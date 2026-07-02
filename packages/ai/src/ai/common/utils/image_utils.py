@@ -38,7 +38,7 @@ from __future__ import annotations
 import base64
 import io
 import zlib
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 
 def image_to_bytes(image: Any) -> bytes:
@@ -126,3 +126,33 @@ def colorize_depth(depth: Any) -> Any:
     b = (255 - norm).astype(np.uint8)
 
     return Image.fromarray(np.stack([r, g, b], axis=-1))
+
+
+def inference_scale(small_size: Tuple[int, int], original_size: Tuple[int, int]) -> Optional[Tuple[float, float]]:
+    """(fx, fy) to map coords from a downscaled inference image back to the original.
+
+    Sparse counterpart to ``dense_resize.restore_dense_output``: detection / pose / face
+    run inference on a downscaled image, then scale their box / keypoint / centroid
+    coords by these factors. PIL-free, so node unit tests can use it without Pillow.
+
+    Returns None when the sizes already match (no rescale needed).
+    """
+    sw, sh = int(small_size[0]), int(small_size[1])
+    ow, oh = int(original_size[0]), int(original_size[1])
+    if sw == ow and sh == oh:
+        return None
+    return ow / sw, oh / sh
+
+
+def scale_box(box: Dict[str, float], fx: float, fy: float) -> None:
+    """Scale an ``{x1, y1, x2, y2}`` box in place by (fx, fy)."""
+    box['x1'] *= fx
+    box['x2'] *= fx
+    box['y1'] *= fy
+    box['y2'] *= fy
+
+
+def scale_point(point: Dict[str, float], fx: float, fy: float) -> None:
+    """Scale an ``{x, y}`` point (keypoint / centroid / landmark) in place by (fx, fy)."""
+    point['x'] *= fx
+    point['y'] *= fy

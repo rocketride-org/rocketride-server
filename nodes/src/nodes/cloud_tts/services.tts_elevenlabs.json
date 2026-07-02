@@ -1,0 +1,215 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Text To Speech (ElevenLabs)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tts_elevenlabs://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["audio"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code. Shared with the OpenAI
+	//		registration: both cloud TTS vendors run the same engine code in
+	//		nodes/cloud_tts and are dispatched by logicalType at runtime.
+	//
+	"path": "nodes.cloud_tts",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "tts_elevenlabs",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Converts incoming text into speech using the ElevenLabs text-to-speech API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "The model and voice lists are maintained manually; the API key falls back to the ELEVENLABS_API_KEY environment variable when blank."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node
+	//
+	"icon": "elevenlabs.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["audio"],
+		"documents": ["audio"],
+		"questions": ["audio"],
+		"answers": ["audio"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself. One profile per model (maintained manually).
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "eleven_multilingual_v2",
+		// Defines profiles used with the "profile": key. model + voice live here so
+		// Config.getNodeConfig merges them under the selected profile.
+		"profiles": {
+			"eleven_multilingual_v2": {
+				"title": "Multilingual v2 - High quality, 29 languages",
+				"model": "eleven_multilingual_v2",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"apikey": ""
+			},
+			"eleven_turbo_v2_5": {
+				"title": "Turbo v2.5      - Low latency, 32 languages",
+				"model": "eleven_turbo_v2_5",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"apikey": ""
+			},
+			"eleven_flash_v2_5": {
+				"title": "Flash v2.5      - Lowest latency",
+				"model": "eleven_flash_v2_5",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"apikey": ""
+			},
+			"eleven_v3": {
+				"title": "Eleven v3       - Most expressive",
+				"model": "eleven_v3",
+				"voice": "EXAVITQu4vr4xnSDxMaL",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		// ── Form objects (one per model profile; api key + voice per profile) ──
+		// voice MUST live inside the form-object so it is merged under the selected
+		// profile; in the top-level shape it would be silently dropped by getNodeConfig.
+		"tts_elevenlabs.eleven_multilingual_v2": {
+			"object": "eleven_multilingual_v2",
+			"properties": ["llm.cloud.apikey", "tts_elevenlabs.voice"]
+		},
+		"tts_elevenlabs.eleven_turbo_v2_5": {
+			"object": "eleven_turbo_v2_5",
+			"properties": ["llm.cloud.apikey", "tts_elevenlabs.voice"]
+		},
+		"tts_elevenlabs.eleven_flash_v2_5": {
+			"object": "eleven_flash_v2_5",
+			"properties": ["llm.cloud.apikey", "tts_elevenlabs.voice"]
+		},
+		"tts_elevenlabs.eleven_v3": {
+			"object": "eleven_v3",
+			"properties": ["llm.cloud.apikey", "tts_elevenlabs.voice"]
+		},
+		// ── Voice (premade voice_id; static) ───────────────────────────────────
+		"tts_elevenlabs.voice": {
+			"type": "string",
+			"title": "Voice",
+			"description": "Premade ElevenLabs voice (voice_id).",
+			"default": "EXAVITQu4vr4xnSDxMaL",
+			"enum": [
+				["21m00Tcm4TlvDq8ikWAM", "Rachel"],
+				["AZnzlk1XvdvUeBnXmlld", "Domi"],
+				["EXAVITQu4vr4xnSDxMaL", "Bella"],
+				["ErXwobaYiN019PkySvjV", "Antoni"],
+				["MF3mGyEYCl7XYWbV9V6O", "Elli"],
+				["TxGEqnHWrfWFTfGW9XjX", "Josh"],
+				["VR6AewLTigWG4xSOukaG", "Arnold"],
+				["pNInz6obpgDQGcFmaJgB", "Adam"],
+				["yoZ06aMxZJJ28mfd3POQ", "Sam"]
+			]
+		},
+		// ── Profile selector (drives conditional form rendering) ───────────────
+		"tts_elevenlabs.profile": {
+			"title": "Model",
+			"description": "ElevenLabs model",
+			"type": "string",
+			"default": "eleven_multilingual_v2",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "eleven_multilingual_v2",
+					"properties": ["tts_elevenlabs.eleven_multilingual_v2"]
+				},
+				{
+					"value": "eleven_turbo_v2_5",
+					"properties": ["tts_elevenlabs.eleven_turbo_v2_5"]
+				},
+				{
+					"value": "eleven_flash_v2_5",
+					"properties": ["tts_elevenlabs.eleven_flash_v2_5"]
+				},
+				{
+					"value": "eleven_v3",
+					"properties": ["tts_elevenlabs.eleven_v3"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "ElevenLabs Text To Speech",
+			"properties": ["tts_elevenlabs.profile"]
+		}
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing
+	//
+	"test": [
+		{
+			// No audio mock exists, so this runs only when a real key is present
+			// (ROCKETRIDE_TTS_ELEVENLABS_KEY) and is skipped in CI otherwise.
+			"requires": ["ROCKETRIDE_TTS_ELEVENLABS_KEY"],
+			"avoidMocks": true,
+			"profiles": ["eleven_multilingual_v2"],
+			"outputs": ["audio"],
+			"cases": [
+				{
+					"name": "ElevenLabs returns audio",
+					"text": "Hello from RocketRide",
+					"expect": {
+						"audio": {
+							"notEmpty": true
+						}
+					}
+				}
+			]
+		}
+	]
+}

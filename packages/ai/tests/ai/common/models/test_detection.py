@@ -1,5 +1,8 @@
 """Unit tests for the detection loader + facade (no torch/transformers needed)."""
 
+import pytest
+from PIL import Image
+
 import ai.common.models.vision.detection as detmod
 from ai.common.models.vision.detection import DetectorLoader, Detector
 
@@ -66,14 +69,38 @@ def test_facade_proxy_sends_prompt_threshold_and_decodes(monkeypatch):
     det = Detector(backend='mmgdino', threshold=0.4, prompt='cat . dog')
     assert det._proxy_mode is True
 
-    out = det.detect(b'fake-image-bytes')
+    out = det.detect(Image.new('RGB', (8, 8)))  # small image -> not downscaled
     assert captured['cmd'] == 'rrext_ms_inference'
     args = captured['args']
-    assert args['data'] == b'fake-image-bytes'
+    assert isinstance(args['data'], (bytes, bytearray)) and args['data'][:4] == b'\x89PNG'
     assert args['output_fields'] == ['detections']
     assert args['prompt'] == 'cat . dog'
     assert args['threshold'] == 0.4
-    assert out == dets
+    assert out == dets  # no downscale -> boxes unchanged
 
     det.disconnect()
     assert captured.get('disconnected') is True
+
+
+def test_facade_proxy_rescales_boxes_to_original(monkeypatch):
+    """Large image is downscaled for inference; returned boxes map back to original coords."""
+    dets = [
+        {
+            'label': 'cat',
+            'score': 0.9,
+            'box': {'x1': 100.0, 'y1': 50.0, 'x2': 200.0, 'y2': 150.0},
+            'centroid': {'x': 150.0, 'y': 100.0},
+        }
+    ]
+    captured = {'dets': dets}
+    monkeypatch.setattr(detmod, 'get_model_server_address', lambda: 'localhost:5590')
+    monkeypatch.setattr(detmod, 'ModelClient', _fake_client_factory(captured))
+
+    det = Detector(backend='mmgdino')  # infer edge = 1333
+    out = det.detect(Image.new('RGB', (2000, 1000)))  # -> downscaled to (1333, 666)
+
+    fx, fy = 2000 / 1333, 1000 / 666
+    b = out[0]['box']
+    assert b['x1'] == pytest.approx(100.0 * fx)
+    assert b['y2'] == pytest.approx(150.0 * fy)
+    assert out[0]['centroid']['x'] == pytest.approx(150.0 * fx)

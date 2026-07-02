@@ -27,8 +27,7 @@ import base64
 
 from rocketlib import IInstanceBase
 from ai.common.schema import Doc, Question, Answer
-from ai.common.image import ImageProcessor
-from rocketlib import AVI_ACTION, Entry, debug
+from rocketlib import AVI_ACTION, Entry
 
 from .IGlobal import IGlobal
 
@@ -227,7 +226,7 @@ class IInstance(IInstanceBase):
             if key not in self.instance.currentObject.response:
                 self.instance.currentObject.response[key] = []
 
-            video_str = base64.b64encode(bytes(self.video)).decode('utf-8')
+            video_str = base64.b64encode(self.video).decode('utf-8')
             self.video = bytearray()
 
             self.instance.currentObject.response[key].append(
@@ -255,13 +254,7 @@ class IInstance(IInstanceBase):
             if key not in self.instance.currentObject.response:
                 self.instance.currentObject.response[key] = []
 
-            # Load the image
-            image = ImageProcessor.load_image_from_bytes(self.image)
-            if image is None:
-                debug('Invalid image data provided')
-
-            # Convert to base64
-            image_str = ImageProcessor.get_base64(image)
+            image_str = base64.b64encode(self.image).decode('utf-8')
 
             # Release the image
             self.image = bytearray()

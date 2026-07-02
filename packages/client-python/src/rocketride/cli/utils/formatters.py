@@ -185,6 +185,11 @@ def truncate_filename(filename: str, max_length: int) -> str:
     if len(filename) <= max_length:
         return filename
 
+    # Widths too small to hold the '...' indicator cannot be truncated with an
+    # ellipsis without overrunning max_length, so hard-truncate instead.
+    if max_length <= 3:
+        return filename[: max(max_length, 0)]
+
     path = Path(filename)
     name = path.stem
     ext = path.suffix

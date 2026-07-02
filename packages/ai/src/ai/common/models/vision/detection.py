@@ -38,7 +38,7 @@ import io
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from ai.web.metrics import metrics
 from ai.common.utils.image_utils import image_to_bytes
@@ -47,15 +47,22 @@ from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.detection')
 
-# Backend key -> default HF/package model id.
-BACKEND_DEFAULTS: Dict[str, str] = {
-    'rfdetr': 'PekingU/rtdetr_r50vd',
-    'mmgdino': 'IDEA-Research/grounding-dino-tiny',
+
+class BackendSpec(NamedTuple):
+    """Model specifications."""
+
+    model: str  # model id
+    infer_edge: int  # = model input resolution (long edge, px); downscale to it is lossless (boxes mapped back)
+    open_vocab: bool  # open-vocab flag
+
+
+BACKENDS: Dict[str, BackendSpec] = {
+    'rfdetr': BackendSpec(model='PekingU/rtdetr_r50vd', infer_edge=560, open_vocab=False),
+    'mmgdino': BackendSpec(model='IDEA-Research/grounding-dino-tiny', infer_edge=1333, open_vocab=True),
 }
 DEFAULT_BACKEND = 'rfdetr'
-BACKENDS = frozenset(BACKEND_DEFAULTS)
-OPEN_VOCAB_BACKENDS = frozenset({'mmgdino'})
 DEFAULT_THRESHOLD = 0.3
+OPEN_VOCAB_BACKENDS = frozenset(b for b, spec in BACKENDS.items() if spec.open_vocab)
 
 
 def _to_detection(label: str, score: float, x1: float, y1: float, x2: float, y2: float) -> Dict[str, Any]:
@@ -284,7 +291,12 @@ class MmGDinoLoader:
         return out
 
 
-def _build_backend(backend: str, model_name: str, device: Optional[str], revision: Optional[str] = None):
+def _build_backend(
+    backend: str,
+    model_name: str,
+    device: Optional[str],
+    revision: Optional[str] = None,
+):
     """Construct the underlying detector for a backend.
 
     Args:
@@ -313,7 +325,7 @@ class DetectorLoader(BaseLoader):
 
     @staticmethod
     def load(
-        model_name: str = BACKEND_DEFAULTS[DEFAULT_BACKEND],
+        model_name: str = BACKENDS[DEFAULT_BACKEND].model,
         backend: str = DEFAULT_BACKEND,
         device: Optional[str] = None,
         allocate_gpu: Optional[callable] = None,
@@ -345,7 +357,12 @@ class DetectorLoader(BaseLoader):
             gpu_index = int(device.split(':')[1]) if str(device).startswith('cuda:') else -1
 
         detector = _build_backend(backend, model_name, device, revision=revision)
-        metadata = {'device': str(device), 'model_name': model_name, 'backend': backend, 'loader': 'detection'}
+        metadata = {
+            'device': str(device),
+            'model_name': model_name,
+            'backend': backend,
+            'loader': 'detection',
+        }
         return {'detector': detector, 'backend': backend}, metadata, gpu_index
 
     @staticmethod
@@ -442,10 +459,11 @@ class Detector:
             **kwargs: Extra identity-only loader options.
         """
         self.backend = backend
-        self.model_name = model_name or BACKEND_DEFAULTS.get(backend, BACKEND_DEFAULTS[DEFAULT_BACKEND])
+        self.model_name = model_name or BACKENDS.get(backend, BACKENDS[DEFAULT_BACKEND]).model
         self.threshold = float(threshold)
         self.prompt = prompt
         self._revision = revision
+        self._infer_max_edge = BACKENDS.get(backend, BACKENDS[DEFAULT_BACKEND]).infer_edge
 
         server_addr = get_model_server_address()
         self._proxy_mode = bool(server_addr) and (device is None or device == 'server')
@@ -490,39 +508,70 @@ class Detector:
         threshold = self.threshold if threshold is None else threshold
         metrics.counter('gpu_inference_count', 1)
 
+        from PIL import Image
+        from ai.common.image.dense_resize import resize_for_inference
+
+        # Run inference on a copy downscaled to the model's input size, then map
+        # boxes back so callers get original-resolution coordinates.
+        if not hasattr(image, 'size'):
+            image = Image.open(io.BytesIO(image)).convert('RGB')
+        small, (orig_w, orig_h) = resize_for_inference(image, self._infer_max_edge)
+
         if self._proxy_mode:
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {
-                    'data': image_to_bytes(image),
+                    'data': image_to_bytes(small),
                     'output_fields': ['detections'],
                     'prompt': prompt,
                     'threshold': threshold,
                 },
             )
             items = result.get('result', [])
-            return items[0].get('detections', []) if items else []
+            dets = items[0].get('detections', []) if items else []
+        else:
+            t0 = time.perf_counter()
+            pre = DetectorLoader.preprocess(self._bundle, [small], self._metadata)
+            t_pre = (time.perf_counter() - t0) * 1000
+            t0 = time.perf_counter()
+            raw = DetectorLoader.inference(self._bundle, pre, self._metadata, prompt=prompt, threshold=threshold)
+            t_gpu = (time.perf_counter() - t0) * 1000
+            t0 = time.perf_counter()
+            out = DetectorLoader.postprocess(self._bundle, raw, 1, ['detections'], metadata=self._metadata)
+            t_post = (time.perf_counter() - t0) * 1000
+            inference_sec = (t_pre + t_gpu + t_post) / 1000.0
+            metrics.add_time(
+                {
+                    'gpu_preprocess': t_pre,
+                    'gpu_compute': t_gpu,
+                    'gpu_postprocess': t_post,
+                    'gpu_queue_wait': 0,
+                    'gpu_memory': model_gpu_gb(self._bundle) * inference_sec,
+                }
+            )
+            dets = out[0]['detections']
 
-        t0 = time.perf_counter()
-        pre = DetectorLoader.preprocess(self._bundle, [image], self._metadata)
-        t_pre = (time.perf_counter() - t0) * 1000
-        t0 = time.perf_counter()
-        raw = DetectorLoader.inference(self._bundle, pre, self._metadata, prompt=prompt, threshold=threshold)
-        t_gpu = (time.perf_counter() - t0) * 1000
-        t0 = time.perf_counter()
-        out = DetectorLoader.postprocess(self._bundle, raw, 1, ['detections'], metadata=self._metadata)
-        t_post = (time.perf_counter() - t0) * 1000
-        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
-        metrics.add_time(
-            {
-                'gpu_preprocess': t_pre,
-                'gpu_compute': t_gpu,
-                'gpu_postprocess': t_post,
-                'gpu_queue_wait': 0,
-                'gpu_memory': model_gpu_gb(self._bundle) * inference_sec,
-            }
-        )
-        return out[0]['detections']
+        return self._rescale_to_original(dets, small.size, orig_w, orig_h)
+
+    @staticmethod
+    def _rescale_to_original(
+        dets: List[Dict[str, Any]], small_size: Tuple[int, int], orig_w: int, orig_h: int
+    ) -> List[Dict[str, Any]]:
+        """Map box/centroid coordinates from the downscaled image back to original size."""
+        from ai.common.utils.image_utils import inference_scale, scale_box, scale_point
+
+        factors = inference_scale(small_size, (orig_w, orig_h))
+        if not dets or factors is None:
+            return dets
+        fx, fy = factors
+        for d in dets:
+            box = d.get('box')
+            if box:
+                scale_box(box, fx, fy)
+            c = d.get('centroid')
+            if c:
+                scale_point(c, fx, fy)
+        return dets
 
     def disconnect(self) -> None:
         """Release the model-server connection (proxy mode only); no-op locally.

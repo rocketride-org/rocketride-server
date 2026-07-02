@@ -317,6 +317,44 @@ standalone catalog nodes.
 
 ---
 
+## Prototyping Local Nodes
+
+Develop a node in your own workspace -- next to your `.pipe` -- without changing
+the installed engine. Set `--node_path` to the directory that holds your
+`local_nodes` folder (the folder name is required):
+
+```sh
+engine --node_path=/path/to/dir-containing-local_nodes ...
+```
+
+Its nodes are scanned like the built-in ones but imported as `local_nodes.<node>`
+(set this in each `services.json` `"path"`), so they never clash with the
+built-in `nodes` package.
+
+```text
+my-workspace/
+└── local_nodes/
+    ├── __init__.py          # empty -- just marks local_nodes as a package
+    └── my_node/
+        ├── __init__.py      # required -- runs depends(requirements.txt) and exports IGlobal/IInstance (see "Adding a New Node")
+        ├── services.json    # "path": "local_nodes.my_node"
+        ├── IGlobal.py
+        ├── IInstance.py
+        └── requirements.txt
+```
+
+Build the node exactly as in [Adding a New Node](#adding-a-new-node) -- its
+`IGlobal` installs the node's own `requirements.txt`, so dependencies work the
+same as any built-in node.
+
+To ship a node so it becomes part of RocketRide, clone the
+[rocketride-server](https://github.com/rocketride-org/rocketride-server) repo,
+move your node into `nodes/src/nodes/<node>/`, change its `services.json`
+`"path"` to `nodes.<node>`, and open a pull request following the
+[contributing guide](../CONTRIBUTING.md).
+
+---
+
 ## License
 
 MIT License, see [LICENSE](../LICENSE).

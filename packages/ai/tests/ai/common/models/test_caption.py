@@ -1,5 +1,9 @@
 """Unit tests for the caption loader + facade (no torch/transformers needed)."""
 
+import io
+
+from PIL import Image
+
 import ai.common.models.vision.caption as capmod
 from ai.common.models.vision.caption import CaptionerLoader, Captioner
 
@@ -56,13 +60,27 @@ def test_facade_proxy_sends_task_and_decodes(monkeypatch):
     cap = Captioner(task='detailed_caption')
     assert cap._proxy_mode is True
 
-    out = cap.caption(b'fake-image-bytes')
+    out = cap.caption(Image.new('RGB', (8, 8)))  # small -> not downscaled
     assert captured['cmd'] == 'rrext_ms_inference'
     args = captured['args']
-    assert args['data'] == b'fake-image-bytes'
+    assert isinstance(args['data'], (bytes, bytearray)) and args['data'][:4] == b'\x89PNG'
     assert args['output_fields'] == ['caption']
     assert args['task'] == 'detailed_caption'
     assert out == 'a person standing'
 
     cap.disconnect()
     assert captured.get('disconnected') is True
+
+
+def test_facade_proxy_downscales_large_image(monkeypatch):
+    """Large image is downscaled before captioning (payload shrinks); caption unchanged."""
+    captured = {'caption': 'ok'}
+    monkeypatch.setattr(capmod, 'get_model_server_address', lambda: 'localhost:5590')
+    monkeypatch.setattr(capmod, 'ModelClient', _fake_client_factory(captured))
+
+    cap = Captioner(task='caption')
+    out = cap.caption(Image.new('RGB', (4000, 2000)))  # INFER_MAX_EDGE=1024
+    assert out == 'ok'
+
+    sent = Image.open(io.BytesIO(captured['args']['data']))
+    assert max(sent.size) <= 1024

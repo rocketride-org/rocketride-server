@@ -1,0 +1,63 @@
+{
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"name": "Ask a question",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" },
+			"ui": { "position": { "x": 20, "y": 220 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "db_arango_1",
+			"provider": "db_arango",
+			"name": "ArangoDB",
+			"config": {
+				"profile": "default",
+				"default": {
+					"endpoint": "${ROCKETRIDE_ARANGO_ENDPOINT}",
+					"auth_method": "userpass",
+					"user": "${ROCKETRIDE_ARANGO_USER}",
+					"password": "${ROCKETRIDE_ARANGO_PASSWORD}",
+					"database": "${ROCKETRIDE_ARANGO_DB}",
+					"db_description": "Application database with users, orders and a social graph (people connected by a 'knows' edge collection).",
+					"max_attempts": 5,
+					"max_execute_rows": 25000,
+					"allow_execute": false
+				},
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 260, "y": 220 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_anthropic_1",
+			"provider": "llm_anthropic",
+			"name": "Anthropic",
+			"config": {
+				"profile": "claude-sonnet-4-6",
+				"claude-sonnet-4-6": { "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}" },
+				"parameters": {}
+			},
+			"control": [{ "classType": "llm", "from": "db_arango_1" }],
+			"ui": { "position": { "x": 260, "y": 400 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"name": "Return Answers",
+			"config": { "laneName": "answers" },
+			"input": [{ "lane": "answers", "from": "db_arango_1" }],
+			"ui": { "position": { "x": 500, "y": 140 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_table_1",
+			"provider": "response_table",
+			"name": "Return Table",
+			"config": { "laneName": "table" },
+			"input": [{ "lane": "table", "from": "db_arango_1" }],
+			"ui": { "position": { "x": 500, "y": 300 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"version": 1,
+	"isLocked": false
+}

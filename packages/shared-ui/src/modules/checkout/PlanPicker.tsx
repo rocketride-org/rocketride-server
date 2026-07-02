@@ -113,6 +113,18 @@ function defaultActionClick(_plan: CheckoutPlan, action: PlanAction): void {
 	}
 }
 
+/** True when an action link points at GitHub (drives the GitHub glyph on the CTA). */
+function isGithubAction(action: PlanAction | null): boolean {
+	return !!action && action.type === 'link' && /github\.com/i.test(action.url);
+}
+
+/** Inline GitHub mark, shown on action links that point at github.com. */
+const GitHubMark: React.FC = () => (
+	<svg width={13} height={13} viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" style={{ flexShrink: 0 }}>
+		<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.65 7.65 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+	</svg>
+);
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -155,13 +167,16 @@ const S = {
 		marginBottom: 16,
 	}),
 
-	planCard: (selected: boolean): CSSProperties => ({
+	planCard: (selected: boolean, interactive: boolean): CSSProperties => ({
 		display: 'flex',
 		flexDirection: 'column',
 		borderRadius: 10,
 		border: `2px solid ${selected ? 'var(--rr-brand)' : 'var(--rr-border)'}`,
 		background: 'var(--rr-bg-paper)',
-		cursor: 'pointer',
+		// Only show the pointer when the whole card selects a plan (the modal).
+		// On display-only pages (pricing) the card isn't clickable — the CTA
+		// button is — so a pointer here is misleading.
+		cursor: interactive ? 'pointer' : 'default',
 		transition: 'border-color 0.15s, box-shadow 0.15s',
 		boxShadow: selected ? '0 0 0 1px var(--rr-brand)' : 'none',
 		overflow: 'hidden',
@@ -236,6 +251,38 @@ const S = {
 		transition: 'background 0.15s',
 	} as CSSProperties,
 
+	// ── Primary CTA button inside a billable card (opt-in via onPlanCta) ──
+	cardCta: {
+		display: 'block',
+		width: 'calc(100% - 24px)',
+		margin: '6px 12px 12px',
+		padding: '8px 0',
+		borderRadius: 6,
+		border: 'none',
+		background: 'var(--rr-brand)',
+		color: 'var(--rr-fg-button)',
+		fontSize: 12,
+		fontWeight: 700,
+		textAlign: 'center' as const,
+		cursor: 'pointer',
+		transition: 'opacity 0.15s',
+	} as CSSProperties,
+
+	// "Current plan" badge shown on the user's active card (selection mode).
+	currentBadge: {
+		display: 'inline-block',
+		alignSelf: 'center',
+		fontSize: 10,
+		fontWeight: 700,
+		letterSpacing: 0.4,
+		textTransform: 'uppercase' as const,
+		color: 'var(--rr-brand)',
+		border: '1px solid var(--rr-brand)',
+		borderRadius: 999,
+		padding: '1px 8px',
+		marginBottom: 6,
+	} as CSSProperties,
+
 	// ── Loading / empty state ────────────────────────────────────────────
 	status: {
 		textAlign: 'center' as const,
@@ -267,6 +314,35 @@ export interface PlanPickerProps {
 
 	/** Called when the user clicks an action plan's CTA. Defaults to opening the link/mailto natively. */
 	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
+
+	/**
+	 * When provided, each billable plan card renders a primary CTA button
+	 * (labelled by ``ctaLabel``) that calls this with the plan. The caller
+	 * owns what the click does (e.g. start checkout, or prompt sign-up first).
+	 * When omitted, billable cards have no CTA button — selection is via the
+	 * card click / ``onSelectPlan`` (the CheckoutModal flow).
+	 */
+	onPlanCta?: (plan: CheckoutPlan) => void;
+
+	/** Label for the per-card billable CTA. Default: ``'Get started'``. Only used with ``onPlanCta``. */
+	ctaLabel?: string;
+
+	/**
+	 * Optional per-plan CTA overrides, keyed by ``stripePriceId``. Lets a host
+	 * app render context-aware labels (e.g. "Selected", "Upgrade", "Switch
+	 * plan") and disable a card's CTA — without baking any subscription logic
+	 * into shared-ui (this component ships in the VS Code extension too). A plan
+	 * with no entry falls back to ``ctaLabel``. Only used with ``onPlanCta``.
+	 */
+	ctaConfig?: Record<string, { label?: string; disabled?: boolean }>;
+
+	/**
+	 * Stripe price ID of the user's current plan, in card-selection mode
+	 * (``onSelectPlan``). The matching card shows a "Current" badge and is made
+	 * non-selectable. The host owns what "current" means — no subscription logic
+	 * lives here. Used by the upgrade flow.
+	 */
+	currentPriceId?: string;
 
 	/** Content rendered below the plan cards (e.g. a "Continue" button). */
 	footer?: React.ReactNode;
@@ -301,6 +377,10 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	selectedPlan = null,
 	onSelectPlan,
 	onActionClick = defaultActionClick,
+	onPlanCta,
+	ctaLabel = 'Get started',
+	ctaConfig,
+	currentPriceId,
 	footer,
 	defaultInterval = 'month',
 	autoSelectDefault = false,
@@ -430,33 +510,50 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 				</div>
 			)}
 
-			{/* Plan cards grid */}
-			<div style={S.planGrid(visiblePlans.length)} role="radiogroup" aria-label="Subscription plans">
+			{/* Plan cards grid. Only a radiogroup when cards are selectable
+			    (modal); on display-only pages it's a plain container. */}
+			<div
+				style={S.planGrid(visiblePlans.length)}
+				role={onSelectPlan ? 'radiogroup' : undefined}
+				aria-label={onSelectPlan ? 'Subscription plans' : undefined}
+			>
 				{visiblePlans.map((plan) => {
 					const action = planAction(plan);
 					const isAction = !!action;
 					const selected = !isAction && selectedPlan?.stripePriceId === plan.stripePriceId;
+					const isCurrent = !isAction && !!currentPriceId && plan.stripePriceId === currentPriceId;
+					const cta = isAction ? undefined : ctaConfig?.[plan.stripePriceId];
+					const ctaDisabled = cta?.disabled ?? false;
 					const desc = planDescription(plan);
+					// Whole-card selection only applies when a selection handler is
+					// wired (the checkout/upgrade modals). On display-only pages
+					// (pricing) the card is static — the CTA button is the action —
+					// so drop the pointer, radio role, focusability and click handlers.
+					// The current plan is never selectable (you can't "switch" to it).
+					const interactive = !isAction && !!onSelectPlan && !isCurrent;
 
 					return (
 						<div
 							key={plan.stripePriceId || plan.id}
-							style={S.planCard(selected)}
-							onClick={() => {
-								if (!isAction && onSelectPlan) onSelectPlan(plan);
-							}}
-							onKeyDown={(e) => {
-								if (e.key === 'Enter' || e.key === ' ') {
-									e.preventDefault();
-									if (!isAction && onSelectPlan) onSelectPlan(plan);
-								}
-							}}
-							role={isAction ? undefined : 'radio'}
-							tabIndex={0}
-							aria-checked={isAction ? undefined : selected}
+							style={S.planCard(selected, interactive)}
+							onClick={interactive ? () => onSelectPlan!(plan) : undefined}
+							onKeyDown={
+								interactive
+									? (e) => {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											onSelectPlan!(plan);
+										}
+									}
+									: undefined
+							}
+							role={interactive ? 'radio' : undefined}
+							tabIndex={interactive ? 0 : undefined}
+							aria-checked={interactive ? selected : undefined}
 						>
 							{/* Card header: tier name, price, interval */}
 							<div style={S.cardHead(selected)}>
+								{isCurrent && <div style={S.currentBadge}>Current plan</div>}
 								<div style={S.cardTier}>{plan.nickname}</div>
 								<div style={S.cardPrice}>{planDisplayAmount(plan)}</div>
 								{planIntervalLabel(plan) && (
@@ -476,13 +573,17 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 								</div>
 							)}
 
-							{/* Action button for link/mailto plans */}
+							{/* Action button for link/mailto plans (Free, Enterprise) */}
 							{action && (
 								<a
 									href={actionHref(action)}
 									target={action.type === 'link' ? '_blank' : undefined}
 									rel={action.type === 'link' ? 'noopener noreferrer' : undefined}
-									style={S.cardAction}
+									style={
+										isGithubAction(action)
+											? { ...S.cardAction, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }
+											: S.cardAction
+									}
 									onClick={(e) => {
 										e.stopPropagation();
 										e.preventDefault();
@@ -490,7 +591,29 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 									}}
 								>
 									{action.label}
+									{isGithubAction(action) && <GitHubMark />}
 								</a>
+							)}
+
+							{/* Primary CTA for billable plans (opt-in via onPlanCta). A host
+							    may override label/disabled per plan via ctaConfig (e.g.
+							    "Selected" on the user's current tier). */}
+							{!isAction && onPlanCta && (
+								<button
+									type="button"
+									disabled={ctaDisabled}
+									style={
+										ctaDisabled
+											? { ...S.cardCta, background: 'transparent', color: 'var(--rr-text-secondary)', border: '1px solid var(--rr-border)', cursor: 'default' }
+											: S.cardCta
+									}
+									onClick={(e) => {
+										e.stopPropagation();
+										if (!ctaDisabled) onPlanCta(plan);
+									}}
+								>
+									{cta?.label ?? ctaLabel}
+								</button>
 							)}
 						</div>
 					);

@@ -9,7 +9,7 @@ on:
     branches: [develop]
     paths:
       - 'packages/docs/**'
-      - 'nodes/src/nodes/**/doc.md'
+      - 'nodes/src/nodes/**/README.md'
       - 'packages/*/docs/**'
       - 'apps/*/docs/**'
       - '.github/workflows/docs.yml'

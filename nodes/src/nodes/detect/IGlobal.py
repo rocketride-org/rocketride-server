@@ -22,8 +22,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import threading
-
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 
@@ -76,7 +74,11 @@ class IGlobal(IGlobalBase):
         self.detector = Detector(
             backend=backend, device=None, threshold=threshold, prompt=prompt or None, revision=revision
         )
-        self.device_lock = threading.Lock()
+
+        # Local inference must serialize GPU access
+        from ai.common.models.base import make_device_lock
+
+        self.device_lock = make_device_lock()
 
     def endGlobal(self):
         """Disconnect the facade and release shared state on teardown."""

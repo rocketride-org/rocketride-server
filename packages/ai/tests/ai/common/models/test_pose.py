@@ -1,6 +1,8 @@
 """Unit tests for the pose loader + facade (no onnxruntime/rtmlib needed)."""
 
 import numpy as np
+import pytest
+from PIL import Image
 
 import ai.common.models.vision.pose as posemod
 from ai.common.models.vision.pose import PoseEstimatorLoader, PoseEstimator
@@ -83,14 +85,39 @@ def test_facade_proxy_sends_params_and_decodes(monkeypatch):
     est = PoseEstimator(mode='performance', threshold=0.4, max_persons=7)
     assert est._proxy_mode is True
 
-    out = est.estimate(b'fake-image-bytes')
+    out = est.estimate(Image.new('RGB', (8, 8)))  # small -> not downscaled
     assert captured['cmd'] == 'rrext_ms_inference'
     args = captured['args']
-    assert args['data'] == b'fake-image-bytes'
+    assert isinstance(args['data'], (bytes, bytearray)) and args['data'][:4] == b'\x89PNG'
     assert args['output_fields'] == ['poses']
     assert args['threshold'] == 0.4
     assert args['max_persons'] == 7
-    assert out == poses
+    assert out == poses  # no downscale -> coords unchanged
 
     est.disconnect()
     assert captured.get('disconnected') is True
+
+
+def test_facade_proxy_rescales_poses_to_original(monkeypatch):
+    """Large image is downscaled for inference; box + keypoints map back to original coords."""
+    poses = [
+        {
+            'label': 'person',
+            'box': {'x1': 100.0, 'y1': 50.0, 'x2': 200.0, 'y2': 150.0},
+            'keypoints': [{'name': 'nose', 'x': 150.0, 'y': 100.0, 'score': 0.9}],
+        }
+    ]
+    captured = {'poses': poses}
+    monkeypatch.setattr(posemod, 'get_model_server_address', lambda: 'localhost:5590')
+    monkeypatch.setattr(posemod, 'ModelClient', _fake_client_factory(captured))
+
+    est = PoseEstimator(mode='balanced')
+    out = est.estimate(Image.new('RGB', (2000, 1000)))  # INFER_MAX_EDGE=1333 -> (1333, 666)
+
+    fx, fy = 2000 / 1333, 1000 / 666
+    b = out[0]['box']
+    assert b['x1'] == pytest.approx(100.0 * fx)
+    assert b['y2'] == pytest.approx(150.0 * fy)
+    kp = out[0]['keypoints'][0]
+    assert kp['x'] == pytest.approx(150.0 * fx)
+    assert kp['y'] == pytest.approx(100.0 * fy)

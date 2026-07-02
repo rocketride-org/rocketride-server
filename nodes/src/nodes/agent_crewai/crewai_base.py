@@ -257,7 +257,13 @@ class CrewBase(AgentBase):
                 available_functions: Optional[Dict[str, Any]] = None,
                 **kwargs: Any,
             ) -> Union[str, Any]:
-                stop_words = getattr(self, 'stop', None)
+                # CrewAI injects the ReAct stop list ("\nObservation:") per-call via a
+                # contextvar override that is ONLY visible through the `stop_sequences`
+                # property (crewai/llms/base_llm.py) — NOT the raw `self.stop` field.
+                # Reading `self.stop` returned an empty list, so call_llm's post-hoc truncation no-oped
+                # and the model's fabricated Observation/Final Answer survived, skipping the
+                # real tool call. Read the property so truncation trims at "\nObservation:".
+                stop_words = self.stop_sequences
                 return outer_self.call_llm(
                     outer_context,
                     messages,

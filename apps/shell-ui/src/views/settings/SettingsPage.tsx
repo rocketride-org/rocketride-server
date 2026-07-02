@@ -600,7 +600,7 @@ const SettingsPage: React.FC = () => {
 									Subscribe to unlock pipeline execution and deployment.
 								</span>
 								<button onClick={handleSubscribe} style={{ ...commonStyles.buttonPrimary, fontFamily: 'var(--rr-font-family)', fontWeight: 600, whiteSpace: 'nowrap' } as CSSProperties}>
-									Subscribe to Pipe Builder
+									Subscribe to RocketRide
 								</button>
 							</div>
 						)}

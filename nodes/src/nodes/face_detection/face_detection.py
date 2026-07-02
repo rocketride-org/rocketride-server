@@ -86,6 +86,10 @@ KEYPOINT_NAMES: List[str] = [
     'left_ear_tragion',
 ]
 
+# Long-edge (px) the input is downscaled to before detection; boxes/landmarks come back
+# in this space and are mapped to original coords. Bounds cost on huge frames.
+INFER_MAX_EDGE = 1333
+
 
 class FaceDetector:
     """
@@ -224,11 +228,50 @@ class FaceDetector:
         import numpy as np
         import mediapipe as mp  # contract-check: ignore — see _build_detector
 
-        rgb = np.array(image.convert('RGB'))
+        from ai.common.image.dense_resize import resize_for_inference
+
+        # Downscale for inference; boxes/landmarks come back in the fed-image space and
+        # are mapped back to original coords so callers get input-resolution coordinates.
+        small, (orig_w, orig_h) = resize_for_inference(image.convert('RGB'), INFER_MAX_EDGE)
+        rgb = np.array(small)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         result = self._detector.detect(mp_image)
-        return self._format(result, image.width, image.height)
+        faces = self._format(result, small.width, small.height)
+        return self._rescale_to_original(faces, small.size, orig_w, orig_h)
+
+    @staticmethod
+    def _rescale_to_original(
+        faces: List[Dict[str, Any]], small_size: Any, orig_w: int, orig_h: int
+    ) -> List[Dict[str, Any]]:
+        """Map box/centroid/landmark coords from the downscaled image back to original size.
+
+        Args:
+            faces: Canonical face dicts with coords in the downscaled (inference) image space.
+            small_size: (width, height) of the downscaled image the detector ran on.
+            orig_w: Original image width in pixels.
+            orig_h: Original image height in pixels.
+
+        Returns:
+            The same list with box/centroid/landmark coords scaled to the original image
+            (mutated in place; returned unchanged when the sizes already match).
+        """
+        from ai.common.utils.image_utils import inference_scale, scale_box, scale_point
+
+        factors = inference_scale(small_size, (orig_w, orig_h))
+        if not faces or factors is None:
+            return faces
+        fx, fy = factors
+        for f in faces:
+            box = f.get('box')
+            if box:
+                scale_box(box, fx, fy)
+            c = f.get('centroid')
+            if c:
+                scale_point(c, fx, fy)
+            for kp in f.get('landmarks', []):
+                scale_point(kp, fx, fy)
+        return faces
 
     def _format(self, result: Any, img_w: int, img_h: int) -> List[Dict[str, Any]]:
         """Convert a MediaPipe FaceDetectorResult to canonical dicts."""

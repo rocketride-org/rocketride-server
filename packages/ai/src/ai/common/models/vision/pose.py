@@ -53,6 +53,11 @@ DEFAULT_MODEL = 'rtmlib-body'
 DEFAULT_THRESHOLD = 0.3
 DEFAULT_MAX_PERSONS = 20
 
+# Long-edge (px) the input is downscaled to before inference. Bounds cost on huge
+# images while keeping enough resolution for the person detector + per-person crops;
+# keypoints/boxes come back in this space and are mapped back to original coords.
+INFER_MAX_EDGE = 1333
+
 # Node profile key -> rtmlib ``mode`` (selects bundled RTMDet-nano + RTMPose sizes).
 PROFILE_TO_MODE: Dict[str, str] = {
     'rtmpose-tiny': 'lightweight',
@@ -400,6 +405,23 @@ class PoseEstimator:
         max_persons = self.max_persons if max_persons is None else max_persons
         metrics.counter('gpu_inference_count', 1)
 
+        from PIL import Image
+        from ai.common.image.dense_resize import resize_for_inference
+
+        # Downscale for inference; poses come back in the fed-image space and are mapped
+        # back to original coords below. Unknown inputs (e.g. BGR ndarray) run unscaled.
+        rescale = None
+        if hasattr(image, 'size') and hasattr(image, 'mode'):
+            pil = image
+        elif isinstance(image, (bytes, bytearray)):
+            pil = Image.open(io.BytesIO(image)).convert('RGB')
+        else:
+            pil = None
+        if pil is not None:
+            small, (orig_w, orig_h) = resize_for_inference(pil, INFER_MAX_EDGE)
+            image = small
+            rescale = (small.size, orig_w, orig_h)
+
         if self._proxy_mode:
             result = self._client.send_command(
                 'rrext_ms_inference',
@@ -411,14 +433,46 @@ class PoseEstimator:
                 },
             )
             items = result.get('result', [])
-            return items[0].get('poses', []) if items else []
+            poses = items[0].get('poses', []) if items else []
+        else:
+            pre = PoseEstimatorLoader.preprocess(self._bundle, [image], self._metadata)
+            raw = PoseEstimatorLoader.inference(
+                self._bundle, pre, self._metadata, threshold=threshold, max_persons=max_persons
+            )
+            out = PoseEstimatorLoader.postprocess(self._bundle, raw, 1, ['poses'], metadata=self._metadata)
+            poses = out[0]['poses']
 
-        pre = PoseEstimatorLoader.preprocess(self._bundle, [image], self._metadata)
-        raw = PoseEstimatorLoader.inference(
-            self._bundle, pre, self._metadata, threshold=threshold, max_persons=max_persons
-        )
-        out = PoseEstimatorLoader.postprocess(self._bundle, raw, 1, ['poses'], metadata=self._metadata)
-        return out[0]['poses']
+        return poses if rescale is None else self._rescale_to_original(poses, *rescale)
+
+    @staticmethod
+    def _rescale_to_original(
+        poses: List[Dict[str, Any]], small_size: Tuple[int, int], orig_w: int, orig_h: int
+    ) -> List[Dict[str, Any]]:
+        """Map box + keypoint coordinates from the downscaled image back to original size.
+
+        Args:
+            poses: Canonical person dicts with coords in the downscaled (inference) image space.
+            small_size: (width, height) of the downscaled image inference ran on.
+            orig_w: Original image width in pixels.
+            orig_h: Original image height in pixels.
+
+        Returns:
+            The same list with box + keypoint coords scaled to the original image
+            (mutated in place; returned unchanged when the sizes already match).
+        """
+        from ai.common.utils.image_utils import inference_scale, scale_box, scale_point
+
+        factors = inference_scale(small_size, (orig_w, orig_h))
+        if not poses or factors is None:
+            return poses
+        fx, fy = factors
+        for p in poses:
+            box = p.get('box')
+            if box:
+                scale_box(box, fx, fy)
+            for kp in p.get('keypoints', []):
+                scale_point(kp, fx, fy)
+        return poses
 
     def disconnect(self) -> None:
         """Release the model-server connection (proxy mode only); no-op locally.

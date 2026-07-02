@@ -23,8 +23,9 @@
 # =============================================================================
 
 import json
+import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, warning
+from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
 
@@ -76,10 +77,10 @@ class IInstance(IInstanceBase):
             self.instance.writeText(json.dumps(detections))
 
         if self.instance.hasListener('image'):
-            image_bytes = ImageProcessor.get_bytes(self._annotate(image, detections))
-            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
-            self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image_bytes)
-            self.instance.writeImage(AVI_ACTION.END, 'image/png')
+            image_bytes = ImageProcessor.get_bytes(self._annotate(image, detections), fmt='JPEG')
+            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/jpeg')
+            self.instance.writeImage(AVI_ACTION.WRITE, 'image/jpeg', image_bytes)
+            self.instance.writeImage(AVI_ACTION.END, 'image/jpeg')
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Accumulate an inbound image stream and run detection on END.
@@ -98,10 +99,20 @@ class IInstance(IInstanceBase):
             self._image_data += buffer
         elif action == AVI_ACTION.END:
             try:
+                t0 = time.perf_counter()
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
+                t_decode = (time.perf_counter() - t0) * 1000
+                t0 = time.perf_counter()
                 with self.IGlobal.device_lock:
                     detections = self.IGlobal.detector.detect(image)
+                t_detect = (time.perf_counter() - t0) * 1000
+                t0 = time.perf_counter()
                 self._emit(image, detections)
+                t_emit = (time.perf_counter() - t0) * 1000
+                debug(
+                    f'detect: decode={t_decode:.0f}ms detect={t_detect:.0f}ms '
+                    f'emit={t_emit:.0f}ms total={t_decode + t_detect + t_emit:.0f}ms'
+                )
             except Exception as exc:
                 warning(f'detect: dropping frame due to inference error: {exc}')
             finally:

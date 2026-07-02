@@ -34,6 +34,7 @@
 
 import type { ConnectResult, DAPMessage } from 'rocketride';
 import type { ConnectionStatus } from './connection';
+import type { CheckoutPlan } from '../modules/checkout/types';
 
 // =============================================================================
 // APP ENTRY — minimal shape for app catalog events
@@ -181,9 +182,11 @@ export interface ShellConnectionEventMap {
 	/**
 	 * User clicked "Subscribe" on a paid app in the marketplace.
 	 *
-	 * Opens the CheckoutModal. The `app` field is the manifest entry.
+	 * Opens the CheckoutModal. The `app` field is the manifest entry. The
+	 * optional `plan` preselects a tier and skips the picker — going straight
+	 * to payment (used by the web pricing page); omit it to show the picker.
 	 */
-	'shell:subscribe': { app: ShellAppEntry };
+	'shell:subscribe': { app: ShellAppEntry; plan?: CheckoutPlan };
 
 	/** Navigate back to the My Apps launcher screen. */
 	'shell:myApps': Record<string, never>;

@@ -62,6 +62,11 @@ MAX_NEW_TOKENS = 256
 # Local-mode watchdog: Florence can hang on complex scenes; skip the frame past this.
 INFERENCE_TIMEOUT = 60
 
+# Long-edge (px) the input is downscaled to before captioning. Florence resizes
+# internally to its own input, so this is quality-neutral and just trims the
+# model-server payload on large images.
+INFER_MAX_EDGE = 1024
+
 
 def _resolve_token(task: Optional[str]) -> str:
     """Map a caption-granularity key to its Florence-2 task token (falling back to <CAPTION>)."""
@@ -288,6 +293,15 @@ class Captioner:
 
         task = self.task if task is None else task
         metrics.counter('gpu_inference_count', 1)
+
+        from PIL import Image
+        from ai.common.image.dense_resize import resize_for_inference
+
+        # Downscale for inference (quality-neutral; shrinks the model-server payload).
+        if hasattr(image, 'size') and hasattr(image, 'mode'):
+            image, _ = resize_for_inference(image, INFER_MAX_EDGE)
+        elif isinstance(image, (bytes, bytearray)):
+            image, _ = resize_for_inference(Image.open(io.BytesIO(image)).convert('RGB'), INFER_MAX_EDGE)
 
         if self._proxy_mode:
             # The model server enforces its own per-request timeout/retry.

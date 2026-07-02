@@ -233,12 +233,12 @@ class AzureBlobStore(IStore):
                 properties = await asyncio.to_thread(blob_client.get_blob_properties)
                 current_etag = properties.etag.strip('"')
 
-                # expected_version is REQUIRED for delete operations
-                if expected_version is None:
-                    raise StorageError(f'Expected version is required when deleting file: {filename}')
-
-                # Verify version matches
-                if current_etag != expected_version:
+                # Optimistic-concurrency check only when a version is supplied.
+                # With no version we fall through to an unconditional delete,
+                # matching the filesystem/memory backends so deleting your own
+                # file always works (cloud backends previously rejected this,
+                # breaking deletes in prod while local worked).
+                if expected_version is not None and current_etag != expected_version:
                     raise VersionMismatchError(
                         filename=filename,
                         expected_version=expected_version,

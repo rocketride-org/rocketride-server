@@ -263,8 +263,6 @@ jobs:
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
       # --- VS Code Marketplace + Open VSX ---
       - name: Set up Node.js for vsce

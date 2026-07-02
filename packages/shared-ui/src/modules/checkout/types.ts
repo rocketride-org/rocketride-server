@@ -97,6 +97,15 @@ export interface CheckoutModalProps {
 	/** Stripe publishable key (pk_test_* or pk_live_*). */
 	stripePublishableKey: string;
 
+	/**
+	 * When set, the modal skips the plan-picker step and goes straight to the
+	 * payment step for this plan (creating the subscription immediately). Omit
+	 * (the default) to show the picker first. Only the web pricing page sets
+	 * this; the in-app and VS Code extension flows leave it undefined and keep
+	 * the pick-a-plan → Continue UX.
+	 */
+	preselectedPlan?: CheckoutPlan;
+
 	/** Fetches available subscription plans from the server. */
 	onFetchPlans: () => Promise<CheckoutPlan[]>;
 
@@ -117,4 +126,12 @@ export interface CheckoutModalProps {
 
 	/** Called when the user dismisses the modal without completing checkout. */
 	onClose: () => void;
+
+	/**
+	 * Overrides how a plan's action CTA (Free → link, Enterprise → mailto) is
+	 * opened. The browser default (window.open / mailto) works in the SaaS web
+	 * app; the VS Code extension passes a handler that routes through the host,
+	 * since webview navigation is sandboxed.
+	 */
+	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }

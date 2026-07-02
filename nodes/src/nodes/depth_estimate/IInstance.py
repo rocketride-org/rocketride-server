@@ -23,8 +23,9 @@
 # =============================================================================
 
 import json
+import time
 
-from rocketlib import IInstanceBase, AVI_ACTION, warning
+from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 from ai.common.image import ImageProcessor
 from ai.common.image.dense_resize import resize_for_inference, restore_dense_output
 from ai.common.utils import colorize_depth
@@ -57,8 +58,10 @@ class IInstance(IInstanceBase):
             image: Decoded input PIL image for this frame.
         """
         resized, original_size = resize_for_inference(image, self.IGlobal.max_edge)
+        t0 = time.perf_counter()
         with self.IGlobal.device_lock:
             depth_np = self.IGlobal.estimator.estimate(resized)
+        debug(f'depth: infer={(time.perf_counter() - t0) * 1000:.0f}ms')
         depth_full = restore_dense_output(depth_np, original_size, mode='bilinear')
 
         stats = {
@@ -71,10 +74,10 @@ class IInstance(IInstanceBase):
             self.instance.writeText(json.dumps(stats))
 
         if self.instance.hasListener('image'):
-            image_bytes = ImageProcessor.get_bytes(colorize_depth(depth_full))
-            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png')
-            self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image_bytes)
-            self.instance.writeImage(AVI_ACTION.END, 'image/png')
+            image_bytes = ImageProcessor.get_bytes(colorize_depth(depth_full), fmt='JPEG')
+            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/jpeg')
+            self.instance.writeImage(AVI_ACTION.WRITE, 'image/jpeg', image_bytes)
+            self.instance.writeImage(AVI_ACTION.END, 'image/jpeg')
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Accumulate an inbound image stream and run depth estimation on END.
