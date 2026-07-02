@@ -18,26 +18,26 @@ import { TabType } from '../types/dropper.types';
 
 /**
  * DropperContainer - Main container component for the RocketRide Dropper application
- * 
+ *
  * This component orchestrates the entire file upload and processing workflow:
  * - Handles file uploads via drag-and-drop or file selection
  * - Tracks upload progress and processing status
  * - Displays results in multiple formats (text, tables, images)
  * - Provides file management (add, remove, clear all)
- * 
+ *
  * State Management:
  * - Connection status and status messages
  * - Active tab for results display
  * - Drag-over state for drop zone
  * - File scroll synchronization
  * - Compare mode for side-by-side viewing
- * 
+ *
  * Component Layout:
  * - Header: Branding, connection status, and actions
  * - Left Panel: Drop zone and file list (when not processing)
  * - Right Panel: Results tabs and content (when results available)
  * - Processing View: Upload progress and completion status
- * 
+ *
  * @component
  * @example
  * ```tsx
@@ -68,7 +68,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	/**
 	 * Handler called when RocketRide client successfully connects
 	 * Clears any status messages - ready to go!
-	 * 
+	 *
 	 * @param _client - Connected RocketRide client instance (unused)
 	 */
 	const handleConnected = useCallback(async (_client: RocketRideClient) => {
@@ -169,7 +169,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 
 			const dt = new DataTransfer();
 			event.data.files.forEach((f: { buffer: Uint8Array; name: string; type: string; lastModified: number }) =>
-				dt.items.add(new File([new Uint8Array(f.buffer)], f.name, { type: f.type, lastModified: f.lastModified }))
+				dt.items.add(new File([f.buffer], f.name, { type: f.type, lastModified: f.lastModified }))
 			);
 			addFiles(dt.files);
 		};
@@ -275,7 +275,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 	/**
 	 * Handles file click in file list
 	 * Scrolls to corresponding content in results view
-	 * 
+	 *
 	 * @param filename - Name of file to scroll to
 	 */
 	const handleFileClick = useCallback((filename: string) => {
