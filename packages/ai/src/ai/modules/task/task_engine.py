@@ -331,8 +331,12 @@ class Task(DAPBase):
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
-        # Instance-level structured logger to avoid collision between engines
-        self.logger = get_task_logger(f"task_engine.{self.id}")
+        # NOTE: task-scoped logging is done via the shared module-level
+        # `_logger` (see top of file) with task_id passed through `extra`.
+        # We intentionally do NOT create a per-instance logger here:
+        # logging.getLogger(name) never garbage-collects loggers, so a
+        # uniquely-named logger per Task (keyed on self.id) would leak one
+        # Logger + StreamHandler per task for the lifetime of the process.
 
     def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
         """Replace ``${KEY}`` placeholders using the merged environment dict.
@@ -853,7 +857,7 @@ class Task(DAPBase):
 
         exit_code = self._status.exitCode
         if exit_code and exit_code != 0:
-            self.logger.warning(
+            _logger.warning(
                 'Task terminated with error',
                 extra={
                     'task_id': self.id,
@@ -863,7 +867,7 @@ class Task(DAPBase):
                 },
             )
         else:
-            self.logger.info(
+            _logger.info(
                 'Task terminated',
                 extra={
                     'task_id': self.id,
@@ -1506,7 +1510,7 @@ class Task(DAPBase):
 
             # Set our current state
             self._status.state = TASK_STATE.STARTING.value
-            self.logger.info(
+            _logger.info(
                 'Task starting',
                 extra={'task_id': self.id, 'step': 'start'},
             )
@@ -1628,7 +1632,7 @@ class Task(DAPBase):
                 env=subprocess_env,
             )
 
-            self.logger.info(
+            _logger.info(
                 'Subprocess created',
                 extra={
                     'task_id': self.id,
@@ -1726,7 +1730,7 @@ class Task(DAPBase):
             sanitized_error = _sanitize_path(str(e))
             sanitized_tb = [_sanitize_path(line) for line in tb_lines]
 
-            self.logger.error(
+            _logger.error(
                 'Task startup failed',
                 extra={
                     'task_id': self.id,
