@@ -6,19 +6,15 @@ import time
 
 
 class _StructuredFormatter(logging.Formatter):
-    _RESERVED = frozenset(logging.LogRecord(
-        '', 0, '', 0, '', (), None
-    ).__dict__.keys()) | {'message', 'asctime'}
+    _RESERVED = frozenset(logging.LogRecord('', 0, '', 0, '', (), None).__dict__.keys()) | {'message', 'asctime'}
 
     def format(self, record: logging.LogRecord) -> str:
         record.message = record.getMessage()
 
         payload = {
-            'timestamp': time.strftime(
-                '%Y-%m-%dT%H:%M:%SZ', time.gmtime(record.created)
-            ),
-            'level':   record.levelname,
-            'logger':  record.name,
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(record.created)),
+            'level': record.levelname,
+            'logger': record.name,
             'message': record.message,
         }
 
@@ -33,12 +29,12 @@ class _StructuredFormatter(logging.Formatter):
             try:
                 return str(obj)
             except Exception:
-                return "<unserializable>"
+                return '<unserializable>'
 
         return json.dumps(payload, default=safe_default)
 
 
-def get_task_logger(name: str = "task_engine") -> logging.Logger:
+def get_task_logger(name: str = 'task_engine') -> logging.Logger:
     logger = logging.getLogger(name)
     logger.propagate = False
     logger.setLevel(logging.DEBUG)
