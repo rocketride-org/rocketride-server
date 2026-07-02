@@ -168,7 +168,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 			if (isProcessing) return;
 
 			const dt = new DataTransfer();
-			event.data.files.forEach((f: { buffer: number[]; name: string; type: string; lastModified: number }) =>
+			event.data.files.forEach((f: { buffer: Uint8Array; name: string; type: string; lastModified: number }) =>
 				dt.items.add(new File([new Uint8Array(f.buffer)], f.name, { type: f.type, lastModified: f.lastModified }))
 			);
 			addFiles(dt.files);

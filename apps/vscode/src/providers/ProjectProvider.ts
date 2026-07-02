@@ -882,13 +882,13 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					return;
 				}
 
-				const files: { buffer: number[]; name: string; type: string; lastModified: number }[] = [];
+				const files: { buffer: Uint8Array; name: string; type: string; lastModified: number }[] = [];
 
 				for (const uri of uris) {
 					try {
 						const bytes = await vscode.workspace.fs.readFile(uri);
 						files.push({
-							buffer: Array.from(bytes),
+							buffer: bytes,
 							name: uri.path.split('/').pop() ?? 'file',
 							type: '',
 							lastModified: Date.now(),
