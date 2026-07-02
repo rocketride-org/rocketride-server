@@ -14,9 +14,19 @@ the generic stream.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+import contextvars
+from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import debug, warning
+
+# Per-call carrier for API-level stop sequences (e.g. CrewAI's ReAct "\nObservation:").
+# Set on the ask path in llm_base._question and read at every model sink so the stop
+# reaches the provider API instead of relying only on post-hoc text truncation. A
+# contextvar (not a param) keeps the many ChatBase._chat/chat() provider overrides and
+# the fixed-signature native handlers below untouched, and is concurrency-safe.
+STOP_SEQUENCES_VAR: contextvars.ContextVar[Optional[List[str]]] = contextvars.ContextVar(
+    'rocketride_llm_stop_sequences', default=None
+)
 
 # --- Anthropic: model id gates (vendor prefixes) ---
 
@@ -165,7 +175,10 @@ def _stream_anthropic_messages_api(
     on_reasoning_chunk: Optional[Callable[[str], None]],
 ) -> str:
     llm = chat._llm
-    payload: dict[str, Any] = dict(llm._get_request_payload(prompt, stop=None, stream=True))
+    # INVARIANT: read synchronously within the ask() call, while LLMBase._question still
+    # holds the contextvar (before its finally reset). The stream is consumed here, not
+    # deferred to the caller, so this never runs after the reset (which would send None).
+    payload: dict[str, Any] = dict(llm._get_request_payload(prompt, stop=STOP_SEQUENCES_VAR.get() or None, stream=True))
     _raw_client = getattr(llm, '_client', None)
     client = _raw_client() if callable(_raw_client) else _raw_client
     if client is None:

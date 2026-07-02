@@ -306,7 +306,10 @@ class AgentBase(ABC):
             q = Question(role=role or '')
             q.addQuestion(transcript)
 
-        result = context.llm.invoke(IInvokeLLM.Ask(question=q))
+        # Forward stop words to the provider API (via the node's ask handler) so the model
+        # actually stops generating at e.g. "\nObservation:", and keep the post-hoc
+        # truncation below as a defense-in-depth net against any marker drift.
+        result = context.llm.invoke(IInvokeLLM.Ask(question=q, stop=stop_words))
         return truncate_at_stop_words(extract_text(result), stop_words)
 
     def call_llm_json(
