@@ -27,7 +27,7 @@
 import React, { createContext, useContext, useCallback, useRef, useState, useEffect } from 'react';
 import { RocketRideClient } from 'rocketride';
 import { useWorkspaceState } from './useWorkspaceState';
-import type { WorkspacePrefs, AppDescriptor, AppManifestEntry } from './types';
+import type { WorkspacePrefs, AppDescriptor, AppManifestEntry, ShellThemeOption } from './types';
 import type { ShellConnectionEventMap } from 'shared';
 import { ConnectionManager } from '../connection/connection';
 
@@ -111,8 +111,8 @@ export interface IWorkspaceContext {
 	updateSetting: (key: string, value: string) => void;
 	/** Update the active app's workspace preferences. */
 	updatePrefs: (patch: Partial<WorkspacePrefs>) => void;
-	/** Available theme options (id + display name). */
-	themeOptions: { id: string; name: string }[];
+	/** Available theme options (id, display name, and palette mode). */
+	themeOptions: ShellThemeOption[];
 	/** Switch the active theme (updates prefs and applies CSS). */
 	setTheme: (themeId: string) => void;
 	/** @deprecated Use `updatePrefs` for prefs, `ConnectionManager.getInstance().emit('shell:switchApp')` for app switches. */
@@ -156,7 +156,7 @@ export const WorkspaceProvider: React.FC<{
 	startupAppId?: string;
 	children: React.ReactNode;
 	defaultAppId?: string;
-	themeOptions?: { id: string; name: string }[];
+	themeOptions?: ShellThemeOption[];
 	onThemeChange?: (themeId: string) => void;
 }> = ({ client, isConnected, apps, workspaceDir, startupAppId, defaultAppId: defaultAppIdProp, themeOptions: themeOptionsProp, onThemeChange, children }) => {
 	// Default app ID — use the prop from Shell (mode-aware), or fall back to hello.

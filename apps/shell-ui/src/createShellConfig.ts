@@ -25,8 +25,13 @@
 // =============================================================================
 
 import { fetchAndApplyTheme } from 'shared/themes';
-import type { ShellConfig, ShellApiConfig, AppManifestEntry } from 'shell-ui';
+import type { ShellConfig, ShellApiConfig, AppManifestEntry, ShellThemeOption } from './workspace/types';
 import { ConnectionManager } from './connection/connection';
+import darkTokens from '../public/themes/dark.json';
+import grayTokens from '../public/themes/gray.json';
+import lightTokens from '../public/themes/light.json';
+import rocketrideTokens from '../public/themes/rocketride.json';
+import rocketrideLightTokens from '../public/themes/rocketride-light.json';
 
 // =============================================================================
 // API CONFIG — read from RR_* process.env defines (cloud only)
@@ -61,15 +66,24 @@ const API_CONFIG: ShellApiConfig = {
  * Ordered list of theme choices surfaced in the Shell's theme picker.
  *
  * Each entry maps a CSS theme bundle identifier (`id`) to a human-readable
- * display name (`name`).  The first entry (`rocketride-light`) is applied
- * as the default theme via `onInit`.
+ * display name (`name`). `isDark` is derived from the theme token file's
+ * `--rr-palette-mode` so new themes do not need hardcoded ID lists elsewhere.
+ * The first entry (`rocketride-light`) is applied as the default via `onInit`.
  */
-const THEME_OPTIONS = [
-	{ id: 'rocketride-light', name: 'RocketRide Light' },
-	{ id: 'light', name: 'Light' },
-	{ id: 'dark', name: 'Dark' },
-	{ id: 'gray', name: 'Gray' },
-	{ id: 'rocketride', name: 'RocketRide Dark' },
+function shellThemeOption(id: string, name: string, tokens: Record<string, string>): ShellThemeOption {
+	return {
+		id,
+		name,
+		isDark: tokens['--rr-palette-mode'] === 'dark',
+	};
+}
+
+const THEME_OPTIONS: ShellThemeOption[] = [
+	shellThemeOption('rocketride-light', 'RocketRide Light', rocketrideLightTokens),
+	shellThemeOption('light', 'Light', lightTokens),
+	shellThemeOption('dark', 'Dark', darkTokens),
+	shellThemeOption('gray', 'Gray', grayTokens),
+	shellThemeOption('rocketride', 'RocketRide Dark', rocketrideTokens),
 ];
 
 // =============================================================================

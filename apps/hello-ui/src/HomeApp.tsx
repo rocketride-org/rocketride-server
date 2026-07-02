@@ -241,14 +241,6 @@ const styles = {
 	} as CSSProperties,
 };
 
-/** Light themes for native control color-scheme (select popup). */
-function themeColorScheme(themeId: string): 'light' | 'dark' {
-	if (themeId === 'light' || themeId === 'rocketride-light' || themeId === 'visual-studio') {
-		return 'light';
-	}
-	return 'dark';
-}
-
 /** Accent colors cycled across app cards. */
 const CARD_COLORS = [
 	'var(--rr-brand)',
@@ -272,6 +264,11 @@ const CARD_COLORS = [
 const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const cm = ConnectionManager.getInstance();
 	const { appManifest, prefs, themeOptions, setTheme } = useWorkspace();
+
+	const activeTheme = useMemo(
+		() => themeOptions.find((t) => t.id === prefs.theme),
+		[themeOptions, prefs.theme],
+	);
 
 	// Filter out this app from the list — don't show ourselves
 	const apps = useMemo(
@@ -324,7 +321,7 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 					<select
 						style={{
 							...styles.themeSelect,
-							colorScheme: themeColorScheme(prefs.theme),
+							colorScheme: activeTheme?.isDark ? 'dark' : 'light',
 						}}
 						value={prefs.theme}
 						onChange={(e) => setTheme(e.target.value)}

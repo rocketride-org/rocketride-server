@@ -233,6 +233,8 @@ export interface ShellThemeOption {
 	id: string;
 	/** Human-readable display name. */
 	name: string;
+	/** Whether the theme uses a dark palette (`--rr-palette-mode: dark`). */
+	isDark: boolean;
 }
 
 /** Theme configuration supplied by the host app. */
