@@ -96,7 +96,7 @@ Pick a profile from the dropdown; the profile pre-fills `model`, `serverbase`, a
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `ollama.profile` | `string` | **Model**<br/>LLM model | `"llama3_3"` |
 | `reasoning_effort` | `string` | **Reasoning Effort**<br/>Optional reasoning budget for reasoning models: low, medium, or high. Leave unset to let reasoning models auto-use 'low'; a value set here always wins. Ignored by non-reasoning models. |  |
-| `temperature` | `number` | **Temperature**<br/>Sampling temperature. Defaults to 0 for standard models; reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) auto-use 1.0 when this is left unset so they emit a final answer instead of looping on empty output. Set an explicit value here to override the auto behavior. | `0` |
+| `temperature` | `number` | **Temperature**<br/>Sampling temperature. Left unset by default so ollama.py can choose: 0 for standard models, and 1.0 for reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) so they emit a final answer instead of looping on empty output. Set an explicit value here to override the auto behavior. |  |
 
 ## Dependencies
 

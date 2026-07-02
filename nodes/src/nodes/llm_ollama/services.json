@@ -240,8 +240,7 @@
 		"temperature": {
 			"type": "number",
 			"title": "Temperature",
-			"description": "Sampling temperature. Defaults to 0 for standard models; reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) auto-use 1.0 when this is left unset so they emit a final answer instead of looping on empty output. Set an explicit value here to override the auto behavior.",
-			"default": 0
+			"description": "Sampling temperature. Left unset by default so ollama.py can choose: 0 for standard models, and 1.0 for reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) so they emit a final answer instead of looping on empty output. Set an explicit value here to override the auto behavior."
 		},
 		"reasoning_effort": {
 			"type": "string",
