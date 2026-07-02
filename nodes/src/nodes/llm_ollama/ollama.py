@@ -38,6 +38,10 @@ class Chat(ChatBase):
 
     _llm: ChatOpenAI
 
+    # Ollama reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) detected by name.
+    # They need a non-zero temperature so they emit a final answer instead of empty content.
+    REASONING_HINTS = ('gpt-oss', 'deepseek-r1', 'qwen3', 'qwq', 'magistral', '-thinking')
+
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
         Initialize the ollama chat bot.
@@ -63,9 +67,8 @@ class Chat(ChatBase):
         # the model name, then default to a non-zero temperature + low reasoning_effort so they
         # emit the final answer. Both are overridable from the pipe config; non-reasoning models
         # (llama/qwen2.5/mistral) keep temperature 0 and send no reasoning_effort.
-        reasoning_hints = ('gpt-oss', 'deepseek-r1', 'qwen3', 'qwq', 'magistral', '-thinking')
         model_name = (self._model or '').lower()
-        is_reasoning = bool(self._is_reasoning) or any(hint in model_name for hint in reasoning_hints)
+        is_reasoning = bool(self._is_reasoning) or any(hint in model_name for hint in self.REASONING_HINTS)
 
         temperature = config['temperature'] if 'temperature' in config else (1.0 if is_reasoning else 0)
         if 'reasoning_effort' in config:
