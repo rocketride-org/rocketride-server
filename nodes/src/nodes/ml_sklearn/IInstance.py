@@ -24,5 +24,5 @@ class IInstance(IInstanceBase):
         answer = copy.deepcopy(answer)
         text = answer.getText() if answer else ''
         result = self._process(text)
-        answer.setText(result)
+        answer.setAnswer(result)
         self.instance.writeAnswers(answer)
