@@ -28,7 +28,7 @@ import GoogleIcon from '@mui/icons-material/Google';
 import { FormContextType, IconButtonProps, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useMemo } from 'react';
-import { useFlow } from '../../../hooks/useFlowContext';
+import { useFlowProject } from '../../../context/FlowProjectContext';
 import '../google-api-types';
 
 // =============================================================================
@@ -45,17 +45,16 @@ import '../google-api-types';
 export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFSchema = RJSFSchema, F extends FormContextType = never>({ ...props }: IconButtonProps<T, S, F>) {
 	const { t } = useTranslation();
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const { saveChanges, selectedNode, oauth2RootUrl, oauthReturnUrl, onOpenExternal } = useFlow() as any;
+	const { oauth2RootUrl, oauthReturnUrl, onOpenExternal } = useFlowProject();
 
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const formContext = (props as unknown as { formContext?: Record<string, any> }).formContext;
+	const formValues = formContext?.formValues ?? {};
+	const nodeId = formContext?.nodeId;
 	// Serialize the current form data for the OAuth redirect so the server can restore state on callback
-	const serviceParam = JSON.stringify(selectedNode?.data?.formData || {});
-	const nodeId = selectedNode?.id || '';
+	const serviceParam = JSON.stringify(formValues);
 
 	const handleHybridSignIn = useCallback(async () => {
-		// Persist any unsaved form changes before navigating away to the OAuth flow
-		await saveChanges();
-
 		if (!oauth2RootUrl) return;
 
 		// Build the OAuth redirect URL with all context needed to resume after authentication
@@ -74,7 +73,7 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		}
 
 		// Default to 'user' auth type for personal Google OAuth (as opposed to service account)
-		const authType = selectedNode?.data?.formData?.parameters?.authType || 'user';
+		const authType = formValues.parameters?.authType || 'user';
 		url.searchParams.set('type', authType);
 
 		// Tell the broker where to return tokens. Web hosts redirect back to the
@@ -94,7 +93,7 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 			settings_sharing: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`, `${_G}/gmail.settings.sharing`],
 			full: ['https://mail.google.com/'],
 		};
-		const accessTier = selectedNode?.data?.formData?.parameters?.access as string | undefined;
+		const accessTier = formValues.parameters?.access as string | undefined;
 		const tierScopes = accessTier ? GMAIL_EXTENDED_SCOPES[accessTier] : undefined;
 		if (tierScopes?.length) {
 			url.searchParams.set('scope', tierScopes.join(' '));
@@ -107,17 +106,17 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		if (onOpenExternal) onOpenExternal(targetUrl);
 		else window.location.href = targetUrl;
 
-		// eslint-disable-next-line react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any
-	}, [(props as any).formContext, serviceParam, nodeId, selectedNode, oauth2RootUrl, oauthReturnUrl, onOpenExternal]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [formContext, formValues, serviceParam, nodeId, oauth2RootUrl, oauthReturnUrl, onOpenExternal]);
 
 	// Show the button in error color if any OAuth-related token is missing from validation errors
 	const color = useMemo(() => {
-		for (const error of selectedNode?.data?.formDataErrors ?? []) if (['accessToken', 'refreshToken', 'userToken'].includes(error.params.missingProperty)) return 'error';
+		for (const error of formContext?.formDataErrors ?? []) if (['accessToken', 'refreshToken', 'userToken'].includes(error.params?.missingProperty)) return 'error';
 		return 'primary';
-	}, [selectedNode?.data?.formDataErrors]);
+	}, [formContext?.formDataErrors]);
 
 	// Check if user is already authenticated by looking for a userToken in either nested or flat location
-	const authenticated = selectedNode?.data?.formData?.parameters?.google?.userToken?.length || selectedNode?.data?.formData?.parameters?.userToken?.length;
+	const authenticated = formValues?.parameters?.google?.userToken?.length || formValues?.parameters?.userToken?.length;
 
 	// i18n is not initialized in every host (e.g. the VS Code webview). When a key
 	// doesn't resolve, t() returns the key itself — fall back to a literal so the
@@ -133,13 +132,8 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 	// marker so GoogleDrivePickerWidget can detect when a fresh token is available after OAuth.
 	// This effect does NOT open the picker - it only signals token availability.
 	useEffect(() => {
-		if (!selectedNode) {
-			return;
-		}
-
-		const formData = selectedNode?.data?.formData || {};
 		// Look for the user token in both possible locations (nested under google or flat)
-		const savedUserToken = formData.parameters?.google?.userToken || formData.parameters?.userToken;
+		const savedUserToken = formValues.parameters?.google?.userToken || formValues.parameters?.userToken;
 
 		if (!savedUserToken) {
 			return;
@@ -147,7 +141,7 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		(window as any).__googlePickerLastToken = savedUserToken;
-	}, [selectedNode]);
+	}, [formValues]);
 
 	return (
 		<Box sx={{ mt: 1, pl: 6.2, pr: 5.4 }}>
