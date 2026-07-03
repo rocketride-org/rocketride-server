@@ -1,0 +1,82 @@
+# RocketRide
+
+> RocketRide is the open source AI Development Environment (AIDE). Build, deploy,
+> and harness production-ready AI solutions directly from your IDE or terminal.
+
+## What is RocketRide?
+
+RocketRide is an open source data pipeline builder and runtime built for AI and ML
+workloads. It combines:
+
+- **50+ pipeline nodes** — LLMs (13 providers), 8 vector databases, OCR, NER, transforms
+- **C++ engine** — multithreaded, high-throughput, battle-tested runtime
+- **VS Code extension** — visual pipeline builder, debugger, live observability
+- **Python + TypeScript SDKs** — connect from any script or service
+- **MCP server** — Model Context Protocol integration for agent frameworks
+
+Pipelines are defined as portable JSON (`.pipe` files) and executed by the engine.
+Everything runs on your own infrastructure — no vendor lock-in.
+
+## Links
+
+- Home: https://rocketride.org
+- Docs: https://docs.rocketride.org
+- GitHub: https://github.com/rocketride-org/rocketride-server
+- Python SDK: https://pypi.org/project/rocketride/
+- TypeScript SDK: https://www.npmjs.com/package/rocketride
+- MCP Server: https://pypi.org/project/rocketride-mcp/
+- Discord: https://discord.gg/PMXrtenMsY
+- License: MIT
+
+## Quick Start (Python)
+
+```bash
+pip install rocketride
+```
+
+```python
+from rocketride import RocketRideClient
+import asyncio
+
+async def main():
+    client = RocketRideClient()  # reads .env automatically
+    await client.connect()
+    result = await client.use(filepath='pipeline.pipe')
+    await client.send(result['token'], "Hello, RocketRide!")
+    await client.disconnect()
+
+asyncio.run(main())
+```
+
+## Quick Start (TypeScript)
+
+```bash
+npm install rocketride
+```
+
+```typescript
+import { RocketRideClient } from 'rocketride';
+const client = new RocketRideClient();
+await client.connect();
+const { token } = await client.use({ filepath: 'pipeline.pipe' });
+await client.send(token, 'Hello, RocketRide!');
+await client.disconnect();
+```
+
+## Connection Modes
+
+| Mode | Description |
+|------|-------------|
+| `local` | Engine runs as a local subprocess (dynamic port); `.env` written automatically |
+| `docker` | Engine runs in a local Docker container |
+| `service` | Engine runs as an OS service |
+| `onprem` | Remote self-hosted engine |
+| `cloud` | RocketRide Cloud (OAuth) |
+
+## Key Docs
+
+- [ROCKETRIDE_QUICKSTART.md](docs/agents/ROCKETRIDE_QUICKSTART.md) — complete working examples
+- [ROCKETRIDE_COMPONENT_REFERENCE.md](docs/agents/ROCKETRIDE_COMPONENT_REFERENCE.md) — all 50+ pipeline nodes
+- [ROCKETRIDE_COMMON_MISTAKES.md](docs/agents/ROCKETRIDE_COMMON_MISTAKES.md) — pitfalls to avoid
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to contribute
+- [CHANGELOG.md](CHANGELOG.md) — release history
