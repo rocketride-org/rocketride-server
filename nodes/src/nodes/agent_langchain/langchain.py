@@ -125,10 +125,29 @@ def _build_langchain_tools(
         LangChain tool execution paths vary across versions; this schema keeps
         invocation robust when arguments are passed either via `input=...` or
         as extra keyword args.
+
+        Used only when a tool's real schema is unknown/unavailable — NOT for
+        tools that explicitly declare zero parameters. Advertising a generic
+        `input` field on a genuinely no-argument tool is what confuses
+        reasoning models into either skipping the tool or supplying a bogus
+        `input` value the server then rejects (see `_NoArgsInput` below).
         """
 
         input: Any = Field(default=None, description='Tool input payload')
         model_config = ConfigDict(extra='allow')
+
+    class _NoArgsInput(BaseModel):
+        """
+        Args schema for a tool that explicitly declares zero parameters.
+
+        Rendered to the model as `{"type": "object", "properties": {}}` with
+        no fields at all — an unambiguous "this tool takes no arguments"
+        signal. `extra='forbid'` means a model that hallucinates an argument
+        anyway gets a clear validation error instead of it being silently
+        forwarded to the MCP server as an unexpected parameter.
+        """
+
+        model_config = ConfigDict(extra='forbid')
 
     def _make_args_schema(input_schema: Optional[Dict[str, Any]]) -> type[BaseModel]:
         """
@@ -136,12 +155,21 @@ def _build_langchain_tools(
 
         LangChain tool execution can filter kwargs based on `args_schema`. Using
         the real tool schema helps preserve tool parameters end-to-end.
+
+        Tools with no schema info at all (`input_schema` missing/not a dict)
+        fall back to the permissive `_ToolInput`. Tools whose schema explicitly
+        declares zero properties (a genuine no-argument tool, e.g. an MCP tool
+        with `inputSchema: {"type": "object", "properties": {}}`) get the
+        strict `_NoArgsInput` instead — conflating the two used to make every
+        zero-argument tool look like it takes a generic `input` argument,
+        which is what caused reasoning models to either drop the tool or call
+        it with an argument the server didn't expect (#1404).
         """
         if not isinstance(input_schema, dict):
             return _ToolInput
         props = input_schema.get('properties', {})
         if not isinstance(props, dict) or not props:
-            return _ToolInput
+            return _NoArgsInput
         required_keys = set(input_schema.get('required', []) or [])
 
         field_defs: Dict[str, Any] = {}
