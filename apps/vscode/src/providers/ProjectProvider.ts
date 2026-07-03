@@ -882,21 +882,46 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					return;
 				}
 
-				const files: { buffer: Uint8Array; name: string; type: string; lastModified: number }[] = [];
+				const extensionToMimeType: Record<string, string> = {
+					txt: 'text/plain',
+					csv: 'text/csv',
+					json: 'application/json',
+					xml: 'application/xml',
+					html: 'text/html',
+					htm: 'text/html',
+					md: 'text/markdown',
+					pdf: 'application/pdf',
+					doc: 'application/msword',
+					docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+					xls: 'application/vnd.ms-excel',
+					xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+					ppt: 'application/vnd.ms-powerpoint',
+					pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+					png: 'image/png',
+					jpg: 'image/jpeg',
+					jpeg: 'image/jpeg',
+					gif: 'image/gif',
+					webp: 'image/webp',
+					svg: 'image/svg+xml',
+					zip: 'application/zip',
+				};
 
-				for (const uri of uris) {
-					try {
+				const results = await Promise.allSettled(
+					uris.map(async (uri) => {
 						const bytes = await vscode.workspace.fs.readFile(uri);
-						files.push({
-							buffer: bytes,
-							name: uri.path.split('/').pop() ?? 'file',
-							type: '',
-							lastModified: Date.now(),
-						});
-					} catch (err) {
-						this.logger.error(`[ProjectProvider] Failed to read selected file ${uri.fsPath}: ${err}`);
+						const stat = await vscode.workspace.fs.stat(uri);
+						const name = uri.path.split('/').pop() ?? 'file';
+						const extension = name.includes('.') ? name.split('.').pop()!.toLowerCase() : '';
+						return { buffer: bytes, name, type: extensionToMimeType[extension] ?? 'application/octet-stream', lastModified: stat.mtime };
+					})
+				);
+				const files = results.filter((r): r is PromiseFulfilledResult<{ buffer: Uint8Array; name: string; type: string; lastModified: number }> => r.status === 'fulfilled').map((r) => r.value);
+				results.forEach((r, i) => {
+					if (r.status === 'rejected') {
+						this.logger.error(`[ProjectProvider] Failed to read selected file ${uris[i].fsPath}: ${r.reason}`);
+						panel.webview.postMessage({ type: 'nativeFilesError', name: uris[i].path.split('/').pop() ?? 'file' });
 					}
-				}
+				});
 
 				if (files.length > 0) {
 					panel.webview.postMessage({ type: 'nativeFilesSelected', files });
