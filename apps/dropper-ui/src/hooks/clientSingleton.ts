@@ -120,7 +120,8 @@ let lastConnectionError: { reason: string; hasError: boolean } | null = null;
  */
 async function getAuthToken(): Promise<string | null> {
 	// Check session storage first for cached token
-	let auth = sessionStorage.getItem('auth');
+	let auth: string | null = null;
+	try { auth = sessionStorage.getItem('auth'); } catch {}
 	if (auth) return auth;
 
 	if (API_CONFIG.devMode) {
@@ -150,7 +151,7 @@ async function getAuthToken(): Promise<string | null> {
 	}
 
 	// Cache token in session storage for subsequent requests
-	if (auth) sessionStorage.setItem('auth', auth);
+	if (auth) { try { sessionStorage.setItem('auth', auth); } catch {} }
 	return auth;
 }
 
