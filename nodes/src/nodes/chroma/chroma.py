@@ -120,8 +120,31 @@ class Store(DocumentStoreBase):
         """
         if self.client is None:
             return False
-        collections = self.client.list_collections()
-        if self.collection in collections:
+        try:
+            collections = self.client.list_collections()
+        except Exception as e:
+            # A raw client/server incompatibility (e.g. an older Chroma server
+            # returning a response shape this client doesn't expect) tends to
+            # surface here as an opaque error such as KeyError('_type'). Wrap
+            # it so the failure is attributable instead of looking like a
+            # random ingestion error.
+            raise Exception(
+                f'Chroma: failed to list collections on {self.host}:{self.port} '
+                f'(often caused by a client/server version mismatch): {e}'
+            ) from e
+
+        # `list_collections()` return shape differs across chromadb versions:
+        # newer clients (>=0.6) return a list of collection name strings, while
+        # older clients (<0.6) return a list of Collection objects exposing
+        # `.name`. Comparing `self.collection` (a str) directly against the
+        # raw list only worked for the string-returning version — against an
+        # older server it silently evaluated to "collection does not exist"
+        # even when it did, which is what caused ingestion to appear to
+        # succeed while indexing nothing.
+        names = {c if isinstance(c, str) else getattr(c, 'name', None) for c in collections}
+        names.discard(None)
+
+        if self.collection in names:
             if self.collectionObj is None:
                 self.collectionObj = self.client.get_collection(name=self.collection)
             return True
@@ -378,6 +401,20 @@ class Store(DocumentStoreBase):
 
         def flush():
             nonlocal ids, embeddings, metadatas, documents
+            if self.collectionObj is None:
+                # Previously this fell through to e.g. `self.collectionObj.delete(...)`
+                # below, raising an opaque `AttributeError: 'NoneType' object has no
+                # attribute 'delete'` deep inside a per-chunk write. The pipeline
+                # engine's generic error handling then just counted it as "1 error"
+                # with no indication that the real cause was the collection never
+                # having been resolved (e.g. a Chroma version mismatch in
+                # `_doesCollectionExist`/`createCollection` upstream). Fail fast with
+                # a message that names the actual problem.
+                raise Exception(
+                    f'Chroma: collection {self.collection!r} is not initialized; cannot write chunks. '
+                    'This usually means collection creation/lookup failed earlier — check for a '
+                    'Chroma client/server version incompatibility.'
+                )
             if object_ids_to_delete:
                 if len(object_ids_to_delete) > 1:
                     filter_condition = {'$or': [{'objectId': object_id} for object_id in object_ids_to_delete]}
