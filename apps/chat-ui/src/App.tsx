@@ -134,6 +134,7 @@ const App: React.FC = () => {
 		if (isVSCode) {
 			// Listen for combined host and theme data from parent
 			const handleVSCodeData = (event: MessageEvent) => {
+				if (event.source !== window.parent) return;
 				const message = event.data;
 
 				if (message.type === 'vscodeData') {

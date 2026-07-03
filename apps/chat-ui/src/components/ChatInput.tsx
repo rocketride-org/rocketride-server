@@ -54,6 +54,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
 		inputRef.current?.focus();
 
 		const handleMessage = (event: MessageEvent) => {
+			if (event.source !== window.parent) return;
 			if (event.data?.type === 'paste' && event.data.text) {
 				setInputText(prev => {
 					const textarea = inputRef.current;

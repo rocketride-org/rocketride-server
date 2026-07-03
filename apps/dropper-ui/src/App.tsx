@@ -100,6 +100,7 @@ const App: React.FC = () => {
 
 		if (isVSCode) {
 			const handleVSCodeData = (event: MessageEvent) => {
+				if (event.source !== window.parent) return;
 				const message = event.data;
 				if (message.type === 'vscodeData' && message.theme) {
 					setVscodeState({
