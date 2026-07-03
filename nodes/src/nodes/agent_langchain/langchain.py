@@ -156,18 +156,25 @@ def _build_langchain_tools(
         LangChain tool execution can filter kwargs based on `args_schema`. Using
         the real tool schema helps preserve tool parameters end-to-end.
 
-        Tools with no schema info at all (`input_schema` missing/not a dict)
-        fall back to the permissive `_ToolInput`. Tools whose schema explicitly
-        declares zero properties (a genuine no-argument tool, e.g. an MCP tool
-        with `inputSchema: {"type": "object", "properties": {}}`) get the
-        strict `_NoArgsInput` instead — conflating the two used to make every
-        zero-argument tool look like it takes a generic `input` argument,
-        which is what caused reasoning models to either drop the tool or call
-        it with an argument the server didn't expect (#1404).
+        Three cases are distinguished:
+        - No schema info at all (`input_schema` missing/not a dict): the tool's
+          real shape is unknown, so fall back to the permissive `_ToolInput`.
+        - `properties` key absent (e.g. `{"type": "object"}`): an unconstrained
+          object schema, not a declaration of zero arguments — also falls back
+          to `_ToolInput` rather than being misread as "no args".
+        - `properties` present and empty (`{"type": "object", "properties": {}}`):
+          an explicit zero-argument declaration, e.g. from an MCP tool. Gets the
+          strict `_NoArgsInput` instead of `_ToolInput` — conflating this with
+          the two cases above used to make every zero-argument tool look like
+          it takes a generic `input` argument, which is what caused reasoning
+          models to either drop the tool or call it with an argument the server
+          didn't expect (#1404).
         """
         if not isinstance(input_schema, dict):
             return _ToolInput
-        props = input_schema.get('properties', {})
+        if 'properties' not in input_schema:
+            return _ToolInput
+        props = input_schema.get('properties')
         if not isinstance(props, dict) or not props:
             return _NoArgsInput
         required_keys = set(input_schema.get('required', []) or [])

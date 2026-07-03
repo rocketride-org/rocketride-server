@@ -227,6 +227,26 @@ class TestMakeArgsSchemaZeroArgTools:
             f'zero-argument tool schema must have no properties, got {json_schema.get("properties")}'
         )
 
+    def test_schema_missing_properties_key_is_unconstrained_not_zero_arg(self):
+        """`{"type": "object"}` (no `properties` key at all) means "any object
+        shape", not "zero arguments" -- it must NOT collapse to the same
+        no-args schema as an explicit `"properties": {}`. Regression for a
+        review finding: `input_schema.get('properties', {})` treated a missing
+        key the same as an explicitly empty one.
+        """
+        tools = self._build_tools(
+            [
+                {
+                    'name': 'unconstrained_tool',
+                    'description': 'no properties key at all',
+                    'inputSchema': {'type': 'object'},
+                }
+            ]
+        )
+        schema_cls = tools[0].args_schema
+        assert 'input' in schema_cls.model_fields
+        assert schema_cls.model_config.get('extra') == 'allow'
+
     def test_zero_arg_tool_schema_rejects_extra_args(self):
         tools = self._build_tools(
             [
