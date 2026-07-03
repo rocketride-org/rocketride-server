@@ -213,6 +213,9 @@ public class EmbeddedContentExtractor {
         appendString(sb, first, "source_mime", sourceMime);
         appendString(sb, first, "container_mime", containerMime);
         if (metadata != null) {
+            // The media file's own name (inner name for extracted media, e.g. the
+            // file inside a zip; parent stays the container).
+            appendString(sb, first, "resource_name", metadataFirst(metadata, "resourceName", "embeddedRelationshipId"));
             // Media detail from the Tika media parser. Keys confirmed against real
             // files; fps has no Tika key from the built-in parser (only the external
             // ffmpeg parser emits it), so its candidates yield nothing on those hosts.

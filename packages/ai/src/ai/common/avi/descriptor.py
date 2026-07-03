@@ -58,7 +58,7 @@ REQUIRED_METADATA_KEYS = (
 )
 
 # Best-effort media keys (omitted when unknown).
-OPTIONAL_COMMON_KEYS = ('start_offset', 'duration', 'container_mime')
+OPTIONAL_COMMON_KEYS = ('start_offset', 'duration', 'container_mime', 'resource_name')
 OPTIONAL_VIDEO_KEYS = ('fps', 'width', 'height')
 OPTIONAL_AUDIO_KEYS = ('sample_rate', 'channels', 'format')
 
