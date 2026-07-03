@@ -5,6 +5,7 @@
 import React, { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import * as XLSX from 'xlsx';
+import DOMPurify from 'dompurify';
 import { viewerStyles } from './styles';
 
 const styles = {
@@ -41,7 +42,11 @@ export const SpreadsheetViewer: React.FC<Props> = ({ content }) => {
 				const workbook = XLSX.read(data, { type: 'array' });
 				const sheet = workbook.Sheets[workbook.SheetNames[0]];
 				if (!sheet) { setError('No sheets found.'); return; }
-				setHtml(XLSX.utils.sheet_to_html(sheet, { id: 'rr-sheet' }));
+				// `sanitizeLinks` strips unsafe `javascript:` URLs from workbook data (CVE-2026-44549);
+				// it is a valid runtime option but absent from the bundled xlsx type defs, hence the cast.
+				const htmlOpts = { id: 'rr-sheet', sanitizeLinks: true } as XLSX.Sheet2HTMLOpts;
+				const rawHtml = XLSX.utils.sheet_to_html(sheet, htmlOpts);
+				setHtml(DOMPurify.sanitize(rawHtml));
 			} catch {
 				if (!cancelled) setError('Failed to render spreadsheet.');
 			}

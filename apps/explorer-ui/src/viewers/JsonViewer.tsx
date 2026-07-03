@@ -11,11 +11,22 @@ interface Props {
 }
 
 export const JsonViewer: React.FC<Props> = ({ content }) => {
-	let pretty: string;
+	// Try to pretty-print; only valid JSON goes through the fenced markdown path.
+	let pretty: string | null = null;
 	try {
 		pretty = JSON.stringify(JSON.parse(content), null, 2);
 	} catch {
-		pretty = content;
+		pretty = null;
+	}
+
+	// Invalid JSON: render the raw content in a plain <pre> so any triple-backtick
+	// fences in the payload can't terminate a markdown code block early.
+	if (pretty === null) {
+		return (
+			<div style={viewerStyles.prose}>
+				<pre>{content}</pre>
+			</div>
+		);
 	}
 
 	return (

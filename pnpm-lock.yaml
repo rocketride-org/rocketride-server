@@ -350,6 +350,9 @@ importers:
       docx-preview:
         specifier: ^0.3.3
         version: 0.3.7
+      dompurify:
+        specifier: '>=3.4.9 <3.5.0'
+        version: 3.4.11
       monaco-editor:
         specifier: ^0.55.1
         version: 0.55.1

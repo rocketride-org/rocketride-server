@@ -551,7 +551,16 @@ class AzureBlobStore(IStore):
                 expiry=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
             )
 
-            blob_url = f'https://{account_name}.blob.core.windows.net/{self._container}/{blob_name}?{sas_token}'
+            # Derive the base URL from the actual blob client rather than a
+            # hardcoded host. This yields the correct scheme/host (custom,
+            # sovereign, or Azurite endpoints from the connection string) and a
+            # properly URL-encoded blob path, then append the SAS query string.
+            client = self._get_client()
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=blob_name,
+            )
+            blob_url = f'{blob_client.url}?{sas_token}'
             return blob_url
         except ImportError:
             raise StorageError('Azure SDK not installed. Install with: pip install azure-storage-blob')

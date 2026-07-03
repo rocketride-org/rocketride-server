@@ -49,6 +49,11 @@ const ROW_HEIGHT = 20;
 /** Extra rows to render above and below the visible area. */
 const OVERSCAN = 10;
 
+// A successful ranged fetch returns 206 Partial Content. Anything else — most
+// notably 200 (server/proxy ignored the Range header and sent the whole file) —
+// must not be cached under a single chunk index, so we skip it.
+const HTTP_PARTIAL_CONTENT = 206;
+
 // -----------------------------------------------------------------------------
 // Styles
 // -----------------------------------------------------------------------------
@@ -335,8 +340,8 @@ class RangeDataSource {
 			});
 		}
 
-		if (response.status !== 206) {
-			return; // silently skip failed chunks
+		if (response.status !== HTTP_PARTIAL_CONTENT) {
+			return; // silently skip failed / non-partial chunks
 		}
 
 		const buf = await response.arrayBuffer();

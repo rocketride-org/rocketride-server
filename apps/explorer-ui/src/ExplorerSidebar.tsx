@@ -163,6 +163,26 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 			const newPath = targetDir ? `${targetDir}/${name}` : name;
 			if (newPath === sourcePath) return;
 			await client.fsRename(sourcePath, newPath);
+			// Keep open editor tabs in sync with the move.  A moved file must
+			// re-point its tab at the new path; a moved directory must re-point
+			// every open tab whose path lives under the old directory prefix.
+			const docs = getDocs();
+			if (docs) {
+				const s = docs.getState();
+				const dirPrefix = `${sourcePath}/`;
+				const affected = Object.entries(s.editors)
+					.map(([id, ed]) => ({ id, uri: ed.documentUri }))
+					.filter(({ uri }) => uri === sourcePath || uri.startsWith(dirPrefix));
+				// Compute each affected tab's new path, close the stale editors,
+				// then reopen at the relocated paths.
+				const reopenPaths: string[] = [];
+				for (const { id, uri } of affected) {
+					const movedUri = uri === sourcePath ? newPath : `${newPath}/${uri.slice(dirPrefix.length)}`;
+					reopenPaths.push(movedUri);
+					docs.closeEditor(id);
+				}
+				for (const movedUri of reopenPaths) await docs.openDocument(movedUri);
+			}
 			await refresh();
 		} catch (err) {
 			console.error('[ExplorerSidebar] move failed:', err);
@@ -176,16 +196,19 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 		try {
 			for (const file of files) {
 				const path = targetDir ? `${targetDir}/${file.name}` : file.name;
-				const data = new Uint8Array(await file.arrayBuffer());
 				const { handle } = await client.fsOpen(path, 'w');
+				const chunkSize = 4 * 1024 * 1024; // 4 MB
 				try {
-					const chunkSize = 4 * 1024 * 1024; // 4 MB
+					// Stream the file in chunks via File.slice so we never
+					// buffer the entire file in memory at once.
 					let offset = 0;
-					while (offset < data.length) {
-						await client.fsWrite(handle, data.subarray(offset, offset + chunkSize));
+					while (offset < file.size) {
+						const chunk = new Uint8Array(await file.slice(offset, offset + chunkSize).arrayBuffer());
+						await client.fsWrite(handle, chunk);
 						offset += chunkSize;
 					}
 				} finally {
+					// Always close the handle, even if a write throws mid-stream.
 					await client.fsClose(handle, 'w');
 				}
 			}
@@ -204,6 +227,11 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 			if (!url) return;
 			const a = document.createElement('a');
 			a.href = url;
+			// NOTE: the `download` filename hint is only honored by browsers for
+			// same-origin responses (the /task/fetch backend).  For cross-origin
+			// presigned URLs (S3 / Azure Blob) the attribute is ignored and the
+			// browser falls back to the object key in the URL — there is no
+			// reliable client-side fix for cross-origin without proxying the bytes.
 			a.download = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
 			document.body.appendChild(a);
 			a.click();

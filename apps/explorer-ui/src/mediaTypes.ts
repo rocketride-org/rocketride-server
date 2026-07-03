@@ -91,9 +91,8 @@ const MEDIA_MAP: Record<string, MediaInfo> = {
 	'.mkd':      { category: 'markdown', mime: 'text/markdown', contentMode: 'inline' },
 	'.mkdn':     { category: 'markdown', mime: 'text/markdown', contentMode: 'inline' },
 
-	// MS Word — blob (fetched and decoded by docx-preview)
+	// MS Word — blob (fetched and decoded by docx-preview; OOXML .docx only)
 	'.docx': { category: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', contentMode: 'blob' },
-	'.doc':  { category: 'docx', mime: 'application/msword', contentMode: 'blob' },
 
 	// Spreadsheets — blob (fetched and decoded by SheetJS)
 	'.xlsx': { category: 'spreadsheet', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', contentMode: 'blob' },
@@ -101,6 +100,9 @@ const MEDIA_MAP: Record<string, MediaInfo> = {
 	'.csv':  { category: 'spreadsheet', mime: 'text/csv', contentMode: 'blob' },
 
 	// Binary — link (hex viewer fetches data directly; no VFS prefetch needed)
+	// Legacy .doc is Compound File Binary Format (not OOXML); docx-preview cannot
+	// render it, so it opens in the hex/binary viewer alongside other binaries.
+	'.doc':    { category: 'binary', mime: 'application/msword',               contentMode: 'link' },
 	'.zip':    { category: 'binary', mime: 'application/zip',                  contentMode: 'link' },
 	'.gz':     { category: 'binary', mime: 'application/gzip',                 contentMode: 'link' },
 	'.tar':    { category: 'binary', mime: 'application/x-tar',                contentMode: 'link' },

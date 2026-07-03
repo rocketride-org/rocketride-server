@@ -59,7 +59,9 @@ async def handle_fetch(request: Request):
         return JSONResponse({'error': 'Server signing key not configured'}, status_code=500)
 
     try:
-        payload = jwt.decode(token, signing_key, algorithms=['HS256'])
+        # Require the `exp` claim so a signed token without an expiration is
+        # rejected rather than treated as non-expiring.
+        payload = jwt.decode(token, signing_key, algorithms=['HS256'], options={'require': ['exp']})
     except jwt.ExpiredSignatureError:
         return JSONResponse({'error': 'Token expired'}, status_code=401)
     except jwt.InvalidTokenError as e:
@@ -74,8 +76,12 @@ async def handle_fetch(request: Request):
     task_server = request.app.state.task
     file_store = task_server.store.get_file_store(user_id)
 
-    # Build the full storage path and resolve it through the filesystem backend
-    full_store_path = file_store._full_path(path)
+    # Build the full storage path and resolve it through the filesystem backend.
+    # A malformed `path` claim can raise ValueError; return 400 rather than 500.
+    try:
+        full_store_path = file_store._full_path(path)
+    except ValueError:
+        return JSONResponse({'error': 'Invalid path'}, status_code=400)
     backend = file_store._store
     try:
         abs_path = backend._get_full_path(full_store_path)

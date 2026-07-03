@@ -77,7 +77,10 @@ export function createStoreVfs(client: RocketRideClient): IVirtualFileSystem {
 				const blob = new Blob([data], { type: mime });
 				return URL.createObjectURL(blob);
 			} catch {
-				return '';
+				// Return null (not '') to signal "load failed" vs "empty content".
+				// revertDocument() bails on null, so the FilePane revert effect
+				// won't re-fire forever on a failing blob load.
+				return null;
 			}
 		},
 
