@@ -1,0 +1,39 @@
+{
+	"title": "Reconcile",
+	"protocol": "reconcile://",
+	"classType": ["text"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.reconcile",
+	"prefix": "reconcile",
+	"description": [
+		"A node that receives structured data (answers) typically from ",
+		"a PDF extraction and an official filing, compares them using an LLM, ",
+		"and generates a reconciliation report highlighting any discrepancies."
+	],
+	"icon": "util-text.svg",
+	"documentation": "https://docs.rocketride.org",
+	"invoke": {
+		"llm": {
+			"description": "LLM to use for data reconciliation",
+			"min": 1
+		}
+	},
+	"lanes": {
+		"answers": ["answers", "documents"]
+	},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {}
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Reconcile",
+			"properties": []
+		}
+	]
+}
