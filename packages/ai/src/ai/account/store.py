@@ -305,7 +305,9 @@ class IStore(ABC):
         if buf:
             buf.close()
 
-    async def get_url(self, filename: str, expires_in: int = 3600) -> Optional[str]:
+    async def get_url(
+        self, filename: str, expires_in: int = 3600, content_disposition: Optional[str] = None
+    ) -> Optional[str]:
         """
         Get a direct HTTP URL for accessing the file.
 
@@ -317,6 +319,9 @@ class IStore(ABC):
         Args:
             filename: Relative path to the file within the store.
             expires_in: URL validity in seconds (default 1 hour).
+            content_disposition: Optional ``Content-Disposition`` header value
+                for cloud backends to bake into the URL. Ignored by the local
+                filesystem backend (which handles disposition at ``/task/fetch``).
 
         Returns:
             A presigned URL string, or ``None`` when the backend cannot

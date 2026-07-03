@@ -69,6 +69,7 @@ async def handle_fetch(request: Request):
 
     user_id = payload.get('sub')
     path = payload.get('path')
+    download_name = payload.get('download_name')
     if not user_id or not path:
         return JSONResponse({'error': 'Token missing required claims'}, status_code=400)
 
@@ -94,9 +95,22 @@ async def handle_fetch(request: Request):
     # ── Serve the file ───────────────────────────────────────────────────
     # FileResponse handles Content-Type (from extension), Content-Length,
     # Range requests (HTTP 206), and streaming automatically.
+    #
+    # If the token carries a download_name, force a download with that filename
+    # (Content-Disposition: attachment). Otherwise serve inline so media
+    # viewers can stream the file (video/audio/pdf) in the browser.
+    if download_name:
+        return FileResponse(
+            path=str(abs_path),
+            filename=download_name,
+            headers={
+                'Cache-Control': 'private, max-age=3600',
+                'Accept-Ranges': 'bytes',
+            },
+        )
     return FileResponse(
         path=str(abs_path),
-        filename=os.path.basename(path),
+        content_disposition_type='inline',
         headers={
             'Cache-Control': 'private, max-age=3600',
             'Accept-Ranges': 'bytes',

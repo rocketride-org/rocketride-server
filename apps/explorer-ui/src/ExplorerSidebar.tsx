@@ -223,16 +223,17 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 	const handleDownload = useCallback(async (path: string) => {
 		if (!client) return;
 		try {
-			const url = await client.fsGetUrl(path);
+			const name = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
+			// Pass downloadName so the server bakes `Content-Disposition:
+			// attachment; filename="<name>"` into the URL (presigned/SAS for
+			// cloud, /task/fetch header for local). This makes the download
+			// filename work even for cross-origin cloud URLs, where the
+			// `<a download>` attribute is otherwise ignored.
+			const url = await client.fsGetUrl(path, undefined, name);
 			if (!url) return;
 			const a = document.createElement('a');
 			a.href = url;
-			// NOTE: the `download` filename hint is only honored by browsers for
-			// same-origin responses (the /task/fetch backend).  For cross-origin
-			// presigned URLs (S3 / Azure Blob) the attribute is ignored and the
-			// browser falls back to the object key in the URL — there is no
-			// reliable client-side fix for cross-origin without proxying the bytes.
-			a.download = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
+			a.download = name; // same-origin belt-and-suspenders
 			document.body.appendChild(a);
 			a.click();
 			a.remove();

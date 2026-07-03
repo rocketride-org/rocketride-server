@@ -562,14 +562,29 @@ class S3Store(IStore):
     # URL Generation
     # =========================================================================
 
-    async def get_url(self, filename: str, expires_in: int = 3600) -> str | None:
-        """Generate a presigned S3 URL for direct browser access."""
+    async def get_url(
+        self, filename: str, expires_in: int = 3600, content_disposition: Optional[str] = None
+    ) -> str | None:
+        """
+        Generate a presigned S3 URL for direct browser access.
+
+        Args:
+            filename: Relative store path.
+            expires_in: URL validity in seconds.
+            content_disposition: Optional ``Content-Disposition`` header value
+                (e.g. ``attachment; filename="report.pdf"``). Baked into the
+                presigned URL via ``ResponseContentDisposition`` so it survives
+                cross-origin, where the browser ``<a download>`` hint is ignored.
+        """
         key = self._get_key(filename)
         try:
             client = self._get_client()
+            params = {'Bucket': self._bucket, 'Key': key}
+            if content_disposition:
+                params['ResponseContentDisposition'] = content_disposition
             url = client.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': self._bucket, 'Key': key},
+                Params=params,
                 ExpiresIn=expires_in,
             )
             return url

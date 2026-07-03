@@ -2228,11 +2228,20 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param path - Relative path within the account store
 	 * @param expiresIn - URL validity in seconds (default 3600)
+	 * @param downloadName - If set, the URL forces a browser download with this
+	 *   filename (`Content-Disposition: attachment`). This is the only reliable
+	 *   way to control the download filename for cross-origin cloud URLs, where
+	 *   the `<a download>` attribute is ignored. Omit for inline streaming.
 	 * @returns A direct HTTP(S) URL to the file
 	 */
-	async fsGetUrl(path: string, expiresIn: number = 3600): Promise<string> {
+	async fsGetUrl(path: string, expiresIn: number = 3600, downloadName?: string): Promise<string> {
 		this.validateStorePath(path);
-		const body = await this.call('rrext_store', { subcommand: 'fs_geturl', path, expires_in: expiresIn });
+		const body = await this.call('rrext_store', {
+			subcommand: 'fs_geturl',
+			path,
+			expires_in: expiresIn,
+			download_name: downloadName,
+		});
 		return (body as any).url;
 	}
 

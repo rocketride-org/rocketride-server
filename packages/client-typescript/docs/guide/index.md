@@ -247,7 +247,7 @@ Read, write, and manage files in your account's server-side store. All paths are
 
 | Method     | Signature                                                     | Returns           | Description                                                                                                                                                                                                                        |
 | ---------- | ------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fsGetUrl` | `fsGetUrl(path: string, expiresIn?: number): Promise<string>` | `Promise<string>` | Time-limited HTTP(S) URL for direct browser access. Cloud backends (S3/Azure) return a presigned/SAS URL; the local filesystem backend returns a JWT-signed `/task/fetch` URL. Use as an `<img>`/`<video>`/`<audio>` source, or to download. `expiresIn` is in seconds (default 3600). |
+| `fsGetUrl` | `fsGetUrl(path: string, expiresIn?: number, downloadName?: string): Promise<string>` | `Promise<string>` | Time-limited HTTP(S) URL for direct browser access. Cloud backends (S3/Azure) return a presigned/SAS URL; the local filesystem backend returns a JWT-signed `/task/fetch` URL. Served **inline** by default (use as an `<img>`/`<video>`/`<audio>` source). Pass `downloadName` to force a download with that filename via `Content-Disposition: attachment` — the only reliable way to set the download filename for cross-origin cloud URLs (where the `<a download>` attribute is ignored). `expiresIn` is in seconds (default 3600). |
 
 **Examples:**
 
@@ -274,8 +274,11 @@ try {
 	await client.fsClose(handle, 'w');
 }
 
-// Time-limited URL for a browser to stream or download
-const url = await client.fsGetUrl('uploads/video.mp4', 600);
+// Inline URL for streaming in a browser (<video>/<img> src)
+const streamUrl = await client.fsGetUrl('uploads/video.mp4', 600);
+
+// Force a download with a friendly filename (works cross-origin on S3/Azure too)
+const downloadUrl = await client.fsGetUrl('uploads/video.mp4', undefined, 'my video.mp4');
 ```
 
 ### Events
