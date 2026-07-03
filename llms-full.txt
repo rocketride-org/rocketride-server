@@ -1,0 +1,259 @@
+# RocketRide — Full Reference for AI Assistants
+
+> This file follows the llmstxt.org standard. It provides a comprehensive
+> reference for AI coding assistants working with the RocketRide codebase.
+
+## Project Overview
+
+RocketRide is the open source AI Development Environment (AIDE). It turns the
+classic IDE into a full AI Development Environment with deep observability,
+a C++ runtime, and zero vendor lock-in.
+
+- **License**: MIT
+- **Language**: C++ (engine), Python (nodes/SDK), TypeScript (VS Code extension + SDK)
+- **Repository**: https://github.com/rocketride-org/rocketride-server
+- **Fork (contributor)**: https://github.com/Pankajsharma99max/rocketride-server
+- **Default branch**: `develop`
+
+---
+
+## Architecture
+
+```
+rocketride-server/
+├── apps/
+│   ├── engine/          # C++ core engine (CMake)
+│   ├── vscode/          # VS Code extension (TypeScript)
+│   │   └── src/
+│   │       ├── engine/  # Engine backend (local, docker, service, remote)
+│   │       │   └── local/engine-local.ts  # Local subprocess engine
+│   │       ├── connection/connection.ts   # WebSocket connection manager
+│   │       └── config/                   # Settings schema
+│   ├── chat-ui/         # Chat UI (React/TypeScript)
+│   ├── dropper-ui/      # File dropper UI (React/TypeScript)
+│   └── aparavi-ui/      # Aparavi UI (React/TypeScript)
+├── docs/
+│   └── agents/          # AI-assistant oriented documentation
+│       ├── ROCKETRIDE_QUICKSTART.md
+│       ├── ROCKETRIDE_COMPONENT_REFERENCE.md
+│       └── ROCKETRIDE_COMMON_MISTAKES.md
+├── llms.txt             # Concise AI summary (this project)
+└── llms-full.txt        # Full AI reference (this file)
+```
+
+---
+
+## Connection Modes
+
+The VS Code extension supports five connection modes configured via `rocketride.connectionMode`:
+
+| Mode | Value | Auth | Engine location |
+|------|-------|------|-----------------|
+| Local subprocess | `local` | `MYAPIKEY` (default) | Spawned by extension |
+| Docker | `docker` | `MYAPIKEY` (default) | Local Docker container |
+| OS service | `service` | `MYAPIKEY` (default) | System service |
+| On-premises | `onprem` | API key from settings | Remote self-hosted |
+| Cloud | `cloud` | OAuth token | RocketRide Cloud |
+
+### Local Mode — Dynamic Port Behavior
+
+The local engine is started with `--port=0` (OS assigns a free port). The extension:
+
+1. Spawns the engine subprocess (`engine-local.ts` → `spawnProcess()`)
+2. Monitors stdout for `"Uvicorn running on http://localhost:<port>"`
+3. Parses the actual port
+4. Emits `ready` with `uri: http://localhost:<port>`
+5. **Writes `ROCKETRIDE_URI=http://localhost:<port>` and `ROCKETRIDE_APIKEY=<key>` to workspace `.env`**
+
+The `.env` write uses an upsert pattern — existing lines are preserved; only the two keys are overwritten. This happens in `EngineLocal.writeLocalEnv()`.
+
+---
+
+## VS Code Extension Key Files
+
+### `apps/vscode/src/engine/local/engine-local.ts`
+
+Class: `EngineLocal extends EngineBackend`
+
+Key methods:
+- `install(versionSpec, config, token)` — downloads engine binary via `EngineInstaller`
+- `start(config, token)` — install + spawn subprocess + write `.env`
+- `stop()` — graceful shutdown (stdin close → SIGTERM → 5s SIGKILL)
+- `remove()` — stop + delete engine directory
+- `getStatus(parentDir)` — static, checks PID files for running state
+- `writeLocalEnv(uri, apiKey)` — private, upserts ROCKETRIDE_URI/APIKEY to workspace `.env`
+- `spawnProcess(exePath, args)` — private, spawns child process, parses Uvicorn port
+
+### `apps/vscode/src/connection/connection.ts`
+
+Class: `ConnectionManager extends EventEmitter`
+
+Manages the WebSocket client (`RocketRideClient`). Key behavior:
+- `handleEngineStatus(event)` — reacts to `ready/idle/error` from `EngineRegistry`
+- `connectToEngine(uri)` — resolves auth (OAuth / API key / default) then calls `client.connect()`
+- Local mode auth: `groupConfig.apiKey || 'MYAPIKEY'`
+- `getHttpUrl()` — returns HTTP URL from engineUri or hostUrl config
+
+### Auth Resolution in `connectToEngine()`
+
+```typescript
+if (connectionModeUsesOAuth(mode)) {
+    auth = await CloudAuthProvider.getInstance().getToken();
+} else if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
+    auth = groupConfig.apiKey;
+} else {
+    // local, service, docker
+    auth = groupConfig.apiKey || 'MYAPIKEY';
+}
+```
+
+---
+
+## Pipeline File Format
+
+Pipeline files use the `.pipe` extension and are JSON:
+
+```json
+{
+    "project_id": "85be2a13-ad93-49ed-a1e1-4b0f763ca618",
+    "source": "input",
+    "components": [
+        {
+            "id": "input",
+            "provider": "webhook",
+            "config": {}
+        },
+        {
+            "id": "llm",
+            "provider": "llm_openai",
+            "config": {
+                "profile": "openai-5",
+                "openai-5": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+            },
+            "input": [{ "lane": "text", "from": "input" }]
+        },
+        {
+            "id": "out",
+            "provider": "response_text",
+            "config": {},
+            "input": [{ "lane": "text", "from": "llm" }]
+        }
+    ]
+}
+```
+
+Rules:
+- `project_id` must be a literal GUID (not a variable)
+- `source` must match a component `id`
+- All env variables must use `ROCKETRIDE_` prefix
+- File extension must be `.pipe` (not `.json`)
+
+---
+
+## Python SDK Usage
+
+```python
+from rocketride import RocketRideClient
+import asyncio
+
+async def main():
+    # Reads ROCKETRIDE_URI and ROCKETRIDE_APIKEY from .env automatically
+    client = RocketRideClient()
+    await client.connect()
+
+    # Webhook pipeline
+    result = await client.use(filepath='pipeline.pipe')
+    token = result['token']
+    await client.send(token, "input data")
+
+    # Chat pipeline
+    from rocketride.schema import Question
+    q = Question()
+    q.addQuestion("What is the capital of France?")
+    response = await client.chat(token=token, question=q)
+    print(response.get('answers', [None])[0])
+
+    await client.disconnect()
+
+asyncio.run(main())
+```
+
+---
+
+## TypeScript SDK Usage
+
+```typescript
+import { RocketRideClient, Question } from 'rocketride';
+
+async function main() {
+    // Reads ROCKETRIDE_URI and ROCKETRIDE_APIKEY from .env automatically
+    const client = new RocketRideClient();
+    await client.connect();
+
+    // Webhook pipeline
+    const { token } = await client.use({ filepath: 'pipeline.pipe' });
+    await client.send(token, 'input data');
+
+    // Chat pipeline
+    const question = new Question();
+    question.addQuestion('What is the capital of France?');
+    const response = await client.chat({ token, question });
+    console.log(response.answers?.[0]);
+
+    await client.disconnect();
+}
+main().catch(console.error);
+```
+
+---
+
+## .env File
+
+The workspace `.env` is the primary configuration mechanism for scripts using the SDK.
+
+For **local mode**, the extension writes it automatically after engine startup:
+
+```env
+ROCKETRIDE_URI=http://localhost:54321    # dynamic — changes each restart
+ROCKETRIDE_APIKEY=MYAPIKEY              # or your configured key
+```
+
+For **remote / cloud / onprem** modes, the extension syncs from extension settings.
+
+**Do not** manually edit `ROCKETRIDE_URI` or `ROCKETRIDE_APIKEY` in local mode — they are
+overwritten each time the engine starts.
+
+---
+
+## Common Mistakes
+
+1. **Wrong pipeline source**: chat pipelines need `"source": "chat_N"` (not `"input"`)
+2. **Using `client.send()` on chat pipelines**: use `client.chat()` instead
+3. **Hardcoding port in `.env`**: local mode uses a dynamic port; let the extension manage it
+4. **Wrong file extension**: use `.pipe` not `.json`
+5. **Variable in `project_id`**: must be a literal GUID
+6. **Not calling `connect()` before use**
+7. **Not calling `disconnect()` after use**
+
+---
+
+## Contributing
+
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR guidelines
+- See [AGENTS.md](AGENTS.md) for AI-assistant specific guidelines
+- Branch: `develop` (default)
+- TypeScript: `apps/vscode/` — `tsc --noEmit` for type checking
+- Python: standard pytest
+
+---
+
+## Links
+
+- Home: https://rocketride.org
+- Docs: https://docs.rocketride.org
+- GitHub: https://github.com/rocketride-org/rocketride-server
+- Python SDK (PyPI): https://pypi.org/project/rocketride/
+- TypeScript SDK (npm): https://www.npmjs.com/package/rocketride
+- MCP Server: https://pypi.org/project/rocketride-mcp/
+- Discord: https://discord.gg/PMXrtenMsY
+- Issues: https://github.com/rocketride-org/rocketride-server/issues

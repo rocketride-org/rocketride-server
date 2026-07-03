@@ -62,9 +62,9 @@ export class EngineLocal extends EngineBackend {
 		this.installer = new EngineInstaller(parentDir, 'version.local.json');
 	}
 
-	// =========================================================================
+	// ==========================================================================
 	// PUBLIC API
-	// =========================================================================
+	// ==========================================================================
 
 	/** The EngineInstaller (for version fetching in UI). */
 	getInstaller(): EngineInstaller {
@@ -83,9 +83,9 @@ export class EngineLocal extends EngineBackend {
 		return { version: installed.tag, publishedAt: installed.publishedAt };
 	}
 
-	// =========================================================================
+	// ==========================================================================
 	// LIFECYCLE — install, start, stop, remove
-	// =========================================================================
+	// ==========================================================================
 
 	/**
 	 * Downloads/installs the engine binary. Does NOT start it.
@@ -123,6 +123,10 @@ export class EngineLocal extends EngineBackend {
 	/**
 	 * Installs the engine (if needed) and starts it as a subprocess.
 	 * Emits 'ready' with the URI when the engine is accepting connections.
+	 *
+	 * Also writes ROCKETRIDE_URI and ROCKETRIDE_APIKEY to the workspace
+	 * root .env file so that Python/TypeScript SDK scripts can connect
+	 * without any manual configuration.
 	 */
 	async start(config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
 		const versionSpec = config.local.engineVersion || 'latest';
@@ -151,10 +155,10 @@ export class EngineLocal extends EngineBackend {
 
 		const executablePath = this.installer.getExecutablePath();
 		const args = [
-			'--autoterm',        // Exit when VS Code closes (stdin monitoring)
+			'--autoterm',          // Exit when VS Code closes (stdin monitoring)
 			'./ai/eaas.py',
 			'--host=localhost',
-			'--port=0',          // Dynamic port assignment
+			'--port=0',           // Dynamic port assignment
 			...effectiveArgs,
 		];
 
@@ -168,6 +172,11 @@ export class EngineLocal extends EngineBackend {
 			uri: `http://localhost:${this.actualPort}`,
 			version: installed?.tag,
 		});
+
+		// --- Phase 3: Write connection details to workspace .env ---
+		// This allows Python/TypeScript SDK scripts to connect automatically
+		// without hardcoding the dynamic port or API key.
+		this.writeLocalEnv(`http://localhost:${this.actualPort}`, config.apiKey || 'MYAPIKEY');
 	}
 
 	/**
@@ -203,9 +212,9 @@ export class EngineLocal extends EngineBackend {
 		}
 	}
 
-	// =========================================================================
+	// ==========================================================================
 	// STATIC STATUS — checks filesystem without needing an instance
-	// =========================================================================
+	// ==========================================================================
 
 	/**
 	 * Checks if a local engine is installed and whether a process is running.
@@ -251,9 +260,9 @@ export class EngineLocal extends EngineBackend {
 		if (this.child) await this.stopProcess();
 	}
 
-	// =========================================================================
+	// ==========================================================================
 	// STATIC ioControl — panel commands
-	// =========================================================================
+	// ==========================================================================
 
 	/**
 	 * Local engine: explicit install (download binary without starting).
@@ -277,9 +286,9 @@ export class EngineLocal extends EngineBackend {
 		}
 	}
 
-	// =========================================================================
+	// ==========================================================================
 	// PROCESS MANAGEMENT — spawn, stop, PID tracking
-	// =========================================================================
+	// ==========================================================================
 
 	/**
 	 * Spawns the engine process and waits for the "Uvicorn running" ready
@@ -428,9 +437,69 @@ export class EngineLocal extends EngineBackend {
 		this.pidFilePath = undefined;
 	}
 
-	// =========================================================================
+	// ==========================================================================
+	// .ENV WRITER — writes/upserts ROCKETRIDE_URI and ROCKETRIDE_APIKEY
+	// ==========================================================================
+
+	/**
+	 * Writes ROCKETRIDE_URI and ROCKETRIDE_APIKEY to the workspace root .env
+	 * file. Existing lines are preserved; only the two keys are upserted.
+	 *
+	 * This is the mechanism that makes the QUICKSTART docs work for local mode:
+	 * the dynamic port isn't known until the engine starts, so we write it here
+	 * rather than expecting the user to configure it manually.
+	 *
+	 * Non-fatal: errors are logged but never propagated.
+	 *
+	 * @param uri     - The engine URI, e.g. http://localhost:54321
+	 * @param apiKey  - The API key (config value or default 'MYAPIKEY')
+	 */
+	private writeLocalEnv(uri: string, apiKey: string): void {
+		try {
+			const workspaceFolders = vscode.workspace.workspaceFolders;
+			if (!workspaceFolders?.length) return;
+
+			const envPath = path.join(workspaceFolders[0].uri.fsPath, '.env');
+
+			// Read existing .env (or start empty)
+			let lines: string[] = [];
+			if (fs.existsSync(envPath)) {
+				lines = fs.readFileSync(envPath, 'utf8').split('\n');
+			}
+
+			// Upsert a key=value line, preserving all other lines
+			const upsert = (key: string, value: string): void => {
+				const idx = lines.findIndex(
+					(l) => l.startsWith(`${key}=`) || l.startsWith(`${key} =`),
+				);
+				const line = `${key}=${value}`;
+				if (idx >= 0) {
+					lines[idx] = line;
+				} else {
+					lines.push(line);
+				}
+			};
+
+			upsert('ROCKETRIDE_URI', uri);
+			upsert('ROCKETRIDE_APIKEY', apiKey);
+
+			fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
+			this.logger.output(
+				`${icons.success} Written ROCKETRIDE_URI and ROCKETRIDE_APIKEY to .env`,
+			);
+		} catch (err) {
+			// Non-fatal — engine is running; only the .env convenience write failed
+			this.logger.output(
+				`${icons.warning} Could not write .env: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+			);
+		}
+	}
+
+	// ==========================================================================
 	// HELPERS
-	// =========================================================================
+	// ==========================================================================
 
 	/** Gets existing GitHub session token (no prompt). */
 	private async getGitHubToken(): Promise<string | undefined> {
