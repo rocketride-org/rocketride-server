@@ -228,7 +228,13 @@ class IGlobal(IGlobalBase):
     def list_namespaced_tools(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         for namespaced, tool in (self._tools_by_namespaced or {}).items():
-            out.append({'name': namespaced, 'description': tool.description, 'input_schema': tool.inputSchema})
+            # Key must be `inputSchema` (camelCase) to match the canonical
+            # `ToolsBase.ToolDescriptor` contract (packages/ai/src/ai/common/tools.py)
+            # that every framework driver reads via `td.get('inputSchema')`. The
+            # previous `input_schema` (snake_case) key meant that key lookup always
+            # missed, so every MCP tool's real schema was silently discarded before
+            # it ever reached the driver (#1404).
+            out.append({'name': namespaced, 'description': tool.description, 'inputSchema': tool.inputSchema})
         return out
 
     def get_tool(self, *, server_name: str, tool_name: str) -> Optional[McpToolDef]:
