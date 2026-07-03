@@ -210,6 +210,19 @@ for (const chunk of chunks) await pipe.write(new TextEncoder().encode(chunk));
 const result = await pipe.close();
 ```
 
+### Store (file access)
+
+| Method     | Signature                                                     | Returns           | Description                                                                                                                                                                                                                                                                                                                          |
+| ---------- | ------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fsGetUrl` | `fsGetUrl(path: string, expiresIn?: number): Promise<string>` | `Promise<string>` | Returns a direct, time-limited HTTP(S) URL for a file in the account store. Cloud backends (S3/Azure) return a presigned/SAS URL; the local filesystem backend returns a JWT-signed `/task/fetch` URL. Use it for streaming media, downloads, or as an `<img>`/`<video>` source. `path` is relative to the store root; `expiresIn` is in seconds (default 3600). |
+
+**Example:**
+
+```typescript
+const url = await client.fsGetUrl('reports/q3.pdf', 600);
+// open in a browser, download the file, or use directly as a <video>/<img> src
+```
+
 ### Events
 
 | Method      | Signature                                                       | Returns | Description                                                                                                                                                                                                                      |

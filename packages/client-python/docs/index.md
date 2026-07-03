@@ -220,6 +220,19 @@ await pipe.write(b'{"key": "value2"}')
 result = await pipe.close()
 ```
 
+### Store (file access)
+
+| Method       | Signature                                                              | Returns | Description                                                                                                                                                                                                                                                                                                                          |
+| ------------ | ---------------------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fs_get_url` | `async def fs_get_url(self, path: str, expires_in: int = 3600) -> str` | `str`   | Returns a direct, time-limited HTTP(S) URL for a file in the account store. Cloud backends (S3/Azure) return a presigned/SAS URL; the local filesystem backend returns a JWT-signed `/task/fetch` URL. Use it for streaming media, downloads, or as an `<img>`/`<video>` source. `path` is relative to the store root; `expires_in` is in seconds (default 3600). |
+
+**Example:**
+
+```python
+url = await client.fs_get_url("reports/q3.pdf", expires_in=600)
+# open in a browser, download the file, or use directly as a <video>/<img> src
+```
+
 ### Events
 
 | Method       | Signature                                                                | Returns | Description                                                                                                                                                          |
