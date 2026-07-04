@@ -220,6 +220,76 @@ await pipe.write(b'{"key": "value2"}')
 result = await pipe.close()
 ```
 
+### Store (file access)
+
+Read, write, and manage files in your account's server-side store. All paths are **relative** to the store root (e.g. `"docs/readme.md"`); absolute-like paths (starting with `/` or `\`) are rejected. Binary I/O uses an explicit handle lifecycle (`fs_open` → `fs_read` / `fs_write` → `fs_close`, 4 MB chunks); for most cases prefer the string/JSON convenience wrappers.
+
+**Handle I/O (low-level binary)**
+
+| Method     | Signature                                                                                 | Returns | Description                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------- |
+| `fs_open`  | `async def fs_open(self, path: str, mode: str = 'r') -> dict`                              | `dict`  | Open a handle. Returns `{'handle': str}`; read mode also includes `'size'` (int).   |
+| `fs_read`  | `async def fs_read(self, handle: str, offset: int = 0, length: int = 4_194_304) -> bytes` | `bytes` | Read up to `length` bytes (default 4 MB) from `offset`. Empty bytes = EOF.           |
+| `fs_write` | `async def fs_write(self, handle: str, data: bytes) -> int`                                | `int`   | Write raw bytes to a write handle. Returns the number of bytes written.             |
+| `fs_close` | `async def fs_close(self, handle: str, mode: str = 'r') -> None`                           | -       | Close a handle. `mode` must match the mode passed to `fs_open`.                     |
+
+**Convenience wrappers** (open/read/write/close handled internally)
+
+| Method            | Signature                                                                               | Returns | Description                                     |
+| ----------------- | --------------------------------------------------------------------------------------- | ------- | ---------------------------------------------- |
+| `fs_read_string`  | `async def fs_read_string(self, path: str, encoding: str = 'utf-8') -> str`              | `str`   | Read an entire file as a decoded string.       |
+| `fs_write_string` | `async def fs_write_string(self, path: str, text: str, encoding: str = 'utf-8') -> None` | -       | Write a string to a file (overwrites).         |
+| `fs_read_json`    | `async def fs_read_json(self, path: str) -> Any`                                         | `Any`   | Read and parse a JSON file.                    |
+| `fs_write_json`   | `async def fs_write_json(self, path: str, obj: Any) -> None`                             | -       | Serialize an object to JSON and write it.      |
+
+**Directory & metadata**
+
+| Method        | Signature                                                                | Returns | Description                                                                                          |
+| ------------- | ------------------------------------------------------------------------ | ------- | --------------------------------------------------------------------------------------------------- |
+| `fs_list_dir` | `async def fs_list_dir(self, path: str = '') -> dict`                     | `dict`  | List immediate children. Returns `{entries: [{name, type, size?, modified?}], count}`.              |
+| `fs_stat`     | `async def fs_stat(self, path: str) -> dict`                             | `dict`  | Metadata: `{exists, type, size, modified}` (`size`/`modified` for files only).                      |
+| `fs_mkdir`    | `async def fs_mkdir(self, path: str) -> None`                            | -       | Create a directory.                                                                                 |
+| `fs_rmdir`    | `async def fs_rmdir(self, path: str, *, recursive: bool = False) -> None` | -       | Remove a directory. `recursive=True` deletes contents. Rejects empty / absolute-like paths.         |
+| `fs_rename`   | `async def fs_rename(self, old_path: str, new_path: str) -> None`         | -       | Rename or move a file/directory (copy+delete on object stores; recursive for directories).          |
+| `fs_delete`   | `async def fs_delete(self, path: str) -> None`                          | -       | Delete a file.                                                                                      |
+
+**Direct URL**
+
+| Method       | Signature                                                              | Returns | Description                                                                                                                                                     |
+| ------------ | --------------------------------------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fs_get_url` | `async def fs_get_url(self, path: str, expires_in: int = 3600, download_name: str = None) -> str` | `str`   | Time-limited HTTP(S) URL for direct browser access. Cloud backends (S3/Azure) return a presigned/SAS URL; the local filesystem backend returns a JWT-signed `/task/fetch` URL. Served **inline** by default (for streaming / `<img>`/`<video>` sources). Pass `download_name` to force a download with that filename via `Content-Disposition: attachment` — the only reliable way to set the download filename for cross-origin cloud URLs (where the browser `<a download>` hint is ignored). `expires_in` is in seconds (default 3600). |
+
+**Examples:**
+
+```python
+# Strings and JSON (wrappers manage the handle for you)
+await client.fs_write_string("notes/todo.txt", "buy milk")
+text = await client.fs_read_string("notes/todo.txt")
+await client.fs_write_json("config/app.json", {"debug": True})
+cfg = await client.fs_read_json("config/app.json")
+
+# Browse and inspect
+listing = await client.fs_list_dir("reports")
+for entry in listing["entries"]:
+    print(entry["name"], entry["type"])
+
+# Streaming binary upload via a write handle (4 MB chunks)
+info = await client.fs_open("uploads/video.mp4", "w")
+handle = info["handle"]
+try:
+    with open("video.mp4", "rb") as f:
+        while chunk := f.read(4_194_304):
+            await client.fs_write(handle, chunk)
+finally:
+    await client.fs_close(handle, "w")
+
+# Inline URL for streaming in a browser (<video>/<img> src)
+stream_url = await client.fs_get_url("uploads/video.mp4", expires_in=600)
+
+# Force a download with a friendly filename (works cross-origin on S3/Azure too)
+download_url = await client.fs_get_url("uploads/video.mp4", download_name="my video.mp4")
+```
+
 ### Events
 
 | Method       | Signature                                                                | Returns | Description                                                                                                                                                          |

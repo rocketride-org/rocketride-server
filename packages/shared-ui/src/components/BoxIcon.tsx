@@ -160,6 +160,8 @@ export const BxEditAlt = createMultiPathIcon(['M19.045 7.401c.378-.378.586-.88.5
 
 export const BxExport = createMultiPathIcon(['M11 16h2V7h3l-4-5-4 5h3z', 'M5 22h14c1.103 0 2-.897 2-2v-9c0-1.103-.897-2-2-2h-4v2h4v9H5v-9h4V9H5c-1.103 0-2 .897-2 2v9c0 1.103.897 2 2 2z']);
 
+export const BxDownload = createMultiPathIcon(['M12 16l4-5h-3V4h-2v7H8l4 5z', 'M20 18H4v-7H2v7c0 1.103.897 2 2 2h16c1.103 0 2-.897 2-2v-7h-2v7z']);
+
 export const BxTrash = createMultiPathIcon(['M5 20a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8h2V6h-4V4a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2v2H3v2h2zM9 4h6v2H9zM8 8h9v12H7V8z', 'M9 10h2v8H9zm4 0h2v8h-2z']);
 
 export const BxSortAlt = createIcon('M7 20h2V8h3L8 4 4 8h3zm13-4h-3V4h-2v12h-3l4 4z');

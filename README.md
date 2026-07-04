@@ -46,6 +46,35 @@ _Design, test, and ship complex AI workflows from a visual canvas, right where y
 
 _Drop pipelines into any Python or TypeScript app with a few lines of code, no infrastructure glue required._
 
+## Two ways to run RocketRide
+
+_Own every layer, or let us handle the infrastructure._
+
+<br/>
+
+<table>
+<tr>
+<td width="50%" valign="top" align="left"><strong>SELF-HOST</strong></td>
+<td width="50%" valign="top" align="left"><strong>ROCKETRIDE CLOUD</strong> &nbsp;·&nbsp; <code>NOW LIVE</code></td>
+</tr>
+<tr>
+<td valign="top" align="left">
+<strong>Run it yourself, free</strong>
+<br/><br/>
+Docker, on-prem, or local. Full control and data residency. Open source, MIT, no lock-in, forever.
+<br/><br/><br/>
+<a href="#quick-start"><strong>Quick Start</strong></a>
+</td>
+<td valign="top" align="left">
+<strong>Deploy at rocket speed</strong>
+<br/><br/>
+Fully managed, predictable costs, true portability. Same pipeline JSON, zero ops, prototype to production.
+<br/><br/>
+<a href="https://cloud.rocketride.ai/"><strong>Get Started</strong></a>
+</td>
+</tr>
+</table>
+
 </div>
 
 ## Features
@@ -59,7 +88,7 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 | **Coding Agent Ready**            | RocketRide auto-detects your coding agent: Claude, Cursor, and more. Build, modify, and deploy pipelines through natural language.                                                                                                  |
 | **TypeScript, Python & MCP SDKs** | Integrate pipelines into native apps, expose them as callable tools for AI assistants, or build programmatic workflows into your existing codebase.                                                                                  |
 | **Zero Dependency Headaches**     | Python environments, C++ toolchains, Java/Tika, and all node dependencies managed automatically. Clone, build, run, no manual setup.                                                                                                |
-| **One-Click Deploy**              | Run on Docker, on-prem, or RocketRide Cloud (coming soon). Production-ready architecture from day one, not retrofitted from a demo.                                                                                                 |
+| **One-Click Deploy**              | Run on Docker, on-prem, or [RocketRide Cloud](https://cloud.rocketride.ai/). Production-ready architecture from day one, not retrofitted from a demo.                                                                               |
 
 ## Quick Start
 
@@ -86,13 +115,13 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 3. Connect input lanes and output lanes by type to properly wire your pipeline. Some nodes like agents or LLMs can be invoked as tools for use by a parent node as shown below:
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/first_pipe.gif" alt="Pipeline canvas example" width="100%">
-</p>
+   <p align="center">
+     <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/first_pipe.gif" alt="Pipeline canvas example" width="100%">
+   </p>
 
 4. You can run a pipeline from the canvas by pressing the ▶ button on the source node or from the `Connection Manager` directly.
 
-5. Deploy your pipelines on your own infrastructure.
+5. Deploy your pipelines - pick the path that fits:
 
    - **Docker** - Download the RocketRide server image and create a container. Requires [Docker](https://docs.docker.com/get-docker/) to be installed.
 
@@ -102,6 +131,8 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
      ```
 
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
+
+   - **RocketRide Cloud** - Skip the setup and ship straight to [managed hosting](https://cloud.rocketride.ai/). Same portable pipeline JSON, zero infrastructure to run, from prototype to production. [Get started](https://cloud.rocketride.ai/)
 
 6. Run your pipelines as standalone processes or integrate them into your existing [Python](https://docs.rocketride.org/sdk/python-sdk) and [TypeScript/JS](https://docs.rocketride.org/sdk/node-sdk) applications utilizing our SDK.
 
@@ -122,5 +153,7 @@ RocketRide is built by a growing community of contributors. Whether you've fixed
 </a>
 
 ---
+
+<p align="center">🚀 Ready to ship? Deploy your pipeline on <a href="https://cloud.rocketride.ai/">RocketRide Cloud</a>, or self-host free.</p>
 
 <p align="center">Made with ♥ in SF &amp; EU</p>

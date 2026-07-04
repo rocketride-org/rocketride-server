@@ -26,6 +26,8 @@ export interface TraceEvent {
 	pipelineId: number;
 	op: 'begin' | 'enter' | 'leave' | 'end';
 	pipes: string[];
+	/** Component this op refers to (for 'leave', the leaving component). Used to pair enter/leave by identity under reentrancy. */
+	component?: string;
 	trace: {
 		lane?: string;
 		data?: Record<string, unknown>;

@@ -423,6 +423,9 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	// Guard against stale async responses when target changes mid-flight
 	const fetchIdRef = useRef<number>(0);
 
+	// Guard so an existing server-side report is rehydrated at most once per target
+	const rehydratedTargetRef = useRef<string | null | undefined>(undefined);
+
 	// =========================================================================
 	// STATUS POLLING
 	// =========================================================================
@@ -545,6 +548,22 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [showSystemCalls]);
+
+	// Rehydrate an existing report when this view mounts (or re-mounts) without
+	// local data — e.g. after the tab is split, which mounts fresh ProfilerView
+	// instances. Report DATA lives only in local state and is otherwise populated
+	// solely by the live Stop flow, so a fresh instance shows "No profiling data
+	// available" even though the server still holds a report (status.has_report
+	// stays true because it is server-backed). Fetch it once per target.
+	useEffect(() => {
+		if (!isConnected) { rehydratedTargetRef.current = undefined; return; }
+		if (status?.active === true) return;   // a live session owns the data
+		if (!status?.has_report) return;       // nothing on the server to rehydrate
+		if (treeData?.tree != null) return;    // already have data locally
+		if (rehydratedTargetRef.current === target) return; // already attempted for this target
+		rehydratedTargetRef.current = target;
+		fetchReport();
+	}, [isConnected, status?.active, status?.has_report, target, treeData, fetchReport]);
 
 	// =========================================================================
 	// ROOT CHANGE HANDLER

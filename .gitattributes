@@ -10,6 +10,9 @@
 # Python files should use LF
 *.py text eol=lf
 
+# Markdown files should use LF (node doc generator writes LF; prevents spurious diffs on Windows)
+*.md text eol=lf
+
 # Windows batch files should use CRLF
 *.cmd text eol=crlf
 *.bat text eol=crlf

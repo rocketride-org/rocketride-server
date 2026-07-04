@@ -19,7 +19,23 @@ from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
-from ai.common.llm_native_stream import dispatch_native_chat_stream
+from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
+
+
+def _stop_kwargs() -> dict:
+    """Return ``{'stop': [...]}`` only when stop sequences are active for this call.
+
+    Passing ``stop=`` unconditionally (even ``stop=None``) breaks model backends and
+    test mocks whose ``invoke``/``stream`` signature does not accept a ``stop`` kwarg, so
+    the argument is omitted entirely for the common no-stop path.
+
+    INVARIANT: this is read within the synchronous ``ask()`` call, while
+    ``LLMBase._question`` still holds the contextvar (before its ``finally`` reset).
+    Do not defer consumption (e.g. by returning a lazy generator to the caller) —
+    the value would then read ``None`` after the reset and silently send no stop.
+    """
+    stop = STOP_SEQUENCES_VAR.get()
+    return {'stop': stop} if stop else {}
 
 
 def _make_think_tag_splitter():
@@ -222,8 +238,9 @@ class ChatBase:
             Should raise appropriate exceptions for API failures, authentication
             errors, or other provider-specific issues
         """
-        # Ask the LLM
-        results = self._llm.invoke(prompt)
+        # Ask the LLM. The stop kwarg is only added when the agent set stop sequences,
+        # so non-agent callers (and backends/mocks without a stop param) are unaffected.
+        results = self._llm.invoke(prompt, **_stop_kwargs())
 
         # Return the results
         return results.content
@@ -479,7 +496,7 @@ class ChatBase:
             # Only retry non-streaming if nothing has reached the UI; otherwise
             # the full fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
-                results = self._llm.invoke(prompt)
+                results = self._llm.invoke(prompt, **_stop_kwargs())
                 content = getattr(results, 'content', '') or ''
                 content_text = content if isinstance(content, str) else str(content)
                 text_parts = [content_text]
@@ -580,7 +597,7 @@ class ChatBase:
                 finish_reason: Optional[str] = None
                 _signature_only_note_sent = False
                 _think_split = _make_think_tag_splitter()
-                for piece in _llm.stream(prompt):
+                for piece in _llm.stream(prompt, **_stop_kwargs()):
                     # content: str for OpenAI-style, list of typed blocks for Anthropic.
                     content = piece.content
                     text = ''

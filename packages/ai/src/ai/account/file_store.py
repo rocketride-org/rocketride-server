@@ -26,7 +26,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Optional
 
 from rocketlib import debug
 
@@ -50,6 +50,25 @@ MAX_HANDLES_PER_CONNECTION = 64
 # drive-letter syntax (C:\...) from leaking through after the '\\' -> '/'
 # conversion in _validate_path.
 _INVALID_SEGMENT_CHARS = frozenset('*?<>|":\x00')
+
+
+def _sanitize_download_name(name: str) -> str:
+    """
+    Make a filename safe to embed in a ``Content-Disposition`` header value.
+
+    Strips characters that could break out of the quoted ``filename="..."``
+    token or inject header content (CR/LF, double quotes, backslashes, control
+    chars) and falls back to a default if nothing usable remains.
+
+    Args:
+        name: The caller-supplied download filename.
+
+    Returns:
+        A sanitized, quote-safe ASCII-ish filename.
+    """
+    # Drop CR/LF (header injection), quotes/backslashes (quoting), and control chars.
+    cleaned = ''.join(c for c in name if c >= ' ' and c not in '"\\\r\n').strip()
+    return cleaned or 'download'
 
 
 class FileHandleMode(Enum):
@@ -618,6 +637,80 @@ class FileStore:
             normalized = ''
 
         return normalized
+
+    async def get_url(self, path: str, expires_in: int = 3600, download_name: Optional[str] = None) -> str:
+        """
+        Get a direct HTTP URL for accessing the file.
+
+        Cloud backends (S3, Azure) return a presigned/SAS URL directly.
+        The local filesystem backend generates a JWT-signed URL pointing at
+        the server's ``/task/fetch`` endpoint.
+
+        Args:
+            path: Relative path within the account store.
+            expires_in: URL validity in seconds (default 1 hour, max 1 hour).
+            download_name: If provided, the URL forces a browser download with
+                this filename via ``Content-Disposition: attachment``. This is
+                the only way to control the download filename for cross-origin
+                cloud URLs, where the ``<a download>`` attribute is ignored.
+                When ``None`` (default) the URL is served inline, so media
+                viewers can stream it.
+
+        Returns:
+            A direct HTTP(S) URL to the file.
+
+        Raises:
+            ValueError: If ``expires_in`` is not positive, or if
+                ``RR_SIGNING_KEY`` is not set and the backend requires a
+                locally-signed URL.
+            RuntimeError: If ``RR_BASE_URL`` is not configured and the
+                backend requires a locally-signed URL.
+        """
+        import os
+
+        if expires_in <= 0:
+            raise ValueError('expires_in must be positive')
+        expires_in = min(expires_in, 3600)
+
+        # Build the Content-Disposition header the backend should bake into the
+        # URL. Sanitize the filename so it cannot inject header/quote characters.
+        content_disposition = None
+        if download_name:
+            safe_name = _sanitize_download_name(download_name)
+            content_disposition = f'attachment; filename="{safe_name}"'
+
+        full_path = self._full_path(path)
+        url = await self._store.get_url(full_path, expires_in, content_disposition=content_disposition)
+        if url is not None:
+            return url
+
+        # Local filesystem backend — generate a JWT-signed fetch URL
+        import time
+        import jwt
+
+        signing_key = os.environ.get('RR_SIGNING_KEY', '')
+        if not signing_key:
+            raise ValueError('RR_SIGNING_KEY not configured — cannot generate fetch URL')
+
+        payload = {
+            'sub': self._client_id,
+            'path': path,
+            'exp': int(time.time()) + expires_in,
+        }
+        # Carry the download filename in the signed claim so /task/fetch can set
+        # Content-Disposition: attachment (else it serves the file inline).
+        if download_name:
+            payload['download_name'] = _sanitize_download_name(download_name)
+        token = jwt.encode(payload, signing_key, algorithm='HS256')
+
+        # This was set by the main web server at startup
+        base_url = os.environ.get('RR_BASE_URL')
+        if not base_url:
+            raise RuntimeError(
+                'RR_BASE_URL is not set — configure it in .env or ensure'
+                ' the web server has started before generating fetch URLs'
+            )
+        return f'{base_url}/task/fetch?token={token}'
 
     def _full_path(self, path: str) -> str:
         """Build the full storage path: users/<client_id>/files/<path>."""

@@ -33,8 +33,80 @@ command_exists() {
 }
 
 # Setup the global required packages
-REQUIRES=()
-COMMANDS=()
+REQUIRES=()              # macOS (brew) package list
+COMMANDS=()              # macOS: install commands to print/run
+EXTRA_PKGS=()            # Linux: compiler/clang packages chosen by select_*_triplet
+NEED_CC_ALTERNATIVES=""  # apt: set when cc/c++ must be pointed at clang
+
+# Single source of truth for the shared Linux build deps: one row per logical
+# dependency as "apt|dnf". An empty field means the dep is not needed on that
+# distro. Both check paths project their own column, so adding a build dep is a
+# one-line edit that reaches Debian and Fedora together — no drift between two
+# hand-kept lists. Compiler/clang packages stay out of this table (resolved
+# per-distro by the select_* funcs).
+LINUX_DEPS=(
+    # Row shorthand:  "name" = same package on both;  "apt|dnf" = differing names;
+    #                 "apt|" = apt-only;  "|dnf" = dnf-only.
+    "sudo"
+    "curl"
+    "wget"
+    "dos2unix"
+    "ca-certificates"
+    "gnupg|gnupg2"
+    "lsb-release|"                          # apt-only: Fedora build path doesn't use lsb_release
+    "python3"
+    "python3-pip"
+    "python3-venv|"                         # apt-only: Fedora uses python3-devel/build/wheel instead
+    "|python3-devel"                        # fedora: cffi/cryptography/Cython sdist builds
+    "make"
+    "ninja-build"
+    "cmake"                                 # version gated (>= 3.19) by check_linux_cmake
+    "git"
+    "|gcc"                                  # fedora: sdist C extensions
+    "|gcc-c++"                              # fedora: sdist C++ extensions
+    "|perl-core"                            # fedora: vcpkg openssl Configure needs core Perl (IPC::Cmd, FindBin); Fedora modularizes it
+    "autoconf"
+    "autoconf-archive"
+    "automake"
+    "libtool"
+    "zip"
+    "unzip"
+    "uuid-dev|libuuid-devel"
+    "pkg-config|pkgconf-pkg-config"
+    "libffi-dev|libffi-devel"
+    "libssl-dev|openssl-devel"
+    "|kernel-headers"                       # fedora: vcpkg openssl needs <linux/*>/<asm/*> (apt: linux-libc-dev)
+    "libsqlite3-dev|sqlite-devel"
+    "libbz2-dev|bzip2-devel"
+    "libreadline-dev|readline-devel"
+    "libexpat1-dev|expat-devel"
+    "libncurses-dev|ncurses-devel"          # apt also accepts libncurses5-dev on older systems
+    "libgdbm-dev|gdbm-devel"
+    "libdb-dev|libdb-devel"
+    "liblzma-dev|xz-devel"
+    "libxmlsec1-dev|xmlsec1-devel"
+    "|xmlsec1-openssl-devel"                # fedora: split out (bundled in libxmlsec1-dev on apt)
+    "zlib1g-dev|zlib-devel"
+    "|python3-build"                        # fedora-only
+    "|python3-wheel"                        # fedora-only
+    # Runtime .so libs the prebuilt/compiled engine links against.
+    "libc++1|libcxx"                        # libc++.so.1
+    "libc++abi1|libcxxabi"                  # libc++abi.so.1
+    "|llvm-libunwind"                       # fedora: clang/libc++ unwinder (apt pulls it via libc++ dev; packaged by tasks.js)
+    "libgomp1|libgomp"                      # OMP runtime for bundled transitive deps
+    "libgles2|mesa-libGLES"                 # libGLESv2.so.2 — MediaPipe GPU-delegate dlopen
+    "libegl1|libglvnd-egl"                  # libEGL.so.1
+)
+
+# Emit one column of LINUX_DEPS: "apt" -> field 1, "dnf" -> field 2. Rows whose
+# selected field is empty are skipped (dep not needed on that distro).
+emit_distro_deps() {
+    local entry name
+    for entry in "${LINUX_DEPS[@]}"; do
+        if [ "$1" = "apt" ]; then name="${entry%%|*}"; else name="${entry##*|}"; fi
+        [ -n "$name" ] && echo "$name"
+    done
+}
 
 # =============================================================================
 # Linux Distribution Detection
@@ -90,12 +162,38 @@ detect_installed_clang() {
     return 1
 }
 
-select_linux_triplet() {
+select_linux_triplet() {   # $1 = apt | dnf
+    local mgr="$1"
     detect_linux_distro
     
     # First, try to detect if a suitable clang is already installed
     INSTALLED_CLANG=$(detect_installed_clang) || true
     
+    TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
+
+    # Fedora/RHEL differ ONLY in the clang packages: an UNVERSIONED clang plus a
+    # libcxx-devel stack (Debian uses versioned clang-15 / libc++-15-dev). Same
+    # triplet, same downstream flow. cc/c++ is pointed at clang later by
+    # setup_cc_alternatives (dnf symlink), so no update-alternatives probing here.
+    if [ "$mgr" = "dnf" ]; then
+        export CC=clang
+        export CXX=clang++
+        if [ -n "$INSTALLED_CLANG" ] && [ "$INSTALLED_CLANG" -ge 12 ]; then
+            CLANG_VERSION="$INSTALLED_CLANG"
+            echo "✓ Compiler: Using clang-$CLANG_VERSION (found and supported)"
+            dep_installed dnf libcxx-devel    || EXTRA_PKGS+=("libcxx-devel")
+            dep_installed dnf libcxxabi-devel || EXTRA_PKGS+=("libcxxabi-devel")
+            dep_installed dnf lld             || EXTRA_PKGS+=("lld")
+        else
+            echo "✗ Compiler: clang not found or too old (requires clang 12+)"
+            echo "→ Will install clang (Fedora unversioned)"
+            EXTRA_PKGS+=("clang" "lld" "libcxx-devel" "libcxxabi-devel")
+        fi
+        TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
+        return 0
+    fi
+
+    # Debian/Ubuntu (apt): versioned clang packages.
     # Determine default/recommended version based on distro
     case "$DISTRO" in
         ubuntu)
@@ -165,7 +263,7 @@ select_linux_triplet() {
         # Check if required libc++ libraries are installed for this version
         if ! dpkg -l "libc++-${CLANG_VERSION}-dev" 2>/dev/null | grep -q "^ii"; then
             echo "  → libc++-${CLANG_VERSION}-dev not found, will install"
-            REQUIRES+=("libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
+            EXTRA_PKGS+=("libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
         fi
         
     elif [ -n "$INSTALLED_CLANG" ]; then
@@ -174,7 +272,7 @@ select_linux_triplet() {
         echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
         
         CLANG_VERSION="$DEFAULT_CLANG"
-        REQUIRES+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
+        EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
@@ -185,13 +283,15 @@ select_linux_triplet() {
         echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
         
         CLANG_VERSION="$DEFAULT_CLANG"
-        REQUIRES+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
+        EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
     fi
     
-    # On Linux with update-alternatives: register our clang as default cc/c++ if different
+    # cc/c++ must resolve to clang for vcpkg's compiler detection. Flag it here;
+    # the generic setup_cc_alternatives (run by check_dependencies) applies it
+    # via update-alternatives — Fedora does the equivalent with a symlink.
     CC_PATH=$(command -v "$CC" 2>/dev/null)
     CXX_PATH=$(command -v "$CXX" 2>/dev/null)
     CC_LINK=$(readlink -f "$(command -v cc 2>/dev/null)" 2>/dev/null || true)
@@ -202,9 +302,7 @@ select_linux_triplet() {
     [ -n "$CXX_PATH" ] && CXX_RESOLVED=$(readlink -f "$CXX_PATH" 2>/dev/null)
     if [ -n "$CC_RESOLVED" ] && [ -n "$CXX_RESOLVED" ]; then
         if [ "$CC_RESOLVED" != "$CC_LINK" ] || [ "$CXX_RESOLVED" != "$CXX_LINK" ]; then
-            COMMANDS+=("    # Set default cc/c++ to $CC and $CXX")
-            COMMANDS+=("    $SUDO update-alternatives --install /usr/bin/cc cc $CC_PATH 100")
-            COMMANDS+=("    $SUDO update-alternatives --install /usr/bin/c++ c++ $CXX_PATH 100")
+            NEED_CC_ALTERNATIVES="1"
         fi
     fi
 
@@ -241,258 +339,183 @@ select_macos_triplet() {
 # Dependency Checks - Linux
 # =============================================================================
 
-check_linux_sudo() {
-    # When already running as root (SUDO=""), apt-get is invoked directly
-    # — no point installing sudo just to satisfy a check that no longer
-    # gates anything.
-    if [ -z "$SUDO" ]; then
-        return 0
-    fi
-    if ! command_exists "sudo"; then
-        COMMANDS+=("    # Installing sudo")
-        COMMANDS+=("    apt update")
-        COMMANDS+=("    apt install -y sudo")
-    fi
-}
-
-check_linux_cmake() {
-    if command_exists cmake; then
-        CMAKE_VERSION=$(cmake --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
-        CMAKE_MAJOR=$(echo "$CMAKE_VERSION" | cut -d. -f1)
-        CMAKE_MINOR=$(echo "$CMAKE_VERSION" | cut -d. -f2)
-
-        if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 19 ]; then
-            echo "CMake version $CMAKE_VERSION is too old (minimum required: 3.19)"
-            COMMANDS+=("    # Upgrading CMake")
-            COMMANDS+=("    $SUDO apt install -y cmake")
-        fi
-    else
-        COMMANDS+=("    # Installing CMake")
-        COMMANDS+=("    $SUDO apt install -y cmake")
-    fi
-}
-
 check_linux_python() {
-    if command_exists python3; then
-        PYTHON_VERSION=$(python3 --version 2>&1 | grep -o '[0-9]\+\.[0-9]\+' | head -1)
-        PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
-        PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
-        
-        if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MAJOR" -eq 3 -a "$PYTHON_MINOR" -lt 10 ]; then
-            echo ""
-            echo "=========================================="
-            echo "ERROR: Python version $PYTHON_VERSION is too old!"
-            echo "Minimum required version: Python 3.10"
-            echo ""
-            echo "Please use one of the following:"
-            echo "  - Ubuntu 22.04 or newer (has Python 3.10+)"
-            echo "  - Debian 12 or newer (has Python 3.11+)"
-            echo "=========================================="
-            echo ""
-            exit 1
-        fi
-    else
+    # Version gate only: a python3 already on the system that is older than 3.10
+    # can't be fixed by the package manager, so fail fast. If python3 is absent
+    # it's installed via the dependency list below — don't exit here (Fedora and
+    # minimal images ship without it).
+    command_exists python3 || return 0
+
+    PYTHON_VERSION=$(python3 --version 2>&1 | grep -o '[0-9]\+\.[0-9]\+' | head -1)
+    PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+    PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+    if [ "$PYTHON_MAJOR" -lt 3 ] || [ "$PYTHON_MAJOR" -eq 3 -a "$PYTHON_MINOR" -lt 10 ]; then
         echo ""
         echo "=========================================="
-        echo "ERROR: Python 3 is not installed!"
+        echo "ERROR: Python version $PYTHON_VERSION is too old!"
         echo "Minimum required version: Python 3.10"
+        echo ""
+        echo "Please use one of the following:"
+        echo "  - Ubuntu 22.04 or newer (has Python 3.10+)"
+        echo "  - Debian 12 or newer (has Python 3.11+)"
         echo "=========================================="
         echo ""
         exit 1
     fi
 }
 
-check_linux_dependencies() {
-    check_linux_sudo
-    check_linux_cmake
-    check_linux_python
+check_linux_cmake() {
+    # Version gate only (mirrors check_linux_python): a cmake already on the
+    # system that is older than 3.19 can't be upgraded by the package manager on
+    # older distros (Ubuntu 20.04 ships 3.16), so fail fast with a clear message
+    # instead of a confusing configure-time error. If cmake is absent it's
+    # installed via the dependency list.
+    command_exists cmake || return 0
 
-    REQUIRES+=(
-        "sudo"
-        "curl"
-        "wget"
-        "dos2unix"
-        "ca-certificates"
-        "gnupg"
-        "lsb-release"
-        "python3"
-        "python3-pip"
-        "python3-venv"
-        "make"
-        "ninja-build"
-        "git"
-        "autoconf"
-        "autoconf-archive"
-        "automake"
-        "libtool"
-        "zip"
-        "unzip"
-        "uuid-dev"
-        "pkg-config"
-        "libffi-dev"
-        "libssl-dev"
-        "libsqlite3-dev"
-        "libbz2-dev"
-        "libreadline-dev"
-        "libexpat1-dev"
-        "libncurses-dev"  # Also accepts libncurses5-dev on older systems
-        "libgdbm-dev"
-        "libdb-dev"
-        "liblzma-dev"
-        "libxmlsec1-dev"
-        "zlib1g-dev"
-        # libc++ runtime libraries — the downloaded prebuilt engine
-        # binary is linked against clang's libc++/libc++abi (not GNU
-        # libstdc++), so executing it during `--autoinstall`'s pip
-        # bootstrap fails with:
-        #   error while loading shared libraries: libc++.so.1: cannot open
-        # The matching `libc++-${CLANG_VERSION}-dev` headers above only
-        # cover the build path; the prebuilt binary needs the *runtime*
-        # libs at execute time. libgomp1 is required by some bundled
-        # OMP-using transitive deps.
-        "libc++1"
-        "libc++abi1"
-        "libgomp1"
-        # libGLESv2.so.2 / libEGL.so.1 — NEEDED by MediaPipe's libmediapipe.so
-        # (GPU delegate; unused by CPU face detection, but the sonames must
-        # resolve at dlopen). libgles2 / libegl1 are the libglvnd dispatchers.
-        "libgles2"
-        "libegl1"
-    )
+    local CMAKE_VERSION CMAKE_MAJOR CMAKE_MINOR
+    CMAKE_VERSION=$(cmake --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1)
+    CMAKE_MAJOR=$(echo "$CMAKE_VERSION" | cut -d. -f1)
+    CMAKE_MINOR=$(echo "$CMAKE_VERSION" | cut -d. -f2)
+    if [ "$CMAKE_MAJOR" -lt 3 ] || [ "$CMAKE_MAJOR" -eq 3 -a "$CMAKE_MINOR" -lt 19 ]; then
+        echo ""
+        echo "=========================================="
+        echo "ERROR: CMake version $CMAKE_VERSION is too old!"
+        echo "Minimum required version: CMake 3.19"
+        echo "=========================================="
+        echo ""
+        exit 1
+    fi
+}
 
-    for package in "${REQUIRES[@]}"; do
-        case "$package" in
-            sudo)
-                if ! command_exists "sudo"; then
-                    echo "✗ sudo"
-                    COMMANDS+=("    # Install sudo")
-                    COMMANDS+=("    apt install -y sudo")
-                else
-                    echo "✓ sudo"
-                fi
-                ;;
-            gnupg)
-                if ! command_exists "gpg"; then
-                    echo "✗ gnupg: gpg not available"
-                    COMMANDS+=("    # Install package gnupg")
-                    COMMANDS+=("    $SUDO apt install -y gnupg")
-                else
-                    echo "✓ gnupg: gpg available"
-                fi
-                ;;
-            ca-certificates)
-                # update-ca-certificates may be root-only on PATH while the package is installed (#370)
-                if dpkg -l ca-certificates 2>/dev/null | grep -q "^ii" || command_exists update-ca-certificates; then
-                    echo "✓ ca-certificates"
-                else
-                    echo "✗ ca-certificates: package not installed and update-ca-certificates not on PATH"
-                    COMMANDS+=("    # Install package ca-certificates")
-                    COMMANDS+=("    $SUDO apt install -y ca-certificates")
-                fi
-                ;;
-            libncurses-dev)
-                # Ubuntu 24.04+ uses libncurses-dev, older systems use libncurses5-dev/libncursesw5-dev
-                if ! dpkg -l "libncurses-dev" 2>/dev/null | grep -q "^ii" && \
-                   ! dpkg -l "libncurses5-dev" 2>/dev/null | grep -q "^ii"; then
-                    echo "✗ libncurses-dev"
-                    COMMANDS+=("    # Install development library (ncurses)")
-                    COMMANDS+=("    $SUDO apt install -y libncurses-dev")
-                else
-                    echo "✓ ncurses"
-                fi
-                ;;
-            libc++1 | libc++abi1 | libgomp1 | libgles2 | libegl1)
-                # Runtime libraries (no CLI command), so check via dpkg
-                # rather than command_exists. Required to execute the
-                # downloaded prebuilt engine during pip bootstrap.
-                if ! dpkg -l "$package" 2>/dev/null | grep -q "^ii"; then
-                    echo "✗ $package"
-                    COMMANDS+=("    # Install runtime library $package")
-                    COMMANDS+=("    $SUDO apt install -y $package")
-                else
-                    echo "✓ $package"
-                fi
-                ;;
-            *-dev)
-                if ! dpkg -l "$package" 2>/dev/null | grep -q "^ii"; then
-                    echo "✗ $package"
-                    COMMANDS+=("    # Install development library $package")
-                    COMMANDS+=("    $SUDO apt install -y $package")
-                else
-                    echo "✓ $package"
-                fi
-                ;;
-            *)
-                local cmd_name="$package"
-                case "$package" in
-                    ninja-build) cmd_name="ninja" ;;
-                    libtool) cmd_name="libtoolize" ;;
-                    dos2unix) cmd_name="dos2unix" ;;
-                    python3-pip) cmd_name="pip3" ;;
-                    python3-venv) cmd_name="python3" ;;
-                    autoconf-archive | lsb-release)
-                        if ! dpkg -l "$package" 2>/dev/null | grep -q "^ii"; then
-                            echo "✗ $package"
-                            COMMANDS+=("    # Install package $package")
-                            COMMANDS+=("    $SUDO apt install -y $package")
-                        else
-                            echo "✓ $package"
-                        fi
-                        continue
-                        ;;
-                esac
-                
-                if ! command_exists "$cmd_name"; then
-                    if [ "$package" == "$cmd_name" ]; then
-                        echo "✗ $package"
-                    else
-                        echo "✗ $package: $cmd_name not available"
-                    fi
-                    COMMANDS+=("    # Install package $package")
-                    COMMANDS+=("    $SUDO apt install -y $package")
-                else
-                    if [ "$package" == "$cmd_name" ]; then
-                        echo "✓ $package"
-                    else
-                        echo "✓ $package: $cmd_name available"
-                    fi
-                fi
-                ;;
-        esac
+# apt and dnf share ALL the dependency machinery below. The ONLY per-distro
+# inputs are the package LIST (apt|dnf columns of LINUX_DEPS) and three tiny
+# primitives: test-installed, install-set, point-cc-at-clang. The loop,
+# missing-detection and autoinstall-vs-print-and-exit flow live once in
+# check_dependencies().
+
+# Is package $2 installed? ($1 = apt|dnf). dpkg works without root, so it also
+# avoids the ca-certificates root-only-PATH false negative (#370). dnf's
+# --whatprovides resolves virtual provides (wget2-wget, zlib-ng-compat-devel,
+# libglvnd-gles) that a plain `rpm -q <name>` would miss.
+dep_installed() {
+    case "$1" in
+        apt)
+            # Ubuntu 24.04+ ships libncurses-dev; older releases use libncurses5-dev.
+            if [ "$2" = "libncurses-dev" ]; then
+                dpkg -l libncurses-dev 2>/dev/null | grep -q "^ii" || \
+                dpkg -l libncurses5-dev 2>/dev/null | grep -q "^ii"
+            else
+                dpkg -l "$2" 2>/dev/null | grep -q "^ii"
+            fi
+            ;;
+        dnf)
+            rpm -q --whatprovides "$2" >/dev/null 2>&1
+            ;;
+    esac
+}
+
+# Install the missing packages ($1 = apt|dnf, $2.. = packages). apt installs one
+# at a time: on Ubuntu 22.04 a single transaction mixing libc++1 (v14) and
+# libc++-15-dev (wants libc++1-15) dead-locks apt ("held broken packages");
+# sequential installs resolve cleanly. dnf resolves the whole set in one shot.
+dep_install() {
+    local mgr="$1"; shift
+    case "$mgr" in
+        apt)
+            $SUDO apt-get update
+            local p
+            for p in "$@"; do $SUDO apt-get install -y "$p"; done
+            ;;
+        dnf) $SUDO dnf install -y "$@" ;;
+    esac
+}
+
+# The install command shown to the user in non-autoinstall mode ($1 = apt|dnf).
+dep_install_hint() {
+    case "$1" in
+        apt) echo "$SUDO apt-get install -y" ;;
+        dnf) echo "$SUDO dnf install -y" ;;
+    esac
+}
+
+# Point the default cc/c++ at clang so vcpkg's compiler detection doesn't pick
+# gcc (which rejects the triplet's -stdlib=libc++). $1 = apt|dnf, $2 = run|print.
+# apt uses update-alternatives; Fedora symlinks into /usr/local/bin (ahead of
+# /usr/bin in PATH).
+setup_cc_alternatives() {
+    case "$1" in
+        apt)
+            [ "$NEED_CC_ALTERNATIVES" = "1" ] || return 0
+            if [ "$2" = "run" ]; then
+                $SUDO update-alternatives --install /usr/bin/cc cc "$CC_PATH" 100
+                $SUDO update-alternatives --install /usr/bin/c++ c++ "$CXX_PATH" 100
+                echo "✓ cc/c++ -> $CC/$CXX"
+            else
+                echo "    # Set default cc/c++ to $CC and $CXX"
+                echo "    $SUDO update-alternatives --install /usr/bin/cc cc $CC_PATH 100"
+                echo "    $SUDO update-alternatives --install /usr/bin/c++ c++ $CXX_PATH 100"
+            fi
+            ;;
+        dnf)
+            if [ "$2" = "run" ] && command_exists clang && command_exists clang++; then
+                $SUDO ln -sf "$(command -v clang)" /usr/local/bin/cc
+                $SUDO ln -sf "$(command -v clang++)" /usr/local/bin/c++
+                echo "✓ cc/c++ -> clang (/usr/local/bin)"
+            elif [ "$2" = "print" ]; then
+                # Fedora's cc defaults to gcc; point it at clang (ahead of /usr/bin
+                # in PATH) so vcpkg's compiler detection doesn't choke on -stdlib=libc++.
+                echo "    # Point default cc/c++ at clang"
+                echo "    $SUDO ln -sf \"\$(command -v clang)\" /usr/local/bin/cc"
+                echo "    $SUDO ln -sf \"\$(command -v clang++)\" /usr/local/bin/c++"
+            fi
+            ;;
+    esac
+}
+
+# The one general check: same flow for every distro; only the list + primitives differ.
+check_dependencies() {
+    local mgr="$1"
+    check_linux_python  # hard version gate (python >= 3.10), distro-agnostic
+    check_linux_cmake   # hard version gate (cmake >= 3.19), distro-agnostic
+
+    # Package set = shared LINUX_DEPS column + the compiler packages the
+    # select_*_triplet chose. This list is the ONLY per-distro input.
+    local pkgs=() p
+    while IFS= read -r p; do pkgs+=("$p"); done < <(emit_distro_deps "$mgr")
+    pkgs+=("${EXTRA_PKGS[@]}")
+
+    local missing=()
+    for p in "${pkgs[@]}"; do
+        if dep_installed "$mgr" "$p"; then
+            echo "✓ $p"
+        else
+            echo "✗ $p"
+            missing+=("$p")
+        fi
     done
-    
-    if [ ${#COMMANDS[@]} -ne 0 ]; then
-        if [ "$AUTOINSTALL" == "1" ]; then
-            echo "Auto-installing missing dependencies..."
-            echo ""
-            echo "Updating apt..."
-            $SUDO apt update
-            for cmd in "${COMMANDS[@]}"; do
-                if [[ "$cmd" == *"# "* ]]; then
-                    echo "$cmd"
-                    continue
-                fi
-                clean_cmd=$(echo "$cmd" | sed 's/^[[:space:]]*//')
-                echo "Executing: $clean_cmd"
-                eval "$clean_cmd"
-            done
+
+    if [ "$AUTOINSTALL" == "1" ]; then
+        if [ ${#missing[@]} -ne 0 ]; then
+            echo "Auto-installing missing dependencies with $mgr..."
+            dep_install "$mgr" "${missing[@]}"
             echo ""
             echo "Dependencies installed successfully."
             echo ""
-        else
-            echo "=========================================="
-            echo "ERROR: Missing required dependencies - please execute the following commands:"
-            echo ""
-            for cmd in "${COMMANDS[@]}"; do
-                echo "$cmd"
-            done
-            echo ""
-            echo "Or run with --autoinstall to install them automatically:"
-            echo "  ./scripts/compiler-unix.sh --autoinstall"
-            echo ""
-            echo "=========================================="
-            exit 1
         fi
+        setup_cc_alternatives "$mgr" run
+    elif [ ${#missing[@]} -ne 0 ] || { [ "$mgr" = "apt" ] && [ "$NEED_CC_ALTERNATIVES" = "1" ]; }; then
+        echo "=========================================="
+        echo "ERROR: Missing required dependencies - install with:"
+        echo ""
+        if [ ${#missing[@]} -ne 0 ]; then
+            echo "    $(dep_install_hint "$mgr") ${missing[*]}"
+        fi
+        setup_cc_alternatives "$mgr" print
+        echo ""
+        echo "Or run with --autoinstall to install them automatically:"
+        echo "  ./scripts/compiler-unix.sh --autoinstall"
+        echo "=========================================="
+        exit 1
     fi
 }
 
@@ -679,9 +702,21 @@ done
 echo "Checking build prerequisites..."
 echo ""
 
-if [[ "$OSTYPE" == "linux-gnu" ]]; then
-    select_linux_triplet
-    check_linux_dependencies
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Branch by package manager. Fedora / RHEL-family use dnf+rpm; everything
+    # else stays on the apt+dpkg path. Both share check_dependencies(); only the
+    # package manager (list column + install/query primitives) differs.
+    detect_linux_distro
+    case "$DISTRO" in
+        fedora|rhel|centos|rocky|almalinux)
+            select_linux_triplet dnf
+            check_dependencies dnf
+            ;;
+        *)
+            select_linux_triplet apt
+            check_dependencies apt
+            ;;
+    esac
 elif [[ "$OSTYPE" == "darwin"* ]]; then
     select_macos_triplet
     check_mac_dependencies

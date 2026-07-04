@@ -75,6 +75,10 @@ class AgentBase(ABC):
         # for this node instance.
         config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
 
+        # Keep the resolved config so subclasses can read their own extra fields
+        # without re-resolving (and without re-implementing shape handling).
+        self._config = config
+
         # And save any specific instructions
         self._instructions = config.get('instructions', [])
         self._agent_description = config.get('agent_description', '') or ''
@@ -306,7 +310,10 @@ class AgentBase(ABC):
             q = Question(role=role or '')
             q.addQuestion(transcript)
 
-        result = context.llm.invoke(IInvokeLLM.Ask(question=q))
+        # Forward stop words to the provider API (via the node's ask handler) so the model
+        # actually stops generating at e.g. "\nObservation:", and keep the post-hoc
+        # truncation below as a defense-in-depth net against any marker drift.
+        result = context.llm.invoke(IInvokeLLM.Ask(question=q, stop=stop_words))
         return truncate_at_stop_words(extract_text(result), stop_words)
 
     def call_llm_json(
