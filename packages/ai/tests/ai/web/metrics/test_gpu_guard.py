@@ -29,10 +29,11 @@ Tests verify that:
 - When --modelserver is NOT set, no hook is installed.
 - Submodules of blocked libraries are also blocked.
 - The hook is idempotent (safe to call multiple times).
+- The finder uses the find_spec protocol (Python 3.12+ compatible) rather
+  than the legacy find_module/load_module pair removed in 3.12.
 """
 
 import sys
-from unittest.mock import patch
 
 import pytest
 
@@ -47,45 +48,73 @@ from ai.common.models.gpu_guard import _GPUImportBlocker, install_gpu_guard, _BL
 class TestGPUImportBlocker:
     """Tests for the _GPUImportBlocker import hook class."""
 
-    def test_find_module_blocks_torch(self):
-        """find_module should return self for blocked top-level modules."""
+    def test_does_not_implement_legacy_protocol(self):
+        """
+        Regression test for the reported bug: find_module/load_module were
+        removed from the import machinery in Python 3.12, so a finder that
+        only implements them silently stops blocking anything. Guard
+        against reintroducing that dead protocol instead of find_spec.
+        """
         blocker = _GPUImportBlocker(_BLOCKED_MODULES)
 
-        # Should return self (the loader) for blocked modules
-        assert blocker.find_module('torch') is blocker
-        assert blocker.find_module('tensorflow') is blocker
-        assert blocker.find_module('onnxruntime') is blocker
-        assert blocker.find_module('cupy') is blocker
+        assert not hasattr(blocker, 'find_module')
+        assert not hasattr(blocker, 'load_module')
+        assert hasattr(blocker, 'find_spec')
 
-    def test_find_module_blocks_submodules(self):
-        """find_module should block submodules of blocked packages."""
+    def test_find_spec_blocks_torch(self):
+        """find_spec should raise ImportError for blocked top-level modules."""
         blocker = _GPUImportBlocker(_BLOCKED_MODULES)
 
-        # Submodules should also be caught (top-level extracted from dotted name)
-        assert blocker.find_module('torch.nn') is blocker
-        assert blocker.find_module('torch.nn.functional') is blocker
-        assert blocker.find_module('tensorflow.keras') is blocker
-        assert blocker.find_module('onnxruntime.transformers') is blocker
+        for name in ('torch', 'tensorflow', 'onnxruntime', 'cupy'):
+            with pytest.raises(ImportError, match=f'Direct import of "{name}" is blocked'):
+                blocker.find_spec(name)
 
-    def test_find_module_allows_other(self):
-        """find_module should return None for non-blocked modules."""
+    def test_find_spec_blocks_submodules(self):
+        """find_spec should block submodules of blocked packages too."""
         blocker = _GPUImportBlocker(_BLOCKED_MODULES)
-
-        # Non-blocked modules should pass through
-        assert blocker.find_module('os') is None
-        assert blocker.find_module('json') is None
-        assert blocker.find_module('numpy') is None
-        assert blocker.find_module('ai.web.metrics') is None
-
-    def test_load_module_raises_import_error(self):
-        """load_module should raise ImportError with descriptive message."""
-        blocker = _GPUImportBlocker(_BLOCKED_MODULES)
-
-        with pytest.raises(ImportError, match='Direct import of "torch" is blocked'):
-            blocker.load_module('torch')
 
         with pytest.raises(ImportError, match='Direct import of "torch.nn" is blocked'):
-            blocker.load_module('torch.nn')
+            blocker.find_spec('torch.nn')
+        with pytest.raises(ImportError, match='Direct import of "torch.nn.functional" is blocked'):
+            blocker.find_spec('torch.nn.functional')
+        with pytest.raises(ImportError, match='Direct import of "tensorflow.keras" is blocked'):
+            blocker.find_spec('tensorflow.keras')
+        with pytest.raises(ImportError, match='Direct import of "onnxruntime.transformers" is blocked'):
+            blocker.find_spec('onnxruntime.transformers')
+
+    def test_find_spec_allows_other(self):
+        """find_spec should return None (defer to other finders) for non-blocked modules."""
+        blocker = _GPUImportBlocker(_BLOCKED_MODULES)
+
+        assert blocker.find_spec('os') is None
+        assert blocker.find_spec('json') is None
+        assert blocker.find_spec('numpy') is None
+        assert blocker.find_spec('ai.web.metrics') is None
+
+    def test_real_import_statement_is_blocked(self):
+        """
+        End-to-end regression test using the actual import machinery
+        (not a direct find_spec() call) — this is what actually failed
+        silently on Python 3.12+ before the fix, since the bug was that
+        the real import system stopped calling into the finder at all.
+        """
+        blocker = _GPUImportBlocker(frozenset({'this_is_a_fake_blocked_pkg'}))
+        sys.meta_path.insert(0, blocker)
+        try:
+            with pytest.raises(ImportError, match='Direct import of "this_is_a_fake_blocked_pkg" is blocked'):
+                __import__('this_is_a_fake_blocked_pkg')
+
+            with pytest.raises(
+                ImportError, match='Direct import of "this_is_a_fake_blocked_pkg.sub" is blocked'
+            ):
+                __import__('this_is_a_fake_blocked_pkg.sub')
+
+            # A genuinely missing, non-blocked module must still raise the
+            # normal error, proving the finder doesn't swallow unrelated imports.
+            with pytest.raises(ModuleNotFoundError):
+                __import__('this_module_genuinely_does_not_exist_xyz')
+        finally:
+            sys.meta_path.remove(blocker)
 
 
 # ============================================================================

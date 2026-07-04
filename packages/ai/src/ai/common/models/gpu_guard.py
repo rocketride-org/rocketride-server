@@ -76,10 +76,13 @@ class _GPUImportBlocker:
     """
     ``sys.meta_path`` finder that blocks GPU library imports.
 
-    When Python's import machinery encounters a module name, it calls
-    ``find_module`` on each entry in ``sys.meta_path``.  This class
-    intercepts blocked module names and raises ``ImportError`` before
-    the real finder can load them.
+    Implements ``MetaPathFinder.find_spec`` (PEP 451), the protocol
+    Python's import machinery has used since 3.4. The legacy
+    ``find_module``/``load_module`` pair this class used to implement was
+    deprecated in 3.4 and removed entirely in 3.12 — on 3.12+ the import
+    system never calls those methods, so a finder implementing only them
+    silently stops blocking anything. ``find_spec`` has no such removal
+    and works unchanged across 3.4 through current versions.
 
     Attributes:
         _blocked: Frozenset of top-level module names to block.
@@ -94,51 +97,38 @@ class _GPUImportBlocker:
         """
         self._blocked = blocked
 
-    def find_module(self, fullname: str, path: Optional[str] = None):
+    def find_spec(self, fullname: str, path: Optional[str] = None, target=None):
         """
-        Check if the requested module should be blocked.
+        Block blocked modules; defer everything else to later finders.
 
-        Called by Python's import machinery for every import.  Returns
-        ``self`` (the loader) if the module is blocked, signalling that
-        this finder will handle it.  Returns ``None`` to let the next
-        finder in ``sys.meta_path`` handle it.
+        Called by Python's import machinery for every import. For a
+        blocked module this raises ``ImportError`` directly — the import
+        system does not catch exceptions raised here, so it propagates
+        straight out of the ``import`` statement. For anything else it
+        returns ``None`` so the next finder in ``sys.meta_path`` handles
+        it normally (including modules that genuinely don't exist, which
+        still raise the standard ``ModuleNotFoundError``).
 
         Args:
             fullname: Fully qualified module name (e.g. ``'torch.nn'``).
-            path: Module search path (unused).
+            path: Parent package's ``__path__`` (unused).
+            target: Existing module used as a hint on reload (unused).
 
-        Returns:
-            ``self`` if blocked, ``None`` otherwise.
+        Raises:
+            ImportError: If the module's top-level package is blocked.
         """
         # Extract the top-level package name (e.g. 'torch' from 'torch.nn.functional')
         top_level = fullname.split('.')[0]
 
-        # Check if this top-level package is in our blocked set
         if top_level in self._blocked:
-            return self
+            raise ImportError(
+                f'Direct import of "{fullname}" is blocked in model server mode. '
+                f'GPU inference runs on the model server via ai.common.models. '
+                f'Do not import GPU libraries directly in nodes.'
+            )
 
         # Not blocked — let the normal import machinery handle it
         return None
-
-    def load_module(self, fullname: str):
-        """
-        Raise ImportError for blocked modules.
-
-        Called by Python after ``find_module`` returns ``self``.  Always
-        raises ``ImportError`` with a descriptive message explaining why
-        the import is blocked and what to use instead.
-
-        Args:
-            fullname: Fully qualified module name being imported.
-
-        Raises:
-            ImportError: Always — this is the whole point of the guard.
-        """
-        raise ImportError(
-            f'Direct import of "{fullname}" is blocked in model server mode. '
-            f'GPU inference runs on the model server via ai.common.models. '
-            f'Do not import GPU libraries directly in nodes.'
-        )
 
 
 # ============================================================================
