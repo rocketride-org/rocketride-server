@@ -18,4 +18,4 @@
  * reference survives into the webview bundle. An empty/unset value falls back
  * to the production broker URL.
  */
-export const OAUTH_ROOT_URL: string = process.env.REACT_APP_OAUTH_ROOT_URL || 'https://oauth.rocketride.ai';
+export const OAUTH_ROOT_URL: string = process.env.REACT_APP_OAUTH_ROOT_URL || 'https://oauth2.rocketride.ai';

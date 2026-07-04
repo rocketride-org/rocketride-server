@@ -71,7 +71,7 @@ from ai.web import exception, error, Result
 from ai.account import account, AccountInfo, Reporter
 from ai.modules import ALL as ALLOWED_MODULES
 from .middleware import AuthMiddleware
-from .endpoints import use, ping, version, shutdown, status, auth_callback
+from .endpoints import use, ping, version, shutdown, status, auth_callback, vscode_oauth_bounce
 from .denied import (
     CONST_ACCESS_DENIED_HTML,
     CONST_ACCESS_DENIED_TEXT,
@@ -313,6 +313,7 @@ class WebServer:
             self.add_route('/use', use, ['POST'])
             self.add_route('/shutdown', shutdown, ['POST'])
             self.add_route('/auth/callback', auth_callback, ['GET'], public=True)
+            self.add_route('/auth/vscode/google', vscode_oauth_bounce, ['GET'], public=True)
 
         # These are always there - no way to turn them off
         self.add_route('/status', status, ['GET'])
