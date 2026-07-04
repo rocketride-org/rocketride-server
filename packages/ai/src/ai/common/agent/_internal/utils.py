@@ -79,7 +79,13 @@ def extract_text(result: Any) -> str:
 
 def truncate_at_stop_words(text: str, stop_words: Any) -> str:
     """
-    Truncate `text` at the first occurrence of any stop word.
+    Truncate `text` at the first exact occurrence of any stop word.
+
+    This is the backstop behind API-level `stop_sequences` (now primary): the provider
+    already stops generating at the marker, so this only trims a fabricated ReAct tail on
+    the rare miss. Matching is exact and case-sensitive on purpose — a fuzzy/anchored
+    match would over-truncate legitimate answers that merely contain the marker text
+    (e.g. "My key observation: ...").
 
     Args:
         text: Model output text.

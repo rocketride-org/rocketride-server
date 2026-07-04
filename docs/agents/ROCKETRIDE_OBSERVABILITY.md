@@ -323,6 +323,7 @@ subscription time.
   id: number,                                  // pipe index within the pipeline
   op: "begin" | "enter" | "leave" | "end",
   pipes: string[],                             // current component stack for this pipe
+  component?: string,                          // component this op refers to (on "leave", the leaving one); pair enter/leave by identity, not stack position
   trace: {                                     // shape depends on pipelineTraceLevel
     lane?: string,
     data?: object,                             // input/intermediate data

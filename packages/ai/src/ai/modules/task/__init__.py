@@ -3,6 +3,7 @@ from typing import Dict, Any
 from ai.web import WebServer
 from .task_server import TaskServer
 from .task_scheduler import TaskScheduler
+from .fetch import handle_fetch
 from depends import depends
 
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
@@ -41,3 +42,6 @@ def initModule(server: WebServer, config: Dict[str, Any]):
 
     # Register our routes - authentication handled in listen() before accepting
     server.add_socket('/task/service', task_server.listen, public=True)
+
+    # Presigned file fetch — public route because auth is in the JWT token
+    server.add_route('/task/fetch', handle_fetch, ['GET'], public=True)

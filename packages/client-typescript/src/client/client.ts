@@ -2216,6 +2216,35 @@ export class RocketRideClient extends DAPClient {
 		await this.call('rrext_store', { subcommand: 'fs_rename', old_path: oldPath, new_path: newPath });
 	}
 
+	/**
+	 * Get a direct HTTP URL for accessing a file in the store.
+	 *
+	 * For cloud backends (S3, Azure) this returns a presigned/SAS URL.
+	 * For local filesystem backends this returns a JWT-signed URL pointing
+	 * at the server's `/task/fetch` endpoint.
+	 *
+	 * The returned URL can be used directly as `src` on `<img>`, `<video>`,
+	 * `<audio>`, and `<iframe>` elements for native browser streaming.
+	 *
+	 * @param path - Relative path within the account store
+	 * @param expiresIn - URL validity in seconds (default 3600)
+	 * @param downloadName - If set, the URL forces a browser download with this
+	 *   filename (`Content-Disposition: attachment`). This is the only reliable
+	 *   way to control the download filename for cross-origin cloud URLs, where
+	 *   the `<a download>` attribute is ignored. Omit for inline streaming.
+	 * @returns A direct HTTP(S) URL to the file
+	 */
+	async fsGetUrl(path: string, expiresIn: number = 3600, downloadName?: string): Promise<string> {
+		this.validateStorePath(path);
+		const body = await this.call('rrext_store', {
+			subcommand: 'fs_geturl',
+			path,
+			expires_in: expiresIn,
+			download_name: downloadName,
+		});
+		return (body as any).url;
+	}
+
 	// ============================================================================
 	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
 	// ============================================================================
@@ -2296,6 +2325,10 @@ export class RocketRideClient extends DAPClient {
 	 * @throws Error if any segment is `..` or contains illegal characters
 	 */
 	private validateStorePath(path: string): void {
+		// Reject absolute paths — store paths must be relative
+		if (path.startsWith('/') || path.startsWith('\\')) {
+			throw new Error(`Path must be relative (got ${path})`);
+		}
 		// Normalise Windows-style backslashes to forward slashes before splitting
 		for (const segment of path.replace(/\\/g, '/').split('/')) {
 			// Reject parent-directory traversal attempts in any position of the path
