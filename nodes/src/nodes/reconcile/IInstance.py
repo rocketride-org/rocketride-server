@@ -16,7 +16,7 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
     collected_answers: List = []
 
-    def open(self, object: Entry):
+    def open(self, obj: Entry):
         """
         Initialize the instance for a new object.
         """
