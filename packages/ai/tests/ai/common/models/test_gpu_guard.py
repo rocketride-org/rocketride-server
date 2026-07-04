@@ -31,6 +31,8 @@ Tests verify that:
 - The hook is idempotent (safe to call multiple times).
 """
 
+import importlib
+import importlib.util
 import sys
 from unittest.mock import patch
 
@@ -47,45 +49,64 @@ from ai.common.models.gpu_guard import _GPUImportBlocker, install_gpu_guard, _BL
 class TestGPUImportBlocker:
     """Tests for the _GPUImportBlocker import hook class."""
 
-    def test_find_module_blocks_torch(self):
-        """find_module should return self for blocked top-level modules."""
+    def test_find_spec_blocks_torch(self):
+        """find_spec should return a blocking spec for blocked top-level modules."""
         blocker = _GPUImportBlocker(_BLOCKED_MODULES)
 
-        # Should return self (the loader) for blocked modules
-        assert blocker.find_module('torch') is blocker
-        assert blocker.find_module('tensorflow') is blocker
-        assert blocker.find_module('onnxruntime') is blocker
-        assert blocker.find_module('cupy') is blocker
+        # Should return a ModuleSpec whose loader is the blocker itself
+        for name in ('torch', 'tensorflow', 'onnxruntime', 'cupy'):
+            spec = blocker.find_spec(name)
+            assert spec is not None
+            assert spec.name == name
+            assert spec.loader is blocker
 
-    def test_find_module_blocks_submodules(self):
-        """find_module should block submodules of blocked packages."""
+    def test_find_spec_blocks_submodules(self):
+        """find_spec should block submodules of blocked packages."""
         blocker = _GPUImportBlocker(_BLOCKED_MODULES)
 
         # Submodules should also be caught (top-level extracted from dotted name)
-        assert blocker.find_module('torch.nn') is blocker
-        assert blocker.find_module('torch.nn.functional') is blocker
-        assert blocker.find_module('tensorflow.keras') is blocker
-        assert blocker.find_module('onnxruntime.transformers') is blocker
+        for name in ('torch.nn', 'torch.nn.functional', 'tensorflow.keras', 'onnxruntime.transformers'):
+            spec = blocker.find_spec(name)
+            assert spec is not None
+            assert spec.name == name
+            assert spec.loader is blocker
 
-    def test_find_module_allows_other(self):
-        """find_module should return None for non-blocked modules."""
+    def test_find_spec_allows_other(self):
+        """find_spec should return None for non-blocked modules."""
         blocker = _GPUImportBlocker(_BLOCKED_MODULES)
 
-        # Non-blocked modules should pass through
-        assert blocker.find_module('os') is None
-        assert blocker.find_module('json') is None
-        assert blocker.find_module('numpy') is None
-        assert blocker.find_module('ai.web.metrics') is None
+        # Non-blocked modules should pass through to the next finder
+        assert blocker.find_spec('os') is None
+        assert blocker.find_spec('json') is None
+        assert blocker.find_spec('numpy') is None
+        assert blocker.find_spec('ai.common.models') is None
 
-    def test_load_module_raises_import_error(self):
-        """load_module should raise ImportError with descriptive message."""
+    def test_exec_module_raises_import_error(self):
+        """exec_module should raise ImportError with descriptive message."""
         blocker = _GPUImportBlocker(_BLOCKED_MODULES)
 
-        with pytest.raises(ImportError, match='Direct import of "torch" is blocked'):
-            blocker.load_module('torch')
+        for name in ('torch', 'torch.nn'):
+            module = importlib.util.module_from_spec(blocker.find_spec(name))
+            with pytest.raises(ImportError, match=f'Direct import of "{name}" is blocked'):
+                blocker.exec_module(module)
 
-        with pytest.raises(ImportError, match='Direct import of "torch.nn" is blocked'):
-            blocker.load_module('torch.nn')
+    def test_blocked_import_raises_end_to_end(self):
+        """A real import of a blocked module through the machinery must raise.
+
+        This drives find_spec -> create_module -> exec_module via the real
+        import system, so it fails if the finder ever stops blocking (e.g. a
+        regression back to the removed find_module/load_module protocol).
+        """
+        blocker = _GPUImportBlocker(_BLOCKED_MODULES)
+        sys.meta_path.insert(0, blocker)
+        try:
+            # Ensure a fresh import so the guard (not a cached module) is hit.
+            sys.modules.pop('cupy', None)
+            with pytest.raises(ImportError, match='blocked in model server mode'):
+                importlib.import_module('cupy')
+        finally:
+            sys.meta_path.remove(blocker)
+            sys.modules.pop('cupy', None)
 
 
 # ============================================================================
