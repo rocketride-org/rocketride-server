@@ -47,7 +47,7 @@ Complete reference for building RocketRide pipelines across any project.
 }
 ```
 
-**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional — the VS Code extension manages it automatically.
+**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional: the VS Code extension manages it automatically.
 
 ---
 
@@ -55,14 +55,14 @@ Complete reference for building RocketRide pipelines across any project.
 
 ### Required Fields
 
-#### `components` (array, required — must be first)
+#### `components` (array, required, must be first)
 
 - Array of component objects
 - Each component must have a unique `id`
 - Components are connected via `input` arrays
 - **Must be the first field in the JSON object**
 
-#### `project_id` (string, required — goes at the bottom)
+#### `project_id` (string, required, goes at the bottom)
 
 - **MUST be a unique GUID** for each pipeline file
 - **Format:** Standard UUID/GUID (e.g., `85be2a13-ad93-49ed-a1e1-4b0f763ca618`)
@@ -97,13 +97,13 @@ Complete reference for building RocketRide pipelines across any project.
 
 **Note:** Do NOT reuse GUIDs from other pipelines. Each `.pipe` file must have its own unique GUID.
 
-#### `viewport` (object, required — goes at the bottom)
+#### `viewport` (object, required, goes at the bottom)
 
 - Stores the visual zoom/pan state of the pipeline editor
 - Format: `{ "x": 0, "y": 0, "zoom": 1 }`
 - Managed by the VS Code extension; use default values when creating manually
 
-#### `version` (number, required — goes at the bottom)
+#### `version` (number, required, goes at the bottom)
 
 - Pipeline format version. Always set to `1`
 
@@ -111,7 +111,7 @@ Complete reference for building RocketRide pipelines across any project.
 
 - ID of the entry point component where data enters the pipeline
 - Managed automatically by the VS Code extension
-- When writing pipelines by hand, you can omit this field — the extension will add it
+- When writing pipelines by hand, you can omit this field, the extension will add it
 
 ---
 
@@ -239,7 +239,7 @@ Lanes are typed data channels that connect components:
 | `text`      | question     | `questions`                                |
 | `documents` | embedding    | `documents` (with vectors)                 |
 | `questions` | embedding    | `questions` (with vectors)                 |
-| `documents` | vector_db    | — (stored)                                 |
+| `documents` | vector_db    | - (stored)                                 |
 | `questions` | vector_db    | `documents`, `answers`, `questions`        |
 | `questions` | llm          | `answers`                                  |
 | `image`     | ocr          | `text`, `table`                            |
@@ -349,7 +349,7 @@ Pipeline configurations support environment variable substitution using the form
 
 ```env
 # Core Configuration
-ROCKETRIDE_URI=https://cloud.rocketride.ai
+ROCKETRIDE_URI=https://api.rocketride.ai
 ROCKETRIDE_APIKEY=your-api-key
 
 # LLM API Keys
@@ -607,7 +607,7 @@ chat →   → agent_b →  → response_answers (single node, multiple inputs)
 ```
 
 **Use Case:** Run multiple agents on the same question simultaneously and collect all answers
-**Key Point:** Use a **single** `response_answers` node with multiple `input` entries — one per agent. Do NOT create a separate response node per agent.
+**Key Point:** Use a **single** `response_answers` node with multiple `input` entries: one per agent. Do NOT create a separate response node per agent.
 
 ```json
 {

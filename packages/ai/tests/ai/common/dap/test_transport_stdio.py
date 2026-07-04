@@ -12,6 +12,7 @@ Each test asserts the **dispatched event payload**, not the internal regex.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -573,3 +574,38 @@ async def test_disconnect_is_safe_when_already_disconnected():
     transport._connected = False
     await transport.disconnect()  # must not raise
     assert transport._process is None
+
+
+# ---------------------------------------------------------------------------
+# _read_stream — line parsing + oversized-line recovery (crash hardening)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_stream_processes_normal_lines_in_order():
+    """Normal-traffic regression: each newline-delimited message is parsed."""
+    reader = asyncio.StreamReader()
+    reader.feed_data(b'>SVC*1\n>JOB*hello\n')
+    reader.feed_eof()
+
+    stub = _Stub()
+    await TransportStdio._read_stream(stub, reader, 'stderr')
+
+    kinds = [e.get('event') for e in stub.events]
+    assert kinds == ['apaevt_status_state', 'apaevt_status_message']
+
+
+@pytest.mark.asyncio
+async def test_read_stream_skips_oversized_line_and_keeps_going():
+    """Regression: a line over the reader limit is skipped, not fatal to the reader."""
+    reader = asyncio.StreamReader(limit=64)
+    # oversized line + newline, then a normal message
+    reader.feed_data(b'X' * 500 + b'\n' + b'>SVC*1\n')
+    reader.feed_eof()
+
+    stub = _Stub()
+    await TransportStdio._read_stream(stub, reader, 'stderr')
+
+    assert any(e.get('event') == 'apaevt_status_state' for e in stub.events), (
+        f'message after the oversized line was not processed: {stub.events!r}'
+    )

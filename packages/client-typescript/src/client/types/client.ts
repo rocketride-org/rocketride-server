@@ -279,11 +279,11 @@ export interface TeamInfo {
 }
 
 /**
- * Describes an organisation the authenticated user is a member of.
+ * Describes the organisation the authenticated user belongs to.
  *
  * Organisations group users and teams for billing and access management.
- * A user may belong to multiple organisations; each carries its own permission
- * set at the organisation level plus a list of contained teams.
+ * Each user belongs to exactly one organisation, which carries its own
+ * permission set at the organisation level plus a list of contained teams.
  */
 export interface OrgInfo {
 	/** Unique identifier of the organisation (UUID or short slug) */
@@ -359,10 +359,11 @@ export interface ConnectResult {
 	defaultTeam: string;
 
 	/**
-	 * List of organisations the authenticated user belongs to, each with
-	 * its own permission set and nested team memberships.
+	 * The organisation the authenticated user belongs to, with its own
+	 * permission set and nested team memberships.  Null when the user
+	 * has no org membership.
 	 */
-	organizations: OrgInfo[];
+	organization: OrgInfo | null;
 
 	/**
 	 * Apps on the user's desktop with ``appStatus`` and ``onDesktop``.
@@ -376,6 +377,33 @@ export interface ConnectResult {
 	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
 	 */
 	capabilities: string[];
+
+	/**
+	 * Platform-level permission strings (e.g. ``['sys.admin']``).
+	 * Set manually in the database, never via API.
+	 */
+	sysPermissions?: string[];
+
+	/** Credit wallet balance snapshot — resource→balance pairs. */
+	credits?: Record<string, unknown>;
+
+	/**
+	 * True when the user is authenticated but not yet granted full app access.
+	 * The shell should show a waitlist page instead of the main workspace.
+	 */
+	waitlisted?: boolean;
+
+	/**
+	 * All org memberships the user has (for the org switcher UI).
+	 * Only present in profile responses, not in the auth handshake.
+	 */
+	memberships?: OrgInfo[];
+
+	/**
+	 * The ID of the user's currently active (default) organization.
+	 * Only present in profile responses.
+	 */
+	defaultOrgId?: string;
 }
 
 /**
@@ -397,7 +425,7 @@ export interface AppManifestEntry {
 	/** Short description of the app. */
 	description?: string;
 
-	/** URL path to the app's icon (e.g. "/shell/apps/rocket-ui/icon.svg"). */
+	/** URL path to the app's icon (e.g. "/apps/rocket-ui/icon.svg"). */
 	icon?: string;
 
 	/** Category tags for filtering (e.g. ["pipelines", "ai"]). */

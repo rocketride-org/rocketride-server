@@ -49,14 +49,16 @@ Usage::
 """
 
 import os
+import signal
 import sys
+import threading
 import urllib.parse
 import uvicorn
 import asyncio
 import importlib
 import time
 from dotenv import load_dotenv
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Dict, Any, Callable, Awaitable, List, Optional, Union, Tuple
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -98,6 +100,58 @@ logo = r"""
             Copyright (c) 2026 Aparavi Software AG
                     All rights reserved
     """
+
+
+def _is_restorable_signal_handler(handler: Any) -> bool:
+    """Return True when Python's signal.signal() accepts the saved handler."""
+    return handler in (signal.SIG_IGN, signal.SIG_DFL) or callable(handler)
+
+
+def _build_signal_safe_capture(server: uvicorn.Server):
+    """
+    Build a Uvicorn-compatible signal capture context manager.
+
+    Some embedded or supervisor-driven runtimes can leave a C-level signal
+    handler installed. Python exposes that previous handler as None, but rejects
+    None when a later signal.signal(sig, handler) call tries to restore it.
+    Uvicorn's default capture_signals() restores every saved handler verbatim,
+    which makes shutdown/restart noisy with:
+        TypeError: signal handler must be signal.SIG_IGN, signal.SIG_DFL, or a callable object
+
+    This preserves Uvicorn's normal behavior while skipping handlers Python
+    cannot restore.
+    """
+    uvicorn_server_module = getattr(uvicorn, 'server', None)
+    handled_signals = getattr(uvicorn_server_module, 'HANDLED_SIGNALS', None)
+    if handled_signals is None:
+        return None
+
+    @contextmanager
+    def capture_signals():
+        if threading.current_thread() is not threading.main_thread():
+            yield
+            return
+
+        original_handlers = {}
+        for sig in handled_signals:
+            try:
+                original_handlers[sig] = signal.signal(sig, server.handle_exit)
+            except (OSError, RuntimeError, ValueError) as exc:
+                debug(f'Unable to install signal handler for {sig}: {exc}')
+
+        try:
+            yield
+        finally:
+            for sig, handler in original_handlers.items():
+                if not _is_restorable_signal_handler(handler):
+                    debug(f'Skipping unrestorable signal handler for {sig}: {handler!r}')
+                    continue
+                signal.signal(sig, handler)
+
+            for captured_signal in reversed(getattr(server, '_captured_signals', [])):
+                signal.raise_signal(captured_signal)
+
+    return capture_signals
 
 
 @asynccontextmanager
@@ -198,26 +252,45 @@ class WebServer:
         # Declare the port
         self._port = None
 
-        # Configure CORS origins and credentials
+        # Configure CORS origins and credentials.
+        # When RR_CORS_ORIGINS is set, only those origins are allowed.
+        # When empty (default for local dev), any localhost/127.0.0.1 origin
+        # is accepted on any port so the dynamic engine port works with
+        # browser access.
         cors_origins_env = os.environ.get('RR_CORS_ORIGINS', '')
         if cors_origins_env:
             cors_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
         else:
             cors_origins = []
 
-        if cors_origins:
-            allow_credentials = True
-        else:
-            cors_origins = ['*']
-            allow_credentials = False
+        # Fail fast when RR_CORS_ORIGINS is explicitly set but parsed to zero
+        # valid origins — this indicates a misconfiguration (e.g. only whitespace
+        # or empty comma-separated values) and should not silently fall back to
+        # the permissive localhost regex.
+        if cors_origins_env and not cors_origins:
+            debug(
+                f'WARNING: RR_CORS_ORIGINS is set to {cors_origins_env!r} but '
+                f'parsed to zero valid origins. Falling back to localhost regex. '
+                f'Check the value — origins must be comma-separated URLs.'
+            )
 
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_origins,
-            allow_credentials=allow_credentials,
-            allow_methods=['*'],
-            allow_headers=['*'],
-        )
+        if cors_origins:
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origins=cors_origins,
+                allow_credentials=True,
+                allow_methods=['*'],
+                allow_headers=['*'],
+            )
+        else:
+            # Allow any localhost origin (any port) with credentials
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origin_regex=r'^https?://(localhost|127\.0\.0\.1)(:\d+)?$',
+                allow_credentials=True,
+                allow_methods=['*'],
+                allow_headers=['*'],
+            )
 
         # Store the server configuration
         self.config = config if config is not None else {}
@@ -374,6 +447,18 @@ class WebServer:
         # Save the port
         self._port = port
 
+        # Publish the server's base URL so components (e.g. FileStore JWT
+        # signing) can construct URLs without needing a reference to the
+        # web server instance.  Only set if not already overridden by the
+        # operator via .env or environment.
+        self._base_url_scheme = 'https' if ssl_certfile else 'http'
+        self._base_url_host = 'localhost' if host == '0.0.0.0' else host
+        if not os.environ.get('RR_BASE_URL'):
+            if port != 0:
+                os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{port}'
+            # When port is 0 the OS assigns the real port at bind time;
+            # RR_BASE_URL will be set lazily by get_port() once resolved.
+
         # Setup the Uvicorn configuration
         config = uvicorn.Config(
             self.app,
@@ -388,7 +473,13 @@ class WebServer:
         )
 
         # Return the configured server instance
-        return uvicorn.Server(config)
+        server = uvicorn.Server(config)
+
+        signal_safe_capture = _build_signal_safe_capture(server)
+        if signal_safe_capture is not None:
+            server.capture_signals = signal_safe_capture
+
+        return server
 
     async def _on_startup(self):
         """
@@ -661,13 +752,31 @@ class WebServer:
         """
         Get the port number on which the server is running.
 
+        Resolved lazily from the bound socket on first use: with port=0 the OS
+        assigns the real port at bind time, which uvicorn does *after* the
+        lifespan startup hook, so self._port is still 0 until a request arrives.
+
         Returns:
-            int: The port number.
+            int: The port number actually bound by uvicorn.
 
         Example:
             >>> port = get_port()
             5565
         """
+        if not self._port and self.server is not None:
+            for srv in getattr(self.server, 'servers', None) or []:
+                for sock in getattr(srv, 'sockets', None) or []:
+                    try:
+                        bound = sock.getsockname()
+                    except OSError:
+                        continue  # closed/bad socket; try the next one
+                    bound_port = bound[1] if isinstance(bound, tuple) and len(bound) >= 2 else None
+                    if bound_port:
+                        self._port = bound_port
+                        # Deferred from _create_server when port was 0
+                        if not os.environ.get('RR_BASE_URL'):
+                            os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{bound_port}'
+                        return self._port
         return self._port
 
     def registerStatusCallback(self, callback: Callable[[Dict[str, any]], None]) -> None:

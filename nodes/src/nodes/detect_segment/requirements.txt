@@ -1,0 +1,4 @@
+# pycocotools is needed CLIENT-SIDE (this node process) to decode/rescale RLE
+# masks for restore + overlay rendering — the node restores/renders even when
+# inference is proxied to the model server, so it can't rely on the loader's deps.
+pycocotools

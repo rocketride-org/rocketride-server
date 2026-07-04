@@ -34,6 +34,7 @@ import * as https from 'https';
 import * as http from 'http';
 import * as os from 'os';
 import * as lockfile from 'proper-lockfile';
+import { execFile, execFileSync } from 'child_process';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
 
@@ -61,6 +62,15 @@ export interface ReleaseListItem {
 	tag_name: string;
 	prerelease: boolean;
 }
+
+/**
+ * Result of a conditional GitHub API call using ETags.
+ * - `data`: fresh data returned (HTTP 200); includes the new ETag for future requests.
+ * - `notModified`: server confirmed cached version is still current (HTTP 304, free — no rate limit hit).
+ */
+export type ConditionalResult<T> =
+	| { status: 'data'; data: T; etag: string | undefined }
+	| { status: 'notModified' };
 
 /** Platform-specific archive naming. */
 interface PlatformInfo {
@@ -222,7 +232,15 @@ export class EngineInstaller {
 		}
 
 		try {
-			return await this.installUnderLock(versionSpec, progress, token, githubToken);
+			const exePath = await this.installUnderLock(versionSpec, progress, token, githubToken);
+			// Run the runtime-dep check on EVERY install attempt, not just fresh
+			// downloads. installUnderLock has three return paths (fresh download,
+			// "already up to date" short-circuit, GitHub-unreachable fallback);
+			// users whose engine was installed before this check existed only hit
+			// the latter two, so putting the check here is the only way to reach
+			// them without forcing a manual uninstall+reinstall.
+			await this.checkLinuxRuntimeDeps(exePath);
+			return exePath;
 		} finally {
 			try { await release(); } catch { /* ignore stale lock */ }
 		}
@@ -349,6 +367,9 @@ export class EngineInstaller {
 				throw new Error(`Engine extraction completed but executable not found at: ${exePath}`);
 			}
 
+			// (Runtime dep check runs in install() after this returns, so it
+			// covers fresh downloads AND "already installed" short-circuits.)
+
 			// Write version file so we know what's installed
 			this.writeVersionJson({ tag: release.tag_name, publishedAt: release.published_at });
 
@@ -407,24 +428,49 @@ export class EngineInstaller {
 	/**
 	 * Fetches all available releases for the version dropdown.
 	 * Returns server-tagged releases with assets, sorted newest first.
+	 *
+	 * Supports ETag-based conditional requests: pass the ETag from a previous
+	 * response to get a free HTTP 304 (not counted against GitHub rate limit)
+	 * when releases haven't changed.
 	 */
 	public async getReleases(
 		token?: vscode.CancellationToken,
-		githubToken?: string
-	): Promise<ReleaseListItem[]> {
+		githubToken?: string,
+		etag?: string
+	): Promise<ConditionalResult<ReleaseListItem[]>> {
 		this.throwIfCancelled(token);
 		const octokit = await this.createOctokit(githubToken);
-		const { data } = await octokit.repos.listReleases({
-			owner: EngineInstaller.GITHUB_OWNER,
-			repo: EngineInstaller.GITHUB_REPO,
-			per_page: 100
-		});
-		return data
-			.filter(r => r.tag_name?.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0)
-			.map(r => ({
-				tag_name: r.tag_name,
-				prerelease: r.prerelease
-			}));
+
+		// Build conditional request headers
+		const headers: Record<string, string> = {};
+		if (etag) {
+			headers['if-none-match'] = etag;
+		}
+
+		try {
+			const response = await octokit.repos.listReleases({
+				owner: EngineInstaller.GITHUB_OWNER,
+				repo: EngineInstaller.GITHUB_REPO,
+				per_page: 100,
+				headers,
+			});
+
+			// HTTP 200 — fresh data
+			const data = response.data
+				.filter(r => r.tag_name?.startsWith('server-') && !r.prerelease && r.assets && r.assets.length > 0)
+				.map(r => ({
+					tag_name: r.tag_name,
+					prerelease: r.prerelease
+				}));
+
+			return { status: 'data', data, etag: response.headers.etag };
+		} catch (error: unknown) {
+			// Octokit throws RequestError with status 304 for Not Modified
+			if (this.isNotModifiedError(error)) {
+				return { status: 'notModified' };
+			}
+			throw error;
+		}
 	}
 
 	/** Creates an authenticated (or anonymous) Octokit instance. */
@@ -434,6 +480,19 @@ export class EngineInstaller {
 			auth: githubToken,
 			userAgent: 'RocketRide-VSCode'
 		});
+	}
+
+	/**
+	 * Checks if an error is an Octokit RequestError with HTTP 304 status.
+	 * Octokit throws rather than returning a response for 304s.
+	 * Duck-types the check to avoid importing @octokit/request-error.
+	 */
+	private isNotModifiedError(error: unknown): boolean {
+		return (
+			error instanceof Error &&
+			'status' in error &&
+			(error as { status: number }).status === 304
+		);
 	}
 
 	/**
@@ -701,6 +760,66 @@ export class EngineInstaller {
 	/** Simple delay helper. */
 	private delay(ms: number): Promise<void> {
 		return new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+	// =========================================================================
+	// LINUX RUNTIME DEPENDENCY CHECK
+	// =========================================================================
+
+	private static readonly LIB_TO_PACKAGE: Record<string, string> = {
+		'libc++.so.1': 'libc++1',
+		'libc++abi.so.1': 'libc++abi1',
+		'libgomp.so.1': 'libgomp1',
+	};
+
+	private async checkLinuxRuntimeDeps(exePath: string): Promise<void> {
+		if (process.platform !== 'linux') return;
+
+		let lddOutput = '';
+		try {
+			lddOutput = execFileSync('ldd', [exePath], { encoding: 'utf8' });
+		} catch { return; }
+
+		const packages = [...new Set(
+			lddOutput.split('\n')
+				.filter(l => l.includes('=> not found'))
+				.map(l => l.trim().match(/^(\S+)/)?.[1])
+				.map(lib => lib ? EngineInstaller.LIB_TO_PACKAGE[lib] : undefined)
+				.filter((p): p is string => !!p),
+		)];
+		if (!packages.length) return;
+
+		// One-click install assumes apt; on non-Debian distros show the list and let the user handle it.
+		const hasApt = fs.existsSync('/usr/bin/apt') || fs.existsSync('/bin/apt');
+		if (!hasApt) {
+			void vscode.window.showWarningMessage(
+				`RocketRide needs these system libraries: ${packages.join(', ')}. Install them with your system package manager.`,
+				{ modal: true },
+			);
+			return;
+		}
+
+		const choice = await vscode.window.showWarningMessage(
+			`RocketRide needs these system libraries: ${packages.join(', ')}.`,
+			{ modal: true, detail: 'Without these libraries the engine cannot start.' },
+			'Install',
+		);
+		if (choice !== 'Install') return;
+
+		try {
+			await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: 'Installing system libraries...', cancellable: false },
+				() => new Promise<void>((resolve, reject) => {
+					execFile('pkexec', ['apt', 'install', '-y', ...packages], { timeout: 5 * 60 * 1000 }, (err, _stdout, stderr) => {
+						if (err) reject(new Error(stderr?.trim() || err.message));
+						else resolve();
+					});
+				}),
+			);
+			void vscode.window.showInformationMessage('System libraries installed.');
+		} catch (err) {
+			void vscode.window.showErrorMessage(`Install failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 }
 

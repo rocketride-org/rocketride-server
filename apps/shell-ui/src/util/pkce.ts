@@ -184,9 +184,10 @@ export function buildAuthUrl(
         code_challenge_method: 'S256',
     });
 
-    // When the caller requests registration mode, set the `prompt=create` hint
-    // so Zitadel presents the sign-up form rather than the sign-in form.
+    // register -> sign-up form; otherwise force the login UI (prompt=login) so
+    // Zitadel never silently reuses its SSO session and blocks switching accounts.
     if (register) params.set('prompt', 'create');
+    else params.set('prompt', 'login');
 
     // Strip any trailing slash from the base URL before appending the path
     // to avoid a double-slash in the resulting URL.

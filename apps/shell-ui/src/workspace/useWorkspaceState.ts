@@ -294,6 +294,7 @@ export function useWorkspaceState(
 		if (!hasStoreApi(client)) {
 			if (!loaded) {
 				setApps({ [defaultAppId]: makeDefaultAppState(defaultAppId) });
+				setSeeded(true);
 				setLoaded(true);
 			}
 			return;
@@ -339,12 +340,14 @@ export function useWorkspaceState(
 				setActiveAppId(restoredAppId);
 				setApps({ [restoredAppId]: mergedState });
 				if (savedSettings && typeof savedSettings === 'object') setSettings(savedSettings);
+				setSeeded(true);
 				setLoaded(true);
 			})
 			.catch(() => {
 				// Load failure — seed defaults
 				setActiveAppId(defaultAppId);
 				setApps({ [defaultAppId]: makeDefaultAppState(defaultAppId) });
+				setSeeded(true);
 				setLoaded(true);
 			});
 	// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -406,6 +409,18 @@ export function useWorkspaceState(
 		clearTimeout(saveRef.current);
 		const currentState = appsRef.current[activeAppIdRef.current];
 		if (currentState) writeAppStateNow(activeAppIdRef.current, currentState);
+
+		// 1b. Clear all server-side monitor subscriptions from the outgoing app
+		// so the next app starts with a clean slate, and update the connection
+		// display name so the server monitor shows which app is active
+		if (client) {
+			try {
+				await client.clearAllMonitors();
+			} catch (err) {
+				console.error('[Workspace] Failed to clear monitors on app switch:', err);
+			}
+			client.identify(`Cloud Shell-UI \u2014 ${newAppId}`).catch(() => {});
+		}
 
 		// 2. Load new app state if not already in memory
 		let newState = appsRef.current[newAppId];

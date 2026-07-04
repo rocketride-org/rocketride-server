@@ -19,7 +19,7 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { applyTheme } from 'shared/themes';
 import type { ThemeTokens } from 'shared/themes/tokens';
 import { ProjectView, parseServerEvent, CheckoutModal } from 'shared';
-import type { TaskStatus, TraceEvent, ViewState, CheckoutPlan } from 'shared';
+import type { TaskStatus, TraceEvent, ViewState, CheckoutPlan, PlanAction } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 import type { ProjectHostToWebview, ProjectWebviewToHost } from '../types';
 
@@ -96,6 +96,7 @@ const ProjectWebview: React.FC = () => {
 					mode: vs?.mode ?? 'design',
 					flowViewMode: vs?.flowViewMode ?? 'pipeline',
 					viewport: vs?.viewport,
+					pipelineTraceLevel: vs?.pipelineTraceLevel,
 				});
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
@@ -157,6 +158,7 @@ const ProjectWebview: React.FC = () => {
 				}
 				setIsConnected(msg.isConnected);
 				if ((msg as any).isSubscribed !== undefined) setSubscribed((msg as any).isSubscribed);
+				if (msg.serverHost) setServerHost(msg.serverHost);
 				break;
 			case 'checkout:required':
 				// Host says subscription is required — show inline prompt (handled by ProjectView's Subscribe button)
@@ -202,6 +204,7 @@ const ProjectWebview: React.FC = () => {
 					mode: msg.state?.mode ?? 'design',
 					flowViewMode: msg.state?.flowViewMode ?? 'pipeline',
 					viewport: msg.state?.viewport,
+					pipelineTraceLevel: msg.state?.pipelineTraceLevel,
 				});
 				break;
 			case 'project:initialPrefs':
@@ -279,9 +282,9 @@ const ProjectWebview: React.FC = () => {
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			sendMessage({ type: 'status:pipelineAction', action, source });
+			sendMessage({ type: 'status:pipelineAction', action, source, pipelineTraceLevel: viewState?.pipelineTraceLevel ?? 'summary' });
 		},
-		[sendMessage]
+		[sendMessage, viewState]
 	);
 
 	const handleMissingEnvVars = useCallback(
@@ -293,6 +296,8 @@ const ProjectWebview: React.FC = () => {
 
 	const handleViewStateChange = useCallback(
 		(vs: ViewState) => {
+			// Keep local state current so the next run message carries the latest trace level
+			setViewState(vs);
 			// Persist to VS Code webview state (survives tab switches)
 			const current = getState() ?? ({} as ViewState);
 			setState({ ...current, ...vs });
@@ -369,7 +374,7 @@ const ProjectWebview: React.FC = () => {
 	return (
 		<>
 			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} voiceBuilder={voiceBuilder} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
-			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} />}
+			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
 		</>
 	);
 };

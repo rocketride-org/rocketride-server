@@ -30,6 +30,7 @@
 import { defineConfig } from '@rsbuild/core';
 import { pluginSass } from '@rsbuild/plugin-sass';
 import { pluginReact } from '@rsbuild/plugin-react';
+import { pluginRocketrideIcons } from './scripts/rsbuild-plugin-icons.mjs';
 
 /** Rsbuild configuration for application-mode builds. */
 export default defineConfig({
@@ -57,5 +58,5 @@ export default defineConfig({
 		polyfill: 'usage',
 		cleanDistPath: true,
 	},
-	plugins: [pluginSass(), pluginReact()],
+	plugins: [pluginSass(), pluginReact(), pluginRocketrideIcons()],
 });

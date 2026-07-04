@@ -484,7 +484,13 @@ class TransportStdio(TransportBase):
             self._debug_message(f'Starting to read {stream_name} stream')
 
             while not stream.at_eof():
-                line = await stream.readline()
+                try:
+                    line = await stream.readline()
+                except (ValueError, asyncio.LimitOverrunError) as line_exc:
+                    # Line over the reader limit (readline already dropped it) —
+                    # skip rather than let it kill the whole task.
+                    self._debug_message(f'Skipping oversized line on {stream_name} (exceeds reader limit): {line_exc}')
+                    continue
 
                 if not line:
                     self._debug_message(f'EOF reached on {stream_name} stream')

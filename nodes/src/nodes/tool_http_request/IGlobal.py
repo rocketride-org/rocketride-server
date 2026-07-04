@@ -34,32 +34,9 @@ import re
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
+from ai.common.utils import config_int
+
 from .rate_limiter import DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_PER_MINUTE, DEFAULT_MAX_PER_SECOND, RateLimiter
-
-
-def _config_int(
-    cfg: dict, key: str, default: int, *, min_value: int | None = None, max_value: int | None = None
-) -> int:
-    """Read an integer from *cfg*, falling back to *default*.
-
-    Returns *default* when the key is missing, non-numeric, or <= 0.
-    The result is clamped to [min_value, max_value] when those bounds are given.
-    """
-    raw = cfg.get(key)
-    if raw is None:
-        val = default
-    else:
-        try:
-            val = int(raw)
-            if val <= 0:
-                val = default
-        except (TypeError, ValueError):
-            val = default
-    if min_value is not None:
-        val = max(val, min_value)
-    if max_value is not None:
-        val = min(val, max_value)
-    return val
 
 
 _METHOD_FLAGS = {
@@ -143,9 +120,9 @@ class IGlobal(IGlobalBase):
             return None
 
         return RateLimiter(
-            max_per_second=_config_int(cfg, 'rateLimitPerSecond', DEFAULT_MAX_PER_SECOND, min_value=1),
-            max_per_minute=_config_int(cfg, 'rateLimitPerMinute', DEFAULT_MAX_PER_MINUTE, min_value=1),
-            max_concurrent=_config_int(cfg, 'maxConcurrentRequests', DEFAULT_MAX_CONCURRENT, min_value=1),
+            max_per_second=config_int(cfg, 'rateLimitPerSecond', DEFAULT_MAX_PER_SECOND, min_value=1),
+            max_per_minute=config_int(cfg, 'rateLimitPerMinute', DEFAULT_MAX_PER_MINUTE, min_value=1),
+            max_concurrent=config_int(cfg, 'maxConcurrentRequests', DEFAULT_MAX_CONCURRENT, min_value=1),
         )
 
     def validateConfig(self) -> None:

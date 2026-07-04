@@ -32,7 +32,7 @@
 import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import {
-	BxCog, BxPalette, BxUser, BxExport, BxGridAlt, BxHome,
+	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome,
 } from '../../icons/BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import type { IconComponent } from '../../icons/BoxIcon';
@@ -71,8 +71,8 @@ export interface SidebarProps {
 	account: ShellAccountConfig;
 	/** When true, the app switcher submenu in the footer is hidden. */
 	hideAppSwitcher?: boolean;
-	/** Callback to open a shell overlay (account, billing, settings). */
-	onOverlay: (overlay: 'account' | 'settings') => void;
+	/** Callback to open a shell overlay (account, settings, environment). */
+	onOverlay: (overlay: 'account' | 'settings' | 'environment') => void;
 }
 
 // =============================================================================
@@ -184,15 +184,14 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 		return <RocketRideMark size={size} color="var(--rr-brand)" />;
 	};
 
-	// Collapsed: show RocketRide mark centered
+	// Collapsed: show the same icon as the expanded state, centered
 	if (collapsed) {
 		return (
 			<div style={{
 				width: COLLAPSED_BTN, height: COLLAPSED_BTN, margin: '0 auto',
 				display: 'flex', alignItems: 'center', justifyContent: 'center',
-				color: 'var(--rr-brand)',
 			}}>
-				<RocketRideMark size={20} color="var(--rr-brand)" />
+				{resolveIcon(20)}
 			</div>
 		);
 	}
@@ -222,6 +221,52 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 // =============================================================================
 
 /**
+ * App-switcher icon: renders the app's logo when available, otherwise a
+ * two-letter monogram fallback (initials of the first two words, or the
+ * first two characters of a single-word name).
+ *
+ * Defined at module scope so it keeps a stable component identity across
+ * renders instead of being recreated inline per menu item.
+ */
+const AppIcon: React.FC<{ name: string; iconUrl?: string; size?: number }> = ({ name, iconUrl, size = 16 }) => {
+	if (iconUrl) {
+		return (
+			<img
+				src={iconUrl}
+				alt=""
+				width={size}
+				height={size}
+				style={{ borderRadius: 4, objectFit: 'cover', flexShrink: 0, display: 'block' }}
+			/>
+		);
+	}
+
+	const words = name.trim().split(/\s+/).filter(Boolean);
+	const monogram = (words.length > 1 ? words.slice(0, 2).map((w) => w[0]).join('') : name.slice(0, 2)).toUpperCase();
+
+	return (
+		<span
+			style={{
+				width: size,
+				height: size,
+				flexShrink: 0,
+				borderRadius: 4,
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: 'center',
+				background: 'var(--rr-bg-surface-alt)',
+				color: 'var(--rr-text-secondary)',
+				fontSize: Math.round(size * 0.5),
+				fontWeight: 700,
+				lineHeight: 1,
+			}}
+		>
+			{monogram}
+		</span>
+	);
+};
+
+/**
  * Collapsible, resizable sidebar that renders the active app's sidebar
  * component and a footer with theme picker, account/billing nav, app
  * switcher, and logout.
@@ -239,6 +284,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 	const [width, setWidth] = useState(EXPANDED_WIDTH);
 	const [isResizing, setIsResizing] = useState(false);
 	const [handleHover, setHandleHover] = useState(false);
+	const [headerHover, setHeaderHover] = useState(false);
 
 	const isResizingRef = useRef(false);
 	const startXRef = useRef(0);
@@ -328,15 +374,19 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
+			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' }) },
+			{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') },
+			{ id: 'environment', label: 'Variables', icon: BxLock, onClick: () => onOverlay('environment') },
+			// Settings is a global workspace view (shell "General" plus any installed app's
+			// settings), so it's always available. Per-app gating lives in SettingsPage.
+			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 			{
-				id: 'theme', label: 'Theme', icon: BxPalette,
+				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
 				submenu: themeOptions.map((t) => ({
 					id: t.id, label: t.name, checked: prefs.theme === t.id,
 					onClick: () => handleThemeSelect(t.id),
 				})),
 			},
-			{ id: 'account', label: 'Account', icon: BxUser, onClick: () => onOverlay('account') },
-			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 		];
 
 		if (showAppSwitcher) {
@@ -351,19 +401,20 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			};
 
 			items.push({
-				id: 'apps', label: 'Switch App', icon: BxGridAlt, dividerBefore: true,
+				id: 'apps', label: 'Switch App', icon: BxGridAlt,
 				submenu: appManifest
 					.filter((a) => a.id !== 'rocketride.home' && a.id !== 'rocketride.hello')
 					.filter((a) => isOnDesktop(a.id))
 					.sort((a, b) => a.name.localeCompare(b.name))
 					.map((app) => ({
 						id: app.id, label: app.name, checked: activeAppId === app.id,
+						icon: ({ size }: { size?: number }) => <AppIcon name={app.name} iconUrl={app.icon} size={size} />,
 						onClick: () => handleSwitchApp(app.id),
 					})),
 			});
 		}
 
-		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: !showAppSwitcher, onClick: () => account.onLogout?.() });
+		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
 
 		return items;
 	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
@@ -387,22 +438,50 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			{/* ================================================================
 			    HEADER — AppSwitcherButton + collapse toggle
 			    ================================================================ */}
-			<div style={{ display: 'flex', alignItems: 'center', height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0 }}>
-				<button
-					title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-					onClick={toggleCollapse}
-					style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', display: 'flex', flex: 1 }}
-				>
-					<AppSwitcherButton collapsed={collapsed} />
-				</button>
-				{showAppSwitcher && !collapsed && (
+			<div
+				style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0 }}
+				onMouseEnter={() => setHeaderHover(true)}
+				onMouseLeave={() => setHeaderHover(false)}
+			>
+				{collapsed ? (
+					// Collapsed: a single always-rendered, focusable button toggles
+					// expansion. It shows the brand mark by default and swaps to the
+					// collapse-sidebar icon on hover/focus (same 40×40 box, so no layout
+					// shift). Always mounted — and focus-reveals the icon — so keyboard
+					// and touch users can expand without hovering.
 					<button
-						title="Home"
-						onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}
-						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0 }}
+						title="Expand sidebar"
+						aria-label="Expand sidebar"
+						onClick={toggleCollapse}
+						onFocus={() => setHeaderHover(true)}
+						onBlur={() => setHeaderHover(false)}
+						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, padding: 0 }}
 					>
-						<BxHome size={18} />
+						{headerHover ? <BxDockLeft size={20} /> : <AppSwitcherButton collapsed={collapsed} />}
 					</button>
+				) : (
+					<>
+						<button
+							title="Go to home"
+							aria-label="Go to home"
+							onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' })}
+							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
+							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+							style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
+						>
+							<AppSwitcherButton collapsed={collapsed} />
+						</button>
+						<button
+							title="Collapse sidebar"
+							aria-label="Collapse sidebar"
+							onClick={toggleCollapse}
+							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
+							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
+						>
+							<BxDockLeft size={18} />
+						</button>
+					</>
 				)}
 			</div>
 

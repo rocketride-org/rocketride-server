@@ -12,7 +12,7 @@
  */
 
 import React, { useState } from 'react';
-import onpremIcon from '../../../../assets/onprem.svg';
+import OnPremIcon from '../../../../assets/onprem.svg';
 import { MessageData, settingsStyles as S } from '../../Settings/SettingsWebview';
 import { MessageDisplay } from '../../Settings/MessageDisplay';
 
@@ -46,7 +46,7 @@ export const OnPremPanel: React.FC<OnPremPanelProps> = ({ hostUrl, onHostUrlChan
 	return (
 		<>
 			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-				<img src={onpremIcon} alt="On-prem" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<OnPremIcon role="img" aria-label="On-prem" style={{ width: 48, height: 48, flexShrink: 0 }} />
 				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Connect directly to a RocketRide server using a host address and API key.</div>
 			</div>
 

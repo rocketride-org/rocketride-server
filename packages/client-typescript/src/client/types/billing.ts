@@ -77,42 +77,83 @@ export interface BillingDetail {
 }
 
 /**
- * Stripe plan/price row for a given product, returned by the `prices`
- * subcommand. Used in the checkout plan picker.
+ * Alternative click action for a plan card. Plans without an action
+ * proceed to Stripe checkout. Plans with an action navigate the user
+ * elsewhere (e.g. GitHub repo for free tier, mailto for enterprise).
  */
-export interface StripePlan {
-	/** Stripe price_* identifier. */
-	priceId: string;
+export interface PlanAction {
+	/** ``link`` opens a URL, ``mailto`` opens email compose. */
+	type: 'link' | 'mailto';
 
-	/** Billing interval: "month" or "year". */
-	interval: 'month' | 'year';
+	/** Target URL (for ``link``) or email address (for ``mailto``). */
+	url: string;
 
-	/** Price in USD cents. */
-	unitAmount: number;
+	/** Optional email subject line (only for ``mailto``). */
+	subject?: string;
 
-	/** Human-readable nickname, e.g. "Pro Monthly". */
-	nickname: string;
+	/** Button label shown on the card (e.g. "Get started", "Contact us"). */
+	label: string;
 }
+
+/**
+ * App pricing tier row from the ``app_prices`` table.
+ * Returned by the ``prices`` subcommand. Used in the checkout plan picker.
+ */
+export interface AppPrice {
+	/** Internal price UUID. */
+	id: string;
+
+	/** App identifier. */
+	appId: string;
+
+	/** Stripe price_* identifier. */
+	stripePriceId: string;
+
+	/** Human-readable tier label (e.g. "Starter", "Pro", "3,700 tokens"). */
+	nickname: string;
+
+	/** Price in smallest currency unit (e.g. cents for USD). */
+	amountCents: number;
+
+	/** ISO 4217 currency code. */
+	currency: string;
+
+	/** Billing interval: "month", "year", or "one_time". */
+	interval: 'month' | 'year' | 'one_time' | '';
+
+	/** Full plan metadata from the app manifest (description, action, order, kind, credits, labels, seats, features, etc.). */
+	metadata?: Record<string, any> | null;
+
+	/** Whether the price is active. */
+	isActive: boolean;
+
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
+}
+
+/** @deprecated Use {@link AppPrice} instead. */
+export type StripePlan = AppPrice;
 
 // =============================================================================
 // COMPUTE CREDITS TYPES
 // =============================================================================
 
 /**
- * Multi-resource credit balance for an organisation's wallet.
+ * Net credit balance for an organisation, grouped by resource.
  * Returned by the `credits_balance` subcommand.
  *
- * Each field is a dict keyed by resource type (e.g. ``{ tokens: 4200, video: 80 }``).
+ * Balance is computed from ``SUM(amount) GROUP BY resource`` on the credit
+ * ledger.  Positive = net credit remaining, negative = overspent.
  */
 export interface CreditBalance {
-	/** Current unspent balances per resource type. */
+	/** Net balance per resource type (positive = remaining, negative = overspent). */
 	balances: Record<string, number>;
 
-	/** Total purchased per resource type — useful for ledger display. */
-	lifetimePurchased: Record<string, number>;
+	/** Total credits granted (purchased/credited) per resource. */
+	granted: Record<string, number>;
 
-	/** Total consumed per resource type — useful for ledger display. */
-	lifetimeConsumed: Record<string, number>;
+	/** Total credits consumed (debited) per resource. */
+	consumed: Record<string, number>;
 
 	/**
 	 * Human-readable display templates per resource type, from Stripe price metadata.
@@ -120,6 +161,73 @@ export interface CreditBalance {
 	 * Falls back to the raw resource key when a label is not configured.
 	 */
 	labels: Record<string, string>;
+}
+
+// =============================================================================
+// TRANSACTION TYPES
+// =============================================================================
+
+/**
+ * A single ledger transaction row returned by the `transactions` subcommand.
+ */
+export interface LedgerTransaction {
+	/** Auto-increment row ID. */
+	id: number;
+
+	/** Transaction type: purchase, usage, credit, refund, etc. */
+	type: string;
+
+	/** Resource type (e.g. cpu_utilization, gpu_memory, tokens). */
+	resource: string;
+
+	/** Signed amount: positive for credits, negative for debits. */
+	amount: number;
+
+	/** Namespaced idempotency key (e.g. task:abc123:cpu_utilization, stripe:cs_xxx:tokens). */
+	idempotencyKey: string;
+
+	/** User who triggered the transaction, or null for system events. */
+	userId: string | null;
+
+	/** Team context, or null. */
+	teamId: string | null;
+
+	/** Human-readable context (pipeline name, source, pack_id, etc.). */
+	context: Record<string, any> | null;
+
+	/** Line-item detail (e.g. gpu_memory, cpu_utilization). */
+	description: string | null;
+
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
+}
+
+/**
+ * Paginated result from the `transactions` subcommand.
+ */
+export interface TransactionsResult {
+	/** Transaction rows for the current page. */
+	transactions: LedgerTransaction[];
+
+	/** Total matching rows (for pagination). */
+	total: number;
+
+	/** Current page number (1-based). */
+	page: number;
+
+	/** Rows per page. */
+	pageSize: number;
+}
+
+/**
+ * Per-user or per-team consumption rollup row returned by usage_by_user / usage_by_team.
+ */
+export interface UsageRollup {
+	/** User or team ID (or '__none__' for unattributed). */
+	id: string;
+
+	/** Consumption per resource type (absolute values — always positive). */
+	credits: Record<string, number>;
 }
 
 /**

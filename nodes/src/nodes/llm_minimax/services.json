@@ -1,0 +1,407 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "MiniMax",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_minimax://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["llm"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_minimax",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A component that connects to MiniMax's large language models for advanced ", "natural language processing. It enables capabilities like long-context reasoning, ", "agentic workflows, multi-step tool use, and high-quality conversational generation. ", "MiniMax offers an OpenAI-compatible API with strong performance across reasoning, ", "writing, and coding tasks. The component is suitable for integrating MiniMax models ", "into pipelines where extended context windows and efficient inference are important."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "minimax.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": ["Model: ${parameters.llm_minimax.profile}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["answers"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "minimax-m2",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom Model",
+				"model": "",
+				"modelTotalTokens": 200000,
+				"modelOutputTokens": 8192,
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2": {
+				"title": "MiniMax M2",
+				"model": "MiniMax-M2",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-1": {
+				"title": "MiniMax M2.1",
+				"model": "MiniMax-M2.1",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-1-highspeed": {
+				"title": "MiniMax M2.1 Highspeed",
+				"model": "MiniMax-M2.1-highspeed",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-5": {
+				"title": "MiniMax M2.5",
+				"model": "MiniMax-M2.5",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-5-highspeed": {
+				"title": "MiniMax M2.5 Highspeed",
+				"model": "MiniMax-M2.5-highspeed",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-7": {
+				"title": "MiniMax M2.7",
+				"model": "MiniMax-M2.7",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-7-highspeed": {
+				"title": "MiniMax M2.7 Highspeed",
+				"model": "MiniMax-M2.7-highspeed",
+				"modelSource": "provider",
+				"modelTotalTokens": 204800, // sync_models.config.json
+				"modelOutputTokens": 65536, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			},
+			"minimax-m2-local": {
+				"title": "MiniMax M2 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 8192, // manual
+				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m2-5-local": {
+				"title": "MiniMax M2.5 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2.5",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 8192, // manual
+				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m2-7-local": {
+				"title": "MiniMax M2.7 (Local)",
+				"model": "MiniMaxAI/MiniMax-M2.7",
+				"modelSource": "manual",
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 8192, // manual
+				"serverbase": "http://localhost:8000/v1"
+			},
+			"minimax-m3": {
+				"title": "MiniMax M3",
+				"model": "MiniMax-M3",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // sync_models.config.json
+				"modelOutputTokens": 131072, // sync_models.config.json
+				"serverbase": "https://api.minimax.io/v1",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "MiniMax model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"minimax.serverbase": {
+			"type": "string",
+			"title": "Server base URL",
+			"description": "OpenAI-compatible base URL for the MiniMax endpoint (e.g. https://api.minimax.io/v1 for international, https://api.minimaxi.com/v1 for China).",
+			"default": "https://api.minimax.io/v1"
+		},
+		"minimax.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"minimax.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2": {
+			"object": "minimax-m2",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-1": {
+			"object": "minimax-m2-1",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-1-highspeed": {
+			"object": "minimax-m2-1-highspeed",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-5": {
+			"object": "minimax-m2-5",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-5-highspeed": {
+			"object": "minimax-m2-5-highspeed",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-7": {
+			"object": "minimax-m2-7",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-7-highspeed": {
+			"object": "minimax-m2-7-highspeed",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-local": {
+			"object": "minimax-m2-local",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"minimax.minimax-m2-5-local": {
+			"object": "minimax-m2-5-local",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"minimax.minimax-m2-7-local": {
+			"object": "minimax-m2-7-local",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"minimax.profile": {
+			"title": "Model",
+			"description": "MiniMax LLM model",
+			"type": "string",
+			"default": "minimax-m2",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"minimax.custom"
+					]
+				},
+				{
+					"value": "minimax-m2",
+					"properties": [
+						"minimax.minimax-m2"
+					]
+				},
+				{
+					"value": "minimax-m2-1",
+					"properties": [
+						"minimax.minimax-m2-1"
+					]
+				},
+				{
+					"value": "minimax-m2-1-highspeed",
+					"properties": [
+						"minimax.minimax-m2-1-highspeed"
+					]
+				},
+				{
+					"value": "minimax-m2-5",
+					"properties": [
+						"minimax.minimax-m2-5"
+					]
+				},
+				{
+					"value": "minimax-m2-5-highspeed",
+					"properties": [
+						"minimax.minimax-m2-5-highspeed"
+					]
+				},
+				{
+					"value": "minimax-m2-7",
+					"properties": [
+						"minimax.minimax-m2-7"
+					]
+				},
+				{
+					"value": "minimax-m2-7-highspeed",
+					"properties": [
+						"minimax.minimax-m2-7-highspeed"
+					]
+				},
+				{
+					"value": "minimax-m2-local",
+					"properties": [
+						"minimax.minimax-m2-local"
+					]
+				},
+				{
+					"value": "minimax-m2-5-local",
+					"properties": [
+						"minimax.minimax-m2-5-local"
+					]
+				},
+				{
+					"value": "minimax-m2-7-local",
+					"properties": [
+						"minimax.minimax-m2-7-local"
+					]
+				},
+				{
+					"value": "minimax-m3",
+					"properties": [
+						"minimax.minimax-m3"
+					]
+				}
+			]
+		},
+		"minimax.minimax-m3": {
+			"object": "minimax-m3",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "MiniMax",
+			"properties": ["minimax.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["minimax-m2"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}

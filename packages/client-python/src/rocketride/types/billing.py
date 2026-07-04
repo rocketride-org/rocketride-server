@@ -34,7 +34,7 @@ Types Defined:
     CreditPack: Per-pack pricing row for the credit top-up modal.
 """
 
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 
 # =============================================================================
@@ -58,6 +58,8 @@ class BillingDetail(TypedDict):
         currentPeriodStart: ISO 8601 datetime when the current billing period started, or None.
         currentPeriodEnd: ISO 8601 datetime when the current billing period ends, or None.
         cancelAtPeriodEnd: True when the user has requested cancellation at period end.
+        credits: Credit grants config from Stripe price metadata, or None.
+        creditLabels: Display templates for credit resource types, or None.
     """
 
     appId: str
@@ -70,24 +72,62 @@ class BillingDetail(TypedDict):
     currentPeriodStart: str | None
     currentPeriodEnd: str | None
     cancelAtPeriodEnd: bool
+    credits: dict[str, dict[str, int]] | None
+    creditLabels: dict[str, str] | None
 
 
-class StripePlan(TypedDict):
+class PlanAction(TypedDict):
     """
-    Stripe plan/price row for a given product, returned by the ``prices``
-    subcommand. Used in the checkout plan picker.
+    Alternative click action for a plan card. Plans without an action
+    proceed to Stripe checkout. Plans with an action navigate the user
+    elsewhere (e.g. GitHub repo for free tier, mailto for enterprise).
 
     Attributes:
-        priceId: Stripe price_* identifier.
-        interval: Billing interval: "month" or "year".
-        unitAmount: Price in USD cents.
-        nickname: Human-readable nickname, e.g. "Pro Monthly".
+        type: ``link`` opens a URL, ``mailto`` opens email compose.
+        url: Target URL (for ``link``) or email address (for ``mailto``).
+        subject: Optional email subject line (only for ``mailto``).
+        label: Button label shown on the card (e.g. "Get started", "Contact us").
     """
 
-    priceId: str
-    interval: Literal['month', 'year']
-    unitAmount: int
+    type: Literal['link', 'mailto']
+    url: str
+    subject: NotRequired[str]
+    label: str
+
+
+class AppPrice(TypedDict):
+    """
+    App pricing tier row from the ``app_prices`` table.
+
+    Returned by the ``prices`` subcommand. Used in the checkout plan picker.
+
+    Attributes:
+        id: Internal price UUID.
+        appId: App identifier.
+        stripePriceId: Stripe price_* identifier.
+        nickname: Human-readable tier label (e.g. "Starter", "Pro").
+        amountCents: Price in smallest currency unit (e.g. cents for USD).
+        currency: ISO 4217 currency code.
+        interval: Billing interval: "month", "year", or "one_time".
+        metadata: Full plan metadata (description, action, order, kind, credits, etc.).
+        isActive: Whether the price is active.
+        createdAt: ISO 8601 creation timestamp, or None.
+    """
+
+    id: str
+    appId: str
+    stripePriceId: str
     nickname: str
+    amountCents: int
+    currency: str
+    interval: Literal['month', 'year', 'one_time', '']
+    metadata: NotRequired[dict | None]
+    isActive: bool
+    createdAt: str | None
+
+
+# Backward compatibility alias
+StripePlan = AppPrice
 
 
 # =============================================================================
@@ -97,20 +137,20 @@ class StripePlan(TypedDict):
 
 class CreditBalance(TypedDict):
     """
-    Multi-resource credit balance for an organisation's wallet.
+    Net credit balance for an organisation, grouped by resource.
 
-    Returned by the ``credits_balance`` subcommand. Each field is a dict
-    keyed by resource type (e.g. ``{"tokens": 4200, "video": 80}``).
+    Returned by the ``credits_balance`` subcommand. Balance is computed from
+    ``SUM(amount) GROUP BY resource`` on the credit ledger.
 
     Attributes:
-        balances: Current unspent balances per resource type.
-        lifetimePurchased: Total purchased per resource type.
-        lifetimeConsumed: Total consumed per resource type.
+        balances: Net balance per resource type (positive = remaining, negative = overspent).
+        labels: Human-readable display templates per resource type, from Stripe
+            price metadata. Supports ``{amount}`` substitution. Falls back to
+            the raw resource key when a label is not configured.
     """
 
-    balances: dict[str, int]
-    lifetimePurchased: dict[str, int]
-    lifetimeConsumed: dict[str, int]
+    balances: dict[str, float]
+    labels: dict[str, str]
 
 
 class CreditPack(TypedDict):
@@ -133,3 +173,67 @@ class CreditPack(TypedDict):
     usdCents: int
     credits: int
     nickname: str
+
+
+# =============================================================================
+# TRANSACTION TYPES
+# =============================================================================
+
+
+class LedgerTransaction(TypedDict):
+    """
+    A single ledger transaction row returned by the ``transactions`` subcommand.
+
+    Attributes:
+        id: Auto-increment row ID.
+        type: Transaction type (purchase, usage, credit, refund, etc.).
+        resource: Resource type (e.g. cpu_utilization, gpu_memory, tokens).
+        amount: Signed amount (positive for credits, negative for debits).
+        idempotencyKey: Namespaced dedup key.
+        userId: User who triggered the transaction, or None.
+        teamId: Team context, or None.
+        context: Human-readable audit context, or None.
+        createdAt: ISO 8601 creation timestamp, or None.
+    """
+
+    id: int
+    type: str
+    resource: str
+    amount: float
+    idempotencyKey: str
+    userId: str | None
+    teamId: str | None
+    context: dict | None
+    createdAt: str | None
+
+
+class TransactionsResult(TypedDict):
+    """
+    Paginated result from the ``transactions`` subcommand.
+
+    Attributes:
+        transactions: Transaction rows for the current page.
+        total: Total matching rows (for pagination).
+        page: Current page number (1-based).
+        pageSize: Rows per page.
+    """
+
+    transactions: list[LedgerTransaction]
+    total: int
+    page: int
+    pageSize: int
+
+
+class UsageRollup(TypedDict):
+    """
+    Per-user or per-team consumption rollup row.
+
+    Returned by ``usage_by_user`` / ``usage_by_team`` subcommands.
+
+    Attributes:
+        id: User or team ID (or '__none__' for unattributed).
+        credits: Consumption per resource type (absolute values).
+    """
+
+    id: str
+    credits: dict[str, float]

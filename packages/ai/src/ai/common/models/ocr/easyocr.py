@@ -36,6 +36,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
+from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 from .utils import preprocess_image_transparency, group_words_into_lines
 
@@ -138,6 +139,37 @@ class EasyOCRLoader(BaseLoader):
             logger.error(f'Failed to load EasyOCR: {e}')
             raise Exception(f'Failed to load EasyOCR: {e}')
 
+        # EasyOCR wraps its detector and recognizer in DataParallel, which
+        # scatters every batch across ALL visible GPUs via parallel_apply().
+        # Under concurrent server load this causes CUDA heap corruption and
+        # a FATAL crash (SIGABRT from parallel_apply worker threads). Pin both
+        # sub-models to the single allocated GPU by unwrapping DataParallel.
+        if use_gpu and gpu_index >= 0:
+            target = torch.device(f'cuda:{gpu_index}')
+            for attr in ('detector', 'recognizer'):
+                module = getattr(reader, attr, None)
+                if module is None:
+                    logger.info(f'EasyOCR reader has no {attr} attribute — skipping device pinning')
+                elif isinstance(module, torch.nn.DataParallel):
+                    setattr(reader, attr, module.module.to(target))
+                    logger.debug(f'EasyOCR {attr}: unwrapped DataParallel → cuda:{gpu_index}')
+                else:
+                    if isinstance(module, torch.nn.Module):
+                        setattr(reader, attr, module.to(target))
+                    first_param = (
+                        next(module.parameters(), None) if callable(getattr(module, 'parameters', None)) else None
+                    )
+                    device = first_param.device if first_param is not None else 'unknown'
+                    logger.info(
+                        f'EasyOCR {attr}: not wrapped in DataParallel (type={type(module).__name__}, device={device})'
+                    )
+            # Align reader.device so EasyOCR's internal img.to(self.device) calls
+            # send inputs to the same GPU as the pinned model weights. Without this,
+            # reader.device stays 'cuda' (→ cuda:0) regardless of which GPU was
+            # allocated, causing a device mismatch on any non-0 allocation.
+            reader.device = str(target)
+            logger.debug(f'EasyOCR reader.device aligned to {target}')
+
         model_bundle = {
             'reader': reader,
             'languages': languages,
@@ -227,12 +259,26 @@ class EasyOCRLoader(BaseLoader):
         reader = models['reader']
         images = preprocessed['images']
         dimensions = preprocessed.get('dimensions', [])
+        device = models.get('device', 'cpu')
+
+        # Set the active CUDA device so tensors created inside readtext
+        # (e.g. input preprocessing, workspace buffers) land on the same GPU
+        # as the model weights that were pinned during load.
+        import contextlib
+        from ai.common.torch import torch
+
+        if device.startswith('cuda'):
+            gpu_id = int(device.split(':')[1]) if ':' in device else 0
+            cuda_ctx = torch.cuda.device(gpu_id)
+        else:
+            cuda_ctx = contextlib.nullcontext()
 
         results = []
 
         for idx, img_np in enumerate(images):
             try:
-                raw_results = reader.readtext(img_np)
+                with cuda_ctx:
+                    raw_results = reader.readtext(img_np)
 
                 # Convert EasyOCR format to standard box format
                 boxes = []
@@ -395,14 +441,15 @@ class EasyOCR:
         results = EasyOCRLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
         t_post = (time.perf_counter() - t0) * 1000
 
-        # Report all perf counters — same shape as model server response
+        # Report all perf counters — same keys as model server response
+        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
 

@@ -1,0 +1,180 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Nebius",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_nebius://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["llm"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		Reuses the generic OpenAI-compatible client, this is a branded preset,
+	//		not a separate node (no duplicated Python).
+	//
+	"path": "nodes.llm_openai_api",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description of this driver shown in the pipeline builder
+	//
+	"description": ["Connects to Nebius Token Factory's OpenAI-compatible inference API.", "Hosts open models (Llama, Qwen, DeepSeek) for reasoning, generation, and tool-calling. This is a branded preset of the generic OpenAI-Compatible API node, so it shares the same implementation; the base URL is pinned to Nebius Token Factory."],
+	//
+	// Optional:
+	//		The icon to display in the UI for this node
+	//
+	"icon": "nebius.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//		Rendering hints to the UI which indicate which config fields to surface
+	//		on the node tile
+	//
+	"tile": ["Model: ${parameters.llm_openai_api.profile}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this pipe component takes and produces
+	//
+	"lanes": {
+		"questions": ["answers"]
+	},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		Each preset pins the Nebius Token Factory base_url and a model id, and
+	//		defaults the API key to the ${ROCKETRIDE_NEBIUS_KEY} env substitution
+	//		(no per-node os.environ lookup needed).
+	//
+	"preconfig": {
+		"default": "llama-3-3-70b",
+		"profiles": {
+			"llama-3-3-70b": {
+				"title": "Llama 3.3 70B Instruct",
+				"model": "meta-llama/Llama-3.3-70B-Instruct",
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"modelTotalTokens": 131072,
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			},
+			"qwen3-235b": {
+				"title": "Qwen3 235B",
+				"model": "Qwen/Qwen3-235B-A22B",
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"modelTotalTokens": 131072,
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			},
+			"deepseek-v3": {
+				"title": "DeepSeek V3",
+				"model": "deepseek-ai/DeepSeek-V3",
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"modelTotalTokens": 131072,
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			},
+			"custom": {
+				"model": "",
+				"base_url": "https://api.tokenfactory.nebius.com/v1/",
+				"modelTotalTokens": 131072,
+				"apikey": "${ROCKETRIDE_NEBIUS_KEY}"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the current
+	//		service. Reuse the underlying llm_openai_api config namespace.
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Nebius Token Factory model id (e.g. meta-llama/Llama-3.3-70B-Instruct). Full list: https://tokenfactory.nebius.com/models"
+		},
+		"base_url": {
+			"type": "string",
+			"title": "Base URL",
+			"description": "OpenAI-compatible base URL. Defaults to Nebius Token Factory."
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"openai_api.llama-3-3-70b": {
+			"object": "llama-3-3-70b",
+			"properties": ["llm.cloud.apikey"]
+		},
+		"openai_api.qwen3-235b": {
+			"object": "qwen3-235b",
+			"properties": ["llm.cloud.apikey"]
+		},
+		"openai_api.deepseek-v3": {
+			"object": "deepseek-v3",
+			"properties": ["llm.cloud.apikey"]
+		},
+		"openai_api.custom": {
+			"object": "custom",
+			"properties": ["model", "base_url", "modelTotalTokens", "llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"openai_api.profile": {
+			"title": "Model",
+			"description": "Nebius Token Factory model",
+			"type": "string",
+			"default": "llama-3-3-70b",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "llama-3-3-70b",
+					"properties": ["openai_api.llama-3-3-70b"]
+				},
+				{
+					"value": "qwen3-235b",
+					"properties": ["openai_api.qwen3-235b"]
+				},
+				{
+					"value": "deepseek-v3",
+					"properties": ["openai_api.deepseek-v3"]
+				},
+				{
+					"value": "custom",
+					"properties": ["openai_api.custom"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Nebius",
+			"properties": ["openai_api.profile"]
+		}
+	]
+}

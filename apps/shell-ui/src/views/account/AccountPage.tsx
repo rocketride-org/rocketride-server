@@ -27,7 +27,7 @@
 // and async callbacks down to the host-agnostic AccountView.
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, CSSProperties } from 'react';
 import { AccountView } from 'shared';
 import type {
 	ConnectResult,
@@ -40,7 +40,8 @@ import type {
 	ProfileUpdate,
 	BillingDetail,
 	CreditBalance,
-	CreditPack,
+	TransactionsResult,
+	UsageRollup,
 } from 'rocketride';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../../hooks/useAuthUser';
@@ -95,18 +96,17 @@ const AccountPage: React.FC = () => {
 	const [creditBalance, setCreditBalance] = useState<CreditBalance | null>(
 		(authUser as { credits?: CreditBalance })?.credits ?? null,
 	);
-	const [creditPacks, setCreditPacks] = useState<CreditPack[]>([]);
+	const [allPlans, setAllPlans] = useState<any[]>([]);
+	const [transactions, setTransactions] = useState<TransactionsResult | null>(null);
+	const [usageByUser, setUsageByUser] = useState<UsageRollup[]>([]);
+	const [usageByTeam, setUsageByTeam] = useState<UsageRollup[]>([]);
+	const [dashboardLoading, setDashboardLoading] = useState(false);
 
 	// ── Refresh signal (bumped by shell:accountUpdate) ─────────────────────
 	const [refreshSignal, setRefreshSignal] = useState(0);
 
 	// ── Section load error ──────────────────────────────────────────────────
 	const [sectionError, setSectionError] = useState<string | null>(null);
-
-	// ── Permission flags ────────────────────────────────────────────────────
-
-	/** Whether the current user is an org admin. */
-	const isOrgAdminFlag = authUser?.organizations?.[0]?.permissions?.includes('org.admin') ?? false;
 
 	// Keep profile in sync with server-pushed account updates, bump refresh
 	// signal for env, and bump reload counter to re-fetch the active section
@@ -122,8 +122,8 @@ const AccountPage: React.FC = () => {
 
 	// ── Data loaders ────────────────────────────────────────────────────────
 
-	/** Derives the orgId from the auth user's first organization. */
-	const orgId = authUser?.organizations?.[0]?.id ?? '';
+	/** Derives the orgId from the auth user's organization. */
+	const orgId = authUser?.organization?.id ?? '';
 
 	/** Extracts a human-readable message from a thrown value. */
 	const errMsg = (e: unknown): string => e instanceof Error ? e.message : String(e);
@@ -189,41 +189,102 @@ const AccountPage: React.FC = () => {
 	// ── Load billing data ───────────────────────────────────────────────────
 
 	/** Fetches subscriptions, credit balance, and credit packs in parallel. */
+	/** Fetches all billing data in one shot: subscriptions, balance, plans, transactions, usage. */
 	const loadBilling = useCallback(async () => {
 		if (!client || !isConnected || !orgId) {
 			setBillingLoading(false);
 			return;
 		}
-		setBillingLoading(true);
 		setBillingError(null);
 		try {
-			const [subs, balance, packs] = await Promise.all([
+			const [subs, balance, plans, tx, byUser, byTeam] = await Promise.all([
 				client.billing.getDetails(orgId).catch((err: any) => {
 					setBillingError(err.message ?? 'Failed to load subscriptions');
 					return [] as BillingDetail[];
 				}),
 				client.billing.getCreditBalance(orgId).catch(() => null),
-				client.billing.listCreditPacks().catch(() => [] as CreditPack[]),
+				client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => []),
+				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
+				client.billing.getUsageByUser(orgId).catch(() => [] as UsageRollup[]),
+				client.billing.getUsageByTeam(orgId).catch(() => [] as UsageRollup[]),
 			]);
 			setSubscriptions(subs);
 			setCreditBalance(balance);
-			setCreditPacks(packs);
+			setAllPlans(plans);
+			setTransactions(tx);
+			setUsageByUser(byUser);
+			setUsageByTeam(byTeam);
 		} finally {
 			setBillingLoading(false);
+			setDashboardLoading(false);
 		}
 	}, [client, isConnected, orgId]);
 
-	// ── Load non-env data on section change ─────────────────────────────────
+	/** Fetches just the transactions page (for pagination). */
+	const handleTransactionPage = useCallback(async (page: number) => {
+		if (!client || !orgId) return;
+		const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
+		if (tx) { setTransactions(tx); }
+	}, [client, orgId]);
+
+	/** Purchase a top-up pack by charging the card on file. */
+	const handlePurchaseTopup = useCallback(async (plan: any) => {
+		if (!client || !orgId) throw new Error('Not connected');
+		const result = await client.billing.purchaseTopup(orgId, plan.stripePriceId);
+		if (result.status === 'succeeded') {
+			// Re-fetch billing data to reflect the new balance
+			loadBilling();
+		}
+		return result;
+	}, [client, orgId, loadBilling]);
+
+	/** Upgrade or downgrade an existing subscription to a new plan. */
+	const handleUpgradeSubscription = useCallback(async (appId: string, newPriceId: string) => {
+		if (!client || !orgId) throw new Error('Not connected');
+		await client.billing.upgradeSubscription(orgId, appId, newPriceId);
+		// Re-fetch billing data to reflect the updated subscription
+		loadBilling();
+	}, [client, orgId, loadBilling]);
+
+	// ── Load ALL data upfront on connect (badges, counts, billing) ──────────
 	useEffect(() => {
-		setSectionError(null);
 		if (!isConnected || !client) return;
+		loadProfile();
+		loadKeys();
+		loadOrg();
+		loadMembers();
+		loadTeams();
+		loadBilling();
+	}, [isConnected, client]);
+
+	// ── Subscribe to billing events when billing tab is active ──────────────
+	useEffect(() => {
+		if (!client || !isConnected || section !== 'billing') return;
+		// Subscribe to billing ledger events via the wildcard monitor
+		client.addMonitor({ token: '*' }, ['billing']).catch(() => {});
+		// Listen for billing update events via ConnectionManager and re-fetch
+		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }: any) => {
+			if (event?.event === 'apaext_billing_update') {
+				loadBilling();
+			}
+		});
+		return () => {
+			client.removeMonitor({ token: '*' }, ['billing']).catch(() => {});
+			unsub();
+		};
+	}, [section, client, isConnected]);
+
+	// ── Reload current section on refresh signal ─────────────────────────────
+	useEffect(() => {
+		if (!reloadCounter || !isConnected || !client) return;
+		setSectionError(null);
 		if (section === 'profile') loadProfile();
 		else if (section === 'billing') loadBilling();
 		else if (section === 'api-keys') { loadProfile(); loadKeys(); }
 		else if (section === 'organization') loadOrg();
 		else if (section === 'members') { loadOrg(); loadMembers(); }
 		else if (section === 'teams') { loadOrg(); loadTeams(); }
-	}, [section, isConnected, client, reloadCounter]);
+	}, [reloadCounter]);
 
 	// ── Load team detail when a team is selected or data changes ────────────
 	useEffect(() => {
@@ -245,6 +306,12 @@ const AccountPage: React.FC = () => {
 	const handleSetDefaultTeam = useCallback(async (teamId: string) => {
 		if (!client) return;
 		await client.account.setDefaultTeam(teamId);
+	}, [client]);
+
+	/** Switches the user's active organization. */
+	const handleSetDefaultOrg = useCallback(async (orgId: string) => {
+		if (!client) return;
+		await client.account.setDefaultOrg(orgId);
 	}, [client]);
 
 	/** Deletes the user account. */
@@ -277,7 +344,7 @@ const AccountPage: React.FC = () => {
 	}, [client, loadKeys]);
 
 	/** Sends an invitation to a new organization member. */
-	const handleInviteMember = useCallback(async (params: { email: string; givenName: string; familyName: string; role: string }) => {
+	const handleInviteMember = useCallback(async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => {
 		if (!client || !orgId) return;
 		await client.account.inviteMember(orgId, params);
 		await loadMembers();
@@ -296,6 +363,12 @@ const AccountPage: React.FC = () => {
 		await client.account.removeMember(orgId, userId);
 		await loadMembers();
 	}, [client, orgId, loadMembers]);
+
+	/** Resends the initialization email for a pending member. */
+	const handleResendInvite = useCallback(async (userId: string) => {
+		if (!client || !orgId) return;
+		await client.account.resendInvite(orgId, userId);
+	}, [client, orgId]);
 
 	/** Creates a new team. */
 	const handleCreateTeam = useCallback(async (name: string) => {
@@ -360,17 +433,6 @@ const AccountPage: React.FC = () => {
 		window.open(url, '_blank', 'noopener');
 	}, [client, orgId]);
 
-	/**
-	 * Initiates a credit pack purchase via Stripe hosted checkout.
-	 * @param pack - The credit pack to purchase.
-	 */
-	const handleBuyCredits = useCallback(async (pack: CreditPack) => {
-		if (!client || !orgId) return;
-		const returnUrl = `${window.location.origin}${window.location.pathname}`;
-		const { url } = await client.billing.createCreditCheckout(orgId, pack.packId, returnUrl);
-		window.location.href = url;
-	}, [client, orgId]);
-
 	// ── Environment callbacks ───────────────────────────────────────────────
 
 	/**
@@ -399,6 +461,16 @@ const AccountPage: React.FC = () => {
 		await client.account.setEnv(scope, env, scopeId);
 	}, [client]);
 
+	// ── Memoized lookups ────────────────────────────────────────────────────
+	const memberNames = useMemo(
+		() => Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId])),
+		[members],
+	);
+	const teamNames = useMemo(
+		() => Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id])),
+		[teams],
+	);
+
 	// ── Render ──────────────────────────────────────────────────────────────
 	return (
 		<div style={accountStyles.root}>
@@ -416,17 +488,28 @@ const AccountPage: React.FC = () => {
 			billingLoading={billingLoading}
 			billingError={billingError}
 			creditBalance={creditBalance}
-			creditPacks={creditPacks}
 			apps={appManifest}
 			onCancelSubscription={handleCancelSubscription}
 			onOpenPortal={handleOpenPortal}
-			onBuyCredits={handleBuyCredits}
+			transactions={transactions}
+			usageByUser={usageByUser}
+			usageByTeam={usageByTeam}
+			activeTasks={[]}
+			topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
+			allPlans={allPlans}
+			onPurchaseTopup={handlePurchaseTopup}
+			onUpgradeSubscription={handleUpgradeSubscription}
+			dashboardLoading={dashboardLoading}
+			onTransactionPage={handleTransactionPage}
+			memberNames={memberNames}
+			teamNames={teamNames}
 			section={section}
 			onSectionChange={setSection}
 			activeTeamId={activeTeamId}
 			onActiveTeamIdChange={setActiveTeamId}
 			onSaveProfile={handleSaveProfile}
 			onSetDefaultTeam={handleSetDefaultTeam}
+			onSetDefaultOrg={handleSetDefaultOrg}
 			onLogout={() => logout?.()}
 			onDeleteAccount={handleDeleteAccount}
 			onSaveOrgName={handleSaveOrgName}
@@ -435,6 +518,7 @@ const AccountPage: React.FC = () => {
 			onInviteMember={handleInviteMember}
 			onUpdateMemberRole={handleUpdateMemberRole}
 			onRemoveMember={handleRemoveMember}
+			onResendInvite={handleResendInvite}
 			onCreateTeam={handleCreateTeam}
 			onDeleteTeam={handleDeleteTeam}
 			onAddTeamMember={handleAddTeamMember}

@@ -1,0 +1,113 @@
+# text_output
+
+A RocketRide target node that writes the pipeline's extracted text to an SMB network share, with optional anonymization of classified (sensitive) data.
+
+## What it does
+
+Saves your pipeline's text to networked storage over SMB. Each upstream object becomes a
+`.txt` file, mirroring the source directory layout under the store path. It is the end of
+the line, it consumes the `text` lane and emits nothing.
+
+Uses **smbclient / smbprotocol**: a pure-Python SMB client, so no host SMB mount or
+`smbclient` binary is required on the machine running the engine.
+
+Output is UTF-8, the source file extension is replaced with `.txt`, and target
+subdirectories are created automatically. Empty objects are skipped ("no text extracted"),
+and so are objects unchanged since the last run, so the same file is never rewritten twice.
+
+Optionally, the node can **anonymize PII**: classification hits in the text are replaced
+with a masking character before the file is written.
+
+Requires the `network` capability and is not available in remote (`noremote`) or SaaS
+(`nosaas`) deployments.
+
+---
+
+## Configuration
+
+### Lanes
+
+| Lane in | Description                            |
+| ------- | -------------------------------------- |
+| `text`  | Text content to write to the SMB share |
+
+The node is a pure target (`classType: ["target"]`), it produces no output lanes.
+
+### Fields
+
+| Field           | Type / Default      | Description                                                                                          |
+| --------------- | ------------------- | ---------------------------------------------------------------------------------------------------- |
+| `server`        | string, required    | SMB server hostname or IP address (validated against RFC-1123).                                       |
+| `username`      | string              | SMB user in domain format: `DOMAIN\user`. Required when `password` is set.                            |
+| `password`      | string              | SMB password, max 127 characters. Required when `username` is set.                                    |
+| `storePath`     | string, required    | Share name plus optional subfolders, e.g. `share/folder/subfolder`. 3–256 characters.                  |
+| `anonymize`     | boolean, `false`    | Mask sensitive data in the text before writing. Enabling it reveals the two fields below.             |
+| `anonymizeChar` | string (1 char), `█` | The character used to mask each character of a classification hit. Required when `anonymize` is on.   |
+| `anonymizeAll`  | boolean, `false`    | Collapse every hit to a fixed length instead of masking character-for-character (`SSN: ***` vs `SSN: ***********`). |
+
+### storePath rules
+
+The path must not be rooted, must not contain empty or dot (`.` / `..`) folders, and must
+not contain the characters `<>:"|?*`. The first segment is the share name (1–80
+characters). When the pipeline starts, the node verifies that `//server/share` is
+reachable; missing subfolders under the share are created on first write.
+
+---
+
+## Anonymization
+
+When `anonymize` is enabled, the node injects the classification filter plus an
+`anonymize_text` pipe filter, so classification hits in the incoming text are replaced
+with `anonymizeChar` before the file is written. With `anonymizeAll` enabled, each hit is
+collapsed to a fixed length (3 masking characters) instead of being masked
+character-for-character.
+
+Changing any anonymization setting (the classify policies, `anonymizeChar`, or
+`anonymizeAll`) changes the settings key the node keeps in its key-value store, which
+forces **all** objects to be re-transformed on the next run, not just new and changed ones.
+
+---
+
+## Change detection
+
+The node performs incremental writes. For each object it builds a transform key of the form
+`flags;sourceChangeKey;targetChangeKey`, where the source change key comes from the
+object's change key (or its modify time and size) and the target change key from the
+existing target file's mtime and size (`0;0` when the file does not exist yet). The key is
+stored in the object's instance tags under `text-output://<server>/<storePath>/status`.
+
+On the next run an object is skipped ("object transformed and not changed") when its
+transform key matches the stored one and the anonymization settings have not changed.
+Failed objects record the exception as their completion code instead of writing a file.
+
+---
+
+## Authentication
+
+Authentication is optional, leave `username` and `password` blank for shares that allow
+anonymous/guest access. When credentials are provided, both fields are required and the
+username must use the domain format `DOMAIN\user`. Credentials are registered with the SMB
+client globally at connection time; the connection (and reachability of the share) is
+tested when the action starts, not during configuration validation.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+_No configuration fields._
+
+## Dependencies
+
+- `cffi`
+- `pycparser`
+- `pyspnego`
+- `smbprotocol`
+- `sspilib`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/text_output)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

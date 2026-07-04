@@ -12,7 +12,7 @@
  * the host via callback props.
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import type { ConnectResult, ProfileUpdate } from '../types';
@@ -32,6 +32,8 @@ export interface ProfilePanelProps {
 	onSave: (fields: ProfileUpdate) => Promise<void>;
 	/** Sets the user's preferred default team by its ID. */
 	onSetDefaultTeam: (teamId: string) => void;
+	/** Switches the user's active organization by its ID. */
+	onSetDefaultOrg: (orgId: string) => void;
 	/** Triggers the logout flow. */
 	onLogout: () => void;
 	/** Async handler that permanently deletes the user account. */
@@ -72,7 +74,7 @@ const VerifiedBadge: React.FC = () => (
  * a list of their organizations and team memberships with a "Set default"
  * action per team, a Sign Out button, and an inline Edit Profile modal.
  */
-export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onLogout, onDeleteAccount }) => {
+export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onSetDefaultOrg, onLogout, onDeleteAccount }) => {
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
 	 * Called both on mount and whenever the underlying data changes, so the
@@ -88,13 +90,13 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 		locale: profile?.locale || authUser?.locale || '',
 	});
 
-	const [editOpen, setEditOpen] = React.useState(false);
-	const [fields, setFields] = React.useState<ProfileUpdate>(fromProfile);
-	const [saving, setSaving] = React.useState(false);
-	const [error, setError] = React.useState<string | null>(null);
+	const [editOpen, setEditOpen] = useState(false);
+	const [fields, setFields] = useState<ProfileUpdate>(fromProfile);
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
 
 	// Re-sync form fields when the server profile or auth user data is refreshed.
-	React.useEffect(() => {
+	useEffect(() => {
 		setFields(fromProfile());
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [profile?.displayName, profile?.email, authUser?.email]);
@@ -134,7 +136,9 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 	// Prefer the server-side profile value over the cached auth token value.
 	const displayName = profile?.displayName || authUser?.displayName || '\u2014';
 	const email = profile?.email || authUser?.email || '';
-	const orgs = profile?.organizations ?? authUser?.organizations ?? [];
+	const org = profile?.organization ?? authUser?.organization ?? null;
+	const memberships = profile?.memberships ?? (org ? [org] : []);
+	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
 
 	return (
 		<section>
@@ -170,50 +174,62 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 				</div>
 			</div>
 
-			{orgs.length > 0 && (
+			{memberships.length > 0 && (
 				<div style={{ ...commonStyles.card, marginBottom: 14 }}>
 					<div style={commonStyles.cardHeader}>
 						<span style={commonStyles.labelUppercase}>Organizations / Workspaces</span>
 					</div>
 					<div style={S.rowList}>
-						{orgs.map((o, oi) => (
-							<React.Fragment key={o.id}>
-								{/* Org row */}
-								<div style={{ ...S.rowItem, borderBottom: 'none' }}>
-									<Avatar name={o.name} size={24} square />
-									<div style={S.rowInfo}>
-										<div style={S.rowName}>{o.name}</div>
-									</div>
-									{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
-								</div>
-								{/* Teams sub-header */}
-								{o.teams.length > 0 && (
-									<div style={{ paddingLeft: 40, paddingTop: 4, paddingBottom: 4 }}>
-										<span style={{ ...commonStyles.labelUppercase, fontSize: 9 }}>Teams</span>
-									</div>
-								)}
-								{/* Team rows — indented under the org */}
-								{o.teams.map((t, i) => {
-									const isDefault = authUser?.defaultTeam === t.id;
-									const isLast = i === o.teams.length - 1;
-									return (
-										<div key={t.id} style={{ ...S.rowItem, paddingLeft: 40, paddingRight: 60, paddingTop: 2, paddingBottom: isLast ? 12 : 2, borderBottom: isLast && oi < orgs.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
-											<div style={{ width: 20, height: 20, borderRadius: 5, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
-											<div style={S.rowInfo}>
-												<div style={S.rowName}>{t.name}</div>
-											</div>
-											{isDefault ? (
-												<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Default</span>
-											) : (
-												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
-													Set default
-												</button>
-											)}
+						{memberships.map((o, oi) => {
+							const isActive = o.id === defaultOrgId;
+							const inactiveOpacity = isActive ? 1 : 0.45;
+							return (
+								<React.Fragment key={o.id}>
+									{/* Org row */}
+									<div style={{ ...S.rowItem, borderBottom: 'none', opacity: inactiveOpacity }}>
+										<Avatar name={o.name} size={24} square />
+										<div style={S.rowInfo}>
+											<div style={S.rowName}>{o.name}</div>
 										</div>
-									);
-								})}
-							</React.Fragment>
-						))}
+										{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
+										{isActive ? (
+											<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Active</span>
+										) : (
+											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton, opacity: 1 } as CSSProperties} onClick={() => onSetDefaultOrg(o.id)}>
+												Switch to
+											</button>
+										)}
+									</div>
+									{/* Teams — only shown for the active org */}
+									{isActive && o.teams.length > 0 && (
+										<>
+											<div style={{ paddingLeft: 40, paddingTop: 4, paddingBottom: 4 }}>
+												<span style={{ ...commonStyles.labelUppercase, fontSize: 9 }}>Teams</span>
+											</div>
+											{o.teams.map((t, i) => {
+												const isDefaultTeam = authUser?.defaultTeam === t.id;
+												const isLast = i === o.teams.length - 1;
+												return (
+													<div key={t.id} style={{ ...S.rowItem, paddingLeft: 40, paddingRight: 60, paddingTop: 2, paddingBottom: isLast ? 12 : 2, borderBottom: isLast && oi < memberships.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
+														<div style={{ width: 20, height: 20, borderRadius: 5, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
+														<div style={S.rowInfo}>
+															<div style={S.rowName}>{t.name}</div>
+														</div>
+														{isDefaultTeam ? (
+															<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Default</span>
+														) : (
+															<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
+																Set default
+															</button>
+														)}
+													</div>
+												);
+											})}
+										</>
+									)}
+								</React.Fragment>
+							);
+						})}
 					</div>
 				</div>
 			)}

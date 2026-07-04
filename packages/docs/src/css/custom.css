@@ -1,0 +1,813 @@
+/**
+ * RocketRide documentation theme.
+ *
+ * Primary accent: Horizon Blue (#41b6e6). Imperial Indigo (#370b7a) lights the
+ * ambient background glow; Night Amethyst (#5f2167) tints highlights and text
+ * selection. RocketRide red (#F93822) is reserved for the logo. Layout models the
+ * Devdocs X reference: a floating, rounded Graphite panel on a deep Abyss
+ * background. Dark is the default; light mode mirrors the surfaces.
+ */
+
+:root {
+	/* Brand tokens */
+	--rr-red: #f93822;
+	--rr-offwhite: #fafbf8;
+	--rr-abyss: #1e1a34;
+	--rr-graphite: #222223;
+	--rr-amethyst: #5f2167;
+	--rr-indigo: #370b7a;
+	--rr-horizon: #41b6e6;
+
+	/* On-surface accent ramp. The saturated brand hexes read well on white, so
+	 * light mode uses them directly (Horizon darkened to match --ifm-color-primary);
+	 * dark mode lightens indigo/amethyst so they stay legible on the Abyss field. */
+	--rr-accent-horizon: #1f9fd0;
+	--rr-accent-indigo: #370b7a;
+	--rr-accent-amethyst: #5f2167;
+
+	--ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	--ifm-heading-font-family: var(--ifm-font-family-base);
+	--ifm-code-font-size: 92%;
+
+	/* Light mode: Horizon darkened for contrast on white */
+	--ifm-color-primary: #1f9fd0;
+	--ifm-color-primary-dark: #1c8ebb;
+	--ifm-color-primary-darker: #1a86b1;
+	--ifm-color-primary-darkest: #156e92;
+	--ifm-color-primary-light: #34a8d6;
+	--ifm-color-primary-lighter: #41aed8;
+	--ifm-color-primary-lightest: #67c0e1;
+
+	--rr-outer-bg: linear-gradient(135deg, #eef1f6 0%, #e6ebf3 100%);
+	--ifm-background-color: #ffffff;
+	--ifm-background-surface-color: #f5f7fb;
+	--rr-panel-border: rgba(30, 26, 52, 0.08);
+	--ifm-toc-border-color: transparent;
+
+	/* Private surface token. Infima forces --ifm-background-color via a
+	 * build-injected :root:not(#\#):not(#\#) rule (specificity 2,0,1) that our
+	 * plain :root/[data-theme] can't beat — so navbar/footer/panel paint from
+	 * this --rr-* var, which nothing else competes for. */
+	--rr-surface: #ffffff;
+
+	--docusaurus-highlighted-code-line-bg: rgba(95, 33, 103, 0.1);
+}
+
+[data-theme='dark'] {
+	/* Horizon Blue accent ramp */
+	--ifm-color-primary: #41b6e6;
+	--ifm-color-primary-dark: #2aa9de;
+	--ifm-color-primary-darker: #1f9fd0;
+	--ifm-color-primary-darkest: #1982ac;
+	--ifm-color-primary-light: #5cc0ea;
+	--ifm-color-primary-lighter: #6ac6ec;
+	--ifm-color-primary-lightest: #8fd4f1;
+
+	/* Indigo glow fading into the Abyss field; Graphite panel floats on top. */
+	--rr-outer-bg: radial-gradient(1200px 600px at 50% -10%, var(--rr-indigo) 0%, var(--rr-abyss) 55%, var(--rr-abyss) 100%);
+	--ifm-background-color: var(--rr-abyss);
+	--ifm-background-surface-color: var(--rr-abyss);
+	--rr-panel-border: rgba(255, 255, 255, 0.07);
+
+	--ifm-font-color-base: #e7e6f0;
+	--ifm-heading-color: var(--rr-offwhite);
+	--rr-surface: var(--rr-graphite);
+	--ifm-menu-color: rgba(250, 251, 248, 0.72);
+	--ifm-menu-color-background-hover: rgba(255, 255, 255, 0.05);
+	--ifm-toc-border-color: transparent;
+	--ifm-hr-background-color: rgba(255, 255, 255, 0.08);
+
+	--docusaurus-highlighted-code-line-bg: rgba(95, 33, 103, 0.28);
+
+	/* Lightened accents so indigo/amethyst read on the dark Abyss field. */
+	--rr-accent-horizon: #41b6e6;
+	--rr-accent-indigo: #9d86f0; /* periwinkle */
+	--rr-accent-amethyst: #c77ad6; /* orchid */
+}
+
+/* Infima ships the surface tokens via build-injected :root:not(#\#):not(#\#) and
+ * html[data-theme=dark]:not(#\#):not(#\#) rules (specificity 2,0,1 / 2,1,1) that a
+ * plain :root/[data-theme] can't beat — leaving secondary chrome (cards, dropdowns,
+ * table headers, mobile sidebar, search modal) on Infima's off-palette #1b1b1d /
+ * #242526. Match the hack (and the `html` prefix for dark) to force them on-palette. */
+:root:not(#\#):not(#\#) {
+	--ifm-background-color: #ffffff;
+	--ifm-background-surface-color: #f5f7fb;
+	/* Infima build-injects --ifm-heading-font-weight: var(--ifm-font-weight-bold)
+	 * at (2,0,1), beating our plain :root — match the hack so headings render at
+	 * the intended 500. */
+	--ifm-heading-font-weight: 500;
+	/* Infima also boosts its .navbar/.footer element rules to (2,1,0), so they
+	 * win over class overrides — feed their tokens the surface color instead, so
+	 * navbar and footer paint identically. */
+	--ifm-navbar-background-color: var(--rr-surface);
+	--ifm-footer-background-color: var(--rr-surface);
+	/* Imperial Indigo links on the light surfaces; Horizon Blue in dark (below). */
+	--ifm-link-color: var(--rr-indigo);
+	/* Active sidebar item follows the link color, not the primary ramp; no
+	 * background fill (Infima's default is a grey hover-overlay). */
+	--ifm-menu-color-active: var(--ifm-link-color);
+	--ifm-menu-color-background-active: transparent;
+}
+
+html[data-theme='dark']:not(#\#):not(#\#) {
+	--ifm-background-color: var(--rr-abyss);
+	--ifm-background-surface-color: var(--rr-abyss);
+	--ifm-navbar-background-color: var(--rr-surface);
+	--ifm-footer-background-color: var(--rr-surface);
+	--ifm-link-color: var(--rr-horizon);
+}
+
+/* ----------------------------------------------------------------------------
+ * MAINTENANCE: Infima specificity coupling (read before upgrading Docusaurus)
+ * ----------------------------------------------------------------------------
+ * Infima ships several of its component color/decoration rules with a build-
+ * injected `:not(#\#):not(#\#)` hack (specificity 2,0,1 for token blocks, 0,1,2
+ * for component rules). To win, the overrides below MATCH that hack rather than
+ * relying on source order alone. This couples them to Infima's current selector
+ * shape: if a Docusaurus/Infima upgrade changes that shape, these stop winning
+ * with NO build error and the styling silently reverts.
+ *
+ * Where Infima reads a CSS variable we override the variable instead (the :root
+ * token blocks above) — that survives specificity changes. The selector fights
+ * below are only for properties Infima hard-codes (e.g. `--ifm-color-primary`
+ * literals for active/hover, custom RocketRide classes with no Infima var).
+ *
+ * Docusaurus is pinned EXACT (`3.8.1`) in package.json to prevent silent drift.
+ * AFTER ANY @docusaurus/* bump, manually re-check these in light AND dark mode:
+ *   - navbar "Home" link + brand-title hover tint
+ *   - breadcrumb active (current page) crumb color
+ *   - right TOC "on this page": resting = body text, active = link color + bold
+ *   - home/quickstart side cards: no underline on hover; accent border
+ *   - quickstart CTA button background
+ *   - no doubled page title (see the .rr-doc-header rule below)
+ * If any reverts, the Infima selector specificity changed; re-match the hack.
+ * ------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------------
+ * Floating rounded panel on a deep background (Devdocs X look)
+ * ------------------------------------------------------------------------- */
+html,
+body {
+	background: var(--rr-outer-bg);
+	background-attachment: fixed;
+}
+
+::selection {
+	background: rgba(95, 33, 103, 0.4); /* Night Amethyst (dark mode) */
+}
+
+[data-theme='light'] ::selection {
+	background: rgba(65, 182, 230, 0.4); /* Horizon Blue — matches dark-mode text accent */
+}
+
+#__docusaurus {
+	max-width: none;
+	margin: 0;
+	min-height: 100vh;
+	background: var(--rr-surface);
+	border: none;
+	border-radius: 0;
+	overflow: clip;
+}
+
+/* Navbar sits inside the panel (sticky can't work under overflow: clip). */
+.navbar {
+	position: static;
+	box-shadow: none;
+	border-bottom: none;
+	background: var(--rr-surface);
+	backdrop-filter: none;
+	/* No hide/reveal-on-scroll animation. */
+	transform: none !important;
+	transition: none !important;
+}
+
+.navbar__logo {
+	height: 1.75rem;
+}
+
+/* Home link colored like content links (Infima boosts .navbar__link to (2,1,0),
+ * so match the hack to win). */
+.navbar__link--colored:not(#\#):not(#\#),
+.navbar__link--colored:not(#\#):not(#\#):hover {
+	color: var(--ifm-link-color);
+}
+
+/* GitHub link with live star count (custom-githubStars navbar item). */
+.github-stars {
+	display: inline-flex;
+	align-items: center;
+}
+
+.github-stars__count {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	font-variant-numeric: tabular-nums;
+	font-size: 0.8rem;
+	font-weight: 600;
+	line-height: 1;
+	padding: 0.25rem 0.55rem;
+	border-radius: 999px;
+	border: 1px solid var(--rr-panel-border);
+	background: var(--ifm-color-emphasis-200);
+	color: var(--ifm-font-color-base);
+}
+
+.github-stars__icon {
+	width: 0.95rem;
+	height: 0.95rem;
+	flex-shrink: 0;
+	color: var(--ifm-font-color-base);
+}
+
+/* Discord link (custom-discord navbar item), icon only, next to GitHub. */
+.navbar-discord {
+	display: inline-flex;
+	align-items: center;
+}
+
+.navbar-discord__icon {
+	width: 1.1rem;
+	height: 1.1rem;
+	flex-shrink: 0;
+	color: var(--ifm-font-color-base);
+	transition: color 0.15s ease;
+}
+
+.navbar-discord:hover .navbar-discord__icon {
+	color: var(--ifm-link-hover-color);
+}
+
+/* Search box themed to the brand (local search uses Infima's .navbar__search-input;
+   background-color, not background, so Infima's search-glyph image is preserved). */
+.navbar__search-input {
+	background-color: var(--ifm-color-emphasis-100);
+	border: 1px solid var(--rr-panel-border);
+	border-radius: 999px;
+	color: var(--ifm-font-color-base);
+	transition:
+		border-color 0.15s ease,
+		box-shadow 0.15s ease,
+		background-color 0.15s ease;
+}
+
+.navbar__search-input::placeholder {
+	color: var(--ifm-color-emphasis-600);
+}
+
+.navbar__search-input:focus {
+	outline: none;
+	border-color: var(--ifm-color-primary);
+	box-shadow: 0 0 0 3px rgba(65, 182, 230, 0.25);
+}
+
+/* ----------------------------------------------------------------------------
+ * Sidebar
+ * ------------------------------------------------------------------------- */
+.menu {
+	padding: 1rem 0.75rem;
+	font-size: 0.92rem;
+}
+
+.menu__link {
+	border-radius: 8px;
+}
+
+.menu__link--active:not(.menu__link--sublist) {
+	color: var(--ifm-link-color);
+	font-weight: 600;
+}
+
+.theme-doc-sidebar-container {
+	border-right: none !important;
+}
+
+/* Breadcrumbs: the active (current-page) crumb follows the link color
+ * (Imperial Indigo in light, Horizon Blue in dark) like the active sidebar
+ * item, instead of Infima's primary ramp + grey background fill. Match the
+ * #\# specificity hack so we beat Infima's (and its build-injected) rules. */
+.breadcrumbs__item--active .breadcrumbs__link:not(#\#):not(#\#) {
+	color: var(--ifm-link-color);
+	background: transparent;
+	font-weight: 600;
+}
+
+/* No divider between the right table-of-contents and the content. */
+.theme-doc-toc-desktop,
+.table-of-contents {
+	border-left: none !important;
+}
+
+/* Breadcrumb row with a right-aligned "View source" action (node pages).
+ * The stock breadcrumbs keep their own bottom margin; move it to the row so
+ * the link stays vertically centered against the crumbs. */
+.rr-breadcrumbs-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 0.8rem;
+}
+
+.rr-breadcrumbs-row .theme-doc-breadcrumbs {
+	margin-bottom: 0 !important;
+}
+
+.rr-view-source {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.85rem;
+	font-weight: 500;
+	white-space: nowrap;
+	color: var(--ifm-color-emphasis-600);
+}
+
+.rr-view-source:hover {
+	color: var(--ifm-link-color);
+	text-decoration: none;
+}
+
+/* Right "on this page" nav: only the current-section (active) link takes the
+ * theme link color (Imperial Indigo light / Horizon Blue dark) + bold; every
+ * other link is plain body text (black light / white dark), not Infima's grey
+ * resting color or primary-blue active ramp. Infima injects its TOC color rules
+ * with the :not(#\#):not(#\#) hack (specificity 0,1,2), so a plain
+ * .table-of-contents__link (0,1,0) loses; match the hack to tie on specificity
+ * and win by source order. */
+.table-of-contents__link:not(#\#):not(#\#),
+.table-of-contents__link:not(#\#):not(#\#) code {
+	color: var(--ifm-font-color-base);
+}
+
+.table-of-contents__link:hover:not(#\#):not(#\#),
+.table-of-contents__link:hover:not(#\#):not(#\#) code,
+.table-of-contents__link--active:not(#\#):not(#\#),
+.table-of-contents__link--active:not(#\#):not(#\#) code {
+	color: var(--ifm-link-color);
+}
+
+.table-of-contents__link--active {
+	font-weight: 600;
+}
+
+/* ----------------------------------------------------------------------------
+ * Content: cards, callouts, tables, code
+ * ------------------------------------------------------------------------- */
+.theme-admonition {
+	border-radius: 12px;
+	border: 1px solid var(--rr-panel-border);
+}
+
+.markdown table {
+	display: block;
+	width: max-content;
+	max-width: 100%;
+	border-radius: 12px;
+	overflow: hidden;
+	border: 1px solid var(--rr-panel-border);
+}
+
+.markdown table thead {
+	background: var(--ifm-background-surface-color);
+}
+
+div[class^='codeBlockContainer'],
+.theme-code-block {
+	border-radius: 12px;
+	border: 1px solid var(--rr-panel-border);
+}
+
+article a {
+	font-weight: 500;
+}
+
+/* react-icons used in place of emoji. Card heading icons tint with the accent;
+ * inline icons size to the surrounding text. */
+.rr-card-icon {
+	width: 1.2em;
+	height: 1.2em;
+	vertical-align: -0.2em;
+	margin-right: 0.45rem;
+	color: var(--ifm-link-color);
+}
+
+.rr-inline-icon {
+	width: 1em;
+	height: 1em;
+	vertical-align: -0.15em;
+}
+
+/* Home left column: lift the section heading to the hero h1 size and enlarge
+ * the summary paragraphs to fill the space above the feature trio. */
+.rr-hero-summary h2 {
+	font-size: var(--ifm-h1-font-size);
+	line-height: 1.15;
+}
+
+.rr-hero-summary p {
+	font-size: 1.2rem;
+	line-height: 1.7;
+}
+
+/* SDK shortcut icons under the home-page header (Python / TypeScript). */
+.rr-sdk-icons {
+	display: flex;
+	gap: 1rem;
+	align-items: center;
+	margin: 0.5rem 0 1.75rem;
+}
+
+/* Brand-colored logos (set inline per icon); only lift on hover, never recolor. */
+.rr-sdk-icons a {
+	display: inline-flex;
+	transition: transform 0.15s ease;
+}
+
+.rr-sdk-icons a:hover {
+	transform: translateY(-2px);
+}
+
+.rr-sdk-icons svg {
+	width: 2.25rem;
+	height: 2.25rem;
+}
+
+/* Home Quickstart CTA: paint from the link color (indigo light / horizon dark)
+ * like the home icons, not Infima's primary ramp. The #\# hack beats Infima's
+ * .button--primary background rule. */
+.rr-quickstart-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	overflow: hidden;
+}
+
+.rr-quickstart-btn:not(#\#):not(#\#),
+.rr-quickstart-btn:not(#\#):not(#\#):hover {
+	background: linear-gradient(135deg, var(--rr-horizon) 0%, var(--rr-amethyst) 100%);
+	background-color: var(--rr-amethyst);
+	background-clip: padding-box;
+	border: 0;
+	color: #fff;
+}
+
+.rr-quickstart-btn:not(#\#):not(#\#):hover {
+	filter: brightness(1.12);
+}
+
+.rr-quickstart-btn__icon {
+	width: 1.15em;
+	height: 1.15em;
+	position: relative;
+	top: 0.15em;
+}
+
+/* Never underline the side-card links. Infima's `a:hover:not(#\#):not(#\#)`
+ * has specificity (2,0,1); match its double `:not(#\#)` to reach (2,2,0) so we
+ * win on the anchor itself. Killing it on the <a> stops the underline from
+ * propagating to the inner title/body/code spans (a descendant text-decoration
+ * cannot remove a line drawn by an ancestor). */
+.rr-side-card:not(#\#):not(#\#),
+.rr-side-card:not(#\#):not(#\#):hover {
+	text-decoration: none;
+}
+
+/* Home: right-column guide cards (bordered, stacked beside the summary). Each
+ * card cycles a palette accent (Horizon -> Indigo -> Amethyst) via --card-accent
+ * so the stack isn't uniformly blue; the icon and hover border follow it. */
+.rr-side-card {
+	display: block;
+	padding: 1.1rem 1.35rem;
+	border: 1px solid var(--rr-panel-border);
+	border-radius: 12px;
+	margin-bottom: 1rem;
+	color: inherit;
+	transition:
+		border-color 0.15s ease,
+		transform 0.15s ease;
+}
+
+.rr-side-card:nth-child(3n + 1) {
+	--card-accent: var(--rr-accent-horizon);
+}
+
+.rr-side-card:nth-child(3n + 2) {
+	--card-accent: var(--rr-accent-indigo);
+}
+
+.rr-side-card:nth-child(3n + 3) {
+	--card-accent: var(--rr-accent-amethyst);
+}
+
+.rr-side-card .rr-card-icon {
+	color: var(--card-accent);
+}
+
+.rr-side-card:hover {
+	border-color: var(--card-accent);
+	transform: translateY(-2px);
+	text-decoration: none;
+	color: inherit;
+}
+
+.rr-side-card__head {
+	display: flex;
+	align-items: center;
+	gap: 0.55rem;
+	margin-bottom: 0.35rem;
+}
+
+.rr-side-card__title {
+	font-size: 1.15rem;
+	font-weight: 650;
+	color: var(--ifm-heading-color);
+}
+
+.rr-side-card__body {
+	display: block;
+	font-size: 0.92rem;
+	line-height: 1.5;
+	color: var(--ifm-color-emphasis-700);
+}
+
+/* Quickstart: hub of linked cards in a responsive 2-column grid. Reuses the
+ * .rr-side-card styling; the grid owns the spacing so the cards' own
+ * margin-bottom is dropped here. Accent cycling still works because the cards
+ * are direct children of the grid. */
+.rr-card-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 1rem;
+	margin: 1.75rem 0;
+}
+
+.rr-card-grid .rr-side-card {
+	margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+	.rr-card-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+/* Home: bottom feature trio (centered icon + title + blurb). */
+.rr-features {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 2.5rem;
+	margin: 4rem 0 1.5rem;
+}
+
+.rr-feature {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+	color: inherit;
+}
+
+/* Each card's icon takes a distinct palette accent so the trio isn't all-blue.
+ * The body keyword stays a normal link (--ifm-link-color), per "like our links". */
+.rr-feature:nth-child(1) {
+	--card-accent: var(--rr-accent-horizon);
+}
+
+.rr-feature:nth-child(2) {
+	--card-accent: var(--rr-accent-indigo);
+}
+
+.rr-feature:nth-child(3) {
+	--card-accent: var(--rr-accent-amethyst);
+}
+
+.rr-feature svg {
+	width: 2rem;
+	height: 2rem;
+	margin-bottom: 0.7rem;
+	color: var(--card-accent);
+}
+
+.rr-feature__body a {
+	text-decoration: underline;
+}
+
+.rr-feature__title {
+	font-size: 1.1rem;
+	font-weight: 650;
+	margin-bottom: 0.4rem;
+	color: var(--ifm-heading-color);
+}
+
+.rr-feature__body {
+	font-size: 0.9rem;
+	line-height: 1.5;
+	color: var(--ifm-color-emphasis-700);
+}
+
+@media (max-width: 768px) {
+	.rr-features {
+		grid-template-columns: 1fr;
+		gap: 2rem;
+	}
+}
+
+/* ----------------------------------------------------------------------------
+ * Secondary palette accents in body chrome. Horizon stays the primary link/CTA
+ * color and Docusaurus admonition semantics (note/tip/warning/danger) are left
+ * alone; these surface Amethyst + Indigo so the page isn't uniformly blue.
+ * ------------------------------------------------------------------------- */
+.markdown blockquote {
+	border-left: 3px solid var(--rr-accent-amethyst);
+	background: rgba(95, 33, 103, 0.06);
+}
+
+[data-theme='dark'] .markdown blockquote {
+	background: rgba(199, 122, 214, 0.08);
+}
+
+/* Section divider: a thin Indigo -> Horizon gradient instead of a flat line. */
+.markdown hr {
+	height: 2px;
+	border: 0;
+	background: linear-gradient(90deg, var(--rr-accent-indigo), var(--rr-accent-horizon));
+}
+
+/* ----------------------------------------------------------------------------
+ * Footer (Devdocs X layout: brand block + link columns + copyright bar)
+ * ------------------------------------------------------------------------- */
+.footer.rr-footer {
+	background-color: var(--rr-surface);
+	border-top: 1px solid var(--rr-panel-border);
+	padding: 3rem 2rem 0;
+}
+
+.rr-footer__inner {
+	display: grid;
+	grid-template-columns: minmax(220px, 1fr) 2fr;
+	gap: 3rem;
+	max-width: 1100px;
+	margin: 0 auto;
+	padding-bottom: 2.5rem;
+}
+
+.rr-footer__logo {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 1.25rem;
+	font-weight: 700;
+	color: var(--ifm-heading-color);
+}
+
+.rr-footer__logo:hover {
+	text-decoration: none;
+	color: var(--ifm-heading-color);
+}
+
+.rr-footer__tagline {
+	margin: 1rem 0 1.25rem;
+	font-size: 0.9rem;
+	line-height: 1.55;
+	color: var(--ifm-color-emphasis-600);
+	max-width: 22rem;
+}
+
+.rr-footer__socials {
+	display: flex;
+	gap: 0.6rem;
+}
+
+.rr-footer__social {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2rem;
+	height: 2rem;
+	border-radius: 50%;
+	border: 1px solid var(--rr-panel-border);
+	color: var(--ifm-color-emphasis-700);
+	transition:
+		color 0.15s ease,
+		border-color 0.15s ease;
+}
+
+.rr-footer__social:hover {
+	color: var(--ifm-color-primary);
+	border-color: var(--ifm-color-primary);
+}
+
+.rr-footer__columns {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 2rem;
+}
+
+.rr-footer__title {
+	font-size: 0.95rem;
+	font-weight: 650;
+	margin-bottom: 1rem;
+	color: var(--ifm-heading-color);
+}
+
+.rr-footer__list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.65rem;
+}
+
+.rr-footer__link {
+	font-size: 0.88rem;
+	color: var(--ifm-color-emphasis-600);
+}
+
+.rr-footer__link:hover {
+	color: var(--ifm-color-primary);
+	text-decoration: none;
+}
+
+.rr-footer__bottom {
+	border-top: 1px solid var(--rr-panel-border);
+	padding: 1.25rem 0;
+	text-align: center;
+	font-size: 0.82rem;
+	color: var(--ifm-color-emphasis-500);
+}
+
+@media (max-width: 768px) {
+	.rr-footer__inner {
+		grid-template-columns: 1fr;
+		gap: 2rem;
+	}
+
+	.rr-footer__columns {
+		grid-template-columns: repeat(2, 1fr);
+	}
+}
+
+/* ----------------------------------------------------------------------------
+ * Copy / View as Markdown controls (DocItem swizzle)
+ * ------------------------------------------------------------------------- */
+/* Custom doc header (DocItem/Content swizzle): title with the markdown
+ * controls directly beneath it. The body's duplicate leading h1 is hidden. */
+.rr-doc-header {
+	margin-bottom: 1.5rem;
+}
+
+/* CommonMark (.md) wraps the body's leading `# Title` in its own <header>,
+ * while .mdx emits a bare <h1>; hide either so it never duplicates the
+ * custom header's title.
+ * LIMITATION: the adjacent-sibling (`+`) selector only matches when the body's
+ * leading heading is the IMMEDIATE next sibling of .rr-doc-header. A page that
+ * opens with an admonition or imported component before its first H1 will not
+ * match, so its title can render doubled. This is belt-and-suspenders alongside
+ * the site-wide `<head><title>` strip; if you see a doubled title, a
+ * non-adjacent body H1 is the likely cause. */
+.rr-doc-header + h1,
+.rr-doc-header + header {
+	display: none;
+}
+
+.docs-md-actions {
+	display: flex;
+	gap: 0.5rem;
+	margin: 0.75rem 0 0;
+}
+
+.docs-md-actions .button {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.docs-md-actions__icon {
+	width: 1em;
+	height: 1em;
+}
+
+.docs-md-actions .button {
+	--ifm-button-border-color: var(--ifm-color-primary);
+	border-color: var(--ifm-color-primary);
+	color: var(--ifm-color-primary);
+	background: transparent;
+}
+
+.docs-md-actions .button:hover {
+	background: var(--ifm-color-primary);
+	color: #fff;
+}
+
+/* ----------------------------------------------------------------------------
+ * Prev / Next pagination buttons: border takes the theme link color on hover
+ * (not Infima's default primary blue). Border only; labels are unchanged. Match
+ * the :not(#\#):not(#\#) hack to win against Infima's component-rule specificity.
+ * ------------------------------------------------------------------------- */
+.pagination-nav__link:hover:not(#\#):not(#\#) {
+	border-color: var(--ifm-link-color);
+}

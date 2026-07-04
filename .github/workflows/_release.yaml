@@ -191,8 +191,22 @@ jobs:
 
       - name: Publish to npm
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
+        env:
+          VERSION: ${{ matrix.version }}
         run: |
-          VERSION="${{ matrix.version }}"
+          # OIDC trusted publishing — no NPM_TOKEN. Auth uses this job's
+          # id-token (already granted for --provenance). Requires npm >= 11.5.1;
+          # Node 20 ships npm 10.x, so upgrade in place. The trusted publisher
+          # must be configured on npmjs.com against the CALLER workflow
+          # (release.yaml) + environment "release" — not this reusable child.
+          npm install -g npm@11.5.1
+          npm --version
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           if npm view "rocketride@${VERSION}" version 2>/dev/null; then
             echo "rocketride@${VERSION} already exists on npm — skipping"
           else
@@ -200,8 +214,6 @@ jobs:
             echo "Publishing ${TARBALL}"
             npm publish "./${TARBALL}" --access public --provenance
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # --- PyPI ---
       - name: Set up Python
@@ -212,33 +224,45 @@ jobs:
 
       - name: Publish rocketride to PyPI
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-python'
+        env:
+          VERSION: ${{ matrix.version }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           pip install twine==6.1.0
-          VERSION="${{ matrix.version }}"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride/${VERSION}/json")
           if [ "$STATUS" = "200" ]; then
             echo "rocketride==${VERSION} already exists on PyPI — skipping"
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
       - name: Publish rocketride-mcp to PyPI
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-mcp'
+        env:
+          VERSION: ${{ matrix.version }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           pip install twine==6.1.0
-          VERSION="${{ matrix.version }}"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z.+-]*)
+              echo "::error::Invalid package version: $VERSION"
+              exit 1
+              ;;
+          esac
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/rocketride-mcp/${VERSION}/json")
           if [ "$STATUS" = "200" ]; then
             echo "rocketride-mcp==${VERSION} already exists on PyPI — skipping"
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-        env:
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
       # --- VS Code Marketplace + Open VSX ---
       - name: Set up Node.js for vsce
@@ -281,34 +305,30 @@ jobs:
 
       # --- Tag and GitHub Release ---
       #
-      # IMPORTANT: tag push uses WORKFLOW_PAT (a Personal Access Token with
-      # `repo` + `workflow` scopes) instead of the default GITHUB_TOKEN.
-      #
-      # GitHub rejects any tag push from GITHUB_TOKEN whose target commit
-      # modifies files under `.github/workflows/`, with the error:
-      #
-      #   refusing to allow a GitHub App to create or update workflow
-      #   `.github/workflows/<file>` without `workflows` permission
-      #
-      # `workflows` is a token-level scope, not a YAML permission, so the
-      # only fix is to swap to a credential that has it. WORKFLOW_PAT is
-      # that credential. Without this, every nightly that lands on a
-      # workflow-touching commit silently bricks the prerelease pipeline:
-      # the cleanup job runs first and deletes existing -prerelease tags,
-      # then all 5 prerelease creation jobs fail to push the new ones,
-      # leaving the repo with zero prereleases until the next clean
-      # commit.
+      # Mint a short-lived GitHub App installation token for the tag push. The
+      # tag points at a commit whose tree contains workflow files, so the
+      # pushing identity needs Workflows:write — GITHUB_TOKEN can't, and an App
+      # token avoids a long-lived PAT that silently expires. The App
+      # (RELEASE_BOT_APP_ID) is installed on this repo with Contents:write +
+      # Workflows:write; the token lives only for this job.
+      - name: Generate release-bot token
+        id: bot_token
+        if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       - name: Create tag
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
         env:
-          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
+          BOT_TOKEN: ${{ steps.bot_token.outputs.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Swap the remote URL to authenticate with WORKFLOW_PAT for the
-          # push. This affects only this step's git config and goes away
-          # when the runner tears down.
-          git remote set-url origin "https://x-access-token:${WORKFLOW_PAT}@github.com/${GITHUB_REPOSITORY}.git"
+          # Authenticate the push with the App installation token (this step's
+          # git config only; gone when the runner tears down).
+          git remote set-url origin "https://x-access-token:${BOT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           if [ "${{ inputs.prerelease }}" = "true" ]; then
             git tag -f "${{ matrix.tag_name }}"
             git push -f origin "${{ matrix.tag_name }}"
@@ -319,15 +339,71 @@ jobs:
 
       - name: Set release body
         id: release_body
-        if: inputs.prerelease
+        env:
+          SERVER_VERSION: ${{ inputs.server_version }}
         run: |
+          # Source GitHub Release notes from CHANGELOG.md so releases show the
+          # curated, human-written change list. The "Create GitHub release"
+          # step below keeps generate_release_notes OFF, so this body is the
+          # ENTIRE published notes — no appended, squashed stage->main merge-PR
+          # list (which is all GitHub's auto-notes would add under squash-merge).
+          #
+          #   Prerelease (nightly): emit the current [Unreleased] section — the
+          #     "what's cooking on stage" view a prerelease should expose.
+          #   Stable: emit the most recent *released* section (the first "## ["
+          #     that is NOT [Unreleased]). The version-bump PR archives
+          #     [Unreleased] into that dated, versioned section via
+          #     scripts/release/cut-changelog.mjs, so the notes are scoped to
+          #     this release instead of re-emitting the whole growing
+          #     [Unreleased] blob on every release. See RELEASE.md.
+          #
+          # Both extractors are fenced-code aware: a "## [" line inside a ```
+          # (or ~~~) block is body text, not a section header, so it must not
+          # split sections.
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            NOTES="$(awk '
+              /^(```|~~~)/        { fence = !fence }
+              !fence && /^## \[/  { c++ }
+              c == 1              { print }
+              c == 2              { exit }
+            ' CHANGELOG.md | sed '1d')"
+          else
+            NOTES="$(awk '
+              /^(```|~~~)/ { fence = !fence }
+              !fence && /^## \[/ {
+                if (cap) exit                       # next header after capture -> done
+                if ($0 ~ /^## \[Unreleased/) next   # skip the [Unreleased] header and its body
+                cap = 1; next                        # first released header -> capture its body
+              }
+              cap { print }
+            ' CHANGELOG.md)"
+            # Warn (do NOT fail) if the top released section is not this
+            # release — the usual cause is a version bump that forgot to run
+            # scripts/release/cut-changelog.mjs. A stale-but-real body beats
+            # bricking the release, so this is a warning, not an error. Match
+            # the bracketed "[x.y.z]" form so 3.2.0 does not match [13.2.0].
+            TOP="$(awk '/^(```|~~~)/{fence=!fence; next} fence{next} /^## \[Unreleased/{next} /^## \[/{print; exit}' CHANGELOG.md)"
+            case "$TOP" in
+              *"[$SERVER_VERSION]"*) : ;;
+              *) echo "::warning::Top released CHANGELOG section ($TOP) does not mention [$SERVER_VERSION] — did the version-bump PR run scripts/release/cut-changelog.mjs?" ;;
+            esac
+          fi
+          # Run-unique heredoc delimiter so free-form CHANGELOG content can
+          # never collide with it and truncate/corrupt $GITHUB_OUTPUT.
+          DELIM="RR_RELEASE_BODY_${GITHUB_RUN_ID:-0}_${GITHUB_RUN_ATTEMPT:-0}_${RANDOM}${RANDOM}"
           {
-            echo 'body<<RELEASE_BODY'
-            echo "Automated nightly prerelease from \`${{ github.ref_name }}\`."
-            echo ""
-            echo "**${{ matrix.name }}** v${{ matrix.version }}"
-            echo 'RELEASE_BODY'
-          } >> $GITHUB_OUTPUT
+            echo "body<<${DELIM}"
+            if [ "${{ inputs.prerelease }}" = "true" ]; then
+              echo "_Automated prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
+              echo ""
+            fi
+            if [ -n "$NOTES" ]; then
+              echo "$NOTES"
+            else
+              echo "**${{ matrix.name }}** v${{ matrix.version }}"
+            fi
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
@@ -336,7 +412,11 @@ jobs:
           tag_name: ${{ matrix.tag_name }}
           name: RocketRide ${{ matrix.name }} v${{ matrix.version }}${{ inputs.prerelease && ' (prerelease)' || '' }}
           prerelease: ${{ inputs.prerelease }}
-          generate_release_notes: ${{ inputs.prerelease == false }}
+          # Keep OFF. softprops/action-gh-release APPENDS GitHub's auto-notes
+          # to `body` when this is true — under squash-merge stage->main that
+          # is just the one batched merge PR, which is exactly the noise the
+          # curated CHANGELOG body (Set release body step) replaces.
+          generate_release_notes: false
           body: ${{ steps.release_body.outputs.body }}
           files: release-assets/*
         env:

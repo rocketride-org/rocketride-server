@@ -39,6 +39,7 @@ from ai.common.dap import DAPConn, TransportBase
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
+    from ..task_scheduler import TaskScheduler
 
 
 # Cron preset aliases accepted in addition to 5-field expressions.
@@ -87,10 +88,18 @@ class DeployCommands(DAPConn):
         """No-op — all state lives on TaskConn via the other mixins."""
         pass
 
+    @property
+    def _scheduler(self) -> 'TaskScheduler':
+        """The deployment scheduler, created and stored in server state at module init."""
+        return self._server._server.app.state.scheduler
+
     # ── rrext_deploy_add ─────────────────────────────────────────────────────
 
     async def on_rrext_deploy_add(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Accept a pipeline definition, persist it as a deployment, and activate it."""
+        if not self._account_info.userToken:
+            raise ValueError('Cannot deploy: no user token available for scheduled runs')
+
         self.verify_permission('task.control')
 
         args = request.get('arguments') or {}
@@ -111,14 +120,14 @@ class DeployCommands(DAPConn):
             pipeline=pipeline,
             schedule=schedule,
             state='active',
-            created_by=self._account_info.userId,
-            created_at=time.time(),
-            updated_at=time.time(),
+            userId=self._account_info.userId,
+            userToken=self._account_info.userToken,
+            createdAt=time.time(),
+            updatedAt=time.time(),
         )
         await self._server.deployments.save(self._account_info.userId, record, mode='create')
-        # todo: feat/deploy2 - enable TaskScheduler
-        # self._server.scheduler.schedule(self._account_info.userId, record)
-        return self.build_response(request, body=record.model_dump())
+        self._scheduler.schedule(record)
+        return self.build_response(request, body=record.to_client_record())
 
     # ── rrext_deploy_remove ──────────────────────────────────────────────────
 
@@ -132,8 +141,7 @@ class DeployCommands(DAPConn):
             raise ValueError('projectId is required')
 
         await self._server.deployments.delete(self._account_info.userId, project_id)
-        # todo: feat/deploy2 - enable TaskScheduler
-        # self._server.scheduler.unschedule(project_id)
+        self._scheduler.unschedule(project_id)
         return self.build_response(request, body={})
 
     # ── rrext_deploy_list ────────────────────────────────────────────────────
@@ -146,7 +154,7 @@ class DeployCommands(DAPConn):
         return self.build_response(
             request,
             body={
-                'deployments': [r.model_dump() for r in records],
+                'deployments': [r.to_client_record() for r in records],
             },
         )
 
@@ -162,12 +170,15 @@ class DeployCommands(DAPConn):
             raise ValueError('projectId is required')
 
         record = await self._server.deployments.get(self._account_info.userId, project_id)
-        return self.build_response(request, body=record.model_dump())
+        return self.build_response(request, body=record.to_client_record())
 
     # ── rrext_deploy_update ──────────────────────────────────────────────────
 
     async def on_rrext_deploy_update(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Modify schedule or pipeline config for an existing deployment."""
+        if not self._account_info.userToken:
+            raise ValueError('Cannot deploy: no user token available for scheduled runs')
+
         self.verify_permission('task.control')
 
         args = request.get('arguments') or {}
@@ -175,8 +186,8 @@ class DeployCommands(DAPConn):
         if not project_id:
             raise ValueError('projectId is required')
 
-        client_id = self._account_info.userId
-        record = await self._server.deployments.get(client_id, project_id)
+        userId = self._account_info.userId
+        record = await self._server.deployments.get(userId, project_id)
 
         if 'pipeline' in args:
             if not isinstance(args['pipeline'], dict):
@@ -188,8 +199,10 @@ class DeployCommands(DAPConn):
             _validate_schedule(args['schedule'])
             record.schedule = args['schedule']
 
-        record.updated_at = time.time()
-        await self._server.deployments.save(client_id, record)
-        # todo: feat/deploy2 - enable TaskScheduler
-        # self._server.scheduler.schedule(self._account_info.userId, record, mode='update')
+        record.userId = self._account_info.userId
+        record.userToken = self._account_info.userToken
+        record.updatedAt = time.time()
+
+        await self._server.deployments.save(userId, record)
+        self._scheduler.schedule(record)
         return self.build_response(request, body={})

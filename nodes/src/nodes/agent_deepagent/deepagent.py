@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -34,6 +35,9 @@ from rocketlib import ToolDescriptor, error
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
 from ai.common.schema import Question
+
+from ai.common.utils import langchain_messages_to_transcript, normalize_bound_tools
+from ai.common.utils import safe_str
 
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -52,7 +56,8 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
     the LLM produces malformed JSON.
     """
     from langchain_core.language_models import BaseChatModel
-    from langchain_core.messages import AIMessage
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.messages.utils import count_tokens_approximately
     from langchain_core.outputs import ChatGeneration, ChatResult
 
     class RocketRideToolCallingChatModel(BaseChatModel):
@@ -74,19 +79,34 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
 
         def bind_tools(self, tools: Any, **kwargs: Any) -> 'RocketRideToolCallingChatModel':
             try:
-                self._bound_tools = _normalize_bound_tools(tools)
+                self._bound_tools = normalize_bound_tools(tools)
             except Exception:
                 self._bound_tools = []
             return self
 
+        # deepagents' middleware asks the model to count tokens; BaseChatModel's
+        # fallback needs `transformers` (not bundled) and only knows GPT-2 anyway.
+        # The host LLM is opaque to us, so approximate counting is both sufficient
+        # and dependency-free.
+        def get_num_tokens(self, text: str) -> int:
+            return count_tokens_approximately([HumanMessage(content=safe_str(text))])
+
+        def get_token_ids(self, text: str) -> List[int]:
+            # No real tokenizer; synthesize an id list of the right length so
+            # len(get_token_ids(text)) == get_num_tokens(text) still holds.
+            return list(range(self.get_num_tokens(text)))
+
+        def get_num_tokens_from_messages(self, messages: Any, tools: Any = None) -> int:
+            return count_tokens_approximately(messages)
+
         def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
-            transcript = _langchain_messages_to_transcript(messages)
+            transcript = langchain_messages_to_transcript(messages)
             tool_hint = _tool_call_protocol_prompt(self._bound_tools)
             prompt = (tool_hint + '\n\n' + transcript).strip()
 
             raw = ''
             for attempt in range(3):
-                raw = _safe_str(
+                raw = safe_str(
                     agent_base.call_llm(
                         context,
                         prompt,
@@ -104,6 +124,14 @@ def _build_deepagent_llm(agent_base: AgentBase, context: AgentContext) -> Any:
                     )
 
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content=raw))])
+
+        async def _agenerate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any) -> Any:
+            # Async hook for LangGraph's async path.  Bridges the blocking engine
+            # LLM RPC off the event loop so concurrent subagent LLM calls don't
+            # serialize on the orchestrator's loop.  The 3-attempt JSON-envelope
+            # retry loop stays inside _generate — LangGraph awaits one _agenerate
+            # per LLM call, retries are an implementation detail.
+            return await asyncio.to_thread(self._generate, messages, stop, run_manager, **kwargs)
 
     return RocketRideToolCallingChatModel()
 
@@ -170,7 +198,7 @@ def _build_deepagent_tools(
         args_schema: type[BaseModel] = _ToolInput
 
         def _run(self, **framework_args: Any) -> str:  # noqa: ANN401
-            tool_name = _safe_str(getattr(self, 'name', ''))
+            tool_name = safe_str(getattr(self, 'name', ''))
 
             try:
                 out = agent_base.call_tool(context, tool_name, framework_args)
@@ -178,9 +206,16 @@ def _build_deepagent_tools(
                 out = {'error': str(e), 'type': type(e).__name__}
 
             try:
-                return json.dumps(out, default=str) if isinstance(out, (dict, list)) else _safe_str(out)
+                return json.dumps(out, default=str) if isinstance(out, (dict, list)) else safe_str(out)
             except Exception:
-                return _safe_str(out)
+                return safe_str(out)
+
+        async def _arun(self, **framework_args: Any) -> str:  # noqa: ANN401
+            # Async hook for LangGraph's async ToolNode (asyncio.gather fan-out).
+            # Bridges the blocking engine RPC off the event loop via to_thread so
+            # multiple concurrent tool calls don't serialize on the orchestrator's
+            # loop.  Sync _run remains the single source of truth.
+            return await asyncio.to_thread(self._run, **framework_args)
 
     tools: List[Any] = []
     for td in tool_descriptors:
@@ -236,46 +271,12 @@ class DeepAgentDriver(AgentBase):
         """
         super().__init__(iGlobal)
 
-        # Read user-configured values directly from connConfig so we work with
-        # both pipe shapes:
-        #   * flat:   {"description": "...", "instructions": [...]}
-        #   * nested: {"default": {"description": "...", "instructions": [...]}}
-        # The UI currently writes the nested shape; ``Config.getNodeConfig``
-        # in the no-profile branch does not descend into that wrapper, so we
-        # overlay the resolved values here. We also re-assign the base-class
-        # ``_instructions`` / ``_agent_description`` for the same reason.
-        values = self._read_connconfig_values()
-        self._instructions = values.get('instructions', []) or []
-        self._agent_description = (values.get('agent_description', '') or '').strip()
-        self._description: str = (values.get('description', '') or '').strip()
-        self._system_prompt: str = (values.get('system_prompt', '') or '').strip()
-
-    def _read_connconfig_values(self) -> Dict[str, Any]:
-        """Return the user-configured field values for this node.
-
-        Handles both pipe shapes the engine may deliver:
-
-        * Flat: ``connConfig`` is the value dict itself.
-        * Nested: ``connConfig`` wraps the values under the default-profile key
-          (the shape the UI writes, e.g. ``{"default": {...}}``).
-        """
-        from rocketlib import IJson as _IJson, getServiceDefinition
-
-        raw = self._iGlobal.glb.connConfig
-        conn = _IJson.toDict(raw) if raw else {}
-        if not isinstance(conn, dict):
-            return {}
-
-        # If the UI nested values under the default-profile key, use those.
-        try:
-            service = getServiceDefinition(self._iGlobal.glb.logicalType) or {}
-            default_profile = (service.get('preconfig') or {}).get('default')
-        except Exception:
-            default_profile = None
-
-        if default_profile and isinstance(conn.get(default_profile), dict):
-            return conn[default_profile]
-        return conn
+        # ``_instructions`` / ``_agent_description`` are already loaded by
+        # ``AgentBase.__init__`` from the resolved config (which handles both the
+        # flat and nested-under-default pipe shapes). Read this driver's two extra
+        # fields from the same resolved config.
+        self._description: str = (self._config.get('description', '') or '').strip()
+        self._system_prompt: str = (self._config.get('system_prompt', '') or '').strip()
 
     def _run(self, *, context: AgentContext, question: Question) -> AgentRunResult:
         """Execute the agent using ``deepagents.create_deep_agent``."""
@@ -299,7 +300,7 @@ class DeepAgentDriver(AgentBase):
 
             def on_tool_start(self, serialized: Any, input_str: Any, **kwargs: Any) -> None:
                 tool_name = (serialized or {}).get('name', '') or 'tool'
-                input_len = len(_safe_str(input_str))
+                input_len = len(safe_str(input_str))
                 self._send_sse('thinking', message=f'Calling {tool_name}...', tool=tool_name, input_length=input_len)
 
             def on_tool_end(self, output: Any, **kwargs: Any) -> None:
@@ -354,12 +355,25 @@ class DeepAgentDriver(AgentBase):
                 subagents=subagents_list if subagents_list else None,
             )
             stage = 'invoke'
-            state = agent.invoke(
-                {'messages': [HumanMessage(content=_safe_str(question.getPrompt() or ''))]},
-                config={'callbacks': [_SSECallbackHandler(_send_sse)]},
+            # Drive LangGraph via its async executor so multiple `task` tool_calls
+            # in one orchestrator turn fan out concurrently (asyncio.gather inside
+            # the async ToolNode).  HostTool._arun and
+            # RocketRideToolCallingChatModel._agenerate bridge the blocking engine
+            # RPCs off the event loop via asyncio.to_thread.
+            #
+            # asyncio.run is safe here because the caller chain is sync:
+            # AgentBase.run_agent -> IInstance.writeQuestions (plain def, called
+            # from the engine's C++ side).  If a future change makes any caller
+            # async, this needs to switch to `await agent.ainvoke(...)` and _run
+            # itself must become async.
+            state = asyncio.run(
+                agent.ainvoke(
+                    {'messages': [HumanMessage(content=safe_str(question.getPrompt() or ''))]},
+                    config={'callbacks': [_SSECallbackHandler(_send_sse)]},
+                )
             )
         except Exception as e:
-            raise RuntimeError(f'Deep agent {stage} failed: {type(e).__name__}: {_safe_str(e)}') from e
+            raise RuntimeError(f'Deep agent {stage} failed: {type(e).__name__}: {safe_str(e)}') from e
 
         final_text = ''
         try:
@@ -367,15 +381,15 @@ class DeepAgentDriver(AgentBase):
             if isinstance(msgs, list) and msgs:
                 last = msgs[-1]
                 if isinstance(last, AIMessage):
-                    final_text = _safe_str(getattr(last, 'content', ''))
+                    final_text = safe_str(getattr(last, 'content', ''))
                 else:
-                    final_text = _safe_str(getattr(last, 'content', last))
+                    final_text = safe_str(getattr(last, 'content', last))
             else:
-                final_text = _safe_str(state)
+                final_text = safe_str(state)
         except Exception:
-            final_text = _safe_str(state)
+            final_text = safe_str(state)
 
-        return _safe_str(final_text), state
+        return safe_str(final_text), state
 
     def _collect_subagents(self, context: AgentContext) -> List[Any]:
         """Fan out ``describe`` to all connected DeepAgent Subagent nodes.
@@ -417,7 +431,7 @@ class DeepAgentDriver(AgentBase):
                 pSelf.instance.invoke(req, component_id=node_id)
             except Exception as e:
                 error(
-                    f'deepagent _collect_subagents invoke failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}'
+                    f'deepagent _collect_subagents invoke failed for node={node_id}: {type(e).__name__}: {safe_str(e)}'
                 )
                 continue
 
@@ -455,7 +469,7 @@ class DeepAgentDriver(AgentBase):
                     )
                 except Exception as e:
                     error(
-                        f'deepagent _collect_subagents build failed for node={node_id}: {type(e).__name__}: {_safe_str(e)}'
+                        f'deepagent _collect_subagents build failed for node={node_id}: {type(e).__name__}: {safe_str(e)}'
                     )
 
         return subagents
@@ -472,117 +486,32 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
 
     The returned string is prepended to the message transcript before every LLM call so
     that models without native tool-calling support can still drive agentic behaviour via
-    the ``{"type":"tool_call",...}`` / ``{"type":"final",...}`` envelope schema.
+    the JSON envelope schema below.
+
+    Supports three response shapes:
+      - Single tool call: ``{"type":"tool_call","name":"...","args":{...}}``
+      - Parallel tool calls: ``{"type":"tool_calls","calls":[{"name":"...","args":{...}}, ...]}``
+      - Final answer: ``{"type":"final","content":"..."}``
+
+    The parallel form lets the orchestrator fan out independent steps in one turn — the
+    async LangGraph runtime dispatches them concurrently via ``asyncio.gather``.
     """
     tools_json = json.dumps(bound_tools, ensure_ascii=False)
     return '\n'.join(
         [
             'system: You MUST respond with exactly one JSON object and nothing else.',
             'system: Allowed schemas:',
-            'system: Tool call:',
+            'system: Single tool call:',
             'system: {"type":"tool_call","name":"server.tool","args":{...}}',
+            'system: Parallel tool calls (use when steps are independent — runs concurrently):',
+            'system: {"type":"tool_calls","calls":[{"name":"server.tool","args":{...}}, {"name":"server.tool2","args":{...}}]}',
             'system: Final answer:',
             'system: {"type":"final","content":"..."}',
+            'system: Prefer "tool_calls" with multiple entries when steps are independent — this dispatches them in parallel and is much faster than issuing them one at a time across turns.',
             'system: Never wrap JSON in markdown. Never include extra keys unless required.',
             f'system: Available tools (name + description + args schema): {tools_json}',
         ]
     ).strip()
-
-
-def _normalize_bound_tools(tools: Any) -> List[Dict[str, Any]]:
-    """Normalise a LangChain tool or list of tools into plain descriptor dicts.
-
-    Each entry carries the tool's real JSON Schema (not ``str(<class 'X'>)``)
-    so the LLM sees the actual argument names when it renders the tool-call
-    envelope — without this, models routinely guess wrong arg names on tools
-    like ``task`` (e.g. emit ``prompt`` instead of ``description``).
-    """
-    if not tools:
-        return []
-    if not isinstance(tools, list):
-        tools = [tools]
-
-    out: List[Dict[str, Any]] = []
-    for t in tools:
-        schema = getattr(t, 'args_schema', None)
-        input_schema = getattr(t, '_rr_input_schema', None)
-
-        entry: Dict[str, Any] = {
-            'name': _safe_str(getattr(t, 'name', '')),
-            'description': _safe_str(getattr(t, 'description', '')),
-            'args_schema': _tool_args_schema(schema),
-        }
-        if isinstance(input_schema, dict):
-            entry['input_schema'] = input_schema
-        out.append(entry)
-    return out
-
-
-def _langchain_messages_to_transcript(messages: Any) -> str:
-    """Convert a LangChain message list (or plain string/dict) into a plain-text transcript."""
-    try:
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-    except Exception:
-        AIMessage = HumanMessage = SystemMessage = ToolMessage = object  # type: ignore
-
-    if messages is None:
-        return ''
-    if isinstance(messages, str):
-        return messages
-    if isinstance(messages, dict):
-        return json.dumps(messages, default=str)
-    if not isinstance(messages, list):
-        try:
-            return str(messages)
-        except Exception:
-            return ''
-
-    lines: List[str] = []
-    for m in messages:
-        role = 'user'
-        content = ''
-        try:
-            content = _safe_str(getattr(m, 'content', ''))
-        except Exception:
-            content = _safe_str(m)
-
-        if isinstance(m, SystemMessage):
-            role = 'system'
-        elif isinstance(m, HumanMessage):
-            role = 'user'
-        elif isinstance(m, ToolMessage):
-            role = 'tool'
-            try:
-                name = _safe_str(getattr(m, 'name', ''))
-                if name:
-                    role = f'tool[{name}]'
-            except Exception:
-                pass
-        elif isinstance(m, AIMessage):
-            role = 'assistant'
-            try:
-                tool_calls = getattr(m, 'tool_calls', None) or []
-                if tool_calls:
-                    rendered_calls = [
-                        json.dumps(
-                            {
-                                'type': 'tool_call',
-                                'name': _safe_str(tc.get('name', '')),
-                                'args': tc.get('args', {}),
-                            },
-                            ensure_ascii=False,
-                            default=str,
-                        )
-                        for tc in tool_calls
-                        if isinstance(tc, dict)
-                    ]
-                    content = '\n'.join(filter(None, [content, *rendered_calls]))
-            except Exception:
-                pass
-
-        lines.append(f'{role}: {content}')
-
-    return '\n'.join(lines).strip()
 
 
 def _parse_tool_call_envelope(raw: str) -> Any:
@@ -604,10 +533,10 @@ def _parse_tool_call_envelope(raw: str) -> Any:
 
     msg_type = obj.get('type')
     if msg_type == 'final':
-        return AIMessage(content=_safe_str(obj.get('content', '')))
+        return AIMessage(content=safe_str(obj.get('content', '')))
 
     if msg_type == 'tool_call':
-        name = _safe_str(obj.get('name', '')).strip()
+        name = safe_str(obj.get('name', '')).strip()
         if not name:
             return None
         args = obj.get('args') or {}
@@ -617,36 +546,38 @@ def _parse_tool_call_envelope(raw: str) -> Any:
         tool_call = {'id': f'call_{uuid.uuid4().hex[:12]}', 'type': 'tool_call', 'name': name, 'args': args}
         return AIMessage(content='', tool_calls=[tool_call])
 
-    return None
+    if msg_type == 'tool_calls':
+        # Plural form — one assistant message with multiple tool_calls.  LangGraph's
+        # async ToolNode dispatches the list concurrently via asyncio.gather, so this
+        # is the on-the-wire shape that unlocks subagent fan-out.
+        raw_calls = obj.get('calls')
+        if not isinstance(raw_calls, list) or not raw_calls:
+            return None
 
-
-def _safe_str(v: Any) -> str:
-    """Safely convert any value to a string without raising."""
-    try:
-        return '' if v is None else str(v)
-    except Exception:
-        return ''
-
-
-def _tool_args_schema(schema: Any) -> Any:
-    """Return a JSON-Schema dict for a tool's ``args_schema``, or a string fallback.
-
-    Pydantic v2 models expose ``model_json_schema()``; older models expose
-    ``schema()``. When neither works, falls back to ``str(schema)`` so the LLM
-    still sees *something* identifying the expected shape.
-    """
-    if schema is None:
-        return ''
-    for attr in ('model_json_schema', 'schema'):
-        fn = getattr(schema, attr, None)
-        if callable(fn):
-            try:
-                result = fn()
-                if isinstance(result, dict):
-                    return result
-            except Exception:
+        tool_calls: List[Dict[str, Any]] = []
+        for entry in raw_calls:
+            if not isinstance(entry, dict):
                 continue
-    return _safe_str(schema)
+            name = safe_str(entry.get('name', '')).strip()
+            if not name:
+                continue
+            args = entry.get('args') or {}
+            if not isinstance(args, dict):
+                args = {'input': args}
+            tool_calls.append(
+                {
+                    'id': f'call_{uuid.uuid4().hex[:12]}',
+                    'type': 'tool_call',
+                    'name': name,
+                    'args': args,
+                }
+            )
+
+        if not tool_calls:
+            return None
+        return AIMessage(content='', tool_calls=tool_calls)
+
+    return None
 
 
 def _extract_first_json_object(raw: str) -> Any:

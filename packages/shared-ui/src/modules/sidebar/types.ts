@@ -12,6 +12,7 @@
  */
 
 import type { ReactNode } from 'react';
+import type { ExplorerFileAction } from '../explorer/types';
 
 // =============================================================================
 // DATA TYPES
@@ -100,6 +101,17 @@ export interface ISidebarViewProps {
 	/** Server tasks with no matching local .pipe file. */
 	unknownTasks?: UnknownTask[];
 
+	// ── Capabilities ────────────────────────────────────────────────────────
+	/**
+	 * Host-injected content rendered at the TOP of the nav section (above
+	 * "New pipeline"). Renders nothing — and adds no spacing — when omitted.
+	 * Hosts use this for host-specific nav (e.g. rocket-ui's "Home" button which
+	 * switches to the home app). The shared component intentionally knows nothing
+	 * about home/dashboard routing, keeping SaaS-shell concepts out of the
+	 * VS Code extension bundle.
+	 */
+	headerSlot?: ReactNode;
+
 	// ── Actions ─────────────────────────────────────────────────────────────
 	onNavigate: (target: 'new' | 'monitor' | 'deploy' | 'templates') => void;
 	/** Open a file in the editor. */
@@ -110,6 +122,11 @@ export interface ISidebarViewProps {
 	 * header buttons.  When absent, the sidebar is display-only.
 	 */
 	onFileManage?: (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => void;
+	/**
+	 * Host-injected extra kebab-menu actions per file row (e.g. Export).
+	 * Forwarded to the Explorer. Omitted hosts (VS Code) show none.
+	 */
+	fileActions?: ExplorerFileAction[];
 	onSourceAction: (action: 'run' | 'stop', filePath: string, sourceId: string, projectId?: string) => void;
 	onRefresh: () => void;
 

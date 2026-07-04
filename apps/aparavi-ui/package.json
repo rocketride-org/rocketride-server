@@ -1,0 +1,63 @@
+{
+  "name": "@rocketride/aparavi-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aparavi AQL Chat — natural-language query interface for Aparavi data",
+  "license": "MIT",
+  "appManifest": {
+    "id": "rocketride.aparavi",
+    "publisher": "Aparavi Software AG",
+    "name": "Aparavi AQL",
+    "description": "Chat with your Aparavi data using natural language",
+    "readme": "./src/README.md",
+    "icon": "./src/icon.svg",
+    "categories": ["tools"],
+    "mode": "free",
+    "authenticated": true,
+    "showStatusBar": true,
+    "settings": [
+      {
+        "key": "ROCKETRIDE_APARAVI_URL",
+        "label": "Aparavi Server URL",
+        "description": "Base URL of the Aparavi platform API (e.g. https://app.aparavi.com)",
+        "type": "text",
+        "required": true
+      },
+      {
+        "key": "ROCKETRIDE_APARAVI_USER",
+        "label": "Aparavi User ID",
+        "description": "User ID for authenticating with the Aparavi API",
+        "type": "text",
+        "required": true
+      },
+      {
+        "key": "ROCKETRIDE_APARAVI_PASSWORD",
+        "label": "Aparavi Password",
+        "description": "Password for authenticating with the Aparavi API",
+        "type": "envkey",
+        "required": true
+      }
+    ]
+  },
+  "scripts": {
+    "build": "pnpm rsbuild build"
+  },
+  "browserslist": [
+    "chrome >= 81",
+    "edge >= 83",
+    "firefox >= 76",
+    "safari >= 13"
+  ],
+  "dependencies": {
+    "@module-federation/rsbuild-plugin": "^2.5.1",
+    "shell-ui": "workspace:*",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "~2.0.11",
+    "@rsbuild/plugin-react": "~2.0.1",
+    "typescript": "^5.3.0"
+  }
+}

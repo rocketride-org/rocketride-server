@@ -1,10 +1,12 @@
 """
-Unit tests for ai.modules.task.commands.cmd_task.TaskCommands.
+Unit tests for ai.modules.task.commands.cmd_task.TaskCommands and the
+file-storage handlers extracted into ai.modules.task.commands.cmd_store.StoreCommands.
 
 Coverage focus: ``on_execute``, ``on_restart``, ``on_rrext_get_task_status``,
-``on_rrext_get_token``, ``on_rrext_get_tasks``, ``on_rrext_store`` dispatch.
-The file-store handlers (``_store_fs_*``) are exercised by mocking the
-underlying ``FileStore`` returned by ``_get_file_store``.
+``on_rrext_get_token``, ``on_rrext_get_tasks`` (TaskCommands) and the
+``on_rrext_store`` dispatch plus ``_store_fs_*`` handlers (StoreCommands).
+The file-store handlers are exercised by mocking the underlying
+``FileStore`` returned by ``_get_file_store``.
 
 The multi-mixin __init__ is bypassed via ``__new__``; tests seed
 ``_server``, ``_account_info``, ``_connection_id``, and the dispatch
@@ -13,12 +15,13 @@ table ``_store_subcommand_handlers`` directly.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from ai.modules.task.commands.cmd_task import TaskCommands
+from ai.modules.task.commands.cmd_store import StoreCommands
 
 
 # ---------------------------------------------------------------------------
@@ -37,30 +40,35 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn.verify_permission = MagicMock()  # granted by default
     conn.verify_plans = MagicMock(return_value=True)
     conn.get_task = MagicMock()
-    # Re-build the dispatch table that __init__ would have created.
+    # File-store access lives on StoreCommands; bind the real method so the
+    # fs_* handlers can resolve _get_file_store on this __init__-bypassed stub.
+    conn._get_file_store = MethodType(StoreCommands._get_file_store, conn)
+    # Re-build the dispatch table that StoreCommands.__init__ would have created.
     conn._store_subcommand_handlers = {
-        'fs_open': lambda req, args: TaskCommands._store_fs_open(conn, req, args),
-        'fs_read': lambda req, args: TaskCommands._store_fs_read(conn, req, args),
-        'fs_write': lambda req, args: TaskCommands._store_fs_write(conn, req, args),
-        'fs_close': lambda req, args: TaskCommands._store_fs_close(conn, req, args),
-        'fs_delete': lambda req, args: TaskCommands._store_fs_delete(conn, req, args),
-        'fs_list_dir': lambda req, args: TaskCommands._store_fs_list_dir(conn, req, args),
-        'fs_mkdir': lambda req, args: TaskCommands._store_fs_mkdir(conn, req, args),
-        'fs_rmdir': lambda req, args: TaskCommands._store_fs_rmdir(conn, req, args),
-        'fs_stat': lambda req, args: TaskCommands._store_fs_stat(conn, req, args),
-        'fs_rename': lambda req, args: TaskCommands._store_fs_rename(conn, req, args),
+        'fs_open': lambda req, args: StoreCommands._store_fs_open(conn, req, args),
+        'fs_read': lambda req, args: StoreCommands._store_fs_read(conn, req, args),
+        'fs_write': lambda req, args: StoreCommands._store_fs_write(conn, req, args),
+        'fs_close': lambda req, args: StoreCommands._store_fs_close(conn, req, args),
+        'fs_delete': lambda req, args: StoreCommands._store_fs_delete(conn, req, args),
+        'fs_list_dir': lambda req, args: StoreCommands._store_fs_list_dir(conn, req, args),
+        'fs_mkdir': lambda req, args: StoreCommands._store_fs_mkdir(conn, req, args),
+        'fs_rmdir': lambda req, args: StoreCommands._store_fs_rmdir(conn, req, args),
+        'fs_stat': lambda req, args: StoreCommands._store_fs_stat(conn, req, args),
+        'fs_rename': lambda req, args: StoreCommands._store_fs_rename(conn, req, args),
+        'fs_geturl': lambda req, args: StoreCommands._store_fs_geturl(conn, req, args),
     }
     return conn
 
 
-def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organizations=None):
+def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organization=None):
     """Build an AccountInfo-shaped stub."""
     return SimpleNamespace(
         userId=user_id,
         auth=auth,
         userToken='token-' + user_id,
         defaultTeam=default_team,
-        organizations=organizations if organizations is not None else [],
+        organization=organization,
+        sysPermissions=[],
     )
 
 
@@ -72,11 +80,8 @@ def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organ
 @pytest.mark.asyncio
 async def test_on_execute_starts_task_with_resolved_org_id():
     """on_execute resolves org_id from the user's default team and calls start_task."""
-    organizations = [
-        {'id': 'org-A', 'teams': [{'id': 'team-other'}]},
-        {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}]},
-    ]
-    account = _account_info(user_id='user-1', default_team='team-1', organizations=organizations)
+    organization = {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}]}
+    account = _account_info(user_id='user-1', default_team='team-1', organization=organization)
 
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
@@ -230,14 +235,12 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     }
 
     # Caller has access to team-1 only; team-other is invisible.
-    organizations = [
-        {
-            'id': 'org-1',
-            'permissions': [],
-            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
-        }
-    ]
-    conn = _make_conn(account_info=_account_info(user_id='user-1', organizations=organizations), server=server)
+    organization = {
+        'id': 'org-1',
+        'permissions': [],
+        'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+    }
+    conn = _make_conn(account_info=_account_info(user_id='user-1', organization=organization), server=server)
     response = await TaskCommands.on_rrext_get_tasks(conn, {})
 
     tokens = [t['token'] for t in response['body']['tasks']]
@@ -265,14 +268,12 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
     server = MagicMock()
     server._task_control = {'tk_1': control}
 
-    organizations = [
-        {
-            'id': 'org-1',
-            'permissions': [],
-            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
-        }
-    ]
-    conn = _make_conn(account_info=_account_info(user_id='user-1', organizations=organizations), server=server)
+    organization = {
+        'id': 'org-1',
+        'permissions': [],
+        'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+    }
+    conn = _make_conn(account_info=_account_info(user_id='user-1', organization=organization), server=server)
     response = await TaskCommands.on_rrext_get_tasks(conn, {})
     assert response['body']['tasks'][0]['name'] == 'my-source'
     assert response['body']['tasks'][0]['description'] == 'RocketRide DTC MCP Tool'
@@ -293,7 +294,7 @@ async def test_on_rrext_store_dispatches_to_known_subcommand():
     server.store.get_file_store = MagicMock(return_value=fs)
 
     conn = _make_conn(account_info=_account_info(), server=server)
-    response = await TaskCommands.on_rrext_store(conn, {'arguments': {'subcommand': 'fs_stat', 'path': 'foo.txt'}})
+    response = await StoreCommands.on_rrext_store(conn, {'arguments': {'subcommand': 'fs_stat', 'path': 'foo.txt'}})
     assert response['body'] == {'exists': True, 'size': 0}
 
 
@@ -302,7 +303,7 @@ async def test_on_rrext_store_unknown_subcommand_raises():
     """An unknown subcommand raises ValueError."""
     conn = _make_conn(account_info=_account_info())
     with pytest.raises(ValueError, match='Unknown subcommand'):
-        await TaskCommands.on_rrext_store(conn, {'arguments': {'subcommand': 'nope'}})
+        await StoreCommands.on_rrext_store(conn, {'arguments': {'subcommand': 'nope'}})
 
 
 @pytest.mark.asyncio
@@ -310,7 +311,7 @@ async def test_on_rrext_store_missing_subcommand_raises():
     """A missing subcommand raises ValueError early."""
     conn = _make_conn(account_info=_account_info())
     with pytest.raises(ValueError, match='Subcommand is required'):
-        await TaskCommands.on_rrext_store(conn, {'arguments': {}})
+        await StoreCommands.on_rrext_store(conn, {'arguments': {}})
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +329,7 @@ async def test_store_fs_open_write_returns_handle_id():
 
     conn = _make_conn(account_info=_account_info(), server=server, connection_id=42)
     args = {'path': 'foo.txt', 'mode': 'w'}
-    response = await TaskCommands._store_fs_open(conn, {}, args)
+    response = await StoreCommands._store_fs_open(conn, {}, args)
     fs.open_write.assert_awaited_once_with('foo.txt', 42)
     assert response['body'] == {'handle': 'h-123'}
 
@@ -342,7 +343,7 @@ async def test_store_fs_open_read_returns_metadata():
     server.store.get_file_store = MagicMock(return_value=fs)
 
     conn = _make_conn(account_info=_account_info(), server=server, connection_id=7)
-    response = await TaskCommands._store_fs_open(conn, {}, {'path': 'foo.txt'})
+    response = await StoreCommands._store_fs_open(conn, {}, {'path': 'foo.txt'})
     fs.open_read.assert_awaited_once_with('foo.txt', 7)
     assert response['body'] == {'handle': 'h-456', 'size': 1024}
 
@@ -357,7 +358,7 @@ async def test_store_fs_read_clamps_negative_offset():
 
     conn = _make_conn(account_info=_account_info(), server=server)
     args = {'handle': 'h-1', 'offset': -50, 'length': 100}
-    await TaskCommands._store_fs_read(conn, {}, args)
+    await StoreCommands._store_fs_read(conn, {}, args)
     fs.read_chunk.assert_awaited_once()
     call_args = fs.read_chunk.call_args
     # The clamped offset is the second positional or 'offset' kwarg.
@@ -372,10 +373,10 @@ async def test_store_fs_read_clamps_negative_offset():
 # ---------------------------------------------------------------------------
 
 
-def test_task_commands_init_builds_subcommand_dispatch_table():
-    """The constructor stores a fully-populated _store_subcommand_handlers dict."""
-    conn = TaskCommands.__new__(TaskCommands)
-    TaskCommands.__init__(conn, connection_id=1, server=None, transport=None)
+def test_store_commands_init_builds_subcommand_dispatch_table():
+    """StoreCommands.__init__ stores a fully-populated _store_subcommand_handlers dict."""
+    conn = StoreCommands.__new__(StoreCommands)
+    StoreCommands.__init__(conn, connection_id=1, server=None, transport=None)
     assert set(conn._store_subcommand_handlers.keys()) == {
         'fs_open',
         'fs_read',
@@ -387,4 +388,5 @@ def test_task_commands_init_builds_subcommand_dispatch_table():
         'fs_rmdir',
         'fs_stat',
         'fs_rename',
+        'fs_geturl',
     }

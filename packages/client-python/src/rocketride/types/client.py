@@ -296,8 +296,9 @@ class ConnectResult(TypedDict, total=False):
         phoneNumberVerified (bool): True when the phone number has been verified.
         locale (str): BCP-47 locale tag (e.g. "en-US").
         defaultTeam (str): ID of the team selected as the default context.
-        organizations (list[OrgInfo]): All organisations the user belongs to.
+        organization (OrgInfo | None): The organisation the user belongs to, or None.
         apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
+        waitlisted (bool): True when authenticated but not yet granted full app access.
     """
 
     userToken: str
@@ -312,9 +313,12 @@ class ConnectResult(TypedDict, total=False):
     phoneNumberVerified: bool
     locale: str
     defaultTeam: str
-    organizations: list[OrgInfo]
+    organization: OrgInfo
     capabilities: list[str]
+    sysPermissions: list[str]
+    credits: dict
     apps: list[AppManifestEntry]
+    waitlisted: bool
 
 
 class ServerInfoResult(TypedDict, total=False):

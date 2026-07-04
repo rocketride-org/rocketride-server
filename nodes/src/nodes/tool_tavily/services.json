@@ -1,0 +1,147 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Tavily",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_tavily://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		"experimental" marks this node as not yet production-ready.
+	//
+	"capabilities": ["invoke", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified.
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate.
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code.
+	//
+	"path": "nodes.tool_tavily",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths.
+	//
+	"prefix": "tavily",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node.
+	//
+	"icon": "tavily.svg",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder.
+	//
+	"description": ["Exposes Tavily real-time web search as an agent tool.", "Performs live web searches via the Tavily API and returns structured results with titles, URLs, content snippets, and relevance scores."],
+	"tile": [],
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Tavily",
+				"apikey": "",
+				"maxResults": 5,
+				"searchDepth": "advanced",
+				"topic": "general"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"tool_tavily.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Tavily API key (from https://tavily.com)",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_tavily.maxResults": {
+			"type": "integer",
+			"title": "Max Results",
+			"description": "Maximum number of search results to return (1-20)",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20
+		},
+		"tool_tavily.searchDepth": {
+			"type": "string",
+			"title": "Search Depth",
+			"description": "Tavily search depth",
+			"default": "advanced",
+			"enum": [
+				["basic", "Basic"],
+				["advanced", "Advanced"]
+			]
+		},
+		"tool_tavily.topic": {
+			"type": "string",
+			"title": "Topic",
+			"description": "Search topic category",
+			"default": "general",
+			"enum": [
+				["general", "General"],
+				["news", "News"],
+				["finance", "Finance"]
+			]
+		}
+	},
+	//
+	//	Test configuration for automated node testing.
+	//	Runs keyless under ROCKETRIDE_MOCK: the test framework injects a placeholder
+	//	apikey (see _LLM_MOCK_CREDENTIALS in nodes/test/framework/pipeline.py), so
+	//	beginGlobal() succeeds and the dynamic test builds/starts the node without a
+	//	real key (matches tool_exa_search). The tool is invoked via an agent's
+	//	control channel, so this case just smoke-tests that the node builds.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Tavily smoke test (placeholder key)",
+				"text": "test query"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Tavily",
+			"properties": ["type", "tool_tavily.apikey", "tool_tavily.maxResults", "tool_tavily.searchDepth", "tool_tavily.topic"]
+		}
+	]
+}

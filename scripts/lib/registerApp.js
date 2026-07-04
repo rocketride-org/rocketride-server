@@ -43,7 +43,7 @@
 
 const fs   = require('node:fs');
 const path = require('node:path');
-const { BUILD_ROOT, DIST_ROOT } = require('./index');
+const { BUILD_ROOT, DIST_ROOT, setState } = require('./index');
 
 const BUILD_APPS_JSON = path.join(BUILD_ROOT, 'apps.json');
 const DIST_APPS_JSON  = path.join(DIST_ROOT, 'server', 'static', 'apps.json');
@@ -145,13 +145,8 @@ function registerApp(appRoot) {
 			const mode = appManifest.mode
 				?? (appManifest.stripeProductId ? 'subscription' : 'free');
 
-			// Validate: subscription and paywall modes require a stripeProductId
-			if ((mode === 'subscription' || mode === 'paywall') && !appManifest.stripeProductId) {
-				throw new Error(
-					`App "${appManifest.id}" has mode="${mode}" but no stripeProductId. `
-					+ 'Paid modes require a Stripe product.'
-				);
-			}
+			// Note: subscription/paywall apps get their stripeProductId at runtime
+			// via seed_apps → ensure_stripe_billing, not at build time.
 
 			// Validate mode value
 			if (!['free', 'subscription', 'paywall'].includes(mode)) {
@@ -182,7 +177,7 @@ function registerApp(appRoot) {
 				try {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(iconSrc, path.join(buildDir, 'icon.svg'));
-					icon = `/shell/${APPS_BASE}/${dirName}/icon.svg`;
+					icon = `/${APPS_BASE}/${dirName}/icon.svg`;
 				} catch {
 					task.output = `Warning: icon not found at ${appManifest.icon}`;
 				}
@@ -195,7 +190,20 @@ function registerApp(appRoot) {
 				try {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(readmeSrc, path.join(buildDir, 'README.md'));
-					readme = `/shell/${APPS_BASE}/${dirName}/README.md`;
+					readme = `/${APPS_BASE}/${dirName}/README.md`;
+
+					// Copy sibling assets/ directory if it exists (images referenced by the README)
+					const assetsSrc = path.join(path.dirname(readmeSrc), 'assets');
+					const assetsDst = path.join(buildDir, 'assets');
+					if (fs.existsSync(assetsSrc) && fs.statSync(assetsSrc).isDirectory()) {
+						fs.mkdirSync(assetsDst, { recursive: true });
+						for (const file of fs.readdirSync(assetsSrc)) {
+							const srcFile = path.join(assetsSrc, file);
+							if (fs.statSync(srcFile).isFile()) {
+								fs.copyFileSync(srcFile, path.join(assetsDst, file));
+							}
+						}
+					}
 				} catch {
 					task.output = `Warning: readme not found at ${appManifest.readme}`;
 				}
@@ -212,7 +220,7 @@ function registerApp(appRoot) {
 				icon,
 				categories:    appManifest.categories ?? [],
 				settings:      appManifest.settings ?? [],
-				entry:         `/shell/${APPS_BASE}/${dirName}/remoteEntry.js`,
+				entry:         `/${APPS_BASE}/${dirName}/remoteEntry.js`,
 				// App monetization mode
 				mode,
 				// Shell compatibility filter (omitted = all shells)
@@ -223,10 +231,18 @@ function registerApp(appRoot) {
 				...(appManifest.showHeader === false ? { showHeader: false } : {}),
 				// Include showStatusBar only when explicitly false
 				...(appManifest.showStatusBar === false ? { showStatusBar: false } : {}),
-				// Include stripeProductId only when set
-				...(appManifest.stripeProductId ? { stripeProductId: appManifest.stripeProductId } : {}),
+				// stripeProductId is NOT included — it is created at runtime by
+				// seed_apps → ensure_stripe_billing and stored in the DB only.
 				// Include public only when explicitly false (default is true)
 				...(appManifest.public === false ? { public: false } : {}),
+				// Include billing section (plans array) for seed_apps to provision Stripe products
+				...(appManifest.billing ? { billing: appManifest.billing } : {}),
+				// Permission-gated apps — user must hold ALL listed sysPermissions to see the app
+				...(Array.isArray(appManifest.requiredPermissions)
+					&& appManifest.requiredPermissions.length
+					&& appManifest.requiredPermissions.every((p) => typeof p === 'string' && p.length > 0)
+					? { requiredPermissions: appManifest.requiredPermissions }
+					: {}),
 			};
 
 			// Upsert into build/apps.json (dev server publicDir)
@@ -234,6 +250,9 @@ function registerApp(appRoot) {
 
 			// Upsert into dist/server/static/apps.json (production server)
 			writeManifest(DIST_APPS_JSON, upsert(readManifest(DIST_APPS_JSON), appEntry));
+
+			// Register apps.json for packaging so it's included in release archives
+			await setState(['package', DIST_APPS_JSON], ['static/apps.json']);
 
 			task.output = `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`;
 		},

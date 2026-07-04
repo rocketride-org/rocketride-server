@@ -69,6 +69,11 @@ public final class TikaApi {
 	public static final String MIME_TYPE_VIDEO = "video/";
 	public static final String MIME_TYPE_EMAIL = "message/rfc822";
 
+	// The native input stream can only rewind within an 8 MB buffer
+	// (NativeInputStream). Larger inputs are spooled to a temp file so type
+	// detection and parsing can seek freely (e.g. archives read to their end).
+	private static final long NATIVE_STREAM_REWIND_LIMIT = 8L * 1024 * 1024;
+
 
 	/**
 	 * <not supported>
@@ -406,6 +411,16 @@ public final class TikaApi {
 		}
 		
 		try {
+			// Inputs larger than the native rewind buffer must be spooled to a temp
+			// file first, so type detection and parsing can seek back over the whole
+			// stream (archives read their central directory at the end). Small inputs
+			// stay on the in-memory native buffer. Unknown size (<= 0) -> spool to be safe.
+			String contentLength = metadata.get(Metadata.CONTENT_LENGTH);
+			long size = contentLength != null ? Long.parseLong(contentLength) : -1;
+			if (size < 0 || size > NATIVE_STREAM_REWIND_LIMIT) {
+				stream.getPath();
+			}
+
 			// Detect the media type
 			Detector detector = parser.getDetector();
 			MediaType mediaType = detector.detect(stream, metadata);
@@ -441,22 +456,27 @@ public final class TikaApi {
 				// Wrap with duplicator to safely reuse the stream
 				Util.StreamDuplicator duplicator = new Util.StreamDuplicator(stream);
 				logger.log(Level.INFO, "Buffered stream size: " + duplicator.size());
-				
-				long bytesBefore = duplicator.getParserStream().available();
 
-				logger.log(Level.INFO, "Bytes available BEFORE parser.parse(): " + bytesBefore);
-				logger.log(Level.INFO, "\nInvoke parse() method (standalone " + mimeType + " type)\n");
+				// Best-effort metadata: a parser failure here must not skip the media
+				// streaming below (else standalone media yields no frames).
+				try {
+					long bytesBefore = duplicator.getParserStream().available();
 
-				// Perform metadata extraction
-				parser.parse(duplicator.getParserStream(), filter, metadata, context);
+					logger.log(Level.INFO, "Bytes available BEFORE parser.parse(): " + bytesBefore);
+					logger.log(Level.INFO, "\nInvoke parse() method (standalone " + mimeType + " type)\n");
 
-				long bytesAfter = duplicator.getParserStream().available();
-				logger.log(Level.INFO, "Bytes available AFTER parser.parse(): " + bytesAfter);
-				
-				// Send media stream to native layer
+					parser.parse(duplicator.getParserStream(), filter, metadata, context);
+
+					long bytesAfter = duplicator.getParserStream().available();
+					logger.log(Level.INFO, "Bytes available AFTER parser.parse(): " + bytesAfter);
+				} catch (Exception e) {
+					logger.log(Level.WARNING, "Metadata extraction failed for standalone " + mimeType
+							+ " (continuing to stream media): " + e.getMessage());
+				}
+
 				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType);
 				extractor.processEmbeddedMediaStream(duplicator.getBinaryStream(), mimeType);
-				
+
 			} else {
 				// Configure the parse context and encoding config
 				context.set(Parser.class, parser);

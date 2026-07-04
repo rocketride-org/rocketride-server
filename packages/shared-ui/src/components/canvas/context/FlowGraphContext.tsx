@@ -48,14 +48,14 @@
 
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Connection, Edge, EdgeChange, Node, NodeChange, useEdgesState, useNodesState, useReactFlow, getConnectedEdges } from '@xyflow/react';
+import { Connection, Edge, EdgeChange, Node, NodeChange, useEdgesState, useNodesState, useReactFlow, getConnectedEdges, useUpdateNodeInternals } from '@xyflow/react';
 
-import { INode, INodeData, IInputConnection, IControlConnection, IProject, IProjectLayout, INodeType, PIPELINE_SCHEMA_VERSION } from '../types';
+import { INode, INodeData, IProject, IProjectLayout, INodeType, PIPELINE_SCHEMA_VERSION } from '../types';
 
 /** ReactFlow Node with strongly-typed data. Used throughout this context. */
 type FlowNode = Node<INodeData>;
 
-import { getNodesFromProject, getEdgesFromNodes, getProjectComponents, generateNodeId } from '../util/graph';
+import { getNodesFromProject, getEdgesFromNodes, getProjectComponents, generateNodeId, DEFAULT_EDGE } from '../util/graph';
 import { useFlowPreferences } from './FlowPreferencesContext';
 import { useFlowProject } from './FlowProjectContext';
 import { resolveDefaultFormData } from '../util/helpers';
@@ -200,8 +200,9 @@ export interface IFlowGraphContext {
 	 * Loads a project into the canvas, replacing all nodes and edges.
 	 *
 	 * @param project - The project to load.
+	 * @returns Number of nodes that failed validation (unconfigured).
 	 */
-	loadData: (project: IProject) => void;
+	loadData: (project: IProject) => number;
 
 	/**
 	 * Low-level canvas loader. Sets nodes and edges, resets isFlowReady,
@@ -224,6 +225,12 @@ export interface IFlowGraphContext {
 	 * when all nodes have measured dimensions.
 	 */
 	isFlowReady: boolean;
+
+	/** Snackbar message shown when nodes need configuration (red gear). Null when hidden. */
+	configSnackbar: string | null;
+
+	/** Set or clear the config snackbar message. */
+	setConfigSnackbar: (msg: string | null) => void;
 }
 
 const FlowGraphContext = createContext<IFlowGraphContext | null>(null);
@@ -264,6 +271,23 @@ export interface IFlowGraphProviderProps {
 }
 
 // =============================================================================
+// Helpers
+// =============================================================================
+
+/**
+ * Stable signature of a project's component content, used to detect echoes of
+ * our own changes independently of docRevision. Two projects with identical
+ * components produce identical signatures regardless of version number.
+ */
+function projectContentSig(project?: { components?: unknown } | null): string {
+	try {
+		return JSON.stringify(project?.components ?? []);
+	} catch {
+		return ' nosig';
+	}
+}
+
+// =============================================================================
 // Provider
 // =============================================================================
 
@@ -282,6 +306,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const [nodes, setNodes, onNodesChangeInternal] = useNodesState<FlowNode>([]);
 	const [edges, setEdges, onEdgesChangeInternal] = useEdgesState<Edge>([]);
 	const { screenToFlowPosition, getNode, setCenter, setViewport, fitView, getIntersectingNodes, deleteElements } = useReactFlow();
+	const updateNodeInternals = useUpdateNodeInternals();
 
 	// --- Refs --------------------------------------------------------------
 
@@ -297,6 +322,16 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const lastSentVersion = useRef(-1);
 	/** The project_id we last loaded — used to bypass echo-detection when project identity changes. */
 	const lastLoadedProjectId = useRef<string | undefined>(undefined);
+	/** Content signature of the components currently on the canvas. Echoes of our
+	 *  own edits share this signature and must NOT trigger a reload. */
+	const loadedContentSig = useRef<string>('');
+	/** Circuit breaker for the reload effect: if the content signature never
+	 *  converges (a non-idempotent load round-trip), the effect re-enters
+	 *  hundreds of times/sec and crashes with "Maximum update depth exceeded".
+	 *  We cap reloads within a short window as a backstop to the signature guard.
+	 *  Bailing also stops our re-emit, so the runaway terminates instead of
+	 *  churning. Counts in normal use stay far below the cap. */
+	const reloadGuardRef = useRef<{ t: number; n: number }>({ t: 0, n: 0 });
 
 	// --- Derived state -----------------------------------------------------
 
@@ -311,6 +346,16 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const [editingNodeId, setEditingNodeId] = useState<string | undefined>(undefined);
 	const [quickAddState, setQuickAddState] = useState<IQuickAddState | null>(null);
 
+	// Config snackbar — shown when nodes need configuration
+	const [configSnackbar, setConfigSnackbar] = useState<string | null>(null);
+
+	// Auto-hide config snackbar after 6 seconds
+	useEffect(() => {
+		if (configSnackbar === null) return;
+		const timer = setTimeout(() => setConfigSnackbar(null), 6000);
+		return () => clearTimeout(timer);
+	}, [configSnackbar]);
+
 	// =====================================================================
 	// Content change notification
 	// =====================================================================
@@ -318,6 +363,10 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	/** Ref to the latest nodes array so deferred callbacks always read current state. */
 	const nodesRef = useRef(nodes);
 	nodesRef.current = nodes;
+
+	/** Ref to the latest edges array so callbacks avoid stale closures. */
+	const edgesRef = useRef(edges);
+	edgesRef.current = edges;
 
 	/** Ref to the latest currentProject so deferred callbacks always read current state. */
 	const currentProjectRef = useRef(currentProject);
@@ -339,10 +388,14 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const onContentUpdated = useCallback(() => {
 		patchToolchainState({ isUpdated: true, isSaved: false });
 
-		if (!onContentChanged || isLoadingRef.current) return;
+		if (!onContentChanged || isLoadingRef.current) {
+				return;
+		}
 
 		setTimeout(() => {
-			const components = getProjectComponents(nodesRef.current as INode[]);
+			const currentNodes = nodesRef.current;
+			const currentEdges = edgesRef.current;
+			const components = getProjectComponents(currentNodes as INode[], currentEdges);
 			const nextVersion = (lastSentVersion.current ?? 0) + 1;
 			const layout = projectLayoutRef.current;
 			const project: IProject = {
@@ -357,6 +410,9 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			// Remove viewport from content — it's a user preference, not document content
 			delete (project as any).viewport;
 			lastSentVersion.current = nextVersion;
+			// Register the content we're about to send so its echo (which round-trips
+			// back as currentProject) is recognized and does NOT trigger a reload.
+			loadedContentSig.current = projectContentSig(project);
 			onContentChanged(project);
 		}, 50);
 	}, [onContentChanged, patchToolchainState]);
@@ -376,9 +432,10 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		(changes: NodeChange<FlowNode>[]) => {
 			if (isLocked) return;
 
-			// Only fire content change for structural modifications, not position/select
 			const structural = changes.some((c) => c.type === 'add' || c.type === 'remove');
-			if (structural) onContentUpdated();
+			if (structural) {
+				onContentUpdated();
+			}
 
 			onNodesChangeInternal(changes);
 		},
@@ -534,110 +591,52 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		(changes: EdgeChange[]) => {
 			if (isLocked) return;
 
-			// Intercept edge removals to sync node.data before removing the edge
-			const removeChanges = changes.filter((c) => c.type === 'remove');
+			// ReactFlow owns edges — pass all changes through directly
+			onEdgesChangeInternal(changes);
 
-			if (removeChanges.length > 0) {
-				setNodes((nds) => {
-					const currentEdges = edges;
-					const updatedNodes = nds.map((node) => {
-						let updated = { ...node };
-
-						removeChanges.forEach((change) => {
-							const edgeToRemove = currentEdges.find((e) => e.id === change.id);
-							if (!edgeToRemove || edgeToRemove.target !== node.id) return;
-
-							const nd = updated.data as INodeData;
-
-							if (edgeToRemove.sourceHandle?.startsWith('invoke-source')) {
-								// Remove matching control connection
-								const control: IControlConnection[] = nd.control || [];
-								updated = {
-									...updated,
-									data: {
-										...updated.data,
-										control: control.filter((c: IControlConnection) => c.from !== edgeToRemove.source),
-									},
-								};
-							} else {
-								// Remove matching lane input by source + lane
-								const lane = edgeToRemove.sourceHandle?.split('-')?.at(1) ?? '';
-								const input: IInputConnection[] = nd.input || [];
-								updated = {
-									...updated,
-									data: {
-										...updated.data,
-										input: input.filter((i: IInputConnection) => !(i.from === edgeToRemove.source && i.lane === lane)),
-									},
-								};
-							}
-						});
-
-						return updated;
-					});
-
-					// Rebuild edges from the cleaned node data
-					const computedEdges = getEdgesFromNodes(updatedNodes as INode[]);
-					setEdges(computedEdges);
-
-					return updatedNodes;
-				});
-			} else {
-				// Non-removal changes (select, etc.) go straight through
-				onEdgesChangeInternal(changes);
-			}
-
-			onContentUpdated();
+			// Notify host on structural changes (add/remove)
+			const structural = changes.some((c) => c.type === 'add' || c.type === 'remove');
+			if (structural) onContentUpdated();
 		},
-		[isLocked, edges, setNodes, setEdges, onEdgesChangeInternal, onContentUpdated]
+		[isLocked, onEdgesChangeInternal, onContentUpdated]
 	);
 
 	const onEdgeConnect = useCallback(
 		(params: Connection) => {
 			if (isLocked) return;
 
-			// Store the connection on the TARGET node's data, then rebuild edges
-			setNodes((nds) => {
-				const updatedNodes = nds.map((node) => {
-					if (node.id !== params.target) return node;
+			// Normalize reversed invoke connections — isValidConnection handles
+			// both drag directions, but params arrive with the raw drag order.
+			// If the user dragged from invoke-target to invoke-source, swap
+			// source/target so the persisted edge is always source→target.
+			let { source, target, sourceHandle, targetHandle } = params;
+			if (sourceHandle?.startsWith('invoke-target') && targetHandle?.startsWith('invoke-source')) {
+				// Swap source ↔ target to normalize
+				[source, target] = [target, source];
+				[sourceHandle, targetHandle] = [targetHandle, sourceHandle];
+			}
 
-					const nd = node.data as INodeData;
+			// Derive edge ID and lane/classType from handle IDs
+			const isInvoke = sourceHandle?.startsWith('invoke-source');
+			const laneOrClass = isInvoke
+				? (sourceHandle?.split('.').at(1) ?? '')
+				: (sourceHandle?.split('-')?.at(1) ?? '');
+			const edgeId = `${source}::${target}::${laneOrClass}`;
 
-					if (params.sourceHandle?.startsWith('invoke-source')) {
-						// Invoke (control-flow) connection — extract classType from the source handle
-						// e.g. "invoke-source.llm" → "llm"
-						const classType = params.sourceHandle?.split('.').at(1) ?? '';
-						const control: IControlConnection[] = nd.control || [];
-						return {
-							...node,
-							data: {
-								...node.data,
-								control: [...control, { classType, from: params.source }],
-							},
-						};
-					} else {
-						// Lane (data-flow) connection
-						const lane = params.sourceHandle?.split('-')?.at(1) ?? '';
-						const input: IInputConnection[] = nd.input || [];
-						return {
-							...node,
-							data: {
-								...node.data,
-								input: [...input, { lane, from: params.source }],
-							},
-						};
-					}
-				});
+			// Add edge directly — ReactFlow owns edges at runtime
+			const newEdge: Edge = {
+				...DEFAULT_EDGE,
+				id: edgeId,
+				source,
+				target,
+				sourceHandle,
+				targetHandle,
+			};
 
-				const computedEdges = getEdgesFromNodes(updatedNodes as INode[]);
-				setEdges(computedEdges);
-
-				return updatedNodes;
-			});
-
+			setEdges((eds) => [...eds, newEdge]);
 			onContentUpdated();
 		},
-		[isLocked, setNodes, setEdges, onContentUpdated]
+		[isLocked, setEdges, onContentUpdated]
 	);
 
 	// =====================================================================
@@ -795,31 +794,14 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				selectable: true,
 			};
 
-			const allNodes = [...nodes, node];
-			const allEdges = getEdgesFromNodes(allNodes as unknown as INode[]);
-			loadCanvas(allNodes, allEdges);
 
-			// Notify host immediately with the new project state.
-			// loadCanvas sets isLoading=true which blocks onContentUpdated,
-			// so we build the project directly from allNodes instead.
-			if (onContentChanged) {
-				const components = getProjectComponents(allNodes as unknown as INode[]);
-				const layout = projectLayoutRef.current;
-				const project: IProject = {
-					...currentProjectRef.current,
-					components,
-					isLocked: layout.isLocked,
-					snapToGrid: layout.snapToGrid,
-					snapGridSize: layout.snapGridSize,
-					version: PIPELINE_SCHEMA_VERSION,
-				};
-				delete (project as any).viewport;
-				onContentChanged(project);
-			}
+			// Append node — ReactFlow owns nodes and edges; no edge rebuild needed
+			setNodes((nds) => [...nds, node]);
+			onContentUpdated();
 
 			return id;
 		},
-		[nodes, screenToFlowPosition, loadCanvas, getInitialFormDataValid, servicesJson, onContentChanged]
+		[nodes, screenToFlowPosition, setNodes, getInitialFormDataValid, servicesJson, onContentUpdated]
 	);
 
 	const updateNode = useCallback(
@@ -884,9 +866,14 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			// Remove all edges connected to any of the deleted nodes in one pass
 			const connected = getConnectedEdges(deletedNodes, edges);
 			const connectedSet = new Set(connected.map((e) => e.id));
-			setEdges(edges.filter((e) => !connectedSet.has(e.id)));
+			const remaining = edges.filter((e) => !connectedSet.has(e.id));
+			setEdges(remaining);
+			// Notify host so project state stays in sync
+			if (connected.length > 0) {
+				onContentUpdated();
+			}
 		},
-		[edges, setEdges]
+		[edges, setEdges, onContentUpdated]
 	);
 
 	// =====================================================================
@@ -926,8 +913,27 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	 * queues viewport restoration for when isFlowReady transitions to true.
 	 */
 	const loadData = useCallback(
-		(project: IProject) => {
+		(project: IProject): number => {
 			const newNodes = getNodesFromProject(project);
+
+			// Re-validate formDataValid for every node against current schemas.
+			// Saved pipelines may have stale formDataValid (e.g. true when the
+			// apikey was empty — before the empty-string validation fix).
+			let unconfigured = 0;
+			for (const node of newNodes) {
+				const data = node.data as Record<string, unknown>;
+				const provider = data?.provider as string;
+				const service = servicesJson?.[provider];
+				const pipe = (service as any)?.Pipe as { schema?: Record<string, unknown> } | undefined;
+				if (pipe?.schema) {
+					const formData = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
+					const validation = validateFormData(pipe.schema, formData);
+					const valid = validation.errors.length === 0;
+					(data as any).formDataValid = valid;
+					if (!valid) unconfigured++;
+				}
+			}
+
 			const sortedNodes = sortNodesParentFirst(newNodes as FlowNode[]);
 			const newEdges = getEdgesFromNodes(sortedNodes);
 
@@ -950,8 +956,10 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			} else {
 				pendingViewportRef.current = null;
 			}
+
+			return unconfigured;
 		},
-		[loadCanvas, updateProjectLayout]
+		[loadCanvas, updateProjectLayout, servicesJson]
 	);
 
 	// --- Detect when ReactFlow has measured all nodes -----------------------
@@ -959,7 +967,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	//   false → true: when all nodes have measured dimensions (or canvas is empty)
 	//   true → false: when unmeasured nodes appear (e.g. template instantiation, addNode)
 	useEffect(() => {
-		const allMeasured = nodes.length === 0 || nodes.every((n) => n.measured?.width != null);
+		const unmeasured = nodes.filter((n) => n.measured?.width == null);
+		const allMeasured = nodes.length === 0 || unmeasured.length === 0;
 		if (allMeasured && !isFlowReady) {
 			setFlowReady(true);
 		} else if (!allMeasured && isFlowReady) {
@@ -980,37 +989,148 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		if (!currentProject) return;
 
 		const projectChanged = incomingProjectId !== lastLoadedProjectId.current;
+		const incomingSig = projectContentSig(currentProject);
 
-		// Skip if this is an echo of our own change — but always load when project identity changes
-		if (!projectChanged && incomingVersion === lastSentVersion.current) return;
+		// Skip echoes of our own content. We compare component CONTENT rather than
+		// docRevision: rapid edits produce several in-flight versions whose echoes
+		// arrive with docRevisions that never equal our latest lastSentVersion, so a
+		// version-equality guard re-ran loadData on every stale echo — and each load
+		// re-emitted content, bumping the version again: an infinite reload loop that
+		// wiped node measurements (setFlowReady thrash) and ended in "Maximum update
+		// depth exceeded". Content comparison converges; undo/redo still loads because
+		// its content differs from what's currently on the canvas.
+		if (!projectChanged && incomingSig === loadedContentSig.current) {
+			return;
+		}
 
+		// Backstop circuit breaker: if signature comparison fails to converge for
+		// some project, this effect re-enters in a tight reload loop. Cap reloads
+		// within a short window (well above any human-driven undo/redo/open rate,
+		// far below React's nested-update crash threshold). Bailing skips loadData,
+		// which stops the re-emit that drives the loop, so it self-terminates.
+		const now = performance.now();
+		const guard = reloadGuardRef.current;
+		if (now - guard.t > 250) {
+			guard.t = now;
+			guard.n = 0;
+		}
+		guard.n += 1;
+		if (guard.n > 30) {
+			// eslint-disable-next-line no-console
+			console.warn('[FlowGraph] Suppressed runaway canvas reload — project content is not converging on load. Canvas left in its last-loaded state.');
+			return;
+		}
+
+		loadedContentSig.current = incomingSig;
 		lastSentVersion.current = incomingVersion;
 		lastLoadedProjectId.current = incomingProjectId;
-		loadData(currentProject);
+		const unconfigured = loadData(currentProject);
+		if (unconfigured > 0) {
+			setConfigSnackbar(unconfigured === 1
+				? '1 node needs configuration — look for the red gear'
+				: `${unconfigured} nodes need configuration — look for the red gear`);
+		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [incomingVersion, incomingProjectId]);
+
+	// --- Re-validate nodes when servicesJson arrives (may be empty on first load) ---
+	useEffect(() => {
+		if (!servicesJson || Object.keys(servicesJson).length === 0) return;
+		if (nodes.length === 0) return;
+
+
+		let unconfigured = 0;
+		let changed = false;
+		const updated = nodes.map((node) => {
+			const data = node.data as Record<string, unknown>;
+			const provider = data?.provider as string;
+			const service = servicesJson[provider];
+			const pipe = (service as any)?.Pipe as { schema?: Record<string, unknown> } | undefined;
+			if (!pipe?.schema) return node;
+
+			const formData = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
+			const validation = validateFormData(pipe.schema, formData);
+			const valid = validation.errors.length === 0;
+			if ((data as any).formDataValid !== valid) {
+				changed = true;
+				return { ...node, data: { ...data, formDataValid: valid } };
+			}
+			if (!valid) unconfigured++;
+			return node;
+		});
+
+		if (changed) {
+			setNodes(updated as FlowNode[]);
+			// Recount after update
+			unconfigured = updated.filter((n) => (n.data as any)?.formDataValid === false).length;
+		}
+
+		if (unconfigured > 0) {
+			setConfigSnackbar(unconfigured === 1
+				? '1 node needs configuration — look for the red gear'
+				: `${unconfigured} nodes need configuration — look for the red gear`);
+		}
+
+		// Force handle re-registration — invoke-target handles depend on
+		// servicesJson (classType) and may not exist when flowReady fires.
+		const nodeIds = nodes.map((n) => n.id);
+		if (nodeIds.length > 0) {
+			updateNodeInternals(nodeIds);
+		}
+
+		// Only re-run when servicesJson changes, not on every node change
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [servicesJson]);
 
 	// --- Restore viewport + clear loading guard when flow is ready ----------
 	useEffect(() => {
 		if (!isFlowReady) return;
 
 		const pending = pendingViewportRef.current;
+
+		// Only do work when a viewport restore is actually queued (loadData sets
+		// pendingViewportRef right after a structural load). Previously
+		// updateNodeInternals + the viewport restore ran on EVERY isFlowReady→true
+		// transition. Because updateNodeInternals perturbs node measurements, that
+		// flipped isFlowReady back to false and re-entered this effect — a feedback
+		// loop that runs away to "Maximum update depth exceeded" once the canvas has
+		// nodes to re-measure (reproducible via add → delete → add). With nothing
+		// pending there is nothing to restore, so we clear the loading guard and bail
+		// instead of needlessly re-scanning every node's internals.
+		if (!pending) {
+			isLoadingRef.current = false;
+			return;
+		}
 		pendingViewportRef.current = null;
+
+		// Force ReactFlow to re-scan all handle positions so edges that loaded
+		// before handles were registered can now find their connection points.
+		const nodeIds = nodesRef.current.map((n) => n.id);
+		if (nodeIds.length > 0) {
+			updateNodeInternals(nodeIds);
+		}
 
 		if (pending === 'fitView') {
 			fitView({ padding: 0.15, duration: 0 });
-		} else if (pending) {
+		} else {
 			setViewport(pending, { duration: 0 });
 		}
 
 		isLoadingRef.current = false;
-	}, [isFlowReady, fitView, setViewport]);
+		// Run only when the flow becomes ready. fitView/setViewport/updateNodeInternals
+		// come from useReactFlow()/useUpdateNodeInternals() and get a NEW identity on
+		// every render — including them here makes setViewport() → store update →
+		// re-render → new identities → effect re-runs → setViewport() … an infinite
+		// "Maximum update depth exceeded" loop. They are stable in behavior, so we
+		// intentionally exclude them and gate solely on isFlowReady.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isFlowReady]);
 
 	// =====================================================================
 	// Context value
 	// =====================================================================
 
-	const value: IFlowGraphContext = {
+	const value: IFlowGraphContext = useMemo(() => ({
 		canvasRef,
 		nodes,
 		edges,
@@ -1039,7 +1159,16 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		isFlowReady,
 		quickAddState,
 		setQuickAddState,
-	};
+		configSnackbar,
+		setConfigSnackbar,
+	}), [
+		nodes, edges, nodeMap, setNodes, setEdges,
+		onNodesChange, onEdgesChange, onEdgeConnect, isValidConnection,
+		onDragOver, onDrop, onNodeDragStop, addNode, updateNode, deleteNode,
+		onNodesDelete, tempNode, focusOnNode, editingNodeId,
+		onContentUpdated, loadData, loadCanvas, isFlowReady,
+		quickAddState, configSnackbar,
+	]);
 
 	return <FlowGraphContext.Provider value={value}>{children}</FlowGraphContext.Provider>;
 }

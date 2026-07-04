@@ -383,6 +383,8 @@ interface SettingsSection {
  * This page handles UI-only settings (trace level, preferences).
  *
  */
+const PIPE_BUILDER_APP_ID = 'rocketride.pipeBuilder';
+
 const SettingsPage: React.FC = () => {
 	const { appManifest, settings, updateSetting } = useWorkspace();
 	const { client, isConnected } = useShellConnection();
@@ -390,6 +392,17 @@ const SettingsPage: React.FC = () => {
 	const [saved, setSaved] = useState(false);
 	const [search, setSearch] = useState('');
 	const [selectedNav, setSelectedNav] = useState<string | null>(null);
+
+	// ── Subscription status ─────────────────────────────────────────────
+	const info = client?.getAccountInfo();
+	const pipeBuilderApp = (info?.apps ?? []).find((a: any) => a.id === PIPE_BUILDER_APP_ID);
+	const isSubscribed = pipeBuilderApp?.appStatus === 'subscribed' || pipeBuilderApp?.appStatus === 'trialing';
+
+	/** Opens the checkout modal via the shell:subscribe event. */
+	const handleSubscribe = useCallback(() => {
+		if (!pipeBuilderApp) return;
+		ConnectionManager.getInstance().emit('shell:subscribe', { app: pipeBuilderApp });
+	}, [pipeBuilderApp]);
 
 	// ── Services from cached catalog ─────────────────────────────────────
 	const [services, setServices] = useState<Record<string, unknown>>({});
@@ -434,6 +447,11 @@ const SettingsPage: React.FC = () => {
 		const groups = new Map<string, { apps: typeof appManifest; defs: AppSettingDefinition[] }>();
 
 		for (const app of appManifest) {
+			// appManifest is the full catalog; only surface settings for apps the user has
+			// actually installed (on their desktop). Without this, an uninstalled app's
+			// settings (e.g. Aparavi AQL) would appear for everyone. Shell "General"
+			// settings above are unaffected and always shown.
+			if (!app.onDesktop) continue;
 			const appSettings = app.settings ?? [];
 			if (appSettings.length === 0) continue;
 			const sig = keySignature(appSettings);
@@ -464,17 +482,18 @@ const SettingsPage: React.FC = () => {
 
 	// Filter sections by search query and sidebar selection
 	const query = search.toLowerCase().trim();
+
+	// The selected settings "page". Defaults to the first section (General) and falls
+	// back to it if a previously-selected app section is no longer present.
+	const effectiveNav = useMemo(() => {
+		if (selectedNav && sections.some((s) => s.id === selectedNav)) return selectedNav;
+		return sections[0]?.id ?? null;
+	}, [selectedNav, sections]);
+
 	const visibleSections = useMemo(() => {
-		let result = sections;
-
-		// Sidebar filter: show General + selected app section
-		if (selectedNav && selectedNav !== 'general') {
-			result = result.filter((s) => s.id === 'general' || s.id === selectedNav);
-		}
-
-		// Search filter
+		// Search spans every section so matches aren't hidden by the current page.
 		if (query) {
-			result = result
+			return sections
 				.map((sec) => ({
 					...sec,
 					defs: sec.defs.filter((d) => matchesSearch(d, query)),
@@ -482,8 +501,9 @@ const SettingsPage: React.FC = () => {
 				.filter((sec) => sec.defs.length > 0);
 		}
 
-		return result;
-	}, [sections, selectedNav, query]);
+		// Otherwise show only the selected section — each nav button is its own page.
+		return sections.filter((sec) => sec.id === effectiveNav);
+	}, [sections, effectiveNav, query]);
 
 	/**
 	 * Returns the current value for any settings key, preferring draft over saved.
@@ -562,8 +582,8 @@ const SettingsPage: React.FC = () => {
 					{sections.map((sec) => (
 						<button
 							key={sec.id}
-							style={styles.navItem(selectedNav === sec.id || (!selectedNav && sec.id === 'general'))}
-							onClick={() => setSelectedNav(selectedNav === sec.id ? null : sec.id)}
+							style={styles.navItem(sec.id === effectiveNav)}
+							onClick={() => setSelectedNav(sec.id)}
 						>
 							{sec.label}
 						</button>
@@ -573,6 +593,17 @@ const SettingsPage: React.FC = () => {
 				{/* ── Content area ────────────────────────────────── */}
 				<div style={styles.content as CSSProperties}>
 					<div style={styles.contentInner}>
+						{/* Subscribe prompt for unsubscribed users */}
+						{info && pipeBuilderApp && !isSubscribed && (
+							<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', marginBottom: 16, borderRadius: 10, border: '1px solid var(--rr-border)', background: 'var(--rr-bg-titleBar-inactive)' }}>
+								<span style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>
+									Subscribe to unlock pipeline execution and deployment.
+								</span>
+								<button onClick={handleSubscribe} style={{ ...commonStyles.buttonPrimary, fontFamily: 'var(--rr-font-family)', fontWeight: 600, whiteSpace: 'nowrap' } as CSSProperties}>
+									Subscribe to RocketRide
+								</button>
+							</div>
+						)}
 						{!hasAny && (
 							<div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--rr-text-disabled)', fontSize: 14 }}>
 								{query ? 'No settings match your search.' : 'No settings defined.'}

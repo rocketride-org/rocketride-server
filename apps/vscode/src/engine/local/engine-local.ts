@@ -357,13 +357,19 @@ export class EngineLocal extends EngineBackend {
 				}
 			};
 
-			// Monitor stdout and stderr for the readiness message
+			// Monitor stdout and stderr for the readiness message.
+			// Lines starting with "[nnnn]" are engine progress — forward
+			// them to the sidebar via emitStatus during startup.
+			const engineLineRegex = /^\[\d+\w*\]\s*/;
 			const handleOutput = (data: Buffer): void => {
 				for (const line of data.toString().split('\n')) {
 					const msg = line.trim();
 					if (msg) {
 						this.logger.console(msg);
 						if (msg.includes('Uvicorn running')) tryResolveReady(msg);
+						else if (!processReady && engineLineRegex.test(msg)) {
+							this.emitStatus({ phase: 'working', message: 'Starting server...', logLine: msg.replace(engineLineRegex, '') });
+						}
 					}
 				}
 			};

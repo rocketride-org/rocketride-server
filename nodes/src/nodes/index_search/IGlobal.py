@@ -352,17 +352,19 @@ class IGlobal(IGlobalTransform):
 
 
 def _format_error(e: Exception) -> str:
-    """Concise, provider-first error string with early returns."""
-    # Handle Elasticsearch exceptions
-    error_str = str(e).strip()
+    """Concise error string for Elasticsearch / OpenSearch exceptions.
 
-    # Try to extract meaningful error messages
-    if hasattr(e, 'info'):
-        try:
-            error_info = e.info if isinstance(e.info, dict) else {}
-            error_msg = error_info.get('error', {}).get('reason', error_str)
-            return error_msg
-        except Exception:
-            pass
-
-    return error_str
+    The elasticsearch and opensearch Python clients attach a dict at
+    ``e.info`` shaped like ``{'error': {'reason': '...'}}`` for query
+    errors. Pull the inner ``reason`` so the agent sees one useful
+    sentence instead of the full nested response. Falls back to
+    ``str(e).strip()`` for any exception that does not match that shape.
+    """
+    info = getattr(e, 'info', None)
+    if isinstance(info, dict):
+        error = info.get('error')
+        if isinstance(error, dict):
+            reason = error.get('reason')
+            if isinstance(reason, str) and reason.strip():
+                return reason.strip()
+    return str(e).strip()

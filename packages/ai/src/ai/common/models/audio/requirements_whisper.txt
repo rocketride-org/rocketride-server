@@ -1,5 +1,10 @@
+# contract-check: skip-install  reason: ~400 MB of ASR deps (ctranslate2, av, onnxruntime) for an opt-in feature. PR lane skips; nightly --install-all installs and verifies.
 # Requirements for Whisper loader
 # Direct imports only
 
 faster-whisper
 numpy
+# onnxruntime is an indirect dep (via faster-whisper), not imported here.
+# Pin 1.20.1 to match the one shared install (rtmlib needs exactly that).
+onnxruntime-gpu==1.20.1; platform_system != 'Darwin'
+onnxruntime==1.20.1; platform_system == 'Darwin'

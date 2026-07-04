@@ -568,7 +568,7 @@
 	//
 	// Optional:
 	//		Test configuration for automated node testing.
-	//		Group 1 (mock): runs with mocked langchain_openai — no real API key required.
+	//		Group 1 (mock): runs with mocked langchain_openai, no real API key required.
 	//		ROCKETRIDE_MOCK must point to nodes/test/mocks.
 	//		Group 2 (real): skipped unless ROCKETRIDE_OPENAI_KEY is set; calls the live API.
 	//

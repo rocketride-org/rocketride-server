@@ -1,4 +1,9 @@
+# contract-check: skip-install  reason: ~300 MB of NER deps (transformers, onnxruntime) plus a python-mecab-ko C-extension compile, for an opt-in feature. PR lane skips; nightly --install-all installs and verifies.
 gliner
 # needed for gliner_ko
 python-mecab-ko
+# onnxruntime is an indirect dep (via gliner), not imported here.
+# Pin 1.20.1 to match the one shared install (rtmlib needs exactly that).
+onnxruntime-gpu==1.20.1; platform_system != 'Darwin'
+onnxruntime==1.20.1; platform_system == 'Darwin'
 

@@ -41,12 +41,12 @@
 // =============================================================================
 
 import { RocketRideClient, ConnectResult } from 'rocketride';
-import type { ShellConnectionEventMap, IConnectionManager } from 'shared';
+import type { ShellConnectionEventMap, IConnectionManager, IAuthProvider } from 'shared';
 import { ConnectionState, ConnectionStatus } from 'shared';
 import type { ConnectionMode } from 'shared';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
-import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
+import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
 	SS_APP_ID,
@@ -73,9 +73,15 @@ export interface InitOptions {
 	env?: Record<string, unknown>;
 	/** Server connection mode (determines auth strategy). */
 	connectionMode?: ConnectionMode;
-	/** Zitadel OAuth2 authority URL (e.g. https://auth.example.com). */
+	/**
+	 * Auth provider for OAuth sign-in and callback handling.
+	 * When set, ConnectionManager delegates all OAuth operations to it
+	 * instead of managing PKCE flows internally.
+	 */
+	authProvider?: IAuthProvider;
+	/** @deprecated Use ``authProvider`` instead. Zitadel OAuth2 authority URL. */
 	zitadelUrl?: string;
-	/** Zitadel OAuth2 client ID for the PKCE flow. */
+	/** @deprecated Use ``authProvider`` instead. Zitadel OAuth2 client ID. */
 	zitadelClientId?: string;
 }
 
@@ -125,14 +131,24 @@ export class ConnectionManager implements IConnectionManager {
 	// SINGLETON
 	// =========================================================================
 
-	private static instance: ConnectionManager;
+	/**
+	 * Global key for the singleton. A plain `private static instance` is NOT a
+	 * true singleton under Module Federation: a remote (e.g. home-ui) that loads
+	 * a duplicated copy of the shell-ui module gets its own class object with its
+	 * own static field, so its emit() lands on a different instance than the one
+	 * the Shell host registered listeners on — events vanish silently. Anchoring
+	 * the instance on globalThis makes getInstance() return the same object
+	 * regardless of how many module copies exist in the page.
+	 */
+	private static readonly GLOBAL_KEY = Symbol.for('rocketride.connectionManager');
 
 	/** Returns the singleton ConnectionManager instance. */
 	public static getInstance(): ConnectionManager {
-		if (!ConnectionManager.instance) {
-			ConnectionManager.instance = new ConnectionManager();
+		const g = globalThis as unknown as Record<symbol, ConnectionManager | undefined>;
+		if (!g[ConnectionManager.GLOBAL_KEY]) {
+			g[ConnectionManager.GLOBAL_KEY] = new ConnectionManager();
 		}
-		return ConnectionManager.instance;
+		return g[ConnectionManager.GLOBAL_KEY]!;
 	}
 
 	private constructor() {}
@@ -175,6 +191,22 @@ export class ConnectionManager implements IConnectionManager {
 	private listeners = new Map<string, Set<Handler>>();
 	private wildcardListeners = new Set<WildcardHandler>();
 	private debugLog: DebugLogEntry[] = [];
+
+	/**
+	 * User-intent control events that must not be silently dropped if emitted
+	 * while no listener is registered (e.g. the Shell listener is mid-remount, or
+	 * a remote emits before the host's listener useEffect has run). These are
+	 * buffered (latest payload wins) and replayed to the first matching handler
+	 * that registers via on(). Status/lifecycle events are intentionally NOT
+	 * replayable — replaying a stale 'shell:disconnected' would be wrong.
+	 */
+	private static readonly REPLAYABLE_EVENTS = new Set<string>([
+		'shell:loginRequest',
+		'shell:subscribe',
+	]);
+
+	/** Latest buffered payload per replayable event, awaiting a listener. */
+	private pendingEvents = new Map<string, unknown>();
 
 	// =========================================================================
 	// INITIALIZATION
@@ -259,7 +291,10 @@ export class ConnectionManager implements IConnectionManager {
 			},
 		});
 
-		// Store OAuth config for startOAuth()
+		// Store auth provider (preferred) or legacy OAuth config
+		if (options?.authProvider) {
+			this.authProvider = options.authProvider;
+		}
 		this.zitadelUrl = options?.zitadelUrl ?? '';
 		this.zitadelClientId = options?.zitadelClientId ?? '';
 
@@ -268,6 +303,25 @@ export class ConnectionManager implements IConnectionManager {
 		this._attachPromise = this.client.attach().catch((err) => {
 			console.error('[ConnectionManager] Failed to attach:', err);
 		});
+
+		// When the user presses Back from Zitadel, the browser restores this page
+		// from the back/forward cache — the singleton (and its `oauthStarted`
+		// one-shot guard) is frozen and restored as-is, so a fresh "Get Started"
+		// click would hit the guard and do nothing. Release it on bfcache restore
+		// so the button works again without a manual page refresh.
+		if (typeof window !== 'undefined') {
+			window.addEventListener('pageshow', (e) => {
+				if ((e as PageTransitionEvent).persisted) {
+					this.oauthStarted = false;
+					// Back from Zitadel without signing in: if still unauthenticated,
+					// drop any pending app so a later refresh can't re-seed the auth
+					// gate and bounce the user back to login. Guard on token — a
+					// signed-in user's last-active-app restore reuses rr:appId via
+					// persistActiveApp, so it must survive for them.
+					if (!this.loadToken()) this.clearPendingAppId();
+				}
+			});
+		}
 	}
 
 	/**
@@ -281,29 +335,64 @@ export class ConnectionManager implements IConnectionManager {
 	// OAUTH — PKCE redirect flow (SaaS mode)
 	// =========================================================================
 
-	/** Zitadel config stored from init(). */
+	/** Auth provider for OAuth sign-in (set via init options). */
+	private authProvider: IAuthProvider | null = null;
+
+	/** @deprecated Legacy Zitadel config — use authProvider instead. */
 	private zitadelUrl = '';
+	/** @deprecated Legacy Zitadel config — use authProvider instead. */
 	private zitadelClientId = '';
 
-	/** Module-level flag to prevent double bootstrap under React StrictMode. */
-	private bootStarted = false;
+	/** Cached in-flight/settled bootstrap promise — dedupes repeat bootstrap() calls
+	 *  (StrictMode double-invoke in dev, a Shell remount, MF host re-init) so every caller
+	 *  gets the SAME result instead of a null that the shell would misread as "logged out". */
+	private bootPromise: Promise<{ result: ConnectResult; appId: string } | null> | null = null;
+
+	/** One-shot guard: startOAuth always ends in a full-page redirect, so it must
+	 *  never run twice in one page load (double authorize → Zitadel invalidates the
+	 *  first code → PKCE 400 → re-auth loop). */
+	private oauthStarted = false;
 
 	/**
-	 * Redirect the browser to Zitadel for PKCE OAuth2 authorization.
+	 * Redirect the browser to the OAuth provider for authorization.
 	 *
-	 * Sets the session phase to 'authenticating' so the callback page
-	 * knows to exchange the authorization code.
+	 * Delegates to the auth provider's ``signIn()`` method. Falls back to
+	 * the legacy PKCE flow if no auth provider is configured.
+	 *
+	 * @param register - If true, requests Zitadel's sign-up form (prompt=create)
+	 *                   instead of the default sign-in form.
 	 */
-	public async startOAuth(): Promise<void> {
-		if (!this.zitadelUrl || !this.zitadelClientId) {
-			console.error('[ConnectionManager] Zitadel not configured');
-			this.emit('shell:error', { error: new Error('Zitadel not configured') });
-			return;
+	public async startOAuth(register?: boolean): Promise<void> {
+		// One-shot: a redirect is coming; never start a second authorize in the
+		// same page load (that invalidates the first code and 400s the exchange).
+		// The guard is released on any path that does NOT actually navigate, so a
+		// failed initiation can still be retried within the same page load.
+		if (this.oauthStarted) return;
+		this.oauthStarted = true;
+		try {
+			if (this.authProvider) {
+				await this.authProvider.signIn(undefined, register);
+				return;
+			}
+			// Legacy fallback — remove once all callers pass authProvider
+			if (!this.zitadelUrl || !this.zitadelClientId) {
+				console.error('[ConnectionManager] Zitadel not configured');
+				this.emit('shell:error', { error: new Error('Zitadel not configured') });
+				this.oauthStarted = false; // no redirect happened — allow a retry
+				return;
+			}
+			const { generatePkce, buildAuthUrl } = await import('../util/pkce');
+			const { challenge } = await generatePkce();
+			const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge, register);
+			// assign() (not replace()) keeps the landing page reachable via the
+			// browser back button — matches CloudAuthProvider.signIn().
+			window.location.assign(url);
+		} catch (err) {
+			// Initiation threw before any redirect (signIn rejected, PKCE/crypto
+			// failure, etc.) — release the guard so a later attempt can retry.
+			this.oauthStarted = false;
+			throw err;
 		}
-		const { challenge } = await generatePkce();
-		const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge);
-		// Full-page redirect to the Zitadel OAuth2 authorize endpoint
-		window.location.href = url;
 	}
 
 	/**
@@ -322,10 +411,22 @@ export class ConnectionManager implements IConnectionManager {
 		workspaceDir?: string;
 		onThemeChange?: (theme: string) => void;
 	}): Promise<{ result: ConnectResult; appId: string } | null> {
-		// Guard against double-execution (React StrictMode dev double-mount)
-		if (this.bootStarted) return null;
-		this.bootStarted = true;
+		// Dedupe: bootstrap can be invoked more than once per page load (StrictMode
+		// double-invoke in dev, a Shell remount, or MF host re-init). Returning null on
+		// the 2nd call made the shell flip to renderPhase='shell' with a null identity —
+		// flashing the logged-out landing page until the real (in-flight) bootstrap
+		// resolved. Hand every caller the SAME promise so they all settle on the real
+		// authenticated result and the shell never sees a spurious null.
+		if (this.bootPromise) return this.bootPromise;
+		this.bootPromise = this._bootstrap(config);
+		return this.bootPromise;
+	}
 
+	private async _bootstrap(config?: {
+		apps?: Array<{ id: string }>;
+		workspaceDir?: string;
+		onThemeChange?: (theme: string) => void;
+	}): Promise<{ result: ConnectResult; appId: string } | null> {
 		if (!this.client) throw new Error('Client not initialized — call init() first.');
 
 		// Ensure the transport is attached before any login attempt
@@ -343,7 +444,20 @@ export class ConnectionManager implements IConnectionManager {
 			window.history.replaceState({}, '', window.location.pathname);
 
 			if (!verifier) {
-				// Missing verifier — can't exchange. Restart auth for locked apps.
+				// Missing verifier — can't exchange this code. This is the
+				// back-button case: now that we use assign(), the auth chain
+				// stays in history, so a stale ?code entry can be revisited.
+				// Prefer the stored token over bouncing into another round-trip.
+				const staleToken = this.loadToken();
+				if (staleToken) {
+					try {
+						const result = await this.client.login(staleToken);
+						return await this.finishConnect(result, sessionAppId, config);
+					} catch {
+						this.clearToken();
+					}
+				}
+				// No usable token — restart auth only for session-locked apps.
 				if (sessionAppId) { await this.startOAuth(); return null; }
 				return null;
 			}
@@ -382,14 +496,20 @@ export class ConnectionManager implements IConnectionManager {
 					),
 				]);
 				return await this.finishConnect(result, '', config);
-			} catch {
+			} catch (err) {
 				// Connect failed — clear stale token
 				this.clearToken();
 				return null;
 			}
 		}
 
-		// No token — show shell unauthenticated (transport is attached, public APIs work)
+		// No code, no session lock, no token — an unauthenticated home load. If a
+		// pending app survived an abandoned OAuth round-trip (user pressed Back from
+		// the Zitadel login instead of signing in), drop it now. Otherwise Shell
+		// re-seeds startupAppId from it and the ShellLayout auth gate re-fires
+		// shell:loginRequest → startOAuth, bouncing the user straight back to Zitadel.
+		this.clearPendingAppId();
+		// Show shell unauthenticated (transport is attached, public APIs work)
 		return null;
 	}
 
@@ -423,9 +543,7 @@ export class ConnectionManager implements IConnectionManager {
 				const dir = config.workspaceDir ?? DEFAULT_WORKSPACE_DIR;
 				const global = await this.client!.fsReadJson<{ shellPrefs?: { theme?: string } }>(`${dir}/global.json`);
 				if (global?.shellPrefs?.theme) config.onThemeChange(global.shellPrefs.theme);
-			} catch (e) {
-				console.error('[ConnectionManager] Failed to restore theme:', e);
-			}
+			} catch { /* theme read failed — not critical */ }
 		}
 
 		// Resolve the target app — check pending app ID from OAuth flow
@@ -569,6 +687,9 @@ export class ConnectionManager implements IConnectionManager {
 		this.clearToken();
 		this.clearSessionAppId();
 		this.accountInfo = undefined;
+		// Drop any buffered user-intent events so a stale shell:subscribe /
+		// shell:loginRequest can't replay into the next session.
+		this.pendingEvents.clear();
 
 		// Emit logout before disconnecting so listeners can clean up
 		this.emit('shell:logout', {});
@@ -584,6 +705,7 @@ export class ConnectionManager implements IConnectionManager {
 		await this.disconnect();
 		this.listeners.clear();
 		this.wildcardListeners.clear();
+		this.pendingEvents.clear();
 		this.debugLog.length = 0;
 	}
 
@@ -692,6 +814,13 @@ export class ConnectionManager implements IConnectionManager {
 		try { return sessionStorage.getItem(SS_PENDING_APP_ID) ?? ''; } catch { return ''; }
 	}
 
+	/** Clear the pending app ID. Called when an OAuth round-trip is abandoned
+	 *  (user pressed Back from Zitadel) so the stale target can't re-seed the
+	 *  auth gate on the next load and bounce them straight back to login. */
+	public clearPendingAppId(): void {
+		try { sessionStorage.removeItem(SS_PENDING_APP_ID); } catch { /* storage unavailable */ }
+	}
+
 	/** Save pending app ID (for retrieval after OAuth callback). */
 	public setPendingAppId(id: string): void {
 		try { sessionStorage.setItem(SS_PENDING_APP_ID, id); } catch (e) {
@@ -778,9 +907,10 @@ export class ConnectionManager implements IConnectionManager {
 		// Push into debug log
 		this.logDebug(event as string, payload);
 
-		// Dispatch to registered handlers via microtask
+		// Dispatch to registered handlers via microtask. An unsubscribed handler
+		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
-		if (handlers) {
+		if (handlers && handlers.size > 0) {
 			Promise.resolve().then(() => {
 				for (const fn of handlers) {
 					try {
@@ -790,6 +920,18 @@ export class ConnectionManager implements IConnectionManager {
 					}
 				}
 			});
+			return;
+		}
+
+		// No live listener. For user-intent control events, buffer the payload so
+		// it can be replayed to the next listener that registers (see on()).
+		// Without this, a click whose listener isn't yet/no-longer mounted is
+		// silently swallowed — the prod "Get Started does nothing" symptom.
+		if (ConnectionManager.REPLAYABLE_EVENTS.has(event as string)) {
+			this.pendingEvents.set(event as string, payload);
+			console.warn(
+				`[ConnectionManager] '${event as string}' emitted with no listener — buffered for replay.`,
+			);
 		}
 	}
 
@@ -808,6 +950,29 @@ export class ConnectionManager implements IConnectionManager {
 		if (!this.listeners.has(key)) this.listeners.set(key, new Set());
 		const set = this.listeners.get(key)!;
 		set.add(handler as Handler);
+
+		// Replay a buffered user-intent event to a fresh listener (see emit()).
+		// Deferred to a microtask AND dispatched to the LIVE listener set at that
+		// time — not the captured handler — because under React StrictMode
+		// (mount→cleanup→mount) or any remount the registering handler may
+		// unsubscribe before the microtask runs. The buffered payload is consumed
+		// only once a live listener actually receives it, so the intent is never
+		// lost to a dead handler.
+		if (this.pendingEvents.has(key)) {
+			Promise.resolve().then(() => {
+				const live = this.listeners.get(key);
+				if (!this.pendingEvents.has(key) || !live || live.size === 0) return;
+				const payload = this.pendingEvents.get(key);
+				this.pendingEvents.delete(key);
+				for (const fn of live) {
+					try {
+						fn(payload);
+					} catch (err) {
+						console.error(`[ConnectionManager] Replay handler for '${key}' threw:`, err);
+					}
+				}
+			});
+		}
 
 		// Warn if a single event has too many listeners — likely a leak
 		if (set.size > 25) {

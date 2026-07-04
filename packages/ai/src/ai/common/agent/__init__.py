@@ -11,6 +11,6 @@ Schemas and contracts remain importable from `ai.common.agent.types`.
 
 from .agent import AgentBase
 from ._internal.host import AgentContext
-from ._internal.utils import extract_text, safe_str
+from ._internal.utils import extract_text
 
-__all__ = ['AgentBase', 'AgentContext', 'extract_text', 'safe_str']
+__all__ = ['AgentBase', 'AgentContext', 'extract_text']

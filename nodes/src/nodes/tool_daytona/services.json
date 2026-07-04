@@ -1,0 +1,109 @@
+{
+	"title": "Daytona",
+	"protocol": "tool_daytona://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_daytona",
+	"prefix": "daytona",
+	"icon": "daytona.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Gives agents an isolated Daytona cloud sandbox for running code and shell commands.", "Provides run_code, run_command, upload_file and download_file on one shared ephemeral sandbox."],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Daytona",
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"tool_daytona.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Daytona API key (app.daytona.io → Keys).",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_daytona.api_url": {
+			"type": "string",
+			"title": "API URL",
+			"description": "Daytona API endpoint. Leave empty for the default cloud (https://app.daytona.io/api); set for self-hosted Daytona.",
+			"default": "",
+			"optional": true
+		},
+		"tool_daytona.target": {
+			"type": "string",
+			"title": "Target Region",
+			"description": "Sandbox region, e.g. \"us\" or \"eu\". Leave empty for the organization default.",
+			"default": "",
+			"optional": true
+		},
+		"tool_daytona.snapshot": {
+			"type": "string",
+			"title": "Snapshot",
+			"description": "Daytona snapshot to create the sandbox from. Leave empty for the default snapshot.",
+			"default": "",
+			"optional": true
+		},
+		"tool_daytona.language": {
+			"type": "string",
+			"title": "Language",
+			"description": "Language runtime for run_code in the sandbox.",
+			"default": "python",
+			"enum": [
+				["python", "Python"],
+				["javascript", "JavaScript"],
+				["typescript", "TypeScript"]
+			]
+		},
+		"tool_daytona.auto_stop_minutes": {
+			"type": "integer",
+			"title": "Auto-stop (minutes)",
+			"description": "Sandbox stops (and, being ephemeral, deletes itself) after this many minutes of inactivity: the cost safety net if cleanup is missed.",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 120
+		},
+		"tool_daytona.exec_timeout_secs": {
+			"type": "integer",
+			"title": "Execution Timeout (seconds)",
+			"description": "Max seconds a single run_code/run_command call may take.",
+			"default": 120,
+			"minimum": 1,
+			"maximum": 1200
+		},
+		"tool_daytona.max_output_chars": {
+			"type": "integer",
+			"title": "Max Output (characters)",
+			"description": "Output longer than this is truncated before being returned to the agent.",
+			"default": 50000,
+			"minimum": 1000,
+			"maximum": 1000000
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Daytona smoke test (placeholder key)",
+				"text": "test query"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Daytona",
+			"properties": ["type", "tool_daytona.apikey", "tool_daytona.api_url", "tool_daytona.target", "tool_daytona.snapshot", "tool_daytona.language", "tool_daytona.auto_stop_minutes", "tool_daytona.exec_timeout_secs", "tool_daytona.max_output_chars"]
+		}
+	]
+}

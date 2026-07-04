@@ -46,12 +46,12 @@ from typing import Any, Callable, Dict, Optional, Union
 
 import pygit2
 
-from rocketlib import (
-    IInstanceBase,
+from rocketlib import IInstanceBase, tool_function
+
+from ai.common.utils import (
     normalize_tool_input,
     optional_bool,
     optional_int,
-    tool_function,
     validate_tool_input_schema,
 )
 

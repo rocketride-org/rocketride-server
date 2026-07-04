@@ -53,6 +53,7 @@ from ai.constants import (
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
+from ai.modules.task.pipeflow import apply_pipeflow_event
 from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
@@ -551,6 +552,12 @@ class Task(DAPBase):
             arguments=args,
             token=args.get('token'),
         )
+
+        # Propagate subprocess failures so callers don't silently
+        # receive success for a failed operation.
+        if self._data_client.did_fail(response):
+            raise RuntimeError(response.get('message', 'Data request failed'))
+
         return response
 
     async def _terminated(self) -> None:
@@ -652,27 +659,6 @@ class Task(DAPBase):
                     self._task_metrics = None
         except Exception as e:
             self.debug_message(f'Error cleaning up metrics: {e}')
-
-        # Reset metrics and tokens to zero after task termination
-        try:
-            # Reset current metrics
-            self._status.metrics.cpu_percent = 0.0
-            self._status.metrics.cpu_memory_mb = 0.0
-            self._status.metrics.gpu_memory_mb = 0.0
-
-            # Reset peak metrics
-            self._status.metrics.peak_cpu_percent = 0.0
-            self._status.metrics.peak_cpu_memory_mb = 0.0
-            self._status.metrics.peak_gpu_memory_mb = 0.0
-
-            # Reset average metrics
-            self._status.metrics.avg_cpu_percent = 0.0
-            self._status.metrics.avg_cpu_memory_mb = 0.0
-            self._status.metrics.avg_gpu_memory_mb = 0.0
-
-            self.debug_message('Metrics and tokens reset to zero')
-        except Exception as e:
-            self.debug_message(f'Error resetting metrics and tokens: {e}')
 
         try:
             # Clean up temporary files
@@ -1039,6 +1025,11 @@ class Task(DAPBase):
             service_up = body.get('service', False)
             self._status.serviceUp = service_up
 
+            # Gate billing accumulation on pipeline readiness so users
+            # are not charged for startup time (model loading, deps, etc.)
+            if self._task_metrics:
+                self._task_metrics.set_service_up(service_up)
+
             if service_up:
                 self._status.state = TASK_STATE.RUNNING.value
                 self._status.notes = self._service_up_notes
@@ -1080,25 +1071,21 @@ class Task(DAPBase):
 
             self._status.pipeflow.totalPipes = total_pipes
 
-            if pipe_index not in self._status.pipeflow.byPipe:
-                self._status.pipeflow.byPipe[pipe_index] = []
+            # Update the per-pipe execution stack and get a stable snapshot chain.
+            # See pipeflow.apply_pipeflow_event for why leave pops by identity and the
+            # snapshot is copied (reentrant sub-invocations share one pipe_index and
+            # interleave across threads).
+            pipes = apply_pipeflow_event(self._status.pipeflow.byPipe, pipe_index, operation, component_name)
 
-            # Update execution stack
-            if operation == 'begin':
-                self._status.pipeflow.byPipe[pipe_index] = [component_name]
-            elif operation == 'enter':
-                self._status.pipeflow.byPipe[pipe_index].append(component_name)
-            elif operation == 'leave':
-                if self._status.pipeflow.byPipe[pipe_index]:
-                    self._status.pipeflow.byPipe[pipe_index].pop()
-            elif operation == 'end':
-                self._status.pipeflow.byPipe[pipe_index] = []
-
-            # Build the flow event
+            # Build the flow event. `component` names the component this op refers to
+            # (for 'leave', the leaving one) so consumers can pair enter/leave by identity
+            # rather than assuming strict LIFO order — reentrant agent sub-invocations
+            # interleave under one pipe_index. `pipes` remains the current component stack.
             body = {
                 'id': pipe_index,
                 'op': operation,
-                'pipes': self._status.pipeflow.byPipe[pipe_index],
+                'pipes': pipes,
+                'component': component_name,
                 'trace': trace or {},
                 'project_id': self.project_id,
                 'source': self.source,
@@ -1553,6 +1540,14 @@ class Task(DAPBase):
                         child_args.append(arg)
                         break
 
+            # Inherit parent engine's --node_path so workspace-local nodes load
+            # in the task subprocess too (Opt reads argv only, not the env).
+            if not any(a.startswith('--node_path=') for a in child_args):
+                for arg in startup_args():
+                    if arg.startswith('--node_path='):
+                        child_args.append(arg)
+                        break
+
             await self._send_status_update()
 
             # Launch subprocess - pass environment with account context for store access
@@ -1600,6 +1595,8 @@ class Task(DAPBase):
                     user_id=getattr(_control, 'userId', '') if _control else '',
                     team_id=getattr(_control, 'teamId', '') if _control else '',
                     org_id=getattr(_control, 'orgId', '') if _control else '',
+                    pipeline_name=self._task_name or '',
+                    source_name=self._status.name or self.source or '',
                     on_update_callback=self._on_metrics_updated,
                 )
                 self._task_metrics.start_monitoring()

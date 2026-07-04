@@ -1,0 +1,121 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Butterbase MCP Client",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_butterbase://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		Reuses the generic MCP client implementation, this is a branded preset,
+	//		not a separate node (no duplicated code).
+	//
+	"path": "nodes.tool_mcp_client",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths (tools surface as <prefix>.<tool>)
+	//
+	"prefix": "butterbase",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node (a URL renders via <img>)
+	//
+	"icon": "butterbase.svg",
+	"documentation": "https://docs.butterbase.ai",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder
+	//
+	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more, as tools named butterbase.<tool>.", "This is a branded preset of the generic MCP Client (Streamable HTTP), so it shares the same implementation. Prerequisite: enable Developer Mode on your Butterbase app so the agent can create/modify resources."],
+	//
+	// Optional:
+	//		Rendering hints for the UI: which config fields to surface on the node tile
+	//
+	"tile": ["Server: ${parameters.mcp_client.serverName}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this component takes and produces.
+	//		This is a control-plane tool node (no data lanes).
+	//
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile pins the Butterbase Streamable HTTP endpoint.
+	//
+	"preconfig": {
+		"default": "butterbase",
+		"profiles": {
+			"butterbase": {
+				"title": "Butterbase MCP server",
+				"serverName": "butterbase",
+				"transport": "streamable-http",
+				"endpoint": "https://api.butterbase.ai/mcp"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"mcp_client.bearer": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Butterbase API key (bb_sk_...). Create one in the <b>Butterbase dashboard</b>: <a href='https://dashboard.butterbase.ai' target='_blank'>dashboard.butterbase.ai</a> → API Keys. Sent as an Authorization Bearer token.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"mcp_client.endpoint": {
+			"type": "string",
+			"title": "Endpoint",
+			"description": "Butterbase MCP Streamable HTTP endpoint. Defaults to the production server.",
+			"default": "https://api.butterbase.ai/mcp"
+		},
+		"mcp_client.serverName": {
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace prefix for the discovered tools: <serverName>.<toolName> (example: butterbase.init_app).",
+			"default": "butterbase"
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Butterbase MCP Client",
+			"properties": ["type", "mcp_client.bearer", "mcp_client.endpoint", "mcp_client.serverName"]
+		}
+	]
+}

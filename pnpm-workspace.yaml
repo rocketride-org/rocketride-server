@@ -28,8 +28,13 @@ packages:
   # Client libraries
   - 'packages/client-typescript'
 
+  # Documentation site
+  - 'packages/docs'
+
   # Applications
+  - 'apps/aparavi-ui'
   - 'apps/chat-ui'
+  - 'apps/explorer-ui'
   - 'apps/dropper-ui'
   - 'apps/hello-ui'
   - 'apps/monitor-ui'

@@ -40,14 +40,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSPrope
 import type { ConnectResult } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
+import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
 import { WorkspaceProvider } from '../../workspace/WorkspaceContext';
 import type { ShellConfig } from '../../workspace/types';
-import { registerAndMapApps } from '../../lib/appLoader';
 import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
+import LoadingScreen from './LoadingScreen';
+import { SS_PENDING_APP_ID } from '../../constants';
+import { registerAndMapApps } from '../../lib/appLoader';
+import type { ServerAppEntry } from '../../lib/appLoader';
 
 // =============================================================================
 // STYLES
@@ -70,6 +74,24 @@ const styles = {
 		color: 'var(--rr-fg-button)',
 		fontSize: 13,
 		cursor: 'pointer',
+	} as CSSProperties,
+	// Matches the landing page's "elevated" 3D button — brand fill with a colored
+	// bottom shadow that presses down on hover (see LandingNav.tsx).
+	elevatedButton: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		padding: '7px 18px',
+		borderRadius: 6,
+		border: 'none',
+		backgroundColor: '#00b9ec',
+		color: '#ffffff',
+		fontSize: 14,
+		fontWeight: 600,
+		cursor: 'pointer',
+		boxShadow: '0 3px 0 0 #00708f',
+		transform: 'translateY(0)',
+		transition: 'background-color 0.1s ease, box-shadow 0.1s ease, transform 0.1s ease',
 	} as CSSProperties,
 	goodbyeContainer: {
 		display: 'flex',
@@ -103,12 +125,13 @@ const styles = {
 /**
  * What the component should render during the auth bootstrap sequence.
  *
- * - 'loading'  — bootstrap in progress; show spinner.
- * - 'shell'    — show Shell (identity may be null for marketplace).
- * - 'error'    — unrecoverable auth failure.
- * - 'goodbye'  — post-logout screen for session-locked apps.
+ * - 'loading'    — bootstrap in progress; show spinner.
+ * - 'shell'      — show Shell (identity may be null for marketplace).
+ * - 'error'      — unrecoverable auth failure.
+ * - 'goodbye'    — post-logout screen for session-locked apps.
+ * - 'waitlisted' — authenticated but not yet granted access.
  */
-type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye';
+type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye' | 'waitlisted';
 
 // =============================================================================
 // SHELL COMPONENT
@@ -161,12 +184,36 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── Connection state ──────────────────────────────────────────────────
 	const { client, isConnected, statusMessage } = useShellConnection();
 
-	// ── Desktop apps — derived from identity, falls back to static config ──
+	// ── Apps — probe catalog + post-auth merge ────────────────────────────
+	// The pre-auth probe registers public MF remotes. Post-auth, the
+	// ConnectResult may include additional apps the user is entitled to
+	// (e.g. apps gated by requiredPermissions). Those need to be registered
+	// as MF remotes and merged into the app list so they can be launched.
 	const apps = useMemo(() => {
-		if (identity?.apps?.length) {
-			return registerAndMapApps(identity.apps as Parameters<typeof registerAndMapApps>[0]);
+		if (!identity?.apps?.length) return config.apps;
+
+		// Index ConnectResult apps by id
+		const identityApps = identity.apps as Array<ServerAppEntry & { appStatus?: string; onDesktop?: boolean }>;
+		const identityById = new Map(identityApps.map((a) => [a.id, a]));
+
+		// Overlay desktop metadata onto probe entries
+		const probeIds = new Set(config.apps.map((a) => a.id));
+		const merged = config.apps.map((a) => {
+			const da = identityById.get(a.id);
+			return da ? { ...a, appStatus: da.appStatus, onDesktop: da.onDesktop } : a;
+		});
+
+		// Register and append apps that were NOT in the probe (e.g. permission-gated)
+		const newApps = identityApps.filter((a) => !probeIds.has(a.id) && a.entry && a.moduleId);
+		if (newApps.length > 0) {
+			const registered = registerAndMapApps(newApps);
+			for (const app of registered) {
+				const da = identityById.get(app.id);
+				merged.push(da ? { ...app, appStatus: da.appStatus, onDesktop: da.onDesktop } : app);
+			}
 		}
-		return config.apps;
+
+		return merged;
 	}, [identity?.apps, config.apps]);
 
 	// =====================================================================
@@ -177,10 +224,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		mountedRef.current = true;
 
 		(async () => {
+			// Initialize and configure the auth provider (SaaS mode)
+			const authProvider = CloudAuthProvider.getInstance();
+			if (RR_ZITADEL_URL && RR_ZITADEL_CLIENT_ID) {
+				authProvider.initialize({ zitadelUrl: RR_ZITADEL_URL, clientId: RR_ZITADEL_CLIENT_ID });
+			}
+
 			// Initialise the client singleton (idempotent)
 			cm.init({
 				uri: RR_APIKEY ? undefined : ROCKETRIDE_URI,
-				clientName: config.apps[0]?.id ?? 'shell-ui',
+				clientName: 'Cloud Shell-UI',
+				authProvider,
 				zitadelUrl: RR_ZITADEL_URL,
 				zitadelClientId: RR_ZITADEL_CLIENT_ID,
 			});
@@ -195,14 +249,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					workspaceDir: config.workspaceDir,
 					onThemeChange: config.themeConfig?.onThemeChange,
 				});
-
 				if (!mountedRef.current) return;
 
 				if (result) {
 					setIdentity(result.result);
 					if (result.appId) setActiveAppId(result.appId);
+					// Gate on waitlist — authenticated but not yet granted access
+					setRenderPhase(result.result?.waitlisted ? 'waitlisted' : 'shell');
+				} else {
+					// No auth — render unauthenticated shell with the default app
+					setRenderPhase('shell');
 				}
-				setRenderPhase('shell');
 			} catch (err) {
 				console.error('[Shell] Bootstrap failed:', err);
 				if (mountedRef.current) setRenderPhase('error');
@@ -220,19 +277,26 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	useEffect(() => {
 		return cm.on('shell:accountUpdate', (result: ConnectResult) => {
 			if (result.userToken) cm.saveToken(result.userToken);
-			if (mountedRef.current) setIdentity(result);
+			if (mountedRef.current) {
+				setIdentity(result);
+				// Auto-transition off waitlist when an admin grants access
+				if (renderPhase === 'waitlisted' && result.waitlisted === false) {
+					setRenderPhase('shell');
+				}
+			}
 		});
-	}, [cm]);
+	}, [cm, renderPhase]);
 
 	// Sign-in request from marketplace
 	useEffect(() => {
-		return cm.on('shell:loginRequest', ({ appId }: { appId?: string }) => {
+		return cm.on('shell:loginRequest', ({ appId, register }: { appId?: string; register?: boolean }) => {
 			if (appId) {
 				cm.setPendingAppId(appId);
 				loginTargetRef.current = appId;
 			}
 			if (isSaas) {
-				cm.startOAuth();
+				// "Get Started" CTAs pass register:true → Zitadel sign-up form.
+				cm.startOAuth(register);
 			} else {
 				if (mountedRef.current) setShowApiKeyLogin(true);
 			}
@@ -245,18 +309,48 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	const handleLogout = useCallback(() => {
 		setIdentity(null);
+		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
+		// the auth transition screen when it mounts after logout.
+		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
 		if (sessionAppId) {
 			cm.logout().finally(() => {
 				if (mountedRef.current) setRenderPhase('goodbye');
 			});
 		} else {
-			cm.logout().finally(() => { window.location.href = '/'; });
+			// Return to the home app before the auth gate re-runs. Otherwise
+			// ShellLayout still sees an auth-required app (e.g. Pipeline Builder)
+			// active with identity===null and emits shell:loginRequest →
+			// startOAuth, bouncing the signing-out user to the Zitadel login
+			// screen instead of the logged-out home. switchApp updates the live
+			// workspace (and clears the persisted rr:appId via persistActiveApp);
+			// setActiveAppId keeps the startup seed in sync for any later remount.
+			setActiveAppId(defaultAppId);
+			cm.emit('shell:switchApp', { appId: defaultAppId });
+			cm.logout().finally(() => {
+				if (mountedRef.current) setRenderPhase('shell');
+			});
 		}
-	}, [cm, sessionAppId]);
+	}, [cm, sessionAppId, defaultAppId]);
 
 	useEffect(() => {
 		return cm.on('shell:logoutRequest', () => handleLogout());
 	}, [cm, handleLogout]);
+
+	// "Back to Home" on the waitlist screen must LEAVE the session-locked app —
+	// not just sign out in place. A session-locked app (e.g. Canvas) is launched
+	// via the ?appId= URL param, which Shell reads on mount. logout() clears the
+	// token and SS_APP_ID but does NOT strip the URL, so a state-only logout
+	// leaves ?appId= in place; any re-init re-seeds the session lock and bootstrap
+	// fires OAuth again, dropping a still-waitlisted user right back on this screen
+	// (the infinite re-auth loop). Hard-navigate to the clean origin so ?appId= is
+	// gone and the next load starts fresh on the home experience. logout() clears
+	// the token + session app ids synchronously before its async disconnect, so
+	// those are wiped before the navigation unloads the page.
+	const handleBackToHome = useCallback(() => {
+		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
+		cm.logout();
+		window.location.href = window.location.origin + window.location.pathname;
+	}, [cm]);
 
 	// =====================================================================
 	// SIGN-IN HELPERS
@@ -342,9 +436,50 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		);
 	}
 
+	// Waitlisted — authenticated but not yet granted access
+	if (renderPhase === 'waitlisted') {
+		const displayName = identity?.displayName || identity?.email || '';
+		return (
+			<div style={styles.statusScreen}>
+				<div style={{
+					display: 'flex', flexDirection: 'column', alignItems: 'center',
+					gap: 20, textAlign: 'center', maxWidth: 440, padding: '0 24px',
+				}}>
+					<div style={{ fontSize: 28, lineHeight: 1.2 }}>
+						&#x1F389;
+					</div>
+					<div style={{ fontSize: 20, fontWeight: 600, color: 'var(--rr-text-primary)' }}>
+						Thanks for signing up{displayName ? `, ${displayName}` : ''}!
+					</div>
+					<div style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--rr-text-secondary)' }}>
+						Your account is all set. We&apos;re rolling out access in waves and
+						you&apos;re in the queue. We&apos;ll send you an email as soon as
+						your account is activated &mdash; it shouldn&apos;t be long!
+					</div>
+					<button
+						onClick={handleBackToHome}
+						style={styles.elevatedButton}
+						onMouseEnter={(e) => {
+							e.currentTarget.style.backgroundColor = '#0099cc';
+							e.currentTarget.style.transform       = 'translateY(3px)';
+							e.currentTarget.style.boxShadow        = '0 1px 0 0 #00708f';
+						}}
+						onMouseLeave={(e) => {
+							e.currentTarget.style.backgroundColor = '#00b9ec';
+							e.currentTarget.style.transform       = 'translateY(0)';
+							e.currentTarget.style.boxShadow        = '0 3px 0 0 #00708f';
+						}}
+					>
+						Back to Home
+					</button>
+				</div>
+			</div>
+		);
+	}
+
 	// Loading
 	if (renderPhase === 'loading') {
-		return <div style={styles.statusScreen}>Loading...</div>;
+		return <LoadingScreen />;
 	}
 
 	// =====================================================================
@@ -362,7 +497,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	} : config;
 
 	const stripeKey = config.apiConfig.RR_STRIPE_PUBLISHABLE_KEY ?? '';
-	const orgId = identity?.organizations?.[0]?.id ?? '';
+	const orgId = identity?.organization?.id ?? '';
 
 	return (
 		<ShellIdentityContext.Provider value={identity}>
@@ -372,7 +507,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					isConnected={isConnected}
 					apps={apps}
 					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || defaultAppId}
+					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}
 					defaultAppId={defaultAppId}
 					themeOptions={config.themeConfig.options}
 					onThemeChange={config.themeConfig.onThemeChange}

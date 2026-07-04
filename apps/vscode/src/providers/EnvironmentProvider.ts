@@ -173,9 +173,10 @@ export class EnvironmentProvider {
 
 			// -- Load env for a specific slot + scope ----------------------------
 			case 'env:getEnv': {
+				const ctx = { slot: message.slot, scope: message.scope, scopeId: message.scopeId };
 				const resolved = this.resolveSlotClient(message.slot);
 				if (!resolved) {
-					this.postError(panel, `${message.slot} server is not connected`);
+					this.postError(panel, `${message.slot} server is not connected`, ctx);
 					break;
 				}
 				try {
@@ -191,16 +192,17 @@ export class EnvironmentProvider {
 						env,
 					});
 				} catch (err: unknown) {
-					this.postError(panel, err instanceof Error ? err.message : String(err));
+					this.postError(panel, err instanceof Error ? err.message : String(err), ctx);
 				}
 				break;
 			}
 
 			// -- Save env for a specific slot + scope ----------------------------
 			case 'env:saveEnv': {
+				const ctx = { slot: message.slot, scope: message.scope, scopeId: message.scopeId };
 				const resolved = this.resolveSlotClient(message.slot);
 				if (!resolved) {
-					this.postError(panel, `${message.slot} server is not connected`);
+					this.postError(panel, `${message.slot} server is not connected`, ctx);
 					break;
 				}
 				try {
@@ -222,7 +224,7 @@ export class EnvironmentProvider {
 					const manager = message.slot === 'development' ? this.connectionManager : this.deployManager;
 					manager.emit('shell:envKeysChanged');
 				} catch (err: unknown) {
-					this.postError(panel, err instanceof Error ? err.message : String(err));
+					this.postError(panel, err instanceof Error ? err.message : String(err), ctx);
 				}
 				break;
 			}
@@ -280,7 +282,7 @@ export class EnvironmentProvider {
 		const isSaas = capabilities.includes('saas');
 
 		// Extract org info and permissions
-		const org = resolved?.accountInfo?.organizations?.[0];
+		const org = resolved?.accountInfo?.organization;
 		const orgId = org?.id;
 		const orgPermissions: string[] = org?.permissions ?? [];
 		const isOrgAdmin = orgPermissions.includes('org.admin');
@@ -406,9 +408,15 @@ export class EnvironmentProvider {
 	 *
 	 * @param panel   - The webview panel.
 	 * @param message - The error description.
+	 * @param context - Optional slot/scope context so the webview can clear
+	 *                  per-card loading state for the specific key that failed.
 	 */
-	private postError(panel: vscode.WebviewPanel, message: string): void {
-		panel.webview.postMessage({ type: 'env:error', error: message }).then(undefined, (err: unknown) => {
+	private postError(
+		panel: vscode.WebviewPanel,
+		message: string,
+		context?: { slot: 'development' | 'deployment'; scope: 'org' | 'team' | 'user'; scopeId?: string },
+	): void {
+		panel.webview.postMessage({ type: 'env:error', error: message, ...context }).then(undefined, (err: unknown) => {
 			console.error(`[EnvironmentProvider] Failed to post error: ${err}`);
 		});
 	}

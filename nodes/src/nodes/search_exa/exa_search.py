@@ -18,6 +18,8 @@ from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ai.common.schema import Answer, Question
 
+from ai.common.utils import parse_bool
+
 _EXA_SEARCH_URL = 'https://api.exa.ai/search'
 _URL_FIELDS = {'url', 'image', 'favicon'}
 
@@ -39,21 +41,6 @@ def _get_question_texts(question: Question) -> List[str]:
     return texts
 
 
-def _get_bool(value: Any, default: bool) -> bool:  # noqa: ANN401
-    """Parse booleans defensively, including common string representations."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {'true', '1', 'yes', 'on'}:
-            return True
-        if normalized in {'false', '0', 'no', 'off'}:
-            return False
-    return bool(value)
-
-
 class ExaSearch(ChatBase):
     """Search backend that sends a single user query to Exa and returns raw JSON."""
 
@@ -73,7 +60,7 @@ class ExaSearch(ChatBase):
         ).strip()
         self._search_type = str(config.get('type') or 'auto').strip() or 'auto'
         self._num_results = int(config.get('numResults') or 5)
-        self._include_highlights = _get_bool(config.get('includeHighlights'), True)
+        self._include_highlights = parse_bool(config.get('includeHighlights'), True)
         self._highlight_chars = int(config.get('highlightChars') or 600)
         bag['search_exa'] = self
 

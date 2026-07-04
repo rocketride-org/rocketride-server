@@ -1,6 +1,6 @@
 {
 	"name": "@rocketride/dropper-ui",
-	"version": "2.1.0",
+	"version": "2.2.0",
 	"description": "RocketRide AI Dropper Interface",
 	"private": true,
 	"copylist": {
@@ -22,9 +22,9 @@
 		"ws": "^8.20.1"
 	},
 	"devDependencies": {
-		"@rsbuild/core": "~1.7.5",
-		"@rsbuild/plugin-react": "~1.4.6",
-		"@rsbuild/plugin-type-check": "~1.3.4",
+		"@rsbuild/core": "~2.0.11",
+		"@rsbuild/plugin-react": "~2.0.1",
+		"@rsbuild/plugin-type-check": "~1.3.5",
 		"@tailwindcss/aspect-ratio": "^0.4.2",
 		"@tailwindcss/forms": "^0.5.10",
 		"@tailwindcss/typography": "^0.5.16",

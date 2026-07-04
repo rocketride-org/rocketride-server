@@ -15,6 +15,7 @@
  */
 
 import React, { useState, useRef, type CSSProperties } from 'react';
+import { commonStyles } from '../../../themes/styles';
 import type { CreditBalance, CreditPack } from '../types';
 
 // =============================================================================
@@ -24,7 +25,6 @@ import type { CreditBalance, CreditPack } from '../types';
 const S = {
 	/** Outer container card. */
 	container: {
-		marginTop: 24,
 		padding: 20,
 		background: 'var(--rr-bg-paper)',
 		border: '1px solid var(--rr-border)',
@@ -39,29 +39,48 @@ const S = {
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 
-	/** Multi-resource balance list — one line per resource. */
-	balanceGrid: {
-		display: 'flex',
-		flexDirection: 'column' as const,
-		gap: 4,
+	/** Summary table for granted / consumed / net balance. */
+	summaryTable: {
+		width: '100%',
+		borderCollapse: 'collapse' as const,
 		marginBottom: 16,
-	} as CSSProperties,
-
-	/** Single resource balance line. */
-	balanceItem: {
-	} as CSSProperties,
-
-	/** Balance label text. */
-	balance: {
 		fontSize: 14,
+	} as CSSProperties,
+
+	summaryHeader: {
+		textAlign: 'left' as const,
+		fontWeight: 600,
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		textTransform: 'uppercase' as const,
+		letterSpacing: 0.5,
+		padding: '4px 8px',
+		borderBottom: '1px solid var(--rr-border)',
+	} as CSSProperties,
+
+	summaryCell: {
+		padding: '6px 8px',
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+
+	summaryCellRight: {
+		padding: '6px 8px',
+		textAlign: 'right' as const,
 		fontWeight: 500,
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 
-	/** Resource type + unit label. */
-	balanceUnit: {
-		fontSize: 13,
+	netRow: {
+		borderTop: '1px solid var(--rr-border)',
+		fontWeight: 700,
+	} as CSSProperties,
+
+	/** Fallback when no balance data. */
+	balanceEmpty: {
+		fontSize: 14,
+		fontWeight: 500,
 		color: 'var(--rr-text-secondary)',
+		marginBottom: 16,
 	} as CSSProperties,
 
 	/** Responsive grid of purchasable pack cards. */
@@ -169,6 +188,8 @@ export interface CreditsPanelProps {
 	packs: CreditPack[];
 	/** Called when the user clicks a pack to purchase. Host handles checkout. */
 	onBuy: (pack: CreditPack) => Promise<void>;
+	/** Called when the user clicks "Add more capacity". */
+	onAddCapacity?: () => void;
 }
 
 // =============================================================================
@@ -176,7 +197,7 @@ export interface CreditsPanelProps {
 // =============================================================================
 
 /** Pure credit balance widget with purchasable pack grid. */
-export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBuy }) => {
+export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBuy, onAddCapacity }) => {
 	// ── Purchase state ──────────────────────────────────────────────────────
 	const [purchasing, setPurchasing] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -204,41 +225,48 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, packs, onBu
 	// ── Render ──────────────────────────────────────────────────────────────
 	return (
 		<div style={S.container}>
-			<div style={S.heading}>Compute credits</div>
+			<div style={S.heading}>Account Balance</div>
 
-			{/* Balance display — one pill per resource type */}
-			<div style={S.balanceGrid}>
-				{balance && balance.balances && Object.keys(balance.balances).length > 0 ? (
-					Object.entries(balance.balances).map(([resource, amount]) => (
-						<div key={resource} style={S.balanceItem}>
-							<span style={S.balance}>{applyLabel(resource, amount, balance.labels)}</span>
-						</div>
-					))
-				) : (
-					<div style={S.balanceItem}>
-						<span style={S.balance}>—</span>
-						<span style={S.balanceUnit}>credits available</span>
-					</div>
-				)}
-			</div>
-
-			{/* Pack grid or empty state */}
-			{packs.length === 0 ? (
-				<p style={S.empty}>No credit packs configured.</p>
+			{/* Balance summary table — granted, consumed, net per resource */}
+			{balance && balance.balances && Object.keys(balance.balances).length > 0 ? (
+				<table style={S.summaryTable}>
+					<thead>
+						<tr>
+							<th style={S.summaryHeader}>Resource</th>
+							<th style={{ ...S.summaryHeader, textAlign: 'right' as const }}>Granted</th>
+							<th style={{ ...S.summaryHeader, textAlign: 'right' as const }}>Consumed</th>
+							<th style={{ ...S.summaryHeader, textAlign: 'right' as const }}>Balance</th>
+						</tr>
+					</thead>
+					<tbody>
+						{Object.entries(balance.balances).map(([resource, net]) => {
+							const granted = balance.granted?.[resource] ?? 0;
+							const consumed = balance.consumed?.[resource] ?? 0;
+							const label = balance.labels?.[resource] ?? resource;
+							const resourceName = label.replace('{amount}', '').trim() || resource;
+							return (
+								<tr key={resource}>
+									<td style={{ ...S.summaryCell, textTransform: 'uppercase' }}>{resourceName}</td>
+									<td style={S.summaryCellRight}>{formatCredits(granted)}</td>
+									<td style={S.summaryCellRight}>{formatCredits(consumed)}</td>
+									<td style={{ ...S.summaryCellRight, color: net < 0 ? 'var(--rr-color-error)' : 'var(--rr-text-primary)' }}>
+										{formatCredits(Math.round(net * 10) / 10)}
+									</td>
+								</tr>
+							);
+						})}
+					</tbody>
+				</table>
 			) : (
-				<div style={S.packsRow}>
-					{packs.map((pack) => {
-						// Disable all packs while any purchase is in-flight
-						const disabled = purchasing !== null;
-						const style = { ...S.pack, ...(disabled ? S.packDisabled : {}) };
-						return (
-							<button type="button" key={pack.packId} style={style} disabled={disabled} onClick={() => handleBuy(pack)}>
-								<div style={S.packCredits}>{formatCredits(pack.credits)} credits</div>
-								<div style={S.packPrice}>{formatUsd(pack.usdCents)}</div>
-								<div style={S.packNickname}>{pack.nickname}</div>
-							</button>
-						);
-					})}
+				<div style={S.balanceEmpty}>— credits available</div>
+			)}
+
+			{/* Add more capacity button */}
+			{onAddCapacity && (
+				<div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+					<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onAddCapacity}>
+						Add more capacity...
+					</button>
 				</div>
 			)}
 

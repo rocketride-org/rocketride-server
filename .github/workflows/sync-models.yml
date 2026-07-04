@@ -32,12 +32,12 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-sync-models-${{ hashFiles('tools/requirements.txt') }}
+          key: ${{ runner.os }}-pip-sync-models-${{ hashFiles('tools/sync_models/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-sync-models-
 
       - name: Install sync script dependencies
-        run: pip install -r tools/requirements.txt
+        run: pip install -r tools/sync_models/requirements.txt
 
       # Partition providers by whether their API key secret is configured.
       # Providers WITH a key run in strict mode (native API discovery only).
@@ -61,6 +61,8 @@ jobs:
             [llm_xai]=ROCKETRIDE_XAI_KEY
             [llm_perplexity]=ROCKETRIDE_PERPLEXITY_KEY
             [llm_qwen]=ROCKETRIDE_QWEN_KEY
+            [llm_minimax]=ROCKETRIDE_MINIMAX_KEY
+            [llm_kimi]=ROCKETRIDE_KIMI_KEY
           )
 
           for PROVIDER in "${!PROVIDER_KEY[@]}"; do
@@ -86,6 +88,8 @@ jobs:
           ROCKETRIDE_XAI_KEY: ${{ secrets.ROCKETRIDE_XAI_KEY }}
           ROCKETRIDE_PERPLEXITY_KEY: ${{ secrets.ROCKETRIDE_PERPLEXITY_KEY }}
           ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
+          ROCKETRIDE_MINIMAX_KEY: ${{ secrets.ROCKETRIDE_MINIMAX_KEY }}
+          ROCKETRIDE_KIMI_KEY: ${{ secrets.ROCKETRIDE_KIMI_KEY }}
 
       # Strict sync: only providers whose API key is configured. Native API
       # discovers and smoke-tests new models. No OpenRouter pollution.
@@ -94,7 +98,7 @@ jobs:
         shell: bash
         run: |
           # Capture markdown PR body to a file; tee to stdout so it is also visible in CI logs.
-          python tools/src/sync_models.py ${{ steps.partition.outputs.with_key }} --enable-discovery --apply --pr-body | tee /tmp/body-strict.md
+          python tools/sync_models/src/sync_models.py ${{ steps.partition.outputs.with_key }} --enable-discovery --apply --pr-body | tee /tmp/body-strict.md
         env:
           ROCKETRIDE_OPENAI_KEY: ${{ secrets.ROCKETRIDE_OPENAI_KEY }}
           ROCKETRIDE_ANTHROPIC_KEY: ${{ secrets.ROCKETRIDE_ANTHROPIC_KEY }}
@@ -104,6 +108,8 @@ jobs:
           ROCKETRIDE_XAI_KEY: ${{ secrets.ROCKETRIDE_XAI_KEY }}
           ROCKETRIDE_PERPLEXITY_KEY: ${{ secrets.ROCKETRIDE_PERPLEXITY_KEY }}
           ROCKETRIDE_QWEN_KEY: ${{ secrets.ROCKETRIDE_QWEN_KEY }}
+          ROCKETRIDE_MINIMAX_KEY: ${{ secrets.ROCKETRIDE_MINIMAX_KEY }}
+          ROCKETRIDE_KIMI_KEY: ${{ secrets.ROCKETRIDE_KIMI_KEY }}
 
       # Fallback sync: providers without an API key. OpenRouter / LiteLLM
       # are permitted as discovery sources for these. Smoke tests are skipped
@@ -113,7 +119,7 @@ jobs:
         if: steps.partition.outputs.without_key != ''
         shell: bash
         run: |
-          python tools/src/sync_models.py ${{ steps.partition.outputs.without_key }} --enable-discovery --allow-fallback-discovery --apply --pr-body | tee /tmp/body-fallback.md
+          python tools/sync_models/src/sync_models.py ${{ steps.partition.outputs.without_key }} --enable-discovery --allow-fallback-discovery --apply --pr-body | tee /tmp/body-fallback.md
 
       # Combine the two PR bodies and write a single SYNC_OUTPUT to GITHUB_ENV.
       # This overrides whatever each --pr-body step appended individually.

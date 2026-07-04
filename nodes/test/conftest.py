@@ -29,22 +29,23 @@ Running tests:
 """
 
 import os
-import sys
 import asyncio
 import pytest
 import pytest_asyncio
 from pathlib import Path
 from typing import Dict, Any, List
 
-# Add project paths
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / 'dist' / 'server'))
+# Derive paths from the engine executable (dist/server/engine.exe)
+# so they resolve correctly whether rocketride-server is standalone or a submodule.
+import sys
 
-# Load environment variables
+_ENGINE_DIR = Path(sys.executable).resolve().parent
+
+# Load environment variables from the build output root (next to the engine).
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(PROJECT_ROOT / '.env')
+    load_dotenv(_ENGINE_DIR / '.env')
 except ImportError:
     pass  # dotenv is optional
 
@@ -60,7 +61,7 @@ class TestConfig:
     def __init__(self) -> None:
         """Initialize test configuration from ROCKETRIDE_* environment variables."""
         self.uri = os.getenv('ROCKETRIDE_URI', 'http://localhost:5565')
-        self.auth = os.getenv('ROCKETRIDE_APIKEY', '')
+        self.auth = os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY')
         self.timeout = float(os.getenv('ROCKETRIDE_TEST_TIMEOUT', '30.0'))
 
     def as_dict(self) -> Dict[str, Any]:
@@ -196,23 +197,74 @@ async def node_test_runner(client):
         await runner.teardown()
 
 
+def _missing_libs_skip_mark(config):
+    """Return a pytest.mark.skip (naming the missing lib + install hint) if the
+    node's `requiresLibs` aren't loadable here, else None — turning a hard engine
+    abort into a clean, explained skip.
+    """
+    missing = config.get_missing_shared_libs()
+    if not missing:
+        return None
+    plural = 'y' if len(missing) == 1 else 'ies'
+    return pytest.mark.skip(
+        reason=(
+            f'{config.node_name}: required shared librar{plural} not available: '
+            f'{", ".join(missing)}. Install the providing system package '
+            f"(e.g. 'apt-get install -y libgles2' provides libGLESv2.so.2)."
+        )
+    )
+
+
+# Nodes that load a heavy model in-process but carry no 'gpu' capability tag
+# (CPU model-download nodes). Supplements the capability signal — keep small.
+_HEAVY_TEST_NODES = {'audio_transcribe', 'audio_tts'}
+
+
+def _is_heavy_node(config) -> bool:
+    """Whether a node loads a heavy model in-process.
+
+    True for the 'gpu' capability (mirrors the existing `'debug' in capabilities`
+    check) or a known CPU heavy-model node. Such tests are pinned to one xdist
+    worker so their model loads run serially instead of exhausting RAM/VRAM.
+    """
+    return 'gpu' in config.capabilities or config.node_name in _HEAVY_TEST_NODES
+
+
 def _build_parametrize_list(configs, skip_nodes=None, include_skip=None):
-    """Build (config, profile) pairs and ids for parametrize, applying skip_nodes filter."""
-    available_configs = []
-    ids = []
+    """Build pytest.param entries for (config, profile) pairs, applying skip_nodes.
+
+    A config with missing `requiresLibs` is still emitted, but marked skip.
+    Heavy (model-loading) configs also get an `xdist_group('gpu')` mark so that,
+    under `--dist loadgroup`, all their tests run on one worker (serially) and don't
+    OOM-crash workers. The mark is applied here at parametrize time — not in
+    `pytest_collection_modifyitems` — because xdist reads the group during its own
+    collection pass and would miss a marker added by a later hook.
+    """
+    params = []
     for config in configs:
+        # Release engines don't register "debug" nodes; running one only errors.
+        if 'debug' in config.capabilities:
+            continue
         if skip_nodes and config.node_name in skip_nodes:
             if include_skip is None or config.node_name not in include_skip:
                 continue
-        if config.has_required_env_vars():
-            if not config.profiles:
-                available_configs.append((config, None))
-                ids.append(config.get_test_id())
-            else:
-                for profile in config.profiles:
-                    available_configs.append((config, profile))
-                    ids.append(f'{config.get_test_id()}:{profile}')
-    return available_configs, ids
+        if not config.has_required_env_vars():
+            continue
+
+        marks = []
+        skip_mark = _missing_libs_skip_mark(config)
+        if skip_mark:
+            marks.append(skip_mark)
+        if _is_heavy_node(config):
+            marks.append(pytest.mark.xdist_group('gpu'))
+        marks = tuple(marks)
+
+        if not config.profiles:
+            params.append(pytest.param((config, None), id=config.get_test_id(), marks=marks))
+        else:
+            for profile in config.profiles:
+                params.append(pytest.param((config, profile), id=f'{config.get_test_id()}:{profile}', marks=marks))
+    return params
 
 
 def pytest_generate_tests(metafunc):
@@ -230,27 +282,43 @@ def pytest_generate_tests(metafunc):
         # excluded because they pull large libraries, use heavy models, or depend on local
         # services, which would cause CI timeouts or OOM. Opt-in via ROCKETRIDE_INCLUDE_SKIP:
         #   ROCKETRIDE_INCLUDE_SKIP=embedding_image pytest nodes/test/test_dynamic.py -v -k embedding_image
-        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama); audio/TTS (audio_tts).
+        # Groups: ML/heavy (anonymize, ocr, ner, embedding_image, embedding_transformer, embedding_video); image/video (image_cleanup, frame_grabber); LLM/local (llm_anthropic, llm_ollama); audio/TTS (audio_tts).
         skip_nodes = {
             'anonymize',
             'ocr',
             'ner',
             'embedding_image',
+            # Download model weights from huggingface.co at test time, so they turn the
+            # required CI check red whenever the HF hub is unreachable/rate-limited — on
+            # PRs unrelated to embeddings (RR-1120). Same class as embedding_image above.
+            'embedding_transformer',  # sentence-transformers (miniLM)
+            'embedding_video',  # CLIP (openai-patch16)
             'image_cleanup',
             'frame_grabber',
             'audio_transcribe',  # it downloads faster-whisper model (1.5GB)
             'audio_tts',
+            # Heavy vision models (model download); opt in via ROCKETRIDE_INCLUDE_SKIP.
+            'depth_estimate',
+            'detect',
+            'detect_segment',
+            'caption',
+            'background_removal',
+            'pose_estimation',
+            'face_detection',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
             'index_search',
+            # Require live third-party API credentials (no live calls in default CI):
+            'tool_xtrace_memory',
+            'tool_mem0',
         }
         include_skip = {n.strip() for n in os.environ.get('ROCKETRIDE_INCLUDE_SKIP', '').split(',') if n.strip()}
 
-        available_configs, ids = _build_parametrize_list(configs, skip_nodes, include_skip)
-        metafunc.parametrize('node_test_config', available_configs, ids=ids)
+        params = _build_parametrize_list(configs, skip_nodes, include_skip)
+        metafunc.parametrize('node_test_config', params)
 
     if 'node_fulltest_config' in metafunc.fixturenames:
         # Fulltest: discovers 'fulltest' key in service*.json — no skip_nodes filter,
         # these are run explicitly via nodes:test-full
         configs = discover_testable_nodes(test_key='fulltest')
-        available_configs, ids = _build_parametrize_list(configs)
-        metafunc.parametrize('node_fulltest_config', available_configs, ids=ids)
+        params = _build_parametrize_list(configs)
+        metafunc.parametrize('node_fulltest_config', params)

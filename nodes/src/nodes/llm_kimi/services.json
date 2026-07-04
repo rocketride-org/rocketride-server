@@ -1,0 +1,219 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Kimi (Moonshot)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_kimi://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["llm"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_kimi",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A component that connects to Moonshot AI's Kimi large language models for ", "advanced natural language processing. It enables text generation, long-context ", "reasoning, summarization, and tool use. The Kimi K2 family offers a 256K context ", "window with thinking and non-thinking modes and strong agentic performance, while ", "the classic Moonshot v1 models provide cost-effective options across 8K, 32K, and ", "128K context sizes. The component is suitable for integrating intelligent ", "reasoning and content generation into pipelines where long context and accuracy ", "are key."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "kimi.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": ["Model: ${parameters.llm_kimi.profile}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["answers"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "kimi-k2-6",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"kimi-k2-6": {
+				"title": "Kimi K2.6",
+				"model": "kimi-k2.6",
+				"modelSource": "manual",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 16384,
+				"serverbase": "https://api.moonshot.ai/v1",
+				"apikey": ""
+			},
+			"kimi-k2-5": {
+				"title": "Kimi K2.5",
+				"model": "kimi-k2.5",
+				"modelSource": "manual",
+				"modelTotalTokens": 262144,
+				"modelOutputTokens": 16384,
+				"serverbase": "https://api.moonshot.ai/v1",
+				"apikey": ""
+			},
+			"moonshot-v1-8k": {
+				"title": "Moonshot v1 8K",
+				"model": "moonshot-v1-8k",
+				"modelSource": "manual",
+				"modelTotalTokens": 8192,
+				"modelOutputTokens": 4096,
+				"serverbase": "https://api.moonshot.ai/v1",
+				"apikey": ""
+			},
+			"moonshot-v1-32k": {
+				"title": "Moonshot v1 32K",
+				"model": "moonshot-v1-32k",
+				"modelSource": "manual",
+				"modelTotalTokens": 32768,
+				"modelOutputTokens": 4096,
+				"serverbase": "https://api.moonshot.ai/v1",
+				"apikey": ""
+			},
+			"moonshot-v1-128k": {
+				"title": "Moonshot v1 128K",
+				"model": "moonshot-v1-128k",
+				"modelSource": "manual",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 4096,
+				"serverbase": "https://api.moonshot.ai/v1",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "Kimi (Moonshot) model"
+		},
+		"kimi.kimi-k2-6": {
+			"object": "kimi-k2-6",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"kimi.kimi-k2-5": {
+			"object": "kimi-k2-5",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"kimi.moonshot-v1-8k": {
+			"object": "moonshot-v1-8k",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"kimi.moonshot-v1-32k": {
+			"object": "moonshot-v1-32k",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"kimi.moonshot-v1-128k": {
+			"object": "moonshot-v1-128k",
+			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+		},
+		"kimi.profile": {
+			"title": "Model",
+			"description": "Kimi (Moonshot) LLM model",
+			"type": "string",
+			"default": "kimi-k2-6",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "kimi-k2-6",
+					"properties": ["kimi.kimi-k2-6"]
+				},
+				{
+					"value": "kimi-k2-5",
+					"properties": ["kimi.kimi-k2-5"]
+				},
+				{
+					"value": "moonshot-v1-8k",
+					"properties": ["kimi.moonshot-v1-8k"]
+				},
+				{
+					"value": "moonshot-v1-32k",
+					"properties": ["kimi.moonshot-v1-32k"]
+				},
+				{
+					"value": "moonshot-v1-128k",
+					"properties": ["kimi.moonshot-v1-128k"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Kimi (Moonshot)",
+			"properties": ["kimi.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["kimi-k2-6"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}

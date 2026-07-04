@@ -81,9 +81,9 @@ key matches the API key that started the task. You will only see your own runs.
 
 Variables the server reads:
 
-- `ROCKETRIDE_APIKEY` — server-side API key (also expected client-side).
-- `ROCKETRIDE_URI` — default URI used by the SDK if not passed in code.
-- `ROCKETRIDE_CORS_ORIGINS` — comma-separated CORS allow-list.
+- `ROCKETRIDE_APIKEY`: server-side API key (also expected client-side).
+- `ROCKETRIDE_URI`: default URI used by the SDK if not passed in code.
+- `ROCKETRIDE_CORS_ORIGINS`: comma-separated CORS allow-list.
 
 ---
 
@@ -156,7 +156,7 @@ Valid values:
 | `NONE`      | 0   | Unsubscribe (clears the registry entry)                                           |
 | `DEBUGGER`  | 1   | DAP debug protocol passthrough (stopped, threads, etc.)                           |
 | `DETAIL`    | 2   | Real-time per-object processing updates                                           |
-| `SUMMARY`   | 4   | Periodic full `TASK_STATUS` snapshots — best for dashboards                       |
+| `SUMMARY`   | 4   | Periodic full `TASK_STATUS` snapshots, best for dashboards                       |
 | `OUTPUT`    | 8   | Engine log/output lines                                                           |
 | `FLOW`      | 16  | Pipeline component flow events (requires `pipelineTraceLevel` on execute, see §5) |
 | `TASK`      | 32  | Lifecycle: `running`, `begin`, `end`, `restart`                                   |
@@ -201,7 +201,7 @@ When you turn on `TASK`, the server immediately replies with one
 When you turn on `SUMMARY`, the server immediately sends an `apaevt_status_update`
 with the current `TASK_STATUS` (or an empty "Not running" placeholder).
 
-So you do not need to poll for initial state — subscribing seeds it.
+So you do not need to poll for initial state: subscribing seeds it.
 
 ### 4.5 Important: enabling FLOW traces
 
@@ -218,7 +218,7 @@ run will be silent. Possible values when starting a pipeline (`execute` /
 | `full`           | Every lane write and invoke call |
 
 If your service is the executor, pass `pipelineTraceLevel: "summary"` (good
-default — captures inputs/outputs without per-call noise).
+default: captures inputs/outputs without per-call noise).
 
 ---
 
@@ -231,7 +231,7 @@ Authoritative type definitions live at:
 - TypeScript: `packages/client-typescript/src/client/types/events.ts`
 - TypeScript: `packages/client-typescript/src/client/types/task.ts`
 
-### 5.1 `apaevt_task` — lifecycle (subscribe to `TASK`)
+### 5.1 `apaevt_task`: lifecycle (subscribe to `TASK`)
 
 `body` is one of:
 
@@ -249,11 +249,11 @@ Authoritative type definitions live at:
 { action: "restart", name: string, projectId: string, source: string }
 ```
 
-There is **no per-event task `id` or token in begin/end** — correlate by
+There is **no per-event task `id` or token in begin/end**: correlate by
 `projectId` + `source`. Use `running` for the id↔project+source map at
 subscription time.
 
-### 5.2 `apaevt_status_update` — periodic full status (subscribe to `SUMMARY`)
+### 5.2 `apaevt_status_update`: periodic full status (subscribe to `SUMMARY`)
 
 `body` is a `TASK_STATUS` (Pydantic model). Key fields:
 
@@ -316,13 +316,14 @@ subscription time.
 `state` enum mapping:
 `0=NONE, 1=STARTING, 2=INITIALIZING, 3=RUNNING, 4=STOPPING, 5=COMPLETED, 6=CANCELLED`.
 
-### 5.3 `apaevt_flow` — per-pipe execution trace (subscribe to `FLOW`)
+### 5.3 `apaevt_flow`: per-pipe execution trace (subscribe to `FLOW`)
 
 ```ts
 {
   id: number,                                  // pipe index within the pipeline
   op: "begin" | "enter" | "leave" | "end",
   pipes: string[],                             // current component stack for this pipe
+  component?: string,                          // component this op refers to (on "leave", the leaving one); pair enter/leave by identity, not stack position
   trace: {                                     // shape depends on pipelineTraceLevel
     lane?: string,
     data?: object,                             // input/intermediate data
@@ -338,7 +339,7 @@ subscription time.
 This is the data that lets you reconstruct _why_ a pipeline produced what it
 produced: each component entry/exit with its lane data and any error.
 
-### 5.4 `apaevt_sse` — node-to-UI passthrough (subscribe to `SSE`)
+### 5.4 `apaevt_sse`: node-to-UI passthrough (subscribe to `SSE`)
 
 Nodes can call `monitorSSE(pipe_id, type, data)` to broadcast custom updates
 ("thinking", "tool_call", progress, etc.). Body shape:
@@ -351,7 +352,7 @@ Nodes can call `monitorSSE(pipe_id, type, data)` to broadcast custom updates
 }
 ```
 
-Schema is intentionally open — interpret per node type.
+Schema is intentionally open: interpret per node type.
 
 ### 5.5 Output / log lines (subscribe to `OUTPUT`)
 
@@ -360,7 +361,7 @@ under `EVENT_TYPE.OUTPUT`. The body carries an `output` string field plus
 DAP-standard fields (`category`, etc., from the underlying debugger output
 event).
 
-### 5.6 `apaevt_status_upload` — file upload progress
+### 5.6 `apaevt_status_upload`: file upload progress
 
 ```ts
 {
@@ -372,7 +373,7 @@ event).
 }
 ```
 
-### 5.7 `apaevt_dashboard` — server admin events (subscribe to `DASHBOARD`)
+### 5.7 `apaevt_dashboard`: server admin events (subscribe to `DASHBOARD`)
 
 Connection lifecycle, monitor-change audit events, etc. Useful if you want to
 record _who_ subscribed/unsubscribed to monitors (operator-level audit).
@@ -386,10 +387,10 @@ Sent the same way as `rrext_monitor`:
 | Command                 | `arguments`                                                                      | Returns          | Purpose                            |
 | ----------------------- | -------------------------------------------------------------------------------- | ---------------- | ---------------------------------- |
 | `auth`                  | `{ auth, clientName?, clientVersion? }`                                          | `{ success }`    | Required first message             |
-| `rrext_get_task_status` | — (uses `token`)                                                                 | `TASK_STATUS`    | Fetch current status synchronously |
+| `rrext_get_task_status` | - (uses `token`)                                                                 | `TASK_STATUS`    | Fetch current status synchronously |
 | `rrext_get_token`       | `{ projectId, source }`                                                          | `{ token }`      | Resolve a running task's token     |
 | `execute`               | `{ pipeline, token?, threads?, args?, useExisting?, ttl?, pipelineTraceLevel? }` | `{ token, ... }` | Start a pipeline                   |
-| `terminate`             | — (uses `token`)                                                                 | —                | Stop a running pipeline            |
+| `terminate`             | - (uses `token`)                                                                 | -                | Stop a running pipeline            |
 
 ---
 
@@ -398,9 +399,9 @@ Sent the same way as `rrext_monitor`:
 If you'd rather not implement DAP-over-WebSocket from scratch, two first-party
 clients exist in this repo and ship to npm/PyPI:
 
-- Python: `pip install rocketride` — `RocketRideClient(uri, auth, on_event=...)`,
+- Python: `pip install rocketride`: `RocketRideClient(uri, auth, on_event=...)`,
   then `await client.add_monitor(key={'token': '*'}, types=['summary','flow','task','output','sse'])`.
-- TypeScript: `@rocketride/client` — same shape.
+- TypeScript: `@rocketride/client`: same shape.
 
 Both let you pass an `on_event` async callback that fires for every inbound
 event message. Source: `packages/client-python/src/rocketride/` and
@@ -438,7 +439,7 @@ event message. Source: `packages/client-python/src/rocketride/` and
 
 ## 9. Things to NOT assume
 
-- There is no built-in dead-letter queue — if your ingester is offline, you
+- There is no built-in dead-letter queue, if your ingester is offline, you
   miss events for that window. The next `apaevt_task` `running` snapshot is
   your only crash-recovery handle.
 - There is no `event_id` / global ordering key. Use the DAP envelope `seq`
@@ -446,7 +447,7 @@ event message. Source: `packages/client-python/src/rocketride/` and
 - `apaevt_flow` `trace` is a free-form dict; schema varies by node and trace
   level. Store as JSONB, do not flatten.
 - `errors` and `warnings` arrays in `TASK_STATUS` are capped at 50 entries
-  each — you must persist them as they appear or you'll lose older ones on
+  each: you must persist them as they appear or you'll lose older ones on
   long runs.
 - Monitor subscriptions are per-connection, not durable server-side. Reconnect
   → resubscribe.

@@ -23,10 +23,30 @@
 
 import os
 import re
+import sys
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
+
+
+# Accepted (lowercased) aliases per canonical OS label for `requiresLibs` keys.
+_OS_ALIASES = {
+    'linux': {'linux'},
+    'macos': {'macos', 'mac', 'osx', 'darwin', 'mac os', 'os x'},
+    'windows': {'windows', 'win', 'win32'},
+}
+
+
+def _current_os_label() -> str:
+    """Canonical OS label for the host (`linux`/`macos`/`windows`)."""
+    if sys.platform.startswith('linux'):
+        return 'linux'
+    if sys.platform == 'darwin':
+        return 'macos'
+    if sys.platform.startswith('win') or sys.platform == 'cygwin':
+        return 'windows'
+    return sys.platform
 
 
 # Known input lane names for detecting which key is the input
@@ -68,6 +88,7 @@ class NodeTestConfig:
 
     # Test configuration
     requires: List[str] = field(default_factory=list)
+    requires_libs: List[str] = field(default_factory=list)
     avoid_mocks: bool = False
     profiles: List[str] = field(default_factory=list)
     controls: List[str] = field(default_factory=list)
@@ -75,10 +96,12 @@ class NodeTestConfig:
     outputs: List[str] = field(default_factory=list)
     timeout: int = 60
     cases: List[TestCase] = field(default_factory=list)
+    config: Dict[str, Any] = field(default_factory=dict)
 
     # Node metadata
     preconfig: Dict[str, Any] = field(default_factory=dict)
     lanes: Dict[str, Any] = field(default_factory=dict)
+    capabilities: List[str] = field(default_factory=list)
     config_id: Optional[str] = None
 
     def get_test_id(self) -> str:
@@ -97,6 +120,22 @@ class NodeTestConfig:
     def get_missing_env_vars(self) -> List[str]:
         """Return list of missing required environment variables."""
         return [var for var in self.requires if not os.environ.get(var)]
+
+    def get_missing_shared_libs(self) -> List[str]:
+        """Return required shared libs (already OS-resolved) that fail to dlopen here.
+
+        Probed with ``ctypes.CDLL`` — the same load the engine does for a node's
+        native dependency — so a failure predicts the node aborting on startup.
+        """
+        import ctypes
+
+        missing = []
+        for lib in self.requires_libs:
+            try:
+                ctypes.CDLL(lib)
+            except OSError:
+                missing.append(lib)
+        return missing
 
 
 def _remove_json_comments(content: str) -> str:
@@ -232,6 +271,32 @@ def _ensure_list_field(value: Any, field_name: str, service_file: str) -> List[A
     return []
 
 
+def _resolve_platform_libs(value: Any, service_file: str) -> List[str]:
+    """Resolve ``requiresLibs`` to the sonames required on the current OS.
+
+    Accepts an OS-keyed object (omit platforms needing nothing) or, as a
+    shorthand, a plain array applied everywhere. Keys are case-insensitive with
+    aliases (Linux / macOS|Darwin / Windows|Win)::
+
+        "requiresLibs": { "Linux": ["libGLESv2.so.2"], "Windows": ["foo.dll"] }
+    """
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return _ensure_list_field(value, 'requiresLibs', service_file)
+    if isinstance(value, dict):
+        accepted = _OS_ALIASES.get(_current_os_label(), {_current_os_label()})
+        for key, libs in value.items():
+            if isinstance(key, str) and key.lower() in accepted:
+                return _ensure_list_field(libs, f'requiresLibs.{key}', service_file)
+        return []
+    print(
+        f'Warning: Invalid "requiresLibs" in {service_file}; '
+        f'expected an OS-keyed object or array, got {type(value).__name__}'
+    )
+    return []
+
+
 def _parse_test_config(
     node_name: str, service_file: str, data: Dict[str, Any], test_key: str = 'test'
 ) -> List[NodeTestConfig]:
@@ -297,6 +362,7 @@ def _parse_test_config(
                 provider=provider,
                 service_file=service_file,
                 requires=_ensure_list_field(group.get('requires'), 'requires', service_file),
+                requires_libs=_resolve_platform_libs(group.get('requiresLibs'), service_file),
                 avoid_mocks=bool(group.get('avoidMocks', False)),
                 profiles=_ensure_list_field(group.get('profiles'), 'profiles', service_file),
                 controls=_ensure_list_field(group.get('controls'), 'controls', service_file),
@@ -308,8 +374,10 @@ def _parse_test_config(
                 outputs=outputs,
                 timeout=group.get('timeout', 60),
                 cases=cases,
+                config=group.get('config') if isinstance(group.get('config'), dict) else {},
                 preconfig=data.get('preconfig', {}),
                 lanes=data.get('lanes', {}),
+                capabilities=_ensure_list_field(data.get('capabilities'), 'capabilities', service_file),
                 config_id=config_id,
             )
         )

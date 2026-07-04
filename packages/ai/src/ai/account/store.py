@@ -305,6 +305,30 @@ class IStore(ABC):
         if buf:
             buf.close()
 
+    async def get_url(
+        self, filename: str, expires_in: int = 3600, content_disposition: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Get a direct HTTP URL for accessing the file.
+
+        Cloud backends (S3, Azure) return a presigned/SAS URL that grants
+        temporary read access without further authentication.  The local
+        filesystem backend returns ``None``, signaling the caller to
+        generate a JWT-signed URL pointing at the ``/task/fetch`` endpoint.
+
+        Args:
+            filename: Relative path to the file within the store.
+            expires_in: URL validity in seconds (default 1 hour).
+            content_disposition: Optional ``Content-Disposition`` header value
+                for cloud backends to bake into the URL. Ignored by the local
+                filesystem backend (which handles disposition at ``/task/fetch``).
+
+        Returns:
+            A presigned URL string, or ``None`` when the backend cannot
+            produce a direct URL (filesystem).
+        """
+        return None
+
     @abstractmethod
     async def list_files(self, prefix: str = '') -> list:  # noqa: D102
         """
@@ -318,6 +342,42 @@ class IStore(ABC):
 
         Raises:
             StorageError: If listing fails
+        """
+        pass
+
+    @abstractmethod
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        name_pattern: Optional[str] = None,
+    ) -> list:
+        """
+        Browse files and/or folders under a prefix.
+
+        Directories are returned with a trailing ``/`` to distinguish them from
+        files.
+
+        Args:
+            prefix: Path prefix to list under (relative to store root).
+            recursive: When ``True`` (default) descend into all sub-directories.
+                When ``False`` list only the immediate children of ``prefix``.
+            include_files: Include regular files in the result.
+            include_dirs: Include directory entries (with trailing ``/``) in the
+                result.
+            name_pattern: Optional glob pattern applied to the **basename** of
+                each result.  Must not contain path separators (``/`` or
+                ``\\``); backends will raise ``ValueError`` for patterns that
+                do.
+
+        Returns:
+            Sorted list of relative paths.  Directory entries end with ``/``.
+
+        Raises:
+            StorageError: If the underlying listing operation fails.
         """
         pass
 

@@ -12,6 +12,8 @@
  * as one prop.
  */
 
+import type { ReactNode } from 'react';
+
 // =============================================================================
 // VIRTUAL FILE SYSTEM
 // =============================================================================
@@ -165,11 +167,34 @@ export interface ExplorerConfig {
 	createPlaceholder?: string;
 	/** Empty state message. Default: 'No files'. */
 	emptyMessage?: string;
+	/** Whether to show the "New Folder" action. Default: true. */
+	allowFolders?: boolean;
 }
 
 // =============================================================================
 // EXPLORER PROPS
 // =============================================================================
+
+/**
+ * A custom action injected by the host into a file row's kebab menu.
+ *
+ * The Explorer is action-agnostic: it renders whatever actions the host
+ * supplies and calls `onSelect(path)` when one is chosen. SaaS hosts use this
+ * for features (e.g. Export/Download) that must stay out of the VS Code
+ * bundle — hosts that omit `fileActions` show only the built-in rename/delete.
+ */
+export interface ExplorerFileAction {
+	/** Stable identifier; also used as the React key. */
+	id: string;
+	/** Menu item label. */
+	label: string;
+	/** Optional leading icon node. */
+	icon?: ReactNode;
+	/** Invoked with the row's file path when the item is chosen. Omit if using children. */
+	onSelect?: (path: string) => void;
+	/** Submenu items — when present, hovering the item opens a nested menu. May be a static array or a function that receives the file path. */
+	children?: ExplorerFileAction[] | ((path: string) => ExplorerFileAction[]);
+}
 
 /**
  * Props for the Explorer component.
@@ -211,6 +236,27 @@ export interface IExplorerProps {
 	 */
 	onChildAction?: (action: 'run' | 'stop', filePath: string, childId: string, documentId?: string) => void;
 
+	/**
+	 * Host-injected extra actions appended to each file row's kebab menu
+	 * (e.g. Export). Optional — omitted hosts (VS Code) show only rename/delete.
+	 */
+	fileActions?: ExplorerFileAction[];
+
 	/** Called when the user clicks the refresh button. */
 	onRefresh: () => void;
+
+	/**
+	 * Called when a file or directory is dragged and dropped onto a directory.
+	 * Optional — when absent, internal drag-to-move is disabled.
+	 */
+	onMove?: (sourcePath: string, targetDir: string) => void;
+
+	/**
+	 * Called when files are dropped from the OS onto the file tree.
+	 * Optional — when absent, upload-by-drop is disabled.
+	 *
+	 * @param files     - The dropped File objects.
+	 * @param targetDir - The directory path they were dropped onto ('' for root).
+	 */
+	onUpload?: (files: File[], targetDir: string) => void;
 }

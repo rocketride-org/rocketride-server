@@ -55,7 +55,7 @@ You can configure the client using a `.env` file:
 ```env
 # .env file
 ROCKETRIDE_APIKEY=your-api-key-here
-ROCKETRIDE_URI=https://cloud.rocketride.ai
+ROCKETRIDE_URI=https://api.rocketride.ai
 ```
 
 The client will automatically parse the `.env` file if it exists and use the values as defaults. The priority order is:
@@ -76,7 +76,7 @@ You can override `.env` settings by passing parameters directly to the construct
 ```python
 # Override for testing or special cases
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='your-api-key'
 )
 ```
@@ -89,7 +89,7 @@ The SDK automatically performs template variable substitution in pipeline config
 
 ```env
 ROCKETRIDE_APIKEY=your-api-key
-ROCKETRIDE_URI=https://cloud.rocketride.ai
+ROCKETRIDE_URI=https://api.rocketride.ai
 ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
@@ -264,7 +264,7 @@ async def on_connect_error(error: str) -> None:
 
 # Create client with automatic reconnection enabled
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='your-api-key',
     persist=True,                # Enable automatic reconnection (exponential backoff)
     max_retry_time=60000,        # Stop retrying after 60 seconds (None = retry forever)
@@ -288,14 +288,14 @@ await client.disconnect()
 from rocketride import RocketRideClient
 
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='your-api-key'
 )
 
 await client.connect()
 
 # Manual pipe management
-pipe = await client.pipe(token, mimetype='text/csv')
+pipe = await client.pipe(token, mime_type='text/csv')
 await pipe.open()
 await pipe.write(b'header1,header2\n')
 await pipe.write(b'value1,value2\n')
@@ -364,12 +364,12 @@ await client.disconnect()
 #### Constructor
 
 ```python
-RocketRideClient(uri: str, auth: str, **kwargs)
+RocketRideClient(uri: str = '', auth: str = '', **kwargs)
 ```
 
 **Parameters:**
 
-- `uri` (str): Server URI (default: uses `ROCKETRIDE_URI` from `.env` or `https://cloud.rocketride.ai`)
+- `uri` (str): Server URI (default: uses `ROCKETRIDE_URI` from `.env` or `https://api.rocketride.ai`)
 - `auth` (str): API key for authentication (can also use `ROCKETRIDE_APIKEY` in `.env`)
 - `on_event` (EventCallback, optional): Event handler for server events
 - `on_connected` (ConnectCallback, optional): Connection established callback
@@ -381,13 +381,65 @@ RocketRideClient(uri: str, auth: str, **kwargs)
 
 #### Connection Methods
 
-##### `async connect() -> None`
+##### `async connect(credential: Optional[str] = None, *, timeout: Optional[float] = None) -> ConnectResult`
 
-Establish connection to the RocketRide server.
+Establish a connection to the RocketRide server. Optionally pass a `credential` to authenticate; `timeout` bounds the attempt. Internally this wraps the attach + login lifecycle and returns a `ConnectResult` carrying the resolved auth/identity info (most callers can ignore the return value).
 
 ##### `async disconnect() -> None`
 
-Close connection to the RocketRide server and stop automatic reconnection.
+Close the connection to the RocketRide server and stop automatic reconnection. Internally wraps `logout()` + `detach()`.
+
+##### Auth / Connection Lifecycle
+
+`connect()`/`disconnect()` are convenience wrappers over two independent concerns: the WebSocket transport (attach/detach) and the DAP auth handshake (login/logout). Use the primitives below when you need to manage them separately: e.g. attach once, then log in and out under different credentials without reopening the socket.
+
+###### `async attach(uri: Optional[str] = None, *, timeout: Optional[float] = None) -> None`
+
+Open the WebSocket transport without authenticating. If `uri` is provided and differs from the current URI, detaches first; attaching to the same URI is a no-op. `timeout` (seconds) bounds the connect.
+
+###### `async detach() -> None`
+
+Detach from the server: closes the WebSocket and cancels any pending reconnection.
+
+###### `async login(credential: Optional[str] = None, *, uri: Optional[str] = None, timeout: Optional[float] = None) -> ConnectResult`
+
+Authenticate over an attached transport (auto-attaches if not already attached). If `credential` differs from the current one, logs out first (best-effort) before re-authenticating; if already authenticated with the same credential, this is a no-op. Passing `uri` detaches and re-attaches to the new URI first. Returns a `ConnectResult` with the resolved auth/identity info.
+
+###### `async logout() -> None`
+
+Deauthenticate: sends a `deauth` request to the server and clears client-side auth state. The transport stays attached.
+
+###### `def is_attached() -> bool`
+
+`True` when the WebSocket transport is connected, regardless of auth state.
+
+###### `def is_authenticated() -> bool`
+
+`True` when the auth handshake has succeeded on the current connection.
+
+###### `def is_connected() -> bool`
+
+`True` when the client is connected (transport is up). Check before `use()`/`send()` if needed.
+
+###### `def get_account_info() -> Optional[ConnectResult]`
+
+Return the `ConnectResult` from the last successful `login()`, or `None` if not authenticated.
+
+**Example: attach once, log in, run, log out:**
+
+```python
+client = RocketRideClient()  # config from .env
+
+await client.attach()
+await client.login()  # uses ROCKETRIDE_APIKEY
+
+if client.is_authenticated():
+    result = await client.use(filepath='pipeline.pipe')
+    await client.send(result['token'], 'hello')
+
+await client.logout()
+await client.detach()
+```
 
 #### Execution Methods
 
@@ -395,13 +447,15 @@ Close connection to the RocketRide server and stop automatic reconnection.
 
 Start a RocketRide pipeline for processing data. Automatically performs environment variable substitution on the pipeline configuration.
 
+> All `use()` parameters are **keyword-only**: pass them by name (e.g. `use(pipeline=...)`), not positionally.
+
 **Parameters:**
 
 - `pipeline` (dict, optional): Flat pipeline configuration dict (`components`, `source`, `project_id` at top level)
 - `filepath` (str, optional): Path to a `.pipe` or JSON file containing pipeline configuration.
 - `token` (str, optional): Custom token for the pipeline (auto-generated if not provided)
 - `source` (str, optional): Override pipeline source
-- `threads` (int, optional): Number of threads for execution (default: 1)
+- `threads` (int, optional): Number of threads for execution (default: None, the server decides)
 - `use_existing` (bool, optional): Use existing pipeline instance
 - `args` (List[str], optional): Command line arguments to pass to pipeline
 - `ttl` (int, optional): Time-to-live in seconds for idle pipelines (server default if not provided; use 0 for no timeout)
@@ -427,9 +481,43 @@ Get the current status of a running pipeline.
 
 **Returns:** Dictionary containing status information
 
+##### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: Optional[str] = None) -> None`
+
+Restart a running pipeline with a new configuration. Looks up the existing task by project/source, terminates it, and starts a new execution in one server round-trip. All arguments are keyword-only.
+
+**Parameters:**
+
+- `project_id` (str): The project identifier
+- `source` (str): The source component identifier
+- `pipeline` (PipelineConfig): The pipeline configuration to restart with
+- `token` (str, optional): Existing task token; resolved server-side if omitted
+
+**Raises:** `RuntimeError` if the restart fails.
+
+**Example:**
+
+```python
+await client.restart(
+    project_id='my-project',
+    source='webhook',
+    pipeline=updated_pipeline,
+)
+```
+
+##### `async get_task_token(project_id: str, source: str) -> str | None`
+
+Resolve a running task's token from its project ID and source component. The token is required for operations like `terminate()` and `restart()`. Returns `None` if no task is currently running for the given project/source.
+
+**Parameters:**
+
+- `project_id` (str): The project identifier
+- `source` (str): The source component identifier
+
+**Returns:** The task token string, or `None` if no running task was found.
+
 #### Data Methods
 
-##### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = {}, mimetype: str = None) -> Dict[str, Any]`
+##### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = None, mimetype: str = None, on_sse=None) -> Dict[str, Any]`
 
 Send data directly to a pipeline.
 
@@ -439,6 +527,7 @@ Send data directly to a pipeline.
 - `data` (str or bytes): Data to send
 - `objinfo` (dict, optional): Metadata about the data
 - `mimetype` (str, optional): MIME type of the data
+- `on_sse` (callable, optional): Async callback `on_sse(type, data)` for streamed SSE events (see [Streaming Callback](#streaming-callback-on_sse))
 
 **Returns:** Processing result dictionary
 
@@ -459,7 +548,7 @@ Upload multiple files in parallel.
 
 **Note:** Upload progress events are sent through the event system as `apaevt_status_upload` events.
 
-##### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None) -> DataPipe`
+##### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe`
 
 Create a streaming data pipe for sending large datasets.
 
@@ -469,19 +558,49 @@ Create a streaming data pipe for sending large datasets.
 - `objinfo` (dict, optional): Metadata about the data
 - `mime_type` (str, optional): MIME type of the data
 - `provider` (str, optional): Provider name
+- `on_sse` (callable, optional): Async callback `on_sse(type, data)` for streamed SSE events (see [Streaming Callback](#streaming-callback-on_sse))
 
 **Returns:** DataPipe instance
 
+##### Streaming Callback (`on_sse`)
+
+`send()`, `pipe()`, and `chat()` each accept an optional `on_sse` keyword argument: an async callback invoked for every Server-Sent Event emitted by the pipeline node for that specific call. Use it to stream incremental output (e.g. token-by-token LLM responses) before the final result resolves.
+
+**Callback signature:**
+
+```python
+async def on_sse(type: str, data: dict) -> None:
+    ...
+```
+
+- `type` (str): The SSE event type
+- `data` (dict): The event payload
+
+**Example: streaming a chat response:**
+
+```python
+from rocketride.schema import Question
+
+async def handle_sse(type: str, data: dict) -> None:
+    print(f'[{type}] {data}')
+
+question = Question()
+question.addQuestion('Summarize the document.')
+
+response = await client.chat(token=token, question=question, on_sse=handle_sse)
+```
+
 #### Chat Methods
 
-##### `async chat(token: str, question: Question) -> Dict[str, Any]`
+##### `async chat(*, token: str, question: Question, on_sse=None) -> Dict[str, Any]`
 
-Ask a question to RocketRide's AI and get an intelligent response.
+Ask a question to RocketRide's AI and get an intelligent response. All arguments are keyword-only.
 
 **Parameters:**
 
 - `token` (str): Task token of the chat pipeline
 - `question` (Question): Question object containing the query
+- `on_sse` (callable, optional): Async callback `on_sse(type, data)` for streamed SSE events (see [Streaming Callback](#streaming-callback-on_sse))
 
 **Returns:** Response dictionary containing answers
 
@@ -563,7 +682,7 @@ Question(expectJson: bool = False)
 
 Add the main question text.
 
-##### `addInstruction(subtitle: str, instructions: str) -> Question`
+##### `addInstruction(title: str, instruction: str) -> Question`
 
 Add specific instructions to guide the AI's response.
 
@@ -674,7 +793,6 @@ The SDK supports automatic MIME type detection for common file extensions:
 
 For data pipes, MIME types determine processing lanes:
 
-- `application/rocketride-tag` → RocketRide tag stream format
 - `application/rocketride-question` → AI chat question format
 - `text/*` → Text lane
 - `image/*` → Image lane
@@ -809,7 +927,7 @@ async def stream_sensor_data(data_generator):
         token = result['token']
 
         # Stream data using pipe
-        async with await client.pipe(token, mimetype='application/json') as pipe:
+        async with await client.pipe(token, mime_type='application/json') as pipe:
             async for sensor_reading in data_generator:
                 data = {
                     'timestamp': sensor_reading.timestamp,
@@ -864,7 +982,7 @@ async def on_disconnected(reason: str, has_error: bool) -> None:
         print('Disconnected gracefully')
 
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='api_key',
     on_connected=on_connected,
     on_disconnected=on_disconnected
@@ -899,7 +1017,7 @@ async def event_notification(event: Dict[str, Any]) -> None:
 
 # Create the client
 client = RocketRideClient(
-    uri='https://cloud.rocketride.ai',
+    uri='https://api.rocketride.ai',
     auth='your_api_key',
     on_event=event_notification,
 )
@@ -946,6 +1064,51 @@ Common error scenarios:
 - **Pipeline errors**: Invalid pipeline configuration
 - **Execution errors**: Pipeline execution failures
 - **Upload errors**: File upload failures
+
+### Exception Hierarchy
+
+All SDK exceptions derive from `DAPException`, which wraps the raw DAP error result (exposed via `.dap_result`). Catch from broad to narrow:
+
+```text
+DAPException                      (base; wraps DAP error responses)
+└── RocketRideException           (catch-all for any RocketRide error)
+    ├── ConnectionException       (server unreachable, network, connection lost)
+    │   └── AuthenticationException   (bad API key / credentials)
+    ├── PipeException             (data-transfer failures; also a RuntimeError)
+    ├── ExecutionException        (pipeline execution failures)
+    └── ValidationException       (invalid input / pipeline configuration)
+```
+
+Which methods raise what:
+
+- `connect()` / `attach()` / `login()`: `ConnectionException`, or `AuthenticationException` on bad credentials
+- `use()`: `ValidationException` for a bad config, `ExecutionException` if the pipeline fails to start
+- `send()` / `send_files()` / `pipe()` writes: `PipeException` on transfer failure (also catchable as `RuntimeError`)
+- `terminate()` / `restart()`: raise `RuntimeError` on failure
+
+Catching `RocketRideException` handles every SDK-originated error while still giving you `.dap_result` for context.
+
+```python
+from rocketride import RocketRideException, AuthenticationException
+
+try:
+    await client.connect()
+    result = await client.use(filepath='pipeline.pipe')
+except AuthenticationException as e:
+    print(f'Bad credentials: {e}')
+except RocketRideException as e:
+    print(f'RocketRide error: {e} (raw: {e.dap_result})')
+```
+
+### Importing Schema Types
+
+Schema models can be imported directly from the top-level `rocketride` package (they are re-exported via `__all__`), not only from `rocketride.schema`:
+
+```python
+from rocketride import Question, Doc, DocGroup, DocFilter
+```
+
+Both import paths work; the top-level form is convenient when you also import `RocketRideClient` from `rocketride`.
 
 ## Performance Considerations
 

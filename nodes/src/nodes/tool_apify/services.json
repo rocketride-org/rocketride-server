@@ -1,0 +1,71 @@
+{
+	"title": "Apify",
+	"protocol": "tool_apify://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_apify",
+	"prefix": "apify",
+	"icon": "apify.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Apify Actors as agent tools.", "Provides run_actor (run an Actor and return its dataset) and get_dataset_items."],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Apify",
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"tool_apify.apikey": {
+			"type": "string",
+			"title": "API Token",
+			"description": "Apify API token",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tool_apify.max_items": {
+			"type": "integer",
+			"title": "Max Items",
+			"description": "Upper cap on items returned per call (agent requests are clamped to this).",
+			"default": 100
+		},
+		"tool_apify.run_timeout_secs": {
+			"type": "integer",
+			"title": "Run Timeout (seconds)",
+			"description": "Max seconds an Actor run may take before it is stopped.",
+			"default": 120
+		},
+		"tool_apify.max_cost_usd": {
+			"type": "number",
+			"title": "Max Cost (USD)",
+			"description": "Spend limit per run for pay-per-event Actors.",
+			"default": 1
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Apify smoke test (placeholder key)",
+				"text": "test query"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Apify",
+			"properties": ["type", "tool_apify.apikey", "tool_apify.max_items", "tool_apify.run_timeout_secs", "tool_apify.max_cost_usd"]
+		}
+	]
+}

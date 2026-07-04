@@ -27,6 +27,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ai.web.metrics import metrics
+from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.whisper')
@@ -65,6 +66,71 @@ class WhisperLoader(BaseLoader):
         'language': 'en',
         'compute_type': 'float16',
     }
+
+    # Cached result of GPU compatibility probe (None = not yet tested)
+    _gpu_compatible: Optional[bool] = None
+    _gpu_probe_lock = threading.Lock()
+
+    @classmethod
+    def _check_gpu_compatible(cls) -> bool:
+        """Return True if ctranslate2 GPU inference is stable on this machine.
+
+        Runs a tiny probe in a subprocess so that a ctranslate2 crash (SIGABRT
+        from heap corruption on some CUDA + cuBLAS combinations) doesn't kill
+        the caller.  Result is cached — probe runs at most once per process.
+        """
+        with cls._gpu_probe_lock:
+            if cls._gpu_compatible is not None:
+                return cls._gpu_compatible
+
+            import subprocess
+            import sys
+
+            # Probe script checks two things:
+            # 1. Version guard: ctranslate2 4.7.x + CUDA 12.8 causes a
+            #    tcache_thread_shutdown() SIGABRT during GPU transcription on H200
+            #    (heap corruption in cuBLAS 12.8.4). Exit non-zero to force CPU.
+            #    Upper bound at 4.8 so the guard lifts automatically once
+            #    ctranslate2 ships a fix (expected in 4.8+).
+            # 2. StorageView sanity: verify a CUDA StorageView can be created via
+            #    the documented from_array() API (no direct (shape,dtype,device)
+            #    constructor exists in the Python bindings).
+            probe_script = (
+                'import sys, ctranslate2, torch\n'
+                'v = ctranslate2.get_supported_compute_types("cuda")\n'
+                'assert v, "no cuda types"\n'
+                'try:\n'
+                '    ct2 = tuple(int(x) for x in ctranslate2.__version__.split(".")[:2])\n'
+                'except (ValueError, AttributeError):\n'
+                '    ct2 = (999, 999)\n'
+                'cuda = torch.version.cuda or ""\n'
+                'if (4, 7) <= ct2 < (4, 8) and cuda.startswith("12.8"):\n'
+                '    sys.exit(1)\n'
+                't = torch.zeros(1, dtype=torch.float32, device="cuda")\n'
+                'sv = ctranslate2.StorageView.from_array(t)\n'
+                'print("ok")\n'
+            )
+            result = None
+            try:
+                result = subprocess.run(
+                    [sys.executable, '-c', probe_script],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                cls._gpu_compatible = result.returncode == 0 and 'ok' in result.stdout
+            except Exception:
+                cls._gpu_compatible = False
+
+            if not cls._gpu_compatible:
+                logger.warning(
+                    'ctranslate2 CUDA probe failed (returncode=%s) — '
+                    'Whisper will use CPU. This is a known issue on some '
+                    'CUDA/cuBLAS version combinations.',
+                    getattr(result, 'returncode', 'N/A'),
+                )
+
+            return cls._gpu_compatible
 
     @classmethod
     def _get_model_lock(cls, model_id: int) -> threading.Lock:
@@ -119,8 +185,23 @@ class WhisperLoader(BaseLoader):
             memory_gb = WhisperLoader._estimate_memory(model_name)
             logger.debug(f'Estimated memory: {memory_gb:.2f} GB')
 
-            gpu_index, torch_device = allocate_gpu(memory_gb, exclude_gpus)
-            logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for Whisper {model_name}')
+            # Probe GPU compatibility before allocating — ctranslate2 CUDA can
+            # cause an unrecoverable SIGABRT on certain CUDA/cuBLAS versions (e.g.
+            # cuBLAS 12.8.4 + H200).  Run the probe here so server mode gets the
+            # same protection as local mode.
+            if torch.cuda.is_available() and WhisperLoader._check_gpu_compatible():
+                gpu_index, torch_device = allocate_gpu(memory_gb, exclude_gpus)
+                logger.info(f'Allocated GPU {gpu_index} ({torch_device}) for Whisper {model_name}')
+            else:
+                gpu_index = -1
+                torch_device = 'cpu'
+                if not torch.cuda.is_available():
+                    logger.warning('CUDA is not available — Whisper will use CPU in server mode.')
+                else:
+                    logger.warning(
+                        'ctranslate2 CUDA probe failed — Whisper will use CPU in server mode. '
+                        'This is a known issue on some CUDA/cuBLAS version combinations.'
+                    )
             # CTranslate2 does not support float16 on CPU (Intel or ARM). Use int8 for speed;
             # use float32 in loader_options if you prefer max precision on CPU (slower, more RAM).
             # Refs: https://opennmt.net/CTranslate2/quantization.html (fallback table),
@@ -130,7 +211,19 @@ class WhisperLoader(BaseLoader):
         else:
             # === LOCAL MODE: Use specified device ===
             if device is None:
-                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                if torch.cuda.is_available() and WhisperLoader._check_gpu_compatible():
+                    device = 'cuda'
+                else:
+                    device = 'cpu'
+            elif device != 'cpu' and not WhisperLoader._check_gpu_compatible():
+                # Explicit cuda / cuda:N requested but probe failed — fall back to CPU
+                # so the same SIGABRT protection applies regardless of how the caller
+                # specified the device.
+                logger.warning(
+                    'ctranslate2 CUDA probe failed for explicit device=%r — Whisper will use CPU instead.',
+                    device,
+                )
+                device = 'cpu'
 
             if device == 'cpu':
                 gpu_index = -1
@@ -572,14 +665,15 @@ class Whisper:
         results = WhisperLoader.postprocess(self._model, raw_output, 1, self.output_fields)
         t_post = (time.perf_counter() - t0) * 1000
 
-        # Report all perf counters — same shape as model server response
+        # Report all perf counters — same keys as model server response
+        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
 

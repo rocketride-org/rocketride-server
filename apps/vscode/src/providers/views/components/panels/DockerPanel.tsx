@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import dockerIcon from '../../../../assets/docker.svg';
+import DockerIcon from '../../../../assets/docker.svg';
 import { DockerStatus, VersionOption, displayVersion, stateLabels, IMAGE_BASE, panelStyles as S, statusIndicatorStyle, primaryBtnStyle, secondaryBtnStyle, optionStyle } from './shared';
 import { MessageData } from '../../Settings/SettingsWebview';
 import { MessageDisplay } from '../../Settings/MessageDisplay';
@@ -153,7 +153,7 @@ export const DockerPanel: React.FC<DockerPanelProps> = ({ idPrefix, status, prog
 	return (
 		<>
 			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-				<img src={dockerIcon} alt="Docker" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<DockerIcon role="img" aria-label="Docker" style={{ width: 48, height: 48, flexShrink: 0 }} />
 				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Run the RocketRide engine as a Docker container. Requires Docker to be installed and the daemon running.</div>
 			</div>
 

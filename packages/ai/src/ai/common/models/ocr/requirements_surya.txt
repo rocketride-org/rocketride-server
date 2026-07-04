@@ -1,3 +1,4 @@
+# contract-check: disable  reason: surya-ocr transitively pins opencv-python-headless==4.11.0.86; the engine's opencv-contrib-python==4.13.0.92 wins via the ai.common.opencv runtime shim. uv resolver can't replay that override, so the install will always fail. NEVER attempted by the framework, even under --install-all. Paired with `# contract-check: ignore` on the surya.* imports in surya.py.
 # Requirements for Surya OCR loader
 # Direct imports only
 

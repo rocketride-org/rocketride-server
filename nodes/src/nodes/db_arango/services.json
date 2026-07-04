@@ -1,0 +1,223 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "ArangoDB",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "db_arango://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["database", "tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["noremote", "invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.db_arango",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "arango",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A processing component that connects to an ArangoDB multi-model database. ", "Accepts natural-language questions, translates them to read-only AQL queries ", "via an LLM, and returns results to the pipeline. Works across documents, graphs ", "and ArangoSearch views — designed for document retrieval, graph traversal, and RAG workflows."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "arango.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//		Defines the invoke connections that may/must be connected
+	// 		which are utilized by this driver
+	//
+	"invoke": {
+		"llm": {
+			"description": "LLM to use to craft AQL queries from question",
+			"min": 1
+		}
+	},
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		// "answers": [],
+		"questions": ["table", "text", "answers"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {
+				"database": "_system"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"arangodb.endpoint": {
+			"type": "string",
+			"title": "Connection endpoint",
+			"default": "http://localhost:8529",
+			"description": "HTTP(S) endpoint for the ArangoDB server. Use http://host:8529 for self-host/Docker, or https://<id>.arangodb.cloud:8529 for ArangoGraph cloud (TLS)."
+		},
+		"arangodb.auth_method": {
+			"type": "string",
+			"title": "Authentication",
+			"default": "userpass",
+			"enum": [
+				["userpass", "Username & Password"],
+				["token", "Bearer / JWT Token"]
+			],
+			"conditional": [
+				{
+					"value": "userpass",
+					"properties": ["arangodb.user", "arangodb.password"]
+				},
+				{
+					"value": "token",
+					"properties": ["arangodb.token"]
+				}
+			]
+		},
+		"arangodb.user": {
+			"type": "string",
+			"title": "User",
+			"default": "root",
+			"description": "Username to authenticate with ArangoDB. Defaults to 'root'."
+		},
+		"arangodb.password": {
+			"type": "string",
+			"title": "Password",
+			"description": "Password to authenticate with the ArangoDB instance.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"arangodb.token": {
+			"type": "string",
+			"title": "Bearer token",
+			"description": "JWT bearer token for token-based authentication (e.g. ArangoGraph cloud).",
+			"secure": true,
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"arangodb.database": {
+			"type": "string",
+			"title": "Database name",
+			"default": "_system",
+			"description": "Name of the ArangoDB database to query. '_system' is the built-in default — point this at your application database."
+		},
+		"arangodb.db_description": {
+			"type": "string",
+			"title": "Database description",
+			"default": "",
+			"description": "What is this database used for? Describe its collections, graphs and domain — this helps the LLM generate more accurate AQL queries.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"arangodb.max_attempts": {
+			"type": "integer",
+			"title": "Max validation attempts",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 20,
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated AQL query"
+		},
+		"arangodb.max_execute_rows": {
+			"type": "integer",
+			"title": "Max result rows",
+			"default": 25000,
+			"minimum": 1,
+			"maximum": 1000000,
+			"description": "Maximum number of rows returned by a query. Also caps the raw EXECUTE path; a query that exceeds it fails rather than streaming unbounded results."
+		},
+		"arangodb.allow_execute": {
+			"type": "boolean",
+			"title": "Allow direct query execution",
+			"default": false,
+			"description": "Permit QuestionType.EXECUTE callers to run raw AQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue AQL directly."
+		},
+		"arangodb.default": {
+			"object": "default",
+			"properties": [
+				"arangodb.db_description",
+				"arangodb.endpoint",
+				"arangodb.auth_method",
+				"arangodb.database",
+				"arangodb.max_attempts",
+				"arangodb.max_execute_rows",
+				"arangodb.allow_execute"
+			]
+		},
+		"arangodb.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["arangodb.default"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "ArangoDB",
+			"properties": ["arangodb.profile"]
+		}
+	]
+}

@@ -28,10 +28,11 @@ from rocketlib import Entry
 from typing import List
 from .IGlobal import IGlobal
 from ai.common.schema import Doc, Question
+from ai.common.store import VectorStoreToolMixin
 from ai.common.transform import IInstanceTransform
 
 
-class IInstance(IInstanceTransform):
+class IInstance(VectorStoreToolMixin, IInstanceTransform):
     IGlobal: IGlobal
 
     def writeQuestions(self, question: Question):

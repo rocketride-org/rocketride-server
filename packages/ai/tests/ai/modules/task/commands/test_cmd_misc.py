@@ -285,13 +285,11 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         userId='user-1',
         auth='ak_caller',
         userToken='ak_caller_secret_token',
-        organizations=[
-            {
-                'id': 'org-1',
-                'permissions': [],
-                'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
-            }
-        ],
+        organization={
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+        },
     )
 
     # Server state: one task in caller's team, one in a team they cannot see.
@@ -360,13 +358,11 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
         userId='user-1',
         auth='tk_my-only-task',
         userToken='tk_token',
-        organizations=[
-            {
-                'id': 'org-1',
-                'permissions': [],
-                'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
-            }
-        ],
+        organization={
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+        },
     )
 
     def _make_control(token):

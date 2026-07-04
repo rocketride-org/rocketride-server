@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Dependabot smoke test: litellm version bumps
 #
-# Verifies that `tools/src/sync_models.py` (the consumer of litellm in this repo)
-# continues to work with the current pin in `tools/requirements.txt`. PR CI runs
+# Verifies that `tools/sync_models/src/sync_models.py` (the consumer of litellm in this repo)
+# continues to work with the current pin in `tools/sync_models/requirements.txt`. PR CI runs
 # build/lint only, not this tool, so a bumped litellm could silently break the
 # weekly sync-models.yml cron without anyone noticing until Monday.
 #
@@ -24,8 +24,8 @@ echo "==> Creating venv at $VENV"
 python3 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
 
-echo "==> Installing tools/requirements.txt"
-"$VENV/bin/pip" install --quiet -r tools/requirements.txt
+echo "==> Installing tools/sync_models/requirements.txt"
+"$VENV/bin/pip" install --quiet -r tools/sync_models/requirements.txt
 
 echo "==> Smoke: litellm import + core APIs"
 "$VENV/bin/python" - <<'PY'
@@ -53,7 +53,7 @@ print(f"litellm {litellm_version}: model_cost={len(litellm.model_cost)} entries;
 PY
 
 echo "==> Smoke: project consumer imports + calls"
-PYTHONPATH="$REPO_ROOT/tools/src" "$VENV/bin/python" - <<'PY'
+PYTHONPATH="$REPO_ROOT/tools/sync_models/src" "$VENV/bin/python" - <<'PY'
 from core.merger import _litellm_info
 # This helper does the direct-lookup + model_cost scan dance. Any breakage
 # in either litellm API surfaces here.
@@ -63,7 +63,7 @@ assert ctx is not None or out is not None, "both context and output token counts
 PY
 
 echo "==> Smoke: sync_models.py --help (verifies argparse + module load)"
-"$VENV/bin/python" tools/src/sync_models.py --help > /dev/null
+"$VENV/bin/python" tools/sync_models/src/sync_models.py --help > /dev/null
 
 echo
 echo "PASS: litellm smoke test."

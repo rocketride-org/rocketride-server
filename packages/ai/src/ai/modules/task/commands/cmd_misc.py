@@ -41,6 +41,7 @@ Architecture:
 - Provides read-only access to service metadata
 """
 
+import os
 import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from rocketride import EVENT_TYPE
@@ -188,14 +189,21 @@ class MiscCommands(DAPConn):
                 # Determine org and team IDs from account info
                 org_id = ''
                 team_id = getattr(self._account_info, 'defaultTeam', '') or ''
-                for org in getattr(self._account_info, 'organizations', []):
+                org = getattr(self._account_info, 'organization', None)
+                if org:
                     org_id = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
-                    if org_id:
-                        break
-                merged_env = await account.get_merged_env(
-                    user_id=self._account_info.userId,
-                    org_id=org_id,
-                    team_id=team_id,
+
+                # sys.admin: seed with server RR_* keys mapped to ROCKETRIDE_*
+                if 'sys.admin' in (self._account_info.sysPermissions or []):
+                    merged_env = {'ROCKETRIDE_' + k[3:]: v for k, v in os.environ.items() if k.startswith('RR_')}
+
+                # Layer org → team → user secrets on top
+                merged_env.update(
+                    await account.get_merged_env(
+                        user_id=self._account_info.userId,
+                        org_id=org_id,
+                        team_id=team_id,
+                    )
                 )
 
             # Resolve ${ROCKETRIDE_*} variables before validation

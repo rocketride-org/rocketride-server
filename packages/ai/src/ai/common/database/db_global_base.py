@@ -447,10 +447,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         self.max_validation_attempts = max(1, self._max_validation_attempts(raw))
         self.db_description = (self._db_description(raw) or '').strip()
 
-        # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
-        # the LLM translation + is_sql_safe gate, so the node owner must
-        # explicitly enable the capability. Strings like 'false' / '0' must
-        # not be truthy here, so don't use bool() directly.
+        # The execute tool is opt-in: callers invoking the 'execute' tool
+        # function bypass the LLM translation + is_sql_safe gate, so the node
+        # owner must explicitly enable the capability. Strings like 'false' /
+        # '0' must not be truthy here, so don't use bool() directly.
         allow_execute = raw.get('allow_execute', False)
         if isinstance(allow_execute, str):
             self.allow_execute = allow_execute.strip().lower() in {'1', 'true', 'yes', 'on'}

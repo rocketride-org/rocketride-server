@@ -1,7 +1,7 @@
 {
 	"--rr-brand": "#2B579A",
 	"--rr-palette-mode": "light",
-	"--rr-bg-default": "#ffffff",
+	"--rr-bg-default": "#f3f3f3",
 	"--rr-bg-paper": "#ffffff",
 	"--rr-bg-surface-alt": "#f6f7fb",
 	"--rr-fg-titleBar-active": "#ffffff",

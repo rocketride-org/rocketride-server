@@ -28,6 +28,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
+from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 from .utils import preprocess_image_transparency, group_words_into_lines
 
@@ -86,7 +87,8 @@ class TrOCRLoader(BaseLoader):
         # is installed and any conflicting opencv packages are removed
         from ai.common.opencv import cv2  # noqa: F401
 
-        from craft_text_detector import Craft
+        # disable contract check for craft_text_detector due to opencv conflict (see README)
+        from craft_text_detector import Craft  # contract-check: ignore  requirements_trocr.txt is `disable`d
         from transformers import TrOCRProcessor, VisionEncoderDecoderModel
         from ai.common.torch import torch
 
@@ -392,14 +394,15 @@ class TrOCR:
         results = TrOCRLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
         t_post = (time.perf_counter() - t0) * 1000
 
-        # Report all perf counters — same shape as model server response
+        # Report all perf counters — same keys as model server response
+        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
 

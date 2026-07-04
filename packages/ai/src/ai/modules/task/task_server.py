@@ -91,8 +91,6 @@ from .task_engine import Task
 from .types import LAUNCH_TYPE
 from .pipeline import resolve_implied_source
 
-# todo: feat/deploy2 - enable TaskScheduler
-# from .task_scheduler import TaskScheduler
 from rocketlib import debug
 
 
@@ -219,19 +217,12 @@ class TaskServer(DAPBase):
         self._store_instance: Optional[Store] = None
         self._deployments_instance: Optional[DeploymentStore] = None
 
-        # Scheduler for running deployed pipelines
-        # todo: feat/deploy2 - enable TaskScheduler
-        # self.scheduler = TaskScheduler(self)
-
         # Start background tasks that must be cancelled on shutdown.
         self._bg_tasks: List[asyncio.Task] = [
             # Cleanup for completed tasks
             asyncio.create_task(self._cleanup_tasks()),
             # TTL monitoring
             asyncio.create_task(self._monitor_ttl()),
-            # Run scheduled deployments
-            # todo: feat/deploy2 - enable TaskScheduler
-            # asyncio.create_task(self.scheduler.start()),
         ]
 
         # Store reference to parent server for statistics integration
@@ -384,8 +375,6 @@ class TaskServer(DAPBase):
 
     async def shutdown(self) -> None:
         """Cancel all background tasks."""
-        # todo: feat/deploy2 - enable TaskScheduler
-        # await self.scheduler.stop()
         bg_tasks = getattr(self, '_bg_tasks', [])
         for task in bg_tasks:
             if not task.done():
@@ -554,14 +543,12 @@ class TaskServer(DAPBase):
             phoneNumberVerified=False,
             locale='',
             defaultTeam=control.teamId,
-            organizations=[
-                {
-                    'id': control.orgId,
-                    'name': '',
-                    'permissions': [],
-                    'teams': [{'id': control.teamId, 'name': '', 'permissions': permissions}],
-                }
-            ],
+            organization={
+                'id': control.orgId,
+                'name': '',
+                'permissions': [],
+                'teams': [{'id': control.teamId, 'name': '', 'permissions': permissions}],
+            },
         )
 
     async def authenticate(self, authorization: str) -> Optional[AccountInfo]:
@@ -737,7 +724,13 @@ class TaskServer(DAPBase):
         if port in self._allocated_ports:
             self._allocated_ports.remove(port)
 
-    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], user_id: str = None) -> None:
+    async def broadcast_server_event(
+        self,
+        type: EVENT_TYPE,
+        event: Dict[str, Any],
+        user_id: str = None,
+        org_id: str = None,
+    ) -> None:
         """
         Broadcast a server-level event to all connections subscribed via the '*' wildcard.
 
@@ -752,14 +745,13 @@ class TaskServer(DAPBase):
                 Expected keys: 'event' (str) and 'body' (Any).
             user_id (str, optional): When provided, restricts delivery to connections
                 whose authenticated userId matches this value (tenant scoping).
-                Pass None to broadcast to all '*'-subscribed connections regardless of tenant.
+            org_id (str, optional): When provided, restricts delivery to connections
+                whose primary org matches this value (org scoping for billing events).
         """
         for conn in list(self._connections.values()):
             try:
-                await conn.send_server_event(type, event=event, user_id=user_id)
+                await conn.send_server_event(type, event=event, user_id=user_id, org_id=org_id)
             except Exception as e:
-                # Log individual delivery failures so dashboard-event drops leave
-                # a trace; match the pattern used by broadcast_task_event below.
                 self.debug_message(f'Failed to broadcast server event to connection: {e}')
 
     async def push_account_update(self, user_id: str) -> None:
@@ -1192,6 +1184,15 @@ class TaskServer(DAPBase):
                 self.debug_message(f'Task stopped during startup: {control.id}...')
             else:
                 self.debug_message(f'Task creation failed, cleaned up: {control.id}...')
+                # Kill the subprocess so it doesn't linger as an orphan
+                # consuming resources and reporting stale metrics.
+                if control.task:
+                    try:
+                        await asyncio.wait_for(control.task.stop_task(), timeout=30)
+                    except asyncio.TimeoutError:
+                        self.debug_message(f'Warning: timed out stopping orphaned task: {control.id}')
+                    except Exception:
+                        self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
             self._task_control.pop(control.token, None)
             raise
 

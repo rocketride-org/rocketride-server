@@ -7,6 +7,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional
+import fnmatch
 from ..store import IStore, StorageError, VersionMismatchError
 
 # Import platform-specific locking
@@ -316,6 +317,56 @@ class FilesystemStore(IStore):
 
         except Exception as e:
             raise StorageError(f'Failed to list files with prefix {prefix}: {e}') from e
+
+    async def list_entries(
+        self,
+        prefix: str = '',
+        *,
+        recursive: bool = True,
+        include_files: bool = True,
+        include_dirs: bool = True,
+        name_pattern: Optional[str] = None,
+    ) -> list:
+        """List files and/or directories under prefix."""
+        try:
+            search_path = self._get_full_path(prefix) if prefix else self._root_path
+
+            if name_pattern and ('/' in name_pattern or '\\' in name_pattern):
+                raise StorageError(f'Invalid name pattern: {name_pattern}')
+            if name_pattern == '..':
+                raise StorageError(f'Path traversal detected: {name_pattern}')
+
+            if not search_path.exists():
+                return []
+
+            result = []
+
+            if search_path.is_file():
+                if include_files:
+                    rel = str(search_path.relative_to(self._root_path)).replace('\\', '/')
+                    if name_pattern is None or fnmatch.fnmatch(search_path.name, name_pattern):
+                        result.append(rel)
+                return result
+
+            pattern = name_pattern or '*'
+            items = search_path.rglob(pattern) if recursive else search_path.glob(pattern)
+
+            for item in items:
+                if item.is_file():
+                    if include_files:
+                        rel = str(item.relative_to(self._root_path)).replace('\\', '/')
+                        result.append(rel)
+                elif item.is_dir():
+                    if include_dirs:
+                        rel = str(item.relative_to(self._root_path)).replace('\\', '/') + '/'
+                        result.append(rel)
+
+            return sorted(result)
+
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageError(f'Failed to list entries with prefix {prefix}: {e}') from e
 
     # =========================================================================
     # Handle-Based I/O

@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
+import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 import { pluginBasicSsl } from '@rsbuild/plugin-basic-ssl';
 
@@ -77,7 +78,7 @@ export default defineConfig(({ command }) => {
 			port: 3000,
 			// Serve everything from the root path — no sub-directory prefix.
 			base: '/',
-			// In dev, also serve MF remotes and vscode webview assets from build/.
+			// In dev, also serve built app bundles and static assets.
 			// public/ is served automatically by rsbuild in both dev and prod.
 			...(isDev && {
 				// Explicit array replaces rsbuild's default public/ serving entirely,
@@ -85,9 +86,9 @@ export default defineConfig(({ command }) => {
 				publicDir: [
 					// Serve static assets (favicon, manifests, etc.) from the app's public/ folder.
 					{ name: path.resolve(__dirname, 'public'), watch: false },
-					// Serve from dist/server/static/ so /shell/apps/* resolves to the
-					// built app bundles at dist/server/static/shell/apps/*.
-					{ name: path.join(process.env.ROCKETRIDE_DIST_ROOT || path.resolve(__dirname, '../../dist'), 'server', 'static'), watch: false },
+					// Serve build/ so /apps/* resolves to built MF remote bundles
+					// and /apps.json resolves to the generated app manifest.
+					{ name: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? path.resolve(__dirname, '../../build')), watch: false },
 				],
 			}),
 		},
@@ -98,6 +99,9 @@ export default defineConfig(({ command }) => {
 
 			// Standard React JSX transform + Fast Refresh support.
 			pluginReact(),
+
+			// SVGR + auto-currentcolor svgo plugin for node icons (used by canvas).
+			pluginRocketrideIcons(),
 
 			// Module Federation plugin — declares this bundle as the `cloud` host.
 			pluginModuleFederation({
@@ -190,6 +194,15 @@ export default defineConfig(({ command }) => {
 			},
 		},
 		dev: {
+			// Disable lazy compilation. It's incompatible with this dev setup
+			// (custom assetPrefix '/shell/' + writeToDisk + Module Federation): the
+			// on-demand `*_lazy-compilation-proxy` chunk for the async bootstrap
+			// boundary (index.tsx -> import('./bootstrap')) fails to load after a
+			// full-page navigation such as the OAuth redirect round-trip, throwing
+			// ChunkLoadError and triggering an HMR reload loop. Compiling everything
+			// up front keeps the bootstrap chunk always available.
+			lazyCompilation: false,
+
 			// Write built assets to disk during development so that the static file
 			// server (and other processes) can read the latest MF remote entries.
 			writeToDisk: true,

@@ -1,0 +1,183 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      },
+      "ui": {
+        "position": {
+          "x": 12,
+          "y": 34
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "agent_crewai_1",
+      "provider": "agent_crewai",
+      "name": "Aparavi Agent",
+      "config": {
+        "default": {
+          "advanced_mode": false,
+          "role": "Aparavi Data Analyst",
+          "goal": "Answer questions about data stored in the Aparavi platform by querying it via the Aparavi AQL tool.",
+          "backstory": "You are a data analyst with deep expertise in the Aparavi data governance platform. You help users explore their file metadata — sizes, types, dates, classifications, paths, and more — by translating natural-language questions into queries against the Aparavi STORE table.",
+          "task_description": "",
+          "expected_output": "A clear, concise answer to the user's question, including relevant data rows or summaries from the query results. Format tables as markdown when appropriate.",
+          "instructions": [
+            "Always use the get_data tool for data retrieval — it handles AQL generation internally.",
+            "Only use get_aql if the user explicitly asks to see the query without executing it.",
+            "Only use get_schema as a fallback if get_data returns unexpected results.",
+            "When presenting results, summarize key findings and format data as markdown tables.",
+            "If no results are returned, suggest how the user might refine their question.",
+            "When using the chart tool, include its output verbatim in your answer."
+          ]
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 242,
+          "y": 24
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_openai_1",
+      "provider": "llm_openai",
+      "name": "LLM",
+      "config": {
+        "profile": "openai-4o",
+        "openai-4o": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {
+          "google": {}
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 130,
+          "y": 360
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_crewai_1"
+        },
+        {
+          "classType": "llm",
+          "from": "aparavi_aql_1"
+        },
+        {
+          "classType": "llm",
+          "from": "tool_chartjs_1"
+        }
+      ]
+    },
+    {
+      "id": "aparavi_aql_1",
+      "provider": "aparavi_aql",
+      "name": "Aparavi AQL",
+      "config": {
+        "profile": "default",
+        "default": {
+          "url": "${ROCKETRIDE_APARAVI_URL}",
+          "user": "${ROCKETRIDE_APARAVI_USER}",
+          "password": "${ROCKETRIDE_APARAVI_PASSWORD}",
+          "db_description": "Enterprise file metadata — documents, emails, images, and other files from connected data sources."
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 290,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_crewai_1"
+        },
+        {
+          "classType": "llm",
+          "from": "llm_openai_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 472,
+          "y": 12
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_crewai_1"
+        }
+      ]
+    },
+    {
+      "id": "tool_chartjs_1",
+      "provider": "tool_chartjs",
+      "name": "Chart (Chart.js)",
+      "config": {
+        "type": "tool_chartjs",
+        "name": "Chart (Chart.js)"
+      },
+      "ui": {
+        "position": {
+          "x": 500,
+          "y": 210
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_crewai_1"
+        }
+      ]
+    }
+  ],
+  "source": "chat_1",
+  "project_id": "f1ca1b37-78bf-4ab0-a2f1-015446f5f9a2",
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 20
+}

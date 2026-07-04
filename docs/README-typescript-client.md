@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/rocketride"><img src="https://img.shields.io/npm/v/rocketride?color=222223&label=NPM" alt="npm"></a>
   <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub"></a>
-  <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://discord.gg/PMXrtenMsY"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License"></a>
 </p>
 
@@ -29,7 +29,7 @@ import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
 	auth: process.env.ROCKETRIDE_APIKEY!,
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 });
 await client.connect();
 const { token } = await client.use({ filepath: './pipeline.pipe' });
@@ -80,7 +80,7 @@ Configuration object passed to `new RocketRideClient(config)`.
 | Property            | Type                                                     | Required | Description                                                                                                                                                                                                                                                                       |
 | ------------------- | -------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `auth`              | `string`                                                 | No       | API key. Optional: omit and set via `env.ROCKETRIDE_APIKEY` or `.env` (Node only), or set later with `setConnectionParams({ auth })` before calling `connect()`.                                                                                                                  |
-| `uri`               | `string`                                                 | No       | Server URI (e.g. `https://cloud.rocketride.ai` or `ws://localhost:8080`). Optional: omit and use `env.ROCKETRIDE_URI` or built-in default, or set later with `setConnectionParams({ uri })` before calling `connect()`.                                                           |
+| `uri`               | `string`                                                 | No       | Server URI (e.g. `https://api.rocketride.ai` or `ws://localhost:8080`). Optional: omit and use `env.ROCKETRIDE_URI` or built-in default, or set later with `setConnectionParams({ uri })` before calling `connect()`.                                                           |
 | `env`               | `Record<string, string>`                                 | No       | Override env; if omitted, `.env` is loaded in Node (only). Used for `${ROCKETRIDE_*}` substitution in pipeline config and for `ROCKETRIDE_APIKEY`/`ROCKETRIDE_URI` when not passed as `auth`/`uri`.                                                                               |
 | `persist`           | `boolean`                                                | No       | Enable automatic reconnection with exponential backoff. Default: `false`. **Use `true`** for long-lived UIs or when the server may restart; the client will retry (250ms -> 2500ms) and call `onConnectError` on each failure until `maxRetryTime` or success.                    |
 | `maxRetryTime`      | `number`                                                 | No       | Max time in ms to keep retrying connection. Default: no limit. **Use** (e.g. 300000 for 5 min) so you can show "gave up" after a bounded time instead of retrying forever.                                                                                                        |
@@ -98,7 +98,7 @@ Configuration object passed to `new RocketRideClient(config)`.
 ```typescript
 const client = new RocketRideClient({
 	auth: process.env.ROCKETRIDE_APIKEY!,
-	uri: 'wss://cloud.rocketride.ai',
+	uri: 'wss://api.rocketride.ai',
 	persist: true,
 	maxRetryTime: 300000,
 	requestTimeout: 30000,
@@ -122,7 +122,7 @@ Creates a client instance; it does **not** connect until you call `connect()`. Y
 **Example:**
 
 ```typescript
-const client = new RocketRideClient({ auth: 'my-key', uri: 'https://cloud.rocketride.ai' });
+const client = new RocketRideClient({ auth: 'my-key', uri: 'https://api.rocketride.ai' });
 await client.connect();
 ```
 
@@ -130,10 +130,9 @@ await client.connect();
 
 | Method                | Signature                                                                      | Returns   | Description                                                                                                                                                                                                                                                                                                                                                                             |
 | --------------------- | ------------------------------------------------------------------------------ | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connect`             | `connect(timeout?: number): Promise<void>`                                     | -         | Opens the WebSocket and performs DAP auth. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only; in persist mode timeout is not applied). In **persist** mode, if this fails the client calls `onConnectError` and schedules retries (exponential backoff); on **auth** failure it does _not_ retry so the app can fix credentials and call `connect()` again. |
-| `disconnect`          | `disconnect(): Promise<void>`                                                  | -         | Closes the connection and cancels any pending reconnection. Call when the user explicitly disconnects or the app is shutting down.                                                                                                                                                                                                                                                      |
-| `isConnected`         | `isConnected(): boolean`                                                       | `boolean` | Whether the client is currently connected. Use before calling `use()` or `send()` to avoid confusing errors.                                                                                                                                                                                                                                                                            |
-| `setConnectionParams` | `setConnectionParams(options: { uri?: string; auth?: string }): Promise<void>` | -         | Updates server URI and/or auth at runtime. If currently connected, disconnects and reconnects with the new params (in persist mode, reconnection is scheduled; otherwise reconnects once). Use when the user changes server or credentials without creating a new client.                                                                                                               |
+| `connect`    | `connect(credential?: string \| { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Opens the WebSocket and performs DAP auth. Optional `credential` and `options` (`uri`, `timeout`) can override config per call. In **persist** mode, if this fails the client calls `onConnectError` and schedules retries (exponential backoff); on **auth** failure it does _not_ retry so the app can fix credentials and call `connect()` again. |
+| `disconnect` | `disconnect(): Promise<void>`              | -         | Closes the connection and cancels any pending reconnection. Call when the user explicitly disconnects or the app is shutting down.                                                                                                                                                                                                                                                      |
+| `isConnected`| `isConnected(): boolean`                   | `boolean` | Whether the client is currently connected. Use before calling `use()` or `send()` to avoid confusing errors.                                                                                                                                                                                                                                                                            |
 
 **How to use:** For one-off scripts, call `connect()` once, do your work, then `disconnect()`. For UIs, use `persist: true` and rely on the client to reconnect; only call `disconnect()` when the user logs out or you are done with the client. The client supports `await using` (Symbol.asyncDispose) for automatic disconnect when exiting scope.
 
@@ -143,7 +142,6 @@ await client.connect();
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `buildRequest` | `buildRequest(command: string, options?: { token?: string; arguments?: Record<string, unknown>; data?: Uint8Array \| string }): DAPMessage` | `DAPMessage`          | Builds a DAP request message with the next sequence number. Use when you need a custom command not wrapped by `use()`, `send()`, etc.                                                       |
 | `request`      | `request(request: DAPMessage, timeout?: number): Promise<DAPMessage>`                                                                       | `Promise<DAPMessage>` | Sends the request and returns the response. Pass `timeout` (ms) to override the config default for this call. Check `didFail(response)` or `response.success` before using `response.body`. |
-| `dapRequest`   | `dapRequest(command: string, args?: Record<string, unknown>, token?: string, timeout?: number): Promise<DAPMessage>`                        | `Promise<DAPMessage>` | Shorthand: builds a request and sends it in one call. Equivalent to `buildRequest()` + `request()`.                                                                                         |
 | `didFail`      | `didFail(response: DAPMessage): boolean`                                                                                                    | `boolean`             | Returns `true` when the server indicated failure (`success === false`). Use after `request()` to decide whether to use `body` or surface `message` as an error.                             |
 
 **Example - custom DAP command:**
@@ -295,7 +293,6 @@ Used to parse chat response content. The client does not attach an `Answer` inst
 
 | Method               | Signature                            | Description                                             |
 | -------------------- | ------------------------------------ | ------------------------------------------------------- |
-| `Answer.parseJson`   | `parseJson(value: string): any`      | Parses JSON from AI text (strips markdown/code blocks). |
 | `Answer.parsePython` | `parsePython(value: string): string` | Extracts Python code from a code block in the response. |
 
 ---
@@ -328,7 +325,7 @@ import { RocketRideClient } from 'rocketride';
 
 const client = new RocketRideClient({
 	auth: process.env.ROCKETRIDE_APIKEY!,
-	uri: 'https://cloud.rocketride.ai',
+	uri: 'https://api.rocketride.ai',
 });
 await client.connect();
 const { token } = await client.use({ filepath: './pipeline.json' });
@@ -343,7 +340,7 @@ await client.disconnect();
 ```typescript
 import { RocketRideClient } from 'rocketride';
 
-const status = await RocketRideClient.withConnection({ auth: 'my-key', uri: 'wss://cloud.rocketride.ai' }, async (client) => {
+const status = await RocketRideClient.withConnection({ auth: 'my-key', uri: 'wss://api.rocketride.ai' }, async (client) => {
 	const { token } = await client.use({ pipeline: { pipeline: myPipelineConfig } });
 	await client.send(token, JSON.stringify({ data: 1 }));
 	return await client.getTaskStatus(token);
@@ -438,7 +435,9 @@ question.addQuestion('Summarize the main points and list keywords.');
 
 const response = await client.chat({ token, question });
 const answerText = response?.data?.answer ?? response?.answers?.[0];
-const structured = answerText ? Answer.parseJson(answerText) : null;
+const answer = new Answer();
+answer.setAnswer(answerText ?? '');
+const structured = answer.isJson() ? answer.getJson() : answer.getText();
 console.log(structured);
 
 await client.terminate(token);
@@ -469,7 +468,7 @@ await client.disconnect();
 
 - [Documentation](https://docs.rocketride.org/)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
-- [Discord](https://discord.gg/9hr3tdZmEG)
+- [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
 
 ## License

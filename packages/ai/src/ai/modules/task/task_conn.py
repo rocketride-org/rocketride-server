@@ -74,6 +74,7 @@ from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
 from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
+from .commands.cmd_store import StoreCommands
 from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
@@ -103,6 +104,7 @@ class TaskConn(
     AppCommands,
     PublicCommands,
     DeployCommands,
+    StoreCommands,
     DAPConn,
 ):
     """
@@ -191,6 +193,7 @@ class TaskConn(
         CProfileCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
+        StoreCommands.__init__(self, connection_id, server, transport, **kwargs)
 
         # Store connection identifier for tracking and logging
         self._connection_id = connection_id
@@ -386,9 +389,11 @@ class TaskConn(
             raise PermissionError(f'Permission {perm!r} denied')
 
     def require_zitadel_auth(self) -> None:
-        """Verify the connection is authenticated (any credential type is accepted)."""
+        """Verify the connection is authenticated and not waitlisted."""
         if not self._authenticated or not self._account_info:
             raise PermissionError('Not authenticated')
+        if self._account_info.waitlisted:
+            raise PermissionError('Account is waitlisted')
 
     def verify_plans(self, account_info: AccountInfo, pipeline: Dict[str, Any]) -> bool:
         """
@@ -470,12 +475,14 @@ class TaskConn(
 
         # pk_ and tk_ auth are already scoped to their task by get_task_token.
         # For all other auth types, resolve permissions against the task's team.
+        # sys.admin bypasses all team permission checks.
         if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            perms = resolve_task_permissions(self._account_info, control.teamId)
-            if not perms:
-                raise PermissionError('Access denied: no permissions for this task')
-            if permissions and permissions not in perms:
-                raise PermissionError(f'Permission {permissions!r} denied for this task')
+            if 'sys.admin' not in (self._account_info.sysPermissions or []):
+                perms = resolve_task_permissions(self._account_info, control.teamId)
+                if not perms:
+                    raise PermissionError('Access denied: no permissions for this task')
+                if permissions and permissions not in perms:
+                    raise PermissionError(f'Permission {permissions!r} denied for this task')
 
         return control.task
 
@@ -580,6 +587,39 @@ class TaskConn(
 
         # Call it
         return await self.request(request)
+
+    async def on_rrext_identify(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Update the client display name for this connection.
+
+        Allows clients to refine their identity after auth — e.g. when an
+        app plugin loads and wants to show "Cloud Shell-UI — rocketride.pipeBuilder"
+        instead of the generic "Cloud Shell-UI".
+
+        Args:
+            request: DAP request with ``arguments.clientName`` (str).
+
+        Returns:
+            Acknowledgement with the new name.
+        """
+        args = request.get('arguments', {})
+        new_name = args.get('clientName')
+        if new_name and isinstance(new_name, str):
+            self._client_info['name'] = new_name
+            # Notify dashboard so the monitor UI updates in real time
+            await self._server.broadcast_server_event(
+                EVENT_TYPE.DASHBOARD,
+                {
+                    'event': 'apaevt_dashboard',
+                    'body': {
+                        'action': 'connection_updated',
+                        'timestamp': time.time(),
+                        'connectionId': self.get_connection_id(),
+                        'clientName': new_name,
+                    },
+                },
+                user_id=self._account_info.userId if self._account_info else None,
+            )
+        return self.build_response(request, body={'clientName': self._client_info.get('name')})
 
     async def on_rrext_ping(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -254,6 +254,9 @@ module.exports = {
 	name: 'vscode',
 	description: 'RocketRide VSCode Extension',
 
+	// Co-located docs gathered by docs:gather.
+	docs: [{ source: 'docs', mount: 'ide-extensions/vscode' }],
+
 	actions: [
 		// Internal actions
 		{ name: 'vscode:copy-readme', action: makeCopyReadmeAction },
@@ -276,7 +279,7 @@ module.exports = {
 			name: 'vscode:build',
 			action: () => ({
 				description: 'Build vscode',
-				steps: ['client-typescript:build', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{

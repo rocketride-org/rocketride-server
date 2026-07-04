@@ -23,8 +23,6 @@
 
 import errno
 from os.path import dirname
-import smbclient
-from smbprotocol.exceptions import SMBOSError
 
 import engLib
 from engLib import Entry
@@ -81,6 +79,8 @@ class Instance:
 
     def close(self):
         """Call from engLib, process object complete."""
+        import smbclient
+
         if not self.current_object.objectFailed:
             try:
                 # Write only non-empty file
@@ -117,6 +117,9 @@ class Instance:
 
     def get_transform_key(self) -> str:
         """Build transform key for current object."""
+        import smbclient
+        from smbprotocol.exceptions import SMBOSError
+
         source_change_key = (
             self.current_object.changeKey or f'{self.current_object.modifyTime};{self.current_object.size}'
         )

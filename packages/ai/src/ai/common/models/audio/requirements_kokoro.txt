@@ -1,4 +1,11 @@
+# contract-check: skip-install  reason: ~200 MB of audio-model deps (misaki, librosa, einops) for an opt-in feature. PR lane skips; nightly --install-all installs and verifies.
 # Kokoro-82M inference (model server + local); torch from image
+
+# Resolve docopt and num2words from wheels only, so the embedded engine installs
+# them without building any source distribution.
+--only-binary docopt
+--only-binary num2words
+
 kokoro>=0.9.4
 soundfile>=0.12.0
 # en_core_web_sm is installed dynamically in KokoroLoader._ensure_dependencies()

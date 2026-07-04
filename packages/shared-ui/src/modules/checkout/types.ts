@@ -11,31 +11,70 @@
  */
 
 // =============================================================================
+// PLAN ACTION
+// =============================================================================
+
+/**
+ * Defines an alternative click action for a plan card.
+ *
+ * Plans without an action proceed to Stripe checkout as normal.
+ * Plans with an action navigate the user elsewhere instead (e.g. a
+ * GitHub repo for a free/OSS tier, or a mailto for enterprise sales).
+ */
+export interface PlanAction {
+	/** Action type: ``link`` opens a URL, ``mailto`` opens an email compose. */
+	type: 'link' | 'mailto';
+
+	/** Target URL (for ``link``) or email address (for ``mailto``). */
+	url: string;
+
+	/** Optional email subject line (only used when type is ``mailto``). */
+	subject?: string;
+
+	/** Button label shown on the card (e.g. "Get started", "Contact us"). */
+	label: string;
+}
+
+// =============================================================================
 // CHECKOUT PLAN
 // =============================================================================
 
 /**
- * A single subscription plan shown in the CheckoutModal plan picker.
- * Returned by the server's `prices` subcommand with pre-formatted display strings.
+ * A single plan card shown in the CheckoutModal plan picker.
+ *
+ * Mirrors the ``app_prices`` DB row shape returned by ``_price_to_dict``.
+ * The UI reads display fields from ``metadata`` (description, action, order, etc.).
  */
 export interface CheckoutPlan {
+	/** Internal price UUID. */
+	id: string;
+
+	/** App identifier. */
+	appId: string;
+
 	/** Stripe price_* identifier. Passed to the checkout session creation. */
-	priceId: string;
+	stripePriceId: string;
 
-	/** Human-readable label shown in the plan selector (e.g. "Monthly", "Annual"). */
-	label: string;
+	/** Human-readable tier label (e.g. "Starter", "Pro", "3,700 tokens"). */
+	nickname: string;
 
-	/** Billing interval — used to sort and badge the options. */
-	interval: 'month' | 'year';
+	/** Price in smallest currency unit (e.g. cents for USD). */
+	amountCents: number;
 
-	/** Display price string (e.g. "$29 / mo", "$276 / yr"). */
-	amount: string;
+	/** ISO 4217 currency code. */
+	currency: string;
 
-	/** Credit grants config from Stripe price metadata, or null. */
-	credits?: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
+	/** Billing interval: "month", "year", or "one_time". */
+	interval: 'month' | 'year' | 'one_time' | '';
 
-	/** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
-	creditLabels?: Record<string, string> | null;
+	/** Full plan metadata from the app manifest (description, action, order, kind, credits, labels, seats, features, etc.). */
+	metadata?: Record<string, any> | null;
+
+	/** Whether the price is active. */
+	isActive: boolean;
+
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
 }
 
 // =============================================================================
@@ -52,11 +91,20 @@ export interface CheckoutModalProps {
 	/** Display name of the app being subscribed to (e.g. "RocketRide"). */
 	appName: string;
 
-	/** Short description shown below the app name in the left column. */
+	/** Short description shown below the app name. */
 	appDescription?: string;
 
 	/** Stripe publishable key (pk_test_* or pk_live_*). */
 	stripePublishableKey: string;
+
+	/**
+	 * When set, the modal skips the plan-picker step and goes straight to the
+	 * payment step for this plan (creating the subscription immediately). Omit
+	 * (the default) to show the picker first. Only the web pricing page sets
+	 * this; the in-app and VS Code extension flows leave it undefined and keep
+	 * the pick-a-plan → Continue UX.
+	 */
+	preselectedPlan?: CheckoutPlan;
 
 	/** Fetches available subscription plans from the server. */
 	onFetchPlans: () => Promise<CheckoutPlan[]>;
@@ -78,4 +126,12 @@ export interface CheckoutModalProps {
 
 	/** Called when the user dismisses the modal without completing checkout. */
 	onClose: () => void;
+
+	/**
+	 * Overrides how a plan's action CTA (Free → link, Enterprise → mailto) is
+	 * opened. The browser default (window.open / mailto) works in the SaaS web
+	 * app; the VS Code extension passes a handler that routes through the host,
+	 * since webview navigation is sandboxed.
+	 */
+	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }

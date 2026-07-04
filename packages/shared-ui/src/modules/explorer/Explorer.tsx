@@ -22,6 +22,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useEffect, useRef, CSSProperties } from 'react';
+import { Tooltip } from '@mui/material';
 import { commonStyles } from '../../themes/styles';
 import { BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxPlay, BxStop, BxListUl, BxGridAlt, BxCollapseAll, BxFilePlus, BxFolderPlus, BxDotsHorizontal, BxEditAlt, BxTrash } from '../../components/BoxIcon';
 import type { IExplorerProps, ExplorerEntry, ExplorerStatus, DirNode } from './types';
@@ -134,6 +135,26 @@ const S = {
 		padding: '4px 0',
 		boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
 		minWidth: 120,
+	} as CSSProperties,
+	submenu: {
+		position: 'absolute' as const,
+		right: 15,
+		top: '100%',
+		zIndex: 101,
+		background: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 6,
+		padding: '4px 0',
+		boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+		minWidth: 160,
+	} as CSSProperties,
+	submenuTrigger: {
+		position: 'relative' as const,
+	} as CSSProperties,
+	submenuArrow: {
+		marginLeft: 'auto',
+		fontSize: 10,
+		opacity: 0.6,
 	} as CSSProperties,
 	popupRow: {
 		display: 'flex',
@@ -322,7 +343,7 @@ function childTooltip(child: { id: string; name: string; provider?: string }, ta
  * sources, or any app-specific concepts.  The hosting container provides
  * entries, statuses, and callbacks.
  */
-export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, onRefresh }) => {
+export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, fileActions, onRefresh, onMove, onUpload }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -330,9 +351,16 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 	const [hoveredAction, setHoveredAction] = useState<string | null>(null);
 	const [selectedPath, setSelectedPath] = useState<string>(activeFilePath ?? '');
 	const [menuPath, setMenuPath] = useState<string | null>(null);
+	const [submenuId, setSubmenuId] = useState<string | null>(null);
 	const [renamePath, setRenamePath] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState('');
 	const [createState, setCreateState] = useState<{ type: 'file' | 'folder'; parentDir: string; name: string } | null>(null);
+
+	// Drag-drop state
+	const [dragPath, setDragPath] = useState<string | null>(null);
+	const [dropTarget, setDropTarget] = useState<string | null>(null);
+	const canDrag = !!onMove;
+	const canDrop = !!onMove || !!onUpload;
 
 	const menuRef = useRef<HTMLDivElement>(null);
 	const hasFileManage = !!onFileManage;
@@ -472,6 +500,54 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 	const hoverBg = (id: string): CSSProperties => (hoveredRow === id ? { background: HOVER_BG } : {});
 	const actionHoverBg = (id: string): CSSProperties => (hoveredAction === id ? { background: 'var(--rr-bg-toolbar-hover)' } : {});
 
+	// --- Drag-drop handlers ---------------------------------------------------
+
+	const handleDragStart = useCallback((e: React.DragEvent, path: string) => {
+		setDragPath(path);
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('text/plain', path);
+	}, []);
+
+	const handleDragOver = useCallback((e: React.DragEvent, dirPath: string) => {
+		e.preventDefault();
+		e.stopPropagation();
+		e.dataTransfer.dropEffect = dragPath ? 'move' : 'copy';
+		// Don't allow dropping onto self or own descendant
+		if (dragPath && (dragPath === dirPath || dirPath.startsWith(dragPath + '/'))) return;
+		setDropTarget(dirPath);
+	}, [dragPath]);
+
+	const handleDragLeave = useCallback((e: React.DragEvent) => {
+		e.stopPropagation();
+		setDropTarget(null);
+	}, []);
+
+	const handleDrop = useCallback((e: React.DragEvent, dirPath: string) => {
+		e.preventDefault();
+		e.stopPropagation();
+		setDropTarget(null);
+		setDragPath(null);
+
+		// OS file drop
+		if (e.dataTransfer.files.length > 0 && onUpload) {
+			onUpload(Array.from(e.dataTransfer.files), dirPath);
+			return;
+		}
+
+		// Internal move
+		const sourcePath = e.dataTransfer.getData('text/plain');
+		if (sourcePath && onMove && sourcePath !== dirPath) {
+			// Prevent moving a directory into itself or its own descendant
+			if (dirPath === sourcePath || dirPath.startsWith(sourcePath + '/')) return;
+			onMove(sourcePath, dirPath);
+		}
+	}, [onMove, onUpload]);
+
+	const handleDragEnd = useCallback(() => {
+		setDragPath(null);
+		setDropTarget(null);
+	}, []);
+
 	// --- Render tree recursively ----------------------------------------------
 
 	const renderChildren = useCallback(
@@ -493,13 +569,19 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 					nodes.push(
 						<div
 							key={rowKey}
-							style={{ ...S.row, paddingLeft: indent, ...hoverBg(rowKey), ...(isSelected ? { background: 'var(--rr-bg-list-active)', color: 'var(--rr-fg-list-active)' } : {}) }}
+							style={{ ...S.row, paddingLeft: indent, ...hoverBg(rowKey), ...(isSelected ? { background: 'var(--rr-bg-list-active)', color: 'var(--rr-fg-list-active)' } : {}), ...(dropTarget === dir.path ? { outline: '2px solid var(--rr-brand)', outlineOffset: -2 } : {}) }}
 							onMouseEnter={() => setHoveredRow(rowKey)}
 							onMouseLeave={() => setHoveredRow(null)}
 							onClick={() => {
 								toggleDir(dir.path);
 								if (hasFileManage) setSelectedPath(dir.path);
 							}}
+							draggable={canDrag}
+							onDragStart={(e) => handleDragStart(e, dir.path)}
+							onDragOver={(e) => handleDragOver(e, dir.path)}
+							onDragLeave={handleDragLeave}
+							onDrop={(e) => handleDrop(e, dir.path)}
+							onDragEnd={handleDragEnd}
 						>
 							{isExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} />}
 							<BxFolderOpen size={16} color="var(--rr-text-secondary)" />
@@ -588,6 +670,9 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 								if (hasFileManage) setSelectedPath(file.path);
 							}}
 							title={file.path}
+							draggable={canDrag}
+							onDragStart={(e) => handleDragStart(e, file.path)}
+							onDragEnd={handleDragEnd}
 						>
 							{hasChildren ? isFileExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} /> : <span style={{ width: 14 }} />}
 							<BxFile size={16} color="var(--rr-text-secondary)" />
@@ -611,10 +696,10 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							{dotColor && <div style={S.dot(dotColor)} />}
 							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
 								<button
-									style={S.menuBtn}
+									style={{ ...S.menuBtn, ...(isFileSelected ? { color: 'var(--rr-fg-list-active)' } : {}) }}
 									onClick={(e) => {
 										e.stopPropagation();
-										setMenuPath(menuPath === file.path ? null : file.path);
+										setMenuPath(menuPath === file.path ? null : file.path); setSubmenuId(null);
 									}}
 								>
 									<BxDotsHorizontal size={16} />
@@ -645,6 +730,71 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 									>
 										<BxTrash size={16} /> Delete
 									</button>
+									{fileActions?.map((a) => {
+										const children = typeof a.children === 'function' ? a.children(file.path) : a.children;
+										return children ? (
+											<div
+												key={a.id}
+												style={S.submenuTrigger}
+												onMouseEnter={() => setSubmenuId(a.id)}
+												onMouseLeave={() => setSubmenuId(null)}
+												onFocus={() => setSubmenuId(a.id)}
+												onBlur={(e) => {
+													if (!e.currentTarget.contains(e.relatedTarget as Node)) setSubmenuId(null);
+												}}
+											>
+												<button
+													style={S.popupRow}
+													role="menuitem"
+													aria-haspopup="true"
+													aria-expanded={submenuId === a.id}
+													tabIndex={0}
+													onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+													onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+													onClick={(e) => {
+														e.stopPropagation();
+														setSubmenuId(submenuId === a.id ? null : a.id);
+													}}
+												>
+													{a.icon} {a.label} <span style={S.submenuArrow}>&#x25B8;</span>
+												</button>
+												{submenuId === a.id && (
+													<div style={S.submenu}>
+														{children.map((ch) => (
+															<button
+																key={ch.id}
+																style={S.popupRow}
+																onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+																onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+																onClick={(e) => {
+																	e.stopPropagation();
+																	setMenuPath(null);
+																	setSubmenuId(null);
+																	ch.onSelect?.(file.path);
+																}}
+															>
+																{ch.icon} {ch.label}
+															</button>
+														))}
+													</div>
+												)}
+											</div>
+										) : (
+											<button
+												key={a.id}
+												style={S.popupRow}
+												onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+												onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+												onClick={(e) => {
+													e.stopPropagation();
+													setMenuPath(null);
+													a.onSelect?.(file.path);
+												}}
+											>
+												{a.icon} {a.label}
+											</button>
+										);
+									})}
 								</div>
 							)}
 						</div>
@@ -702,7 +852,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							}}
 							onBlur={cancelCreate}
 							autoFocus
-							placeholder={config.createPlaceholder ?? (createState.type === 'folder' ? 'folder name' : 'file name')}
+							placeholder={createState.type === 'folder' ? 'folder name' : (config.createPlaceholder ?? 'file name')}
 						/>
 					</div>
 				);
@@ -710,7 +860,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 
 			return nodes;
 		},
-		[getChildren, expandedDirs, expandedFiles, hoveredRow, statuses, isConnected, showChildActions, onOpenFile, onFileManage, onChildAction, toggleDir, toggleFile, entries, hasFileManage, selectedPath, menuPath, renamePath, renameValue, confirmRename, cancelRename, startRename, createState, confirmCreate, cancelCreate, getDisplayName, config.createPlaceholder]
+		[getChildren, expandedDirs, expandedFiles, hoveredRow, statuses, isConnected, showChildActions, onOpenFile, onFileManage, onChildAction, toggleDir, toggleFile, entries, hasFileManage, selectedPath, menuPath, renamePath, renameValue, confirmRename, cancelRename, startRename, createState, confirmCreate, cancelCreate, getDisplayName, config.createPlaceholder, canDrag, handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd, dropTarget]
 	);
 
 	// --- Render ---------------------------------------------------------------
@@ -722,30 +872,47 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 				<span style={S.sectionLabel}>{config.title}</span>
 				{hasFileManage && (
 					<>
-						<button style={{ ...S.headerAction, ...actionHoverBg('newFile') }} title={`New ${config.title.replace(/s$/, '')}`} onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>
-							<BxFilePlus size={16} />
-						</button>
-						<button style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} title="New Folder" onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
-							<BxFolderPlus size={16} />
-						</button>
+						<Tooltip title={`New ${config.title.replace(/s$/, '')}`} arrow placement="top">
+							<button aria-label={`New ${config.title.replace(/s$/, '')}`} style={{ ...S.headerAction, ...actionHoverBg('newFile') }} onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>
+								<BxFilePlus size={16} />
+							</button>
+						</Tooltip>
+						{config.allowFolders !== false && (
+							<Tooltip title="New folder" arrow placement="top">
+								<button aria-label="New folder" style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
+									<BxFolderPlus size={16} />
+								</button>
+							</Tooltip>
+						)}
 					</>
 				)}
-				<button style={{ ...S.headerAction, ...actionHoverBg('viewMode') }} title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))} onMouseEnter={() => setHoveredAction('viewMode')} onMouseLeave={() => setHoveredAction(null)}>
-					{viewMode === 'tree' ? <BxListUl size={16} /> : <BxGridAlt size={16} />}
-				</button>
-				<button style={{ ...S.headerAction, ...actionHoverBg('collapse') }} title="Collapse All" onClick={collapseAll} onMouseEnter={() => setHoveredAction('collapse')} onMouseLeave={() => setHoveredAction(null)}>
-					<BxCollapseAll size={16} />
-				</button>
-				<button style={{ ...S.headerAction, ...actionHoverBg('refresh') }} title="Refresh" onClick={onRefresh} onMouseEnter={() => setHoveredAction('refresh')} onMouseLeave={() => setHoveredAction(null)}>
-					<BxRefresh size={16} />
-				</button>
+				<Tooltip title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} arrow placement="top">
+					<button aria-label={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} style={{ ...S.headerAction, ...actionHoverBg('viewMode') }} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))} onMouseEnter={() => setHoveredAction('viewMode')} onMouseLeave={() => setHoveredAction(null)}>
+						{viewMode === 'tree' ? <BxListUl size={16} /> : <BxGridAlt size={16} />}
+					</button>
+				</Tooltip>
+				<Tooltip title="Collapse all" arrow placement="top">
+					<button aria-label="Collapse all" style={{ ...S.headerAction, ...actionHoverBg('collapse') }} onClick={collapseAll} onMouseEnter={() => setHoveredAction('collapse')} onMouseLeave={() => setHoveredAction(null)}>
+						<BxCollapseAll size={16} />
+					</button>
+				</Tooltip>
+				<Tooltip title="Refresh" arrow placement="top">
+					<button aria-label="Refresh" style={{ ...S.headerAction, ...actionHoverBg('refresh') }} onClick={onRefresh} onMouseEnter={() => setHoveredAction('refresh')} onMouseLeave={() => setHoveredAction(null)}>
+						<BxRefresh size={16} />
+					</button>
+				</Tooltip>
 			</div>
 
 			{/* ── File tree ───────────────────────────────────────────── */}
 			{/* When the tree is empty we still need to render the inline create
 			    input if the user just clicked +File / +Folder at the root, since
 			    that input lives inside renderChildren(). */}
-			<div style={S.treeList}>
+			<div
+				style={{ ...S.treeList, ...(dropTarget === '' ? { outline: '2px solid var(--rr-brand)', outlineOffset: -2 } : {}) }}
+				onDragOver={canDrop ? (e) => handleDragOver(e, '') : undefined}
+				onDragLeave={canDrop ? handleDragLeave : undefined}
+				onDrop={canDrop ? (e) => handleDrop(e, '') : undefined}
+			>
 				{entries.length === 0 && !(createState && createState.parentDir === '') && (
 					<div style={S.emptyState}>{config.emptyMessage ?? 'No files'}</div>
 				)}

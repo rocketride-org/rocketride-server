@@ -45,8 +45,10 @@ import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
+import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import type { ShellConfig } from '../../workspace/types';
+import { commonStyles } from 'shared/themes/styles';
 
 // =============================================================================
 // STYLES
@@ -78,6 +80,39 @@ const styles = {
 		color: 'var(--rr-text-secondary)',
 		fontFamily: 'var(--rr-font-family)',
 		fontSize: 13,
+	} as CSSProperties,
+	// Load-failure state — fills the same client-area slot as appLoading but
+	// stacks a title/message/Retry, mirroring AppErrorBoundary's error screen.
+	appLoadError: {
+		display: 'flex',
+		flex: 1,
+		flexDirection: 'column',
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: 16,
+		padding: 40,
+		fontFamily: 'var(--rr-font-family)',
+		color: 'var(--rr-text-primary)',
+		backgroundColor: 'var(--rr-bg-default)',
+		textAlign: 'center',
+	} as CSSProperties,
+	appLoadErrorTitle: {
+		fontSize: 18,
+		fontWeight: 700,
+		color: 'var(--rr-color-error, #ef4444)',
+	} as CSSProperties,
+	appLoadErrorMessage: {
+		fontSize: 13,
+		color: 'var(--rr-text-secondary)',
+		maxWidth: 480,
+		lineHeight: 1.6,
+		wordBreak: 'break-word',
+	} as CSSProperties,
+	appLoadErrorButton: {
+		...commonStyles.buttonPrimary,
+		padding: '8px 20px',
+		fontWeight: 600,
+		marginTop: 8,
 	} as CSSProperties,
 	overlayContainer: {
 		position: 'relative',
@@ -122,7 +157,7 @@ export interface ShellLayoutProps {
 export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	config, isConnected, statusMessage, hideAppSwitcher, defaultAppId,
 }) => {
-	const { loaded, seeded, appLoading, prefs, activeAppId, loadedApps, settings, appManifest } = useWorkspace();
+	const { loaded, seeded, appLoading, prefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp } = useWorkspace();
 
 	// --- Merge API config: build-time -> setting defaults -> user settings ----
 	const mergedApiConfig = useMemo(() => {
@@ -184,11 +219,26 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Auth gate: auto-trigger login for authenticated apps ----------------
 	const activeManifest = appManifest.find((m) => m.id === activeAppId);
 	const authGateTriggeredRef = useRef<string | null>(null);
+	const prevIdentityRef = useRef(identity);
+	const suppressGateRef = useRef(false);
 
 	useEffect(() => {
+		// Detect a logout transition (had an identity, now none). On logout the
+		// shell switches the active app back to home via shell:switchApp, but that
+		// event is delivered on a microtask, so the workspace's activeAppId flips a
+		// tick AFTER identity clears. During that gap the check below would see
+		// "no identity + auth-required app still active" and fire shell:loginRequest
+		// → startOAuth, bouncing a signing-out user to the Zitadel login screen
+		// instead of leaving them on the logged-out home. Suppress the gate from the
+		// moment identity drops until the active app settles back on the default.
+		const wasLoggedIn = !!prevIdentityRef.current;
+		prevIdentityRef.current = identity;
+		if (wasLoggedIn && !identity) suppressGateRef.current = true;
+		if (identity || activeAppId === defaultAppId) suppressGateRef.current = false;
+
 		// Only gate when the manifest is loaded and explicitly requires auth.
 		// Skip for the default app (home/hello) — it must always be accessible.
-		if (!identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
+		if (!suppressGateRef.current && !identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
 			if (authGateTriggeredRef.current === activeAppId) return;
 			authGateTriggeredRef.current = activeAppId;
 			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId });
@@ -197,13 +247,36 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		}
 	}, [identity, activeAppId, activeManifest, defaultAppId]);
 
+	// --- Subscription gate: auto-trigger checkout for subscription apps ------
+	const subGateTriggeredRef = useRef<string | null>(null);
+	const subGateActive = identity
+		&& activeManifest
+		&& activeAppId !== defaultAppId
+		&& activeManifest.appStatus === 'unsubscribed';
+
+	useEffect(() => {
+		// When a logged-in user navigates to an app they haven't subscribed to,
+		// open the checkout flow automatically. Skip the default app (always accessible).
+		if (subGateActive) {
+			if (subGateTriggeredRef.current === activeAppId) return;
+			subGateTriggeredRef.current = activeAppId;
+			ConnectionManager.getInstance().emit('shell:subscribe', { app: activeManifest });
+		} else {
+			subGateTriggeredRef.current = null;
+		}
+	}, [subGateActive, activeAppId, activeManifest]);
+
 	// --- Loading guard -------------------------------------------------------
 	if (!loaded && !seeded) return null;
 
 	// --- Derived layout info -------------------------------------------------
 	const hasSidebar = !!activeApp?.components?.Sidebar;
 	const appName = activeApp?.branding?.appName ?? config.apps[0]?.name ?? 'RocketRide';
-	const showStatusBar = activeManifest?.showStatusBar !== false;
+	// Only show the status bar once the app has actually loaded. During the app-load gap the
+	// client area shows the boot rocket (LoadingScreen); rendering the StatusBar there made it
+	// blink in and then get covered by home-ui's AuthTransitionPage overlay — a one-frame
+	// "flash" between the otherwise-identical loading/transition screens.
+	const showStatusBar = activeManifest?.showStatusBar !== false && !!activeApp?.components?.App;
 
 	// --- Render --------------------------------------------------------------
 	return (
@@ -231,8 +304,22 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 									identity={identity}
 								/>
 							</AppErrorBoundary>
+						) : appLoadErrors[activeAppId] ? (
+							<div style={styles.appLoadError}>
+								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
+								<div style={styles.appLoadErrorMessage} role="alert">
+									{appLoadErrors[activeAppId]}
+								</div>
+								<button type="button" style={styles.appLoadErrorButton} onClick={() => retryApp(activeAppId)}>
+									Retry
+								</button>
+							</div>
 						) : appLoading || !activeApp ? (
-							<div style={styles.appLoading}>Loading...</div>
+							// Same bobbing rocket as the boot LoadingScreen and home-ui's
+							// AuthTransitionPage (all phase-anchored) so the post-login
+							// boot → app-load → transition handoff is one continuous animation
+							// with no "Loading…" text frame flashing between them.
+							<LoadingScreen />
 						) : null}
 					</div>
 				</div>

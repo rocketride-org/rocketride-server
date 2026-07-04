@@ -19,10 +19,12 @@ import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { ConnectionManager } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
+import { ConfigManager } from '../config';
 import { ConnectionState } from '../shared/types';
 import type { ConnectionStatus } from '../shared/types';
 import type { ConnectResult, TeamDetail } from 'rocketride';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
+import { PIPE_BUILDER_APP_ID } from '../shared/types';
 
 // =============================================================================
 // INTERFACES
@@ -41,6 +43,10 @@ interface AccountWebviewMessage {
 	params?: Record<string, unknown>;
 	appId?: string;
 	packId?: string;
+	priceId?: string;
+	newPriceId?: string;
+	orgId?: string;
+	subscriptionId?: string;
 }
 
 // =============================================================================
@@ -62,6 +68,7 @@ export class AccountProvider {
 	private disposables: vscode.Disposable[] = [];
 
 	private connectionManager = ConnectionManager.getInstance();
+	private configManager = ConfigManager.getInstance();
 
 	/**
 	 * Creates the AccountProvider, registers the open command, and sets up
@@ -151,6 +158,10 @@ export class AccountProvider {
 				await this.handleSetDefaultTeam(panel, message.teamId as string);
 				break;
 
+			case 'account:setDefaultOrg':
+				await this.handleSetDefaultOrg(panel, message.orgId as string);
+				break;
+
 			// -- API Keys ---------------------------------------------------------
 			case 'account:createKey':
 				await this.handleCreateKey(panel, message.params as { name: string; teamId: string; permissions: string[]; expiresAt?: string });
@@ -176,6 +187,10 @@ export class AccountProvider {
 
 			case 'account:removeMember':
 				await this.handleRemoveMember(panel, message.userId as string);
+				break;
+
+			case 'account:resendInvite':
+				await this.handleResendInvite(panel, message.userId as string);
 				break;
 
 			// -- Teams ------------------------------------------------------------
@@ -222,8 +237,25 @@ export class AccountProvider {
 				await this.handleOpenPortal();
 				break;
 
-			case 'billing:buyCredits':
-				await this.handleBuyCredits(message.packId as string);
+			case 'billing:purchaseTopup':
+				await this.handlePurchaseTopup(panel, message.priceId as string);
+				break;
+
+			case 'billing:upgrade':
+				await this.handleUpgradeSubscription(panel, message.appId as string, message.newPriceId as string);
+				break;
+
+			// -- Checkout flow (embedded Stripe Elements in the Account webview) ---
+			case 'checkout:fetchPlans':
+				await this.handleCheckoutFetchPlans(panel);
+				break;
+
+			case 'checkout:createSession':
+				await this.handleCheckoutCreateSession(panel, message);
+				break;
+
+			case 'checkout:confirmPending':
+				await this.handleCheckoutConfirmPending(panel, message);
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
@@ -248,29 +280,46 @@ export class AccountProvider {
 	 */
 	private async sendInitialData(panel: vscode.WebviewPanel): Promise<void> {
 		// Resolve the best available client (dev → deploy cascade).
-		const { client, accountInfo } = this.resolveClient();
+		const { client, accountInfo, orgId } = this.resolveClient();
 		const isConnected = client !== undefined;
 
-		// Fetch profile for the default tab; other sections load on demand.
+		// Fetch all account data upfront in parallel so every tab has data
+		// immediately (badges, counts, billing) without waiting for the user
+		// to click into each section.
 		let profile: ConnectResult | null = accountInfo ?? null;
+		let org = null;
+		let members: any[] = [];
+		let teams: any[] = [];
+		let keys: any[] = [];
+
 		if (client && isConnected) {
-			const fresh = await client.account.getProfile().catch(() => null);
-			if (fresh) profile = fresh;
+			const results = await Promise.all([
+				client.account.getProfile().catch(() => null),
+				orgId ? client.account.getOrg(orgId).catch(() => null) : null,
+				orgId ? client.account.listMembers(orgId).catch(() => []) : [],
+				orgId ? client.account.listTeams(orgId).catch(() => []) : [],
+				client.account.listKeys().catch(() => []),
+			]);
+			if (results[0]) profile = results[0];
+			org = results[1];
+			members = results[2] as any[];
+			teams = results[3] as any[];
+			keys = results[4] as any[];
 		}
 
-		// Post init with profile only — org/members/teams/keys load lazily.
-		// authUser is the ConnectResult (includes defaultTeam); profile is the
-		// richer profile dict from getProfile (includes org/team structure).
 		await panel.webview.postMessage({
 			type: 'account:init',
 			isConnected,
 			profile,
 			authUser: accountInfo ?? null,
-			org: null,
-			members: [],
-			teams: [],
-			keys: [],
+			org,
+			members,
+			teams,
+			keys,
 		});
+
+		// Also fetch billing data immediately
+		await this.fetchBillingData(panel);
 	}
 
 	/**
@@ -366,6 +415,30 @@ export class AccountProvider {
 		// Step 2: the server pushes a refreshed ConnectResult to all connections
 		// via push_account_update. The SDK updates getAccountInfo() automatically.
 		// Post both profile and authUser so the UI reflects the new default.
+		const profile = await client.account.getProfile().catch(() => null);
+		const authUser = client.getAccountInfo();
+		await panel.webview.postMessage({ type: 'account:profile', profile: profile || authUser || null });
+		await panel.webview.postMessage({ type: 'account:authUser', authUser });
+	}
+
+	/**
+	 * Switches the user's active organization.
+	 *
+	 * @param panel - The webview panel.
+	 * @param orgId - The org ID to switch to.
+	 */
+	private async handleSetDefaultOrg(panel: vscode.WebviewPanel, orgId: string): Promise<void> {
+		const { client } = this.resolveClient();
+		if (!client) {
+			this.postError(panel, 'Not connected');
+			return;
+		}
+
+		// Step 1: send the set_default_org request.
+		await client.account.setDefaultOrg(orgId);
+
+		// Step 2: the server pushes a refreshed ConnectResult to all connections.
+		// Re-fetch profile and authUser so the UI reflects the new active org.
 		const profile = await client.account.getProfile().catch(() => null);
 		const authUser = client.getAccountInfo();
 		await panel.webview.postMessage({ type: 'account:profile', profile: profile || authUser || null });
@@ -534,6 +607,22 @@ export class AccountProvider {
 
 		// Step 2: refresh the member list.
 		await this.refreshMembers(panel);
+	}
+
+	/**
+	 * Resends the initialization email for a pending org member.
+	 *
+	 * @param panel  - The webview panel.
+	 * @param userId - The pending member's user ID.
+	 */
+	private async handleResendInvite(panel: vscode.WebviewPanel, userId: string): Promise<void> {
+		const { client, orgId } = this.resolveClient();
+		if (!client) {
+			this.postError(panel, 'Not connected');
+			return;
+		}
+
+		await client.account.resendInvite(orgId!, userId);
 	}
 
 	/**
@@ -747,7 +836,18 @@ export class AccountProvider {
 			}
 		});
 
-		this.disposables.push(connectionStateListener, accountEventListener);
+		// Subscribe to billing monitor and re-fetch on billing ledger events
+		const client = this.connectionManager.getClient();
+		if (client) {
+			client.addMonitor({ token: '*' }, ['billing']).catch(() => {});
+		}
+		const billingEventListener = this.connectionManager.on('shell:event' as any, ({ event }: any) => {
+			if (event?.event === 'apaext_billing_update' && AccountProvider.panel) {
+				this.fetchBillingData(AccountProvider.panel).catch(() => {});
+			}
+		});
+
+		this.disposables.push(connectionStateListener, accountEventListener, billingEventListener);
 	}
 
 	/**
@@ -786,7 +886,6 @@ export class AccountProvider {
 				type: 'account:billing',
 				subscriptions: [],
 				creditBalance: null,
-				creditPacks: [],
 				billingLoading: false,
 				billingError: 'No organisation found. Please sign in first.',
 			});
@@ -798,20 +897,33 @@ export class AccountProvider {
 			type: 'account:billing',
 			subscriptions: [],
 			creditBalance: null,
-			creditPacks: [],
 			billingLoading: true,
 			billingError: null,
 		});
 
 		try {
-			// Fetch all billing data in parallel via the SDK
-			const [subscriptions, creditBalance, creditPacks] = await Promise.all([client.billing.getDetails(orgId), client.billing.getCreditBalance(orgId), client.billing.listCreditPacks()]);
+			// Fetch all billing data in parallel — all from local DB, no Stripe calls
+			const [subscriptions, creditBalance, allPlans, transactions, usageByUser, usageByTeam] = await Promise.all([
+				client.billing.getDetails(orgId),
+				client.billing.getCreditBalance(orgId),
+				client.billing.getProductPrices(PIPE_BUILDER_APP_ID).catch(() => []),
+				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
+				client.billing.getUsageByUser(orgId).catch(() => []),
+				client.billing.getUsageByTeam(orgId).catch(() => []),
+			]);
+
+			// Split plans into topups for the billing dashboard
+			const topupPlans = (allPlans as any[]).filter((p: any) => p.metadata?.kind === 'topup');
 
 			await panel.webview.postMessage({
 				type: 'account:billing',
 				subscriptions,
 				creditBalance,
-				creditPacks,
+				topupPlans,
+				allPlans,
+				transactions,
+				usageByUser,
+				usageByTeam,
 				billingLoading: false,
 				billingError: null,
 			});
@@ -821,7 +933,9 @@ export class AccountProvider {
 				type: 'account:billing',
 				subscriptions: [],
 				creditBalance: null,
-				creditPacks: [],
+				transactions: null,
+				usageByUser: [],
+				usageByTeam: [],
 				billingLoading: false,
 				billingError: `Failed to load billing data: ${error}`,
 			});
@@ -849,6 +963,66 @@ export class AccountProvider {
 	}
 
 	/**
+	 * Fetches available subscription plans for the checkout modal.
+	 *
+	 * @param panel - The webview panel to post the result to.
+	 */
+	private async handleCheckoutFetchPlans(panel: vscode.WebviewPanel): Promise<void> {
+		try {
+			const { client } = this.resolveClient();
+			if (!client) throw new Error('Not connected');
+			const plans = await client.billing.getProductPrices(PIPE_BUILDER_APP_ID);
+			await panel.webview.postMessage({ type: 'checkout:plansResult', plans, error: null });
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			await panel.webview.postMessage({ type: 'checkout:plansResult', plans: [], error: msg });
+		}
+	}
+
+	/**
+	 * Creates a Stripe checkout session and returns the client secret.
+	 *
+	 * @param panel   - The webview panel to post the result to.
+	 * @param message - The incoming message containing the priceId.
+	 */
+	private async handleCheckoutCreateSession(panel: vscode.WebviewPanel, message: AccountWebviewMessage): Promise<void> {
+		try {
+			const { client, orgId } = this.resolveClient();
+			if (!client) throw new Error('Not connected');
+			if (!orgId) throw new Error('No organisation found');
+			const result = await client.billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, message.priceId as string);
+			await panel.webview.postMessage({ type: 'checkout:sessionResult', ...result, error: null });
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			await panel.webview.postMessage({ type: 'checkout:sessionResult', clientSecret: '', subscriptionId: '', error: msg });
+		}
+	}
+
+	/**
+	 * Notifies the server that Stripe payment was confirmed client-side.
+	 *
+	 * @param panel   - The webview panel to post the result to.
+	 * @param message - The incoming message containing subscriptionId and priceId.
+	 */
+	private async handleCheckoutConfirmPending(panel: vscode.WebviewPanel, message: AccountWebviewMessage): Promise<void> {
+		try {
+			const { client } = this.resolveClient();
+			if (!client) throw new Error('Not connected');
+			await (client as any).dapRequest('rrext_account_billing', {
+				subcommand: 'confirm_pending',
+				appId: PIPE_BUILDER_APP_ID,
+				subscriptionId: message.subscriptionId,
+				priceId: message.priceId,
+			});
+			await panel.webview.postMessage({ type: 'checkout:confirmResult', error: null });
+		} catch (err: unknown) {
+			// Non-fatal -- the webhook will still update the DB, but surface the error
+			const msg = err instanceof Error ? err.message : String(err);
+			await panel.webview.postMessage({ type: 'checkout:confirmResult', error: msg });
+		}
+	}
+
+	/**
 	 * Creates a Stripe portal session and opens the URL in the user's browser.
 	 */
 	private async handleOpenPortal(): Promise<void> {
@@ -864,19 +1038,52 @@ export class AccountProvider {
 	}
 
 	/**
-	 * Creates a Stripe checkout session for a credit pack and opens the URL.
-	 *
-	 * @param packId - The credit pack identifier to purchase.
+	 * Purchases a top-up pack by charging the customer's card on file.
+	 * Posts the result back to the webview for the TopUpModal to handle.
 	 */
-	private async handleBuyCredits(packId: string): Promise<void> {
+	private async handlePurchaseTopup(panel: vscode.WebviewPanel, priceId: string): Promise<void> {
 		const { client, orgId } = this.resolveClient();
-		if (!client || !orgId) return;
-
+		if (!client || !orgId) {
+			await panel.webview.postMessage({ type: 'billing:topupResult', error: 'Not connected' });
+			return;
+		}
 		try {
-			const { url } = await client.billing.createCreditCheckout(orgId, packId, 'https://rocketride.ai');
-			await vscode.env.openExternal(vscode.Uri.parse(url));
-		} catch (error) {
-			console.error(`[AccountProvider] Failed to create credit checkout: ${error}`);
+			const result = await client.billing.purchaseTopup(orgId, priceId);
+			await panel.webview.postMessage({ type: 'billing:topupResult', result });
+			// Re-fetch billing data to reflect the new balance
+			if (result.status === 'succeeded') {
+				await this.fetchBillingData(panel);
+			}
+		} catch (error: unknown) {
+			const msg = error instanceof Error ? error.message : String(error);
+			await panel.webview.postMessage({ type: 'billing:topupResult', error: msg });
+		}
+	}
+
+	/**
+	 * Handles an upgrade/downgrade subscription request from the webview.
+	 *
+	 * Calls the SDK to change the subscription plan on the server, then
+	 * re-fetches billing data and sends the result back to the webview.
+	 *
+	 * @param panel      - The webview panel to post the result to.
+	 * @param appId      - The app whose subscription is being changed.
+	 * @param newPriceId - Stripe price_* identifier for the target plan.
+	 */
+	private async handleUpgradeSubscription(panel: vscode.WebviewPanel, appId: string, newPriceId: string): Promise<void> {
+		const { client, orgId } = this.resolveClient();
+		if (!client || !orgId) {
+			await panel.webview.postMessage({ type: 'billing:upgradeResult', error: 'Not connected' });
+			return;
+		}
+		try {
+			await client.billing.upgradeSubscription(orgId, appId, newPriceId);
+			await panel.webview.postMessage({ type: 'billing:upgradeResult' });
+			// Re-fetch billing data to reflect the updated subscription
+			await this.fetchBillingData(panel);
+		} catch (error: unknown) {
+			const msg = error instanceof Error ? error.message : String(error);
+			await panel.webview.postMessage({ type: 'billing:upgradeResult', error: msg });
 		}
 	}
 
@@ -885,33 +1092,32 @@ export class AccountProvider {
 	// =========================================================================
 
 	/**
-	 * Resolves the best available client using dev → deploy cascade.
-	 * Prefers the dev client if it has account info (cloud mode), otherwise
-	 * falls back to the deploy client.
+	 * Resolves the best available client by checking which connection is
+	 * actually cloud-connected.  Dev takes priority; if dev is not cloud,
+	 * falls back to deploy.  Local/docker/service connections don't have
+	 * real cloud account info and should not be used for account operations.
 	 *
 	 * @returns The client, its account info, and the orgId (if available).
 	 */
 	private resolveClient(): { client: any | undefined; accountInfo: any | undefined; orgId: string | undefined } {
-		// Try dev client first
+		const config = this.configManager.getConfig();
+
 		const devClient = this.connectionManager.getClient();
 		const devInfo = devClient?.getAccountInfo();
-		if (devInfo?.displayName) {
-			const orgId = devInfo.organizations?.[0]?.id;
-			return { client: devClient, accountInfo: devInfo, orgId };
-		}
-
-		// Fall back to deploy client
 		const deployClient = DeployManager.getDeployInstance().getClient();
 		const deployInfo = deployClient?.getAccountInfo();
-		if (deployInfo?.displayName) {
-			const orgId = deployInfo.organizations?.[0]?.id;
-			return { client: deployClient, accountInfo: deployInfo, orgId };
-		}
 
-		// Neither has account info — return dev client anyway (may still be useful)
-		const fallbackInfo = devInfo ?? deployInfo;
-		const orgId = fallbackInfo?.organizations?.[0]?.id;
-		return { client: devClient ?? deployClient, accountInfo: fallbackInfo, orgId };
+		// Prefer whichever connection is cloud-connected (dev first).
+		const accountInfo =
+			(config.development.connectionMode === 'cloud' ? devInfo : null) ??
+			(config.deployment.connectionMode === 'cloud' ? deployInfo : null);
+
+		const client =
+			(config.development.connectionMode === 'cloud' && devClient ? devClient : null) ??
+			(config.deployment.connectionMode === 'cloud' && deployClient ? deployClient : null);
+
+		const orgId = accountInfo?.organization?.id;
+		return { client: client ?? undefined, accountInfo: accountInfo ?? undefined, orgId };
 	}
 
 	/**

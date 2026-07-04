@@ -49,6 +49,8 @@ from urllib.parse import urlparse, urlunparse
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
+from ai.common.utils import parse_bool
+
 from .git_repo import GitError, GitRepo, scrub_credentials
 
 
@@ -117,9 +119,9 @@ class IGlobal(IGlobalBase):
         ssh_key = str(cfg.get('sshKey') or '').strip()
         ssh_passphrase = str(cfg.get('sshPassphrase') or '').strip()
         safe_mode_raw = cfg.get('safeMode', True)
-        safe_mode = _parse_bool(safe_mode_raw, default=True)
+        safe_mode = parse_bool(safe_mode_raw, default=True)
         read_only_mode_raw = cfg.get('readOnlyMode', True)
-        read_only_mode = _parse_bool(read_only_mode_raw, default=True)
+        read_only_mode = parse_bool(read_only_mode_raw, default=True)
 
         # --- Validate auth config -----------------------------------------
         # Unknown authType is downgraded to "none" rather than raising — this lets
@@ -221,17 +223,3 @@ class IGlobal(IGlobalBase):
 def _is_url(value: str) -> bool:
     """Return True if value looks like a remote git URL."""
     return value.startswith(('http://', 'https://', 'git://', 'git@', 'ssh://'))
-
-
-def _parse_bool(raw: object, default: bool = True) -> bool:
-    """Coerce a config value to bool; return *default* for unrecognised strings."""
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, str):
-        value = raw.strip().lower()
-        if value in {'1', 'true', 'yes', 'on'}:
-            return True
-        if value in {'0', 'false', 'no', 'off'}:
-            return False
-        return default
-    return bool(raw) if raw is not None else default

@@ -11,7 +11,7 @@
  */
 
 import React from 'react';
-import localIcon from '../../../../assets/local.svg';
+import LocalIcon from '../../../../assets/local.svg';
 import { settingsStyles as S, EngineVersionItem } from '../../Settings/SettingsWebview';
 
 // =============================================================================
@@ -48,7 +48,7 @@ export const LocalPanel: React.FC<LocalPanelProps> = ({ engineVersion, onVersion
 	if (simplified) {
 		return (
 			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-				<img src={localIcon} alt="Local" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<LocalIcon role="img" aria-label="Local" style={{ width: 48, height: 48, flexShrink: 0 }} />
 				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Run the server locally on your machine. The extension will download and manage the server for you.</div>
 			</div>
 		);
@@ -57,7 +57,7 @@ export const LocalPanel: React.FC<LocalPanelProps> = ({ engineVersion, onVersion
 	return (
 		<>
 			<div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-				<img src={localIcon} alt="Local" style={{ width: 48, height: 48, objectFit: 'contain', flexShrink: 0 }} />
+				<LocalIcon role="img" aria-label="Local" style={{ width: 48, height: 48, flexShrink: 0 }} />
 				<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)', lineHeight: 1.5 }}>Run the server locally on your machine. The extension will download and manage the server for you.</div>
 			</div>
 

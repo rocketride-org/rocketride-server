@@ -13,7 +13,9 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from rocketlib import debug
 from ai.web.metrics import metrics
+from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.transformers')
@@ -243,11 +245,20 @@ class TransformersLoader(BaseLoader):
 
         try:
             return AutoTokenizer.from_pretrained(model_name)
-        except Exception:
+        except Exception as e:
+            # Fast tokenizer conversion fails for SentencePiece/Tiktoken models
+            # (e.g. XLM-RoBERTa) — fall back to slow Python tokenizer
+            debug(f'Fast tokenizer load failed for {model_name}: {e}; trying slow tokenizer')
             try:
-                return AutoProcessor.from_pretrained(model_name)
-            except Exception:
-                return None
+                return AutoTokenizer.from_pretrained(model_name, use_fast=False)
+            except Exception as e2:
+                debug(f'Slow tokenizer load failed for {model_name}: {e2}; trying AutoProcessor')
+
+        try:
+            return AutoProcessor.from_pretrained(model_name)
+        except Exception as e3:
+            debug(f'No tokenizer or processor could be loaded for {model_name}: {e3}')
+            return None
 
     @staticmethod
     def preprocess(
@@ -608,14 +619,15 @@ class PipelineLocal:
         results = TransformersLoader.postprocess(self._pipeline, raw_output, len(inputs), self.output_fields)
         t_post = (time.perf_counter() - t0) * 1000
 
-        # Report all perf counters — same shape as model server response
+        # Report all perf counters — same keys as model server response
+        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(self._pipeline) * inference_sec,
             }
         )
         metrics.counter('gpu_inference_count', 1)
@@ -740,14 +752,15 @@ class ModelLocal:
         results = TransformersLoader.postprocess(self._model, raw_output, len(inputs), self.output_fields)
         t_post = (time.perf_counter() - t0) * 1000
 
-        # Report all perf counters — same shape as model server response
+        # Report all perf counters — same keys as model server response
+        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
         metrics.counter('gpu_inference_count', 1)

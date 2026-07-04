@@ -27,6 +27,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
+from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 from .utils import preprocess_image_transparency
 
@@ -64,9 +65,10 @@ class SuryaLoader(BaseLoader):
         # Import opencv first to ensure correct version (may be used by surya)
         from ai.common.opencv import cv2  # noqa: F401
 
-        from surya.foundation import FoundationPredictor
-        from surya.recognition import RecognitionPredictor
-        from surya.detection import DetectionPredictor
+        # disable contract check for surya due to opencv conflict (see README)
+        from surya.foundation import FoundationPredictor  # contract-check: ignore  see comment above
+        from surya.recognition import RecognitionPredictor  # contract-check: ignore  see comment above
+        from surya.detection import DetectionPredictor  # contract-check: ignore  see comment above
         from ai.common.torch import torch
 
         languages = languages or ['en']
@@ -304,14 +306,15 @@ class Surya:
         results = SuryaLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
         t_post = (time.perf_counter() - t0) * 1000
 
-        # Report all perf counters — same shape as model server response
+        # Report all perf counters — same keys as model server response
+        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
 

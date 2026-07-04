@@ -22,6 +22,11 @@
 	"capabilities": ["internal"],
 	//
 	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["An internal target component that collects processed content and packages it into a ZIP archive available for export or download."],
+	//
+	// Optional:
 	//		Supported actions - if not specified, no actions are supported
 	//		engine
 	//

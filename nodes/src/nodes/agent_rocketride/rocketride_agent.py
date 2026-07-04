@@ -33,10 +33,12 @@ from typing import Any, Dict, List
 
 from rocketlib import debug, error
 
-from ai.common.agent import AgentBase, AgentContext, safe_str
+from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
 from ai.common.config import Config
 from ai.common.schema import Question
+
+from ai.common.utils import safe_str
 
 from .planner import plan as plan_wave
 from .executor import execute_wave, resolve_answer_refs

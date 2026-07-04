@@ -1,0 +1,246 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "xTrace Memory",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_xtrace_memory://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.tool_xtrace_memory",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths (tools surface as <prefix>.<tool>)
+	//
+	"prefix": "xtrace",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node
+	//
+	"icon": "xtrace.svg",
+	"documentation": "https://docs.mem.xtrace.ai",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder
+	//
+	"description": ["Long-term, shared agent memory exposed as tools, backed by xTrace Memory Manager.", "Exposes two agent tools: 'remember' stores conversation turns and 'recall' returns the relevant, ready-to-inject context. Set your API key and org id and it works; point several agents at the same org (and group) to share one memory."],
+	//
+	// Optional:
+	//		Rendering hints for the UI: which config fields to surface on the node tile
+	//
+	"tile": ["Org: ${parameters.xtrace_memory.org_id}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this component takes and produces.
+	//		This is a control-plane tool node (no data lanes).
+	//
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "xTrace Memory",
+				"api_key": "",
+				"org_id": "",
+				"user_id": "",
+				"group_ids": "",
+				"show_advanced": false,
+				"base_url": "https://api.production.xtrace.ai",
+				"agent_id": "",
+				"app_id": "",
+				"wait": true,
+				"ingest_timeout": 30,
+				"extract_artifacts": false,
+				"search_mode": "compose",
+				"search_limit": 10
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		Only api_key and org_id are required; the rest are optional and revealed
+	//		by the "Advanced settings" toggle. "secure: true" fields are encrypted
+	//		at rest and masked in the UI.
+	//
+	"fields": {
+		"xtrace_memory.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "xTrace API key (xtk_...). Get it from the <b>Developer Portal</b>: <a href='https://app.xtrace.ai' target='_blank'>app.xtrace.ai</a> → Settings → API Keys (not in mem.xtrace.ai).",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"xtrace_memory.org_id": {
+			"type": "string",
+			"title": "Org id",
+			"description": "xTrace organization id (org_...). Same place as the API key: <a href='https://app.xtrace.ai' target='_blank'>app.xtrace.ai</a> → Settings → API Keys.",
+			"default": ""
+		},
+		"xtrace_memory.user_id": {
+			"type": "string",
+			"optional": true,
+			"title": "User id",
+			"description": "Who this memory belongs to (used to store and recall). Can be passed by the agent per call.",
+			"default": ""
+		},
+		"xtrace_memory.group_ids": {
+			"type": "string",
+			"optional": true,
+			"title": "Group ids (shared memory)",
+			"description": "Optional. Comma-separated group ids (grp_...) to share memory across users/agents. Leave empty for private memory.",
+			"default": ""
+		},
+		// Toggle: when on, reveals the advanced fields listed in `conditional`.
+		"xtrace_memory.show_advanced": {
+			"type": "boolean",
+			"optional": true,
+			"title": "Advanced settings",
+			"description": "Show advanced options. The defaults work for most cases, leave off for a simple setup.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			],
+			"conditional": [
+				{
+					"value": true,
+					"properties": ["xtrace_memory.base_url", "xtrace_memory.agent_id", "xtrace_memory.app_id", "xtrace_memory.wait", "xtrace_memory.ingest_timeout", "xtrace_memory.extract_artifacts", "xtrace_memory.search_mode", "xtrace_memory.search_limit"]
+				}
+			]
+		},
+		// --- Advanced fields (hidden unless "Advanced settings" is on) ---
+		"xtrace_memory.base_url": {
+			"type": "string",
+			"optional": true,
+			"title": "Base URL",
+			"description": "xTrace Memory API base URL. Production by default; use https://api.staging.xtrace.ai for staging.",
+			"default": "https://api.production.xtrace.ai"
+		},
+		"xtrace_memory.agent_id": {
+			"type": "string",
+			"optional": true,
+			"title": "Agent id",
+			"description": "Optional agent scope stamped on ingested memories and AND-narrowed on recall.",
+			"default": ""
+		},
+		"xtrace_memory.app_id": {
+			"type": "string",
+			"optional": true,
+			"title": "App id",
+			"description": "Optional app scope stamped on ingested memories and AND-narrowed on recall.",
+			"default": ""
+		},
+		"xtrace_memory.wait": {
+			"type": "boolean",
+			"optional": true,
+			"title": "Synchronous ingest",
+			"description": "When on, ingest waits (up to ~30s) for extraction to finish so the agent gets a terminal result. When off, ingest returns immediately and runs in the background.",
+			"default": true,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"xtrace_memory.ingest_timeout": {
+			"type": "integer",
+			"optional": true,
+			"title": "Ingest timeout (s)",
+			"description": "Max seconds to wait/poll for an ingest job to reach a terminal state.",
+			"default": 30,
+			"minimum": 1,
+			"maximum": 120
+		},
+		"xtrace_memory.extract_artifacts": {
+			"type": "boolean",
+			"optional": true,
+			"title": "Extract artifacts",
+			"description": "Opt into artifact extraction (the most expensive stage). Facts and episodes are always extracted. Leave off unless you need it.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"xtrace_memory.search_mode": {
+			"type": "string",
+			"optional": true,
+			"title": "Recall mode",
+			"description": "'compose' returns a ready-to-inject markdown context block (LLM-selected); 'retrieve' returns ranked rows only.",
+			"default": "compose",
+			"enum": [
+				["compose", "Compose (ready-to-inject context)"],
+				["retrieve", "Retrieve (ranked rows only)"]
+			]
+		},
+		"xtrace_memory.search_limit": {
+			"type": "integer",
+			"optional": true,
+			"title": "Recall limit",
+			"description": "Maximum number of memory rows to retrieve per recall.",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 100
+		}
+	},
+	//
+	// Optional:
+	//		Test configuration for automated node testing. Credentials are
+	//		placeholders, config validation is tested here, not live API calls.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder credentials",
+				"text": "test"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "xTrace Memory",
+			"properties": ["type", "xtrace_memory.api_key", "xtrace_memory.org_id", "xtrace_memory.user_id", "xtrace_memory.group_ids", "xtrace_memory.show_advanced"]
+		}
+	]
+}

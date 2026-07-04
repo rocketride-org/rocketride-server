@@ -1,0 +1,37 @@
+{
+  "name": "@rocketride/docs",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "docusaurus": "docusaurus",
+    "start": "docusaurus start",
+    "build": "docusaurus build",
+    "swizzle": "docusaurus swizzle",
+    "clear": "docusaurus clear",
+    "serve": "docusaurus serve --dir ../../dist/docs",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.8.1",
+    "@docusaurus/plugin-client-redirects": "3.8.1",
+    "@docusaurus/preset-classic": "3.8.1",
+    "@easyops-cn/docusaurus-search-local": "^0.55.1",
+    "@mdx-js/react": "^3.0.0",
+    "clsx": "^2.0.0",
+    "prism-react-renderer": "^2.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-icons": "^5.6.0"
+  },
+  "devDependencies": {
+    "@docusaurus/module-type-aliases": "3.8.1",
+    "@docusaurus/plugin-content-docs": "3.8.1",
+    "@docusaurus/theme-common": "3.8.1",
+    "@docusaurus/tsconfig": "3.8.1",
+    "@docusaurus/types": "3.8.1",
+    "typescript": "~5.6.2"
+  },
+  "engines": {
+    "node": ">=18.0"
+  }
+}

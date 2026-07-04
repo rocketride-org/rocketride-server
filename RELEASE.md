@@ -7,9 +7,10 @@ This document describes the automated release pipeline for the RocketRide Engine
 - [Overview](#overview)
 - [Packages](#packages)
 - [Branching Strategy](#branching-strategy)
-- [Nightly Prereleases](#nightly-prereleases)
+- [Prereleases](#prereleases)
 - [Stable Releases](#stable-releases)
 - [Version Management](#version-management)
+- [Release Notes](#release-notes)
 - [Tags and GitHub Releases](#tags-and-github-releases)
 - [Registry Publishing](#registry-publishing)
 - [Build Matrix](#build-matrix)
@@ -21,7 +22,7 @@ The release pipeline consists of two workflows:
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| **Nightly** (`.github/workflows/nightly.yaml`) | Daily at 02:00 UTC or manual dispatch | Build and publish prereleases from `stage` |
+| **Prerelease** (`.github/workflows/prerelease.yaml`) | On successful `develop` CI (`workflow_run`) or manual dispatch | Build and publish GitHub prereleases (one per package) |
 | **Release** (`.github/workflows/release.yaml`) | Push to `main` | Build, publish to registries, and create stable GitHub Releases |
 
 Both workflows build the full project across three platforms (Linux, Windows, macOS), run tests, and package artifacts. The key difference is that nightly creates prereleases on GitHub only, while the release workflow publishes to external registries (npm, PyPI, VS Code Marketplace) and creates stable GitHub Releases.
@@ -43,27 +44,27 @@ The monorepo produces five independently versioned and released packages:
 Each package produces specific artifacts during the build:
 
 **Server** (per platform):
-- `rocketride-server-v{version}-win64.zip` — Windows x64 binary archive
-- `rocketride-server-v{version}-win64.symbols.zip` — Windows debug symbols
-- `rocketride-server-v{version}-win64.manifest.json` — Build manifest with content hash
-- `rocketride-server-v{version}-linux-x64.tar.gz` — Linux x64 binary archive
-- `rocketride-server-v{version}-linux-x64.manifest.json` — Build manifest
-- `rocketride-server-v{version}-darwin-arm64.tar.gz` — macOS ARM64 binary archive
-- `rocketride-server-v{version}-darwin-arm64.manifest.json` — Build manifest
+- `rocketride-server-v{version}-win64.zip`: Windows x64 binary archive
+- `rocketride-server-v{version}-win64.symbols.zip`: Windows debug symbols
+- `rocketride-server-v{version}-win64.manifest.json`: Build manifest with content hash
+- `rocketride-server-v{version}-linux-x64.tar.gz`: Linux x64 binary archive
+- `rocketride-server-v{version}-linux-x64.manifest.json`: Build manifest
+- `rocketride-server-v{version}-darwin-arm64.tar.gz`: macOS ARM64 binary archive
+- `rocketride-server-v{version}-darwin-arm64.manifest.json`: Build manifest
 
 **TypeScript Client:**
-- `rocketride-{version}.tgz` — npm package tarball
+- `rocketride-{version}.tgz`: npm package tarball
 
 **Python Client:**
-- `rocketride-{version}-py3-none-any.whl` — Python wheel
-- `rocketride-{version}.tar.gz` — Python source distribution
+- `rocketride-{version}-py3-none-any.whl`: Python wheel
+- `rocketride-{version}.tar.gz`: Python source distribution
 
 **MCP Client:**
-- `rocketride_mcp-{version}-py3-none-any.whl` — Python wheel
-- `rocketride_mcp-{version}.tar.gz` — Python source distribution
+- `rocketride_mcp-{version}-py3-none-any.whl`: Python wheel
+- `rocketride_mcp-{version}.tar.gz`: Python source distribution
 
 **VS Code Extension:**
-- `rocketride-{version}.vsix` — VS Code extension package
+- `rocketride-{version}.vsix`: VS Code extension package
 
 ## Branching Strategy
 
@@ -76,29 +77,29 @@ hotfix/*  ──┘                  │         │
                         (prereleases)  (registry + GitHub)
 ```
 
-- **`develop`** — Integration branch. All feature and bugfix branches merge here. No prereleases are built from this branch.
-- **`stage`** — Prerelease stabilization branch. Changes are promoted from `develop` to `stage` once they are ready to be validated. Nightly prereleases are built from this branch, so a broken commit on `develop` cannot leak into a prerelease.
-- **`main`** — Stable release branch. When `stage` is merged into `main`, the release workflow triggers automatically.
-- **`feature/*`**, **`bugfix/*`**, **`hotfix/*`** — Short-lived branches that merge into `develop` via pull request.
+- **`develop`**: Integration branch. All feature and bugfix branches merge here. No prereleases are built from this branch.
+- **`stage`**: Prerelease stabilization branch. Changes are promoted from `develop` to `stage` once they are ready to be validated. Nightly prereleases are built from this branch, so a broken commit on `develop` cannot leak into a prerelease.
+- **`main`**: Stable release branch. When `stage` is merged into `main`, the release workflow triggers automatically.
+- **`feature/*`**, **`bugfix/*`**, **`hotfix/*`**: Short-lived branches that merge into `develop` via pull request.
 
-## Nightly Prereleases
+## Prereleases
 
-**Workflow:** `.github/workflows/nightly.yaml`
+**Workflow:** `.github/workflows/prerelease.yaml`
 
-**Trigger:** Runs automatically every day at 02:00 UTC, or can be triggered manually via GitHub Actions UI (`workflow_dispatch`).
+**Trigger:** Runs automatically on every successful `develop` CI run (`workflow_run` on the CI workflow), or can be triggered manually via the GitHub Actions UI (`workflow_dispatch`).
 
 ### What happens
 
-1. **Initialize** — Extract current versions from all package files.
+1. **Initialize**: Extract current versions from all package files.
 
-2. **Build** — Compile and test the full project on all three platforms in parallel:
+2. **Build**: Compile and test the full project on all three platforms in parallel:
    - Ubuntu 22.04 (Linux x64)
    - Windows Server 2022 (Windows x64)
    - macOS 14 (ARM64)
 
-3. **Clean up previous prereleases** — Delete all existing GitHub Releases and tags with the `-prerelease` suffix. This ensures stale prereleases from previous versions are removed.
+3. **Clean up previous prereleases**: Delete all existing GitHub Releases and tags with the `-prerelease` suffix. This ensures stale prereleases from previous versions are removed.
 
-4. **Create prereleases** — Create five separate GitHub Releases, one per package, each marked as a prerelease:
+4. **Create prereleases**: Create five separate GitHub Releases, one per package, each marked as a prerelease:
 
    | GitHub Release | Tag |
    |----------------|-----|
@@ -125,30 +126,30 @@ Visit the [Releases page](https://github.com/rocketride-org/rocketride-server/re
 
 ### What happens
 
-1. **Initialize** — Extract current versions from all package files.
+1. **Initialize**: Extract current versions from all package files.
 
-2. **Build** — Compile and test the full project on all three platforms in parallel (same as nightly).
+2. **Build**: Compile and test the full project on all three platforms in parallel (same as nightly).
 
-3. **Publish** — Each package is processed independently with `fail-fast: false`, meaning one package failure does not block the others. For each package:
+3. **Publish**: Each package is processed independently with `fail-fast: false`, meaning one package failure does not block the others. For each package:
 
-   a. **Check if already released** — If the git tag (e.g., `server-v1.0.3`) already exists, the package is skipped entirely. This makes the workflow fully idempotent.
+   a. **Check if already released**: If the git tag (e.g., `server-v1.0.3`) already exists, the package is skipped entirely. This makes the workflow fully idempotent.
 
-   b. **Publish to registry** — Push the package to its external registry. Each registry publish includes a check to skip if the version already exists:
+   b. **Publish to registry**: Push the package to its external registry. Each registry publish includes a check to skip if the version already exists:
       - TypeScript Client → `npm publish` to npmjs.org
       - Python Client → `twine upload` to PyPI
       - MCP Client → `twine upload` to PyPI
       - VS Code Extension → `vsce publish` to VS Code Marketplace and `ovsx publish` to Open VSX
       - Server → No registry publish (binaries are distributed via GitHub Releases only)
 
-   c. **Create git tag** — Tag the commit (e.g., `server-v1.0.3`).
+   c. **Create git tag**: Tag the commit (e.g., `server-v1.0.3`).
 
-   d. **Create GitHub Release** — Create a GitHub Release with the tag, auto-generated release notes, and the package artifacts attached.
+   d. **Create GitHub Release**: Create a GitHub Release with the tag, release notes sourced from `CHANGELOG.md` (see [Release Notes](#release-notes)), and the package artifacts attached.
 
 ### Idempotency
 
 The release workflow is designed to be fully idempotent:
 
-- If a git tag already exists for a package version, that package is **skipped entirely** — no registry publish, no GitHub Release creation.
+- If a git tag already exists for a package version, that package is **skipped entirely**: no registry publish, no GitHub Release creation.
 - If a version already exists on a registry (npm, PyPI, Marketplace) but the git tag does not exist, the registry publish step is skipped but the GitHub Release is still created.
 - Running the release workflow multiple times with the same versions produces the same result as running it once.
 
@@ -174,21 +175,28 @@ Each package is published independently:
 ### How to release a new version
 
 1. **Bump the version** in the appropriate file(s) on the `develop` branch.
-2. **Commit and push** to `develop`, then **merge `develop` into `stage`** once the change is ready to be validated:
+2. **Cut the changelog** in the *same* pull request, so the cut rides the normal `develop → stage → main` promotion:
+   ```bash
+   # Archive [Unreleased] -> [<server-version>] - <today> and open a fresh [Unreleased].
+   node scripts/release/cut-changelog.mjs            # uses the root package.json version + today
+   # or pin explicitly:  node scripts/release/cut-changelog.mjs 3.2.0 2026-06-05
+   ```
+   This is what makes the stable GitHub Release notes scoped to the release (see [Release Notes](#release-notes)). Do this in the version-bump PR, **never** auto-commit a cut to `main` from CI (it would re-trigger the release workflow and diverge `main`'s changelog from `develop`).
+3. **Commit and push** to `develop`, then **merge `develop` into `stage`** once the change is ready to be validated:
    ```bash
    git checkout stage
    git merge develop
    git push origin stage
    ```
    The next nightly build will create a prerelease with the new version from `stage`.
-3. **Verify the prerelease** by downloading artifacts from the GitHub Releases page.
-4. **Merge `stage` into `main`**:
+4. **Verify the prerelease** by downloading artifacts from the GitHub Releases page.
+5. **Merge `stage` into `main`**:
    ```bash
    git checkout main
    git merge stage
    git push origin main
    ```
-5. The release workflow triggers automatically and publishes all packages with new versions.
+6. The release workflow triggers automatically and publishes all packages with new versions.
 
 ### Releasing a single package
 
@@ -204,6 +212,23 @@ Because each package is versioned independently, you can release a single packag
 - Bump MAJOR for breaking API changes.
 - Bump MINOR for new features that are backward compatible.
 - Bump PATCH for backward-compatible bug fixes.
+
+## Release Notes
+
+GitHub Release bodies are sourced from `CHANGELOG.md` by the **Set release body** step in `.github/workflows/_release.yaml`. The **Create GitHub release** step keeps `generate_release_notes: false`, so the curated CHANGELOG section is the *entire* published body, GitHub's auto-generated notes (under squash-merge `stage → main` that is just the single batched merge PR) are **not** appended. The same notes are used for all five packages, because they ship as one synchronized release train sharing this changelog.
+
+| Build | Notes shown |
+|-------|-------------|
+| **Prerelease** (nightly) | The current `## [Unreleased]` section, the "what's cooking on `stage`" view. |
+| **Stable** (push to `main`) | The most recent *released* section, the first `## [` heading that is **not** `[Unreleased]`. |
+
+This is why the changelog must be **cut at version-bump time** (step 2 of [How to release a new version](#how-to-release-a-new-version)):
+
+- `scripts/release/cut-changelog.mjs` archives `[Unreleased]` into a dated, versioned section (labelled with the **server** version, e.g. `## [3.2.2] - 2026-06-10`) and opens a fresh, empty `[Unreleased]`.
+- At release time the stable build emits that newly-cut section, so the notes are scoped to the release instead of re-emitting the entire growing `[Unreleased]` blob on every release.
+- If a version bump forgets to cut, the release does **not** fail, it emits the previous released section and logs a `::warning::` that the top section does not mention `[<release-version>]`. **Re-running the workflow will NOT fix the already-published body**: once the tag exists, the tag-skip idempotency skips the "Create GitHub release" step (see [Idempotency](#idempotency)). To correct it, either edit the GitHub Release body by hand, or run the cut and then delete the stale tag **and** its GitHub Release before re-running (see ["A git tag exists but there is no GitHub Release"](#a-git-tag-exists-but-there-is-no-github-release)).
+
+Keep `CHANGELOG.md` in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) form (`### Added` / `### Changed` / `### Fixed` / etc. under `[Unreleased]`) so each cut section reads as clean release notes.
 
 ## Tags and GitHub Releases
 
@@ -279,11 +304,11 @@ Client packages (TypeScript, Python, MCP) and the VS Code extension are platform
 
 ### Build dependencies
 
-- **pnpm 10** — Package manager and workspace orchestration
-- **vcpkg** — C++ dependency management with NuGet binary caching via GitHub Packages
-- **CMake + Ninja** — C++ build system
-- **Node.js 20** — TypeScript compilation and npm publishing
-- **Python 3.12** — Python package building and PyPI publishing
+- **pnpm 10**: Package manager and workspace orchestration
+- **vcpkg**: C++ dependency management with NuGet binary caching via GitHub Packages
+- **CMake + Ninja**: C++ build system
+- **Node.js 20**: TypeScript compilation and npm publishing
+- **Python 3.12**: Python package building and PyPI publishing
 
 ## Troubleshooting
 
@@ -307,7 +332,7 @@ This means the tag was created manually or by a previous version of the workflow
 ### The nightly build is not running
 
 - Check that the workflow is enabled in the GitHub Actions UI (Settings > Actions > General).
-- The nightly always runs on schedule — there is no commit-based skip logic.
+- The nightly always runs on schedule, there is no commit-based skip logic.
 - You can manually trigger it via the GitHub Actions UI using "Run workflow".
 
 ### A stable release is being skipped

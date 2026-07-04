@@ -63,6 +63,13 @@ export interface ConnectionConfigProps {
 	onFetchTeams?: () => void;
 	isSaas?: boolean;
 	teams: Array<{ id: string; name: string }>;
+	/** Whether the user has an active subscription. */
+	isSubscribed?: boolean;
+	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
+	onFetchPlans?: () => Promise<any[]>;
+	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
+	onCheckoutSuccess?: () => void;
 
 	// On-prem
 	onClearCredentials: () => void;
@@ -212,7 +219,7 @@ export const ConnectionConfig: React.FC<ConnectionConfigProps> = (props) => {
 
 			{/* Mode-specific panel — hidden when no mode selected or mode has a conflict */}
 			{connectionMode && !modeConflict && <div style={{ ...S.modeConfigBox, marginTop: 8 }}>
-				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} teams={teams} selectedTeamId={groupSettings.teamId} onTeamChange={(id) => changeGroup({ teamId: id })} simplified={simplified} isSaas={props.isSaas} onProbeServer={props.onProbeCloudServer} onFetchTeams={props.onFetchTeams} />}
+				{connectionMode === 'cloud' && <CloudPanel idPrefix={idPrefix} cloudSignedIn={cloudSignedIn} cloudUserName={cloudUserName} onCloudSignIn={onCloudSignIn} onCloudSignOut={onCloudSignOut} teams={teams} selectedTeamId={groupSettings.teamId} onTeamChange={(id) => changeGroup({ teamId: id })} simplified={simplified} isSaas={props.isSaas} onProbeServer={props.onProbeCloudServer} onFetchTeams={props.onFetchTeams} isSubscribed={props.isSubscribed} onFetchPlans={props.onFetchPlans} onCreateCheckout={props.onCreateCheckout} onConfirmPending={props.onConfirmPending} onCheckoutSuccess={props.onCheckoutSuccess} />}
 
 				{connectionMode === 'onprem' && <OnPremPanel idPrefix={idPrefix} hostUrl={groupSettings.hostUrl} onHostUrlChange={(url) => changeGroup({ hostUrl: url })} apiKey={groupSettings.apiKey} onApiKeyChange={(key) => changeGroup({ apiKey: key, hasApiKey: key.trim().length > 0 })} onClearApiKey={onClearCredentials} debugOutput={groupSettings.local.debugOutput} onDebugOutputChange={(c) => changeGroup({ local: { debugOutput: c } })} onTestConnection={(hostUrl, apiKey) => onTestConnection('onprem', { hostUrl, apiKey })} testMessage={testMessage} simplified={simplified} />}
 

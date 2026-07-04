@@ -157,6 +157,22 @@ class Config:
             # Use the connConfig directly as it is not using profiles
             userConfig = connConfig
 
+            # Some UIs nest a node's fields under a sub-object named after the default
+            # profile (e.g. connConfig["default"] = {"instructions": [...]}) instead of at
+            # the top level. That nesting is otherwise invisible here — merge() below never
+            # descends into it — so agent nodes silently lose their instructions. Overlay the
+            # nested object's keys as a lower-priority layer, with real top-level keys still
+            # winning, so both shapes resolve. No-op unless such a sub-object exists.
+            nested = connConfig.get(profile)
+            if isinstance(nested, (dict, IJson)):
+                combined = dict(IJson.toDict(nested) if isinstance(nested, IJson) else nested)
+                for key, value in connConfig.items():
+                    # Only real (non-None) top-level values override the nested block; a
+                    # None placeholder must not clobber a populated nested value.
+                    if key != profile and value is not None:
+                        combined[key] = value
+                userConfig = combined
+
             # Merge it
             config = merge(userConfig, defaultConfig)
 

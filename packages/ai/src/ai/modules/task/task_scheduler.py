@@ -26,10 +26,10 @@ TaskScheduler — background asyncio loop that fires deployed pipelines on sched
 On startup it scans the store for all active deployments and builds an in-memory
 registry of (next_run, record) entries.  A single asyncio task wakes up when the
 soonest job is due (capped at 60 s) and dispatches overdue runs via
-TaskServer.start_task() — the same path as an on-demand API call.
+start_server_task() — the same authenticated path as an on-demand API call.
 
 Caller responsibilities:
-  • Call scheduler.schedule(client_id, record) after every rrext_deploy_add / _update.
+  • Call scheduler.schedule(record) after every rrext_deploy_add / _update.
   • Call scheduler.unschedule(project_id) after every rrext_deploy_remove.
   • Do NOT call start() more than once.
 """
@@ -41,9 +41,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List
 
 from croniter import croniter
-from rocketlib import debug
+from rocketlib import debug, error
 
 from ai.account.models import DeploymentRecord
+from .task_server_facade import ServerTaskAuthError, start_server_task
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
@@ -54,6 +55,7 @@ class Task:
     next_run: float
     client_id: str = field(compare=False)
     project_id: str = field(compare=False)
+    schedule: str = field(compare=False)
     cancelled: bool = field(default=False, compare=False)
 
 
@@ -68,9 +70,10 @@ class TaskScheduler:
         self._tasks: Dict[str, Task] = {}
         # project_id -> token of the most-recently dispatched task (overlap guard)
         self._active_tokens: Dict[str, str] = {}
-        self._loop_task: asyncio.Task | None = None
+        self._scheduling: asyncio.Task | None = None
+        self._inflight_starts: set[asyncio.Task] = set()
 
-    def schedule(self, client_id: str, record: DeploymentRecord) -> None:
+    def schedule(self, record: DeploymentRecord) -> None:
         """Insert or update a deployment. Removes it when manual or not active."""
         project_id = record.pipeline['project_id']
         old = self._tasks.pop(project_id, None)
@@ -79,7 +82,7 @@ class TaskScheduler:
         if record.schedule == 'manual' or record.state != 'active':
             return
         run_time = croniter(record.schedule, datetime.now()).get_next(datetime).timestamp()
-        task = Task(next_run=run_time, client_id=client_id, project_id=project_id)
+        task = Task(next_run=run_time, client_id=record.userId, project_id=project_id, schedule=record.schedule)
         self._tasks[project_id] = task
         heapq.heappush(self._schedule, task)
 
@@ -90,31 +93,41 @@ class TaskScheduler:
             old.cancelled = True
         self._active_tokens.pop(project_id, None)
 
-    async def start(self) -> None:
-        """Load all persisted deployments then start the scheduler loop."""
-        await self._load_all()
-        self._loop_task = asyncio.create_task(self._loop())
+    def start(self) -> None:
+        """Start the scheduler in the background: load deployments, then run the loop."""
+        self._scheduling = asyncio.create_task(self._main())
 
-    async def stop(self) -> None:
-        """Cancel the scheduler loop and wait for it to finish."""
-        if self._loop_task and not self._loop_task.done():
-            self._loop_task.cancel()
+    async def _main(self) -> None:
+        """Load all persisted deployments, then run the scheduling loop."""
+        await self._load()
+        await self._run()
+
+    async def shutdown(self) -> None:
+        """Cancel the scheduler loop (including any in-flight load), then drain in-flight dispatches."""
+        if self._scheduling and not self._scheduling.done():
+            self._scheduling.cancel()
             try:
-                await self._loop_task
+                await self._scheduling
             except asyncio.CancelledError:
                 pass
-        self._loop_task = None
+        self._scheduling = None
 
-    async def _load_all(self) -> None:
+        if self._inflight_starts:
+            await asyncio.gather(*self._inflight_starts, return_exceptions=True)
+
+    async def _load(self) -> None:
         """Populate the schedule from all persisted deployments across all users."""
         try:
-            async for client_id, record in self._server.deployments.iter_all():
-                self.schedule(client_id, record)
+            async for record in self._server.deployments.iter_all():
+                try:
+                    self.schedule(record)
+                except Exception as e:
+                    error(f'[SCHEDULER] {record.pipeline.get("project_id")}: failed to schedule: {e}')
             debug(f'[SCHEDULER] loaded {len(self._tasks)} scheduled deployment(s)')
         except Exception as e:
-            debug(f'[SCHEDULER] startup scan failed: {e}')
+            error(f'[SCHEDULER] startup scan failed: {e}')
 
-    async def _loop(self) -> None:
+    async def _run(self) -> None:
         while True:
             now = datetime.now().timestamp()
 
@@ -130,26 +143,31 @@ class TaskScheduler:
 
                 heapq.heappop(self._schedule)
 
-                # Skip if the previous run for this deployment is still active.
-                prev_token = self._active_tokens.get(task.project_id)
-                if prev_token:
-                    ctrl = self._server._task_control.get(prev_token)
-                    if ctrl and not ctrl.task.is_task_complete():
-                        debug(f'[SCHEDULER] {task.project_id}: previous run still active, skipping')
-                        record = await self._server.deployments.get(task.client_id, task.project_id)
-                        next_run = croniter(record.schedule, datetime.now()).get_next(datetime).timestamp()
-                        new_task = Task(next_run=next_run, client_id=task.client_id, project_id=task.project_id)
-                        self._tasks[task.project_id] = new_task
-                        heapq.heappush(self._schedule, new_task)
-                        continue
+                try:
+                    next_run = croniter(task.schedule, datetime.now()).get_next(datetime).timestamp()
+                    new_task = Task(
+                        next_run=next_run,
+                        client_id=task.client_id,
+                        project_id=task.project_id,
+                        schedule=task.schedule,
+                    )
+                    self._tasks[task.project_id] = new_task
+                    heapq.heappush(self._schedule, new_task)
 
-                asyncio.create_task(self._dispatch(task.client_id, task.project_id))
+                    # Skip if the previous run for this deployment is still active.
+                    prev_token = self._active_tokens.get(task.project_id)
+                    if prev_token:
+                        ctrl = self._server._task_control.get(prev_token)
+                        if ctrl and not ctrl.task.is_task_complete():
+                            debug(f'[SCHEDULER] {task.project_id}: previous run still active, skipping')
+                            continue
 
-                record = await self._server.deployments.get(task.client_id, task.project_id)
-                next_run = croniter(record.schedule, datetime.now()).get_next(datetime).timestamp()
-                new_task = Task(next_run=next_run, client_id=task.client_id, project_id=task.project_id)
-                self._tasks[task.project_id] = new_task
-                heapq.heappush(self._schedule, new_task)
+                    task_start = asyncio.create_task(self._start_task(task.client_id, task.project_id))
+                    self._inflight_starts.add(task_start)
+                    task_start.add_done_callback(self._inflight_starts.discard)
+
+                except Exception as e:
+                    error(f'[SCHEDULER] {task.project_id}: scheduling tick failed: {e}')
 
             # Sleep until the next scheduled run (max 60 s).
             if self._schedule:
@@ -160,28 +178,42 @@ class TaskScheduler:
 
             await asyncio.sleep(delay)
 
-    async def _dispatch(self, client_id: str, project_id: str) -> None:
+    async def _start_task(self, client_id: str, project_id: str) -> None:
         try:
             record = await self._server.deployments.get(client_id, project_id)
         except Exception as e:
-            debug(f'[SCHEDULER] {project_id}: failed to load record: {e}')
+            error(f'[SCHEDULER] {project_id}: failed to load record: {e}')
+            return
+
+        if not record.userToken:
+            # Without a replayable credential the run can never authenticate.
+            error(f'[SCHEDULER] {project_id}: no user token; cannot dispatch')
             return
 
         try:
-            request = {
-                'command': 'execute',
-                'arguments': {'pipeline': record.pipeline},
-            }
-            # todo: feat/deploy2 - build conn and verify permissions
-            result = await self._server.start_task(
-                request,
-                conn=None,
-                client_id=record.created_by,
-                user_id=record.created_by,
-            )
-            token = result['token']
-            self._active_tokens[project_id] = token
-            debug(f'[SCHEDULER] {project_id}: dispatched -> task {token}')
-
+            task_token = await start_server_task(self._server, record.userToken, record.pipeline)
+        except ServerTaskAuthError as e:
+            error(f'[SCHEDULER] {project_id}: authentication failed: {e}; marking errored')
+            await self._mark_errored(client_id, record)
+            return
         except Exception as e:
-            debug(f'[SCHEDULER] {project_id}: dispatch failed: {e}')
+            error(f'[SCHEDULER] {project_id}: dispatch failed: {e}')
+            return
+
+        self._active_tokens[project_id] = task_token
+        debug(f'[SCHEDULER] {project_id}: dispatched -> task {task_token}')
+
+    async def _mark_errored(self, client_id: str, record: DeploymentRecord) -> None:
+        """Flip a deployment to 'errored' (e.g. its user token expired) and stop scheduling it.
+
+        Persisting the state lets the UI prompt for a re-deploy; unscheduling stops
+        the cron from re-attempting a doomed authentication every tick until then.
+        """
+        project_id = record.pipeline['project_id']
+        try:
+            record.state = 'errored'
+            record.updatedAt = datetime.now().timestamp()
+            await self._server.deployments.save(client_id, record)
+        except Exception as e:
+            error(f'[SCHEDULER] {project_id}: failed to persist errored state: {e}')
+        self.unschedule(project_id)

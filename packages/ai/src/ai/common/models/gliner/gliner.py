@@ -14,6 +14,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ai.web.metrics import metrics
+from ai.common.utils.cuda_utils import model_gpu_gb as _model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.gliner')
@@ -440,15 +441,16 @@ class GLiNER:
         )
         t_gpu = (time.perf_counter() - t0) * 1000
 
-        # Report all perf counters — same shape as model server response
+        # Report all perf counters — same keys as model server response
         # No postprocess for GLiNER — inference returns final entities directly
+        inference_sec = (t_pre + t_gpu) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': 0,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': 0,
+                'gpu_queue_wait': 0,
+                'gpu_memory': _model_gpu_gb(self._model) * inference_sec,
             }
         )
 

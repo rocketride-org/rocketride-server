@@ -498,6 +498,19 @@ export class Documents {
 		return this._state.documents[uri];
 	}
 
+	// --- Subscription --------------------------------------------------------
+
+	/**
+	 * Register a listener that fires on every state change.
+	 *
+	 * @param listener - Callback invoked after each state update.
+	 * @returns An unsubscribe function.
+	 */
+	subscribe(listener: () => void): () => void {
+		this._listeners.add(listener);
+		return () => this._listeners.delete(listener);
+	}
+
 	// --- React hook ----------------------------------------------------------
 
 	/**
@@ -740,6 +753,46 @@ export class Documents {
 	}
 
 	/**
+	 * Force-remove a document and all its editors from state, regardless of
+	 * dirty status. Used when the backing file has been deleted from disk —
+	 * any unsaved content is discarded.
+	 *
+	 * @param uri - The document URI to discard.
+	 */
+	discardDocument(uri: string): void {
+		this._update((prev) => {
+			const doc = prev.documents[uri];
+			if (!doc) return prev;
+
+			// Find and remove all editors for this document
+			const editorIdsToRemove = Object.entries(prev.editors)
+				.filter(([, ed]) => ed.documentUri === uri)
+				.map(([id]) => id);
+
+			const { [uri]: _, ...remainingDocs } = prev.documents;
+			let remainingEditors = prev.editors;
+			for (const eid of editorIdsToRemove) {
+				const { [eid]: __, ...rest } = remainingEditors;
+				remainingEditors = rest;
+			}
+
+			// Remove editor IDs from groups
+			let newGroups = prev.groups;
+			for (const gid of Object.keys(newGroups)) {
+				const group = newGroups[gid]!;
+				const filtered = group.editorIds.filter((id) => !editorIdsToRemove.includes(id));
+				if (filtered.length !== group.editorIds.length) {
+					let newActiveIdx = group.activeEditorIndex;
+					if (newActiveIdx >= filtered.length) newActiveIdx = Math.max(0, filtered.length - 1);
+					newGroups = { ...newGroups, [gid]: { ...group, editorIds: filtered, activeEditorIndex: newActiveIdx } };
+				}
+			}
+
+			return { ...prev, documents: remainingDocs, editors: remainingEditors, groups: newGroups };
+		});
+	}
+
+	/**
 	 * Updates the in-memory content of a document and marks it dirty.
 	 * No-op if content hasn't changed (prevents infinite render loops).
 	 *
@@ -770,6 +823,9 @@ export class Documents {
 		if (!doc) return;
 		// Static documents are not backed by VFS — nothing to write
 		if (doc.static) return;
+		// New (untitled) documents should not be written to disk — the caller
+		// must provide a real filename via save-as before any disk write.
+		if (doc.isNew) return;
 		if (this._vfs) {
 			await this._vfs.write(uri, doc.content);
 		}

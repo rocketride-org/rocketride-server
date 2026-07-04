@@ -125,6 +125,8 @@ export interface IFlowProps {
 
 	/** Called when the user triggers save from the canvas toolbar. */
 	onSave?: () => void;
+	/** SaaS-only: export/download the current pipeline. Omitted hosts (VS Code) hide the button. */
+	onExport?: () => void;
 
 	/** Host-provided Voice Builder bridge. */
 	voiceBuilder?: IVoiceBuilderAdapter;
@@ -140,7 +142,7 @@ export interface IFlowProps {
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, voiceBuilder, isReadonly = false, envKeys }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, voiceBuilder, isReadonly = false, envKeys }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -152,24 +154,38 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 	useEffect(() => {
 		if (typeof document === 'undefined') return;
 
-		// Watch for VS Code theme attribute changes on <body>
-		const observer = new MutationObserver(() => setThemeVersion((v) => v + 1));
-		observer.observe(document.body, {
+		// Watch for theme attribute changes:
+		//   - VS Code webview switches kind via `data-vscode-theme-kind` /
+		//     `data-vscode-theme-id` on `<body>`.
+		//   - Non-VS Code apps flip light/dark via `data-theme` on `<html>`
+		//     (see rocketride-default.css header).
+		const bump = () => setThemeVersion((v) => v + 1);
+		const bodyObserver = new MutationObserver(bump);
+		bodyObserver.observe(document.body, {
 			attributes: true,
 			attributeFilter: ['class', 'data-vscode-theme-kind', 'data-vscode-theme-id'],
 		});
+		const rootObserver = new MutationObserver(bump);
+		rootObserver.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ['data-theme'],
+		});
 
-		return () => observer.disconnect();
+		return () => {
+			bodyObserver.disconnect();
+			rootObserver.disconnect();
+		};
 	}, []);
 
 	// Rebuild MUI theme from --rr-* CSS custom properties
 	const currentTheme = useMemo(() => getMuiTheme(), [themeVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
-	// Sync --icon-filter on <body> whenever the theme changes
-	useEffect(() => {
-		const iconFilter = currentTheme.palette.mode === 'dark' ? 'brightness(0) invert(1)' : 'none';
-		document.body.style.setProperty('--icon-filter', iconFilter);
-	}, [currentTheme]);
+	// NOTE: `--icon-color` is driven by the theme contract — see
+	// rocketride-default.css (`:root` + `[data-theme="dark"]` for the standalone
+	// case) and rocketride-vscode.css (`data-vscode-theme-kind` selectors for
+	// the webview case). `buildMuiTheme.ts` bridges the `--rr-icon-color`
+	// token to `--icon-color` via MuiCssBaseline. No runtime override is
+	// needed (or wanted — it would break per-theme customization).
 
 	// --- Render --------------------------------------------------------------
 
@@ -185,7 +201,7 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					overflow: 'hidden',
 				}}
 			>
-				<FlowContainer oauth2RootUrl={oauth2RootUrl} project={project} servicesJson={servicesJson} inventory={inventory} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} handleValidatePipeline={handleValidatePipeline} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} voiceBuilder={voiceBuilder} isReadonly={isReadonly} envKeys={envKeys}>
+				<FlowContainer oauth2RootUrl={oauth2RootUrl} project={project} servicesJson={servicesJson} inventory={inventory} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} handleValidatePipeline={handleValidatePipeline} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} onExport={onExport} voiceBuilder={voiceBuilder} isReadonly={isReadonly} envKeys={envKeys}>
 					<FlowCanvas />
 				</FlowContainer>
 			</div>

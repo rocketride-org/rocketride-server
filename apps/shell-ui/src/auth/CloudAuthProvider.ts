@@ -130,8 +130,12 @@ export class CloudAuthProvider implements IAuthProvider {
 			register,
 		);
 
-		// Full-page redirect to Zitadel
-		window.location.href = url;
+		// assign() (not replace()) so the landing page stays in history — the
+		// browser back button from Zitadel returns the user to where they came
+		// from. Zitadel's own login page (cross-origin) still lingers one step
+		// back from the app after login; we can't delete that entry from JS,
+		// but bootstrap() recovers gracefully if a stale ?code is revisited.
+		window.location.assign(url);
 	}
 
 	// =========================================================================
