@@ -487,9 +487,23 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// this panel via project:oauthTokens.
 				case 'project:openExternal': {
 					if (data.url) {
+						// Webview-supplied URL: require a parseable https target
+						// before arming any OAuth state (same spirit as openLink's
+						// scheme allowlist; OAuth brokers are https-only).
+						let parsedUrl: URL;
+						try {
+							parsedUrl = new URL(data.url as string);
+						} catch {
+							this.logger.error('[ProjectProvider] Blocked unparseable OAuth URL');
+							break;
+						}
+						if (parsedUrl.protocol !== 'https:') {
+							this.logger.error(`[ProjectProvider] Blocked OAuth URL scheme: ${parsedUrl.protocol}`);
+							break;
+						}
 						// Key the waiter by the node that started the login so the
 						// deep-link return routes to the right editor.
-						const nodeId = new URL(data.url as string).searchParams.get('node_id') || (data.url as string);
+						const nodeId = parsedUrl.searchParams.get('node_id') || (data.url as string);
 						const unregister = CloudAuthProvider.getInstance().setPendingGoogleOAuth(nodeId, (tokens, state) => {
 							webview.postMessage({ type: 'project:oauthTokens', tokens, state });
 						});

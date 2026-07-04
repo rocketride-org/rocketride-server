@@ -58,7 +58,9 @@ class IGlobal(IGlobalBase):
         from .gmail_client import build_service
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        self.access = resolve_google_access({'access': cfg.get('access')}, GMAIL)
+        # Pass the full config: gate flags like allowHardDelete live beside
+        # 'access' and must reach _resolve_flags or they silently stay False.
+        self.access = resolve_google_access(cfg, GMAIL)
         auth_type = (cfg.get('authType') or 'service').strip()
         self.service = build_service(auth_type, cfg, self.access.scopes)
 
@@ -67,8 +69,8 @@ class IGlobal(IGlobalBase):
             from nodes.core.google_access import GMAIL, resolve_google_access
 
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            # Surfaces tier/flag misconfig (e.g. unknown access tier) as a warning.
-            resolve_google_access({'access': cfg.get('access')}, GMAIL)
+            # Surfaces tier/flag misconfig (unknown tier, non-bool flag) as a warning.
+            resolve_google_access(cfg, GMAIL)
             auth_type = (cfg.get('authType') or 'service').strip()
             if auth_type == 'user':
                 token_str = str(cfg.get('userToken') or '').strip()
@@ -81,7 +83,7 @@ class IGlobal(IGlobalBase):
 
                         token_info = _json.loads(_decode_blob(token_str))
                         granted = set((token_info.get('scope') or '').split())
-                        resolved = resolve_google_access({'access': cfg.get('access')}, GMAIL)
+                        resolved = resolve_google_access(cfg, GMAIL)
                         _full = 'https://mail.google.com/'
                         missing = [] if _full in granted else [s for s in resolved.scopes if s not in granted]
                         if missing and granted:

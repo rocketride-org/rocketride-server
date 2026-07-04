@@ -51,8 +51,12 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 	const formContext = (props as unknown as { formContext?: Record<string, any> }).formContext;
 	const formValues = formContext?.formValues ?? {};
 	const nodeId = formContext?.nodeId;
-	// Serialize the current form data for the OAuth redirect so the server can restore state on callback
-	const serviceParam = JSON.stringify(formValues);
+	// Serialize the current form data for the OAuth redirect so the server can
+	// restore state on callback. Credential fields are stripped at any depth:
+	// the URL lands in browser history and broker logs, so existing tokens must
+	// never ride along.
+	const CREDENTIAL_KEYS = ['accessToken', 'refreshToken', 'userToken', 'idToken', 'tokenExpiry'];
+	const serviceParam = JSON.stringify(formValues, (key, value) => (CREDENTIAL_KEYS.includes(key) ? undefined : value));
 
 	const handleHybridSignIn = useCallback(async () => {
 		if (!oauth2RootUrl) return;
@@ -134,13 +138,21 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 	useEffect(() => {
 		// Look for the user token in both possible locations (nested under google or flat)
 		const savedUserToken = formValues.parameters?.google?.userToken || formValues.parameters?.userToken;
+		const pickerWindow = window as typeof window & { __googlePickerLastToken?: string };
 
 		if (!savedUserToken) {
+			// Switching to an unauthenticated node must not leave the previous
+			// node's token readable by the picker.
+			delete pickerWindow.__googlePickerLastToken;
 			return;
 		}
 
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(window as any).__googlePickerLastToken = savedUserToken;
+		pickerWindow.__googlePickerLastToken = savedUserToken;
+		return () => {
+			if (pickerWindow.__googlePickerLastToken === savedUserToken) {
+				delete pickerWindow.__googlePickerLastToken;
+			}
+		};
 	}, [formValues]);
 
 	return (
