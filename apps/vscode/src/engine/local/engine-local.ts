@@ -461,10 +461,15 @@ export class EngineLocal extends EngineBackend {
 
 			const envPath = path.join(workspaceFolders[0].uri.fsPath, '.env');
 
-			// Read existing .env (or start empty)
+			// Read existing .env (or start empty), preserving whichever line
+			// ending it already uses (CRLF is common on Windows) instead of
+			// silently normalizing every line to LF on write.
 			let lines: string[] = [];
+			let eol = '\n';
 			if (fs.existsSync(envPath)) {
-				lines = fs.readFileSync(envPath, 'utf8').split('\n');
+				const raw = fs.readFileSync(envPath, 'utf8');
+				eol = raw.includes('\r\n') ? '\r\n' : '\n';
+				lines = raw.split(/\r?\n/);
 			}
 
 			// Upsert a key=value line, preserving all other lines
@@ -483,7 +488,7 @@ export class EngineLocal extends EngineBackend {
 			upsert('ROCKETRIDE_URI', uri);
 			upsert('ROCKETRIDE_APIKEY', apiKey);
 
-			fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
+			fs.writeFileSync(envPath, lines.join(eol), 'utf8');
 			this.logger.output(
 				`${icons.success} Written ROCKETRIDE_URI and ROCKETRIDE_APIKEY to .env`,
 			);

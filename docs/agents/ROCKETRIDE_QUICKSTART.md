@@ -16,7 +16,7 @@ behavior depends on your connection mode:
 > **Local mode**: `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` are written to `.env` **after** the
 > engine process starts and its port is known. If you check `.env` before starting the engine you
 > will not see these keys — that is expected.
-
+>
 > **Remote / Cloud mode**: `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` are synced from your
 > extension settings when the connection is established.
 

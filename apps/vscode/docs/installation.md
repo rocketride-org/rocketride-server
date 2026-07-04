@@ -50,6 +50,8 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 | `rocketride.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
 | `rocketride.engineArgs` | - | Additional startup arguments for the local engine |
 
+> **Workspace `.env` writes**: In local mode the engine binds to a dynamic port (`--port=0`), so the connection URI isn't known until the process has started. Once it is, the extension upserts `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` into the `.env` file at the first workspace folder's root — existing lines and values are preserved, only those two keys are added or replaced. This runs on every local engine start, so the values are refreshed (and may change) on each restart. The write is best-effort: if it fails (e.g. no workspace open, or the file can't be written), the engine keeps running and a warning is logged instead.
+
 ### Integrations
 
 | Setting | Default | Description |
