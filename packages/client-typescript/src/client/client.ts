@@ -1445,6 +1445,13 @@ export class RocketRideClient extends DAPClient {
 				result = await pipe.close();
 			} catch (err) {
 				error = err instanceof Error ? err.message : String(err);
+				if (pipe?.isOpened) {
+					try {
+						await pipe.close();
+					} catch {
+						// Ignore errors during cleanup
+					}
+				}
 			}
 
 			// Send final status
@@ -1481,7 +1488,8 @@ export class RocketRideClient extends DAPClient {
 					await uploadFile(fileData, index);
 				} catch (err) {
 					// Ensure errors don't kill the whole batch
-					console.error(`Upload failed for ${fileData.file.name}:`, err);
+					const errorMsg = err instanceof Error ? err.message : String(err);
+					this.debugMessage(`Upload failed for ${fileData.file.name}: ${errorMsg}`);
 				}
 			}
 		};
