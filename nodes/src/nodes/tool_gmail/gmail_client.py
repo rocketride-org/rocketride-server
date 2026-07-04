@@ -37,15 +37,55 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import os
 import time as _time
 from email.message import EmailMessage
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
+from urllib.parse import urlparse
 
 # Gmail's per-call ceiling for batchModify / batchDelete is 1000 ids.
 MAX_BATCH = 1000
+
+# Hosts the token-refresh POST may target. The token payload is untrusted (it
+# rides in saved pipes and broker responses); a token-supplied refresh URL is
+# honored only if it is https and its host is one of these, so a tampered token
+# can never redirect the refresh_token to an attacker host. RR_OAUTH_BROKER_URL
+# lets self-hosted deployments add their own broker host.
+_BROKER_HOSTS = frozenset({'oauth2.rocketride.ai', 'oauth.rocketride.ai'})
+
+
+def resolve_refresh_url(token_url: object) -> str | None:
+    """Validate a token-supplied refresh URL against the trusted broker hosts.
+
+    Returns the URL when it is https and its host is a known broker host
+    (built-in or the RR_OAUTH_BROKER_URL host). Returns None when the token
+    carries no URL. Raises ValueError for any other value so a tampered token
+    fails loud instead of silently posting credentials elsewhere.
+    """
+    if not token_url:
+        return None
+    if not isinstance(token_url, str):
+        raise ValueError('Gmail token oauth_server_url must be a string')
+
+    allowed = set(_BROKER_HOSTS)
+    env_broker = os.environ.get('RR_OAUTH_BROKER_URL', '')
+    if env_broker:
+        env_host = urlparse(env_broker).hostname
+        if env_host:
+            allowed.add(env_host.lower())
+
+    parsed = urlparse(token_url)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.hostname.lower() not in allowed:
+        raise ValueError(
+            f'Gmail token refresh URL {token_url!r} is not a trusted OAuth broker '
+            '(expected https and one of: ' + ', '.join(sorted(allowed)) + '). '
+            'Reconnect your Google account, or set RR_OAUTH_BROKER_URL for a self-hosted broker.'
+        )
+    return token_url
+
 
 # HTTP status codes worth retrying (rate-limit + transient server errors).
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
@@ -97,7 +137,8 @@ def build_service(auth_type: str, cfg: dict, scopes: list[str]) -> Any:
         client_id = info.get('client_id')
         client_secret = info.get('client_secret')
         token_uri = info.get('token_uri', 'https://oauth2.googleapis.com/token')
-        oauth_server_url = info.get('oauth_server_url')
+        # Untrusted input: reject any refresh URL not pointing at a known broker.
+        oauth_server_url = resolve_refresh_url(info.get('oauth_server_url'))
         expiry_date_ms = info.get('expiry_date')
 
         expiry: '_dt.datetime | None' = None
@@ -355,6 +396,7 @@ def clean_ref(msg: dict | None) -> dict:
 
 
 def clean_thread(thread: dict | None) -> dict:
+    """Compact a thread: id, historyId, snippet, and cleaned messages."""
     if not isinstance(thread, dict):
         return {}
     return {
@@ -366,6 +408,7 @@ def clean_thread(thread: dict | None) -> dict:
 
 
 def clean_label(label: dict | None) -> dict:
+    """Compact a label resource: id, name, type, visibility, and counts."""
     if not isinstance(label, dict):
         return {}
     return {
@@ -386,18 +429,21 @@ def clean_label(label: dict | None) -> dict:
 
 
 def clean_draft(draft: dict | None) -> dict:
+    """Compact a draft: id plus the cleaned embedded message."""
     if not isinstance(draft, dict):
         return {}
     return {'id': draft.get('id'), 'message': clean_message(draft.get('message'))}
 
 
 def clean_attachment(att: dict | None) -> dict:
+    """Compact an attachment body: attachmentId, size, and base64url data."""
     if not isinstance(att, dict):
         return {}
     return {'attachmentId': att.get('attachmentId'), 'size': att.get('size'), 'data': att.get('data')}
 
 
 def clean_history(record: dict | None) -> dict:
+    """Compact a history record: id plus message refs per change type."""
     if not isinstance(record, dict):
         return {}
     out: dict = {'id': record.get('id')}
@@ -408,12 +454,14 @@ def clean_history(record: dict | None) -> dict:
 
 
 def clean_filter(f: dict | None) -> dict:
+    """Compact a filter resource: id, criteria, and action."""
     if not isinstance(f, dict):
         return {}
     return {k: f[k] for k in ('id', 'criteria', 'action') if k in f}
 
 
 def clean_send_as(s: dict | None) -> dict:
+    """Compact a sendAs alias: address, display name, signature, and status fields."""
     if not isinstance(s, dict):
         return {}
     return {
@@ -433,6 +481,7 @@ def clean_send_as(s: dict | None) -> dict:
 
 
 def clean_vacation(v: dict | None) -> dict:
+    """Compact vacation responder settings to their key fields."""
     if not isinstance(v, dict):
         return {}
     return {
@@ -452,24 +501,28 @@ def clean_vacation(v: dict | None) -> dict:
 
 
 def clean_forwarding_address(a: dict | None) -> dict:
+    """Compact a forwarding address: email and verification status."""
     if not isinstance(a, dict):
         return {}
     return {k: a[k] for k in ('forwardingEmail', 'verificationStatus') if k in a}
 
 
 def clean_delegate(d: dict | None) -> dict:
+    """Compact a delegate: email and verification status."""
     if not isinstance(d, dict):
         return {}
     return {k: d[k] for k in ('delegateEmail', 'verificationStatus') if k in d}
 
 
 def clean_imap(i: dict | None) -> dict:
+    """Compact IMAP settings to their key fields."""
     if not isinstance(i, dict):
         return {}
     return {k: i[k] for k in ('enabled', 'autoExpunge', 'expungeBehavior', 'maxFolderSize') if k in i}
 
 
 def clean_pop(p: dict | None) -> dict:
+    """Compact POP settings: accessWindow and disposition."""
     if not isinstance(p, dict):
         return {}
     return {k: p[k] for k in ('accessWindow', 'disposition') if k in p}

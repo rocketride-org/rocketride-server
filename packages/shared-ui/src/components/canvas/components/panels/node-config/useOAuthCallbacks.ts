@@ -51,6 +51,9 @@ export function useOAuthCallbacks() {
 				tokens = JSON.parse(tokensParam);
 			} catch (error) {
 				console.error('Error parsing Google OAuth callback data:', error);
+				// A malformed callback must not overwrite saved config with a
+				// token object full of undefined fields.
+				return formData;
 			}
 
 			const existingParams = (formData.parameters as Record<string, unknown>) || {};

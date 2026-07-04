@@ -82,12 +82,15 @@ class IInstance(IInstanceBase):
     # -----------------------------------------------------------------------
 
     def _svc(self):
+        """Return the shared Gmail service handle."""
         return self.IGlobal.service
 
     def _access(self):
+        """Return the node's access descriptor (tier, scopes, flags)."""
         return self.IGlobal.access
 
     def _require_send(self, op: str) -> None:
+        """Raise GoogleAccessError unless the granted scopes include the send or full scope."""
         scopes = self._access().scopes
         if _GMAIL_FULL_SCOPE not in scopes and _GMAIL_SEND_SCOPE not in scopes:
             raise GoogleAccessError(
@@ -95,18 +98,24 @@ class IInstance(IInstanceBase):
             )
 
     def _require_hard_delete(self, op: str) -> None:
+        """Gate permanent deletion: needs the full tier AND the allowHardDelete flag."""
         if _GMAIL_FULL_SCOPE not in self._access().scopes:
             raise GoogleAccessError(
                 f"{op} permanently deletes mail and needs the full mailbox scope. Set access to 'full' on this node."
             )
+        # Scope alone is not consent: the destructive gate must also be enabled
+        # explicitly in the node config.
+        self._access().require_flag('allowHardDelete', op)
 
     def _require_settings(self, op: str) -> None:
+        """Raise GoogleAccessError unless the granted scopes include the settings or full scope."""
         if _GMAIL_SETTINGS_SCOPE not in self._access().scopes and _GMAIL_FULL_SCOPE not in self._access().scopes:
             raise GoogleAccessError(
                 f"{op} needs the settings scope. Set access to 'settings', 'settings_sharing', or 'full'."
             )
 
     def _require_settings_sharing(self, op: str) -> None:
+        """Raise GoogleAccessError unless the granted scopes include the settings sharing or full scope."""
         if (
             _GMAIL_SETTINGS_SHARING_SCOPE not in self._access().scopes
             and _GMAIL_FULL_SCOPE not in self._access().scopes
@@ -116,7 +125,20 @@ class IInstance(IInstanceBase):
             )
 
     @staticmethod
+    def _int_arg(args: dict, key: str, default: int, lo: int, hi: int) -> int:
+        """Read an integer arg, defaulting only on None and clamping to [lo, hi].
+
+        `args.get(key) or default` silently turns an explicit 0 into the
+        default, bypassing the clamp (the antipattern flagged on #1228/#1445).
+        """
+        value = args.get(key)
+        if value is None:
+            value = default
+        return max(lo, min(int(value), hi))
+
+    @staticmethod
     def _id_list(args: dict, key: str, op: str) -> list[str]:
+        """Validate a non-empty list of id strings, capped at MAX_BATCH."""
         ids = args.get(key)
         if not isinstance(ids, list) or not ids:
             raise ValueError(f'{op}: "{key}" must be a non-empty list of message ids')
@@ -140,6 +162,7 @@ class IInstance(IInstanceBase):
         input_schema={'type': 'object', 'properties': {}, 'required': []},
     )
     def check_connection(self, args: dict) -> dict:
+        """Check Gmail connection status and whether granted OAuth scopes cover the configured access tier. Read-only."""
         glb = self.IGlobal
         access = glb.access
         granted_scopes: set[str] = set()
@@ -209,12 +232,13 @@ class IInstance(IInstanceBase):
         description='List message ids in the mailbox, optionally filtered by a Gmail query or labels.',
     )
     def message_list(self, args):
+        """List message ids, optionally filtered by a Gmail query or labels. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         params = {
             'userId': USER_ID,
             'q': args.get('query'),
             'labelIds': args.get('labelIds'),
-            'maxResults': max(1, min(int(args.get('maxResults') or 25), 500)),
+            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
             'pageToken': args.get('pageToken'),
             'includeSpamTrash': bool(args.get('includeSpamTrash', False)),
         }
@@ -238,6 +262,7 @@ class IInstance(IInstanceBase):
         description='Search messages using Gmail query syntax. Returns matching message ids.',
     )
     def message_search(self, args):
+        """Search messages using Gmail query syntax; returns matching message ids. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         require_str(args, 'query', tool_name='message_search')
         return self.message_list(args)
@@ -258,6 +283,7 @@ class IInstance(IInstanceBase):
         description='Get a single message: ids, labels, snippet, and key headers.',
     )
     def message_get(self, args):
+        """Get a single message: ids, labels, snippet, and key headers. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         mid = require_str(args, 'id', tool_name='message_get')
         fmt = args.get('format') or 'full'
@@ -281,6 +307,7 @@ class IInstance(IInstanceBase):
         description='Add or remove labels on a message. Use the UNREAD label to change read state.',
     )
     def message_modify(self, args):
+        """Add or remove labels on a message. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_modify')
         mid = require_str(args, 'id', tool_name='message_modify')
@@ -303,6 +330,7 @@ class IInstance(IInstanceBase):
         description=f'Add or remove labels on up to {MAX_BATCH} messages by explicit id list (never a query).',
     )
     def message_batch_modify(self, args):
+        """Add or remove labels on a batch of messages by explicit id list. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_batch_modify')
         ids = self._id_list(args, 'ids', 'message_batch_modify')
@@ -327,6 +355,7 @@ class IInstance(IInstanceBase):
         description='Apply (add) labels to a message.',
     )
     def label_apply(self, args):
+        """Apply (add) labels to a message. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('label_apply')
         mid = require_str(args, 'messageId', tool_name='label_apply')
@@ -346,6 +375,7 @@ class IInstance(IInstanceBase):
         description='Remove labels from a message.',
     )
     def label_remove(self, args):
+        """Remove labels from a message. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('label_remove')
         mid = require_str(args, 'messageId', tool_name='label_remove')
@@ -369,6 +399,7 @@ class IInstance(IInstanceBase):
         description='Get a thread and its messages.',
     )
     def thread_get(self, args):
+        """Get a thread and its messages. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         tid = require_str(args, 'id', tool_name='thread_get')
         fmt = args.get('format') or 'full'
@@ -388,12 +419,13 @@ class IInstance(IInstanceBase):
         description='List threads, optionally filtered by query or labels.',
     )
     def thread_list(self, args):
+        """List threads, optionally filtered by query or labels. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         params = {
             'userId': USER_ID,
             'q': args.get('query'),
             'labelIds': args.get('labelIds'),
-            'maxResults': max(1, min(int(args.get('maxResults') or 25), 500)),
+            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().threads().list(**{k: v for k, v in params.items() if v is not None}))
@@ -415,6 +447,7 @@ class IInstance(IInstanceBase):
         description='List all labels in the mailbox.',
     )
     def label_list(self, args):
+        """List all labels in the mailbox. Read-only."""
         normalize_tool_input(args, tool_name='tool_gmail')
         data = execute(self._svc().users().labels().list(userId=USER_ID))
         return [clean_label(label) for label in (data.get('labels') or [])]
@@ -440,6 +473,7 @@ class IInstance(IInstanceBase):
         description='Create a new label.',
     )
     def label_create(self, args):
+        """Create a new label. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('label_create')
         body = {'name': require_str(args, 'name', tool_name='label_create')}
@@ -466,6 +500,7 @@ class IInstance(IInstanceBase):
         description='Update an existing label (name and/or visibility).',
     )
     def label_update(self, args):
+        """Update a label's name and/or visibility. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('label_update')
         lid = require_str(args, 'id', tool_name='label_update')
@@ -483,6 +518,7 @@ class IInstance(IInstanceBase):
         description='Delete a label. Messages keep existing; only the label is removed.',
     )
     def label_delete(self, args):
+        """Delete a label; messages keep existing. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('label_delete')
         lid = require_str(args, 'id', tool_name='label_delete')
@@ -504,10 +540,11 @@ class IInstance(IInstanceBase):
         description='List drafts.',
     )
     def draft_list(self, args):
+        """List drafts. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         params = {
             'userId': USER_ID,
-            'maxResults': max(1, min(int(args.get('maxResults') or 25), 500)),
+            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().drafts().list(**{k: v for k, v in params.items() if v is not None}))
@@ -528,6 +565,7 @@ class IInstance(IInstanceBase):
         description='Get a single draft.',
     )
     def draft_get(self, args):
+        """Get a single draft. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         did = require_str(args, 'id', tool_name='draft_get')
         fmt = args.get('format') or 'full'
@@ -569,6 +607,7 @@ class IInstance(IInstanceBase):
         description='Create a draft message. Pass html_body for rich HTML content; pass attachments for file attachments.',
     )
     def draft_create(self, args):
+        """Create a draft message, with optional HTML body and attachments. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('draft_create')
         to = require_str(args, 'to', tool_name='draft_create')
@@ -631,6 +670,7 @@ class IInstance(IInstanceBase):
         description='Replace the contents of an existing draft. Pass html_body for rich HTML content.',
     )
     def draft_update(self, args):
+        """Replace the contents of an existing draft. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('draft_update')
         did = require_str(args, 'id', tool_name='draft_update')
@@ -671,6 +711,7 @@ class IInstance(IInstanceBase):
         description='Send an existing draft.',
     )
     def draft_send(self, args):
+        """Send an existing draft. Requires a writable tier and the send scope."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('draft_send')
         self._require_send('draft_send')
@@ -686,6 +727,7 @@ class IInstance(IInstanceBase):
         description='Delete a draft.',
     )
     def draft_delete(self, args):
+        """Delete a draft. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('draft_delete')
         did = require_str(args, 'id', tool_name='draft_delete')
@@ -735,6 +777,7 @@ class IInstance(IInstanceBase):
         description='Send an email. Pass threadId to reply in-thread. Pass html_body for rich HTML; pass attachments for files.',
     )
     def message_send(self, args):
+        """Send an email, optionally in-thread, with HTML body and attachments. Requires a writable tier and the send scope."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_send')
         self._require_send('message_send')
@@ -800,6 +843,7 @@ class IInstance(IInstanceBase):
         description='Move a message to Trash (recoverable).',
     )
     def message_trash(self, args):
+        """Move a message to Trash (recoverable). Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_trash')
         mid = require_str(args, 'id', tool_name='message_trash')
@@ -814,6 +858,7 @@ class IInstance(IInstanceBase):
         description='Remove a message from Trash.',
     )
     def message_untrash(self, args):
+        """Restore a message from Trash. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_untrash')
         mid = require_str(args, 'id', tool_name='message_untrash')
@@ -835,6 +880,7 @@ class IInstance(IInstanceBase):
         description='Get an attachment body (base64url data) by message and attachment id.',
     )
     def attachment_get(self, args):
+        """Get an attachment body (base64url data) by message and attachment id. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         mid = require_str(args, 'messageId', tool_name='attachment_get')
         aid = require_str(args, 'attachmentId', tool_name='attachment_get')
@@ -868,6 +914,7 @@ class IInstance(IInstanceBase):
         description='List incremental mailbox changes since a historyId (for sync).',
     )
     def history_list(self, args):
+        """List incremental mailbox changes since a historyId (for sync). Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         start = require_str(args, 'startHistoryId', tool_name='history_list')
         params = {
@@ -875,7 +922,7 @@ class IInstance(IInstanceBase):
             'startHistoryId': start,
             'historyTypes': args.get('historyTypes'),
             'labelId': args.get('labelId'),
-            'maxResults': max(1, min(int(args.get('maxResults') or 100), 500)),
+            'maxResults': self._int_arg(args, 'maxResults', 100, 1, 500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().history().list(**{k: v for k, v in params.items() if v is not None}))
@@ -898,6 +945,7 @@ class IInstance(IInstanceBase):
         description='Permanently delete a message (bypasses Trash, irreversible). Requires full access.',
     )
     def message_delete(self, args):
+        """Permanently delete a message, bypassing Trash (irreversible). Requires the full tier and allowHardDelete."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_hard_delete('message_delete')
         mid = require_str(args, 'id', tool_name='message_delete')
@@ -915,6 +963,7 @@ class IInstance(IInstanceBase):
         description=f'Permanently delete up to {MAX_BATCH} messages by explicit id list (never a query). Requires full access.',
     )
     def messages_batchDelete(self, args):
+        """Permanently delete a batch of messages by explicit id list (irreversible). Requires the full tier and allowHardDelete."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_hard_delete('messages_batchDelete')
         ids = self._id_list(args, 'ids', 'messages_batchDelete')
@@ -938,6 +987,7 @@ class IInstance(IInstanceBase):
         description='Add or remove labels on all messages in a thread.',
     )
     def thread_modify(self, args):
+        """Add or remove labels on all messages in a thread. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('thread_modify')
         tid = require_str(args, 'id', tool_name='thread_modify')
@@ -955,6 +1005,7 @@ class IInstance(IInstanceBase):
         description='Move all messages in a thread to Trash (recoverable).',
     )
     def thread_trash(self, args):
+        """Move all messages in a thread to Trash (recoverable). Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('thread_trash')
         tid = require_str(args, 'id', tool_name='thread_trash')
@@ -969,6 +1020,7 @@ class IInstance(IInstanceBase):
         description='Remove all messages in a thread from Trash.',
     )
     def thread_untrash(self, args):
+        """Restore all messages in a thread from Trash. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('thread_untrash')
         tid = require_str(args, 'id', tool_name='thread_untrash')
@@ -983,6 +1035,7 @@ class IInstance(IInstanceBase):
         description='Permanently delete a thread and all its messages (bypasses Trash, irreversible). Requires full access.',
     )
     def thread_delete(self, args):
+        """Permanently delete a thread and all its messages, bypassing Trash (irreversible). Requires the full tier and allowHardDelete."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_hard_delete('thread_delete')
         tid = require_str(args, 'id', tool_name='thread_delete')
@@ -1002,6 +1055,7 @@ class IInstance(IInstanceBase):
         description='Archive a message by removing it from the INBOX label.',
     )
     def message_archive(self, args):
+        """Archive a message by removing the INBOX label. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_archive')
         mid = require_str(args, 'id', tool_name='message_archive')
@@ -1018,6 +1072,7 @@ class IInstance(IInstanceBase):
         description='Mark a message as read (removes the UNREAD label).',
     )
     def message_mark_read(self, args):
+        """Mark a message as read by removing the UNREAD label. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_mark_read')
         mid = require_str(args, 'id', tool_name='message_mark_read')
@@ -1034,6 +1089,7 @@ class IInstance(IInstanceBase):
         description='Mark a message as unread (adds the UNREAD label).',
     )
     def message_mark_unread(self, args):
+        """Mark a message as unread by adding the UNREAD label. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_mark_unread')
         mid = require_str(args, 'id', tool_name='message_mark_unread')
@@ -1050,6 +1106,7 @@ class IInstance(IInstanceBase):
         description='Star a message (adds the STARRED label).',
     )
     def message_star(self, args):
+        """Star a message by adding the STARRED label. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_star')
         mid = require_str(args, 'id', tool_name='message_star')
@@ -1066,6 +1123,7 @@ class IInstance(IInstanceBase):
         description='Unstar a message (removes the STARRED label).',
     )
     def message_unstar(self, args):
+        """Unstar a message by removing the STARRED label. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('message_unstar')
         mid = require_str(args, 'id', tool_name='message_unstar')
@@ -1084,6 +1142,7 @@ class IInstance(IInstanceBase):
         description='Fetch a message and return its decoded body text and HTML. Walks MIME parts recursively.',
     )
     def message_get_body(self, args):
+        """Fetch a message and return its decoded plain-text and HTML bodies. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         mid = require_str(args, 'id', tool_name='message_get_body')
         data = execute(self._svc().users().messages().get(userId=USER_ID, id=mid, format='full'))
@@ -1125,6 +1184,7 @@ class IInstance(IInstanceBase):
         description="List all filters in the mailbox. Requires 'settings' or higher access tier.",
     )
     def filter_list(self, args):
+        """List all filters in the mailbox. Requires the settings tier or higher."""
         normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('filter_list')
         data = execute(self._svc().users().settings().filters().list(userId=USER_ID))
@@ -1148,6 +1208,7 @@ class IInstance(IInstanceBase):
         description="Create a new filter. Requires 'settings' or higher access tier.",
     )
     def filter_create(self, args):
+        """Create a new filter from criteria and action objects. Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('filter_create')
         criteria = args.get('criteria')
@@ -1175,6 +1236,7 @@ class IInstance(IInstanceBase):
         description="Delete a filter by id. Requires 'settings' or higher access tier.",
     )
     def filter_delete(self, args):
+        """Delete a filter by id. Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('filter_delete')
         fid = require_str(args, 'id', tool_name='filter_delete')
@@ -1209,6 +1271,7 @@ class IInstance(IInstanceBase):
         description='Start push notifications to a Cloud Pub/Sub topic. Returns historyId and expiration timestamp.',
     )
     def watch_start(self, args):
+        """Start push notifications to a Cloud Pub/Sub topic. Requires a writable tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('watch_start')
         topic = require_str(args, 'topic_name', tool_name='watch_start')
@@ -1225,6 +1288,7 @@ class IInstance(IInstanceBase):
         description='Stop push notifications for this mailbox.',
     )
     def watch_stop(self, args):
+        """Stop push notifications for this mailbox. Requires a writable tier."""
         normalize_tool_input(args, tool_name='tool_gmail')
         self._access().require_write('watch_stop')
         execute(self._svc().users().stop(userId=USER_ID))
@@ -1239,6 +1303,7 @@ class IInstance(IInstanceBase):
         description="List all sendAs aliases. Requires 'settings' or higher access tier.",
     )
     def send_as_list(self, args):
+        """List all sendAs aliases. Requires the settings tier or higher."""
         normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('send_as_list')
         data = execute(self._svc().users().settings().sendAs().list(userId=USER_ID))
@@ -1255,6 +1320,7 @@ class IInstance(IInstanceBase):
         description="Get a single sendAs alias. Requires 'settings' or higher access tier.",
     )
     def send_as_get(self, args):
+        """Get a single sendAs alias. Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('send_as_get')
         email = require_str(args, 'send_as_email', tool_name='send_as_get')
@@ -1275,6 +1341,7 @@ class IInstance(IInstanceBase):
         description="Create a sendAs alias. Requires 'settings_sharing' or 'full' access tier.",
     )
     def send_as_create(self, args):
+        """Create a sendAs alias. Requires the settings_sharing or full tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings_sharing('send_as_create')
         email = require_str(args, 'send_as_email', tool_name='send_as_create')
@@ -1305,6 +1372,7 @@ class IInstance(IInstanceBase):
         description="Update a sendAs alias. Requires 'settings_sharing' or 'full' access tier.",
     )
     def send_as_update(self, args):
+        """Update a sendAs alias. Requires the settings_sharing or full tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings_sharing('send_as_update')
         email = require_str(args, 'send_as_email', tool_name='send_as_update')
@@ -1335,6 +1403,7 @@ class IInstance(IInstanceBase):
         description="Delete a sendAs alias. Requires 'settings_sharing' or 'full' access tier.",
     )
     def send_as_delete(self, args):
+        """Delete a sendAs alias. Requires the settings_sharing or full tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings_sharing('send_as_delete')
         email = require_str(args, 'send_as_email', tool_name='send_as_delete')
@@ -1350,6 +1419,7 @@ class IInstance(IInstanceBase):
         description="Get IMAP settings. Requires 'settings' or higher access tier.",
     )
     def imap_get(self, args):
+        """Get IMAP settings. Requires the settings tier or higher."""
         normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('imap_get')
         return clean_imap(execute(self._svc().users().settings().getImap(userId=USER_ID)))
@@ -1371,6 +1441,7 @@ class IInstance(IInstanceBase):
         description="Update IMAP settings. Requires 'settings' or higher access tier.",
     )
     def imap_update(self, args):
+        """Update IMAP settings. Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('imap_update')
         body: dict = {}
@@ -1391,6 +1462,7 @@ class IInstance(IInstanceBase):
         description="Get POP settings. Requires 'settings' or higher access tier.",
     )
     def pop_get(self, args):
+        """Get POP settings. Requires the settings tier or higher."""
         normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('pop_get')
         return clean_pop(execute(self._svc().users().settings().getPop(userId=USER_ID)))
@@ -1414,6 +1486,7 @@ class IInstance(IInstanceBase):
         description="Update POP settings. Requires 'settings' or higher access tier.",
     )
     def pop_update(self, args):
+        """Update POP settings. Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('pop_update')
         body: dict = {}
@@ -1433,6 +1506,7 @@ class IInstance(IInstanceBase):
         description="Get vacation auto-reply settings. Requires 'settings' or higher access tier.",
     )
     def vacation_get(self, args):
+        """Get vacation auto-reply settings. Requires the settings tier or higher."""
         normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('vacation_get')
         return clean_vacation(execute(self._svc().users().settings().getVacation(userId=USER_ID)))
@@ -1454,6 +1528,7 @@ class IInstance(IInstanceBase):
         description="Update vacation auto-reply settings. Requires 'settings' or higher access tier.",
     )
     def vacation_update(self, args):
+        """Update vacation auto-reply settings. Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('vacation_update')
         body: dict = {}
@@ -1483,6 +1558,7 @@ class IInstance(IInstanceBase):
         description="List forwarding addresses. Requires 'settings' or higher access tier.",
     )
     def forwarding_address_list(self, args):
+        """List forwarding addresses. Requires the settings tier or higher."""
         normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('forwarding_address_list')
         data = execute(self._svc().users().settings().forwardingAddresses().list(userId=USER_ID))
@@ -1499,6 +1575,7 @@ class IInstance(IInstanceBase):
         description="Create a forwarding address (requires the recipient to confirm). Requires 'settings' access tier.",
     )
     def forwarding_address_create(self, args):
+        """Create a forwarding address (the recipient must confirm). Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('forwarding_address_create')
         email = require_str(args, 'forwarding_email', tool_name='forwarding_address_create')
@@ -1523,6 +1600,7 @@ class IInstance(IInstanceBase):
         description="Delete a forwarding address. Requires 'settings' or higher access tier.",
     )
     def forwarding_address_delete(self, args):
+        """Delete a forwarding address. Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('forwarding_address_delete')
         email = require_str(args, 'forwarding_email', tool_name='forwarding_address_delete')
@@ -1538,6 +1616,7 @@ class IInstance(IInstanceBase):
         description="List delegates for this mailbox. Requires 'settings_sharing' or 'full' access tier.",
     )
     def delegate_list(self, args):
+        """List delegates for this mailbox. Requires the settings_sharing or full tier."""
         normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings_sharing('delegate_list')
         data = execute(self._svc().users().settings().delegates().list(userId=USER_ID))
@@ -1554,6 +1633,7 @@ class IInstance(IInstanceBase):
         description="Add a delegate to this mailbox. Requires 'settings_sharing' or 'full' access tier.",
     )
     def delegate_create(self, args):
+        """Add a delegate to this mailbox. Requires the settings_sharing or full tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings_sharing('delegate_create')
         email = require_str(args, 'delegate_email', tool_name='delegate_create')
@@ -1572,6 +1652,7 @@ class IInstance(IInstanceBase):
         description="Remove a delegate from this mailbox. Requires 'settings_sharing' or 'full' access tier.",
     )
     def delegate_delete(self, args):
+        """Remove a delegate from this mailbox. Requires the settings_sharing or full tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings_sharing('delegate_delete')
         email = require_str(args, 'delegate_email', tool_name='delegate_delete')
@@ -1593,6 +1674,7 @@ class IInstance(IInstanceBase):
         description="List S/MIME keys for a sendAs address. Requires 'settings' or higher access tier.",
     )
     def smime_list(self, args):
+        """List S/MIME keys for a sendAs address. Requires the settings tier or higher."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings('smime_list')
         email = require_str(args, 'send_as_email', tool_name='smime_list')
@@ -1611,6 +1693,7 @@ class IInstance(IInstanceBase):
         description="Set the default S/MIME key for a sendAs address. Requires 'settings_sharing' or 'full'.",
     )
     def smime_set_default(self, args):
+        """Set the default S/MIME key for a sendAs address. Requires the settings_sharing or full tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings_sharing('smime_set_default')
         email = require_str(args, 'send_as_email', tool_name='smime_set_default')
@@ -1632,6 +1715,7 @@ class IInstance(IInstanceBase):
         description="Delete an S/MIME key. Requires 'settings_sharing' or 'full' access tier.",
     )
     def smime_delete(self, args):
+        """Delete an S/MIME key. Requires the settings_sharing or full tier."""
         args = normalize_tool_input(args, tool_name='tool_gmail')
         self._require_settings_sharing('smime_delete')
         email = require_str(args, 'send_as_email', tool_name='smime_delete')

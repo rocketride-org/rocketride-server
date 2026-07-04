@@ -72,6 +72,7 @@ for _name, _stub in _build_import_stubs().items():
         _added.append(_name)
 
 IInstance = importlib.import_module('nodes.tool_gmail.IInstance')
+gmail_client = importlib.import_module('nodes.tool_gmail.gmail_client')
 ga = importlib.import_module('nodes.core.google_access')
 
 for _name in _added:
@@ -137,8 +138,8 @@ class FakeGmail:
         return next((kw for n, kw in self.calls if n == op), None)
 
 
-def make_inst(access_tier='modify', results=None):
-    access = ga.resolve_google_access({'access': access_tier}, ga.GMAIL)
+def make_inst(access_tier='modify', results=None, config=None):
+    access = ga.resolve_google_access({'access': access_tier, **(config or {})}, ga.GMAIL)
     inst = IInstance.IInstance()
     inst.IGlobal = types.SimpleNamespace(service=FakeGmail(results or {}), access=access)
     return inst
@@ -155,6 +156,61 @@ def test_message_list_shapes_refs():
     assert out['messages'] == [{'id': 'a', 'threadId': 't1'}]
     assert out['resultSizeEstimate'] == 1
     assert inst.IGlobal.service.call_for('list')['q'] == 'is:unread'
+
+
+def test_message_list_max_results_zero_clamps_not_defaults():
+    # An explicit 0 must hit the clamp (-> 1), not silently become the default 25.
+    inst = make_inst(results={'list': {'messages': []}})
+    inst.message_list({'maxResults': 0})
+    assert inst.IGlobal.service.call_for('list')['maxResults'] == 1
+
+
+def test_message_list_max_results_absent_uses_default():
+    inst = make_inst(results={'list': {'messages': []}})
+    inst.message_list({})
+    assert inst.IGlobal.service.call_for('list')['maxResults'] == 25
+
+
+# ---------------------------------------------------------------------------
+# Refresh URL allowlist (SSRF gate on the untrusted token payload)
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_url_accepts_trusted_broker():
+    url = 'https://oauth2.rocketride.ai/refresh'
+    assert gmail_client.resolve_refresh_url(url) == url
+
+
+def test_refresh_url_none_passes_through():
+    assert gmail_client.resolve_refresh_url(None) is None
+    assert gmail_client.resolve_refresh_url('') is None
+
+
+@pytest.mark.parametrize(
+    'bad',
+    [
+        'http://oauth2.rocketride.ai/refresh',  # scheme downgrade
+        'https://evil.example.com/refresh',  # attacker host
+        'https://oauth2.rocketride.ai.evil.com/refresh',  # suffix confusion
+        'ftp://oauth2.rocketride.ai/refresh',
+    ],
+)
+def test_refresh_url_rejects_untrusted(bad):
+    with pytest.raises(ValueError):
+        gmail_client.resolve_refresh_url(bad)
+
+
+def test_refresh_url_rejects_non_string():
+    with pytest.raises(ValueError):
+        gmail_client.resolve_refresh_url({'url': 'https://oauth2.rocketride.ai'})
+
+
+def test_refresh_url_env_override_adds_host(monkeypatch):
+    monkeypatch.setenv('RR_OAUTH_BROKER_URL', 'https://broker.internal.example')
+    url = 'https://broker.internal.example/refresh'
+    assert gmail_client.resolve_refresh_url(url) == url
+    # Built-in hosts still allowed alongside the override.
+    assert gmail_client.resolve_refresh_url('https://oauth2.rocketride.ai/refresh')
 
 
 def test_message_get_cleans_headers():
@@ -284,24 +340,33 @@ def test_draft_send_requires_send_scope():
 
 
 # ---------------------------------------------------------------------------
-# Hard delete gate (full tier)
+# Hard delete gate (full tier AND allowHardDelete flag; fail closed)
 # ---------------------------------------------------------------------------
 
 
 def test_hard_delete_blocked_without_full_tier():
-    # Non-full tier cannot grant the permanent-delete scope.
-    inst = make_inst(access_tier='send')
+    # Non-full tier cannot grant the permanent-delete scope, even with the flag.
+    inst = make_inst(access_tier='send', config={'allowHardDelete': True})
     with pytest.raises(ga.GoogleAccessError):
         inst.message_delete({'id': 'm1'})
 
 
-def test_hard_delete_allowed_with_full_tier():
+def test_hard_delete_blocked_without_flag():
+    # The full tier alone is not consent: allowHardDelete must be enabled too.
     inst = make_inst(access_tier='full', results={'delete': {}})
+    with pytest.raises(ga.GoogleAccessError):
+        inst.message_delete({'id': 'm1'})
+    with pytest.raises(ga.GoogleAccessError):
+        inst.messages_batchDelete({'ids': ['a']})
+
+
+def test_hard_delete_allowed_with_full_tier_and_flag():
+    inst = make_inst(access_tier='full', results={'delete': {}}, config={'allowHardDelete': True})
     assert inst.message_delete({'id': 'm1'}) == {'deleted': True, 'id': 'm1'}
 
 
 def test_batch_delete_enforces_cap_and_gate():
-    inst = make_inst(access_tier='full', results={'batchDelete': {}})
+    inst = make_inst(access_tier='full', results={'batchDelete': {}}, config={'allowHardDelete': True})
     assert inst.messages_batchDelete({'ids': ['a', 'b', 'c']}) == {'deleted': 3}
     with pytest.raises(ValueError):
         inst.messages_batchDelete({'ids': [f'id{i}' for i in range(1001)]})
@@ -518,8 +583,14 @@ def test_thread_delete_blocked_without_full_tier():
 
 
 def test_thread_delete_allowed_with_full_tier():
-    inst = make_inst(access_tier='full', results={'delete': {}})
+    inst = make_inst(access_tier='full', results={'delete': {}}, config={'allowHardDelete': True})
     assert inst.thread_delete({'id': 't1'}) == {'deleted': True, 'id': 't1'}
+
+
+def test_thread_delete_blocked_without_flag():
+    inst = make_inst(access_tier='full', results={'delete': {}})
+    with pytest.raises(ga.GoogleAccessError):
+        inst.thread_delete({'id': 't1'})
 
 
 # ---------------------------------------------------------------------------

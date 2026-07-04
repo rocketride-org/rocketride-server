@@ -374,7 +374,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
-						oauthReturnUrl: `${vscode.env.uriScheme}://rocketride.rocketride/auth/google`,
+						// The OAuth broker only allows https://*.rocketride.ai redirect URLs,
+						// so tokens bounce off this hosted page, which forwards them to the
+						// `<uriScheme>://rocketride.rocketride/auth/google` deep link.
+						oauthReturnUrl: `https://api.rocketride.ai/auth/vscode/google?scheme=${vscode.env.uriScheme}`,
 						envKeys,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
@@ -484,10 +487,24 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// this panel via project:oauthTokens.
 				case 'project:openExternal': {
 					if (data.url) {
-						CloudAuthProvider.getInstance().setPendingGoogleOAuth((tokens, state) => {
+						// Key the waiter by the node that started the login so the
+						// deep-link return routes to the right editor.
+						const nodeId = new URL(data.url as string).searchParams.get('node_id') || (data.url as string);
+						const unregister = CloudAuthProvider.getInstance().setPendingGoogleOAuth(nodeId, (tokens, state) => {
 							webview.postMessage({ type: 'project:oauthTokens', tokens, state });
 						});
-						await vscode.env.openExternal(vscode.Uri.parse(data.url as string));
+						// Pass the raw string: Uri.parse re-encodes the query and un-escapes
+						// %3B/%3A, and Zitadel's Go parser rejects raw semicolons in queries
+						// (microsoft/vscode#85930). openExternal accepts a string at runtime.
+						try {
+							const opened = await vscode.env.openExternal(data.url as unknown as vscode.Uri);
+							if (!opened) throw new Error('the system browser refused to open');
+						} catch (error) {
+							// A dead waiter would swallow a later unrelated deep link.
+							unregister();
+							this.logger.error(`[ProjectProvider] Failed to open OAuth URL: ${error}`);
+							vscode.window.showErrorMessage('Could not open the browser for Google sign-in. Check your default browser and try again.');
+						}
 					}
 					break;
 				}

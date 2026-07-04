@@ -233,3 +233,16 @@ def test_tool_call_args_defaults_to_empty_dict():
     msg = _parse(raw)
     assert msg is not None
     assert msg.tool_calls[0]['args'] == {}
+
+
+def test_tool_call_non_dict_args_wrapped_in_input():
+    # Scalar / list args are wrapped as {'input': value} rather than dropped.
+    raw = '{"type":"tool_call","name":"srv.echo","args":"hello"}'
+    msg = _parse(raw)
+    assert msg is not None
+    assert msg.tool_calls[0]['args'] == {'input': 'hello'}
+
+    raw = '{"type":"tool_call","name":"srv.echo","args":[1, 2]}'
+    msg = _parse(raw)
+    assert msg is not None
+    assert msg.tool_calls[0]['args'] == {'input': [1, 2]}

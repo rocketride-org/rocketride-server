@@ -9,14 +9,14 @@
 Live integration tests for tool_gmail.
 
 Calls real Gmail API endpoints using a user OAuth token obtained via the
-oauth.rocketride.ai broker. Read-only calls exercise the readonly tier;
+oauth2.rocketride.ai broker. Read-only calls exercise the readonly tier;
 write calls use the modify/send tier and clean up after themselves.
 
 Obtain a token via the broker:
-    1. Open in browser:
-       https://oauth.rocketride.ai/auth/google?service=%7B%7D&type=user&baseURL=https://owf4nzqqq8.execute-api.us-west-1.amazonaws.com/default/rocketrideGoogleOAuthCallback
+    1. Open in browser (baseURL must be on the broker's redirect allowlist):
+       https://oauth2.rocketride.ai/google?service=%7B%7D&type=user&baseURL=https://oauth2.rocketride.ai/callback
     2. Complete Google login.
-    3. Copy the 'tokens' query-param JSON from the Lambda response and set it below.
+    3. Copy the 'tokens' query-param JSON from the callback response and set it below.
 
 Set up:
     export GMAIL_USER_TOKEN='{"access_token":"ya29.x","refresh_token":"1//x","scope":"...","token_type":"Bearer","expiry_date":...,"oauth_server_url":"https://oauth.rocketride.ai/refresh"}'
@@ -262,7 +262,7 @@ class TestHardDeleteGate:
         """message_delete should raise without the full tier."""
         inst = make_live_inst('modify')
         with pytest.raises((ValueError, PermissionError)):
-            inst.message_permanent_delete({'id': 'fake-id-that-doesnt-exist'})
+            inst.message_delete({'id': 'fake-id-that-doesnt-exist'})
 
 
 # ---------------------------------------------------------------------------

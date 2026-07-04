@@ -96,7 +96,10 @@ const ProjectWebview: React.FC = () => {
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
 				if (msg.serverHost) setServerHost(msg.serverHost);
-				if (msg.oauthReturnUrl) setOauthReturnUrl(msg.oauthReturnUrl);
+				// Unconditional: a load without a return URL must clear any stale
+				// one, and a reload must not keep tokens from a previous session.
+				setOauthReturnUrl(msg.oauthReturnUrl);
+				setPendingOAuthTokens(undefined);
 				setEnvKeys(msg.envKeys ?? []);
 				break;
 			}
