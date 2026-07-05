@@ -22,6 +22,7 @@
 
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
+import type { ConnectResult } from 'rocketride';
 import { generatePkce, buildAuthUrl } from './pkce';
 
 import { EventEmitter } from 'events';
@@ -33,6 +34,26 @@ import { EventEmitter } from 'events';
 const SECRET_KEY_TOKEN = 'rocketride.cloudToken';
 const SECRET_KEY_NAME = 'rocketride.cloudUserName';
 const REDIRECT_URI = `${vscode.env.uriScheme}://rocketride.rocketride/auth/callback`;
+
+/**
+ * Resolve the Cloud web app URL for the same environment as the API endpoint
+ * used for token exchange (`ROCKETRIDE_URI`). Maps `api.*` hosts to `cloud.*`
+ * so staging/dev builds do not open production.
+ */
+function resolveCloudAppUrl(cloudApiUrl: string): string {
+	try {
+		const url = new URL(RocketRideClient.normalizeUri(cloudApiUrl));
+		if (url.hostname.startsWith('api.')) {
+			url.hostname = `cloud.${url.hostname.slice('api.'.length)}`;
+		}
+		url.pathname = '/';
+		url.search = '';
+		url.hash = '';
+		return url.toString();
+	} catch {
+		return 'https://cloud.rocketride.ai/';
+	}
+}
 
 // =============================================================================
 // CLASS
@@ -189,35 +210,61 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 
 		// Exchange the code for a persistent rr_* token using a temporary
 		// client connection. This is auth only — not a persistent connection.
+		// Always use the cloud URI for token exchange -- the OAuth code must
+		// be exchanged against the cloud server regardless of the current
+		// connection mode (local, docker, etc.).
+		const cloudUrl = process.env.ROCKETRIDE_URI;
+		if (!cloudUrl) {
+			vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: cloud endpoint is not configured (ROCKETRIDE_URI).');
+			return;
+		}
+
+		let result: ConnectResult;
 		try {
-			// Always use the cloud URI for token exchange -- the OAuth code must
-			// be exchanged against the cloud server regardless of the current
-			// connection mode (local, docker, etc.).
-			const cloudUrl = process.env.ROCKETRIDE_URI;
-			if (!cloudUrl) {
-				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: cloud endpoint is not configured (ROCKETRIDE_URI).');
-				return;
-			}
 			const tempClient = new RocketRideClient({ persist: false });
-			const result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: cloudUrl });
+			result = await tempClient.connect({ code, verifier, redirectUri: REDIRECT_URI }, { uri: cloudUrl });
 
-			const token = (result as any)?.userToken || '';
-			const displayName = (result as any)?.displayName || '';
-
-			// Disconnect immediately — we only needed the token
+			// Disconnect immediately — we only needed the auth result
 			await tempClient.disconnect();
-
-			if (token) {
-				await this.storeToken(token);
-				await this.storeUserName(displayName);
-				this._onDidChange.emit('changed');
-				vscode.window.showInformationMessage(`Signed in to RocketRide Cloud as ${displayName || 'user'}`);
-			} else {
-				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: no token received.');
-			}
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
 			vscode.window.showErrorMessage(`RocketRide Cloud sign-in failed: ${msg}`);
+			return;
+		}
+
+		const token = result.userToken || '';
+		const displayName = result.displayName || '';
+
+		if (token) {
+			await this.storeToken(token);
+			await this.storeUserName(displayName);
+			this._onDidChange.emit('changed');
+			vscode.window.showInformationMessage(`Signed in to RocketRide Cloud as ${displayName || 'user'}`);
+			return;
+		}
+
+		// A resolved (non-throwing) connect() with an empty userToken is not
+		// "no account" — cloud PKCE auto-provisions users. The server returns
+		// waitlisted:true for pending access (empty token by design), or an
+		// empty token for an enabled user whose rr_* API keys are all inactive.
+		if (result.waitlisted) {
+			vscode.window.showInformationMessage(
+				"Your RocketRide account is pending access approval. You'll be able to sign in once access is granted."
+			);
+			return;
+		}
+
+		const selection = await vscode.window.showErrorMessage(
+			'No active API key was found for this RocketRide account. Open RocketRide Cloud to create or reactivate a key, then sign in again.',
+			'Open RocketRide Cloud'
+		);
+		if (selection === 'Open RocketRide Cloud') {
+			try {
+				await vscode.env.openExternal(vscode.Uri.parse(resolveCloudAppUrl(cloudUrl)));
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error);
+				vscode.window.showErrorMessage(`Failed to open RocketRide Cloud: ${msg}`);
+			}
 		}
 	}
 
