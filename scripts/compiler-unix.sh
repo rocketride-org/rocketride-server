@@ -422,11 +422,11 @@ dep_install() {
     local mgr="$1"; shift
     case "$mgr" in
         apt)
-            $SUDO apt-get update
+            $SUDO apt-get update || return 1
             local p
-            for p in "$@"; do $SUDO apt-get install -y "$p"; done
+            for p in "$@"; do $SUDO apt-get install -y "$p" || return 1; done
             ;;
-        dnf) $SUDO dnf install -y "$@" ;;
+        dnf) $SUDO dnf install -y "$@" || return 1 ;;
     esac
 }
 
@@ -497,7 +497,35 @@ check_dependencies() {
     if [ "$AUTOINSTALL" == "1" ]; then
         if [ ${#missing[@]} -ne 0 ]; then
             echo "Auto-installing missing dependencies with $mgr..."
-            dep_install "$mgr" "${missing[@]}"
+            # A failed install must stop the build. Without this the script would
+            # continue and report success, and the missing runtime libs only
+            # surface much later as "libc++.so.1: cannot open shared object file".
+            if ! dep_install "$mgr" "${missing[@]}"; then
+                echo ""
+                echo "=========================================="
+                echo "ERROR: $mgr failed to install dependencies."
+                echo "Read the package manager errors above, fix them, then re-run:"
+                echo "  ./scripts/compiler-unix.sh --autoinstall"
+                echo "=========================================="
+                exit 1
+            fi
+            # Re-check every package. A package manager can exit 0 without
+            # installing everything (unknown package name, held package). Verify
+            # before claiming success so a partial install is not silently accepted.
+            local still_missing=() m
+            for m in "${missing[@]}"; do
+                dep_installed "$mgr" "$m" || still_missing+=("$m")
+            done
+            if [ ${#still_missing[@]} -ne 0 ]; then
+                echo ""
+                echo "=========================================="
+                echo "ERROR: these packages are still missing after install:"
+                echo "    ${still_missing[*]}"
+                echo "Check the package names for this distro, then re-run:"
+                echo "  ./scripts/compiler-unix.sh --autoinstall"
+                echo "=========================================="
+                exit 1
+            fi
             echo ""
             echo "Dependencies installed successfully."
             echo ""
