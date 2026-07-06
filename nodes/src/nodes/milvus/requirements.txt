@@ -1,6 +1,6 @@
 environs
 marshmallow
-grpcio
+grpcio<1.82.0
 milvus-lite; platform_system != "Windows"
 pandas
 protobuf

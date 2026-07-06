@@ -1,7 +1,7 @@
 authlib
-grpcio
-grpcio-health-checking
-grpcio-tools
+grpcio<1.82.0
+grpcio-health-checking<1.82.0
+grpcio-tools<1.82.0
 httpx
 pydantic
 requests
