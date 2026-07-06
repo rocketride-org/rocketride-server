@@ -682,7 +682,7 @@ def _compile_constraints(constraints_path: str):
         '--python',
         sys.executable,  # Explicitly specify Python version to avoid mismatch
         '--index-strategy',
-        'unsafe-best-match',  # Check all indexes for best version
+        'unsafe-first-match',  # Check all indexes for best version
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
         '--emit-index-url',  # Preserve --extra-index-url etc. so install/dry-run can find packages (e.g. torch+cu128)
     ]
@@ -789,7 +789,7 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
         '-r',
         requirements_path,
         '--index-strategy',
-        'unsafe-best-match',
+        'unsafe-first-match',
         '--no-build-isolation',
         '--dry-run',
         '--no-color',
