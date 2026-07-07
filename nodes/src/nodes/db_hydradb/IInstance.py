@@ -24,9 +24,9 @@
 """
 Instance-level state for the HydraDB database node.
 
-Exposes agent-callable tools (store_memory, recall_memory) that call HydraDB's
-v2 REST API. Retrieval is HydraDB's native server-side search - no embeddings,
-no query language, no LLM translation - so this node consumes no LLM.
+Exposes agent-callable tools (store_memory, recall_memory, query_graph, get_schema)
+that call HydraDB's v2 REST API. Retrieval is HydraDB's native server-side search -
+no embeddings, no query language, no LLM translation - so this node consumes no LLM.
 """
 
 from __future__ import annotations
@@ -40,6 +40,12 @@ class IInstance(IInstanceBase):
     """HydraDB-specific instance state."""
 
     IGlobal: IGlobal
+
+    def _require_client(self):
+        """Return the configured HydraDB client, or raise if the node isn't configured."""
+        if self.IGlobal.client is None:
+            raise RuntimeError('HydraDB client is not configured')
+        return self.IGlobal.client
 
     # ------------------------------------------------------------------
     # Tool methods
@@ -88,10 +94,8 @@ class IInstance(IInstanceBase):
         if metadata is not None and not isinstance(metadata, dict):
             raise ValueError('"metadata" must be an object if provided')
 
-        if self.IGlobal.client is None:
-            raise RuntimeError('HydraDB client is not configured')
-
-        result = self.IGlobal.client.store_memory(text.strip(), metadata=metadata)
+        client = self._require_client()
+        result = client.store_memory(text.strip(), metadata=metadata)
         return {'status': 'ok', 'result': result}
 
     @tool_function(
@@ -143,11 +147,9 @@ class IInstance(IInstanceBase):
         else:
             max_results = max(1, min(100, max_results))
 
-        if self.IGlobal.client is None:
-            raise RuntimeError('HydraDB client is not configured')
-
-        result = self.IGlobal.client.query(query.strip(), type='all', max_results=max_results)
-        results = self.IGlobal.client.extract_results(result)
+        client = self._require_client()
+        result = client.query(query.strip(), type='all', max_results=max_results)
+        results = client.extract_results(result)
         return {'results': results, 'result': result}
 
     @tool_function(
@@ -190,11 +192,9 @@ class IInstance(IInstanceBase):
         if source_id is not None and (not isinstance(source_id, str) or not source_id.strip()):
             raise ValueError('"source_id" must be a non-empty string if provided')
 
-        if self.IGlobal.client is None:
-            raise RuntimeError('HydraDB client is not configured')
-
-        result = self.IGlobal.client.relations(source_id=source_id.strip() if source_id else None)
-        return {'relations': self.IGlobal.client.unwrap(result), 'result': result}
+        client = self._require_client()
+        result = client.relations(source_id=source_id.strip() if source_id else None)
+        return {'relations': client.unwrap(result), 'result': result}
 
     @tool_function(
         input_schema={'type': 'object', 'properties': {}},
@@ -221,13 +221,11 @@ class IInstance(IInstanceBase):
         if args is not None and not isinstance(args, dict):
             raise ValueError('Tool input must be a JSON object or empty')
 
-        if self.IGlobal.client is None:
-            raise RuntimeError('HydraDB client is not configured')
-
-        collections = self.IGlobal.client.collections()
-        status = self.IGlobal.client.status()
-        col_data = self.IGlobal.client.unwrap(collections)
-        status_data = self.IGlobal.client.unwrap(status)
+        client = self._require_client()
+        collections = client.collections()
+        status = client.status()
+        col_data = client.unwrap(collections)
+        status_data = client.unwrap(status)
         return {
             'database': self.IGlobal.database,
             'collections': (col_data.get('collections') if isinstance(col_data, dict) else None) or [],
