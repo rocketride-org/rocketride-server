@@ -1,0 +1,194 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Cognee",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_cognee://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.tool_cognee",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths (tools surface as <prefix>.<tool>)
+	//
+	"prefix": "cognee",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node
+	//
+	"icon": "cognee.svg",
+	"documentation": "https://docs.cognee.ai",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder
+	//
+	"description": ["Turns content into a queryable AI-memory knowledge graph, exposed as agent tools, backed by a cognee server.", "Exposes four tools: 'add' ingests content into a dataset, 'cognify' builds the knowledge graph from it, 'search' answers natural-language questions over that memory, and 'reset' clears a dataset. Point it at a self-hosted cognee server (Docker, http://localhost:8000) or a Cognee Cloud instance."],
+	//
+	// Optional:
+	//		Rendering hints for the UI: which config fields to surface on the node tile
+	//
+	"tile": ["Dataset: ${parameters.cognee.dataset}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this component takes and produces.
+	//		This is a control-plane tool node (no data lanes).
+	//
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile is applied when the node is first added to a pipeline.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Cognee",
+				"base_url": "http://localhost:8000",
+				"api_key": "",
+				"dataset": "main",
+				"show_advanced": false,
+				"search_type": "GRAPH_COMPLETION",
+				"top_k": 15,
+				"request_timeout": 120
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		base_url is required; api_key is optional (cognee's single-tenant local
+	//		mode needs no key). "secure: true" fields are encrypted at rest and
+	//		masked in the UI. The rest are revealed by the "Advanced settings" toggle.
+	//
+	"fields": {
+		"cognee.base_url": {
+			"type": "string",
+			"title": "Server URL",
+			"description": "Base URL of your cognee server. Self-hosted cognee runs on <b>http://localhost:8000</b> (Docker); for <a href='https://platform.cognee.ai' target='_blank'>Cognee Cloud</a> use your instance URL.",
+			"default": "http://localhost:8000"
+		},
+		"cognee.api_key": {
+			"type": "string",
+			"optional": true,
+			"title": "API Key",
+			"description": "cognee API key, sent as the <code>X-Api-Key</code> header. Optional: a self-hosted server with access control disabled needs none. For Cognee Cloud, get a key from <a href='https://platform.cognee.ai' target='_blank'>platform.cognee.ai</a>. Falls back to the <code>COGNEE_API_KEY</code> env var.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"cognee.dataset": {
+			"type": "string",
+			"title": "Dataset",
+			"description": "The cognee dataset these tools read and write by default. Groups related memory; the agent can override it per call. ",
+			"default": "main"
+		},
+		// Toggle: when on, reveals the advanced fields listed in `conditional`.
+		"cognee.show_advanced": {
+			"type": "boolean",
+			"optional": true,
+			"title": "Advanced settings",
+			"description": "Show advanced options. The defaults work for most cases, leave off for a simple setup.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			],
+			"conditional": [
+				{
+					"value": true,
+					"properties": ["cognee.search_type", "cognee.top_k", "cognee.request_timeout"]
+				}
+			]
+		},
+		// --- Advanced fields (hidden unless "Advanced settings" is on) ---
+		"cognee.search_type": {
+			"type": "string",
+			"optional": true,
+			"title": "Default search type",
+			"description": "How 'search' retrieves by default (the agent can override per call). GRAPH_COMPLETION answers from the knowledge graph; RAG_COMPLETION is plain top-k RAG; CHUNKS/SUMMARIES return raw passages/summaries with no LLM; TEMPORAL is time-aware; FEELING_LUCKY lets cognee pick.",
+			"default": "GRAPH_COMPLETION",
+			"enum": [
+				["GRAPH_COMPLETION", "Graph completion (default)"],
+				["RAG_COMPLETION", "RAG completion"],
+				["CHUNKS", "Chunks (no LLM)"],
+				["SUMMARIES", "Summaries (no LLM)"],
+				["TEMPORAL", "Temporal"],
+				["FEELING_LUCKY", "Feeling lucky (auto)"]
+			]
+		},
+		"cognee.top_k": {
+			"type": "integer",
+			"optional": true,
+			"title": "Search results (top_k)",
+			"description": "Maximum number of results 'search' retrieves per query.",
+			"default": 15,
+			"minimum": 1,
+			"maximum": 100
+		},
+		"cognee.request_timeout": {
+			"type": "integer",
+			"optional": true,
+			"title": "Request timeout (s)",
+			"description": "Max seconds to wait for a cognee request. 'cognify' runs synchronously and can take minutes on large datasets, so keep this generous.",
+			"default": 120,
+			"minimum": 5,
+			"maximum": 600
+		}
+	},
+	//
+	// Optional:
+	//		Test configuration for automated node testing. Credentials are
+	//		placeholders: config validation is tested here, not live API calls.
+	//
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder credentials",
+				"text": "test"
+			}
+		]
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Cognee",
+			"properties": ["type", "cognee.base_url", "cognee.api_key", "cognee.dataset", "cognee.show_advanced"]
+		}
+	]
+}
