@@ -27,6 +27,7 @@ import base64
 
 from rocketlib import IInstanceBase, IJson
 from ai.common.schema import Doc, Question, Answer
+from ai.common.avi.descriptor import descriptor_from_payload
 from rocketlib import AVI_ACTION, Entry
 
 from .IGlobal import IGlobal
@@ -37,6 +38,7 @@ class IInstance(IInstanceBase):
 
     text: str = ''
     image = bytearray()
+    _image_descriptor = None
 
     def _getkey(self, type: str):
         # Allow the key to be overriden by
@@ -251,6 +253,9 @@ class IInstance(IInstanceBase):
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
             self.image = bytearray()
+            # BEGIN carries the stream descriptor (not image bytes); keep it so the
+            # emitted entry can carry the source provenance.
+            self._image_descriptor = descriptor_from_payload(buffer)
 
         # Handle AVI_WRITE action (appending chunks of the image)
         elif action == AVI_ACTION.WRITE:
@@ -270,5 +275,8 @@ class IInstance(IInstanceBase):
             # Release the image
             self.image = bytearray()
 
-            # Add the image
-            self.instance.currentObject.response[key].append({'mime_type': mimeType, 'image': image_str})
+            # Add the image, with the descriptor metadata when one arrived on BEGIN.
+            entry = {'mime_type': mimeType, 'image': image_str}
+            if self._image_descriptor is not None:
+                entry['metadata'] = self._image_descriptor.metadata.toDict()
+            self.instance.currentObject.response[key].append(entry)

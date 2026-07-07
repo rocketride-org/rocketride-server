@@ -3,7 +3,7 @@
 Covers the round-trip (build -> to_payload -> from_payload), the safety contract
 (empty / non-JSON / non-descriptor payloads parse to None so raw BEGINs stay safe),
 the exclude_none behaviour (unset optionals are omitted), and a guardrail that the
-canonical fixture testdata/descriptor_keys.json stays in sync with the module constants.
+canonical fixture testdata/contracts/descriptor_keys.json stays in sync with the module constants.
 """
 
 import json
@@ -17,11 +17,12 @@ from ai.common.avi.descriptor import (
     descriptor_from_payload,
     descriptor_to_payload,
 )
+from ai.common.schema import DocMetadata
 
-# Repo-root testdata/descriptor_keys.json. From this file, parents[6] is the repo root:
-# .../packages/ai/tests/ai/common/avi/test_descriptor.py
-#  [0]=avi [1]=common [2]=ai(tests) [3]=tests [4]=ai(package) [5]=packages [6]=<repo root>.
-_FIXTURE = Path(__file__).resolve().parents[6] / 'testdata' / 'descriptor_keys.json'
+# Canonical key fixture — a cross-language contract in the shared testdata corpus (also
+# synced into the engtest `datasets` folder, so the C++ builder-conformance test reads the
+# same file). From this test, parents[6] is the repo root.
+_FIXTURE = Path(__file__).resolve().parents[6] / 'testdata' / 'contracts' / 'descriptor_keys.json'
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +85,32 @@ def test_audio_round_trip_and_non_ascii_parent():
     assert parsed.metadata.sample_rate == 16000
 
 
+def test_image_round_trip_carries_media_detail():
+    """An image descriptor round-trips; image dims reuse the video width/height keys."""
+    doc = build_stream_descriptor(
+        None,
+        'image',
+        objectId='img1',
+        parent='/inbox/deck.pptx',
+        permissionId=0,
+        signature='sig',
+        nodeId='fg',
+        origin='extracted',
+        source_mime='video/mp4',
+        size=51200,
+        stream_index=2,
+        width=1920,
+        height=1080,
+        resource_name='media1.mp4 @ deck.pptx',
+    )
+    parsed = descriptor_from_payload(descriptor_to_payload(doc))
+    assert parsed is not None
+    assert parsed.type == 'ImageStream'
+    assert parsed.metadata.stream_index == 2
+    assert parsed.metadata.width == 1920
+    assert parsed.metadata.resource_name == 'media1.mp4 @ deck.pptx'
+
+
 def test_unset_optionals_are_omitted_not_null():
     """exclude_none: a descriptor built without duration/fps omits those keys entirely."""
     doc = build_stream_descriptor(
@@ -144,12 +171,119 @@ def test_build_stream_descriptor_rejects_unknown_kind():
 
 
 # ---------------------------------------------------------------------------
+# derived-document provenance: attach_source / attach_name / swap_ext
+# ---------------------------------------------------------------------------
+
+
+def _video_descriptor(**overrides):
+    """A parsed video descriptor for a standalone BBC clip (overridable)."""
+    fields = dict(
+        objectId='v1',
+        parent='/inbox/BBC - Tear down this wall.mp4',
+        permissionId=0,
+        signature='sig',
+        nodeId='n',
+        origin='ingested',
+        source_mime='video/mp4',
+        size=12838904,
+        stream_index=0,
+        duration=74.05,
+        width=1280,
+        height=720,
+    )
+    fields.update(overrides)
+    return build_stream_descriptor(None, 'video', **fields)
+
+
+def test_attach_source_stamps_media_detail_only():
+    """attach_source copies media detail, never the identity/security backlink."""
+    md = DocMetadata(objectId='doc1', chunkId=0)
+    D.attach_source(md, _video_descriptor())
+    assert md.source['source_mime'] == 'video/mp4'
+    assert md.source['duration'] == 74.05
+    assert md.source['width'] == 1280
+    assert md.source['stream_index'] == 0
+    for excluded in ('objectId', 'parent', 'permissionId', 'signature', 'nodeId', 'origin'):
+        assert excluded not in md.source
+
+
+def test_attach_source_noop_without_descriptor():
+    """A None descriptor leaves metadata.source unset (so toDict omits it)."""
+    md = DocMetadata(objectId='doc1', chunkId=0)
+    D.attach_source(md, None)
+    assert getattr(md, 'source', None) is None
+
+
+def test_attach_name_one_to_many():
+    """One-to-many: <stem>.<marker><index>.<ext>."""
+    md = DocMetadata(objectId='doc1', chunkId=0)
+    D.attach_name(md, _video_descriptor(), index=0, marker='frame', ext='png')
+    assert md.name == 'BBC - Tear down this wall.frame0.png'
+
+
+def test_attach_name_one_to_one_and_extensionless():
+    """One-to-one swaps to <stem>.<ext>; no ext yields an extensionless name."""
+    md = DocMetadata(objectId='doc1', chunkId=0)
+    D.attach_name(md, _video_descriptor(), ext='png')
+    assert md.name == 'BBC - Tear down this wall.png'
+    md2 = DocMetadata(objectId='doc2', chunkId=0)
+    D.attach_name(md2, _video_descriptor(), index=3, marker='frame')
+    assert md2.name == 'BBC - Tear down this wall.frame3'
+
+
+def test_attach_name_prefers_resource_name():
+    """The inner file name (resource_name) wins over the container parent."""
+    md = DocMetadata(objectId='doc1', chunkId=0)
+    D.attach_name(md, _video_descriptor(resource_name='media1.mp4'), index=1, ext='png')
+    assert md.name == 'media1.frame1.png'
+
+
+def test_attach_name_noop_without_source_name():
+    """No descriptor -> no name (never a bare '.frame0.png')."""
+    md = DocMetadata(objectId='doc1', chunkId=0)
+    D.attach_name(md, None, index=0, ext='png')
+    assert getattr(md, 'name', None) is None
+
+
+def test_derived_name_string_forms():
+    """derived_name returns the same string attach_name would set (or None)."""
+    d = _video_descriptor()
+    assert D.derived_name(d, index=0, marker='frame', ext='png') == 'BBC - Tear down this wall.frame0.png'
+    assert D.derived_name(d, index=2, marker='segment', ext='txt') == 'BBC - Tear down this wall.segment2.txt'
+    assert D.derived_name(d, index=5, marker='frame') == 'BBC - Tear down this wall.frame5'  # extensionless
+    assert D.derived_name(d, ext='png') == 'BBC - Tear down this wall.png'  # one-to-one
+    assert D.derived_name(None, index=0, ext='png') is None
+
+
+def test_swap_ext():
+    """swap_ext replaces a real trailing extension, else appends; None-safe."""
+    assert D.swap_ext('BBC - Tear down this wall.frame0.png', 'txt') == 'BBC - Tear down this wall.frame0.txt'
+    assert D.swap_ext('photo.png', 'txt') == 'photo.txt'
+    assert D.swap_ext('BBC.frame0', 'txt') == 'BBC.frame0.txt'  # 'frame0' not a real ext -> append
+    assert D.swap_ext('name', 'txt') == 'name.txt'
+    assert D.swap_ext(None, 'txt') is None
+
+
+def test_rename_ext_swaps_on_a_copy():
+    """rename_ext swaps the name extension without mutating the input metadata."""
+    md = DocMetadata(objectId='doc1', chunkId=0)
+    md.name = 'BBC - Tear down this wall.frame0.png'
+    out = D.rename_ext(md, 'txt')
+    assert out.name == 'BBC - Tear down this wall.frame0.txt'
+    assert md.name == 'BBC - Tear down this wall.frame0.png'  # input untouched
+    # No name -> returned unchanged; None -> None (both safe).
+    md2 = DocMetadata(objectId='doc2', chunkId=0)
+    assert D.rename_ext(md2, 'txt') is md2
+    assert D.rename_ext(None, 'txt') is None
+
+
+# ---------------------------------------------------------------------------
 # guardrail: fixture <-> module constants stay in sync
 # ---------------------------------------------------------------------------
 
 
 def test_fixture_matches_module_constants():
-    """Fixture testdata/descriptor_keys.json must agree with the module constants.
+    """Fixture descriptor_keys.json must agree with the module constants.
 
     Adding/renaming a key without updating both sides then fails CI.
     """
@@ -161,3 +295,35 @@ def test_fixture_matches_module_constants():
     assert tuple(md['optional_common']) == D.OPTIONAL_COMMON_KEYS
     assert tuple(md['optional_video']) == D.OPTIONAL_VIDEO_KEYS
     assert tuple(md['optional_audio']) == D.OPTIONAL_AUDIO_KEYS
+
+
+def test_parser_accepts_every_canonical_key():
+    """Consumer conformance: descriptor_from_payload parses a descriptor carrying every
+    canonical metadata key, preserving each one.
+
+    Pairs with the C++ builder-conformance test (which asserts the builder emits only
+    canonical keys): together they enforce that the C++-produced key set and the
+    Python-consumed key set both agree with the descriptor_keys.json contract.
+    """
+    fixture = json.loads(_FIXTURE.read_text(encoding='utf-8'))
+    m = fixture['metadata']
+    keys = m['required'] + m['optional_common'] + m['optional_video'] + m['optional_audio']
+
+    # Type-correct sample per canonical key (DocMetadata validates its declared fields).
+    int_keys = {'permissionId', 'size', 'stream_index', 'width', 'height', 'sample_rate'}
+    float_keys = {'start_offset', 'duration', 'fps'}
+
+    def sample(k):
+        if k in int_keys:
+            return 1
+        if k in float_keys:
+            return 1.5
+        return f'{k}-value'
+
+    metadata = {k: sample(k) for k in keys}
+    payload = json.dumps({'type': 'VideoStream', 'metadata': metadata}).encode('utf-8')
+
+    parsed = descriptor_from_payload(payload)
+    assert parsed is not None
+    for k in keys:
+        assert getattr(parsed.metadata, k, None) is not None, f'canonical key {k!r} not preserved by the parser'

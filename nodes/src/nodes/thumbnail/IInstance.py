@@ -24,6 +24,7 @@
 from rocketlib import AVI_ACTION, Entry, IInstanceBase, warning
 from ai.common.schema import Doc, DocMetadata
 from ai.common.image import ImageProcessor
+from ai.common.avi.descriptor import descriptor_from_payload, attach_source, attach_name
 from .IGlobal import IGlobal
 
 
@@ -49,6 +50,7 @@ class IInstance(IInstanceBase):
         """
         self.chunkId = 0  # Initialize chunk counter
         self.image_data = None  # Reset accumulated raw image data buffer
+        self._source_descriptor = None  # Stream descriptor from the image BEGIN
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """
@@ -70,6 +72,8 @@ class IInstance(IInstanceBase):
         """
         # Handle the start of image data streaming
         if action == AVI_ACTION.BEGIN:
+            # BEGIN carries the stream descriptor (source provenance), not image bytes.
+            self._source_descriptor = descriptor_from_payload(buffer)
             self.image_data = bytearray()  # Initialize buffer to accumulate chunks
             return self.preventDefault()  # Signal to prevent further default handling
 
@@ -99,6 +103,10 @@ class IInstance(IInstanceBase):
                     tableId=0,
                     isDeleted=False,
                 )
+
+                # Source provenance + name (<image-stem>.png) from the stream descriptor.
+                attach_source(metadata, self._source_descriptor)
+                attach_name(metadata, self._source_descriptor, ext='png')
 
                 # Create the document object with the image data and metadata
                 doc = Doc(type='Image', page_content=image_str, metadata=metadata)

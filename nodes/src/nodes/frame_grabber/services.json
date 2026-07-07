@@ -148,15 +148,15 @@
 		},
 		"grabber.interval": {
 			"object": "interval",
-			"properties": ["grabber.second.interval", "grabber.start_time", "grabber.duration"]
+			"properties": ["grabber.second.interval", "grabber.start_time", "grabber.duration", "grabber.watermark"]
 		},
 		"grabber.transition": {
 			"object": "transition",
-			"properties": ["grabber.percent", "grabber.min_scene_gap", "grabber.start_time", "grabber.duration", "grabber.max_frames"]
+			"properties": ["grabber.percent", "grabber.min_scene_gap", "grabber.start_time", "grabber.duration", "grabber.max_frames", "grabber.watermark"]
 		},
 		"grabber.key": {
 			"object": "key",
-			"properties": ["grabber.start_time", "grabber.duration", "grabber.max_frames"]
+			"properties": ["grabber.start_time", "grabber.duration", "grabber.max_frames", "grabber.watermark"]
 		},
 		"grabber.profile": {
 			"title": "Frame grabber mode",
@@ -176,6 +176,50 @@
 					"value": "key",
 					"properties": ["grabber.key"]
 				}
+			]
+		},
+		"grabber.watermark": {
+			"title": "Watermark extracted frames",
+			"type": "string",
+			"default": "no",
+			"enum": [
+				["no", "No watermark"],
+				["yes", "Add watermark"]
+			],
+			"conditional": [
+				{
+					"value": "yes",
+					"properties": ["grabber.watermark_location", "grabber.watermark_filename", "grabber.watermark_timestamp"]
+				}
+			]
+		},
+		"grabber.watermark_location": {
+			"title": "Watermark position",
+			"type": "string",
+			"default": "bottom_right",
+			"enum": [
+				["top_left", "Top left"],
+				["top_right", "Top right"],
+				["bottom_left", "Bottom left"],
+				["bottom_right", "Bottom right"]
+			]
+		},
+		"grabber.watermark_filename": {
+			"title": "Include file name",
+			"type": "string",
+			"default": "yes",
+			"enum": [
+				["yes", "Yes"],
+				["no", "No"]
+			]
+		},
+		"grabber.watermark_timestamp": {
+			"title": "Include timestamp",
+			"type": "string",
+			"default": "yes",
+			"enum": [
+				["yes", "Yes"],
+				["no", "No"]
 			]
 		}
 	},

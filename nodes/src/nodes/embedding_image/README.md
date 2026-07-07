@@ -49,6 +49,14 @@ accumulated bytes are decoded, embedded, and wrapped in a new document of type `
 whose `page_content` is the base64-encoded image. Each image in the stream receives a
 unique `chunkId` in its metadata.
 
+### Source provenance
+
+Documents produced from the **image lane** carry the source image's media detail under
+`metadata.source` (`source_mime`, `width`, `height`, `size`, `resource_name`, …) and a
+`metadata.name` of the source stem (e.g. `photo`). Both are omitted when the incoming image
+carried no stream descriptor. Documents from the **documents lane** keep the `source`/`name`
+their upstream node already set.
+
 ### Fields
 
 | Field | Type | Description |

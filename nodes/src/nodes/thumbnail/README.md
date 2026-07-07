@@ -38,7 +38,8 @@ It then emits on whichever output lanes have listeners attached:
 
 - **`documents` listener**: the thumbnail is base64-encoded (PNG) and emitted as a
   single `Doc` of type `Image` with fresh metadata (`chunkId`, `isTable: false`,
-  `tableId: 0`, `isDeleted: false`).
+  `tableId: 0`, `isDeleted: false`), plus `metadata.source` (the source image's media
+  detail) and `metadata.name` = `<image-stem>.png` when the input carried a stream descriptor.
 - **`image` listener**: the thumbnail is emitted as raw PNG bytes in a new
   `BEGIN` / `WRITE` / `END` stream, keeping the incoming MIME type.
 
