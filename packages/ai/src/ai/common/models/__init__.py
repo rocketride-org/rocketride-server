@@ -37,8 +37,31 @@ from .ocr import TrOCR, TrOCRLoader
 from .transformers import SentenceTransformer, SentenceTransformerLoader
 from .transformers import pipeline, AutoModel, AutoTokenizer, TransformersLoader
 
-# Vision (CLIP / ViT) image embedding
-from .vision import VisionLoader, CLIPModel, ViTModel
+# Vision family: CLIP / ViT image embedding, depth estimation, object detection
+from .vision import (
+    VisionLoader,
+    CLIPModel,
+    ViTModel,
+    DepthEstimatorLoader,
+    DepthEstimator,
+    DetectorLoader,
+    Detector,
+    CaptionerLoader,
+    Captioner,
+    BackgroundRemoverLoader,
+    BackgroundRemover,
+    PoseEstimatorLoader,
+    PoseEstimator,
+)
+
+# Detection / segmentation backends (relocated under vision/)
+from .vision.detection import MmGDinoLoader, RFDetrLoader
+from .vision.segmentation import (
+    Mask2FormerInstanceLoader,
+    Mask2FormerSemanticLoader,
+    SegmenterLoader,
+    Segmenter,
+)
 
 __all__ = [
     # Base
@@ -70,4 +93,27 @@ __all__ = [
     'VisionLoader',
     'CLIPModel',
     'ViTModel',
+    # Depth
+    'DepthEstimatorLoader',
+    'DepthEstimator',
+    # Detection (served)
+    'DetectorLoader',
+    'Detector',
+    # Segmentation (served)
+    'SegmenterLoader',
+    'Segmenter',
+    # Caption (served)
+    'CaptionerLoader',
+    'Captioner',
+    # Background removal (served)
+    'BackgroundRemoverLoader',
+    'BackgroundRemover',
+    # Pose estimation (served)
+    'PoseEstimatorLoader',
+    'PoseEstimator',
+    # Detection / segmentation (plain backends)
+    'Mask2FormerInstanceLoader',
+    'Mask2FormerSemanticLoader',
+    'MmGDinoLoader',
+    'RFDetrLoader',
 ]

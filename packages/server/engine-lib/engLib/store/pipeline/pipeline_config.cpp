@@ -287,6 +287,14 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
         for (auto &[id, comp] : comps) {
             for (auto &input : comp.inputs) {
                 for (auto &output : comp.outputs) {
+                    // Unregistered provider (e.g. a debug-only node in a release
+                    // build) — error instead of dereferencing a null def.
+                    if (!comp.def)
+                        return APERR(Ec::InvalidParam, "Component", id,
+                                     "references a provider with no registered "
+                                     "service definition; it is unavailable in "
+                                     "this engine build (e.g. a debug-only node)");
+
                     if (!comp.def->serviceDefinition["lanes"].isMember(
                             input->name))
                         return APERR(Ec::InvalidParam, "Component", id,

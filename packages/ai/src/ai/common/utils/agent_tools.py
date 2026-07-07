@@ -136,29 +136,41 @@ def langchain_messages_to_transcript(messages: Any) -> str:
             role = 'tool'
             try:
                 name = safe_str(getattr(m, 'name', ''))
-                if name:
-                    role = f'tool[{name}]'
+                # Carry the tool_call_id so each result stays paired with the
+                # specific call that produced it. Without this, a turn that
+                # replays *parallel* calls to the same tool loses the
+                # call->result mapping and the model can mis-attribute results.
+                call_id = safe_str(getattr(m, 'tool_call_id', ''))
+                label = f'{name}#{call_id}' if name and call_id else (name or call_id)
+                if label:
+                    role = f'tool[{label}]'
             except Exception:
                 pass
         elif isinstance(m, AIMessage):
             role = 'assistant'
             try:
-                tool_calls = getattr(m, 'tool_calls', None) or []
+                tool_calls = [tc for tc in (getattr(m, 'tool_calls', None) or []) if isinstance(tc, dict)]
                 if tool_calls:
-                    rendered_calls = [
-                        json.dumps(
-                            {
-                                'type': 'tool_call',
-                                'name': safe_str(tc.get('name', '')),
-                                'args': tc.get('args', {}),
-                            },
-                            ensure_ascii=False,
-                            default=str,
-                        )
+                    calls = [
+                        {
+                            'id': safe_str(tc.get('id', '')),
+                            'name': safe_str(tc.get('name', '')),
+                            'args': tc.get('args', {}),
+                        }
                         for tc in tool_calls
-                        if isinstance(tc, dict)
                     ]
-                    content = '\n'.join(filter(None, [content, *rendered_calls]))
+                    # Preserve the original grouping and per-call ids so a replayed
+                    # turn is unambiguous. A single call renders as the singular
+                    # envelope; multiple parallel calls render as ONE plural
+                    # ``tool_calls`` envelope (the same shape the model emitted)
+                    # rather than being flattened into separate single-call lines,
+                    # which erased both the grouping and the id->result pairing.
+                    if len(calls) == 1:
+                        envelope: Dict[str, Any] = {'type': 'tool_call', **calls[0]}
+                    else:
+                        envelope = {'type': 'tool_calls', 'calls': calls}
+                    rendered = json.dumps(envelope, ensure_ascii=False, default=str)
+                    content = '\n'.join(filter(None, [content, rendered]))
             except Exception:
                 pass
 

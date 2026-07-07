@@ -27,15 +27,24 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
+import { ConnectionManager } from '../../connection/connection';
 import AccountPage from '../../views/account/AccountPage';
 import SettingsPage from '../../views/settings/SettingsPage';
+import EnvironmentPage from '../../views/environment/EnvironmentPage';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
 /** Shell overlay pages that render as modal dialogs over the client area. */
-export type ShellOverlay = 'account' | 'settings' | null;
+export type ShellOverlay = 'account' | 'settings' | 'environment' | null;
+
+/** Opaque overlay ids a guest app is allowed to request via `shell:openOverlay`. */
+const OPENABLE_OVERLAYS = ['account', 'settings', 'environment'] as const;
+
+/** Type guard: is `id` a valid openable overlay id (not null/unknown)? */
+const isOpenableOverlay = (id: unknown): id is Exclude<ShellOverlay, null> =>
+	typeof id === 'string' && (OPENABLE_OVERLAYS as readonly string[]).includes(id);
 
 // =============================================================================
 // STYLES
@@ -100,6 +109,18 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 	/** Closes the currently open overlay. */
 	const closeOverlay = useCallback(() => setOverlay(null), []);
 
+	// --- Open-overlay requests from guest apps -------------------------------
+	// Guest apps (e.g. home-ui's profile menu) can't reach `setOverlay`
+	// directly, so they emit `shell:openOverlay` over the event bus and the
+	// shell routes it into the same overlay state the sidebar uses.
+	useEffect(() => {
+		return ConnectionManager.getInstance().on('shell:openOverlay', ({ id }: { id: ShellOverlay }) => {
+			// Gate to the contracted ids so a stray runtime value can't open a
+			// blank modal shell with no page content.
+			if (isOpenableOverlay(id)) setOverlay(id);
+		});
+	}, []);
+
 	// --- Escape key handler --------------------------------------------------
 	useEffect(() => {
 		/** Closes the Account or Settings overlay when Escape is pressed. */
@@ -124,6 +145,7 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 						<button style={styles.dialogClose} onClick={closeOverlay}>✕</button>
 						{overlay === 'account' && <AccountPage />}
 						{overlay === 'settings' && <SettingsPage />}
+						{overlay === 'environment' && <EnvironmentPage />}
 					</div>
 				</div>
 			)}

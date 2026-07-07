@@ -53,14 +53,15 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     return conn
 
 
-def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organizations=None):
+def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organization=None):
     """Build an AccountInfo-shaped stub."""
     return SimpleNamespace(
         userId=user_id,
         auth=auth,
         userToken='token-' + user_id,
         defaultTeam=default_team,
-        organizations=organizations if organizations is not None else [],
+        organization=organization,
+        sysPermissions=[],
     )
 
 
@@ -72,11 +73,8 @@ def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organ
 @pytest.mark.asyncio
 async def test_on_execute_starts_task_with_resolved_org_id():
     """on_execute resolves org_id from the user's default team and calls start_task."""
-    organizations = [
-        {'id': 'org-A', 'teams': [{'id': 'team-other'}]},
-        {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}]},
-    ]
-    account = _account_info(user_id='user-1', default_team='team-1', organizations=organizations)
+    organization = {'id': 'org-B', 'teams': [{'id': 'team-1'}, {'id': 'team-other'}]}
+    account = _account_info(user_id='user-1', default_team='team-1', organization=organization)
 
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
@@ -230,14 +228,12 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     }
 
     # Caller has access to team-1 only; team-other is invisible.
-    organizations = [
-        {
-            'id': 'org-1',
-            'permissions': [],
-            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
-        }
-    ]
-    conn = _make_conn(account_info=_account_info(user_id='user-1', organizations=organizations), server=server)
+    organization = {
+        'id': 'org-1',
+        'permissions': [],
+        'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+    }
+    conn = _make_conn(account_info=_account_info(user_id='user-1', organization=organization), server=server)
     response = await TaskCommands.on_rrext_get_tasks(conn, {})
 
     tokens = [t['token'] for t in response['body']['tasks']]
@@ -265,14 +261,12 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
     server = MagicMock()
     server._task_control = {'tk_1': control}
 
-    organizations = [
-        {
-            'id': 'org-1',
-            'permissions': [],
-            'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
-        }
-    ]
-    conn = _make_conn(account_info=_account_info(user_id='user-1', organizations=organizations), server=server)
+    organization = {
+        'id': 'org-1',
+        'permissions': [],
+        'teams': [{'id': 'team-1', 'permissions': ['task.monitor']}],
+    }
+    conn = _make_conn(account_info=_account_info(user_id='user-1', organization=organization), server=server)
     response = await TaskCommands.on_rrext_get_tasks(conn, {})
     assert response['body']['tasks'][0]['name'] == 'my-source'
     assert response['body']['tasks'][0]['description'] == 'RocketRide DTC MCP Tool'

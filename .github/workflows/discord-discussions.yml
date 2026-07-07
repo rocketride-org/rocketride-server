@@ -185,10 +185,10 @@ jobs:
 
               # GraphQL returns author.login as "github-actions" (no [bot] suffix);
               # REST returns "github-actions[bot]". Match either to be safe.
-              m=$(echo "$page" | jq -c '
+              m=$(echo "$page" | jq -c --arg re "$DISCORD_MARKER_PATTERN" '
                 [.data.repository.discussion.comments.nodes[]
                   | select((.author.login == "github-actions" or .author.login == "github-actions[bot]")
-                    and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))
+                    and (.body | test($re)))
                 ] | first // empty')
 
               if [ -n "$m" ] && [ "$m" != "null" ]; then
@@ -206,7 +206,7 @@ jobs:
           MARKER_COMMENT_ID=""
           MARKER=$(find_marker)
           if [ -n "$MARKER" ] && [ "$MARKER" != "null" ]; then
-            DISCORD_MSG_ID=$(echo "$MARKER" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+            DISCORD_MSG_ID=$(echo "$MARKER" | jq -r '.body' | extract_discord_marker)
             MARKER_COMMENT_ID=$(echo "$MARKER" | jq -r '.id')
           fi
 
@@ -257,14 +257,15 @@ jobs:
             if [ -n "$EXISTING_MARKER" ] && [ "$EXISTING_MARKER" != "null" ]; then
               # Another run won the race — delete our duplicate message, use theirs
               discord_curl -X DELETE "$BASE/messages/$NEW_MSG_ID" > /dev/null || true
-              DISCORD_MSG_ID=$(echo "$EXISTING_MARKER" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              DISCORD_MSG_ID=$(echo "$EXISTING_MARKER" | jq -r '.body' | extract_discord_marker)
               discord_curl -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
                 "$BASE/messages/$DISCORD_MSG_ID" > /dev/null || true
             else
               DISCORD_MSG_ID="$NEW_MSG_ID"
+              COMMENT_BODY=$(render_discord_marker "$DISCORD_MSG_ID")
               gh api graphql \
                 -f query='mutation($id:ID!,$body:String!){ addDiscussionComment(input:{discussionId:$id,body:$body}){ clientMutationId } }' \
                 -f id="$NODE_ID" \
-                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+                -f body="$COMMENT_BODY"
             fi
           fi

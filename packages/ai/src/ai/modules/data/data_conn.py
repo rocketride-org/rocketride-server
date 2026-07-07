@@ -28,11 +28,14 @@ from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
 from rocketlib import (
+    APERR,
+    AVI_ACTION,
+    Ec,
+    Entry,
+    IInvokeTool,
     IServiceEndpoint,
     IServiceFilterPipe,
     getObject,
-    Entry,
-    AVI_ACTION,
     monitorCompleted,
     monitorFailed,
 )
@@ -414,6 +417,7 @@ class DataConn(DAPConn):
         - open: Initialize a new data pipe for processing
         - write: Write data to a specific lane of an active pipe (resets activity timer)
         - close: Close and finalize a pipe, returning processing results (resets activity timer)
+        - tool: Invoke a @tool_function on a pipeline node (optionally using an open pipe)
 
         Args:
             request (Dict[str, Any]): The extended command request containing:
@@ -442,6 +446,8 @@ class DataConn(DAPConn):
             return await self._write(request, args)
         elif subcmd == 'close':
             return await self._close(request, args)
+        elif subcmd == 'tool':
+            return await self._tool(request, args)
         else:
             raise ValueError(f'Invalid subcommand {subcmd}')
 
@@ -747,6 +753,117 @@ class DataConn(DAPConn):
                 self._pipe_sem.release()
                 self.debug_message(f'Released semaphore for pipe {pipe_id}')
 
+    async def _tool(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Invoke a @tool_function on a pipeline node.
+
+        Dispatches an IInvokeTool.Invoke through the control plane, bypassing
+        the Question/Answer data lane entirely.  If ``pipe_id`` is provided the
+        caller's already-open pipe is reused; otherwise a pipe is borrowed from
+        the endpoint pool for the duration of the call.
+
+        Args:
+            request: The DAP request envelope.
+            args: Parsed arguments containing:
+                - tool (str, required): Name of the @tool_function to invoke.
+                - nodeId (str, optional): Target node ID.  When empty the
+                  control plane broadcasts to all tool-lane nodes; the first
+                  node that owns the tool handles the call.
+                - input (dict, optional): Arguments forwarded to the tool.
+                - pipe_id (int, optional): Pipe ID of an already-open pipe.
+
+        Returns:
+            DAP response with ``body.result`` set to the tool's return value.
+
+        Raises:
+            ValueError: If ``tool`` is missing, ``pipe_id`` is invalid, or no
+                node handles the requested tool.
+        """
+        tool_name = args.get('tool')
+        if not tool_name:
+            raise ValueError('tool is required')
+
+        node_id = args.get('nodeId', '')
+        tool_input = args.get('input', {})
+        pipe_id = args.get('pipe_id', None)
+
+        # Resolve conn_pipe in async scope so we can set in_use before
+        # dispatching to the thread (mirrors _write pattern).
+        conn_pipe = None
+        if pipe_id is not None:
+            conn_pipe = self._pipe_map.get(pipe_id)
+            if not conn_pipe or not conn_pipe.is_open:
+                raise ValueError(f'Pipe {pipe_id} is not open')
+            if conn_pipe.has_failed:
+                raise ValueError(f'Pipe {pipe_id} has failed')
+            self._reset_pipe_activity(conn_pipe)
+
+        # Acquire semaphore when borrowing a pipe (no pipe_id) to prevent
+        # tool traffic from saturating the endpoint beyond threadCount.
+        borrowed = conn_pipe is None
+        if borrowed:
+            await self._pipe_sem.acquire()
+
+        def tool_sync():
+            # Use caller's open pipe if provided, otherwise borrow one
+            if conn_pipe is not None:
+                pipe = conn_pipe.pipe
+            else:
+                pipe = self._target.getPipe()
+
+            try:
+                # Walk the filter chain to find candidate node(s).
+                # When node_id is provided, match exactly.
+                # When empty, broadcast to all nodes — first handler wins.
+                if node_id:
+                    node = pipe
+                    while node is not None:
+                        if node.pipeType.id == node_id:
+                            break
+                        node = node.next
+                    else:
+                        raise ValueError(f'Node "{node_id}" not found in pipeline')
+                    candidates = [node]
+                else:
+                    candidates = []
+                    node = pipe
+                    while node is not None:
+                        candidates.append(node)
+                        node = node.next
+
+                # Invoke the tool on the first node that handles it.
+                for node in candidates:
+                    py_instance = getattr(node, 'pyInstance', None)
+                    if py_instance is None:
+                        continue
+                    param = IInvokeTool.Invoke(tool_name=tool_name, input=tool_input)
+                    try:
+                        py_instance.invoke(param)
+                        return param.output
+                    except APERR as e:
+                        if e.ec == Ec.PreventDefault:
+                            continue
+                        raise
+
+                raise ValueError(f'No handler found for tool "{tool_name}" on node "{node_id}"')
+
+            finally:
+                if borrowed:
+                    self._target.putPipe(pipe)
+
+        # Execute in thread, marking pipe as in-use so the zombie detector skips it
+        if conn_pipe is not None:
+            conn_pipe.in_use = True
+        try:
+            result = await asyncio.to_thread(tool_sync)
+            return self.build_response(request, body={'result': result})
+        finally:
+            if conn_pipe is not None:
+                conn_pipe.in_use = False
+                self._reset_pipe_activity(conn_pipe)
+            if borrowed:
+                self._pipe_sem.release()
+
     # =========================================================================
     # CPROFILE COMMANDS
     # =========================================================================
@@ -810,4 +927,30 @@ class DataConn(DAPConn):
             Dict[str, Any]: DAP response with report text
         """
         result = profiler.report()
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_report_tree(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get a structured call tree from the last completed profiling session.
+
+        Returns a hierarchical JSON tree suitable for flame graph, sunburst,
+        and icicle visualisations.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments.max_depth (int, optional): Max tree depth (default 50)
+                - arguments.min_pct (float, optional): Min cumtime % threshold (default 0.1)
+
+        Returns:
+            Dict[str, Any]: DAP response with tree, total_time, total_calls
+        """
+        args = request.get('arguments', {})
+        max_depth = args.get('max_depth', 50)
+        min_pct = args.get('min_pct', 0.1)
+        include_system = args.get('include_system', True)
+        result = profiler.report_tree(
+            max_depth=max_depth,
+            min_pct=min_pct,
+            include_system=include_system,
+        )
         return self.build_response(request, body=result)

@@ -99,9 +99,7 @@ class DeployApi:
 
     async def list(self) -> list[DeploymentRecord]:
         """
-        Return all deployments visible to the caller with their status and schedule config.
-
-        Team members see their team's deployments; org admins see all deployments in the org.
+        Return the authenticated user's deployments with their status and schedule config.
 
         Returns:
             List of deployment summary records.

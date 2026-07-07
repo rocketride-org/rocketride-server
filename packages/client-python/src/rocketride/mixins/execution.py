@@ -353,10 +353,8 @@ class ExecutionMixin(DAPClient):
         Raises:
             RuntimeError: If the restart fails.
         """
-        # token='*' scopes the request; the task's own token goes in arguments
         request = self.build_request(
             command='restart',
-            token='*',
             arguments={
                 'token': token,
                 'projectId': project_id,

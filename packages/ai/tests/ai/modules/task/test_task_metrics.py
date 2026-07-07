@@ -109,6 +109,27 @@ def no_gpu(monkeypatch):
     monkeypatch.setitem(sys.modules, 'pynvml', None)  # importing None raises
 
 
+# Default billing rates matching the DB seed defaults (all time units in ms).
+_TEST_BILLING_RATES = {
+    'cpu_compute': 0.001,  # tokens per ms
+    'cpu_memory': 0.05,  # tokens per GB-sec
+    'gpu_compute': 0.005,  # tokens per ms
+    'gpu_memory': 2.0,  # tokens per GB-sec
+    'gpu_preprocess': 0.0,
+    'gpu_postprocess': 0.0,
+    'gpu_queue_wait': 0.0,
+    'gpu_inference_count': 0.0,
+}
+
+
+@pytest.fixture(autouse=True)
+def mock_billing_rates(monkeypatch):
+    """Mock account.get_billing_rates() so _update_tokens() uses test rates."""
+    mock_account = MagicMock()
+    mock_account.get_billing_rates.return_value = _TEST_BILLING_RATES
+    monkeypatch.setitem(sys.modules, 'ai.account', MagicMock(account=mock_account))
+
+
 def _make_metrics(fake_psutil, pid=1234, sample_interval=1.0, callback=None):
     """
     Build a TaskMetrics with mocked psutil and a fresh TASK_STATUS namespace.
@@ -357,6 +378,7 @@ def test_sample_gpu_swallows_sampling_errors(monkeypatch, fake_psutil):
 def test_accumulate_sample_updates_internal_counters(fake_psutil, no_gpu):
     """Internal cpu_seconds, memory_mb_seconds, duration_seconds increase as expected."""
     tm, status = _make_metrics(fake_psutil)
+    tm.set_service_up(True)  # ungate billing accumulators
     tm._cpu_percent_raw = 200.0  # raw across cores
     status.metrics.cpu_memory_mb = 150.0
     status.metrics.gpu_memory_mb = 0.0  # gpu not available anyway
@@ -404,6 +426,7 @@ def test_accumulate_sample_tracks_peaks(fake_psutil, no_gpu):
 def test_accumulate_sample_computes_averages(fake_psutil, no_gpu):
     """avg_* fields equal accumulated total / duration."""
     tm, status = _make_metrics(fake_psutil)
+    tm.set_service_up(True)  # ungate billing accumulators
     tm._cpu_percent_raw = 200.0
     status.metrics.cpu_memory_mb = 100.0
     tm._accumulate_sample(2.0)
@@ -418,24 +441,28 @@ def test_accumulate_sample_computes_averages(fake_psutil, no_gpu):
 # ---------------------------------------------------------------------------
 
 
-def test_update_tokens_converts_resource_seconds_to_token_rates(fake_psutil, no_gpu):
-    """Tokens = resource-hours * per-hour rate; total = sum of components."""
+def test_update_tokens_converts_resource_accumulators_via_db_rates(fake_psutil, no_gpu):
+    """Tokens = raw_value * DB rate; total = sum of components."""
     tm, status = _make_metrics(fake_psutil)
+    tm.set_service_up(True)  # ungate billing accumulators
     # Inject accumulators directly to bypass arithmetic noise.
-    tm._cpu_seconds = 3600.0  # 1 vCPU-hour
-    tm._memory_mb_seconds = 1024 * 3600.0  # 1 GB-hour
-    tm._gpu_memory_mb_seconds = 1024 * 3600.0  # 1 GB-hour
+    # 100 CPU-seconds = 100_000 ms * 0.001 tokens/ms = 100 tokens
+    tm._cpu_seconds = 100.0
+    # 10240 MB-sec = 10 GB-sec * 0.05 tokens/GB-sec = 0.5 tokens
+    tm._memory_mb_seconds = 10240.0
+    # GPU memory comes from subprocess timer, not OS sampling
+    # Simulate 5 GB-sec of inference VRAM (stored as GB-sec, not ms)
+    tm._subprocess_timers['gpu_memory'] = 5.0
 
     tm._update_tokens()
 
-    assert status.tokens.cpu_utilization == round(task_metrics.CONST_RATE_VCPU_HOUR, 1)
-    assert status.tokens.cpu_memory == round(task_metrics.CONST_RATE_MEMORY_GB_HOUR, 1)
-    assert status.tokens.gpu_memory == round(task_metrics.CONST_RATE_GPU_GB_HOUR, 1)
-    # Total is the rounded sum.
-    expected_total = round(
-        status.tokens.cpu_utilization + status.tokens.cpu_memory + status.tokens.gpu_memory,
-        1,
-    )
+    expected_cpu = round(100.0 * 1000.0 * _TEST_BILLING_RATES['cpu_compute'], 1)
+    expected_mem = round(10.0 * _TEST_BILLING_RATES['cpu_memory'], 1)
+    expected_gpu_mem = round(5.0 * _TEST_BILLING_RATES['gpu_memory'], 1)
+    assert status.tokens.cpu_utilization == expected_cpu
+    assert status.tokens.cpu_memory == expected_mem
+    assert status.tokens.gpu_memory == expected_gpu_mem
+    expected_total = round(expected_cpu + expected_mem + expected_gpu_mem, 1)
     assert status.tokens.total == expected_total
 
 
@@ -455,7 +482,7 @@ def test_report_to_billing_system_advances_last_report_state(fake_psutil, no_gpu
     status.tokens.gpu_memory = 5.0
     status.tokens.total = 35.0
 
-    tm._report_to_billing_system()
+    asyncio.run(tm._report_to_billing_system())
 
     # State advanced — the next report's delta starts from these.
     assert tm._last_report_cpu_seconds == 100.0
@@ -469,15 +496,20 @@ def test_report_to_billing_system_advances_last_report_state(fake_psutil, no_gpu
 def test_report_to_billing_system_handles_consecutive_reports(fake_psutil, no_gpu):
     """Second report sees only the delta accrued since the first."""
     tm, _ = _make_metrics(fake_psutil)
-    # First period
-    tm._cpu_seconds = 100.0
-    tm._report_to_billing_system()
-    assert tm._last_report_cpu_seconds == 100.0
 
-    # Second period — accumulators grew by 50
-    tm._cpu_seconds = 150.0
-    tm._report_to_billing_system()
-    assert tm._last_report_cpu_seconds == 150.0
+    async def run():
+        """Run two consecutive billing reports."""
+        # First period
+        tm._cpu_seconds = 100.0
+        await tm._report_to_billing_system()
+        assert tm._last_report_cpu_seconds == 100.0
+
+        # Second period — accumulators grew by 50
+        tm._cpu_seconds = 150.0
+        await tm._report_to_billing_system()
+        assert tm._last_report_cpu_seconds == 150.0
+
+    asyncio.run(run())
 
 
 # ---------------------------------------------------------------------------

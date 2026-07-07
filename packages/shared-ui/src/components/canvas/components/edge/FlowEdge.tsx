@@ -54,20 +54,29 @@ export default function FlowEdge({ id, sourceX, sourceY, targetX, targetY, sourc
 	const [hovered, setHovered] = useState(false);
 	const { setEdges } = useReactFlow();
 
+	// ReactFlow can render an edge for a frame before its connected nodes have been
+	// measured — at which point sourceX/Y and targetX/Y are NaN, and getBezierPath
+	// produces an invalid `<path d="MNaN,NaN…">` (a console error every frame). Bail
+	// until the endpoints are real numbers; ReactFlow re-renders the edge once the
+	// nodes report their measured size. (Hooks above run unconditionally — this early
+	// return is after them, so rules-of-hooks are respected.)
+	if (![sourceX, sourceY, targetX, targetY].every(Number.isFinite)) return null;
+
 	// Invoke edges run vertically (top-to-bottom) so the offset is applied
 	// to Y instead of X. Detect by checking the source handle ID.
 	const isInvokeEdge = sourceHandleId?.toLowerCase().includes('invoke');
 
 	// Compute the bezier path, shifting endpoints away from the handle center
 	// so the curve visually starts/ends at the handle edge.
-	const [edgePath, labelX, labelY] = getBezierPath({
+	const pathInput = {
 		sourceX: !isInvokeEdge ? sourceX - HANDLE_OFFSET : sourceX,
 		sourceY: isInvokeEdge ? sourceY - HANDLE_OFFSET : sourceY,
 		sourcePosition,
 		targetX: !isInvokeEdge ? targetX + HANDLE_OFFSET : targetX,
 		targetY: isInvokeEdge ? targetY + HANDLE_OFFSET : targetY,
 		targetPosition,
-	});
+	};
+	const [edgePath, labelX, labelY] = getBezierPath(pathInput);
 
 	/** Removes this edge from the canvas. */
 	const onDelete = () => setEdges((edges) => edges.filter((e) => e.id !== id));

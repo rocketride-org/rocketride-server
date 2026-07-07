@@ -98,6 +98,25 @@ class AccountBase(ABC):
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three
     # =========================================================================
 
+    def get_billing_rates(self) -> dict[str, float]:
+        """
+        Return billing rates (metric_key -> tokens_per_unit).
+
+        OSS default: empty dict (no billing).
+        SaaS override: returns the cached rates loaded from the
+        metrics_conversions DB table.
+        """
+        return {}
+
+    async def reload_billing_rates(self) -> dict[str, float]:
+        """
+        Reload billing rates from the DB.
+
+        OSS default: no-op, returns empty dict.
+        SaaS override: reloads from the metrics_conversions table.
+        """
+        return {}
+
     async def get_merged_env(self, user_id: str, org_id: str, team_id: str | None) -> dict[str, str]:
         """
         Build the merged ROCKETRIDE_* environment for a user.
@@ -153,7 +172,7 @@ class AccountBase(ABC):
 
         Args:
             user_id:       Internal user ID from the ConnectResult.
-            organizations: List of org dicts with nested teams (from ConnectResult).
+            organizations: List containing the user's single org dict with nested teams.
 
         Returns:
             List of app manifest dicts.
@@ -184,6 +203,124 @@ class AccountBase(ABC):
             org_id:        UUID of the organisation this event pertains to, or None.
         """
         pass
+
+    # =========================================================================
+    # BILLING — no-op in OSS; SaaS overrides with real ledger writes
+    # =========================================================================
+
+    async def apply_credit(
+        self,
+        org_id: str,
+        type: str,
+        resource: str,
+        amount: float,
+        idempotency_key: str,
+        user_id: str | None = None,
+        team_id: str | None = None,
+        context: dict | None = None,
+    ) -> bool:
+        """
+        Add credits to an org's ledger.
+
+        OSS default is a no-op returning False.  The SaaS implementation
+        INSERTs a positive-amount row into ``credit_ledger``.
+
+        Args:
+            org_id:          Organisation to credit.
+            type:            Transaction type (``purchase``, ``credit``, ``refund``, etc.).
+            resource:        Resource being credited (``tokens``, ``video``, etc.).
+            amount:          Positive amount to credit.
+            idempotency_key: Namespaced dedup key (e.g. ``stripe:cs_xxx:tokens``).
+            user_id:         Optional actor who initiated the credit.
+            team_id:         Optional team context.
+            context:         Optional audit metadata.
+
+        Returns:
+            True on first apply, False on duplicate or no-op.
+        """
+        return False
+
+    async def apply_debit(
+        self,
+        org_id: str,
+        user_id: str,
+        team_id: str | None,
+        resource: str,
+        amount: float,
+        idempotency_key: str,
+        context: dict,
+        description: str | None = None,
+    ) -> bool:
+        """
+        Debit an org's ledger (UPSERT for task usage).
+
+        OSS default is a no-op returning False.  The SaaS implementation
+        UPSERTs a negative-amount row into ``credit_ledger``.
+
+        The caller passes a **positive** amount; the implementation negates
+        it internally.
+
+        Args:
+            org_id:          Organisation to debit.
+            user_id:         User whose task triggered the burn (required for attribution).
+            team_id:         Team the task belongs to (None when task has no team scope).
+            resource:        Billing bucket (e.g. tokens, video, audio).
+            amount:          Positive amount to debit (negated internally).
+            idempotency_key: Namespaced dedup key (e.g. ``task:abc123:gpu_memory``).
+            context:         Human-readable audit context — pipeline name, source, etc.
+            description:     Line-item detail (e.g. gpu_memory, cpu_utilization).
+
+        Returns:
+            True on success, False on duplicate or no-op.
+        """
+        return False
+
+    async def get_credit_balance(self, org_id: str) -> dict:
+        """
+        Get the net credit balance for an org, grouped by resource.
+
+        OSS default returns empty balances.  The SaaS implementation
+        queries ``SELECT resource, SUM(amount) GROUP BY resource``.
+
+        Args:
+            org_id: Organisation to query.
+
+        Returns:
+            ``{'balances': {resource: float, ...}}``
+        """
+        return {'balances': {}}
+
+    async def get_transactions(
+        self,
+        org_id: str,
+        scope: str = 'org',
+        scope_id: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+        since: str | None = None,
+    ) -> dict:
+        """
+        Paginated transaction detail for an org, optionally scoped to a team or user.
+
+        OSS default returns empty results.  The SaaS implementation queries
+        the ``credit_ledger`` table with pagination and scope filtering.
+
+        Args:
+            org_id:    Organisation to query.
+            scope:     ``org``, ``team``, or ``user``.
+            scope_id:  Team or user ID when scope is not ``org``.
+            page:      1-based page number.
+            page_size: Rows per page (max 100).
+            since:     ISO datetime string — only return rows at or after this time.
+
+        Returns:
+            ``{'transactions': [...], 'total': int, 'page': int, 'pageSize': int}``
+        """
+        return {'transactions': [], 'total': 0, 'page': page, 'pageSize': page_size}
+
+    # =========================================================================
+    # DAP COMMAND DISPATCH — SaaS overrides all three
+    # =========================================================================
 
     async def handle_account(self, conn, request):
         """

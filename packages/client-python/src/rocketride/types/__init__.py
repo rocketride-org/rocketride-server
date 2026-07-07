@@ -153,13 +153,19 @@ from .account import (
 # Deploy types: deployment records.
 from .deploy import DeploymentRecord
 
-# Billing types: subscriptions, Stripe plans, compute credits.
+# Billing types: subscriptions, Stripe plans, compute credits, promo codes.
 from .billing import (
+    AppPrice,
     BillingDetail,
     PlanAction,
     StripePlan,
     CreditBalance,
     CreditPack,
+    LedgerTransaction,
+    PromoRedemption,
+    PromoValidation,
+    TransactionsResult,
+    UsageRollup,
 )
 
 # Service types: shapes for service discovery responses, slot/lane descriptors,
@@ -255,9 +261,15 @@ __all__ = [
     # Deploy types
     'DeploymentRecord',
     # Billing types
+    'AppPrice',
     'BillingDetail',
     'PlanAction',
     'StripePlan',
     'CreditBalance',
     'CreditPack',
+    'LedgerTransaction',
+    'PromoRedemption',
+    'PromoValidation',
+    'TransactionsResult',
+    'UsageRollup',
 ]

@@ -22,6 +22,7 @@
  */
 
 import React, { useState, useCallback, useMemo, useEffect, useRef, CSSProperties } from 'react';
+import { Tooltip } from '@mui/material';
 import { commonStyles } from '../../themes/styles';
 import { BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxPlay, BxStop, BxListUl, BxGridAlt, BxCollapseAll, BxFilePlus, BxFolderPlus, BxDotsHorizontal, BxEditAlt, BxTrash } from '../../components/BoxIcon';
 import type { IExplorerProps, ExplorerEntry, ExplorerStatus, DirNode } from './types';
@@ -322,7 +323,7 @@ function childTooltip(child: { id: string; name: string; provider?: string }, ta
  * sources, or any app-specific concepts.  The hosting container provides
  * entries, statuses, and callbacks.
  */
-export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, onRefresh }) => {
+export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, fileActions, onRefresh }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -611,7 +612,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							{dotColor && <div style={S.dot(dotColor)} />}
 							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
 								<button
-									style={S.menuBtn}
+									style={{ ...S.menuBtn, ...(isFileSelected ? { color: 'var(--rr-fg-list-active)' } : {}) }}
 									onClick={(e) => {
 										e.stopPropagation();
 										setMenuPath(menuPath === file.path ? null : file.path);
@@ -645,6 +646,21 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 									>
 										<BxTrash size={16} /> Delete
 									</button>
+									{fileActions?.map((a) => (
+										<button
+											key={a.id}
+											style={S.popupRow}
+											onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+											onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+											onClick={(e) => {
+												e.stopPropagation();
+												setMenuPath(null);
+												a.onSelect(file.path);
+											}}
+										>
+											{a.icon} {a.label}
+										</button>
+									))}
 								</div>
 							)}
 						</div>
@@ -702,7 +718,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							}}
 							onBlur={cancelCreate}
 							autoFocus
-							placeholder={config.createPlaceholder ?? (createState.type === 'folder' ? 'folder name' : 'file name')}
+							placeholder={createState.type === 'folder' ? 'folder name' : (config.createPlaceholder ?? 'file name')}
 						/>
 					</div>
 				);
@@ -722,23 +738,35 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 				<span style={S.sectionLabel}>{config.title}</span>
 				{hasFileManage && (
 					<>
-						<button style={{ ...S.headerAction, ...actionHoverBg('newFile') }} title={`New ${config.title.replace(/s$/, '')}`} onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>
-							<BxFilePlus size={16} />
-						</button>
-						<button style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} title="New Folder" onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
-							<BxFolderPlus size={16} />
-						</button>
+						<Tooltip title={`New ${config.title.replace(/s$/, '')}`} arrow placement="top">
+							<button aria-label={`New ${config.title.replace(/s$/, '')}`} style={{ ...S.headerAction, ...actionHoverBg('newFile') }} onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>
+								<BxFilePlus size={16} />
+							</button>
+						</Tooltip>
+						{config.allowFolders !== false && (
+							<Tooltip title="New folder" arrow placement="top">
+								<button aria-label="New folder" style={{ ...S.headerAction, ...actionHoverBg('newFolder') }} onClick={() => startCreate('folder')} onMouseEnter={() => setHoveredAction('newFolder')} onMouseLeave={() => setHoveredAction(null)}>
+									<BxFolderPlus size={16} />
+								</button>
+							</Tooltip>
+						)}
 					</>
 				)}
-				<button style={{ ...S.headerAction, ...actionHoverBg('viewMode') }} title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))} onMouseEnter={() => setHoveredAction('viewMode')} onMouseLeave={() => setHoveredAction(null)}>
-					{viewMode === 'tree' ? <BxListUl size={16} /> : <BxGridAlt size={16} />}
-				</button>
-				<button style={{ ...S.headerAction, ...actionHoverBg('collapse') }} title="Collapse All" onClick={collapseAll} onMouseEnter={() => setHoveredAction('collapse')} onMouseLeave={() => setHoveredAction(null)}>
-					<BxCollapseAll size={16} />
-				</button>
-				<button style={{ ...S.headerAction, ...actionHoverBg('refresh') }} title="Refresh" onClick={onRefresh} onMouseEnter={() => setHoveredAction('refresh')} onMouseLeave={() => setHoveredAction(null)}>
-					<BxRefresh size={16} />
-				</button>
+				<Tooltip title={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} arrow placement="top">
+					<button aria-label={viewMode === 'tree' ? 'Switch to flat view' : 'Switch to tree view'} style={{ ...S.headerAction, ...actionHoverBg('viewMode') }} onClick={() => setViewMode((m) => (m === 'tree' ? 'flat' : 'tree'))} onMouseEnter={() => setHoveredAction('viewMode')} onMouseLeave={() => setHoveredAction(null)}>
+						{viewMode === 'tree' ? <BxListUl size={16} /> : <BxGridAlt size={16} />}
+					</button>
+				</Tooltip>
+				<Tooltip title="Collapse all" arrow placement="top">
+					<button aria-label="Collapse all" style={{ ...S.headerAction, ...actionHoverBg('collapse') }} onClick={collapseAll} onMouseEnter={() => setHoveredAction('collapse')} onMouseLeave={() => setHoveredAction(null)}>
+						<BxCollapseAll size={16} />
+					</button>
+				</Tooltip>
+				<Tooltip title="Refresh" arrow placement="top">
+					<button aria-label="Refresh" style={{ ...S.headerAction, ...actionHoverBg('refresh') }} onClick={onRefresh} onMouseEnter={() => setHoveredAction('refresh')} onMouseLeave={() => setHoveredAction(null)}>
+						<BxRefresh size={16} />
+					</button>
+				</Tooltip>
 			</div>
 
 			{/* ── File tree ───────────────────────────────────────────── */}

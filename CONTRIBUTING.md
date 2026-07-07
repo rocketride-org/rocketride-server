@@ -20,9 +20,9 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 ### Branching Strategy
 
-- `main` — Stable release branch
-- `develop` — Integration branch (target all PRs here)
-- `release/*` — Release preparation branches
+- `main`: Stable release branch
+- `develop`: Integration branch (target all PRs here)
+- `release/*`: Release preparation branches
 
 All other branches **must** follow the naming convention:
 
@@ -45,11 +45,11 @@ All other branches **must** follow the naming convention:
 - `feat/RR-456-add-nomic-embeddings`
 - `chore/RR-789-pin-release-deps`
 
-> A GitHub Ruleset enforces this convention — pushes with non-conforming branch names will be rejected.
+> A GitHub Ruleset enforces this convention, pushes with non-conforming branch names will be rejected.
 
 ### Making Changes
 
-1. **Open or find an issue** — every PR must be linked to an issue
+1. **Open or find an issue**: every PR must be linked to an issue
 2. Create a branch from the issue:
 
    ```bash
@@ -97,7 +97,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 2. Open a Pull Request against the `develop` branch
 
-3. **Link the issue** — use `Fixes #123`, `Closes #123`, or `Resolves #123` in the PR description (required by CI)
+3. **Link the issue**: use `Fixes #123`, `Closes #123`, or `Resolves #123` in the PR description (required by CI)
 
 4. Fill out the PR template with:
 
@@ -115,7 +115,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
    PRs with failing checks will not be reviewed until the checks are green.
 
-   If compilation still fails after rebasing and there is no open issue tracking it, and the code compiles cleanly on your machine — you've found a bug in CI or the build itself. Please open an issue and feel free to follow up with a PR to fix it.
+   If compilation still fails after rebasing and there is no open issue tracking it, and the code compiles cleanly on your machine, you've found a bug in CI or the build itself. Please open an issue and feel free to follow up with a PR to fix it.
 
 6. Wait for code review and address feedback
 

@@ -1,0 +1,49 @@
+{
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" },
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "agent_llamaindex_1",
+			"provider": "agent_llamaindex",
+			"config": {
+				"agent_description": "General-purpose assistant that can call tools to answer questions.",
+				"instructions": ["You are a helpful assistant. Use the available tools when they help, then give a clear final answer."],
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 240, "y": 200 }, "measured": { "width": 150, "height": 86 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_anthropic_1",
+			"provider": "llm_anthropic",
+			"config": {
+				"profile": "claude-sonnet-4-6",
+				"claude-sonnet-4-6": { "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}" },
+				"parameters": {}
+			},
+			"control": [{ "classType": "llm", "from": "agent_llamaindex_1" }],
+			"ui": { "position": { "x": 130, "y": 360 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "tool_http_request_1",
+			"provider": "tool_http_request",
+			"config": { "type": "tool_http_request" },
+			"control": [{ "classType": "tool", "from": "agent_llamaindex_1" }],
+			"ui": { "position": { "x": 350, "y": 360 }, "measured": { "width": 150, "height": 40 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"config": { "laneName": "answers" },
+			"input": [{ "lane": "answers", "from": "agent_llamaindex_1" }],
+			"ui": { "position": { "x": 460, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "7f3e2d1c-9b8a-4c6d-8e5f-1a2b3c4d5e6f",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

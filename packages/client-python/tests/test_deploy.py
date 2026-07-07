@@ -105,9 +105,11 @@ class TestDeploy:
             assert rec['pipeline'] == PIPELINE
             assert rec['schedule'] == 'manual'
             assert rec['state'] == 'active'
-            assert rec['created_by']
-            assert rec['created_at'] > 0
-            assert rec['updated_at'] > 0
+            assert rec['userId']
+            # The stored user credential must never be echoed back to clients.
+            assert 'userToken' not in rec
+            assert rec['createdAt'] > 0
+            assert rec['updatedAt'] > 0
         finally:
             await self.client.deploy.remove(rec['pipeline']['project_id'])
 
@@ -195,7 +197,7 @@ class TestDeploy:
         try:
             await self.client.deploy.update(rec['pipeline']['project_id'], schedule='@hourly')
             status = await self.client.deploy.status(rec['pipeline']['project_id'])
-            assert status['updated_at'] >= rec['updated_at']
+            assert status['updatedAt'] >= rec['updatedAt']
         finally:
             await self.client.deploy.remove(rec['pipeline']['project_id'])
 

@@ -18,7 +18,7 @@ After the pipeline starts, the Project Log displays the webhook URL and public a
 
 | Lane in | Lane out                                  | Description                         |
 | ------- | ----------------------------------------- | ----------------------------------- |
-| —       | `data`, `text`, `audio`, `video`, `image` | Data received from the HTTP request |
+| -       | `data`, `text`, `audio`, `video`, `image` | Data received from the HTTP request |
 
 ## Configuration
 

@@ -80,6 +80,12 @@ export type EnvironmentHostToWebview =
 			type: 'env:error';
 			/** Human-readable error description. */
 			error: string;
+			/** Which connection slot the error belongs to (if known). */
+			slot?: 'development' | 'deployment';
+			/** The scope level that failed (if known). */
+			scope?: 'org' | 'team' | 'user';
+			/** Optional scope identifier for the failed operation. */
+			scopeId?: string;
 	  }
 	| {
 			/** Pre-fill missing env var keys as empty entries in the user scope card. */

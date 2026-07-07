@@ -157,6 +157,7 @@ class CProfileCommands(DAPConn):
         - Local: { "command": "rrext_cprofile_start", "arguments": { "session": "test" } }
         - Proxy: { "command": "rrext_cprofile_start", "arguments": { "target": "tk_abc", "session": "test" } }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -187,6 +188,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_stop" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -215,6 +217,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_status" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -243,6 +246,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_report" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -252,6 +256,45 @@ class CProfileCommands(DAPConn):
 
         # Direct mode
         result = profiler.report()
+        return self.build_response(request, body=result)
+
+    async def on_rrext_cprofile_report_tree(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_cprofile_report_tree' command to retrieve a structured call tree.
+
+        Returns a hierarchical JSON tree built from the pstats callers data of the
+        last completed session.  Suitable for flame graph, sunburst, and icicle
+        visualisations.  Supports optional max_depth and min_pct pruning parameters.
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments.target (str, optional): Task token, or None for local
+                - arguments.max_depth (int, optional): Max tree depth (default 50)
+                - arguments.min_pct (float, optional): Min cumtime % threshold (default 0.1)
+
+        Returns:
+            Dict[str, Any]: DAP response with tree, total_time, total_calls
+
+        Usage Example:
+        { "command": "rrext_cprofile_report_tree", "arguments": { "max_depth": 30, "min_pct": 0.5 } }
+        """
+        self.verify_permission('task.control')
+        args = request.get('arguments', {})
+        target = args.get('target', None)
+
+        # Proxy mode — forward to engine subprocess
+        if target:
+            return await self._proxy_to_task(request, target)
+
+        # Direct mode — build the tree from the local profiler's stored stats
+        max_depth = args.get('max_depth', 50)
+        min_pct = args.get('min_pct', 0.1)
+        include_system = args.get('include_system', True)
+        result = profiler.report_tree(
+            max_depth=max_depth,
+            min_pct=min_pct,
+            include_system=include_system,
+        )
         return self.build_response(request, body=result)
 
     def release_profiler(self) -> None:

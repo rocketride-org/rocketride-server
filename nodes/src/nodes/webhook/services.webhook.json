@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Web Hook",
+	"title": "Webhook",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -102,7 +102,7 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Web Hook",
+			"title": "Webhook",
 			"properties": ["hideForm", "type", "source.mode", "parameters"]
 		}
 	]

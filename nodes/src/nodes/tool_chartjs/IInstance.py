@@ -70,7 +70,9 @@ class IInstance(IInstanceBase):
             'description': 'A ready-to-render ```chartjs fenced block. Use this string verbatim in the answer — do not add extra fences around it.',
         },
         description=(
-            'Generate a Chart.js chart configuration from data. '
+            'ALWAYS use this tool when the user requests a chart, graph, or visualization. '
+            'Do NOT generate Chart.js configs manually — call this tool instead. '
+            'It generates a ready-to-render chart from data. '
             'Required: "data" (the raw data to chart). '
             'Optional: "chart_type" (bar, line, pie, doughnut, radar, polarArea, scatter, bubble), '
             '"title" (chart title), "description" (natural language description of desired chart). '

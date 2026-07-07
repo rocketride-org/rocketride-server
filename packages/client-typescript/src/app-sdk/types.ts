@@ -422,6 +422,34 @@ export interface DocumentsState {
  * }
  * ```
  */
+/**
+ * Plan payload for the `shell:subscribe` event. Mirrors the `AppPrice` row from
+ * the `app_prices` table (see the client billing types) so the preselected-plan
+ * checkout flow is type-checked end to end rather than passing an opaque value.
+ */
+export interface CheckoutPlan {
+	/** Internal price UUID. */
+	id: string;
+	/** App identifier. */
+	appId: string;
+	/** Stripe price_* identifier. */
+	stripePriceId: string;
+	/** Human-readable tier label (e.g. "Starter", "Pro"). */
+	nickname: string;
+	/** Price in smallest currency unit (e.g. cents for USD). */
+	amountCents: number;
+	/** ISO 4217 currency code. */
+	currency: string;
+	/** Billing interval. */
+	interval: 'month' | 'year' | 'one_time' | '';
+	/** Full plan metadata (description, action, order, kind, credits, etc.). */
+	metadata?: Record<string, unknown> | null;
+	/** Whether the price is active. */
+	isActive: boolean;
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface ShellEventMap {
 	'shell:connected': Record<string, never>;
@@ -431,7 +459,7 @@ export interface ShellEventMap {
 	'shell:loginRequest': { appId?: string };
 	'shell:logoutRequest': Record<string, never>;
 	'shell:switchApp': { appId: string };
-	'shell:subscribe': { app: AppManifestEntry };
+	'shell:subscribe': { app: AppManifestEntry; plan?: CheckoutPlan };
 	'shell:myApps': Record<string, never>;
 	'shell:accountUpdate': ConnectResult;
 	'shell:sidebarCollapsing': Record<string, never>;

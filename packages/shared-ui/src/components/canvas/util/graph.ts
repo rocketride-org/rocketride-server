@@ -36,7 +36,7 @@
 
 import { Edge } from '@xyflow/react';
 
-import { uuid } from './uuid';
+// uuid import removed — edge IDs are now deterministic (source::target::lane)
 import { INodeType } from '../types';
 
 import type { PipelineComponent } from 'rocketride';
@@ -57,7 +57,7 @@ type INodeLike = Pick<INode, 'id' | 'data'> & {
 // ============================================================================
 
 /** Base properties applied to every edge created by getEdgesFromNodes. */
-const DEFAULT_EDGE: Partial<Edge> = {
+export const DEFAULT_EDGE: Partial<Edge> = {
 	selectable: true,
 	deletable: true,
 	zIndex: 5,
@@ -241,8 +241,9 @@ export const getNodesFromProject = (project: IProject): INode[] => {
  */
 export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 	const edges: Edge[] = [];
+	const nodesWithConnections = nodes.filter((n) => n.data.control?.length || n.data.input?.length);
 
-	for (const node of nodes) {
+	for (const node of nodesWithConnections) {
 		const { data } = node;
 
 		// -----------------------------------------------------------------
@@ -253,7 +254,7 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 			data.control.forEach((control: IControlConnection) => {
 				edges.push({
 					...DEFAULT_EDGE,
-					id: uuid(),
+					id: `${control.from}::${node.id}::${control.classType}`,
 					source: control.from,
 					target: node.id,
 					sourceHandle: `invoke-source.${control.classType}`,
@@ -270,7 +271,7 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 			data.input.forEach((input: IInputConnection) => {
 				edges.push({
 					...DEFAULT_EDGE,
-					id: uuid(),
+					id: `${input.from}::${node.id}::${input.lane}`,
 					source: input.from,
 					target: node.id,
 					sourceHandle: `source-${input.lane}`,
@@ -298,7 +299,7 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
  * @param node - The canvas node to convert.
  * @returns The serialised component representation.
  */
-export const getComponentFromNode = (node: INode): IProjectComponent => {
+export const getComponentFromNode = (node: INode, edges?: Edge[]): IProjectComponent => {
 	const { data } = node;
 
 	// Build the base component with UI metadata
@@ -316,12 +317,31 @@ export const getComponentFromNode = (node: INode): IProjectComponent => {
 		},
 	};
 
-	// Attach connection arrays only when non-empty
-	if (data.control?.length) {
-		component.control = data.control;
-	}
-	if (data.input?.length) {
-		component.input = data.input;
+	if (edges) {
+		// Derive connection arrays from edges (ReactFlow owns edges at runtime)
+		const incomingEdges = edges.filter((e) => e.target === node.id);
+
+		const control: IControlConnection[] = [];
+		const input: IInputConnection[] = [];
+
+		for (const edge of incomingEdges) {
+			if (edge.sourceHandle?.startsWith('invoke-source')) {
+				// Invoke edge — classType is the part after "invoke-source."
+				const classType = edge.sourceHandle.replace(/^invoke-source\./, '');
+				control.push({ classType, from: edge.source });
+			} else {
+				// Lane edge — lane is the part after "source-"
+				const lane = edge.sourceHandle?.substring(edge.sourceHandle.indexOf('-') + 1) ?? '';
+				input.push({ lane, from: edge.source });
+			}
+		}
+
+		if (control.length) component.control = control;
+		if (input.length) component.input = input;
+	} else {
+		// Fallback: read from node.data (used during load/template paths)
+		if (data.control?.length) component.control = data.control;
+		if (data.input?.length) component.input = data.input;
 	}
 
 	return component;
@@ -343,8 +363,8 @@ export const getComponentFromNode = (node: INode): IProjectComponent => {
  * @param parentId - The parent group ID to filter by, or undefined for root.
  * @returns Components at the requested level.
  */
-export const getChildComponents = (allNodes: INode[], parentId?: string): IProjectComponent[] => {
-	return allNodes.filter((node) => node.parentId === parentId).map(getComponentFromNode);
+export const getChildComponents = (allNodes: INode[], parentId?: string, edges?: Edge[]): IProjectComponent[] => {
+	return allNodes.filter((node) => node.parentId === parentId).map((node) => getComponentFromNode(node, edges));
 };
 
 /**
@@ -356,13 +376,13 @@ export const getChildComponents = (allNodes: INode[], parentId?: string): IProje
  * @param allNodes - All nodes currently on the canvas.
  * @returns The top-level component array with groups containing nested children.
  */
-export const getProjectComponents = (allNodes: INode[]): IProjectComponent[] => {
+export const getProjectComponents = (allNodes: INode[], edges?: Edge[]): IProjectComponent[] => {
 	/**
 	 * Gets components at a given level and recursively nests
 	 * children into any group nodes found.
 	 */
 	const buildLevel = (parentId?: string): IProjectComponent[] => {
-		const components = getChildComponents(allNodes, parentId);
+		const components = getChildComponents(allNodes, parentId, edges);
 
 		// For each group node, recurse into its children
 		for (const component of components) {

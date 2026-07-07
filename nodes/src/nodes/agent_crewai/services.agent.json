@@ -44,7 +44,7 @@
 			"title": "Agent description",
 			"default": "",
 			"optional": true,
-			"description": "What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly.",
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
 			"ui": {
 				"ui:widget": "textarea"
 			}
@@ -112,17 +112,13 @@
 			"format": "textarea",
 			"title": "Expected Output",
 			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...)."
-		},
-		"agent_crewai.default": {
-			"object": "default",
-			"properties": ["agent_description", "instructions", "advanced_mode"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "CrewAI Agent",
-			"properties": ["agent_crewai.default"]
+			"properties": ["agent_description", "instructions", "advanced_mode"]
 		}
 	]
 }

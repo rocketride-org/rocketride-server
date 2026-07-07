@@ -50,6 +50,7 @@ command processing layer in a task execution and debugging infrastructure.
 The actual task execution and management is delegated to the TaskServer.
 """
 
+import os
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
@@ -151,25 +152,36 @@ class TaskCommands(DAPConn):
             # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
             team_id = args.get('teamId') or self._account_info.defaultTeam
 
-            # Resolve org_id by walking the organizations/teams tree.
+            # Resolve org_id from the user's single organization.
             org_id = ''
-            for org in self._account_info.organizations or []:
+            org = self._account_info.organization
+            if org:
                 for team in org.get('teams', []):
                     if team.get('id') == team_id:
                         org_id = org.get('id', '')
                         break
-                if org_id:
-                    break
 
             # Build merged environment for pipeline variable resolution.
             # Combines .env → org → team → user secrets (SaaS) or just .env (OSS).
             # Security: only accept ROCKETRIDE_* keys from the caller
             raw_env = args.get('env', {})
             caller_env = {k: v for k, v in raw_env.items() if k.startswith('ROCKETRIDE_')}
-            merged_env = await account.get_merged_env(
-                user_id=self._account_info.userId,
-                org_id=org_id,
-                team_id=team_id,
+
+            # sys.admin: seed with server RR_* keys mapped to ROCKETRIDE_* so
+            # admin pipelines can reference internal secrets via ${ROCKETRIDE_*}.
+            # This is the bottom layer — org/team/user secrets override it.
+            if 'sys.admin' in (self._account_info.sysPermissions or []):
+                merged_env = {'ROCKETRIDE_' + k[3:]: v for k, v in os.environ.items() if k.startswith('RR_')}
+            else:
+                merged_env = {}
+
+            # Layer org → team → user secrets on top
+            merged_env.update(
+                await account.get_merged_env(
+                    user_id=self._account_info.userId,
+                    org_id=org_id,
+                    team_id=team_id,
+                )
             )
             # Caller-supplied env overrides on top
             merged_env.update(caller_env)

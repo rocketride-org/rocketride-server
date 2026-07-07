@@ -81,17 +81,13 @@
 			"format": "textarea",
 			"title": "Manager Backstory",
 			"description": "Background context for the manager's persona. Maps to CrewAI Agent(backstory=...)."
-		},
-		"agent_crewai_manager.default": {
-			"object": "default",
-			"properties": ["agent_description", "instructions", "advanced_mode"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "CrewAI Manager",
-			"properties": ["agent_crewai_manager.default"]
+			"properties": ["agent_description", "instructions", "advanced_mode"]
 		}
 	]
 }

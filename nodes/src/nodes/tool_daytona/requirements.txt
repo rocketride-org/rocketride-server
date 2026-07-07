@@ -1,0 +1,5 @@
+# Newest version importable next to agent_crewai: crewai pins opentelemetry-sdk
+# ~=1.34 (semconv 0.55b) while daytona>=0.141 requires
+# opentelemetry-instrumentation-aiohttp-client>=0.59b0 (semconv >=0.59b0),
+# which makes the engine-wide constraints solve unsatisfiable.
+daytona==0.140.0

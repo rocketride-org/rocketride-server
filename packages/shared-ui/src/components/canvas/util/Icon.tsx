@@ -41,7 +41,9 @@ import * as React from 'react';
 const isUrl = (value: string): boolean =>
 	/^(https?|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(value);
 
-type SvgComponent = React.FC<React.SVGProps<SVGSVGElement>>;
+type SvgComponent = React.ForwardRefExoticComponent<
+	React.SVGProps<SVGSVGElement> & React.RefAttributes<SVGSVGElement>
+>;
 
 // Build-time directory scan. The path is 6 levels up from this file:
 //   packages/shared-ui/src/components/canvas/util/ → repo root → nodes/src/nodes/
@@ -93,11 +95,64 @@ const DEFAULT_STYLE: React.CSSProperties = {
 	color: 'var(--rr-icon-color, var(--icon-color))',
 };
 
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Namespaces every internal id in a rendered icon SVG — and the references to
+ * them — with a per-instance suffix.
+ *
+ * The shell keeps multiple canvases mounted at once, and a single canvas can
+ * hold several copies of the same node, so the same icon SVG (with its
+ * hardcoded gradient/clipPath ids) appears many times in one document.
+ * Browsers resolve `url(#id)` to the FIRST matching id in the DOM, so without
+ * this every duplicate after the first loses its gradient/clip (e.g. the
+ * Telegram icon's blue fill). Runs in-place on the live SVG element.
+ */
+const namespaceSvgIds = (svg: SVGSVGElement, uid: string): void => {
+	const suffix = `__${uid}`;
+	const renames = new Map<string, string>();
+	svg.querySelectorAll('[id]').forEach((el) => {
+		const oldId = el.getAttribute('id');
+		if (!oldId || oldId.endsWith(suffix)) return;
+		const newId = oldId + suffix;
+		el.setAttribute('id', newId);
+		renames.set(oldId, newId);
+	});
+	if (renames.size === 0) return;
+	const rewrite = (el: Element): void => {
+		for (const attr of Array.from(el.attributes)) {
+			if (!attr.value.includes('#')) continue;
+			let next = attr.value;
+			renames.forEach((newId, oldId) => {
+				// Matches `url(#id)`, `url('#id')` and bare `#id` (href), but not when
+				// followed by an id char — so it never re-rewrites the new id.
+				next = next.replace(new RegExp(`#${escapeRegExp(oldId)}(?![\\w-])`, 'g'), `#${newId}`);
+			});
+			if (next !== attr.value) el.setAttribute(attr.name, next);
+		}
+	};
+	rewrite(svg);
+	svg.querySelectorAll('*').forEach(rewrite);
+};
+
+/**
+ * Renders an inline icon SVG and namespaces its internal ids per instance so
+ * multiple copies of the same icon don't collide on shared `url(#id)` refs.
+ */
+const InlineSvgIcon: React.FC<{ component: SvgComponent } & React.SVGProps<SVGSVGElement>> = ({ component: Component, ...svgProps }) => {
+	const uid = React.useId().replace(/:/g, '');
+	const svgRef = React.useRef<SVGSVGElement>(null);
+	React.useLayoutEffect(() => {
+		if (svgRef.current) namespaceSvgIds(svgRef.current, uid);
+	}, [uid, Component]);
+	return <Component ref={svgRef} {...svgProps} />;
+};
+
 export const Icon: React.FC<IconProps> = ({ name, alt = '', style, ...svgProps }) => {
 	const mergedStyle: React.CSSProperties = { ...DEFAULT_STYLE, ...style };
 
 	if (!name) {
-		return UnknownIcon ? <UnknownIcon {...svgProps} style={mergedStyle} /> : null;
+		return UnknownIcon ? <InlineSvgIcon component={UnknownIcon} {...svgProps} style={mergedStyle} /> : null;
 	}
 
 	if (isUrl(name)) {
@@ -119,7 +174,7 @@ export const Icon: React.FC<IconProps> = ({ name, alt = '', style, ...svgProps }
 
 	const key = name.replace(/\.(svg|png|jpg|jpeg)$/i, '');
 	const Component = iconComponents.get(key) ?? UnknownIcon;
-	return Component ? <Component {...svgProps} style={mergedStyle} /> : null;
+	return Component ? <InlineSvgIcon component={Component} {...svgProps} style={mergedStyle} /> : null;
 };
 
 export default Icon;

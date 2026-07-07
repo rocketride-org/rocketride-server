@@ -1,0 +1,90 @@
+{
+	"type": "object",
+	"properties": {
+		"invoice_number": {
+			"type": "string",
+			"description": "The unique identifier of the invoice.",
+			"x-alternativeNames": ["Invoice No", "Invoice #", "Inv Number"]
+		},
+		"invoice_date": {
+			"type": "string",
+			"description": "The date the invoice was issued.",
+			"format": "YYYY-MM-DD",
+			"x-alternativeNames": ["Date", "Issued On", "Invoice Date"]
+		},
+		"due_date": {
+			"type": "string",
+			"description": "The date the payment is due.",
+			"format": "YYYY-MM-DD",
+			"x-alternativeNames": ["Payment Due", "Due By"]
+		},
+		"vendor_name": {
+			"type": "string",
+			"description": "The name of the company that issued the invoice.",
+			"x-alternativeNames": ["Seller", "Supplier", "From", "Billed By"]
+		},
+		"bill_to": {
+			"type": "object",
+			"description": "The customer being billed.",
+			"properties": {
+				"name": {
+					"type": "string",
+					"x-alternativeNames": ["Customer", "Bill To", "Sold To"]
+				},
+				"address": {
+					"type": "string",
+					"description": "Full billing address."
+				},
+				"email": {
+					"type": "string",
+					"format": "email"
+				}
+			}
+		},
+		"line_items": {
+			"type": "array",
+			"description": "Each product or service line on the invoice.",
+			"items": {
+				"type": "object",
+				"properties": {
+					"description": {
+						"type": "string",
+						"description": "Item or service description."
+					},
+					"quantity": {
+						"type": "number",
+						"x-alternativeNames": ["Qty", "Units"]
+					},
+					"unit_price": {
+						"type": "number",
+						"x-alternativeNames": ["Price", "Rate", "Unit Cost"]
+					},
+					"amount": {
+						"type": "number",
+						"x-alternativeNames": ["Line Total", "Amount"]
+					}
+				}
+			}
+		},
+		"subtotal": {
+			"type": "number",
+			"description": "Sum of all line items before tax.",
+			"x-alternativeNames": ["Sub Total", "Net Amount"]
+		},
+		"tax": {
+			"type": "number",
+			"description": "Total tax applied to the invoice.",
+			"x-alternativeNames": ["VAT", "GST", "Sales Tax"]
+		},
+		"total_invoice_amount": {
+			"type": "number",
+			"description": "The total monetary value of the invoice, including all charges and taxes.",
+			"x-alternativeNames": ["Total", "Grand Total", "Amount Due", "Balance Due"]
+		},
+		"currency": {
+			"type": "string",
+			"description": "The 3-letter ISO 4217 currency code (e.g. USD, EUR).",
+			"x-alternativeNames": ["Currency Code"]
+		}
+	}
+}

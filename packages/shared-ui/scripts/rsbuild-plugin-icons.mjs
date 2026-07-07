@@ -52,7 +52,11 @@ export const pluginRocketrideIcons = () => ({
 			svgrOptions: {
 				// Default export = React component (matches our import style).
 				exportType: 'default',
-				ref: false,
+				// Forward refs to the underlying <svg> so the Icon renderer can
+				// namespace each instance's internal ids (gradients/clipPaths) at
+				// runtime. Without unique ids, multiple copies of the same icon in
+				// the DOM collide on `url(#id)` and only the first paints correctly.
+				ref: true,
 				// Let parent CSS control icon size.
 				dimensions: false,
 				svgoConfig: {

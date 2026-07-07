@@ -1,0 +1,94 @@
+{
+	"title": "Depth Estimation",
+	"protocol": "depth_estimate://",
+	"classType": ["image"],
+	"capabilities": ["gpu", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.depth_estimate",
+	"prefix": "depth_estimate",
+	"description": ["Monocular depth estimation using Depth Anything V2 Small (Apache-2.0). ", "Outputs a colorized depth map (red = near, blue = far); depth statistics (min, max, mean) are emitted as JSON on the text lane.", "Pair with the Object Detection node to get rough distance to detected objects. ", "Runs on CPU, Apple Silicon (MPS), and CUDA."],
+	"icon": "depth-estimate.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.depth_estimate.profile}"],
+	"lanes": {
+		"image": ["text", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to estimate depth from.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Colorized depth map as raw stream — red is near, blue is far."
+				},
+				{
+					"lane": "text",
+					"description": "JSON depth statistics: {min, max, mean}."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "v2-small",
+		"profiles": {
+			"v2-small": {
+				"title": "Depth Anything V2 Small",
+				"model": "depth-anything/Depth-Anything-V2-Small-hf",
+				"revision": "5426e4f0f36572d16453bbda7a8389317b1bef99"
+			}
+		}
+	},
+	"fields": {
+		"depth_estimate.maxEdge": {
+			"type": "number",
+			"title": "Max input edge (px)",
+			"description": "Downscale input so the long edge <= this value before inference; dense output is upsampled back to original. Lower = faster + less VRAM, higher = sharper depth.",
+			"default": 1024,
+			"minimum": 256,
+			"maximum": 4096
+		},
+		"depth_estimate.profile": {
+			"title": "Model",
+			"type": "string",
+			"default": "v2-small",
+			"enum": ["*>preconfig.profiles.*.title"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Depth Estimation",
+			"properties": ["depth_estimate.profile", "depth_estimate.maxEdge"]
+		}
+	],
+	"test": {
+		"profiles": ["v2-small"],
+		"outputs": ["text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Estimate depth and emit stats",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "mean" }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["v2-small"],
+		"outputs": ["text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Estimate depth and emit stats",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "mean" }
+				}
+			}
+		]
+	}
+}

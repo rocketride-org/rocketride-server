@@ -151,3 +151,43 @@ class CProfileMixin(DAPClient):
         if target:
             args['target'] = target
         return await self.call('rrext_cprofile_report', args)
+
+    async def cprofile_report_tree(
+        self,
+        target: Optional[str] = None,
+        max_depth: int = 50,
+        min_pct: float = 0.1,
+        include_system: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Get a structured call tree from the last completed profiling session.
+
+        Returns a hierarchical JSON tree suitable for flame graph, sunburst,
+        and icicle visualisations.  Supports optional depth and minimum
+        percentage pruning parameters.
+
+        Args:
+            target: Task token if querying a pipeline, or None for server.
+            max_depth: Maximum tree depth before pruning (default 50).
+            min_pct: Minimum cumtime percentage threshold for inclusion (default 0.1).
+            include_system: Include stdlib/system functions in the tree (default True).
+                When False, the server filters out system nodes and promotes
+                project-code children.
+
+        Returns:
+            Dict with 'tree' (root node), 'total_time', and 'total_calls'.
+
+        Example:
+            result = await client.cprofile_report_tree(max_depth=30, min_pct=0.5)
+            tree = result['tree']
+            print(f"Root has {len(tree['children'])} top-level functions")
+        """
+        # Build arguments — only include target if provided, always send depth/pct
+        args: Dict[str, Any] = {
+            'max_depth': max_depth,
+            'min_pct': min_pct,
+            'include_system': include_system,
+        }
+        if target:
+            args['target'] = target
+        return await self.call('rrext_cprofile_report_tree', args)

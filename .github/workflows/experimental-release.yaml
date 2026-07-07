@@ -7,8 +7,8 @@ run-name: Experimental release ${{ inputs.ref }} → -${{ inputs.tag_suffix }}
 # publish a GitHub Release (with binaries attached) under a custom tag
 # suffix so workshop attendees can `gh release download` from it.
 #
-# Distinct from nightly.yaml/release.yaml because:
-#   - nightly.yaml hard-codes the `-prerelease` suffix and its
+# Distinct from prerelease.yaml/release.yaml because:
+#   - prerelease.yaml hard-codes the `-prerelease` suffix and its
 #     `cleanup-prereleases` step would wipe develop's current
 #     prerelease tags if run from another branch.
 #   - release.yaml has no suffix and auto-publishes to

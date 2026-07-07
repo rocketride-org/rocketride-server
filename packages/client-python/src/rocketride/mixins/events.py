@@ -439,6 +439,34 @@ class EventMixin(DAPClient):
         if not ref_counts:
             self._monitor_keys.pop(key_str, None)
 
+    async def clear_all_monitors(self) -> None:
+        """Remove all monitor subscriptions from this client.
+
+        Sends an empty types list for each active monitor key to unsubscribe
+        on the server, then clears the local ref-count map.
+        """
+        empty: Dict[str, int] = {}
+        for key_str in list(self._monitor_keys.keys()):
+            key = self._monitor_string_to_key(key_str)
+            if key is not None:
+                try:
+                    await self._sync_monitor(key, empty)
+                except Exception:
+                    pass  # Best-effort — server may have already cleared
+        self._monitor_keys.clear()
+
+    async def identify(self, client_name: str) -> None:
+        """Update this connection's display name on the server.
+
+        Useful when an app plugin loads and wants the server monitor to show
+        a more descriptive name instead of the generic client name sent at
+        auth time.
+
+        Args:
+            client_name: The new display name for this connection.
+        """
+        await self.call('rrext_identify', clientName=client_name)
+
     async def _sync_monitor(self, key: Dict[str, Any], ref_counts: Dict[str, int]) -> None:
         """Send the merged type list for a monitor key to the server."""
         if not self.is_connected():

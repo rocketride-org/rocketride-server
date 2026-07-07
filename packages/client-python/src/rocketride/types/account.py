@@ -73,7 +73,7 @@ class AccountOrganization(TypedDict, total=False):
     """
     An organization entry nested inside AccountProfile.
 
-    Mirrors the shape returned by the server's ``organizations`` array.
+    Mirrors the shape of the server's ``organization`` field.
 
     Attributes:
         id: Unique identifier for the organization.
@@ -107,7 +107,7 @@ class AccountProfile(TypedDict, total=False):
         phoneNumberVerified: Whether the phone number has been verified.
         locale: Locale / language preference (e.g. "en").
         defaultTeam: The ID of the user's default team context.
-        organizations: Organizations the user belongs to.
+        organization: The organization the user belongs to, or None.
     """
 
     userId: str
@@ -121,7 +121,7 @@ class AccountProfile(TypedDict, total=False):
     phoneNumberVerified: bool
     locale: str
     defaultTeam: str
-    organizations: list[AccountOrganization]
+    organization: AccountOrganization
 
 
 # =============================================================================

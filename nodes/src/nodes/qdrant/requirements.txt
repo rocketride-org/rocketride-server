@@ -4,5 +4,5 @@ portalocker
 pydantic
 urllib3
 httpx
-qdrant_client
+qdrant_client==1.17.1
 numpy

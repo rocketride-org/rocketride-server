@@ -76,3 +76,36 @@ discord_curl() {
   printf '%s' "$body"
   return 1
 }
+
+# ── Discord sync marker contract ─────────────────────────────────────────
+# The notifier stores the linked Discord message ID in a GitHub comment so
+# follow-up events PATCH the existing embed instead of posting a duplicate.
+# All three notifier workflows (pr/issues/discussions) go through the helpers
+# below — change the marker format here only.
+
+# jq/PCRE pattern matching the marker anywhere in a comment body. Pass to jq
+# via --arg, e.g.  jq --arg re "$DISCORD_MARKER_PATTERN" '... test($re) ...'.
+# Unanchored so it still matches once wrapped in <details>, staying
+# backward-compatible with legacy bare-marker comments.
+# shellcheck disable=SC2034  # consumed by the sourcing workflows, not here
+DISCORD_MARKER_PATTERN='<!-- discord-msg-id:[0-9]+ -->'
+
+# render_discord_marker <msg_id> — emit the GitHub comment body that stores
+# <msg_id>. Wrapped in <details> so it renders as a collapsible note instead
+# of a blank "No description provided" comment.
+render_discord_marker() {
+  printf '%s\n' \
+    '<details>' \
+    '<summary>🤖 Internal: Discord sync marker</summary>' \
+    '' \
+    'Auto-managed by the Discord notification workflow. Stores the linked Discord message ID. Do not edit or delete.' \
+    '' \
+    "<!-- discord-msg-id:${1} -->" \
+    '</details>'
+}
+
+# extract_discord_marker — read a comment body (or marker line) on stdin and
+# print the stored Discord message ID, or nothing if absent.
+extract_discord_marker() {
+  grep -oE 'discord-msg-id:[0-9]+' | cut -d':' -f2 | head -n1
+}

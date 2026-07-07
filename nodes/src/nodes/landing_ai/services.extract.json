@@ -1,0 +1,147 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Landing.ai Extract",
+
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "landing_ai_extract://",
+
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["data"],
+
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine.
+	//		"experimental" marks this as a new node; compute happens remotely on Landing.ai.
+	//
+	"capabilities": [],
+
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+
+	//
+	// Optional:
+	//		The path is the executable/script code - node dependent
+	//
+	"path": "nodes.landing_ai.extract",
+
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "landing_ai_extract",
+
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Extracts structured fields from parsed Markdown using Landing.ai ADE and a ", "JSON Schema you upload. Runs downstream of Landing.ai Parse, consuming the ", "Markdown it produces and emitting the extracted key-value data."],
+
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "landing_ai.svg",
+	"documentation": "https://docs.landing.ai/ade/ade-python",
+
+	//
+	// Required:
+	//		Defines the input and output data types for the node. Consumes parsed
+	//		Markdown on the 'text' lane (ADE Extract takes Markdown, not raw docs).
+	//
+	"lanes": {
+		"text": ["answers", "documents"]
+	},
+
+	//
+	// Required:
+	//		Defines the fields (shape) of the service shown in the side panel
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Landing.ai Extract",
+			"properties": ["landing_ai_extract.default"]
+		}
+	],
+
+	//
+	// Required:
+	//		Defines the fields that are available in the UI and for config
+	//
+	"fields": {
+		"landing_ai_extract.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Your Landing.ai ADE API key. Falls back to the ROCKETRIDE_LANDING_AI_KEY environment variable when left blank.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"landing_ai_extract.schema_file": {
+			"type": "string",
+			"format": "data-url",
+			"title": "Extraction Schema (JSON Schema file)",
+			"description": "Upload a .json file describing the fields to extract. Supports the ADE x-alternativeNames and format keywords.",
+			"ui:options:accept": ".json"
+		},
+		"landing_ai_extract.strict": {
+			"type": "boolean",
+			"title": "Strict",
+			"description": "Fail the extraction when the document does not match the schema, instead of returning partial results.",
+			"default": false,
+			"enum": [
+				[true, "Yes"],
+				[false, "No"]
+			]
+		},
+		"landing_ai_extract.region": {
+			"type": "string",
+			"title": "Region",
+			"description": "Which Landing.ai deployment to call. Use EU for the eu-west-1 data-residency endpoint.",
+			"default": "production",
+			"enum": [
+				["production", "US (production)"],
+				["eu", "EU (eu-west-1)"]
+			]
+		},
+		"landing_ai_extract.default": {
+			"object": "default",
+			"properties": ["landing_ai_extract.api_key", "landing_ai_extract.schema_file", "landing_ai_extract.strict", "landing_ai_extract.region"]
+		}
+	},
+
+	//
+	// Optional:
+	//		Predefined configurations for common use cases
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"strict": false,
+				"region": "production",
+				"schema_file": "{\"type\":\"object\",\"properties\":{\"summary\":{\"type\":\"string\"}}}"
+			}
+		}
+	},
+	"required": ["landing_ai_extract.schema_file"]
+}

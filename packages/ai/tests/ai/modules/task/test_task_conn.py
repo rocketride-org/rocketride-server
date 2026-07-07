@@ -111,6 +111,8 @@ def _make_account_info(*, auth: str = 'ak_user_token', user_id: str = 'user-1', 
         userId=user_id,
         userToken='token-' + user_id,
         defaultTeam=default_team,
+        sysPermissions=[],
+        waitlisted=False,
     )
 
 

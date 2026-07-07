@@ -252,26 +252,45 @@ class WebServer:
         # Declare the port
         self._port = None
 
-        # Configure CORS origins and credentials
+        # Configure CORS origins and credentials.
+        # When RR_CORS_ORIGINS is set, only those origins are allowed.
+        # When empty (default for local dev), any localhost/127.0.0.1 origin
+        # is accepted on any port so the dynamic engine port works with
+        # browser access.
         cors_origins_env = os.environ.get('RR_CORS_ORIGINS', '')
         if cors_origins_env:
             cors_origins = [o.strip() for o in cors_origins_env.split(',') if o.strip()]
         else:
             cors_origins = []
 
-        if cors_origins:
-            allow_credentials = True
-        else:
-            cors_origins = ['*']
-            allow_credentials = False
+        # Fail fast when RR_CORS_ORIGINS is explicitly set but parsed to zero
+        # valid origins — this indicates a misconfiguration (e.g. only whitespace
+        # or empty comma-separated values) and should not silently fall back to
+        # the permissive localhost regex.
+        if cors_origins_env and not cors_origins:
+            debug(
+                f'WARNING: RR_CORS_ORIGINS is set to {cors_origins_env!r} but '
+                f'parsed to zero valid origins. Falling back to localhost regex. '
+                f'Check the value — origins must be comma-separated URLs.'
+            )
 
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=cors_origins,
-            allow_credentials=allow_credentials,
-            allow_methods=['*'],
-            allow_headers=['*'],
-        )
+        if cors_origins:
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origins=cors_origins,
+                allow_credentials=True,
+                allow_methods=['*'],
+                allow_headers=['*'],
+            )
+        else:
+            # Allow any localhost origin (any port) with credentials
+            self.app.add_middleware(
+                CORSMiddleware,
+                allow_origin_regex=r'^https?://(localhost|127\.0\.0\.1)(:\d+)?$',
+                allow_credentials=True,
+                allow_methods=['*'],
+                allow_headers=['*'],
+            )
 
         # Store the server configuration
         self.config = config if config is not None else {}

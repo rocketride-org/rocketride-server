@@ -24,9 +24,11 @@
 // MONITOR-UI — App Descriptor
 // =============================================================================
 
+import React from 'react';
 import type { AppDescriptor } from 'shell-ui';
 import MonitorApp from './MonitorApp';
 import MonitorSidebar from './MonitorSidebar';
+import RocketRideMark from './RocketRideMark';
 
 /**
  * AppDescriptor for the Server Monitor app.
@@ -39,6 +41,8 @@ const MONITOR_APP: AppDescriptor = {
 	name: 'Server Monitor',
 	branding: {
 		appName: 'Server Monitor',
+		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0' }),
+		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34' }),
 	},
 	components: {
 		App: MonitorApp,

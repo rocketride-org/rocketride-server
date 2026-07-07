@@ -7,7 +7,7 @@
 	"node": "python",
 	"path": "nodes.agent_crewai.crewai_subagent",
 	"prefix": "agent",
-	"description": ["Managed CrewAI sub-agent. Must be wired into a CrewAI Manager via the crewai channel.", "Cannot be invoked directly — has no questions lane."],
+	"description": ["Managed CrewAI sub-agent. Must be wired into a CrewAI Manager via the crewai channel.", "Cannot be invoked directly, has no questions lane."],
 	"icon": "crewai.svg",
 	"documentation": "https://docs.rocketride.org",
 	"invoke": {
@@ -98,17 +98,13 @@
 			"format": "textarea",
 			"title": "Expected Output",
 			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...)."
-		},
-		"agent_crewai_subagent.default": {
-			"object": "default",
-			"properties": ["instructions", "advanced_mode"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "CrewAI Subagent",
-			"properties": ["agent_crewai_subagent.default"]
+			"properties": ["instructions", "advanced_mode"]
 		}
 	]
 }

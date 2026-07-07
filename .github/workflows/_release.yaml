@@ -182,27 +182,12 @@ jobs:
           ls -la release-assets/
 
       # --- npm: rocketride ---
-      #
-      # Authenticated via npm trusted publishing (OIDC), configured on the
-      # npm side for package `rocketride` against this repo + this workflow
-      # file + the `release` environment. No NODE_AUTH_TOKEN — npm CLI
-      # exchanges the GitHub OIDC token for a short-lived registry token
-      # automatically when --provenance is used and no static token is set.
-      #
-      # Requires npm >= 11.5.1 for the auto-exchange; Node 22's bundled npm
-      # is still 10.x, so we upgrade explicitly before publishing.
       - name: Set up Node.js
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
-          # No `registry-url` — when it's set, setup-node auto-injects
-          # NODE_AUTH_TOKEN into the job env (sourced from the `token`
-          # input, which defaults to ${{ github.token }}). npm CLI picks
-          # that up and uses token auth, bypassing the OIDC trusted
-          # publisher exchange. npmjs.org is the default registry anyway
-          # for unscoped packages, so dropping the line is functionally
-          # safe and is what unlocks OIDC.
+          node-version: 20
+          registry-url: https://registry.npmjs.org
 
       - name: Publish to npm
         if: inputs.prerelease == false && steps.tag_check.outputs.exists == 'false' && matrix.type == 'client-typescript'
@@ -227,7 +212,7 @@ jobs:
           else
             TARBALL=$(find release-assets -name '*.tgz' | head -n1)
             echo "Publishing ${TARBALL}"
-            npm publish "./${TARBALL}" --access public --provenance --loglevel verbose
+            npm publish "./${TARBALL}" --access public --provenance
           fi
 
       # --- PyPI ---
@@ -278,8 +263,6 @@ jobs:
           else
             twine upload release-assets/*.whl release-assets/*.tar.gz
           fi
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
 
       # --- VS Code Marketplace + Open VSX ---
       - name: Set up Node.js for vsce
@@ -356,15 +339,71 @@ jobs:
 
       - name: Set release body
         id: release_body
-        if: inputs.prerelease
+        env:
+          SERVER_VERSION: ${{ inputs.server_version }}
         run: |
+          # Source GitHub Release notes from CHANGELOG.md so releases show the
+          # curated, human-written change list. The "Create GitHub release"
+          # step below keeps generate_release_notes OFF, so this body is the
+          # ENTIRE published notes — no appended, squashed stage->main merge-PR
+          # list (which is all GitHub's auto-notes would add under squash-merge).
+          #
+          #   Prerelease (nightly): emit the current [Unreleased] section — the
+          #     "what's cooking on stage" view a prerelease should expose.
+          #   Stable: emit the most recent *released* section (the first "## ["
+          #     that is NOT [Unreleased]). The version-bump PR archives
+          #     [Unreleased] into that dated, versioned section via
+          #     scripts/release/cut-changelog.mjs, so the notes are scoped to
+          #     this release instead of re-emitting the whole growing
+          #     [Unreleased] blob on every release. See RELEASE.md.
+          #
+          # Both extractors are fenced-code aware: a "## [" line inside a ```
+          # (or ~~~) block is body text, not a section header, so it must not
+          # split sections.
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            NOTES="$(awk '
+              /^(```|~~~)/        { fence = !fence }
+              !fence && /^## \[/  { c++ }
+              c == 1              { print }
+              c == 2              { exit }
+            ' CHANGELOG.md | sed '1d')"
+          else
+            NOTES="$(awk '
+              /^(```|~~~)/ { fence = !fence }
+              !fence && /^## \[/ {
+                if (cap) exit                       # next header after capture -> done
+                if ($0 ~ /^## \[Unreleased/) next   # skip the [Unreleased] header and its body
+                cap = 1; next                        # first released header -> capture its body
+              }
+              cap { print }
+            ' CHANGELOG.md)"
+            # Warn (do NOT fail) if the top released section is not this
+            # release — the usual cause is a version bump that forgot to run
+            # scripts/release/cut-changelog.mjs. A stale-but-real body beats
+            # bricking the release, so this is a warning, not an error. Match
+            # the bracketed "[x.y.z]" form so 3.2.0 does not match [13.2.0].
+            TOP="$(awk '/^(```|~~~)/{fence=!fence; next} fence{next} /^## \[Unreleased/{next} /^## \[/{print; exit}' CHANGELOG.md)"
+            case "$TOP" in
+              *"[$SERVER_VERSION]"*) : ;;
+              *) echo "::warning::Top released CHANGELOG section ($TOP) does not mention [$SERVER_VERSION] — did the version-bump PR run scripts/release/cut-changelog.mjs?" ;;
+            esac
+          fi
+          # Run-unique heredoc delimiter so free-form CHANGELOG content can
+          # never collide with it and truncate/corrupt $GITHUB_OUTPUT.
+          DELIM="RR_RELEASE_BODY_${GITHUB_RUN_ID:-0}_${GITHUB_RUN_ATTEMPT:-0}_${RANDOM}${RANDOM}"
           {
-            echo 'body<<RELEASE_BODY'
-            echo "Automated nightly prerelease from \`${{ github.ref_name }}\`."
-            echo ""
-            echo "**${{ matrix.name }}** v${{ matrix.version }}"
-            echo 'RELEASE_BODY'
-          } >> $GITHUB_OUTPUT
+            echo "body<<${DELIM}"
+            if [ "${{ inputs.prerelease }}" = "true" ]; then
+              echo "_Automated prerelease from \`${{ github.ref_name }}\` — **${{ matrix.name }}** v${{ matrix.version }}._"
+              echo ""
+            fi
+            if [ -n "$NOTES" ]; then
+              echo "$NOTES"
+            else
+              echo "**${{ matrix.name }}** v${{ matrix.version }}"
+            fi
+            echo "${DELIM}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub release
         if: inputs.prerelease || steps.tag_check.outputs.exists == 'false'
@@ -373,7 +412,11 @@ jobs:
           tag_name: ${{ matrix.tag_name }}
           name: RocketRide ${{ matrix.name }} v${{ matrix.version }}${{ inputs.prerelease && ' (prerelease)' || '' }}
           prerelease: ${{ inputs.prerelease }}
-          generate_release_notes: ${{ inputs.prerelease == false }}
+          # Keep OFF. softprops/action-gh-release APPENDS GitHub's auto-notes
+          # to `body` when this is true — under squash-merge stage->main that
+          # is just the one batched merge PR, which is exactly the noise the
+          # curated CHANGELOG body (Set release body step) replaces.
+          generate_release_notes: false
           body: ${{ steps.release_body.outputs.body }}
           files: release-assets/*
         env:

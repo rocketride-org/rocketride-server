@@ -1,0 +1,105 @@
+{
+  "name": "Landing.ai Parse + Extract — document to structured fields",
+  "description": "Drop a document; Landing.ai parses it to Markdown, then extracts fields defined by a JSON Schema.",
+  "components": [
+    {
+      "id": "dropper_1",
+      "provider": "dropper",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "dropper"
+      },
+      "ui": {
+        "position": {
+          "x": 40,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "landing_ai_parse_1",
+      "provider": "landing_ai_parse",
+      "config": {
+        "default": {
+          "model": "dpt-2-latest",
+          "region": "production",
+          "api_key": ""
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 280,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "dropper_1"
+        }
+      ]
+    },
+    {
+      "id": "landing_ai_extract_1",
+      "provider": "landing_ai_extract",
+      "config": {
+        "default": {
+          "region": "production",
+          "strict": false,
+          "schema_file": "data:application/json;name=landing_ai_invoice_schema.json;base64,ewoJInR5cGUiOiAib2JqZWN0IiwKCSJwcm9wZXJ0aWVzIjogewoJCSJpbnZvaWNlX251bWJlciI6IHsKCQkJInR5cGUiOiAic3RyaW5nIiwKCQkJImRlc2NyaXB0aW9uIjogIlRoZSB1bmlxdWUgaWRlbnRpZmllciBvZiB0aGUgaW52b2ljZS4iLAoJCQkieC1hbHRlcm5hdGl2ZU5hbWVzIjogWyJJbnZvaWNlIE5vIiwgIkludm9pY2UgIyIsICJJbnYgTnVtYmVyIl0KCQl9LAoJCSJpbnZvaWNlX2RhdGUiOiB7CgkJCSJ0eXBlIjogInN0cmluZyIsCgkJCSJkZXNjcmlwdGlvbiI6ICJUaGUgZGF0ZSB0aGUgaW52b2ljZSB3YXMgaXNzdWVkLiIsCgkJCSJmb3JtYXQiOiAiWVlZWS1NTS1ERCIsCgkJCSJ4LWFsdGVybmF0aXZlTmFtZXMiOiBbIkRhdGUiLCAiSXNzdWVkIE9uIiwgIkludm9pY2UgRGF0ZSJdCgkJfSwKCQkiZHVlX2RhdGUiOiB7CgkJCSJ0eXBlIjogInN0cmluZyIsCgkJCSJkZXNjcmlwdGlvbiI6ICJUaGUgZGF0ZSB0aGUgcGF5bWVudCBpcyBkdWUuIiwKCQkJImZvcm1hdCI6ICJZWVlZLU1NLUREIiwKCQkJIngtYWx0ZXJuYXRpdmVOYW1lcyI6IFsiUGF5bWVudCBEdWUiLCAiRHVlIEJ5Il0KCQl9LAoJCSJ2ZW5kb3JfbmFtZSI6IHsKCQkJInR5cGUiOiAic3RyaW5nIiwKCQkJImRlc2NyaXB0aW9uIjogIlRoZSBuYW1lIG9mIHRoZSBjb21wYW55IHRoYXQgaXNzdWVkIHRoZSBpbnZvaWNlLiIsCgkJCSJ4LWFsdGVybmF0aXZlTmFtZXMiOiBbIlNlbGxlciIsICJTdXBwbGllciIsICJGcm9tIiwgIkJpbGxlZCBCeSJdCgkJfSwKCQkiYmlsbF90byI6IHsKCQkJInR5cGUiOiAib2JqZWN0IiwKCQkJImRlc2NyaXB0aW9uIjogIlRoZSBjdXN0b21lciBiZWluZyBiaWxsZWQuIiwKCQkJInByb3BlcnRpZXMiOiB7CgkJCQkibmFtZSI6IHsKCQkJCQkidHlwZSI6ICJzdHJpbmciLAoJCQkJCSJ4LWFsdGVybmF0aXZlTmFtZXMiOiBbIkN1c3RvbWVyIiwgIkJpbGwgVG8iLCAiU29sZCBUbyJdCgkJCQl9LAoJCQkJImFkZHJlc3MiOiB7CgkJCQkJInR5cGUiOiAic3RyaW5nIiwKCQkJCQkiZGVzY3JpcHRpb24iOiAiRnVsbCBiaWxsaW5nIGFkZHJlc3MuIgoJCQkJfSwKCQkJCSJlbWFpbCI6IHsKCQkJCQkidHlwZSI6ICJzdHJpbmciLAoJCQkJCSJmb3JtYXQiOiAiZW1haWwiCgkJCQl9CgkJCX0KCQl9LAoJCSJsaW5lX2l0ZW1zIjogewoJCQkidHlwZSI6ICJhcnJheSIsCgkJCSJkZXNjcmlwdGlvbiI6ICJFYWNoIHByb2R1Y3Qgb3Igc2VydmljZSBsaW5lIG9uIHRoZSBpbnZvaWNlLiIsCgkJCSJpdGVtcyI6IHsKCQkJCSJ0eXBlIjogIm9iamVjdCIsCgkJCQkicHJvcGVydGllcyI6IHsKCQkJCQkiZGVzY3JpcHRpb24iOiB7CgkJCQkJCSJ0eXBlIjogInN0cmluZyIsCgkJCQkJCSJkZXNjcmlwdGlvbiI6ICJJdGVtIG9yIHNlcnZpY2UgZGVzY3JpcHRpb24uIgoJCQkJCX0sCgkJCQkJInF1YW50aXR5IjogewoJCQkJCQkidHlwZSI6ICJudW1iZXIiLAoJCQkJCQkieC1hbHRlcm5hdGl2ZU5hbWVzIjogWyJRdHkiLCAiVW5pdHMiXQoJCQkJCX0sCgkJCQkJInVuaXRfcHJpY2UiOiB7CgkJCQkJCSJ0eXBlIjogIm51bWJlciIsCgkJCQkJCSJ4LWFsdGVybmF0aXZlTmFtZXMiOiBbIlByaWNlIiwgIlJhdGUiLCAiVW5pdCBDb3N0Il0KCQkJCQl9LAoJCQkJCSJhbW91bnQiOiB7CgkJCQkJCSJ0eXBlIjogIm51bWJlciIsCgkJCQkJCSJ4LWFsdGVybmF0aXZlTmFtZXMiOiBbIkxpbmUgVG90YWwiLCAiQW1vdW50Il0KCQkJCQl9CgkJCQl9CgkJCX0KCQl9LAoJCSJzdWJ0b3RhbCI6IHsKCQkJInR5cGUiOiAibnVtYmVyIiwKCQkJImRlc2NyaXB0aW9uIjogIlN1bSBvZiBhbGwgbGluZSBpdGVtcyBiZWZvcmUgdGF4LiIsCgkJCSJ4LWFsdGVybmF0aXZlTmFtZXMiOiBbIlN1YiBUb3RhbCIsICJOZXQgQW1vdW50Il0KCQl9LAoJCSJ0YXgiOiB7CgkJCSJ0eXBlIjogIm51bWJlciIsCgkJCSJkZXNjcmlwdGlvbiI6ICJUb3RhbCB0YXggYXBwbGllZCB0byB0aGUgaW52b2ljZS4iLAoJCQkieC1hbHRlcm5hdGl2ZU5hbWVzIjogWyJWQVQiLCAiR1NUIiwgIlNhbGVzIFRheCJdCgkJfSwKCQkidG90YWxfaW52b2ljZV9hbW91bnQiOiB7CgkJCSJ0eXBlIjogIm51bWJlciIsCgkJCSJkZXNjcmlwdGlvbiI6ICJUaGUgdG90YWwgbW9uZXRhcnkgdmFsdWUgb2YgdGhlIGludm9pY2UsIGluY2x1ZGluZyBhbGwgY2hhcmdlcyBhbmQgdGF4ZXMuIiwKCQkJIngtYWx0ZXJuYXRpdmVOYW1lcyI6IFsiVG90YWwiLCAiR3JhbmQgVG90YWwiLCAiQW1vdW50IER1ZSIsICJCYWxhbmNlIER1ZSJdCgkJfSwKCQkiY3VycmVuY3kiOiB7CgkJCSJ0eXBlIjogInN0cmluZyIsCgkJCSJkZXNjcmlwdGlvbiI6ICJUaGUgMy1sZXR0ZXIgSVNPIDQyMTcgY3VycmVuY3kgY29kZSAoZS5nLiBVU0QsIEVVUikuIiwKCQkJIngtYWx0ZXJuYXRpdmVOYW1lcyI6IFsiQ3VycmVuY3kgQ29kZSJdCgkJfQoJfQp9Cg==",
+          "api_key": ""
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 520,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "landing_ai_parse_1"
+        }
+      ]
+    },
+    {
+      "id": "response_answers_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 760,
+          "y": 200
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "landing_ai_extract_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "3c4d5e6f-7081-4b9c-8d0e-2f3a4b5c6d7e",
+  "version": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "docRevision": 2
+}

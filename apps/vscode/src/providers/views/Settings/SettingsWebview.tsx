@@ -31,6 +31,7 @@ import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
+import type { CheckoutPlan } from 'shared';
 import { TabPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ITabPanelTab, ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
@@ -110,6 +111,7 @@ export type SettingsIncomingMessage =
 	| {
 			type: 'settingsLoaded';
 			settings: SettingsData;
+			isSubscribed?: boolean;
 	  }
 	| {
 			type: 'showMessage';
@@ -121,6 +123,10 @@ export type SettingsIncomingMessage =
 	| {
 			type: 'versionsLoaded';
 			versions: EngineVersionItem[];
+	  }
+	| {
+			type: 'subscriptionStatus';
+			isSubscribed: boolean;
 	  };
 
 /** Messages this webview sends **to** the extension host. */
@@ -145,6 +151,9 @@ export type SettingsOutgoingMessage =
 	  }
 	| {
 			type: 'fetchTeams';
+	  }
+	| {
+			type: 'openSubscribe';
 	  };
 
 // ============================================================================
@@ -230,6 +239,65 @@ export const settingsStyles = {
 		marginTop: 2,
 		marginBottom: 8,
 		lineHeight: 1.4,
+	} as CSSProperties,
+};
+
+// ============================================================================
+// SUBSCRIBE BANNER STYLES
+// ============================================================================
+
+const subscribeBannerStyles = {
+	container: {
+		background: 'var(--rr-color-warning-bg, rgba(255, 193, 7, 0.1))',
+		borderBottom: '1px solid var(--rr-color-warning, #ffc107)',
+		padding: '10px 16px',
+	} as CSSProperties,
+	content: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'space-between',
+		gap: 12,
+	} as CSSProperties,
+	text: {
+		fontSize: 13,
+		color: 'var(--rr-text-primary)',
+		flex: 1,
+	} as CSSProperties,
+	button: {
+		...commonStyles.buttonPrimary,
+		whiteSpace: 'nowrap',
+		flexShrink: 0,
+	} as CSSProperties,
+};
+
+// ============================================================================
+// AUTH ERROR BANNER STYLES
+// ============================================================================
+
+const authErrorBannerStyles = {
+	container: {
+		background: 'var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1))',
+		borderBottom: '1px solid var(--vscode-inputValidation-errorBorder, #be1100)',
+		padding: '10px 16px',
+	} as CSSProperties,
+	content: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+	} as CSSProperties,
+	text: {
+		fontSize: 13,
+		color: 'var(--vscode-errorForeground, #f44336)',
+		flex: 1,
+	} as CSSProperties,
+	dismiss: {
+		background: 'none',
+		border: 'none',
+		color: 'var(--vscode-errorForeground, #f44336)',
+		cursor: 'pointer',
+		fontSize: 14,
+		padding: '2px 6px',
+		flexShrink: 0,
 	} as CSSProperties,
 };
 
@@ -330,8 +398,17 @@ export const Settings: React.FC = () => {
 
 	// Cloud auth state
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
+	// Subscription state — defaults to false so the subscribe button shows until the host confirms
+	const [subscribed, setSubscribed] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
 	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
+
+	// Checkout modal state
+	const checkoutResolvers = useRef<{
+		plans?: { resolve: (v: CheckoutPlan[]) => void; reject: (e: Error) => void };
+		session?: { resolve: (v: { clientSecret: string; subscriptionId: string }) => void; reject: (e: Error) => void };
+		confirm?: { resolve: () => void; reject: (e: Error) => void };
+	}>({});
 
 	// Docker state
 	const [dockerStatus, setDockerStatus] = useState<DockerStatus>({ state: 'not-installed', version: null, publishedAt: null, imageTag: null });
@@ -351,6 +428,9 @@ export const Settings: React.FC = () => {
 	const [serviceSelectedVersion, setServiceSelectedVersion] = useState('latest');
 	const [sudoPromptVisible, setSudoPromptVisible] = useState(false);
 	const [sudoPasswordInput, setSudoPasswordInput] = useState('');
+
+	// Auth error banner — shown when the settings page opens due to an auth failure
+	const [authError, setAuthError] = useState<string | null>(null);
 
 	// Active settings tab
 	const [activeTab, setActiveTab] = useState('development');
@@ -373,6 +453,10 @@ export const Settings: React.FC = () => {
 					// Deep-clone for cancel/reset so future edits don't mutate the snapshot
 					savedSettingsRef.current = JSON.parse(JSON.stringify(message.settings));
 					setDirty(false);
+					// Subscription status is included in the settingsLoaded payload
+					if (message.isSubscribed !== undefined) {
+						setSubscribed(message.isSubscribed);
+					}
 					// Pre-fetch versions from GitHub (cached on backend, shared across all modes)
 					setEngineVersionsLoading(true);
 					sendMessage({ type: 'fetchVersions' });
@@ -390,12 +474,49 @@ export const Settings: React.FC = () => {
 					setCloudUserName((message as any).userName || '');
 					break;
 
+				case 'subscriptionStatus':
+					setSubscribed(message.isSubscribed);
+					break;
+
+				// -- Checkout flow responses ------------------------------------
+				case 'checkout:plansResult' as any: {
+					const r = checkoutResolvers.current.plans;
+					if (r) {
+						checkoutResolvers.current.plans = undefined;
+						if ((message as any).error) r.reject(new Error((message as any).error));
+						else r.resolve((message as any).plans ?? []);
+					}
+					break;
+				}
+				case 'checkout:sessionResult' as any: {
+					const r = checkoutResolvers.current.session;
+					if (r) {
+						checkoutResolvers.current.session = undefined;
+						if ((message as any).error) r.reject(new Error((message as any).error));
+						else r.resolve({ clientSecret: (message as any).clientSecret, subscriptionId: (message as any).subscriptionId });
+					}
+					break;
+				}
+				case 'checkout:confirmResult' as any: {
+					const r = checkoutResolvers.current.confirm;
+					if (r) {
+						checkoutResolvers.current.confirm = undefined;
+						if ((message as any).error) r.reject(new Error((message as any).error));
+						else r.resolve();
+					}
+					break;
+				}
+
 				case 'teamsLoaded' as any:
 					setTeams((message as any).teams || []);
 					break;
 
 				case 'setFocus' as any:
 					if ((message as any).focus) setActiveTab((message as any).focus);
+					break;
+
+				case 'authError' as any:
+					setAuthError((message as any).message || 'Authentication failed');
 					break;
 
 				case 'serverInfo' as any: {
@@ -475,7 +596,11 @@ export const Settings: React.FC = () => {
 							? { level: 'success', message: 'Connection successful!' }
 							: { level: 'error', message: error || 'Connection failed' };
 						setTestMessage(msg);
-						if (success) setTimeout(() => setTestMessage(null), 5000);
+						// Clear the auth error banner on successful test connection
+						if (success) {
+							setAuthError(null);
+							setTimeout(() => setTestMessage(null), 5000);
+						}
 						break;
 					}
 
@@ -676,6 +801,32 @@ export const Settings: React.FC = () => {
 		[]
 	);
 
+	// ── Checkout callbacks (passed to CloudPanel) ──────────────────────
+	const handleFetchPlans = useCallback((): Promise<CheckoutPlan[]> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.plans = { resolve, reject };
+			sendMessage({ type: 'checkout:fetchPlans' } as any);
+		});
+	}, [sendMessage]);
+
+	const handleCreateCheckout = useCallback((priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.session = { resolve, reject };
+			sendMessage({ type: 'checkout:createSession', priceId } as any);
+		});
+	}, [sendMessage]);
+
+	const handleConfirmPending = useCallback((subscriptionId: string, priceId: string): Promise<void> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.confirm = { resolve, reject };
+			sendMessage({ type: 'checkout:confirmPending', subscriptionId, priceId } as any);
+		});
+	}, [sendMessage]);
+
+	const handleCheckoutSuccess = useCallback(() => {
+		setSubscribed(true);
+	}, []);
+
 	const panels: Record<string, ITabPanelPanel> = useMemo(
 		() => ({
 			development: {
@@ -733,6 +884,11 @@ export const Settings: React.FC = () => {
 							sudoPasswordInput={sudoPasswordInput}
 							onSudoPasswordChange={setSudoPasswordInput}
 							onSudoSubmit={handleSudoSubmit}
+							isSubscribed={subscribed}
+							onFetchPlans={handleFetchPlans}
+							onCreateCheckout={handleCreateCheckout}
+							onConfirmPending={handleConfirmPending}
+							onCheckoutSuccess={handleCheckoutSuccess}
 						/>
 					</div>
 				),
@@ -792,6 +948,11 @@ export const Settings: React.FC = () => {
 							sudoPasswordInput={sudoPasswordInput}
 							onSudoPasswordChange={setSudoPasswordInput}
 							onSudoSubmit={handleSudoSubmit}
+							isSubscribed={subscribed}
+							onFetchPlans={handleFetchPlans}
+							onCreateCheckout={handleCreateCheckout}
+							onConfirmPending={handleConfirmPending}
+							onCheckoutSuccess={handleCheckoutSuccess}
 						/>
 					</div>
 				),
@@ -826,6 +987,22 @@ export const Settings: React.FC = () => {
 
 	return (
 		<div style={commonStyles.columnFill}>
+			{/* ── Auth error banner (shown when opened due to auth failure) ── */}
+			{authError && (
+				<div style={authErrorBannerStyles.container}>
+					<div style={authErrorBannerStyles.content}>
+						<span style={{ fontSize: 18 }}>&#9888;</span>
+						<span style={authErrorBannerStyles.text}>{authError}</span>
+						<button
+							style={authErrorBannerStyles.dismiss}
+							onClick={() => setAuthError(null)}
+							title="Dismiss"
+						>
+							&#10005;
+						</button>
+					</div>
+				</div>
+			)}
 			{/* ── Tab panel ─────────────────────────────────────────── */}
 			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} panels={panels} />
 		</div>

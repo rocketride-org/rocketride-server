@@ -11,7 +11,7 @@
 	"protocol": "tool_git://",
 	//
 	// Required:
-	//		Class type of the node — what it does. "tool" makes the node
+	//		Class type of the node: what it does. "tool" makes the node
 	//		invocable by an agent via the control-plane tool channel.
 	//
 	"classType": ["tool"],
@@ -30,13 +30,13 @@
 	"register": "filter",
 	//
 	// Optional:
-	//		The node is the actual physical node to instantiate — if not
+	//		The node is the actual physical node to instantiate, if not
 	//		specified, the protocol will be used.
 	//
 	"node": "python",
 	//
 	// Optional:
-	//		The path is the executable/script code — it is node dependent
+	//		The path is the executable/script code: it is node dependent
 	//		and is optional for most nodes. For Python nodes this is the
 	//		import path to the package containing IGlobal/IInstance.
 	//
@@ -62,13 +62,13 @@
 	//
 	// Optional:
 	//		Description shown in the node palette and node info pane.
-	//		Each array entry is concatenated with no separator — keep
+	//		Each array entry is concatenated with no separator, keep
 	//		trailing spaces to avoid words running together.
 	//
 	"description": ["Exposes local Git repository operations as agent tools. ", "Covers clone, init, status, log, show, diff, blame, stage, commit, stash, branch management, pull, push, and code search. ", "Runs entirely in-process without requiring a host git installation. ", "Supports secure authentication via personal access tokens and SSH keys."],
 	//
 	// Optional:
-	//		Canvas tile template — supports ${parameters.<field>}
+	//		Canvas tile template: supports ${parameters.<field>}
 	//		interpolation. Rendered on the node card in the editor.
 	//
 	"tile": ["Git: ${parameters.git.repoPath || 'not configured'}"],
@@ -81,7 +81,7 @@
 	"lanes": {},
 	//
 	// Optional:
-	//		Profile section — configuration options used by the driver
+	//		Profile section: configuration options used by the driver
 	//		itself. The values under "default" are merged into any
 	//		user-supplied profile unless that profile is "absolute".
 	//
@@ -103,7 +103,7 @@
 	},
 	//
 	// Optional:
-	//		Local field definitions — schema rendered as the node's
+	//		Local field definitions: schema rendered as the node's
 	//		config form. Field names are namespaced with the node's
 	//		"prefix" (git.<field>). Fields marked "secure": true are
 	//		stored encrypted and never echoed back to the UI.
@@ -172,8 +172,8 @@
 			"description": "Block destructive operations: force-push and force branch deletion. Normal branch deletion is allowed only when the branch is fully merged into HEAD; deleting an unmerged branch requires force=true (which is blocked in safe mode). Recommended for agent use.",
 			"default": true,
 			"enum": [
-				[true, "Yes — block destructive ops"],
-				[false, "No — allow all operations"]
+				[true, "Yes: block destructive ops"],
+				[false, "No: allow all operations"]
 			]
 		},
 		"git.readOnlyMode": {
@@ -182,14 +182,14 @@
 			"description": "Block ALL write operations (clone, init, write_file, stage, commit, stash push/pop/drop, branch create/delete, checkout, merge, fetch, pull, push). Read-only tools (status, log, show, diff, blame, file_at, branch_list, grep, ls_files, stash list) remain available. Strictly stronger than Safe Mode. Recommended when the agent only needs to inspect a repository.",
 			"default": true,
 			"enum": [
-				[true, "Yes — block all writes"],
-				[false, "No — allow writes (subject to Safe Mode)"]
+				[true, "Yes: block all writes"],
+				[false, "No: allow writes (subject to Safe Mode)"]
 			]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service — which fields appear
+	//		Defines the fields (shape) of the service, which fields appear
 	//		in which section of the config dialog, and in what order.
 	//
 	"shape": [

@@ -68,7 +68,7 @@ function parseFile(filePath) {
 // ============================================================================
 
 /**
- * Load merged build environment: .config defaults + .env overrides.
+ * Load merged build environment: .config -> .env -> process.env (real wins).
  *
  * In overlay mode (ROCKETRIDE_BUILD_ROOT is set by build.js when
  * --overlay-root is passed), the .env is read from the overlay root.
@@ -86,8 +86,15 @@ function getenv() {
 	const envRoot = buildRoot ? path.resolve(buildRoot, '..') : SERVER_ROOT;
 	const env = parseFile(path.join(envRoot, '.env'));
 
-	// Step 3: merge — .env values override .config defaults
-	return { ...config, ...env };
+	// Step 3: merge — .env overrides .config defaults
+	const merged = { ...config, ...env };
+
+	// Real env vars win, for known keys only, ignoring empty values.
+	for (const key in merged) {
+		const real = process.env[key];
+		if (real !== undefined && real !== '') merged[key] = real;
+	}
+	return merged;
 }
 
 // ============================================================================

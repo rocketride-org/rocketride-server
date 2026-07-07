@@ -50,10 +50,13 @@ import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
 import { EnvironmentProvider } from './providers/EnvironmentProvider';
 // BillingProvider removed — billing is now a tab in AccountProvider
-import { AuthProvider } from './providers/AuthProvider';
+// AuthProvider removed — auth failures now open the Settings page directly
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
+
+// Extension context — set once in activate(), available via getExtensionContext()
+let extensionContext: vscode.ExtensionContext;
 
 // Core managers
 let connectionManager: ConnectionManager | undefined;
@@ -178,6 +181,7 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
  * @param context VS Code extension context
  */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+	extensionContext = context;
 	const logger = getLogger();
 	logger.output(`${icons.begin} Activating RocketRide extension...`);
 
@@ -270,8 +274,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				const account = new AccountProvider(context);
 				const environment = new EnvironmentProvider(context);
-				const auth = new AuthProvider(context, context.extensionUri);
-				context.subscriptions.push(account, environment, auth);
+				context.subscriptions.push(account, environment);
 
 				// Register unified project editor (canvas + status + trace)
 				project = new ProjectProvider(context);
@@ -609,6 +612,7 @@ export let cachedDockerTags: string[] = [];
 export const setCachedDockerTags = (t: string[]) => { cachedDockerTags = t; };
 
 // Export getters for provider access
+export const getExtensionContext = () => extensionContext;
 export const getConnectionManager = () => connectionManager;
 export const getEngineRegistry = () => engineRegistry;
 export const getSettingsProvider = () => settings;

@@ -31,7 +31,7 @@ def getEmbedding():
     """
     Return the embedding class.
     """
-    from .OpenAIEmbeddingWrapper import Embedding
+    from .OpenAIEmbeddingWrapper import OpenAIEmbeddingWrapper as Embedding
 
     return Embedding
 

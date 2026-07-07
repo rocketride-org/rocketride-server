@@ -80,9 +80,7 @@ export class DeployApi {
 	}
 
 	/**
-	 * Returns all deployments visible to the caller with their status and schedule config.
-	 *
-	 * Team members see their team's deployments; org admins see all deployments in the org.
+	 * Returns the authenticated user's deployments with their status and schedule config.
 	 *
 	 * @returns Array of deployment summary records.
 	 */

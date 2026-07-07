@@ -7,10 +7,14 @@
  * SidebarFooter — unified footer for both shell-ui and VS Code sidebars.
  *
  * Renders (top to bottom):
- *   1. Documentation button (optional, driven by onOpenDocs)
- *   2. Avatar trigger row (when userName is provided) OR gear icon fallback
- *      (when no userName but menuItems exist) — both open the popup menu
- *   3. Connection status row (optional, driven by connection prop)
+ *   1. Announcements ticker (when expanded and announcements are available)
+ *   2. Documentation button (optional, driven by onOpenDocs)
+ *   3. Trigger row — always present, whole row opens the popup menu:
+ *      - When userName is provided: avatar circle + name/email
+ *      - When anonymous: rocket icon + "RocketRide" branding
+ *   4. Connection status line(s) below the trigger row (optional):
+ *      - If one connection or both identical: single line
+ *      - If two different connections: two labelled lines
  *
  * Popup menu:
  *   - Main popup is 2/3 of sidebar width, inset by POPUP_MARGIN on each side.
@@ -19,11 +23,6 @@
  *     the VS Code webview bounds (popups cannot escape the webview iframe).
  *   - Selecting a flyout item closes only the flyout, keeping the main popup.
  *   - Click-outside dismisses everything (no hover timers).
- *
- * Three distinct footer states (driven by host):
- *   - Anonymous + engine:   gear icon trigger, Settings + Development Mode
- *   - Cloud identity + engine: avatar trigger, full menu
- *   - Cloud-UI (always cloud):  avatar trigger, Theme/Account/Billing/etc.
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -35,7 +34,7 @@ import { commonStyles } from '../../themes/styles';
 import { useFixedPopupPosition } from '../../hooks/useFixedPopupPosition';
 import { useAnnouncements } from '../../hooks/useAnnouncements';
 import { PopupRow } from '../PopupRow';
-import { BxBookOpen, BxCog, BxChevronRight, BxCheck, BxLock } from '../BoxIcon';
+import { BxBookOpen, BxChevronRight, BxCheck, BxCog } from '../BoxIcon';
 import type { IconComponent } from '../BoxIcon';
 
 // =============================================================================
@@ -51,6 +50,18 @@ const annMarkdownComponents = {
 		<span {...props} style={{ display: 'block', margin: 0, fontSize: 10 }} />
 	),
 };
+
+// =============================================================================
+// ROCKETRIDE MARK — branded rocket icon for anonymous trigger row
+// =============================================================================
+
+/** RocketRide rocket mark (icon only, no logotype). */
+const RocketRideMark: React.FC<{ size?: number }> = ({ size = 16 }) => (
+	<svg width={size} height={size} viewBox="0 0 211 211" fill="none" xmlns="http://www.w3.org/2000/svg">
+		<path d="M159.501 180.6L153.701 186.4C151.901 188.2 148.901 188.2 147.001 186.4L126.601 166C115.601 155 115.601 137.2 126.601 126.2C138.101 114.7 138.101 96.1 126.601 84.6L125.101 83.1C113.601 71.6 95.0006 71.6 83.5006 83.1C72.5006 94.1 54.6006 94.1 43.6006 83.1L23.2006 62.7C21.4006 60.9 21.4006 57.9 23.2006 56L29.0006 50.2C37.0006 42.2 49.1006 39.7 59.6006 44.1L87.5006 55.5C97.3006 59.3 108.401 57.2 116.301 50.3L137.001 29.6C138.601 28.1 140.401 26.6 142.501 25.4C146.201 23.3 150.301 22.2 154.501 21.8L185.401 19.2C188.301 18.9 190.801 21.4 190.501 24.3L187.801 55.6C187.301 62 184.501 68 180.101 72.7L160.501 92.3C152.501 100.4 150.101 112.5 154.501 123L155.501 125.4L161.201 139.2L165.601 150.1C169.901 160.6 167.501 172.7 159.501 180.7V180.6Z" fill="currentColor"/>
+		<path d="M0.800333 209.5C-0.199667 208.5 -0.299667 206.8 0.600333 205.6L21.1003 181.2C31.1003 169.2 37.9003 156.9 41.3003 144.5C43.6003 135.8 44.6003 127.7 44.1003 120.4C44.1003 119.5 44.4003 118.6 45.1003 118C45.8003 117.4 46.8003 117.1 47.7003 117.3C65.0003 120.8 83.5003 117.5 98.5003 108.1C99.6003 107.4 101.1 107.6 102 108.5C102.9 109.4 103.1 110.9 102.4 112C93.0003 127 89.7003 145.5 93.2003 162.7C93.4003 163.5 93.2003 164.4 92.6003 165.1C92.0003 165.8 91.0003 166.4 90.1003 166.3C82.8003 165.8 74.6003 166.7 66.0003 169.1C53.6003 172.4 41.2003 179.2 29.3003 189.3L4.90033 209.8C3.80033 210.7 2.10033 210.7 1.00033 209.6H0.800333V209.5Z" fill="#F93822"/>
+	</svg>
+);
 
 // =============================================================================
 // TYPES
@@ -93,24 +104,9 @@ export interface SidebarFooterProps {
 	// ── Fixed footer buttons ────────────────────────────────────────────────
 	/** Show a Documentation link. */
 	onOpenDocs?: () => void;
-	/** Opens the Environment page (shown in flat mode when connected). */
-	onEnvironmentClick?: () => void;
-	/** Opens the Settings page directly (used in both flat and popup modes). */
-	onSettingsClick?: () => void;
-
-	// ── Inline connection status (flat mode) ────────────────────────────────
-	/**
-	 * When provided, the footer renders in "flat" mode: Documentation,
-	 * Settings, and connection status are shown directly — no popup.
-	 */
-	connectionStatus?: {
-		state: 'connected' | 'connecting' | 'disconnected';
-		text: string;
-		message?: string;
-	};
 
 	// ── Popup menu items ────────────────────────────────────────────────────
-	/** Host-specific menu items shown in the avatar popup. */
+	/** Host-specific menu items shown in the popup. */
 	menuItems?: SidebarFooterMenuItem[];
 }
 
@@ -192,23 +188,17 @@ const S = {
 		lineHeight: 1.3,
 	} as CSSProperties,
 
-	// ── Gear trigger (fallback when no user identity) ────────────────────────
-	gearTrigger: (hovered: boolean, menuOpen: boolean, collapsed: boolean): CSSProperties => ({
+	// ── Rocket icon circle (anonymous trigger) ──────────────────────────────
+	rocketCircle: {
+		width: 32,
+		height: 32,
+		borderRadius: '50%',
+		background: 'var(--rr-bg-surface-alt)',
 		display: 'flex',
 		alignItems: 'center',
-		gap: 8,
-		padding: collapsed ? '4px 0' : '6px 10px',
-		justifyContent: collapsed ? 'center' : 'flex-start',
-		borderRadius: 8,
-		cursor: 'pointer',
-		fontSize: 13,
-		color: 'var(--rr-text-secondary)',
-		border: 'none',
-		background: hovered || menuOpen ? 'var(--rr-bg-surface-alt)' : 'transparent',
-		transition: 'background 100ms ease',
-		width: '100%',
-		textAlign: 'left' as const,
-	}),
+		justifyContent: 'center',
+		flexShrink: 0,
+	} as CSSProperties,
 
 	// ── Popup divider ───────────────────────────────────────────────────────
 	divider: commonStyles.divider,
@@ -225,10 +215,10 @@ const S = {
 // COMPONENT
 // =============================================================================
 
-export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, onEnvironmentClick, onSettingsClick, connectionStatus, menuItems }) => {
+export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, menuItems }) => {
 	// ── Avatar initials ─────────────────────────────────────────────────────
 	const initials = useMemo(() => {
-		if (!userName) return 'U';
+		if (!userName) return '';
 		return userName
 			.split(' ')
 			.filter(Boolean)
@@ -242,7 +232,6 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [hovered, setHovered] = useState(false);
 	const [docsHovered, setDocsHovered] = useState(false);
-	const [envHovered, setEnvHovered] = useState(false);
 	const triggerRef = useRef<HTMLDivElement>(null);
 	const popupRef = useRef<HTMLDivElement>(null);
 	const [triggerWidth, setTriggerWidth] = useState(200);
@@ -332,9 +321,8 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	}, [menuOpen]);
 
 	const topLevelItems = menuItems ?? [];
-	const flatMode = !!connectionStatus;
 
-	// ── Announcements ticker (flat mode) ────────────────────────────────────
+	// ── Announcements ticker ────────────────────────────────────────────────
 	const announcements = useAnnouncements();
 	const [tickerIndex, setTickerIndex] = useState(0);
 	const [tickerFade, setTickerFade] = useState(true);
@@ -352,86 +340,6 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	}, [announcements.length]);
 
 	// ── Render ──────────────────────────────────────────────────────────────
-
-	// ── Flat mode: no popup, render items directly in the footer ────────
-	if (flatMode) {
-		const current = announcements[tickerIndex % Math.max(announcements.length, 1)];
-		return (
-			<div style={S.wrapper}>
-				{/* Announcements ticker */}
-				{current && (
-					<>
-						<div style={S.fullDivider} />
-						<div style={{ padding: '10px 12px', overflow: 'hidden' }}>
-							<div
-								style={{
-									opacity: tickerFade ? 1 : 0,
-									transition: 'opacity 300ms ease',
-								}}
-							>
-								<div style={{ fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 4 }}>
-									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.title}</ReactMarkdown>
-								</div>
-								<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
-									<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]} components={annMarkdownComponents}>{current.body}</ReactMarkdown>
-								</div>
-								<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-									{current.link && /^https?:\/\//i.test(current.link) ? (
-										<a href={current.link} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: 'var(--rr-brand)', textDecoration: 'none', cursor: 'pointer' }}>Learn more &rarr;</a>
-									) : <span />}
-									{announcements.length > 1 && (
-										<div style={{ display: 'flex', gap: 2 }}>
-											<button type="button" aria-label="Previous announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i - 1 + announcements.length) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&lsaquo;</button>
-											<button type="button" aria-label="Next announcement" onClick={() => { setTickerFade(false); setTimeout(() => { setTickerIndex((i) => (i + 1) % announcements.length); setTickerFade(true); }, 150); }} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--rr-text-secondary)', lineHeight: 1 }}>&rsaquo;</button>
-										</div>
-									)}
-								</div>
-							</div>
-						</div>
-					</>
-				)}
-				{onOpenDocs && (
-					<button style={{ ...S.docsBtn, background: docsHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setDocsHovered(true)} onMouseLeave={() => setDocsHovered(false)} onClick={onOpenDocs}>
-						<BxBookOpen size={16} />
-						{!collapsed && 'Documentation'}
-					</button>
-				)}
-				{onEnvironmentClick && (
-					<button style={{ ...S.docsBtn, background: envHovered ? 'var(--rr-bg-surface-alt)' : 'none' }} onMouseEnter={() => setEnvHovered(true)} onMouseLeave={() => setEnvHovered(false)} onClick={onEnvironmentClick}>
-						<BxLock size={16} />
-						{!collapsed && 'Variables'}
-					</button>
-				)}
-				{onSettingsClick && (
-					<button style={S.gearTrigger(hovered, false, collapsed)} onClick={onSettingsClick} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-						<BxCog size={20} />
-						{!collapsed && <span>Settings</span>}
-					</button>
-				)}
-				{/* Separator under Settings, above connection info */}
-				<div style={S.fullDivider} />
-				{!collapsed && (
-					<div style={{ padding: '4px 15px', fontSize: 11, color: 'var(--rr-text-secondary)' }}>
-						<div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-							<span
-								style={{
-									width: 8,
-									height: 8,
-									borderRadius: '50%',
-									flexShrink: 0,
-									backgroundColor: connectionStatus.state === 'connected' ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
-								}}
-							/>
-							<span>{connectionStatus.text}</span>
-						</div>
-						{connectionStatus.message && <div style={{ paddingLeft: 13, marginTop: 2, fontSize: 11, color: 'var(--rr-text-secondary)' }}>{connectionStatus.message}</div>}
-					</div>
-				)}
-			</div>
-		);
-	}
-
-	// ── Popup mode ──────────────────────────────────────────────────────
 
 	return (
 		<div style={S.wrapper}>
@@ -474,26 +382,30 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 				</button>
 			)}
 
-			{/* ── Avatar trigger row (when user identity is available) ── */}
-			{userName && (
-				<div ref={triggerRef} style={S.avatarRow(hovered, menuOpen, collapsed)} onClick={() => setMenuOpen((v) => !v)} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-					<div style={S.avatarCircle}>{initials}</div>
-					{!collapsed && (
-						<div style={S.nameBlock}>
-							<div style={S.nameText}>{userName}</div>
-							{userEmail && <div style={S.emailText}>{userEmail}</div>}
-						</div>
-					)}
-				</div>
-			)}
-
-			{/* ── Gear trigger fallback (no identity, popup mode) ──────── */}
-			{!userName && menuItems && menuItems.length > 0 && (
-				<button ref={triggerRef as React.RefObject<HTMLButtonElement>} style={S.gearTrigger(hovered, menuOpen, collapsed)} onClick={() => setMenuOpen((v) => !v)} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
-					<BxCog size={20} />
-					{!collapsed && <span>Settings</span>}
-				</button>
-			)}
+			{/* ── Trigger row — avatar (signed in) or rocket branding (anonymous) */}
+			<div ref={triggerRef} role="button" tabIndex={0} aria-haspopup="menu" aria-expanded={menuOpen} style={S.avatarRow(hovered, menuOpen, collapsed)} onClick={() => { if (menuOpen) handleClose(); else setMenuOpen(true); }} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (menuOpen) handleClose(); else setMenuOpen(true); } }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+				{userName ? (
+					<>
+						<div style={S.avatarCircle}>{initials}</div>
+						{!collapsed && (
+							<div style={{ ...S.nameBlock, flex: 1 }}>
+								<div style={S.nameText}>{userName}</div>
+								{userEmail && <div style={S.emailText}>{userEmail}</div>}
+							</div>
+						)}
+					</>
+				) : (
+					<>
+						<div style={S.rocketCircle}><RocketRideMark size={18} /></div>
+						{!collapsed && (
+							<div style={{ ...S.nameBlock, flex: 1 }}>
+								<div style={S.nameText}>RocketRide</div>
+							</div>
+						)}
+					</>
+				)}
+				{!collapsed && <BxCog size={16} color="var(--rr-text-secondary)" />}
+			</div>
 
 			{/* ── Popup menu (portalled to document.body to escape overflow:hidden) */}
 			{menuOpen &&
@@ -530,15 +442,21 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 										{/* Status lines (e.g. "Connected (Local)" + "Team: Dev") */}
 										{item.statusText &&
 											item.statusText.split('\n').map((line, i) => {
-												// Last line with a submenu → clickable to open team flyout
-												const isTeamLine = i > 0 && item.submenu;
+												// Line 0 = connection status, line 1 with submenu = team selector,
+												// remaining lines = engine progress log (truncated with hover tooltip)
+												const isTeamLine = i > 0 && item.submenu && line.startsWith('Team:');
+												const isProgressLine = i > 0 && !isTeamLine;
 												return (
 													<div
 														key={i}
-														onClick={isTeamLine ? (e) => openFlyout(item.id, item.submenu!, (e.currentTarget.parentElement ?? e.currentTarget) as HTMLElement) : undefined}
+														title={isProgressLine ? line : undefined}
+														role={isTeamLine ? 'button' : undefined}
+														tabIndex={isTeamLine ? 0 : undefined}
+														onClick={isTeamLine ? (e) => openFlyout(item.id, item.submenu!, e.currentTarget as HTMLElement) : undefined}
+														onKeyDown={isTeamLine ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFlyout(item.id, item.submenu!, e.currentTarget as HTMLElement); } } : undefined}
 														style={{
 															paddingLeft: 10,
-															fontSize: 11,
+															fontSize: isProgressLine ? 10 : 11,
 															fontWeight: 400,
 															textTransform: 'none',
 															letterSpacing: 'normal',
@@ -547,9 +465,12 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 															cursor: isTeamLine ? 'pointer' : 'default',
 															display: 'flex',
 															alignItems: 'center',
+															overflow: 'hidden',
+															textOverflow: 'ellipsis',
+															whiteSpace: 'nowrap',
 														}}
 													>
-														{/* Green/gray dot on the connection status line */}
+														{/* Colored dot on the connection status line */}
 														{i === 0 && item.statusState && (
 															<span
 																style={{
@@ -562,7 +483,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 																}}
 															/>
 														)}
-														<span style={{ flex: 1 }}>{line}</span>
+														<span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{line}</span>
 														{isTeamLine && <BxChevronRight size={12} />}
 													</div>
 												);
@@ -614,8 +535,12 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 							position: 'fixed',
 							top: flyoutPos.top,
 							left: flyoutPos.left,
-							width: Math.round(((triggerWidth - 2 * POPUP_MARGIN) * 2) / 3),
-							minWidth: 140,
+							// Content-driven width so long app names + logos aren't cramped. Grows
+							// to fit the widest row, floored at 160px and capped to the viewport
+							// (the flyout opens rightward from flyoutPos.left, so cap on the right edge).
+							width: 'max-content',
+							minWidth: 160,
+							maxWidth: `calc(100vw - ${flyoutPos.left + 8}px)`,
 							maxHeight: `calc(100vh - ${flyoutPos.top + 8}px)`,
 							overflowY: 'auto',
 							scrollbarWidth: 'thin',

@@ -45,8 +45,8 @@ def store(istore):
     return DeploymentStore(istore)
 
 
-def make_record(project_id: str = 'proj-1', **kwargs) -> DeploymentRecord:
-    return DeploymentRecord(pipeline={'project_id': project_id}, created_by=CLIENT_1, **kwargs)
+def make_record(project_id: str = 'proj-1', userId: str = CLIENT_1, **kwargs) -> DeploymentRecord:
+    return DeploymentRecord(pipeline={'project_id': project_id}, userId=userId, userToken='rr_test', **kwargs)
 
 
 class TestDeploymentStore:
@@ -57,7 +57,7 @@ class TestDeploymentStore:
         result = await store.get(CLIENT_1, 'proj-1')
         assert result.pipeline['project_id'] == 'proj-1'
         assert result.schedule == '0 * * * *'
-        assert result.created_by == CLIENT_1
+        assert result.userId == CLIENT_1
 
     @pytest.mark.asyncio
     async def test_save_overwrites(self, store):
@@ -106,14 +106,28 @@ class TestDeploymentStore:
     async def test_iter_all(self, store):
         await store.save(CLIENT_1, make_record('proj-1'))
         await store.save(CLIENT_1, make_record('proj-2'))
-        await store.save(CLIENT_2, make_record('proj-3'))
-        results = [(cid, r.pipeline['project_id']) async for cid, r in store.iter_all()]
+        await store.save(CLIENT_2, make_record('proj-3', userId=CLIENT_2))
+        results = [(r.userId, r.pipeline['project_id']) async for r in store.iter_all()]
         assert sorted(results) == [(CLIENT_1, 'proj-1'), (CLIENT_1, 'proj-2'), (CLIENT_2, 'proj-3')]
 
     @pytest.mark.asyncio
     async def test_iter_all_empty(self, store):
         results = [r async for r in store.iter_all()]
         assert results == []
+
+    @pytest.mark.asyncio
+    async def test_user_token_persisted_but_excluded_from_client_record(self, store):
+        """The credential must survive the store round-trip (the scheduler replays
+        it) while to_client_record() — used for rrext_deploy_* responses — omits it.
+        """
+        await store.save(CLIENT_1, make_record())
+        result = await store.get(CLIENT_1, 'proj-1')
+        assert result.userToken == 'rr_test'
+
+        client_record = result.to_client_record()
+        assert 'userToken' not in client_record
+        assert client_record['userId'] == CLIENT_1
+        assert client_record['pipeline'] == result.pipeline
 
 
 class TestSaveMode:

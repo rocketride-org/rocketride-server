@@ -37,6 +37,11 @@ const LAYOUTS_KEY = 'rocketride.layouts';
 // TYPES
 // =============================================================================
 
+// Defined locally on purpose: the host tsconfig excludes `src/providers/views/**`
+// and does not map the `shared/*` path alias, so it cannot import the canonical
+// TraceLevel from the webview/shared-ui layer. Keep in sync with that union.
+type TraceLevel = 'none' | 'metadata' | 'summary' | 'full';
+
 interface EditorState {
 	document: vscode.TextDocument;
 	webviewPanel: vscode.WebviewPanel;
@@ -420,6 +425,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'status:pipelineAction': {
 					const action = data.action as 'run' | 'stop' | 'restart';
 					const source = data.source as string | undefined;
+					const traceLevel = data.pipelineTraceLevel as TraceLevel | undefined;
 					if (action === 'run' || action === 'restart') {
 						// Gate: check connection before running
 						const runClient = this.connectionManager.getClient();
@@ -439,7 +445,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							await this.saveDocument(document, document.getText());
 							const parsed = JSON.parse(document.getText());
 							const pipeName = path.basename(document.uri.fsPath, '.pipe');
-							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
+							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName, traceLevel);
 						} catch (error: unknown) {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
@@ -465,7 +471,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				// Link opening
 				case 'project:openLink': {
 					if (data.url) {
-						this.openLink(data.url as string, data.displayName as string | undefined);
+						this.openLink(data.url as string, data.displayName as string | undefined, data.browser as boolean | undefined);
 					}
 					break;
 				}
@@ -516,7 +522,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					try {
 						const billingClient = this.connectionManager.getClient();
 						if (!billingClient) throw new Error('Not connected');
-						const orgId = billingClient.getAccountInfo()?.organizations?.[0]?.id;
+						const orgId = billingClient.getAccountInfo()?.organization?.id;
 						if (!orgId) throw new Error('No organisation found');
 						const result = await billingClient.billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, data.priceId as string);
 						webview.postMessage({ type: 'checkout:sessionResult', ...result, error: null });
@@ -684,7 +690,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// PIPELINE EXECUTION
 	// =========================================================================
 
-	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string): Promise<void> {
+	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string, pipelineTraceLevel?: TraceLevel): Promise<void> {
 		try {
 			const client = this.connectionManager.getClient();
 			if (!client) throw new Error('Not connected to server');
@@ -694,7 +700,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			await client.use({
 				pipeline: project,
 				source: project.source,
-				pipelineTraceLevel: 'full',
+				pipelineTraceLevel: pipelineTraceLevel ?? 'summary',
 				args: ConfigManager.getInstance().getEngineArgs('development'),
 				name,
 			});
@@ -703,8 +709,6 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
 		}
 	}
-
-
 
 	private async stopPipeline(componentId: string, document: vscode.TextDocument): Promise<void> {
 		try {
@@ -741,10 +745,23 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// =========================================================================
 
 	/**
-	 * Opens a URL in an embedded VS Code WebviewPanel with an iframe.
-	 * Bridges theme colors, env vars, clipboard, and drag-and-drop to the iframe.
+	 * Opens a URL. With `browser`, opens it in the system browser via the VS Code
+	 * shell (used by sandboxed CTAs like the Free/Enterprise plan links). Otherwise
+	 * opens it in an embedded WebviewPanel with an iframe, bridging theme colors,
+	 * env vars, clipboard, and drag-and-drop to the iframe.
 	 */
-	private openLink(url: string, displayName?: string): void {
+	private openLink(url: string, displayName?: string, browser = false): void {
+		if (browser) {
+			// URL comes from a webview message; allowlist schemes before opening.
+			const uri = vscode.Uri.parse(url);
+			const scheme = uri.scheme.toLowerCase();
+			if (!['https', 'http', 'mailto'].includes(scheme)) {
+				this.logger.error(`[ProjectProvider] Blocked external URL scheme: ${scheme}`);
+				return;
+			}
+			void vscode.env.openExternal(uri);
+			return;
+		}
 		const panel = vscode.window.createWebviewPanel('externalContent', displayName || 'Pipeline', vscode.ViewColumn.One, {
 			enableScripts: true,
 			retainContextWhenHidden: true,

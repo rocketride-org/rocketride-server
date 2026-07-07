@@ -123,7 +123,7 @@ jobs:
 
       - name: Initialize CodeQL
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/init@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        uses: github/codeql-action/init@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
         with:
           languages: cpp
           build-mode: manual
@@ -145,6 +145,9 @@ jobs:
           FULL_VERSION: ${{ inputs.full_version }}
           BUILD_HASH: ${{ inputs.build_hash }}
           BUILD_STAMP: ${{ inputs.build_stamp }}
+          # Production values baked into the VS Code extension at build time.
+          ROCKETRIDE_URI: ${{ vars.ROCKETRIDE_URI }}
+          RR_STRIPE_PUBLISHABLE_KEY: ${{ vars.RR_STRIPE_PUBLISHABLE_KEY }}
         run: ${{ matrix.builder_cmd }} build --verbose --autoinstall --version="$FULL_VERSION" --hash="$BUILD_HASH" --stamp="$BUILD_STAMP" ${{ inputs.nodownload && '--nodownload' || '' }}
 
       # MinIO for S3Store integration tests (Linux only). Env vars are exported
@@ -235,13 +238,17 @@ jobs:
         # (.env.template, the engine's built-in dev key).
         env:
           ROCKETRIDE_APIKEY: MYAPIKEY
+          # Force uv to copy rather than hardlink when (re)installing node deps at
+          # test time. On Windows a hardlink over an already-loaded native .pyd
+          # (e.g. cryptography's _rust.pyd) fails with a file lock; copy is atomic.
+          UV_LINK_MODE: copy
         # note: Sequential execution should be changed to parallel execution
         #       after the appropriate fixes have been made, see #743 #1048 for details.
         run: ${{ matrix.builder_cmd }} test --verbose --sequential
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
-        uses: github/codeql-action/analyze@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        uses: github/codeql-action/analyze@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
         with:
           category: /language:cpp
 

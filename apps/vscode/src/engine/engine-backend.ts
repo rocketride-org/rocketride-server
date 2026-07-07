@@ -34,6 +34,8 @@ export interface EngineStatusEvent {
 	version?: string;
 	/** Error description when phase is `error`. */
 	error?: string;
+	/** Optional engine log line (e.g. "Installing wheel...") shown in the sidebar progress log. */
+	logLine?: string;
 }
 
 /** Callback signature for emitting status events from a backend to its owner. */
