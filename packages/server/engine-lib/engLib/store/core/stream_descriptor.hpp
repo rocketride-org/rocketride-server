@@ -33,7 +33,8 @@ namespace engine::store {
 ///
 ///		Producer side of a JSON wire contract; the consumer is the Python
 ///		parser `descriptor_from_payload()` in `ai/common/avi/descriptor.py`.
-///		Canonical keys live in `testdata/descriptor_keys.json`. Called from
+///		Canonical keys live in the guardrail fixture
+///		`packages/ai/tests/ai/common/avi/descriptor_keys.json`. Called from
 ///		`buildBeginPayload()`. Free function so Catch2 can drive it via
 ///		`getDummyEntry()`. Absent fields are omitted (never null).
 ///

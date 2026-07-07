@@ -43,6 +43,7 @@ Error IServiceFilterInstance::open(Entry &entry) noexcept {
     // Reset the per-object stream-descriptor indices for this new object.
     videoStreamIndex = 0;
     audioStreamIndex = 0;
+    imageStreamIndex = 0;
 
     // Call down, if it fails, clear it
     if (auto ccode = binder.open(entry)) {

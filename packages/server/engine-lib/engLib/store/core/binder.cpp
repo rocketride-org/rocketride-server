@@ -400,6 +400,21 @@ static pybind11::bytes buildBeginPayload(IServiceFilterInstance *pInstance,
 }
 
 /**
+ * @brief Frees a descriptor payload (built by buildBeginPayload) under the GIL.
+ *
+ * writeVideo/writeAudio/writeImage run with the GIL *released* (cb_writeX wraps the
+ * call in UnlockPython). The descriptor py::bytes was built under a brief LockPython,
+ * so its destructor must also run under the GIL — otherwise the optional frees a
+ * Python object without the GIL (_PyObject_Free access violation). No-op when empty.
+ */
+static void freeBeginPayload(std::optional<pybind11::bytes> &descriptor) noexcept {
+    if (!descriptor)
+        return;
+    engine::python::LockPython lock;
+    descriptor.reset();
+}
+
+/**
  * @brief Writes audio data to all bound service filter instances.
  *
  * @param action The action to perform on the audio.
@@ -410,10 +425,15 @@ static pybind11::bytes buildBeginPayload(IServiceFilterInstance *pInstance,
 Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
                          const pybind11::bytes &streamData) noexcept {
     // Forward streamData as-is, except on BEGIN where we swap in the descriptor.
-    // The optional only ever *moves* in the built bytes (GIL-safe); it is never
-    // default-constructed, avoiding a py::bytes alloc without the GIL.
+    // The descriptor py::bytes is built under the GIL (in buildBeginPayload) and
+    // must be freed under the GIL too — this function runs GIL-released, so the
+    // optional is reset via freeBeginPayload() before returning, never by its own
+    // destructor at scope exit.
     const pybind11::bytes *payload = &streamData;
     std::optional<pybind11::bytes> descriptor;
+
+    auto guard = util::Guard{[&]() noexcept { freeBeginPayload(descriptor); }};
+
     if (action == AVI_ACTION::BEGIN && isStreamDescriptorEnabled()) {
         descriptor.emplace(buildBeginPayload(m_pInstance, "AudioStream", mimeType,
                                              m_pInstance->audioStreamIndex, streamData));
@@ -434,7 +454,9 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
         }
     };
 
-    return callMethods(this, "audio", call, serializeTrace);
+    auto rc = callMethods(this, "audio", call, serializeTrace);
+
+    return rc;
 }
 
 /**
@@ -448,10 +470,15 @@ Error Binder::writeAudio(const AVI_ACTION action, Text &mimeType,
 Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
                          const pybind11::bytes &streamData) noexcept {
     // Forward streamData as-is, except on BEGIN where we swap in the descriptor.
-    // The optional only ever *moves* in the built bytes (GIL-safe); it is never
-    // default-constructed, avoiding a py::bytes alloc without the GIL.
+    // The descriptor py::bytes is built under the GIL (in buildBeginPayload) and
+    // must be freed under the GIL too — this function runs GIL-released, so the
+    // optional is reset via freeBeginPayload() before returning, never by its own
+    // destructor at scope exit.
     const pybind11::bytes *payload = &streamData;
     std::optional<pybind11::bytes> descriptor;
+
+    auto guard = util::Guard{[&]() noexcept { freeBeginPayload(descriptor); }};
+
     if (action == AVI_ACTION::BEGIN && isStreamDescriptorEnabled()) {
         descriptor.emplace(buildBeginPayload(m_pInstance, "VideoStream", mimeType,
                                              m_pInstance->videoStreamIndex, streamData));
@@ -472,7 +499,9 @@ Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
         }
     };
 
-    return callMethods(this, "video", call, serializeTrace);
+    auto rc = callMethods(this, "video", call, serializeTrace);
+
+    return rc;
 }
 
 /**
@@ -485,8 +514,24 @@ Error Binder::writeVideo(const AVI_ACTION action, Text &mimeType,
  */
 Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
                          const pybind11::bytes &streamData) noexcept {
+    // Forward streamData as-is, except on BEGIN where we swap in the descriptor.
+    // The descriptor py::bytes is built under the GIL (in buildBeginPayload) and
+    // must be freed under the GIL too — this function runs GIL-released, so the
+    // optional is reset via freeBeginPayload() before returning, never by its own
+    // destructor at scope exit.
+    const pybind11::bytes *payload = &streamData;
+    std::optional<pybind11::bytes> descriptor;
+
+    auto guard = util::Guard{[&]() noexcept { freeBeginPayload(descriptor); }};
+
+    if (action == AVI_ACTION::BEGIN && isStreamDescriptorEnabled()) {
+        descriptor.emplace(buildBeginPayload(m_pInstance, "ImageStream", mimeType,
+                                             m_pInstance->imageStreamIndex, streamData));
+        payload = &*descriptor;
+    }
+
     auto call = localfcn(auto pInstance)->Error {
-        return pInstance->writeImage(action, mimeType, streamData);
+        return pInstance->writeImage(action, mimeType, *payload);
     };
 
     auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
@@ -495,11 +540,13 @@ Error Binder::writeImage(const AVI_ACTION action, Text &mimeType,
             out["mimeType"] = mimeType;
 
             engine::python::LockPython lock;
-            out["bufferSize"] = (int)PyBytes_GET_SIZE(streamData.ptr());
+            out["bufferSize"] = (int)PyBytes_GET_SIZE(payload->ptr());
         }
     };
 
-    return callMethods(this, "image", call, serializeTrace);
+    auto rc = callMethods(this, "image", call, serializeTrace);
+
+    return rc;
 }
 
 /**

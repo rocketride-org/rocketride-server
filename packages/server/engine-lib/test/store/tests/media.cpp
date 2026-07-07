@@ -27,7 +27,8 @@
 //	(engine::store::buildStreamDescriptor). Drives the pure builder off a
 //	dummy Entry so no pipeline / media corpus is needed. The descriptor shape
 //	is the wire contract shared with the Python parser
-//	(ai.common.avi.descriptor) and testdata/descriptor_keys.json.
+//	(ai.common.avi.descriptor); its canonical key list lives in the guardrail
+//	fixture packages/ai/tests/ai/common/avi/descriptor_keys.json.
 //
 //-----------------------------------------------------------------------------
 
@@ -115,5 +116,31 @@ TEST_CASE("store::media stream descriptor") {
         REQUIRE(md["source_mime"].asString() == "video/mp4");
         // Backlink objectId is authoritative; enrichment must NOT win.
         REQUIRE(md["objectId"].asString() == "obj1");
+    }
+
+    //-----------------------------------------------------------------
+    // Image streams use the same generic builder: backlink + stream_index,
+    // with image media detail (dims/origin) supplied via enrichment.
+    //-----------------------------------------------------------------
+    SECTION("image stream carries backlink plus enriched media detail") {
+        Text mime = "image/png"_tv;
+        json::Value enrich;
+        enrich["origin"] = "extracted";      // a frame derived from a video
+        enrich["width"] = 1920;
+        enrich["height"] = 1080;
+        enrich["resource_name"] = "media1.mp4 @ deck.pptx";
+
+        auto desc =
+            buildStreamDescriptor(entry, "ImageStream", mime, nodeId, 2, enrich);
+
+        const auto &md = desc["metadata"];
+        REQUIRE(desc["type"].asString() == "ImageStream");
+        REQUIRE(md["objectId"].asString() == "obj1");
+        REQUIRE(md["stream_index"].asInt() == 2);
+        REQUIRE(md["source_mime"].asString() == "image/png");  // mime fallback
+        REQUIRE(md["origin"].asString() == "extracted");
+        REQUIRE(md["width"].asInt() == 1920);
+        REQUIRE(md["height"].asInt() == 1080);
+        REQUIRE(md["resource_name"].asString() == "media1.mp4 @ deck.pptx");
     }
 }
