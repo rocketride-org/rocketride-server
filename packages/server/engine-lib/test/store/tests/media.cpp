@@ -28,11 +28,13 @@
 //	dummy Entry so no pipeline / media corpus is needed. The descriptor shape
 //	is the wire contract shared with the Python parser
 //	(ai.common.avi.descriptor); its canonical key list lives in the guardrail
-//	fixture packages/ai/tests/ai/common/avi/descriptor_keys.json.
+//	fixture testdata/contracts/descriptor_keys.json.
 //
 //-----------------------------------------------------------------------------
 
 #include "../store.h"
+
+#include <set>
 
 using engine::store::buildStreamDescriptor;
 
@@ -96,12 +98,13 @@ TEST_CASE("store::media stream descriptor") {
     //-----------------------------------------------------------------
     // Enrichment fills missing fields but never overwrites the backlink.
     //-----------------------------------------------------------------
-    SECTION("enrichment fills missing but does not overwrite backlink") {
+    SECTION("enrichment fills missing but does not overwrite the identity backlink") {
         Text mime = "audio/wav"_tv;
         json::Value enrich;
         enrich["duration"] = 240.0;
         enrich["origin"] = "extracted";
         enrich["source_mime"] = "video/mp4";     // container mime (authoritative)
+        enrich["size"] = (uint64_t)12345;        // the stream's own size (overrides Entry)
         enrich["objectId"] = "SHOULD_NOT_WIN";   // must NOT overwrite the backlink
 
         auto desc =
@@ -114,7 +117,9 @@ TEST_CASE("store::media stream descriptor") {
         REQUIRE(md["origin"].asString() == "extracted");
         // Enrichment's source_mime (the container mime) wins over the mime fallback.
         REQUIRE(md["source_mime"].asString() == "video/mp4");
-        // Backlink objectId is authoritative; enrichment must NOT win.
+        // size is the stream's own size: enrichment wins over Entry.size (42).
+        REQUIRE(md["size"].asUInt64() == 12345);
+        // Identity backlink objectId is authoritative; enrichment must NOT win.
         REQUIRE(md["objectId"].asString() == "obj1");
     }
 
@@ -142,5 +147,67 @@ TEST_CASE("store::media stream descriptor") {
         REQUIRE(md["width"].asInt() == 1920);
         REQUIRE(md["height"].asInt() == 1080);
         REQUIRE(md["resource_name"].asString() == "media1.mp4 @ deck.pptx");
+    }
+
+    //-----------------------------------------------------------------
+    // Contract conformance: the builder emits only canonical keys and all
+    // required keys, checked against the shared descriptor_keys.json fixture
+    // (the same file the Python parser test consumes). Adding/renaming a key on
+    // one side without updating the fixture fails here or in test_descriptor.py.
+    //-----------------------------------------------------------------
+    SECTION("descriptor keys conform to the canonical fixture") {
+        // The fixture is synced into the engtest datasets folder (testdata/contracts).
+        auto contents = file::fetchString(datasetsPath() / "descriptor_keys.json");
+        REQUIRE(contents);
+
+        json::Value fixture;
+        REQUIRE(!fixture.parse(*contents));  // parse() returns a truthy Error on failure
+
+        // Collect the canonical + required key sets from the fixture, and build an
+        // enrichment payload that sets every canonical key, so the descriptor carries
+        // the full set. Values are dummies — this checks key presence, not values.
+        std::set<std::string> canonical;
+        json::Value enrich;
+        const auto &meta = fixture["metadata"];
+        auto collect = [&](const char *group) {
+            const auto &arr = meta[group];
+            for (json::ArrayIndex i = 0; i < arr.size(); ++i) {
+                std::string k = arr[i].asString();
+                canonical.insert(k);
+                enrich[k] = 1;
+            }
+        };
+        collect("required");
+        collect("optional_common");
+        collect("optional_video");
+        collect("optional_audio");
+
+        Text mime = "video/mp4"_tv;
+        const auto &reqArr = meta["required"];
+        const auto &types = fixture["doc"]["type_values"];
+        REQUIRE(types.isArray());
+
+        // The builder is type-agnostic for metadata; run the conformance for every
+        // canonical stream type (video/audio/image) so it future-proofs against any
+        // per-type key divergence, and confirms each fixture type builds.
+        for (json::ArrayIndex t = 0; t < types.size(); ++t) {
+            std::string streamType = types[t].asString();
+            INFO("stream type: " << streamType);
+
+            auto desc = buildStreamDescriptor(entry, streamType.c_str(), mime, nodeId, 0, enrich);
+            const auto &md = desc["metadata"];
+
+            // The builder invents no keys outside the contract.
+            for (const auto &key : md.getMemberNames()) {
+                INFO("emitted key not in fixture: " << key);
+                REQUIRE(canonical.count(key) == 1);
+            }
+            // Every required key is present (pass asString()'s engine string type
+            // straight to isMember to avoid the std::string overload ambiguity).
+            for (json::ArrayIndex i = 0; i < reqArr.size(); ++i) {
+                INFO("required key missing from descriptor: " << reqArr[i].asString());
+                REQUIRE(md.isMember(reqArr[i].asString()));
+            }
+        }
     }
 }

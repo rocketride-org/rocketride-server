@@ -34,7 +34,7 @@ namespace engine::store {
 ///		Producer side of a JSON wire contract; the consumer is the Python
 ///		parser `descriptor_from_payload()` in `ai/common/avi/descriptor.py`.
 ///		Canonical keys live in the guardrail fixture
-///		`packages/ai/tests/ai/common/avi/descriptor_keys.json`. Called from
+///		`testdata/contracts/descriptor_keys.json`. Called from
 ///		`buildBeginPayload()`. Free function so Catch2 can drive it via
 ///		`getDummyEntry()`. Absent fields are omitted (never null).
 ///
@@ -43,7 +43,8 @@ namespace engine::store {
 ///	@param[in]	mimeType     The stream's BEGIN mime; the `source_mime` fallback.
 ///	@param[in]	nodeId       Pipeline node id (jobConfig["nodeId"]).
 ///	@param[in]	streamIndex  Per-object index distinguishing multiple streams.
-///	@param[in]	enrich       Optional payload; its keys fill only unset fields.
+///	@param[in]	enrich       Optional payload; fills unset fields and may set/override
+///	                         size and source_mime (a producer knows the real stream size).
 ///	@returns	The descriptor as a `json::Value`.
 //-------------------------------------------------------------------------
 inline json::Value buildStreamDescriptor(const Entry &entry,
@@ -57,20 +58,26 @@ inline json::Value buildStreamDescriptor(const Entry &entry,
 
     json::Value &md = desc["metadata"];
 
-    // Backlink from the Entry; omit unset fields (never null).
+    // Identity backlink from the Entry; enrichment can never overwrite these.
     if (entry.objectId) md["objectId"] = entry.objectId();
     if (entry.url) md["parent"] = entry.path();
     if (entry.permissionId) md["permissionId"] = entry.permissionId();
     if (entry.componentId) md["signature"] = entry.componentId();
     if (!nodeId.empty()) md["nodeId"] = nodeId;
-    if (entry.size) md["size"] = entry.size();
     md["stream_index"] = streamIndex;
 
-    // Enrichment fills only keys the backlink didn't set, so it never overwrites it.
+    // Enrichment fills keys the identity backlink didn't set (media detail; may also
+    // set size / source_mime, resolved below).
     if (enrich.isObject()) {
         for (const auto &key : enrich.getMemberNames()) {
             if (!md.isMember(key)) md[key] = enrich[key];
         }
+    }
+
+    // size: the stream's own size — a producer may enrich it (e.g. an extracted frame's
+    // byte length); otherwise fall back to the source object's Entry.size.
+    if (!md.isMember("size") && entry.size) {
+        md["size"] = entry.size();
     }
 
     // source_mime: prefer enrichment (the source file's mime, e.g. the container for
