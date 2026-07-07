@@ -53,6 +53,7 @@ import { getLogger, safeJSONStringify } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConnectionStatus, ConnectionState } from '../shared/types';
 import { connectionModeRequiresApiKey, connectionModeUsesOAuth } from '../shared/util/connectionModeAuth';
+import { mergeEnvText, resolveConnectionEnv } from '../shared/util/envFile';
 import { getIdeName } from '../shared/util/ide';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
@@ -257,6 +258,55 @@ export class ConnectionManager extends EventEmitter {
 
 		await this.client.connect(auth, { uri });
 		// onConnected callback in createClient() handles state update
+
+		// Persist the resolved engine URI + key to the workspace .env so the
+		// RocketRide SDK/CLI can drive the same (self-hosted) engine. Best-effort:
+		// a failure here must never break an otherwise-successful connection.
+		await this.syncEnvFile(mode, auth);
+	}
+
+	/**
+	 * Writes ROCKETRIDE_URI / ROCKETRIDE_APIKEY into the workspace `.env` for
+	 * self-hosted engine connections (local/docker/service/onprem) on the
+	 * development group, preserving any existing comments and user variables.
+	 *
+	 * Uses the resolved engine URI (getHttpUrl() — the real, possibly dynamic
+	 * local port) rather than a hardcoded default. No-op for cloud (OAuth token
+	 * is not a usable SDK key), for the deployment group, or when no workspace
+	 * is open. Skips the write when the file already matches, so reconnects
+	 * don't churn `.env`.
+	 */
+	private async syncEnvFile(mode: ConnectionMode, apiKey: string): Promise<void> {
+		try {
+			const updates = resolveConnectionEnv({
+				group: this.group,
+				mode,
+				httpUrl: this.getHttpUrl(),
+				apiKey,
+			});
+			const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri;
+			if (!updates || !workspaceRoot) {
+				return;
+			}
+
+			const envUri = vscode.Uri.joinPath(workspaceRoot, '.env');
+			let existing = '';
+			try {
+				existing = Buffer.from(await vscode.workspace.fs.readFile(envUri)).toString('utf8');
+			} catch {
+				// .env doesn't exist yet — it will be created.
+			}
+
+			const merged = mergeEnvText(existing, updates);
+			if (merged === existing) {
+				return;
+			}
+
+			await vscode.workspace.fs.writeFile(envUri, Buffer.from(merged, 'utf8'));
+			this.logger.output(`${icons.success} Synced ROCKETRIDE_URI/ROCKETRIDE_APIKEY to .env`);
+		} catch (err) {
+			this.logger.error(`Failed to sync .env: ${err}`);
+		}
 	}
 
 	// =========================================================================

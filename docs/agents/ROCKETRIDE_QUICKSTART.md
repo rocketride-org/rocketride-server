@@ -2,21 +2,21 @@
 
 ## Python: Complete Working Project
 
-### Step 1: Check `.env` File (Auto-Created)
+### Step 1: Set Up the `.env` File
 
-The RocketRide extension automatically creates/updates `.env` with your configured settings:
+When you connect the extension to a **self-hosted engine** (local, docker, service, or on-prem), it auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
 
 ```env
-# Auto-populated from extension settings (rocketride.hostUrl and API key)
-ROCKETRIDE_URI=https://api.rocketride.ai  # Your configured server
-ROCKETRIDE_APIKEY=your-api-key-here     # From extension settings
+# Self-hosted engines: auto-filled on connect (local uses the real dynamic port).
+ROCKETRIDE_URI=http://localhost:54123   # live engine address (auto-filled)
+ROCKETRIDE_APIKEY=MYAPIKEY              # self-hosted default; set your own for cloud
 
 # Add your custom variables:
 ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` are automatically synced from your extension settings. You can add additional custom variables as needed.
+> **Note:** For self-hosted engines the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. Add any additional custom variables as needed.
 
 ### Step 2: Install Client
 
@@ -106,21 +106,21 @@ python main.py
 
 ## TypeScript: Complete Working Project
 
-### Step 1: Check `.env` File (Auto-Created)
+### Step 1: Set Up the `.env` File
 
-The RocketRide extension automatically creates/updates `.env` with your configured settings:
+When you connect the extension to a **self-hosted engine** (local, docker, service, or on-prem), it auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
 
 ```env
-# Auto-populated from extension settings (rocketride.hostUrl and API key)
-ROCKETRIDE_URI=https://api.rocketride.ai  # Your configured server
-ROCKETRIDE_APIKEY=your-api-key-here     # From extension settings
+# Self-hosted engines: auto-filled on connect (local uses the real dynamic port).
+ROCKETRIDE_URI=http://localhost:54123   # live engine address (auto-filled)
+ROCKETRIDE_APIKEY=MYAPIKEY              # self-hosted default; set your own for cloud
 
 # Add your custom variables:
 ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` are automatically synced from your extension settings. You can add additional custom variables as needed.
+> **Note:** For self-hosted engines the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. Add any additional custom variables as needed.
 
 ### Step 2: Install Client
 
@@ -275,7 +275,7 @@ await client.disconnect();
 ### Always Do This:
 
 1. Configure server URL in extension settings (`rocketride.hostUrl` and API key)
-2. Extension auto-creates/updates `.env` with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`
+2. On connect to a self-hosted engine the extension auto-populates `.env` with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` (for cloud, set `ROCKETRIDE_APIKEY` manually)
 3. Use empty constructor: `RocketRideClient()` or `new RocketRideClient()`
 4. Use literal GUID for `project_id` - generate a new one per pipeline
 5. Use `${ROCKETRIDE_*}` variables in component `config` fields
@@ -286,7 +286,7 @@ await client.disconnect();
 
 1. Hardcode `uri` or `auth` in constructor (use `.env` instead)
 2. Use variables in `project_id` field (must be literal GUID)
-3. Manually edit `ROCKETRIDE_URI` or `ROCKETRIDE_APIKEY` in `.env` (use extension settings)
+3. Hand-edit `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` for a self-hosted engine — the extension re-syncs them on connect (change them via extension settings; for cloud, set `ROCKETRIDE_APIKEY` manually)
 4. Skip `connect()` or `disconnect()`
 5. Use non-ROCKETRIDE\_\* variables in pipelines
 6. Use `.json` extension for pipeline files (use `.pipe`)
