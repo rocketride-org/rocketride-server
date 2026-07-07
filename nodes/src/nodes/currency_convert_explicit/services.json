@@ -60,39 +60,13 @@
 		"answers": ["answers"]
 	},
 	//
-	//	Test configuration for automated node testing (builder nodes:test)
-	//
-	"test": {
-		"profiles": ["default"],
-		"cases": [
-			{
-				// Matching source currency -> converted + provenance added,
-				// original amount/currency preserved.
-				"answers": {
-					"answers": [{ "amount": 100, "currency": "EUR" }]
-				},
-				"expect": {
-					"answers": {
-						"property": [
-							{ "path": "[0].converted.currency", "equals": "USD" },
-							{ "path": "[0].currency", "equals": "EUR" }
-						]
-					}
-				}
-			},
-			{
-				// Non-matching currency -> passed through unchanged.
-				"answers": {
-					"answers": [{ "amount": 250, "currency": "JPY" }]
-				},
-				"expect": {
-					"answers": {
-						"property": { "path": "[0].currency", "equals": "JPY" }
-					}
-				}
-			}
-		]
-	},
+	//	Note: no "test" block. The dynamic node-test harness injects lane input
+	//	via data_conn, which builds answers with `Answer.model_validate_json`.
+	//	The Answer schema's field validator forbids populating `answer` at
+	//	construction, so a webhook-injected `answers` input is always empty —
+	//	an engine-level dynamic test for an answers-consuming node cannot deliver
+	//	a populated fact. Conversion logic is covered by the unit tests in
+	//	nodes/test/test_currency_convert_explicit.py and the contract suite.
 	//
 	//	Optional:
 	//		Profile section - configuration defaults used by the driver.
