@@ -36,6 +36,7 @@ packages:
   - 'apps/chat-ui'
   - 'apps/explorer-ui'
   - 'apps/dropper-ui'
+  - 'apps/events-ui'
   - 'apps/hello-ui'
   - 'apps/monitor-ui'
   - 'apps/profiler-ui'
