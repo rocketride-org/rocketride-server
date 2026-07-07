@@ -157,3 +157,32 @@ def test_coerce_port_respects_custom_default() -> None:
     """The default is configurable and returned for unparseable input."""
     Store = _load_store_class()
     assert Store._coercePort('${MISSING}', default=443) == 443
+
+
+def test_coerce_port_int_out_of_range_falls_back_to_default() -> None:
+    """Integers outside the 1-65535 TCP port range fall back to the default."""
+    Store = _load_store_class()
+    assert Store._coercePort(-1) == 8000
+    assert Store._coercePort(0) == 8000
+    assert Store._coercePort(99999) == 8000
+
+
+def test_coerce_port_string_out_of_range_falls_back_to_default() -> None:
+    """Numeric strings outside the 1-65535 range fall back to the default."""
+    Store = _load_store_class()
+    assert Store._coercePort('0') == 8000
+    assert Store._coercePort('99999') == 8000
+
+
+def test_coerce_port_whole_float_out_of_range_falls_back_to_default() -> None:
+    """A whole-number float outside the 1-65535 range falls back to the default."""
+    Store = _load_store_class()
+    assert Store._coercePort(99999.0) == 8000
+
+
+def test_coerce_port_in_range_boundaries_pass() -> None:
+    """The 1 and 65535 boundaries (and an in-range whole float) pass through."""
+    Store = _load_store_class()
+    assert Store._coercePort(65535) == 65535
+    assert Store._coercePort(1) == 1
+    assert Store._coercePort(443.0) == 443

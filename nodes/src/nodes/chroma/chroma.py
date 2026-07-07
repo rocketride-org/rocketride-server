@@ -122,28 +122,34 @@ class Store(DocumentStoreBase):
         The port schema accepts both a number and a string so env-var
         interpolation (which always yields a string, e.g.
         '${ROCKETRIDE_CHROMA_PORT}') validates. Normalize here: pass ints and
-        whole-number floats through, parse numeric strings, and fall back to
-        ``default`` for anything unparseable, such as an unresolved
-        placeholder, rather than crashing the client, which requires an int.
+        whole-number floats through, parse numeric strings, reject values
+        outside the valid TCP port range 1-65535, and fall back to ``default``
+        for anything unparseable, such as an unresolved placeholder, rather than
+        crashing the client, which requires an int.
         """
         if isinstance(value, bool):
             return default
         if isinstance(value, int):
-            return value
-        if isinstance(value, float):
+            parsed = value
+        elif isinstance(value, float):
             # A JSON 'number' may arrive as a float (e.g. 8443.0). Accept
             # whole-number floats; a fractional port is invalid, so fall back.
-            if value.is_integer():
-                return int(value)
-            debug(f'chroma: port {value!r} is not a whole number; using default {default}')
-            return default
-        if isinstance(value, str):
+            if not value.is_integer():
+                debug(f'chroma: port {value!r} is not a whole number; using default {default}')
+                return default
+            parsed = int(value)
+        elif isinstance(value, str):
             try:
-                return int(value.strip())
+                parsed = int(value.strip())
             except ValueError:
                 debug(f'chroma: port {value!r} is not numeric (unresolved env var?); using default {default}')
                 return default
-        return default
+        else:
+            return default
+        if not 1 <= parsed <= 65535:
+            debug(f'chroma: port {parsed} is out of range 1-65535; using default {default}')
+            return default
+        return parsed
 
     def _doesCollectionExist(self) -> bool:
         """

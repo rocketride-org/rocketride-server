@@ -298,9 +298,10 @@
 		//
 		"langchain.splitter.custom.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to RecursiveCharacterTextSplitter by the 'Custom' text-splitter profile and cannot be changed here; the custom profile currently behaves like default. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "RecursiveCharacterTextSplitter",
-			"const": "RecursiveCharacterTextSplitter",
-			"title": "Splitter class name"
+			"const": "RecursiveCharacterTextSplitter"
 		},
 		"langchain.splitter.custom": {
 			"object": "custom",
