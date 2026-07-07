@@ -191,6 +191,10 @@ export default defineConfig(({ command }) => {
 
 				// Zitadel OAuth2 client ID registered for this SPA.
 				'process.env.RR_ZITADEL_CLIENT_ID': e('RR_ZITADEL_CLIENT_ID'),
+
+				// OAuth broker root URL — read at module load by shared-ui/config/oauth.ts;
+				// shell-ui bundles shared-ui from source so it must define this (like rslib/vscode).
+				'process.env.REACT_APP_OAUTH_ROOT_URL': e('REACT_APP_OAUTH_ROOT_URL'),
 			},
 		},
 		dev: {
