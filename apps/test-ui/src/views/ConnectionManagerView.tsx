@@ -46,8 +46,9 @@ import { DEFAULT_CONFIG } from '../session';
 // TYPES
 // =============================================================================
 
+/** Inline form state — mode discriminates add vs edit (edit carries the id). */
 interface FormState {
-	mode: 'add' | string;
+	mode: { type: 'add' } | { type: 'edit'; id: string };
 	name: string;
 	url: string;
 	apiKey: string;
@@ -273,13 +274,13 @@ const ConnectionManagerView: React.FC = () => {
 	}, []);
 
 	const handleAdd = useCallback(() => {
-		setForm({ mode: 'add', name: '', url: 'localhost:5565', apiKey: '' });
+		setForm({ mode: { type: 'add' }, name: '', url: 'localhost:5565', apiKey: '' });
 		setShowApiKey(false);
 	}, []);
 
 	const handleEdit = useCallback((e: React.MouseEvent, conn: SavedConnection) => {
 		e.stopPropagation();
-		setForm({ mode: conn.id, name: conn.name, url: conn.url, apiKey: conn.apiKey || '' });
+		setForm({ mode: { type: 'edit', id: conn.id }, name: conn.name, url: conn.url, apiKey: conn.apiKey || '' });
 		setShowApiKey(false);
 	}, []);
 
@@ -294,27 +295,22 @@ const ConnectionManagerView: React.FC = () => {
 		if (!form || !form.name.trim()) return;
 		const docs = getDocs();
 
-		if (form.mode === 'add') {
-			const id = addConnection({
+		if (form.mode.type === 'add') {
+			// Build the connection once — addConnection() assigns the id,
+			// then the same object (plus id) is what gets opened.
+			const newConn: Omit<SavedConnection, 'id'> = {
 				name: form.name.trim(),
 				url: form.url.trim(),
 				apiKey: form.apiKey.trim(),
 				config: { ...DEFAULT_CONFIG },
 				selectedPhases: [...ALL_PHASES],
-			});
+			};
+			const id = addConnection(newConn);
 			if (docs) {
-				const conn: SavedConnection = {
-					id,
-					name: form.name.trim(),
-					url: form.url.trim(),
-					apiKey: form.apiKey.trim(),
-					config: { ...DEFAULT_CONFIG },
-					selectedPhases: [...ALL_PHASES],
-				};
-				openConnection(docs, conn);
+				openConnection(docs, { ...newConn, id });
 			}
 		} else {
-			updateConnection(form.mode, {
+			updateConnection(form.mode.id, {
 				name: form.name.trim(),
 				url: form.url.trim(),
 				apiKey: form.apiKey.trim(),
@@ -381,12 +377,13 @@ const ConnectionManagerView: React.FC = () => {
 				<div style={s.formOverlay} onClick={handleCancel}>
 					<div style={s.formDialog} onClick={(e) => e.stopPropagation()}>
 						<h2 style={s.formTitle}>
-							{form.mode === 'add' ? 'New Connection' : 'Edit Connection'}
+							{form.mode.type === 'add' ? 'New Connection' : 'Edit Connection'}
 						</h2>
 
 						<div style={s.formField}>
-							<label style={s.formLabel}>Name</label>
+							<label style={s.formLabel} htmlFor="conn-name">Name</label>
 							<input
+								id="conn-name"
 								style={s.formInput}
 								value={form.name}
 								onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -397,8 +394,9 @@ const ConnectionManagerView: React.FC = () => {
 						</div>
 
 						<div style={s.formField}>
-							<label style={s.formLabel}>URL</label>
+							<label style={s.formLabel} htmlFor="conn-url">URL</label>
 							<input
+								id="conn-url"
 								style={s.formInput}
 								value={form.url}
 								onChange={(e) => setForm({ ...form, url: e.target.value })}
@@ -408,9 +406,10 @@ const ConnectionManagerView: React.FC = () => {
 						</div>
 
 						<div style={s.formField}>
-							<label style={s.formLabel}>API Key</label>
+							<label style={s.formLabel} htmlFor="conn-apikey">API Key</label>
 							<div style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
 								<input
+									id="conn-apikey"
 									style={{ ...s.formInput, flex: 1 }}
 									type={showApiKey ? 'text' : 'password'}
 									value={form.apiKey}
@@ -444,7 +443,7 @@ const ConnectionManagerView: React.FC = () => {
 						<div style={s.formButtons}>
 							<button style={s.buttonSecondary} onClick={handleCancel}>Cancel</button>
 							<button style={s.buttonPrimary} onClick={handleSave}>
-								{form.mode === 'add' ? 'Connect' : 'Save'}
+								{form.mode.type === 'add' ? 'Connect' : 'Save'}
 							</button>
 						</div>
 					</div>

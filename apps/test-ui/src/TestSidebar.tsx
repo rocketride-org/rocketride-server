@@ -28,7 +28,7 @@ import React, { useCallback } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellSidebarProps } from 'shell-ui';
 import { NavButton, BxGridAlt, BxDesktop, BxCog, BxListUl, BxStop, BxPlay } from 'shell-ui';
-import { useSavedConnections } from './connections';
+import { useSavedConnections, type SavedConnection } from './connections';
 import { getDocs } from './docs';
 import { openConnection } from './TestApp';
 import { useView, useHasActiveTab, requestView } from './navigation';
@@ -170,7 +170,7 @@ const TestSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 	const currentView = useView();
 	const hasActiveTab = useHasActiveTab();
 
-	const handleOpenConnection = useCallback((conn: any) => {
+	const handleOpenConnection = useCallback((conn: SavedConnection) => {
 		const docs = getDocs();
 		if (docs) openConnection(docs, conn);
 	}, []);

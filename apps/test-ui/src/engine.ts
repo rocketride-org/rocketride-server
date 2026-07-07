@@ -105,6 +105,24 @@ function randomDelay(maxMs: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, Math.random() * maxMs));
 }
 
+/** Max bytes crypto.getRandomValues() accepts per call (Web Crypto spec). */
+const RANDOM_CHUNK_BYTES = 65_536;
+
+/**
+ * Fill a buffer of arbitrary size with random bytes.
+ *
+ * The Web Crypto spec caps getRandomValues() at 65,536 bytes per call
+ * (QuotaExceededError above that), so large buffers are filled in
+ * 64 KiB chunks. subarray() clamps the final chunk automatically.
+ */
+function randomBytes(byteLength: number): Uint8Array {
+	const buf = new Uint8Array(byteLength);
+	for (let i = 0; i < byteLength; i += RANDOM_CHUNK_BYTES) {
+		crypto.getRandomValues(buf.subarray(i, i + RANDOM_CHUNK_BYTES));
+	}
+	return buf;
+}
+
 /**
  * Generate a test payload of the requested size and type.
  *
@@ -137,9 +155,7 @@ function generatePayload(
 		return '{"broken: [' + 'x'.repeat(Math.min(bytes, 100_000)) + ']}}{';
 	}
 	if (type === 'binary' || (type === 'mixed' && Math.random() < 0.5)) {
-		const buf = new Uint8Array(bytes);
-		crypto.getRandomValues(buf);
-		return buf;
+		return randomBytes(bytes);
 	}
 	// Realistic text payload — use NLP-grade content for pipeline stress
 	const idx = payloadCounter++;
@@ -347,7 +363,9 @@ export function createTestEngine(): TestEngine {
 	async function startPingHeartbeat(
 		signal: AbortSignal,
 	): Promise<{ stop: () => Promise<void> }> {
-		const client = await createClient('ping');
+		// 5s request timeout — a stalled ping must fail fast so the 100ms
+		// heartbeat keeps sampling; matches the >5000ms classification below.
+		const client = await createClient('ping', 5000);
 		let running = true;
 
 		// Ping loop runs in the background
@@ -362,7 +380,7 @@ export function createTestEngine(): TestEngine {
 					const r = apiMonitor.get('ping');
 					r.issued++;
 					r.completed++;
-					r.latencies.push(latency);
+					apiMonitor.pushLatency(r, latency);
 					if (r.errors === 0) r.status = 'passed';
 
 					// Snapshot in-flight and update worst ping
@@ -536,6 +554,22 @@ export function createTestEngine(): TestEngine {
 		const connected = clientPool.filter((c) => c.isConnected());
 		if (connected.length === 0) return null;
 		return connected[idx % connected.length];
+	}
+
+	/**
+	 * Get the client that owns a pipeline via its recorded pool slot.
+	 *
+	 * Unlike getPoolClient(), this never re-maps to a different WebSocket
+	 * when other pool clients drop — a pipeline must keep talking on the
+	 * connection that started it. Returns null when the owning client is
+	 * gone or disconnected. Falls back to round-robin selection only for
+	 * pipelines that never recorded a slot (start failed before assignment).
+	 */
+	function getPipelineClient(idx: number): RocketRideClient | null {
+		const clientIdx = pipelines[idx]?.clientIdx;
+		if (clientIdx === undefined) return getPoolClient(idx);
+		const client = clientPool[clientIdx];
+		return client && client.isConnected() ? client : null;
 	}
 
 	// =========================================================================
@@ -1237,7 +1271,7 @@ export function createTestEngine(): TestEngine {
 		notify();
 		for (let i = 0; i < tokens.length; i++) {
 			if (!tokens[i]) continue;
-			const client = getPoolClient(pipelines[i]?.clientIdx ?? i);
+			const client = getPipelineClient(i);
 			if (!client) continue;
 			const label = `P-${String(i).padStart(2, '0')}`;
 
@@ -1331,7 +1365,7 @@ export function createTestEngine(): TestEngine {
 		signal: AbortSignal,
 	) {
 		const label = `P-${String(idx).padStart(2, '0')}`;
-		const client = getPoolClient(pipelines[idx]?.clientIdx ?? idx);
+		const client = getPipelineClient(idx);
 		if (!client) return;
 
 		const corruptionPct =
@@ -2305,7 +2339,7 @@ export function createTestEngine(): TestEngine {
 			notify();
 		},
 
-		/** Clear all results but keep settings intact. */
+		/** Clear all run data. Settings are view-owned and unaffected. */
 		clear() {
 			if (state === 'running' || state === 'paused') return;
 			opsCounter = 0;
@@ -2330,29 +2364,13 @@ export function createTestEngine(): TestEngine {
 			notify();
 		},
 
-		/** Reset all data AND settings to defaults. */
+		/**
+		 * Reset the engine. Engine-side this is identical to clear() —
+		 * settings live in the view layer (TestSessionView restores its
+		 * own config and phase selection when handling the reset action).
+		 */
 		reset() {
-			if (state === 'running' || state === 'paused') return;
-			opsCounter = 0;
-			opsWindow = [];
-			dataTransferred = 0;
-			metrics.passed = 0;
-			metrics.failed = 0;
-			metrics.activePipelines = 0;
-			metrics.opsPerSec = 0;
-			metrics.totalOps = 0;
-			metrics.targetOps = 0;
-			metrics.elapsed = 0;
-			metrics.dataTransferred = 0;
-			metrics.wsConnections = 0;
-			metrics.queuedOps = 0;
-			events.length = 0;
-			apiMonitor.clear();
-			latencyHistory.length = 0;
-			pipelines.length = 0;
-			clientPool = [];
-			initPhases();
-			notify();
+			engine.clear();
 		},
 
 		/** Run a pre-built chaos scenario with custom config overrides. */

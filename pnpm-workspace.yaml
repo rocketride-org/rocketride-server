@@ -39,8 +39,8 @@ packages:
   - 'apps/monitor-ui'
   - 'apps/profiler-ui'
   - 'apps/shell-ui'
-  - 'apps/vscode'
   - 'apps/test-ui'
+  - 'apps/vscode'
   - 'apps/world-ui'
 
   # Examples

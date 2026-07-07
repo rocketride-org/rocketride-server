@@ -40,7 +40,8 @@ export interface ApiTestResult {
 	completed: number;
 	/** Calls that failed (network error, unexpected result). */
 	errors: number;
-	/** All recorded latencies in ms (for percentile calculation). */
+	/** Recent latency samples in ms (rolling window capped at
+	 *  MAX_LATENCY_SAMPLES in monitor.ts; used for percentile calculation). */
 	latencies: number[];
 	/** Last error message. */
 	lastError?: string;

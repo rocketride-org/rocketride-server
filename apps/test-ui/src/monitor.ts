@@ -71,6 +71,14 @@ function inferCategory(method: string): string {
 // =============================================================================
 
 /**
+ * Rolling-window cap for per-method latency samples. High-frequency
+ * methods (send, ping) run thousands-to-millions of times during long
+ * stress runs; unbounded arrays would bloat memory and slow every panel
+ * that recomputes percentiles. 500 recent samples keep stats meaningful.
+ */
+export const MAX_LATENCY_SAMPLES = 500;
+
+/**
  * Global API call monitor. Records issued/completed/latency for every method.
  * Does NOT interpret success or failure — the caller decides that.
  *
@@ -113,6 +121,16 @@ export class ApiMonitor {
 	}
 
 	/**
+	 * Push a latency sample onto a result's rolling window.
+	 * Evicts the oldest sample beyond MAX_LATENCY_SAMPLES so per-method
+	 * arrays stay bounded across long-running stress runs.
+	 */
+	pushLatency(r: ApiTestResult, latency: number): void {
+		r.latencies.push(latency);
+		if (r.latencies.length > MAX_LATENCY_SAMPLES) r.latencies.shift();
+	}
+
+	/**
 	 * Record the start of an API call.
 	 *
 	 * Increments issued count and tracks in-flight state.
@@ -141,7 +159,7 @@ export class ApiMonitor {
 		const r = this.get(method);
 		const latency = performance.now() - t0;
 		r.completed++;
-		r.latencies.push(latency);
+		this.pushLatency(r, latency);
 
 		// Update in-flight tracking
 		const count = this._inflight.get(method) || 1;

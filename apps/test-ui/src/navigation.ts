@@ -34,7 +34,7 @@
 //    applies it locally, then calls setView() to confirm.
 // =============================================================================
 
-import { useSyncExternalStore } from 'react';
+import { createExternalStore } from './store';
 
 // =============================================================================
 // TYPES
@@ -55,11 +55,8 @@ let _viewRequest: ViewId | null = null;
 /** Whether any tab is open. */
 let _hasActiveTab = false;
 
-const _listeners = new Set<() => void>();
-
-function _emit(): void {
-	for (const fn of _listeners) fn();
-}
+/** Shared pub/sub backing all three hooks below. */
+const _store = createExternalStore();
 
 // =============================================================================
 // PUBLIC API — called by the active tab
@@ -69,7 +66,7 @@ function _emit(): void {
 export function setView(view: ViewId): void {
 	_view = view;
 	_viewRequest = null; // clear any pending request
-	_emit();
+	_store.emit();
 }
 
 /** Set whether any tab is active (controls sidebar visibility). */
@@ -77,7 +74,7 @@ export function setHasActiveTab(active: boolean): void {
 	if (_hasActiveTab !== active) {
 		_hasActiveTab = active;
 		if (!active) _view = '';
-		_emit();
+		_store.emit();
 	}
 }
 
@@ -88,7 +85,7 @@ export function setHasActiveTab(active: boolean): void {
 /** Request a view change. The active tab will pick this up and apply it. */
 export function requestView(view: ViewId): void {
 	_viewRequest = view;
-	_emit();
+	_store.emit();
 }
 
 // =============================================================================
@@ -97,24 +94,15 @@ export function requestView(view: ViewId): void {
 
 /** What the sidebar should display. */
 export function useView(): ViewId | '' {
-	return useSyncExternalStore(
-		(cb) => { _listeners.add(cb); return () => _listeners.delete(cb); },
-		() => _view,
-	);
+	return _store.useValue(() => _view);
 }
 
 /** Pending view request from sidebar. Null if none. */
 export function useViewRequest(): ViewId | null {
-	return useSyncExternalStore(
-		(cb) => { _listeners.add(cb); return () => _listeners.delete(cb); },
-		() => _viewRequest,
-	);
+	return _store.useValue(() => _viewRequest);
 }
 
 /** Whether any tab is open. */
 export function useHasActiveTab(): boolean {
-	return useSyncExternalStore(
-		(cb) => { _listeners.add(cb); return () => _listeners.delete(cb); },
-		() => _hasActiveTab,
-	);
+	return _store.useValue(() => _hasActiveTab);
 }

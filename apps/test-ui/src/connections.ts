@@ -24,9 +24,9 @@
 // CONNECTION STORE — Saved test server connections with workspace persistence
 // =============================================================================
 
-import { useSyncExternalStore } from 'react';
 import type { TestConfig } from './types';
 import { DEFAULT_CONFIG } from './session';
+import { createExternalStore } from './store';
 
 // =============================================================================
 // TYPES
@@ -58,11 +58,13 @@ export interface TestConnectionContent {
 let _connections: SavedConnection[] = [];
 let _updateAppState: ((key: string, value: unknown) => void) | null = null;
 let _persistTimer: ReturnType<typeof setTimeout> | null = null;
-const _listeners = new Set<() => void>();
+
+/** Shared pub/sub backing useSavedConnections(). */
+const _store = createExternalStore();
 
 /** Emit change to all React subscribers. */
 function emit() {
-	for (const cb of _listeners) cb();
+	_store.emit();
 }
 
 /** Schedule debounced persist to workspace. */
@@ -126,7 +128,7 @@ export function destroyConnectionStore() {
 	flushPersist();
 	_connections = [];
 	_updateAppState = null;
-	_listeners.clear();
+	_store.clear();
 }
 
 /** Get all saved connections (non-reactive). */
@@ -136,10 +138,7 @@ export function getSavedConnections(): SavedConnection[] {
 
 /** React hook — subscribe to connection list changes. */
 export function useSavedConnections(): SavedConnection[] {
-	return useSyncExternalStore(
-		(cb) => { _listeners.add(cb); return () => _listeners.delete(cb); },
-		() => _connections,
-	);
+	return _store.useValue(() => _connections);
 }
 
 /** Add a new connection. Returns the generated ID. */
