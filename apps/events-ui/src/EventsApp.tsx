@@ -12,8 +12,6 @@ import { styles } from './styles';
 import Toolbar from './components/Toolbar';
 import EventList from './components/EventList';
 
-let nextId = 1;
-
 const EventsApp: React.FC<ShellAppProps> = (_props) => {
 	const client = useClient();
 
@@ -21,6 +19,7 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 	const eventsRef = useRef<CapturedEvent[]>([]);
 	const [tick, setTick] = useState(0);
 	const rafRef = useRef<number | null>(null);
+	const nextIdRef = useRef(1);
 
 	// Monitor configuration
 	const [config, setConfig] = useState<MonitorConfig>({
@@ -45,6 +44,16 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 		});
 	}, []);
 
+	// Cancel pending rAF on unmount
+	useEffect(() => {
+		return () => {
+			if (rafRef.current !== null) {
+				cancelAnimationFrame(rafRef.current);
+				rafRef.current = null;
+			}
+		};
+	}, []);
+
 	// Handle incoming shell events
 	useShellEvent('shell:event', useCallback(({ event }) => {
 		if (!config.active) return;
@@ -56,7 +65,7 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 		if (config.token !== '*' && event.token !== config.token) return;
 
 		const captured: CapturedEvent = {
-			id: nextId++,
+			id: nextIdRef.current++,
 			time: Date.now(),
 			eventName: event.event ?? 'unknown',
 			body: (event.body ?? {}) as Record<string, unknown>,
@@ -68,8 +77,8 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 		totalRef.current++;
 		rateWindowRef.current.push(Date.now());
 
-		// Cap memory
-		if (eventsRef.current.length > MAX_EVENTS) {
+		// Cap memory — trim in batches to amortize the cost
+		if (eventsRef.current.length > MAX_EVENTS * 1.2) {
 			eventsRef.current = eventsRef.current.slice(-MAX_EVENTS);
 		}
 
@@ -92,13 +101,15 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 
 		const key = { token: config.token };
 
-		client.addMonitor(key, config.types).catch(() => {
-			// Subscription failed — stop monitoring
+		client.addMonitor(key, config.types).catch((err) => {
+			console.error('[events-ui] addMonitor failed', err);
 			setConfig((c) => ({ ...c, active: false }));
 		});
 
 		return () => {
-			client.removeMonitor(key, config.types).catch(() => {});
+			client.removeMonitor(key, config.types).catch((err) => {
+				console.error('[events-ui] removeMonitor failed', err);
+			});
 		};
 	}, [client, config.active, config.token, config.types]);
 
@@ -110,6 +121,7 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 		eventsRef.current = [];
 		totalRef.current = 0;
 		rateWindowRef.current = [];
+		nextIdRef.current = 1;
 		setTick((t) => t + 1);
 	};
 

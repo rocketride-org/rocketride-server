@@ -27,13 +27,16 @@ const EventList: React.FC<Props> = ({ events, filterType }) => {
 		stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
 	};
 
-	// Auto-scroll to bottom when new events arrive (if sticky)
+	// Auto-scroll to bottom when new events arrive (if sticky).
+	// Use last event ID rather than length — length can stay the same when
+	// the 10K cap evicts an older matching event and appends a new one.
+	const lastId = filtered.length > 0 ? filtered[filtered.length - 1].id : 0;
 	useEffect(() => {
 		const el = containerRef.current;
 		if (el && stickRef.current) {
 			el.scrollTop = el.scrollHeight;
 		}
-	}, [filtered.length]);
+	}, [lastId]);
 
 	return (
 		<div

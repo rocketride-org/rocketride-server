@@ -6,7 +6,6 @@ import React from 'react';
 import type { CapturedEvent, MonitorConfig } from '../types';
 import { EVENT_TYPE_NAMES } from '../types';
 import { styles, toggleChip } from '../styles';
-import { commonStyles } from 'shared/themes/styles';
 
 interface Props {
 	config: MonitorConfig;
@@ -26,7 +25,9 @@ function downloadEvents(events: CapturedEvent[], filterType: string) {
 	const a = document.createElement('a');
 	a.href = url;
 	a.download = `rocketride-events-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+	document.body.appendChild(a);
 	a.click();
+	document.body.removeChild(a);
 	URL.revokeObjectURL(url);
 }
 
@@ -63,7 +64,7 @@ const Toolbar: React.FC<Props> = ({
 
 	const startStopStyle = config.active
 		? styles.buttonDanger
-		: { ...styles.buttonActive, ...(config.types.length === 0 ? commonStyles.buttonDisabled : {}) };
+		: { ...styles.buttonActive, ...(config.types.length === 0 ? styles.buttonDisabled : {}) };
 
 	return (
 		<div>
@@ -110,7 +111,7 @@ const Toolbar: React.FC<Props> = ({
 				</button>
 
 				<button
-					style={{ ...styles.button, ...(events.length === 0 ? commonStyles.buttonDisabled : {}) }}
+					style={{ ...styles.button, ...(events.length === 0 ? styles.buttonDisabled : {}) }}
 					onClick={() => downloadEvents(events, filterType)}
 					disabled={events.length === 0}
 				>
@@ -122,29 +123,33 @@ const Toolbar: React.FC<Props> = ({
 			<div style={{ ...styles.toolbar, gap: 6 }}>
 				<span style={styles.toolbarLabel}>Types</span>
 				<div style={styles.typeChipsRow}>
-					{EVENT_TYPE_NAMES.map((type) => (
-						<button
-							key={type}
-							style={{
-								...toggleChip(config.types.includes(type)),
-								...(config.active ? commonStyles.buttonDisabled : {}),
-							}}
-							onClick={() => toggleType(type)}
-							disabled={config.active}
-						>
-							{type}
-						</button>
-					))}
+					{EVENT_TYPE_NAMES.map((type) => {
+						const active = config.types.includes(type);
+						return (
+							<button
+								key={type}
+								style={{
+									...toggleChip(active),
+									...(config.active ? styles.buttonDisabled : {}),
+								}}
+								onClick={() => toggleType(type)}
+								disabled={config.active}
+								aria-pressed={active}
+							>
+								{type}
+							</button>
+						);
+					})}
 				</div>
 				<button
-					style={{ ...toggleChip(false), marginLeft: 4, ...(config.active ? commonStyles.buttonDisabled : {}) }}
+					style={{ ...toggleChip(false), marginLeft: 4, ...(config.active ? styles.buttonDisabled : {}) }}
 					onClick={selectAll}
 					disabled={config.active}
 				>
 					All
 				</button>
 				<button
-					style={{ ...toggleChip(false), ...(config.active ? commonStyles.buttonDisabled : {}) }}
+					style={{ ...toggleChip(false), ...(config.active ? styles.buttonDisabled : {}) }}
 					onClick={selectNone}
 					disabled={config.active}
 				>
