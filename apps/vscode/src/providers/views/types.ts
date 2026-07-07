@@ -12,6 +12,7 @@
 
 import type { ViewState, TaskStatus, TraceLevel } from 'shared/modules/project';
 import type { DashboardResponse } from 'shared/modules/server';
+import type { PromoRedemption, PromoValidation } from 'shared/modules/checkout';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from 'rocketride';
 
 // =============================================================================
@@ -40,7 +41,9 @@ export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initia
 // =============================================================================
 
 /** All messages the extension host can send to the AccountWebview. */
-export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:accountUpdate' } | { type: 'account:error'; error: string };
+export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:accountUpdate' } | { type: 'account:error'; error: string }
+	| { type: 'checkout:validatePromoResult'; result: PromoValidation | null; error: string | null }
+	| { type: 'checkout:redeemPromoResult'; result: PromoRedemption | null; error: string | null };
 
 /** All messages the AccountWebview can send to the extension host. */
 export type AccountWebviewToHost =
@@ -61,7 +64,9 @@ export type AccountWebviewToHost =
 	| { type: 'account:addTeamMember'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:editPerms'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:removeTeamMember'; params: { teamId: string; userId: string } }
-	| { type: 'account:sectionChange'; section: string };
+	| { type: 'account:sectionChange'; section: string }
+	| { type: 'checkout:validatePromo'; code: string; priceId?: string }
+	| { type: 'checkout:redeemPromo'; code: string };
 
 // =============================================================================
 // ENVIRONMENT PAGE PROTOCOL

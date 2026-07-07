@@ -164,6 +164,18 @@ export interface UpgradeModalProps {
  * selects a new plan and clicks Confirm to trigger the server-side
  * Stripe subscription modification with proration.
  */
+/**
+ * Whether a plan may appear in the upgrade picker: not a top-up pack, not a
+ * hidden promo-base plan, not action-only, and not deactivated. Applied to
+ * both the picker grid and preselected plans so a hidden plan can never be
+ * reached via `preselectedPriceId`.
+ */
+const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
+	p.metadata?.kind !== 'topup' &&
+	p.metadata?.kind !== 'promo_base' &&
+	!p.metadata?.action &&
+	p.isActive !== false;
+
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	plans,
 	currentPriceId,
@@ -174,16 +186,16 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 }) => {
 	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(
 		() => (preselectedPriceId && preselectedPriceId !== currentPriceId
-			? plans.find((p) => p.stripePriceId === preselectedPriceId) ?? null
+			? plans.find((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p)) ?? null
 			: null),
 	);
 	const [upgrading, setUpgrading] = useState(false);
 	const [success, setSuccess] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	// Filter out top-up packs and action-only plans, keep subscription plans
+	// Filter out top-up packs, hidden promo-base plans, and action-only plans
 	const subscriptionPlans = useMemo(
-		() => plans.filter((p) => p.metadata?.kind !== 'topup' && !p.metadata?.action && p.isActive !== false),
+		() => plans.filter(isVisibleSubscriptionPlan),
 		[plans],
 	);
 

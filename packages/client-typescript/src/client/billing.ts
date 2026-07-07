@@ -31,7 +31,7 @@
  */
 
 import type { RocketRideClient } from './client.js';
-import type { BillingDetail, AppPrice, CreditBalance, CreditPack, TransactionsResult, UsageRollup } from './types/billing.js';
+import type { BillingDetail, AppPrice, CreditBalance, CreditPack, PromoRedemption, PromoValidation, TransactionsResult, UsageRollup } from './types/billing.js';
 
 // =============================================================================
 // BILLING API CLASS
@@ -85,17 +85,68 @@ export class BillingApi {
 	 * The returned client_secret is passed to `stripe.confirmPayment()` to
 	 * complete the checkout without a browser redirect to Stripe.
 	 *
-	 * @param orgId   - Organisation UUID to subscribe.
-	 * @param appId   - App being subscribed (e.g. "brandi").
-	 * @param priceId - Stripe price_* identifier for the plan.
-	 * @returns Object with client_secret for Stripe Elements and subscription_id.
+	 * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
+	 * promotion code) — the subscription is already active and no payment
+	 * step is needed.
+	 *
+	 * @param orgId         - Organisation UUID to subscribe.
+	 * @param appId         - App being subscribed (e.g. "brandi").
+	 * @param priceId       - Stripe price_* identifier for the plan.
+	 * @param promotionCode - Optional promo code to apply (validated server-side).
+	 * @returns Object with client_secret (or null), subscription_id, and status.
 	 */
-	async createCheckoutSession(orgId: string, appId: string, priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> {
-		return this.client.call<{ clientSecret: string; subscriptionId: string }>('rrext_account_billing', {
+	async createCheckoutSession(orgId: string, appId: string, priceId: string, promotionCode?: string): Promise<{ clientSecret: string | null; subscriptionId: string; status: string }> {
+		return this.client.call<{ clientSecret: string | null; subscriptionId: string; status: string }>('rrext_account_billing', {
 			subcommand: 'subscribe',
 			orgId,
 			appId,
 			priceId,
+			...(promotionCode ? { promotionCode } : {}),
+		});
+	}
+
+	/**
+	 * Resolves a promo code without side effects.
+	 *
+	 * An unknown or expired code returns `{ valid: false, reason }` — it never
+	 * throws. Pass `priceId` to also get the discounted first-invoice amount
+	 * for the selected plan.
+	 *
+	 * @param orgId   - Organisation UUID (context only — validation is global).
+	 * @param code    - Customer-facing code string (case-insensitive).
+	 * @param priceId - Optional plan to compute `discountedAmountCents` against.
+	 * @returns Promo validation result.
+	 */
+	async validatePromoCode(orgId: string, code: string, priceId?: string): Promise<PromoValidation> {
+		return this.client.call<PromoValidation>('rrext_account_billing', {
+			subcommand: 'promo_validate',
+			orgId,
+			code,
+			...(priceId ? { priceId } : {}),
+		});
+	}
+
+	/**
+	 * Redeems a credit-grant (hackathon) code for the caller's org.
+	 *
+	 * Creates a $0 subscription for the app named in the code's metadata (no
+	 * payment method required) and grants the metadata-defined credits
+	 * immediately. If the org is already subscribed to the app, only the
+	 * credits are granted (`mode: 'credits_only'`). Discount-only codes are
+	 * rejected — those are applied during checkout instead.
+	 *
+	 * Any authenticated org member may redeem; the server derives the org
+	 * from the caller's own membership.
+	 *
+	 * @param orgId - Organisation UUID (context only — server uses the caller's org).
+	 * @param code  - Customer-facing code string (case-insensitive).
+	 * @returns Redemption result with mode and granted credits.
+	 */
+	async redeemPromoCode(orgId: string, code: string): Promise<PromoRedemption> {
+		return this.client.call<PromoRedemption>('rrext_account_billing', {
+			subcommand: 'promo_redeem',
+			orgId,
+			code,
 		});
 	}
 
