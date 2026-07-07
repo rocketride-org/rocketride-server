@@ -54,8 +54,10 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 		};
 	}, []);
 
-	// Handle incoming shell events
-	useShellEvent('shell:event', useCallback(({ event }) => {
+	// Handle incoming shell events.
+	// useShellEvent already stores the handler in a ref and calls the latest
+	// version on every event, so useCallback is unnecessary here.
+	useShellEvent('shell:event', ({ event }) => {
 		if (!config.active) return;
 
 		// Only capture DAP events
@@ -83,7 +85,7 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 		}
 
 		scheduleUpdate();
-	}, [config.active, config.token, scheduleUpdate]));
+	});
 
 	// Clean up rate window periodically
 	useEffect(() => {

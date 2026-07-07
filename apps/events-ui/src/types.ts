@@ -42,4 +42,4 @@ export const EVENT_TYPE_NAMES = [
 export type EventTypeName = (typeof EVENT_TYPE_NAMES)[number];
 
 /** Maximum events to keep in memory */
-export const MAX_EVENTS = 10_000;
+export const MAX_EVENTS = 1_000;
