@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IInstanceBase
+from rocketlib import Entry, IInstanceBase
 from ai.common.schema import Answer
 
 from .IGlobal import IGlobal
@@ -31,32 +31,46 @@ from .convert import convert_payload
 class IInstance(IInstanceBase):
     IGlobal: IGlobal  # Reference to the global context holding the resolved config
 
+    # Converted payloads collected during the object, emitted at closing.
+    # Each entry is (expectJson: bool, payload) — see writeAnswers/closing.
+    pending: list = None
+
+    def open(self, object: Entry):
+        self.pending = []
+
     def writeAnswers(self, answer: Answer):
-        """Convert matching facts on the ``answers`` lane, then forward.
+        """Collect and convert an incoming answer; emit happens in ``closing``.
 
-        This node owns forwarding for the lane: source-currency fact records are
-        enriched with a ``converted`` value plus provenance, and everything else
-        (plain text, non-fact JSON, non-matching currencies) is passed through
-        unchanged. Records are never dropped, so there is no ``preventDefault``.
+        We take ownership of the ``answers`` lane by calling ``preventDefault``
+        (mirrors the ``anonymize`` node): the engine's default pass-through is
+        suppressed and this node re-emits every record itself in ``closing``, so
+        each answer appears exactly once. Source-currency fact records are
+        enriched with a ``converted`` value plus provenance; everything else
+        (plain text, non-fact JSON, non-matching currencies) is forwarded
+        unchanged. Records are never dropped.
+
+        The payload is extracted here (not the ``Answer`` object) so nothing
+        depends on the engine reusing the object after this call returns.
         """
-        if answer is None:
-            self.instance.writeAnswers(answer)
-            return
-
         try:
-            payload = answer.getJson()
+            payload = answer.getJson() if answer is not None else None
         except ValueError:
-            # Answer holds plain, non-JSON text — nothing structured to convert.
-            self.instance.writeAnswers(answer)
-            return
+            payload = None
 
-        if not isinstance(payload, (dict, list)):
-            # Scalar JSON (a bare number/string) carries no currency; forward it.
-            self.instance.writeAnswers(answer)
-            return
+        if isinstance(payload, (dict, list)):
+            self.pending.append((True, convert_payload(payload, self.IGlobal.config)))
+        else:
+            # Plain text / scalar JSON carries no currency — pass through verbatim.
+            self.pending.append((False, answer.getText() if answer is not None else ''))
 
-        converted = convert_payload(payload, self.IGlobal.config)
+        # Suppress the engine's default forward; we emit in closing().
+        self.preventDefault()
 
-        out = Answer(expectJson=True)
-        out.setAnswer(converted)
-        self.instance.writeAnswers(out)
+    def closing(self):
+        for expect_json, data in self.pending:
+            out = Answer(expectJson=expect_json)
+            out.setAnswer(data)
+            self.instance.writeAnswers(out)
+
+    def close(self):
+        self.pending = None
