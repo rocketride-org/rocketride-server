@@ -69,7 +69,7 @@ class Store(DocumentStoreBase):
 
         # Remove leading and trailing spaces, leading http/https and :// and trailing slashes
         self.host = re.sub(r'^https?://', '', config.get('host', 'localhost').strip()).rstrip('/')
-        self.port = config.get('port', 8000)
+        self.port = self._coercePort(config.get('port', 8000))
         self.threshold_search = config.get('score', 0.5)
 
         # Strip API key also
@@ -113,6 +113,37 @@ class Store(DocumentStoreBase):
         self.similarity = 'cosine'
         self.client = None
         self.collectionObj = None
+
+    @staticmethod
+    def _coercePort(value: Any, default: int = 8000) -> int:
+        """
+        Coerce a configured port to an int for the chromadb HTTP client.
+
+        The port schema accepts both a number and a string so env-var
+        interpolation (which always yields a string, e.g.
+        '${ROCKETRIDE_CHROMA_PORT}') validates. Normalize here: pass ints and
+        whole-number floats through, parse numeric strings, and fall back to
+        ``default`` for anything unparseable, such as an unresolved
+        placeholder, rather than crashing the client, which requires an int.
+        """
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            # A JSON 'number' may arrive as a float (e.g. 8443.0). Accept
+            # whole-number floats; a fractional port is invalid, so fall back.
+            if value.is_integer():
+                return int(value)
+            debug(f'chroma: port {value!r} is not a whole number; using default {default}')
+            return default
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError:
+                debug(f'chroma: port {value!r} is not numeric (unresolved env var?); using default {default}')
+                return default
+        return default
 
     def _doesCollectionExist(self) -> bool:
         """
