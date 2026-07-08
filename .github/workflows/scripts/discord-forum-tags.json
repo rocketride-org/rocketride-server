@@ -3,6 +3,8 @@
   "issues": {
     "state": { "open": "open", "closed": "closed" },
     "labels": {
+      "good first issue": "good-first-issue",
+      "good-first-issue": "good-first-issue",
       "bug": "bug",
       "feature": "feature",
       "enhancement": "enhancement",
@@ -24,6 +26,7 @@
     "ids": {
       "open": "1524258480611917919",
       "closed": "1524258480611917920",
+      "good-first-issue": "1524470113389121557",
       "bug": "1524258480611917921",
       "feature": "1524258480611917922",
       "enhancement": "1524258480611917923",
@@ -39,6 +42,8 @@
   "pr": {
     "state": { "open": "open", "closed": "closed", "merged": "merged", "draft": "draft" },
     "labels": {
+      "good first issue": "good-first-issue",
+      "good-first-issue": "good-first-issue",
       "module:nodes": "nodes",
       "nodes": "nodes",
       "area: nodes": "nodes",
@@ -70,6 +75,7 @@
       "open": "1524258481451044929",
       "closed": "1524258481451044930",
       "merged": "1524258481451044931",
+      "good-first-issue": "1524470119781240964",
       "draft": "1524258481451044932",
       "nodes": "1524258481451044933",
       "docs": "1524258481463492758",
