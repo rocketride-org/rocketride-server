@@ -277,6 +277,176 @@ def test_rename_ext_swaps_on_a_copy():
     assert D.rename_ext(None, 'txt') is None
 
 
+def test_source_media_detail_nests_prior_source():
+    """source_media_detail carries a prior nested `source` forward (chain) + includes name."""
+    video = {'source_mime': 'video/mp4', 'duration': 74.05, 'width': 1280, 'height': 720}
+    frame = build_stream_descriptor(
+        None,
+        'image',
+        objectId='v1',
+        parent='/inbox/BBC.mp4',
+        permissionId=0,
+        signature='s',
+        nodeId='n',
+        origin='extracted',
+        source_mime='image/png',
+        size=40213,
+        stream_index=0,
+        name='BBC.frame0.png',
+        source=video,
+    )
+    layer = D.source_media_detail(frame)
+    assert layer['source_mime'] == 'image/png'
+    assert layer['size'] == 40213
+    assert layer['name'] == 'BBC.frame0.png'
+    assert layer['source'] == video  # the prior chain, nested
+    for excluded in ('objectId', 'parent', 'permissionId', 'signature', 'nodeId', 'origin'):
+        assert excluded not in layer
+
+
+def test_image_source_layer_builds_and_nests():
+    """image_source_layer synthesizes an image self-layer with the prior source nested."""
+    video = {'source_mime': 'video/mp4', 'duration': 74.05}
+    layer = D.image_source_layer(
+        size=40213, width=1280, height=720, stream_index=3, name='BBC.frame3.png', prior_source=video
+    )
+    assert layer == {
+        'source_mime': 'image/png',
+        'size': 40213,
+        'width': 1280,
+        'height': 720,
+        'stream_index': 3,
+        'name': 'BBC.frame3.png',
+        'source': video,
+    }
+    # absent fields omitted; no prior_source -> no nested source
+    assert D.image_source_layer(size=100) == {'source_mime': 'image/png', 'size': 100}
+
+
+def test_source_chain_three_levels():
+    """A video -> frame -> thumbnail chain nests three levels deep."""
+    video = {'source_mime': 'video/mp4', 'duration': 74.05}
+    frame_desc = build_stream_descriptor(
+        None,
+        'image',
+        objectId='v1',
+        parent='/BBC.mp4',
+        permissionId=0,
+        signature='s',
+        nodeId='n',
+        origin='extracted',
+        source_mime='image/png',
+        size=40213,
+        stream_index=0,
+        name='BBC.frame0.png',
+        source=video,
+    )
+    frame_layer = D.source_media_detail(frame_desc)  # {frame, source:{video}}
+    thumb_layer = D.image_source_layer(
+        size=1234, width=128, height=128, name='BBC.frame0.png', prior_source=frame_layer
+    )
+    assert thumb_layer['source'] == frame_layer
+    assert thumb_layer['source']['source'] == video  # three deep
+
+
+# ---------------------------------------------------------------------------
+# image-lane helpers: image_dims / inherited_or_derived_name /
+# image_begin_payload / forward_enriched_image
+# ---------------------------------------------------------------------------
+
+
+def _png_bytes(width=8, height=4):
+    """A tiny real PNG for dimension / round-trip assertions."""
+    import io
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new('RGB', (width, height), (10, 20, 30)).save(buf, format='PNG')
+    return buf.getvalue()
+
+
+def _image_descriptor(**overrides):
+    """A parsed frame descriptor (image/png) carrying a nested video `source`."""
+    video = {'source_mime': 'video/mp4', 'duration': 74.05}
+    fields = dict(
+        objectId='v1',
+        parent='/inbox/BBC.mp4',
+        permissionId=0,
+        signature='s',
+        nodeId='n',
+        origin='extracted',
+        source_mime='image/png',
+        size=40213,
+        stream_index=0,
+        name='BBC.frame0.png',
+        source=video,
+    )
+    fields.update(overrides)
+    return build_stream_descriptor(None, 'image', **fields)
+
+
+def test_image_dims_reads_header_else_none():
+    """image_dims returns (w, h) for a real image and (None, None) for anything else."""
+    assert D.image_dims(_png_bytes(8, 4)) == (8, 4)
+    assert D.image_dims(b'not an image') == (None, None)
+    assert D.image_dims(b'') == (None, None)
+
+
+def test_inherited_or_derived_name():
+    """One-to-one name inherits the input's name, else derives <stem>.<ext>; None-safe."""
+    assert D.inherited_or_derived_name(_image_descriptor(), ext='png') == 'BBC.frame0.png'  # inherited
+    # no name on the input -> derive from the source stem
+    assert D.inherited_or_derived_name(_video_descriptor(), ext='png') == 'BBC - Tear down this wall.png'
+    assert D.inherited_or_derived_name(None, ext='png') is None
+
+
+def test_image_begin_payload_shape_and_nesting():
+    """image_begin_payload assembles {origin,size,dims,source,name} and nests a prior chain."""
+    payload = json.loads(
+        D.image_begin_payload(_image_descriptor(), size=1234, width=128, height=128, name='BBC.frame0.png').decode(
+            'utf-8'
+        )
+    )
+    assert payload['origin'] == 'extracted'
+    assert payload['size'] == 1234
+    assert payload['width'] == 128 and payload['height'] == 128
+    assert payload['name'] == 'BBC.frame0.png'
+    assert payload['source']['source_mime'] == 'image/png'  # the frame layer
+    assert payload['source']['source'] == {'source_mime': 'video/mp4', 'duration': 74.05}  # video nested
+    # no descriptor + absent dims/name -> just {origin, size}
+    assert json.loads(D.image_begin_payload(None, size=10).decode('utf-8')) == {'origin': 'extracted', 'size': 10}
+
+
+class _CaptureInstance:
+    """Minimal stand-in for a node's ``self.instance``: records writeImage calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    def writeImage(self, action, mime, buffer=None):  # noqa: N802 (engine method name)
+        self.calls.append((action, mime, buffer))
+
+
+def test_forward_enriched_image_emits_enriched_triplet():
+    """forward_enriched_image emits BEGIN(enriched)/WRITE/END with nested source + inherited name."""
+    from rocketlib import AVI_ACTION
+
+    inst = _CaptureInstance()
+    img = _png_bytes(8, 4)
+    D.forward_enriched_image(inst, _image_descriptor(), 'image/png', img)
+
+    assert len(inst.calls) == 3
+    (a0, m0, b0), (a1, m1, b1), (a2, m2, _b2) = inst.calls
+    assert (a0, a1, a2) == (AVI_ACTION.BEGIN, AVI_ACTION.WRITE, AVI_ACTION.END)
+    assert m0 == m1 == m2 == 'image/png'
+    assert b1 == img  # WRITE carries the exact bytes
+    payload = json.loads(b0.decode('utf-8'))
+    assert payload['size'] == len(img)
+    assert payload['width'] == 8 and payload['height'] == 4  # best-effort decoded from bytes
+    assert payload['name'] == 'BBC.frame0.png'  # inherited (one-to-one)
+    assert payload['source']['source'] == {'source_mime': 'video/mp4', 'duration': 74.05}  # video nested
+
+
 # ---------------------------------------------------------------------------
 # guardrail: fixture <-> module constants stay in sync
 # ---------------------------------------------------------------------------

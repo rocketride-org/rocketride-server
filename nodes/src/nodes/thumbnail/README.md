@@ -38,10 +38,14 @@ It then emits on whichever output lanes have listeners attached:
 
 - **`documents` listener**: the thumbnail is base64-encoded (PNG) and emitted as a
   single `Doc` of type `Image` with fresh metadata (`chunkId`, `isTable: false`,
-  `tableId: 0`, `isDeleted: false`), plus `metadata.source` (the source image's media
-  detail) and `metadata.name` = `<image-stem>.png` when the input carried a stream descriptor.
+  `tableId: 0`, `isDeleted: false`), plus a `metadata.source` provenance chain (the input
+  image's media detail, nesting the input's own `source` underneath, so the chain grows one
+  hop per transform) and `metadata.name` (inherited from the input, else `<image-stem>.png`)
+  when the input carried a stream descriptor.
 - **`image` listener**: the thumbnail is emitted as raw PNG bytes in a new
-  `BEGIN` / `WRITE` / `END` stream, keeping the incoming MIME type.
+  `BEGIN` / `WRITE` / `END` stream, keeping the incoming MIME type; the `BEGIN` carries the
+  same `source` provenance chain and `name` as an enrichment descriptor, so both lanes stay
+  consistent.
 
 ### `documents` lane in
 

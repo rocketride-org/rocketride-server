@@ -23,6 +23,7 @@
 
 from rocketlib import IInstanceBase
 from rocketlib import AVI_ACTION
+from ai.common.avi.descriptor import descriptor_from_payload, forward_enriched_image
 from .IGlobal import IGlobal
 
 
@@ -33,9 +34,14 @@ class IInstance(IInstanceBase):
     # Raw image data
     image_data: bytearray = None
 
+    # Stream descriptor parsed on the image BEGIN (source provenance).
+    _source_descriptor = None
+
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
+            # BEGIN carries the source stream descriptor, not image bytes.
+            self._source_descriptor = descriptor_from_payload(buffer)
             self.image_data = bytearray()
 
         # Handle AVI_WRITE action (appending chunks of the image)
@@ -50,10 +56,8 @@ class IInstance(IInstanceBase):
             # Release the orginal image
             self.image_data = None
 
-            # Output the image to the next pipe
-            self.instance.writeImage(AVI_ACTION.BEGIN, mimeType)
-            self.instance.writeImage(AVI_ACTION.WRITE, mimeType, image)
-            self.instance.writeImage(AVI_ACTION.END, mimeType)
+            # Output the image to the next pipe, carrying nested source provenance.
+            forward_enriched_image(self.instance, self._source_descriptor, mimeType, image)
 
         # We are re-writing the image, so don't do the default
         return self.preventDefault()

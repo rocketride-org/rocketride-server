@@ -23,16 +23,16 @@
 
 from typing import TYPE_CHECKING
 import base64
-import json
 from rocketlib import IInstanceBase, AVI_ACTION, Entry, error
 from .IGlobal import IGlobal
 from ai.common.schema import DocMetadata, Doc
 from ai.common.avi.descriptor import (
     descriptor_from_payload,
-    source_media_detail,
     attach_source,
     attach_name,
     derived_name,
+    image_begin_payload,
+    image_dims,
 )
 from ai.common.table import Table
 
@@ -150,7 +150,7 @@ class IInstance(IInstanceBase):
             return f'{inner} @ {container}'
         return inner or container or None
 
-    def _image_begin_payload(self, frame_number: int, image_size: int) -> bytes:
+    def _image_begin_payload(self, frame_number: int, image_size: int, width=None, height=None) -> bytes:
         """Build the ImageStream BEGIN enrichment for an extracted frame.
 
         Mirrors the documents lane: top level describes the image stream itself
@@ -161,18 +161,16 @@ class IInstance(IInstanceBase):
         Args:
             frame_number (int): The frame index, used for the per-frame name.
             image_size (int): The frame's PNG byte size (the image stream's own size).
+            width (int): The frame width in pixels (best-effort; omitted when unknown).
+            height (int): The frame height in pixels (best-effort; omitted when unknown).
 
         Returns:
             bytes: UTF-8 JSON enrichment for the image BEGIN.
         """
-        payload = {'origin': 'extracted', 'size': image_size}
-        detail = source_media_detail(self._source_descriptor)
-        if detail:
-            payload['source'] = detail
+        # One-to-many: per-frame name '<stem>.frame<N>.png'. image_begin_payload projects the
+        # source video under `source` (nesting any existing chain) and omits absent dims.
         name = derived_name(self._source_descriptor, index=frame_number, marker='frame', ext='png')
-        if name:
-            payload['name'] = name
-        return json.dumps(payload).encode('utf-8')
+        return image_begin_payload(self._source_descriptor, size=image_size, width=width, height=height, name=name)
 
     def _frame_callback(self, image: bytes, frame_number: int, time_stamp: float):
         """Handle a frame from the video stream.
@@ -226,10 +224,15 @@ class IInstance(IInstanceBase):
             self.instance.writeDocuments([doc])
 
         if self.instance.hasListener('image'):
-            # The BEGIN buffer carries stream-descriptor enrichment (the source
-            # video's media detail + origin); the engine merges it into the
-            # ImageStream descriptor for this frame.
-            self.instance.writeImage(AVI_ACTION.BEGIN, 'image/png', self._image_begin_payload(frame_number, len(image)))
+            # The BEGIN buffer carries stream-descriptor enrichment (the frame's own
+            # detail + origin + name, with the source video nested); the engine merges
+            # it into the ImageStream descriptor for this frame.
+            width, height = image_dims(image)
+            self.instance.writeImage(
+                AVI_ACTION.BEGIN,
+                'image/png',
+                self._image_begin_payload(frame_number, len(image), width, height),
+            )
             self.instance.writeImage(AVI_ACTION.WRITE, 'image/png', image)
             self.instance.writeImage(AVI_ACTION.END, 'image/png')
 
