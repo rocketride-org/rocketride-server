@@ -37,8 +37,15 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     text: str = ''
-    image = bytearray()
-    _image_descriptor = None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Per-lane media state so image/audio/video share one identical code path
+        # (see _write_media): buffer = the accumulated stream bytes, descriptor = the
+        # stream descriptor parsed from that lane's BEGIN payload. Initialized per instance
+        # (never a class-level mutable, which would be shared across every instance).
+        self._media_buffers = {}
+        self._media_descriptors = {}
 
     def _getkey(self, type: str):
         # Allow the key to be overriden by
@@ -80,8 +87,9 @@ class IInstance(IInstanceBase):
             object (Entry): The object to initialize processing for.
         """
         self.text = ''  # Reset the text buffer
-        self.image = bytearray()
-        self.video = bytearray()
+        # Per-lane media buffers + descriptors; each lane's BEGIN (re)initializes its entry.
+        self._media_buffers = {}
+        self._media_descriptors = {}
 
     def close(self):
         """
@@ -207,76 +215,51 @@ class IInstance(IInstanceBase):
         else:
             self.instance.currentObject.response[key].append(answer.getText())
 
+    def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
+        """Shared handler for the image/audio/video stream lanes.
+
+        All three multimedia lanes behave identically: accumulate the stream across
+        BEGIN/WRITE/END and emit a single entry ``{mime_type, <lane>, metadata}`` where
+        ``<lane>`` is the base64 payload (key ``'image'``/``'audio'``/``'video'``) and
+        ``metadata`` is the stream descriptor parsed from the BEGIN payload (present only
+        when one arrived). Per-lane buffers keep concurrent streams isolated.
+
+        Args:
+            lane (str): The media lane — ``'image'``, ``'audio'`` or ``'video'``.
+            action (int): The AVI stream action (BEGIN/WRITE/END).
+            mimeType (str): The media MIME type.
+            data (bytes): The BEGIN descriptor payload, or a WRITE data chunk.
+        """
+        if action == AVI_ACTION.BEGIN:
+            # BEGIN carries the stream descriptor (not media bytes); keep it so the
+            # emitted entry can carry the source provenance.
+            self._media_buffers[lane] = bytearray()
+            self._media_descriptors[lane] = descriptor_from_payload(data)
+
+        elif action == AVI_ACTION.WRITE:
+            self._media_buffers[lane] += data
+
+        elif action == AVI_ACTION.END:
+            key = self._getkey(lane)
+
+            if key not in self.instance.currentObject.response:
+                self.instance.currentObject.response[key] = []
+
+            payload = base64.b64encode(self._media_buffers.get(lane, bytearray())).decode('utf-8')
+            self._media_buffers[lane] = bytearray()
+
+            # The base64 media under its lane key + the descriptor metadata when present.
+            entry = {'mime_type': mimeType, lane: payload}
+            descriptor = self._media_descriptors.get(lane)
+            if descriptor is not None:
+                entry['metadata'] = descriptor.metadata.toDict()
+            self.instance.currentObject.response[key].append(entry)
+
     def writeAudio(self, aviAction: int, mimeType: str, data: bytes):
-        # Get the key to write to
-        key = self._getkey('audio')
-
-        # If it isn't there, create it
-        if key not in self.instance.currentObject.response:
-            self.instance.currentObject.response[key] = []
-
-        # Create the tracking info
-        info = {
-            'url': self.instance.currentObject.url,
-            'aviAction': str(aviAction),
-            'mimeType': mimeType,
-            'size': len(data),
-        }
-
-        # Add the documents
-        self.instance.currentObject.response[key].append(info)
+        self._write_media('audio', aviAction, mimeType, data)
 
     def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
-        if aviAction == AVI_ACTION.BEGIN:
-            self.video = bytearray()
-
-        elif aviAction == AVI_ACTION.WRITE:
-            self.video += data
-
-        elif aviAction == AVI_ACTION.END:
-            key = self._getkey('video')
-
-            if key not in self.instance.currentObject.response:
-                self.instance.currentObject.response[key] = []
-
-            video_str = base64.b64encode(self.video).decode('utf-8')
-            self.video = bytearray()
-
-            self.instance.currentObject.response[key].append(
-                {
-                    'mime_type': mimeType,
-                    'video': video_str,
-                }
-            )
+        self._write_media('video', aviAction, mimeType, data)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
-        # Handle AVI_BEGIN action
-        if action == AVI_ACTION.BEGIN:
-            self.image = bytearray()
-            # BEGIN carries the stream descriptor (not image bytes); keep it so the
-            # emitted entry can carry the source provenance.
-            self._image_descriptor = descriptor_from_payload(buffer)
-
-        # Handle AVI_WRITE action (appending chunks of the image)
-        elif action == AVI_ACTION.WRITE:
-            self.image += buffer  # Append the chunk to the existing image data
-
-        # Handle AVI_END action (finalizing the image processing)
-        elif action == AVI_ACTION.END:
-            # Get the key to write to
-            key = self._getkey('image')
-
-            # If it isn't there, create it
-            if key not in self.instance.currentObject.response:
-                self.instance.currentObject.response[key] = []
-
-            image_str = base64.b64encode(self.image).decode('utf-8')
-
-            # Release the image
-            self.image = bytearray()
-
-            # Add the image, with the descriptor metadata when one arrived on BEGIN.
-            entry = {'mime_type': mimeType, 'image': image_str}
-            if self._image_descriptor is not None:
-                entry['metadata'] = self._image_descriptor.metadata.toDict()
-            self.instance.currentObject.response[key].append(entry)
+        self._write_media('image', action, mimeType, buffer)
