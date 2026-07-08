@@ -287,7 +287,7 @@ When extending the engine with Python (custom nodes, filter callbacks), Pydantic
 - **OpenSSL** -- cryptography
 - **Python 3.10** -- optional, for Python integration
 - **Java** -- optional, for Tika document processing
-- **vcpkg packages** -- replxx, tinyxml2, breakpad, etc.
+- **vcpkg packages** -- replxx, tinyxml2, crashpad, etc.
 
 ### Tika Media Parsing: External Tool Requirements
 

@@ -26,12 +26,9 @@
 namespace ap::plat::lin {
 
 void init() noexcept {
+    // Crashpad starts once; per-task location changes are honored by the startup
+    // sweep, so no re-register on location change (unlike Breakpad).
     minidumpRegister();
-    dev::registerCrashDumpLocationChangedHandler(
-        [](const file::Path &) noexcept {
-            minidumpDeregister();
-            minidumpRegister();
-        });
 }
 
 void deinit() noexcept { minidumpDeregister(); }

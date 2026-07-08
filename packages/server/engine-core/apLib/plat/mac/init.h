@@ -23,27 +23,9 @@
 
 #pragma once
 
-// Forward declare Error in the ap space
-namespace ap {
-class Error;
-}  // namespace ap
+namespace ap::plat::mac {
 
-namespace ap::dev {
+void init() noexcept;
+void deinit() noexcept;
 
-template <typename... DebugInfo>
-void enterDebugger(Location location, DebugInfo&&... info) noexcept;
-
-template <typename... DebugInfo>
-[[noreturn]] void fatality(Location location, DebugInfo&&... info) noexcept;
-
-using FatalityHandler =
-    Function<void(Location location, std::string_view reason)>;
-
-[[nodiscard]] size_t registerFatalityHandler(
-    FatalityHandler&& handler) noexcept;
-void deRegisterFatalityHandler(size_t slot) noexcept;
-
-void onFatality(Location location, std::string_view reason) noexcept;
-bool& bugCheck() noexcept;
-
-}  // namespace ap::dev
+}  // namespace ap::plat::mac

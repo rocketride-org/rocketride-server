@@ -22,19 +22,27 @@
 // =============================================================================
 
 #include <apLib/ap.h>
+#if ROCKETRIDE_PLAT_LIN
 #include <apLib/plat/lin/init.h>
+#elif ROCKETRIDE_PLAT_MAC
+#include <apLib/plat/mac/init.h>
+#endif
 
 namespace ap::plat {
 
 void init() noexcept {
 #if ROCKETRIDE_PLAT_LIN
     ap::plat::lin::init();
+#elif ROCKETRIDE_PLAT_MAC
+    ap::plat::mac::init();
 #endif
 }
 
 void deinit() noexcept {
 #if ROCKETRIDE_PLAT_LIN
     ap::plat::lin::deinit();
+#elif ROCKETRIDE_PLAT_MAC
+    ap::plat::mac::deinit();
 #endif
 }
 

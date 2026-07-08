@@ -21,43 +21,18 @@
 // SOFTWARE.
 // =============================================================================
 
-#include <apLib/ap.h>
+#pragma once
 
-namespace ap::plat::internal {
-
-struct MinidumpPathMemory {
-    Array<uint8_t, PATH_MAX * 2> m_chunk;
-    BufferView m_dataView{m_chunk};
-    memory::ViewAllocatorArena m_arena{m_dataView};
-    memory::ViewAllocator<Utf8Chr> m_allocator{m_arena};
-};
-
-auto &getMinidumpPathAllocator() {
-    using MemoryDumpSingleton = Singleton<MinidumpPathMemory>;
-    return MemoryDumpSingleton::get().m_allocator;
-}
-
-}  // namespace ap::plat::internal
-
-#define AP_PLAT_MINIDUMP_CPP_PRIVATE_INCLUDE
-#include "minidump.hpp"
+// Façade for the out-of-process Crashpad handler shared by Linux and macOS.
+// Crashpad types stay confined to minidump_lifetime.cpp.
 
 namespace ap::plat {
 
-namespace internal {
+// Start the handler once and sweep any previous run's dumps into
+// crashDumpLocation(). Idempotent.
+void minidumpRegister() noexcept;
 
-auto &minidumpLifetime() noexcept {
-    static Opt<Minidump> minidump;
-    return minidump;
-}
-
-}  // namespace internal
-
-void minidumpRegister() noexcept {
-    internal::minidumpLifetime().reset();
-    internal::minidumpLifetime().emplace();
-}
-
-void minidumpDeregister() noexcept { internal::minidumpLifetime().reset(); }
+// Releases client-side state only; the handler process lives until exit.
+void minidumpDeregister() noexcept;
 
 }  // namespace ap::plat

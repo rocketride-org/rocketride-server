@@ -12,6 +12,20 @@ target_link_libraries(aptest PRIVATE Catch2::Catch2)
 
 target_include_directories(aptest PUBLIC .)
 
+# Ship crashpad_handler next to the test binary so the out-of-process crash test
+# (plat/unx/minidump.cpp) finds it with no env setup. Runtime resolves it via
+# execDir(); mirrors how it sits beside the engine in dist/server.
+if(ROCKETRIDE_PLAT_LIN OR ROCKETRIDE_PLAT_MAC)
+    set(_rr_handler "${VCPKG_INSTALLED_TRIPLET_DIR}/tools/crashpad_handler")
+    if(EXISTS "${_rr_handler}")
+        add_custom_command(TARGET aptest POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${_rr_handler}" "$<TARGET_FILE_DIR:aptest>/crashpad_handler"
+            COMMENT "Copying crashpad_handler next to aptest"
+            VERBATIM)
+    endif()
+endif()
+
 # Register it with cmake unit
 enable_testing()
 

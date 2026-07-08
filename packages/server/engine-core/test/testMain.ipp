@@ -84,6 +84,21 @@ CATCH_REGISTER_LISTENER(Listener)
 namespace ap::application {
 
 Error TestMain() noexcept {
+    // Crash-test hook: a fresh process re-exec'd by the "crashpad" test (see
+    // test/plat/unx/minidump.cpp) registers the out-of-process handler and either
+    // faults or exits cleanly, so the parent can verify dump recovery without the
+    // fork-in-a-threaded-process deadlock a plain fork() would hit.
+#if ROCKETRIDE_PLAT_UNX
+    if (auto mode = plat::env("RR_CRASH_CHILD")) {
+        plat::minidumpRegister();
+        if (mode == "crash") {
+            volatile int* p = nullptr;
+            *p = 1;
+        }
+        std::quick_exit(0);
+    }
+#endif
+
     // Custom prefix hook, shows current test name
     auto& opts = log::options();
     opts.customPrefixCb = [](StackText& hdr) {

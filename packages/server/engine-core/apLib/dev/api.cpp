@@ -38,7 +38,6 @@ namespace ap::dev {
 
 size_t g_nextSlot = 1;
 std::map<size_t, FatalityHandler> g_fatalityHandlers;
-std::map<size_t, CrashDumpLocationChangeHandler> g_crashDumpLocationHandlers;
 
 bool &bugCheck() noexcept {
     static bool check = plat::IsDebug ? true : false;
@@ -53,17 +52,6 @@ size_t registerFatalityHandler(FatalityHandler &&handler) noexcept {
 
 void deRegisterFatalityHandler(size_t slot) noexcept {
     g_fatalityHandlers.erase(slot);
-}
-
-size_t registerCrashDumpLocationChangedHandler(
-    CrashDumpLocationChangeHandler &&handler) noexcept {
-    auto slot = g_nextSlot++;
-    g_crashDumpLocationHandlers[slot] = _mv(handler);
-    return slot;
-}
-
-void deRegisterCrashDumpLocationChangedHandler(size_t slot) noexcept {
-    g_crashDumpLocationHandlers.erase(slot);
 }
 
 void onFatality(Location location, std::string_view reason) noexcept {
@@ -82,8 +70,6 @@ const file::Path &crashDumpLocation() noexcept {
 
 void crashDumpLocation(const file::Path &path) noexcept {
     actualCrashDumpLocation() = path;
-    auto handlers = g_crashDumpLocationHandlers;
-    for (auto &[slot, handler] : handlers) _call(handler, path);
 }
 
 Text createCrashDumpName(TextView extension) noexcept {

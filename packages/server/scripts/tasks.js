@@ -723,6 +723,22 @@ function makeCompileEngineAction(options = {}) {
 
 			if (isWindows()) {
 				await syncFile(path.join(BUILD_ROOT, 'apps', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
+			} else {
+				// crashpad_handler must ship next to the engine (runtime finds it via
+				// execDir()). Windows keeps its native MiniDumpWriteDump path.
+				const vcpkgInstalled = await getVcpkgInstalledDir(options);
+				const handlerSrc = path.join(vcpkgInstalled, 'tools', 'crashpad_handler');
+				if (await exists(handlerSrc)) {
+					await syncFile(handlerSrc, path.join(DIST_DIR, 'crashpad_handler'), { package: true });
+				} else {
+					task.output = 'Warning: crashpad_handler not found in vcpkg tools; crash handling will be disabled at runtime';
+				}
+
+				// Retain generated symbols (if dump_syms ran) for later symbolication.
+				const symbolsSrc = path.join(BUILD_ROOT, 'apps', 'engine', 'symbols');
+				if (await exists(symbolsSrc)) {
+					await syncDir(symbolsSrc, path.join(DIST_DIR, 'symbols'), { mirror: false, package: true });
+				}
 			}
 
 			// Save content hash after successful compilation

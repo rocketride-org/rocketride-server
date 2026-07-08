@@ -21,14 +21,29 @@
 // SOFTWARE.
 // =============================================================================
 
-#pragma once
+#include <apLib/ap.h>
+
+#define AP_PLAT_MINIDUMP_CPP_PRIVATE_INCLUDE
+#include "minidump.hpp"
 
 namespace ap::plat {
 
-void minidumpRegister() noexcept;
-void minidumpDeregister() noexcept;
+namespace internal {
 
-void minidumpAltSignalHandlersEnable() noexcept;
-void minidumpAltSignalHandlersDisable() noexcept;
+auto &minidumpLifetime() noexcept {
+    static Opt<Minidump> minidump;
+    return minidump;
+}
+
+}  // namespace internal
+
+void minidumpRegister() noexcept {
+    // Idempotent: restarting the handler per task would leak handler processes.
+    if (!internal::minidumpLifetime()) internal::minidumpLifetime().emplace();
+
+    internal::sweepPreviousDumps(internal::crashDbDir());
+}
+
+void minidumpDeregister() noexcept { internal::minidumpLifetime().reset(); }
 
 }  // namespace ap::plat

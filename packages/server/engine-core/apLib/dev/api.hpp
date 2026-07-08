@@ -79,6 +79,10 @@ template <typename... DebugInfo>
 #endif
 
 #if ROCKETRIDE_PLAT_UNX
+    // abort()'s SIGABRT is what makes Crashpad write a minidump: wanted for real
+    // fatalities, suppressed when we're already cancelling.
+    if (async::cancelled(_location, true))
+        std::quick_exit(1);
     std::abort();
 #else
     std::quick_exit(1);
