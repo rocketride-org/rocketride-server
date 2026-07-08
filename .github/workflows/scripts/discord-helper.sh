@@ -134,6 +134,9 @@ extract_discord_thread() {
 discord_applied_tags() {
   local cfg="$1" section="$2" state="$3" labels="$4" answer="${5:-}" category="${6:-}"
   [ -f "$cfg" ] || { printf '[]'; return 0; }
+  # Resolve in priority order (state first, then labels, answer, category) and
+  # dedupe *preserving order* before the 5-tag cap, so a state tag (open/closed/
+  # merged/…) is never dropped when an item maps to more than five tags.
   jq -nc --slurpfile c "$cfg" --arg s "$section" --arg st "$state" \
      --argjson lbls "$labels" --arg ans "$answer" --arg cat "$category" '
     ($c[0][$s] // {}) as $sec
@@ -141,9 +144,10 @@ discord_applied_tags() {
     | ( [ ($sec.state[$st]      // empty) ]
       + [ $lbls[] | ($sec.labels[.] // empty) ]
       + [ ($sec.answer[$ans]     // empty) ]
-      + [ ($sec.categories[$cat] // empty) ]
-      | unique ) as $names
-    | [ $names[] | ($ids[.] // empty) ] | unique | .[0:5]'
+      + [ ($sec.categories[$cat] // empty) ] ) as $names
+    | ( [ $names[] | ($ids[.] // empty) ]
+        | reduce .[] as $id ([]; if any(.[]; . == $id) then . else . + [$id] end) )
+    | .[0:5]'
 }
 
 # ── Forum thread archiving ───────────────────────────────────────────────

@@ -274,6 +274,9 @@ jobs:
               gh api graphql -f query='mutation($id:ID!){ deleteDiscussionComment(input:{id:$id}){ clientMutationId } }' \
                 -f id="$MARKER_COMMENT_ID" || true
               DISCORD_MSG_ID=""
+              # Stale thread is gone too — clear it so the archive step targets
+              # the recreated thread (NEW_THREAD_ID), not the deleted one.
+              DISCORD_THREAD_ID=""
             elif [ "$PATCH_STATUS" != "200" ]; then
               echo "PATCH failed ($PATCH_STATUS): $PATCH_BODY"
               exit 1
