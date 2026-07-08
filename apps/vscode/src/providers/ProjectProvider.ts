@@ -18,6 +18,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { TaskStatus, GenericEvent, ConnectionState, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { ConnectionManager } from '../connection/connection';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConfigManager } from '../config';
 import type { PipelineConfig } from 'rocketride';
 import { getLogger } from '../shared/util/output';
@@ -373,6 +374,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
+						// The OAuth broker only allows https://*.rocketride.ai redirect URLs,
+						// so tokens bounce off this hosted page, which forwards them to the
+						// `<uriScheme>://rocketride.rocketride/auth/google` deep link.
+						oauthReturnUrl: `https://api.rocketride.ai/auth/vscode/google?scheme=${vscode.env.uriScheme}`,
 						envKeys,
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
@@ -472,6 +477,48 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'project:openLink': {
 					if (data.url) {
 						this.openLink(data.url as string, data.displayName as string | undefined, data.browser as boolean | undefined);
+					}
+					break;
+				}
+
+				// OAuth login: open the broker URL in the system browser (Google's
+				// consent screen refuses to render in a webview iframe) and arm a
+				// one-shot callback so the deep-link return delivers tokens back to
+				// this panel via project:oauthTokens.
+				case 'project:openExternal': {
+					if (data.url) {
+						// Webview-supplied URL: require a parseable https target
+						// before arming any OAuth state (same spirit as openLink's
+						// scheme allowlist; OAuth brokers are https-only).
+						let parsedUrl: URL;
+						try {
+							parsedUrl = new URL(data.url as string);
+						} catch {
+							this.logger.error('[ProjectProvider] Blocked unparseable OAuth URL');
+							break;
+						}
+						if (parsedUrl.protocol !== 'https:') {
+							this.logger.error(`[ProjectProvider] Blocked OAuth URL scheme: ${parsedUrl.protocol}`);
+							break;
+						}
+						// Key the waiter by the node that started the login so the
+						// deep-link return routes to the right editor.
+						const nodeId = parsedUrl.searchParams.get('node_id') || (data.url as string);
+						const unregister = CloudAuthProvider.getInstance().setPendingGoogleOAuth(nodeId, (tokens, state) => {
+							webview.postMessage({ type: 'project:oauthTokens', tokens, state });
+						});
+						// Pass the raw string: Uri.parse re-encodes the query and un-escapes
+						// %3B/%3A, and Zitadel's Go parser rejects raw semicolons in queries
+						// (microsoft/vscode#85930). openExternal accepts a string at runtime.
+						try {
+							const opened = await vscode.env.openExternal(data.url as unknown as vscode.Uri);
+							if (!opened) throw new Error('the system browser refused to open');
+						} catch (error) {
+							// A dead waiter would swallow a later unrelated deep link.
+							unregister();
+							this.logger.error(`[ProjectProvider] Failed to open OAuth URL: ${error}`);
+							vscode.window.showErrorMessage('Could not open the browser for Google sign-in. Check your default browser and try again.');
+						}
 					}
 					break;
 				}
@@ -875,6 +922,28 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				panel.webview.postMessage({ type: 'pasteContent', text });
 			} else if (msg?.type === 'copyText' && typeof msg.text === 'string') {
 				await vscode.env.clipboard.writeText(msg.text);
+			} else if (msg?.type === 'requestFileDialog') {
+				// The embedded app's "Browse" button can't open an OS file picker from
+				// inside the sandboxed iframe, so it posts {type:'requestFileDialog'} up to
+				// the bridge, which forwards it here. Open the native dialog on the host,
+				// read the chosen files, and post them back as {type:'nativeFilesSelected'};
+				// the bridge relays that into the iframe. Buffers go as number[] so they
+				// survive webview message serialization.
+				try {
+					const uris = await vscode.window.showOpenDialog({ canSelectMany: true, openLabel: 'Select' });
+					if (!uris || uris.length === 0) return;
+					const files = await Promise.all(
+						uris.map(async (uri) => ({
+							name: uri.path.split('/').pop() || 'file',
+							type: '',
+							lastModified: Date.now(),
+							buffer: Array.from(await vscode.workspace.fs.readFile(uri)),
+						}))
+					);
+					panel.webview.postMessage({ type: 'nativeFilesSelected', files });
+				} catch (error) {
+					this.logger.error(`[ProjectProvider] Native file dialog failed: ${error}`);
+				}
 			}
 		});
 	}

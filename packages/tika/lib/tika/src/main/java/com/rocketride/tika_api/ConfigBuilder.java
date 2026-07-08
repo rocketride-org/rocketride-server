@@ -27,6 +27,7 @@ import javax.xml.parsers.ParserConfigurationException;
 
 import org.apache.tika.config.TikaConfig;
 import org.apache.tika.exception.TikaException;
+import org.apache.tika.parser.external.ExternalParser;
 
 public class ConfigBuilder {
 	public static boolean ocrEnabled = false;
@@ -57,8 +58,8 @@ public class ConfigBuilder {
 	/**
 	 * Gets a nodes text value
 	 * 
-	 * @param doc   The parent document
-	 * @param node  The node to set
+	 * @param doc  The parent document
+	 * @param node The node to set
 	 */
 	public static String getNodeValue(Document doc, Node node) {
 		// Return the value
@@ -209,7 +210,8 @@ public class ConfigBuilder {
 	}
 
 	/**
-	 * Remove the parser entry and add it to the parser-exclude list of the default parser
+	 * Remove the parser entry and add it to the parser-exclude list of the default
+	 * parser
 	 * 
 	 * @param doc        The parent document
 	 * @param parserName The name of the parser (class=) attribute
@@ -390,6 +392,79 @@ public class ConfigBuilder {
 	}
 
 	/**
+	 * @return true if the external command launches (via Tika's
+	 *         ExternalParser.check;
+	 *         126/127 = not found on Windows/Unix). Never throws.
+	 */
+	private static boolean isExternalToolAvailable(String... command) {
+		try {
+			return ExternalParser.check(command, 126, 127);
+		} catch (Throwable t) {
+			logger.debug("External tool unavailable: " + command[0] + " (" + t.getMessage() + ")");
+			return false;
+		}
+	}
+
+	// Test seam: force the tool-availability result (null = probe the real host).
+	static Boolean toolsAvailableOverrideForTest = null;
+
+	/**
+	 * @return true only if ALL external media tools are available. The parsers launch
+	 *         their tools via the Unix `env` shim on every platform, so gate on `env`
+	 *         first — a host without it can't run them regardless of the tools (this is
+	 *         why Windows always falls back).
+	 */
+	private static boolean externalMediaToolsAvailable() {
+		if (toolsAvailableOverrideForTest != null) {
+			return toolsAvailableOverrideForTest;
+		}
+		// && short-circuits, so `env` is probed first and the rest are skipped if it's missing.
+		return isExternalToolAvailable("env")
+				&& isExternalToolAvailable("ffmpeg", "-version")
+				&& isExternalToolAvailable("exiftool", "-ver")
+				&& isExternalToolAvailable("sox", "--version");
+	}
+
+	/**
+	 * @return true if parserName is already a parser-exclude under DefaultParser.
+	 */
+	public static boolean isParserExcluded(Document doc, String parserName) {
+		Node defaultParser = findParser(doc, defaultParserName);
+		if (defaultParser == null)
+			return false;
+
+		NodeList children = defaultParser.getChildNodes();
+		for (int index = 0; index < children.getLength(); index++) {
+			Node child = children.item(index);
+			// Match by node name, not getLocalName(): elements created via
+			// createElement (removeParser) have a null localName in a namespace-aware DOM.
+			if (child.getNodeType() != Node.ELEMENT_NODE || !"parser-exclude".equals(child.getNodeName()))
+				continue;
+
+			Element excludeElement = (Element) child;
+			if (excludeElement.getAttribute("class").contentEquals(parserName))
+				return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Exclude an external parser when its tools are missing, so Tika falls back to
+	 * built-in parsers instead of throwing. Honors an existing exclusion (skips the
+	 * probe — an explicit parser-exclude wins, and check() spawns a process).
+	 */
+	static void excludeExternalParserIfUnavailable(Document doc, String parserName) {
+		if (isParserExcluded(doc, parserName)) {
+			return;
+		}
+		if (!externalMediaToolsAvailable()) {
+			logger.info("External media tools unavailable; excluding " + parserName
+					+ " (falling back to built-in parsers)");
+			removeParser(doc, parserName);
+		}
+	}
+
+	/**
 	 * Returns the Tika configuration loaded from the tika-config.xml file located
 	 * at the root path of the TikaApi.
 	 *
@@ -429,15 +504,21 @@ public class ConfigBuilder {
 		// Grab the languages
 		if (lang != null)
 			languages = getParam(doc, lang, "languages", "string");
-		
-		removeParser(doc, "org.apache.tika.parser.ocr.TesseractOCRParser"); // Explicitely removed it, otherwise it will throw error
+
+		removeParser(doc, "org.apache.tika.parser.ocr.TesseractOCRParser"); // Explicitely removed it, otherwise it will
+																			// throw error
+
+		// Exclude the external media parsers when ffmpeg/exiftool/sox are missing (they
+		// throw at launch and abort media extraction) so Tika uses built-in parsers.
+		excludeExternalParserIfUnavailable(doc, "org.apache.tika.parser.external.CompositeExternalParser");
+		excludeExternalParserIfUnavailable(doc, "org.apache.tika.parser.external.ExternalParser");
 
 		// Output the xml
 		logger.debug(xmlToString(doc, 4));
-							   
+
 		// Create the configuration
 		TikaConfig tikaConfig = new TikaConfig(doc);
-													
+
 		// And return it
 		return tikaConfig;
 	}

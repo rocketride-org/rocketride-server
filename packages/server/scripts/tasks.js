@@ -392,6 +392,29 @@ async function copyClangRuntimeLibs(options = {}) {
 		return { copied: true, version: 'system' };
 	}
 
+	// Fedora / RHEL-family: clang's libc++ (package libcxx) and libunwind
+	// (llvm-libunwind) land in /usr/lib64, not the Debian multiarch dir.
+	const fedoraLib = '/usr/lib64';
+	const fedoraLibcpp = path.join(fedoraLib, 'libc++.so.1');
+
+	if (await exists(fedoraLibcpp)) {
+		await copyFile(fedoraLibcpp, path.join(destLib, 'libc++.so.1'));
+
+		const fedoraLibcppabi = path.join(fedoraLib, 'libc++abi.so.1');
+		if (await exists(fedoraLibcppabi)) {
+			await copyFile(fedoraLibcppabi, path.join(destLib, 'libc++abi.so.1'));
+		}
+
+		for (const unwindPath of [path.join(fedoraLib, 'libunwind.so.1'), path.join(fedoraLib, 'libunwind.so.8')]) {
+			if (await exists(unwindPath)) {
+				await copyFile(unwindPath, path.join(destLib, 'libunwind.so.1'));
+				break;
+			}
+		}
+
+		return { copied: true, version: 'fedora' };
+	}
+
 	return { copied: false, reason: 'No clang runtime libs found' };
 }
 

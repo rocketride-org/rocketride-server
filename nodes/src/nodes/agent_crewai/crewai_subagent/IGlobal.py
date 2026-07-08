@@ -18,7 +18,9 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rocketlib import IGlobalBase, IJson, OPEN_MODE
+from rocketlib import IGlobalBase, OPEN_MODE
+
+from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
@@ -44,7 +46,9 @@ class IGlobal(IGlobalBase):
         )
         depends(requirements)
 
-        conn_config = IJson.toDict(self.glb.connConfig) if self.glb.connConfig else {}
+        # Resolve through Config.getNodeConfig so profile defaults are applied and both
+        # the flat and nested-under-default pipe shapes work.
+        conn_config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
         self.role = str(conn_config.get('role') or 'Specialist').strip() or 'Specialist'
         self.task_description = str(conn_config.get('task_description') or '').strip()

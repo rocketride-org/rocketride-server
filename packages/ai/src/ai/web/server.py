@@ -71,7 +71,7 @@ from ai.web import exception, error, Result
 from ai.account import account, AccountInfo, Reporter
 from ai.modules import ALL as ALLOWED_MODULES
 from .middleware import AuthMiddleware
-from .endpoints import use, ping, version, shutdown, status, auth_callback
+from .endpoints import use, ping, version, shutdown, status, auth_callback, vscode_oauth_bounce
 from .denied import (
     CONST_ACCESS_DENIED_HTML,
     CONST_ACCESS_DENIED_TEXT,
@@ -313,6 +313,7 @@ class WebServer:
             self.add_route('/use', use, ['POST'])
             self.add_route('/shutdown', shutdown, ['POST'])
             self.add_route('/auth/callback', auth_callback, ['GET'], public=True)
+            self.add_route('/auth/vscode/google', vscode_oauth_bounce, ['GET'], public=True)
 
         # These are always there - no way to turn them off
         self.add_route('/status', status, ['GET'])
@@ -446,6 +447,18 @@ class WebServer:
 
         # Save the port
         self._port = port
+
+        # Publish the server's base URL so components (e.g. FileStore JWT
+        # signing) can construct URLs without needing a reference to the
+        # web server instance.  Only set if not already overridden by the
+        # operator via .env or environment.
+        self._base_url_scheme = 'https' if ssl_certfile else 'http'
+        self._base_url_host = 'localhost' if host == '0.0.0.0' else host
+        if not os.environ.get('RR_BASE_URL'):
+            if port != 0:
+                os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{port}'
+            # When port is 0 the OS assigns the real port at bind time;
+            # RR_BASE_URL will be set lazily by get_port() once resolved.
 
         # Setup the Uvicorn configuration
         config = uvicorn.Config(
@@ -761,6 +774,9 @@ class WebServer:
                     bound_port = bound[1] if isinstance(bound, tuple) and len(bound) >= 2 else None
                     if bound_port:
                         self._port = bound_port
+                        # Deferred from _create_server when port was 0
+                        if not os.environ.get('RR_BASE_URL'):
+                            os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{bound_port}'
                         return self._port
         return self._port
 

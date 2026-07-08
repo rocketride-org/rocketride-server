@@ -156,6 +156,7 @@ component's entry and exit with its lane data and any error.
   id: number,                              // pipe index within the pipeline
   op: "begin" | "enter" | "leave" | "end",
   pipes: string[],                         // current component stack for this pipe
+  component?: string,                      // component this op refers to (on "leave", the leaving one) — pair enter/leave by identity, not stack position
   trace: { lane?: string, data?: object, result?: string, error?: string },
   result?: PIPELINE_RESULT,                // on op === "end", level >= summary
   project_id: string,

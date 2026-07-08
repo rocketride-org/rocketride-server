@@ -1,0 +1,46 @@
+{
+  "name": "@rocketride/explorer-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "File Explorer — browse and edit files in the RocketRide store",
+  "license": "MIT",
+  "appManifest": {
+    "id": "rocketride.explorer",
+    "publisher": "Aparavi Software AG",
+    "name": "File Explorer",
+    "description": "Browse, view, and edit files stored on the RocketRide server",
+    "icon": "./src/icon.svg",
+    "categories": [
+      "tools"
+    ],
+    "mode": "free",
+    "authenticated": true,
+    "showStatusBar": true
+  },
+  "scripts": {
+    "build": "pnpm rsbuild build"
+  },
+  "browserslist": [
+    "chrome >= 81",
+    "edge >= 83",
+    "firefox >= 76",
+    "safari >= 13"
+  ],
+  "dependencies": {
+    "@module-federation/rsbuild-plugin": "^2.5.1",
+    "@monaco-editor/react": "^4.7.0",
+    "docx-preview": "^0.3.3",
+    "dompurify": "~3.4.0",
+    "monaco-editor": "^0.55.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "shared": "workspace:*",
+    "shell-ui": "workspace:*",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@rsbuild/core": "~2.0.11",
+    "@rsbuild/plugin-react": "~2.0.1",
+    "typescript": "^5.3.0"
+  }
+}

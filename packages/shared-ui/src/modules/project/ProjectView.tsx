@@ -28,6 +28,7 @@ import { SourceFlowContent } from '../../components/flow/Flow';
 import Trace from '../../components/trace/Trace';
 import Errors from '../../components/errors/Errors';
 import { commonStyles } from '../../themes/styles';
+import { OAUTH_ROOT_URL } from '../../config/oauth';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
@@ -77,6 +78,22 @@ export interface IProjectViewProps {
 	onPrefsChange?: (prefs: Record<string, unknown>) => void;
 	/** Called when the user clicks an external link in the canvas. */
 	onOpenLink?: (url: string, displayName?: string) => void;
+	/**
+	 * OAuth broker base URL for the social-login buttons. Defaults to the
+	 * built-in {@link OAUTH_ROOT_URL}; hosts may override (e.g. for staging).
+	 */
+	oauth2RootUrl?: string;
+	/**
+	 * Where the OAuth broker should redirect after authentication. Hosts that
+	 * cannot receive a web redirect (VS Code) set a deep link they intercept.
+	 */
+	oauthReturnUrl?: string;
+	/** Opens an external URL in the host's system browser to start an OAuth login. */
+	onOpenExternal?: (url: string) => void;
+	/** OAuth tokens delivered out-of-band by the host (e.g. VS Code deep-link callback). */
+	pendingOAuthTokens?: { tokens: string; state: string };
+	/** Clears `pendingOAuthTokens` once a config panel has consumed them. */
+	clearPendingOAuthTokens?: () => void;
 	/** Called when the user requests a save (Ctrl+S or menu). */
 	onSave?: () => void;
 	/** SaaS-only: export/download the current pipeline. Forwarded to the canvas. */
@@ -174,7 +191,7 @@ interface SourceInfo {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, onSave, onExport, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -356,7 +373,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl="" project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
 		},
 		parameters: {
 			content: (

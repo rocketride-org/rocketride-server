@@ -34,11 +34,14 @@ packages:
   # Applications
   - 'apps/aparavi-ui'
   - 'apps/chat-ui'
+  - 'apps/explorer-ui'
   - 'apps/dropper-ui'
+  - 'apps/events-ui'
   - 'apps/hello-ui'
   - 'apps/monitor-ui'
   - 'apps/profiler-ui'
   - 'apps/shell-ui'
+  - 'apps/test-ui'
   - 'apps/vscode'
   - 'apps/world-ui'
 

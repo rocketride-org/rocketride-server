@@ -122,6 +122,30 @@ class TestTruncationOutcome:
         assert truncate_at_stop_words(FABRICATED, []) == FABRICATED
 
 
+# Matching is exact (case-sensitive) on purpose: API-level stop is now primary, so the
+# truncation net stays narrow to avoid cutting legitimate answers that merely contain the
+# marker text. Drifted markers are left alone rather than risk an over-match.
+DRIFT_SPACED = FABRICATED.replace('\nObservation:', '\nObservation :')  # spaced colon
+DRIFT_CASE = FABRICATED.replace('\nObservation:', '\nobservation:')  # lowercased
+
+
+class TestTruncationIsExactOnly:
+    def test_drifted_marker_is_not_truncated(self):
+        # "\nObservation :" / "\nobservation:" are not the exact stop word, so the net
+        # leaves them intact (the provider's API stop handles the real case).
+        assert truncate_at_stop_words(DRIFT_SPACED, REACT_STOP) == DRIFT_SPACED
+        assert truncate_at_stop_words(DRIFT_CASE, REACT_STOP) == DRIFT_CASE
+
+    def test_prose_containing_marker_text_is_preserved(self):
+        # A legitimate answer mentioning the marker text must not be cut.
+        prose = 'My key observation: the pipeline is healthy.'
+        assert truncate_at_stop_words(prose, REACT_STOP) == prose
+
+    def test_clean_text_without_marker_is_untouched(self):
+        clean = 'Thought: all done\nFinal Answer: 42 is the answer.'
+        assert truncate_at_stop_words(clean, REACT_STOP) == clean
+
+
 # ---------------------------------------------------------------------------
 # Seam 2 — why the wrapper must read `stop_sequences`, not `stop`
 # Faithful mirror of crewai/llms/base_llm.py:165-214 (stop field + stop_sequences
@@ -183,3 +207,145 @@ class TestStopSequencesContract:
         with call_stop_override(llm, REACT_STOP):
             out = truncate_at_stop_words(FABRICATED, llm.stop_sequences)
         assert 'Observation:' not in out and 'Final Answer' not in out
+
+
+# ---------------------------------------------------------------------------
+# Seam 3 — API-level stop: the native Anthropic payload must carry the stop
+# sequences published on STOP_SEQUENCES_VAR, so the provider stops generating
+# (not just post-hoc truncation). Loads the REAL llm_native_stream with rocketlib
+# stubbed, and fakes the LangChain payload builder + raw stream.
+# ---------------------------------------------------------------------------
+_NATIVE_PATH = (
+    Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'llm_native_stream.py'
+)
+
+
+def _load_native_stream():
+    saved_rl = sys.modules.get('rocketlib')
+    rl = types.ModuleType('rocketlib')
+    rl.debug = lambda *a, **k: None
+    rl.warning = lambda *a, **k: None
+    sys.modules['rocketlib'] = rl
+    try:
+        spec = importlib.util.spec_from_file_location('rr_real_native_stream', _NATIVE_PATH)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        if saved_rl is None:
+            sys.modules.pop('rocketlib', None)
+        else:
+            sys.modules['rocketlib'] = saved_rl
+
+
+def _run_native_capture(ns, stop_value):
+    """Drive _stream_anthropic_messages_api with fakes; return the stop the payload got."""
+    captured: dict = {}
+
+    class _FakeLLM:
+        _client = object()  # non-None so the client guard passes
+
+        def _get_request_payload(self, prompt, stop=None, stream=None):
+            captured['stop'] = stop
+            return {}
+
+    class _FakeChat:
+        _llm = _FakeLLM()
+
+    ns._open_raw_message_stream = lambda client, payload: iter(())  # no events -> no text
+    token = ns.STOP_SEQUENCES_VAR.set(stop_value)
+    try:
+        # Produces no text, so the function raises after building the payload — we only
+        # assert the payload wiring, which happens before any streaming.
+        ns._stream_anthropic_messages_api(_FakeChat(), 'prompt', lambda t: None, None, None)
+    except RuntimeError:
+        pass
+    finally:
+        ns.STOP_SEQUENCES_VAR.reset(token)
+    return captured.get('stop', 'UNSET')
+
+
+class TestNativeStopThreading:
+    def test_payload_carries_contextvar_stop(self):
+        ns = _load_native_stream()
+        assert _run_native_capture(ns, REACT_STOP) == REACT_STOP
+
+    def test_payload_stop_defaults_none(self):
+        ns = _load_native_stream()
+        assert _run_native_capture(ns, None) is None
+
+
+# ---------------------------------------------------------------------------
+# Seam 4 — LLMBase._question must publish the stop list on STOP_SEQUENCES_VAR
+# around chat.chat(...) and ALWAYS reset it afterward, so a stop from one request
+# cannot leak onto the next on a reused chat instance. Loads the REAL llm_base
+# with its deps stubbed, sharing the real STOP_SEQUENCES_VAR object.
+# ---------------------------------------------------------------------------
+_LLM_BASE_PATH = Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'llm_base.py'
+
+
+def _load_llm_base(stop_var):
+    saved = {
+        k: sys.modules.get(k)
+        for k in ('rocketlib', 'ai', 'ai.common', 'ai.common.schema', 'ai.common.llm_native_stream')
+    }
+    rl = types.ModuleType('rocketlib')
+    rl.IInstanceBase = object
+    rl.invoke_function = lambda f: f
+    rl.warning = lambda *a, **k: None
+    sys.modules['rocketlib'] = rl
+    sys.modules['ai'] = types.ModuleType('ai')
+    sys.modules['ai.common'] = types.ModuleType('ai.common')
+    schema = types.ModuleType('ai.common.schema')
+    schema.Question = object
+    schema.Answer = object
+    sys.modules['ai.common.schema'] = schema
+    nsmod = types.ModuleType('ai.common.llm_native_stream')
+    nsmod.STOP_SEQUENCES_VAR = stop_var  # share the SAME contextvar the test asserts on
+    sys.modules['ai.common.llm_native_stream'] = nsmod
+    try:
+        spec = importlib.util.spec_from_file_location('rr_real_llm_base', _LLM_BASE_PATH)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.LLMBase
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+
+class TestQuestionContextvar:
+    def _make_self(self, chat):
+        ig = type('IGlobal', (), {'_chat': chat})()
+        return type('Node', (), {'IGlobal': ig})()
+
+    def test_question_sets_stop_during_and_resets_after(self):
+        var = _load_native_stream().STOP_SEQUENCES_VAR
+        LLMBase = _load_llm_base(var)
+        seen = {}
+
+        class _Chat:
+            def chat(self, question, on_chunk=None, on_finish=None, on_reasoning_chunk=None):
+                seen['during'] = var.get()
+                return 'answer'
+
+        assert var.get() is None
+        LLMBase._question(self._make_self(_Chat()), 'q', stop=REACT_STOP)
+        assert seen['during'] == REACT_STOP  # published during the call
+        assert var.get() is None  # reset afterward
+
+    def test_question_resets_stop_even_when_chat_raises(self):
+        var = _load_native_stream().STOP_SEQUENCES_VAR
+        LLMBase = _load_llm_base(var)
+
+        class _Chat:
+            def chat(self, question, on_chunk=None, on_finish=None, on_reasoning_chunk=None):
+                raise RuntimeError('boom')
+
+        try:
+            LLMBase._question(self._make_self(_Chat()), 'q', stop=REACT_STOP)
+        except RuntimeError:
+            pass
+        assert var.get() is None  # reset in finally, no leak onto the next request

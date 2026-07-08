@@ -6,7 +6,7 @@ A RocketRide LLM node that routes pipeline traffic through a locally-hosted Olla
 
 Provides text generation against an Ollama server running on your own hardware. The node acts as an `llm` invoke connection for agents and other nodes that need an LLM, and can also be driven directly via its `questions` / `answers` lane pair. Because all inference happens on-premise, no external API key is required, making it a natural fit for privacy-sensitive or air-gapped deployments.
 
-Internally, the node talks to Ollama through its **OpenAI-compatible `/v1` endpoint** using **langchain-openai** (`ChatOpenAI`), with temperature fixed at `0`. If the configured `serverbase` URL does not end in `/v1`, the node appends it automatically, so both `http://localhost:11434` and `http://localhost:11434/v1` are accepted. The OpenAI client requires a non-empty API key field; the node sends the placeholder string `dummy-key`, which Ollama ignores.
+Internally, the node talks to Ollama through its **OpenAI-compatible `/v1` endpoint** using **langchain-openai** (`ChatOpenAI`). `temperature` is configurable (default `0`; reasoning models such as `gpt-oss` auto-use `1.0` when it is left unset), and `reasoning_effort` can be set for reasoning models. If the configured `serverbase` URL does not end in `/v1`, the node appends it automatically, so both `http://localhost:11434` and `http://localhost:11434/v1` are accepted. The OpenAI client requires a non-empty API key field; the node sends the placeholder string `dummy-key`, which Ollama ignores.
 
 ---
 
@@ -95,6 +95,8 @@ Pick a profile from the dropdown; the profile pre-fills `model`, `serverbase`, a
 | `model` | `string` | **Model**<br/>Ollama model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `ollama.profile` | `string` | **Model**<br/>LLM model | `"llama3_3"` |
+| `reasoning_effort` | `string` | **Reasoning Effort**<br/>Optional reasoning budget for reasoning models: low, medium, or high. Leave unset to let reasoning models auto-use 'low'; a value set here always wins. Ignored by non-reasoning models. |  |
+| `temperature` | `number` | **Temperature**<br/>Sampling temperature. Left unset by default so ollama.py can choose: 0 for standard models, and 1.0 for reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) so they emit a final answer instead of looping on empty output. Set an explicit value here to override the auto behavior. |  |
 
 ## Dependencies
 
