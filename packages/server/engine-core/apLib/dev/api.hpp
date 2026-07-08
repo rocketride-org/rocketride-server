@@ -80,9 +80,10 @@ template <typename... DebugInfo>
 
 #if ROCKETRIDE_PLAT_UNX
     // abort()'s SIGABRT is what makes Crashpad write a minidump: wanted for real
-    // fatalities, suppressed when we're already cancelling.
+    // fatalities, suppressed when we're already cancelling (exit without a
+    // signal via the existing platform-safe quickExit).
     if (async::cancelled(_location, true))
-        std::quick_exit(1);
+        application::quickExit(1);
     std::abort();
 #else
     std::quick_exit(1);
