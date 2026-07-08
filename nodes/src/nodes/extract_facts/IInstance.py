@@ -123,7 +123,9 @@ class IInstance(IInstanceBase):
             page_tag = f'[Page {page}]\n' if page is not None else ''
 
             if metadata.get('isTable'):
-                tid = metadata.get('tableId', self.table_id)
+                tid = metadata.get('tableId')
+                if tid is None:
+                    tid = self.table_id
                 self.table_text += f'{page_tag}[TABLE {tid}]\n{content}\n[/TABLE {tid}]\n'
                 self.table_id = max(self.table_id, tid + 1)
             elif content:

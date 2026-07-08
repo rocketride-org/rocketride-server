@@ -413,3 +413,21 @@ def test_page_marker_from_document_metadata_reaches_prompt():
     question = captured.asks[0].question
     context = '\n'.join(question.documents) + '\n'.join(question.context)
     assert '[Page 7]' in context, 'page metadata must be emitted as a [Page N] marker'
+
+
+def test_page_marker_from_table_document_metadata_reaches_prompt():
+    """A table doc carrying page metadata must surface a [Page N] marker in context."""
+
+    def side_effect(i, ask):
+        return _make_answer([])
+
+    inst, captured = _build_instance(side_effect)
+    inst.open(types.SimpleNamespace())
+    inst.writeDocuments([FakeDoc(page_content=_TABLE, metadata={'isTable': True, 'tableId': None, 'page': 3})])
+    inst.closing()
+
+    assert captured.asks, 'extraction pass must call instance.invoke'
+    question = captured.asks[0].question
+    context = '\n'.join(question.documents) + '\n'.join(question.context)
+    assert '[Page 3]' in context, 'table-document page metadata must be emitted as a [Page N] marker'
+    assert '[TABLE 0]' in context, 'a null tableId must fall back to the running table id'
