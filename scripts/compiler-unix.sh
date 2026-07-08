@@ -39,12 +39,8 @@ EXTRA_PKGS=()            # Linux: compiler/clang packages chosen by select_*_tri
 NEED_CC_ALTERNATIVES=""  # apt: set when cc/c++ must be pointed at clang
 LLVM_APT_VERSION=""      # apt: clang major to pull from apt.llvm.org when the distro lacks it
 
-# Supported clang major range on Linux: [MIN_CLANG, MAX_CLANG].
-#  - Lower bound 16: Crashpad's bundled mini_chromium (base/containers/span.h)
-#    uses C++20 std::ranges that libc++ 14/15 don't fully implement.
-#  - Upper bound 18: the engine sources don't compile with clang >= 19, so a
-#    newer default clang (e.g. Fedora's clang-22) must NOT be selected.
-# clang-18 is the standard install target where the distro's clang is outside it.
+# Supported clang range on Linux: 16 (Crashpad needs C++20 <ranges>) .. 18
+# (engine doesn't build with clang >= 19). Install target is clang-18.
 MIN_CLANG=16
 MAX_CLANG=18
 
@@ -139,20 +135,11 @@ detect_linux_distro() {
 # Triplet Selection
 # =============================================================================
 
-# Detect an installed clang new enough for Crashpad (>= MIN_CLANG).
+# Detect an installed clang within [MIN_CLANG, MAX_CLANG].
 detect_installed_clang() {
-    # Prefer the distro-DEFAULT unversioned `clang` when it already satisfies
-    # MIN_CLANG — its matching libc++ stack (including the UNVERSIONED
-    # libc++-dev/libc++abi-dev that own the multiarch symlink
-    # /usr/lib/x86_64-linux-gnu/libc++.so the linker resolves `-lc++` against)
-    # is already installed and consistent, so no apt mutation is needed.
-    #
-    # When the default is too old (e.g. Ubuntu 22.04's clang-14) we do NOT try to
-    # bolt a higher Ubuntu-universe libc++-<n>-dev onto it — that made apt remove
-    # the unversioned libc++-dev and broke `-lc++` (seen on GHA ubuntu-22.04).
-    # Instead select_linux_triplet installs a self-consistent clang-<MIN+>
-    # toolchain from apt.llvm.org, which ships its own libc++ under
-    # /usr/lib/llvm-<n>/ and doesn't touch the distro multiarch symlink.
+    # Prefer the distro-default clang when it's in range (its libc++ stack is
+    # already consistent); otherwise select_linux_triplet installs a versioned
+    # clang from apt.llvm.org (self-consistent libc++ under /usr/lib/llvm-<n>/).
     if command_exists "clang"; then
         CLANG_VER=$(clang --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
         if [ "$CLANG_VER" -ge "$MIN_CLANG" ] 2>/dev/null && \
@@ -197,10 +184,9 @@ select_linux_triplet() {   # $1 = apt | dnf
             dep_installed dnf libcxxabi-devel || EXTRA_PKGS+=("libcxxabi-devel")
             dep_installed dnf lld             || EXTRA_PKGS+=("lld")
         else
-            # Fedora ships only its newest clang (unversioned) with no versioned
-            # clang-18 package, so dnf can't downgrade an out-of-range compiler.
-            # The engine doesn't build with clang >= 19, so fail with guidance
-            # rather than install an incompatible clang.
+            # Fedora ships only its newest (unversioned) clang; dnf can't provide
+            # an in-range clang-18, so fail with guidance rather than pick one the
+            # engine can't use (clang >= 19).
             local sysver=""
             command_exists clang && sysver=$(clang --version | head -n1 | grep -o '[0-9]\+' | head -1)
             echo "=========================================="
@@ -217,10 +203,8 @@ select_linux_triplet() {   # $1 = apt | dnf
 
     # Debian/Ubuntu (apt): versioned clang packages.
     # Determine default/recommended version based on distro
-    # Crashpad needs clang/libc++ >= MIN_CLANG (C++20 ranges). We standardise on
-    # clang-18 across apt distros; where it isn't in the distro repos (e.g. Ubuntu
-    # 22.04) it's pulled from apt.llvm.org (see ensure_llvm_repo). The case still
-    # validates the distro/version is recognised.
+    # Standardise on clang-18 (see MIN/MAX_CLANG); pulled from apt.llvm.org where
+    # the distro lacks it (see ensure_llvm_repo). Case validates the version.
     case "$DISTRO" in
         ubuntu)
             case "$VERSION_ID" in
@@ -311,18 +295,18 @@ select_linux_triplet() {   # $1 = apt | dnf
         export CXX=clang++-${CLANG_VERSION}
     fi
     
-    # cc/c++ must resolve to clang for vcpkg's compiler detection. Flag it here;
-    # the generic setup_cc_alternatives (run by check_dependencies) applies it
-    # via update-alternatives — Fedora does the equivalent with a symlink.
-    CC_PATH=$(command -v "$CC" 2>/dev/null)
-    CXX_PATH=$(command -v "$CXX" 2>/dev/null)
-    CC_LINK=$(readlink -f "$(command -v cc 2>/dev/null)" 2>/dev/null || true)
-    CXX_LINK=$(readlink -f "$(command -v c++ 2>/dev/null)" 2>/dev/null || true)
-    CC_RESOLVED=""
-    CXX_RESOLVED=""
-    [ -n "$CC_PATH" ] && CC_RESOLVED=$(readlink -f "$CC_PATH" 2>/dev/null)
-    [ -n "$CXX_PATH" ] && CXX_RESOLVED=$(readlink -f "$CXX_PATH" 2>/dev/null)
-    if [ -n "$CC_RESOLVED" ] && [ -n "$CXX_RESOLVED" ]; then
+    # Decide whether cc/c++ need repointing at clang (setup_cc_alternatives applies
+    # it after install). `|| true`: a not-yet-installed clang-<n> fails command -v
+    # and would abort under `set -e`.
+    CC_PATH=$(command -v "$CC" 2>/dev/null || true)
+    CXX_PATH=$(command -v "$CXX" 2>/dev/null || true)
+    if [ -z "$CC_PATH" ] || [ -z "$CXX_PATH" ]; then
+        NEED_CC_ALTERNATIVES="1"   # not installed yet; will need repointing
+    else
+        CC_LINK=$(readlink -f "$(command -v cc 2>/dev/null)" 2>/dev/null || true)
+        CXX_LINK=$(readlink -f "$(command -v c++ 2>/dev/null)" 2>/dev/null || true)
+        CC_RESOLVED=$(readlink -f "$CC_PATH" 2>/dev/null || true)
+        CXX_RESOLVED=$(readlink -f "$CXX_PATH" 2>/dev/null || true)
         if [ "$CC_RESOLVED" != "$CC_LINK" ] || [ "$CXX_RESOLVED" != "$CXX_LINK" ]; then
             NEED_CC_ALTERNATIVES="1"
         fi
@@ -452,11 +436,8 @@ dep_install() {
     esac
 }
 
-# Ensure clang-$1 is installable via apt. If the distro repos don't offer it
-# (e.g. Ubuntu 22.04 tops out at clang-15) add the official apt.llvm.org repo.
-# Its versioned clang/libc++ ship their own libc++ under /usr/lib/llvm-$1/, so
-# they're self-consistent and don't disturb the distro's unversioned libc++
-# multiarch symlink (the breakage the detect_installed_clang note warns about).
+# Make clang-$1 installable via apt, adding apt.llvm.org when the distro repos
+# don't carry it (e.g. Ubuntu 22.04 tops out at clang-15).
 ensure_llvm_repo() {
     local ver="$1" codename
     # Already known to apt (distro repo, or we added it on a prior call)?
@@ -535,14 +516,22 @@ setup_cc_alternatives() {
             # don't already resolve to clang), so the run path is reached only
             # when a change is genuinely needed — no extra idempotency check here.
             [ "$NEED_CC_ALTERNATIVES" = "1" ] || return 0
+            # Resolve now (runs after install; the select-time path was empty).
+            local cc_path cxx_path
+            cc_path=$(command -v "$CC" 2>/dev/null || true)
+            cxx_path=$(command -v "$CXX" 2>/dev/null || true)
             if [ "$2" = "run" ]; then
-                run_privileged update-alternatives --install /usr/bin/cc cc "$CC_PATH" 100
-                run_privileged update-alternatives --install /usr/bin/c++ c++ "$CXX_PATH" 100
+                if [ -z "$cc_path" ] || [ -z "$cxx_path" ]; then
+                    echo "ERROR: $CC/$CXX not on PATH after install"
+                    exit 1
+                fi
+                run_privileged update-alternatives --install /usr/bin/cc cc "$cc_path" 100
+                run_privileged update-alternatives --install /usr/bin/c++ c++ "$cxx_path" 100
                 echo "✓ cc/c++ -> $CC/$CXX"
             else
                 echo "    # Set default cc/c++ to $CC and $CXX"
-                echo "    $SUDO update-alternatives --install /usr/bin/cc cc $CC_PATH 100"
-                echo "    $SUDO update-alternatives --install /usr/bin/c++ c++ $CXX_PATH 100"
+                echo "    $SUDO update-alternatives --install /usr/bin/cc cc ${cc_path:-\$(command -v $CC)} 100"
+                echo "    $SUDO update-alternatives --install /usr/bin/c++ c++ ${cxx_path:-\$(command -v $CXX)} 100"
             fi
             ;;
         dnf)
@@ -596,8 +585,7 @@ check_dependencies() {
     if [ "$AUTOINSTALL" == "1" ]; then
         if [ ${#missing[@]} -ne 0 ]; then
             echo "Auto-installing missing dependencies with $mgr..."
-            # A clang version newer than the distro ships (e.g. clang-18 on Ubuntu
-            # 22.04) needs the apt.llvm.org repo added before it can be installed.
+            # clang-18 may need apt.llvm.org before it's installable (e.g. Ubuntu 22.04).
             if [ "$mgr" = "apt" ] && [ -n "$LLVM_APT_VERSION" ]; then
                 if ! ensure_llvm_repo "$LLVM_APT_VERSION"; then
                     echo "=========================================="

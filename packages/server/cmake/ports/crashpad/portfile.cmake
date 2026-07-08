@@ -90,21 +90,15 @@ if(VCPKG_TARGET_IS_ANDROID)
 elseif(VCPKG_TARGET_IS_LINUX)
     string(APPEND OPTIONS " target_os=\"linux\"")
 
-    # Upstream forwards the triplet's compiler flags to gn only on Windows, so on
-    # Linux the mini_chromium build compiles against the system libstdc++ instead
-    # of the libc++ the engine and the rest of vcpkg use. With a clang toolchain
-    # and a much newer system libstdc++ that fails to compile. Forward the flags
-    # (-stdlib=libc++, etc.) so crashpad matches the engine ABI.
-    #
+    # Upstream forwards the triplet flags to gn only on Windows; do it for Linux
+    # too so crashpad compiles/links against libc++ (matching the engine ABI)
+    # rather than the system libstdc++.
     vcpkg_cmake_get_vars(cmake_vars_file)
     include("${cmake_vars_file}")
 
-    # Link with lld. mini_chromium's gn build otherwise uses the system ld.bfd,
-    # which with a clang toolchain can emit a broken DT_INIT so crashpad_handler
-    # SIGSEGVs in _init before main. lld links it correctly. lld is a guaranteed
-    # Linux toolchain dependency here (scripts/compiler-unix.sh installs
-    # lld-<clang-version> alongside clang), so require it -- a missing-lld build
-    # error is clearer than a runtime handler segfault.
+    # Force lld: gn's default (system ld.bfd) can emit a broken DT_INIT that makes
+    # crashpad_handler SIGSEGV in _init before main. lld is always installed on
+    # Linux here (compiler-unix.sh), so a missing-lld build error beats that crash.
     set(OPTIONS_DBG "${OPTIONS_DBG} \
         extra_cflags_c=\"${VCPKG_COMBINED_C_FLAGS_DEBUG}\" \
         extra_cflags_cc=\"${VCPKG_COMBINED_CXX_FLAGS_DEBUG}\" \
