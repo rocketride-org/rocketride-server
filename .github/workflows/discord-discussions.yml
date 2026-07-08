@@ -47,6 +47,16 @@ jobs:
           # shellcheck source=scripts/discord-helper.sh
           source "${GITHUB_WORKSPACE}/.github/workflows/scripts/discord-helper.sh"
 
+          # Back-compat shims: these notifiers source the helper from the default
+          # branch (fork-safety), so on the PR that first introduces new helper
+          # functions the default-branch helper won't have them yet. Define no-op
+          # fallbacks so the workflow degrades gracefully instead of aborting
+          # (command not found / exit 127); the real implementations take over
+          # automatically once this merges to the default branch.
+          command -v discord_applied_tags   >/dev/null 2>&1 || discord_applied_tags()   { printf '[]'; }
+          command -v extract_discord_thread >/dev/null 2>&1 || extract_discord_thread() { :; }
+          command -v discord_archive_thread >/dev/null 2>&1 || discord_archive_thread() { :; }
+
           NUMBER="${{ github.event.discussion.number }}"
           OWNER="${REPO%/*}"
           NAME="${REPO#*/}"
