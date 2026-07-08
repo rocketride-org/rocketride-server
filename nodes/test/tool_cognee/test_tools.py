@@ -15,6 +15,9 @@ only for the pure response/error shaping helpers and key redaction (with
 Covers:
 * ``cognee_client`` pure helpers — ``_headers``, ``_shape_run``,
   ``_shape_results``, ``_find_dataset_id``, ``_as_runtime_error`` redaction.
+* ``cognee_client.reset`` network-level behavior — the GET/DELETE dataset
+  lifecycle via a stubbed ``requests.request``, including the 404-as-not_found
+  delete-race handling and key redaction on transport/HTTP failures.
 * ``add`` / ``cognify`` / ``search`` / ``reset`` — input validation, dataset
   and default fallbacks, per-call overrides, delegation args, raise-on-error.
 """
@@ -254,6 +257,171 @@ def test_add_error_never_leaks_key(monkeypatch):
     with pytest.raises(RuntimeError) as ei:
         client.add('http://localhost:8000', 'ck_supersecret', text='hi', dataset='main', timeout=5)
     assert 'ck_supersecret' not in str(ei.value)
+
+
+# ---------------------------------------------------------------------------
+# cognee_client.reset — retry-wrapped GET/DELETE against a stubbed requests.request
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    """Minimal ``requests.Response`` stand-in: status_code, json(), raise_for_status()."""
+
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = {} if payload is None else payload
+        self.content = b'{}'
+
+    def json(self):
+        """Return the canned JSON payload."""
+        return self._payload
+
+    def raise_for_status(self):
+        """Raise HTTPError with ``.response`` set, mirroring real requests behavior."""
+        if self.status_code >= 400:
+            err = requests.exceptions.HTTPError(f'{self.status_code} error')
+            err.response = self
+            raise err
+
+
+def _stub_request(monkeypatch, *, get=None, get_exc=None, delete=None, delete_exc=None):
+    """Stub ``requests.request`` (what ``_request_with_retry`` calls) by HTTP method.
+
+    Returns the list of recorded calls so tests can assert whether DELETE happened.
+    """
+    calls = []
+
+    def fake(method, url, *, headers, timeout):
+        calls.append({'method': method, 'url': url})
+        if method == 'GET':
+            if get_exc is not None:
+                raise get_exc
+            resp = get
+        elif method == 'DELETE':
+            if delete_exc is not None:
+                raise delete_exc
+            resp = delete
+        else:
+            raise AssertionError(f'unexpected method {method}')
+        resp.raise_for_status()
+        return resp
+
+    monkeypatch.setattr(client.requests, 'request', fake, raising=False)
+    return calls
+
+
+def test_reset_client_dataset_missing_skips_delete(monkeypatch):
+    """Dataset absent from the list -> not_found, deleted False, DELETE never called."""
+    calls = _stub_request(monkeypatch, get=_FakeResponse(200, {'datasets': [{'id': 'u1', 'name': 'other'}]}))
+    out = client.reset('http://localhost:8000', 'ck_test', dataset='main', timeout=5)
+    assert out == {'dataset': 'main', 'status': 'not_found', 'deleted': False}
+    assert [c['method'] for c in calls] == ['GET']
+
+
+def test_reset_client_happy_path(monkeypatch):
+    """GET lists the dataset, DELETE 2xx -> status='reset', deleted=True."""
+    calls = _stub_request(
+        monkeypatch,
+        get=_FakeResponse(200, {'datasets': [{'id': 'u2', 'name': 'main'}]}),
+        delete=_FakeResponse(200),
+    )
+    out = client.reset('http://localhost:8000', 'ck_test', dataset='main', timeout=5)
+    assert out == {'dataset': 'main', 'status': 'reset', 'deleted': True}
+    assert [c['method'] for c in calls] == ['GET', 'DELETE']
+    assert calls[1]['url'] == 'http://localhost:8000/api/v1/datasets/u2'
+
+
+def test_reset_client_delete_404_is_not_found(monkeypatch):
+    """DELETE 404 (already gone) is reported as not_found, never raised — the regression guard."""
+    _stub_request(
+        monkeypatch,
+        get=_FakeResponse(200, {'datasets': [{'id': 'u2', 'name': 'main'}]}),
+        delete=_FakeResponse(404),
+    )
+    out = client.reset('http://localhost:8000', 'ck_test', dataset='main', timeout=5)
+    assert out == {'dataset': 'main', 'status': 'not_found', 'deleted': False}
+
+
+def _stub_request_with_retry(monkeypatch, *, get=None, get_exc=None, delete_exc=None):
+    """Stub ``cognee_client._request_with_retry`` directly, bypassing tenacity's retry/backoff.
+
+    For the two "final failure after retries exhausted" cases below: whether ``tenacity`` is
+    the in-file passthrough stub (isolated unit runs) or the real dependency (``./builder
+    nodes:test``, which really retries 429/5xx/timeout with real backoff) is an environment
+    detail ``reset()`` shouldn't care about. Raising directly here models the exception tenacity
+    re-raises once attempts are exhausted, without depending on real sleep timing or attempt
+    counts.
+    """
+    calls = []
+
+    def fake(method, url, *, headers, timeout):
+        calls.append(method)
+        if method == 'GET':
+            if get_exc is not None:
+                raise get_exc
+            return get
+        if method == 'DELETE':
+            if delete_exc is not None:
+                raise delete_exc
+            raise AssertionError('unexpected DELETE call')
+        raise AssertionError(f'unexpected method {method}')
+
+    monkeypatch.setattr(client, '_request_with_retry', fake)
+    return calls
+
+
+def test_reset_client_delete_500_raises_without_key_leak(monkeypatch):
+    """A non-404 DELETE error (e.g. exhausted 500 retries) raises RuntimeError, no key leak."""
+    err = requests.exceptions.HTTPError('500 error')
+    err.response = _FakeResponse(500)
+    calls = _stub_request_with_retry(
+        monkeypatch,
+        get=_FakeResponse(200, {'datasets': [{'id': 'u2', 'name': 'main'}]}),
+        delete_exc=err,
+    )
+    with pytest.raises(RuntimeError) as ei:
+        client.reset('http://localhost:8000', 'ck_supersecret', dataset='main', timeout=5)
+    assert 'ck_supersecret' not in str(ei.value)
+    assert 'reset request failed' in str(ei.value)
+    assert calls == ['GET', 'DELETE']
+
+
+def test_reset_client_get_transport_error_raises_without_key_leak(monkeypatch):
+    """A transport failure exhausting retries on the GET raises RuntimeError; no key leak, no DELETE."""
+    calls = _stub_request_with_retry(monkeypatch, get_exc=requests.exceptions.ConnectionError('connect failed'))
+    with pytest.raises(RuntimeError) as ei:
+        client.reset('http://localhost:8000', 'ck_supersecret', dataset='main', timeout=5)
+    assert 'ck_supersecret' not in str(ei.value)
+    assert calls == ['GET']
+
+
+def _http_error(status):
+    """Build an HTTPError with a fake response of the given status (or no response when None)."""
+    err = requests.exceptions.HTTPError(f'{status} error')
+    err.response = _FakeResponse(status) if status is not None else None
+    return err
+
+
+@pytest.mark.parametrize(
+    ('exc', 'expected'),
+    [
+        (_http_error(429), True),  # rate limited
+        (_http_error(500), True),  # server error
+        (_http_error(503), True),  # server error (upper 5xx)
+        (_http_error(404), False),  # 4xx other than 429 is terminal
+        (_http_error(None), False),  # HTTPError with no response attached
+        (requests.exceptions.Timeout('t'), True),
+        (requests.exceptions.ConnectionError('c'), True),
+        (ValueError('not an http/transport error'), False),
+    ],
+)
+def test_is_retryable_classification(exc, expected):
+    """_is_retryable retries only transient 429/5xx/timeout/connection failures.
+
+    Exercised directly (not through tenacity's loop), so the classification is
+    verified regardless of whether the stub or the real tenacity backend is loaded.
+    """
+    assert client._is_retryable(exc) is expected
 
 
 # ---------------------------------------------------------------------------

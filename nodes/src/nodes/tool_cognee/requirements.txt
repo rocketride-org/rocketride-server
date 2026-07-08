@@ -1,2 +1,2 @@
-requests
+requests>=2.34.2
 tenacity

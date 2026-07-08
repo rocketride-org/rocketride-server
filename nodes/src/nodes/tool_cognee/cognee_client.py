@@ -29,6 +29,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 import requests
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
 
 from ai.common.utils import post_with_retry
 
@@ -49,6 +50,38 @@ def _headers(api_key: str) -> Dict[str, str]:
     if api_key:
         headers['X-Api-Key'] = api_key
     return headers
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """Retry transient transport failures and 429 / 5xx responses only."""
+    if isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
+        return True
+    if isinstance(exc, requests.exceptions.HTTPError):
+        resp = exc.response
+        return resp is not None and (resp.status_code == 429 or 500 <= resp.status_code < 600)
+    return False
+
+
+def _request_with_retry(method: str, url: str, *, headers: Dict[str, str], timeout: float) -> requests.Response:
+    """GET/DELETE with the same 429 / 5xx / timeout retry policy as ``post_with_retry``.
+
+    The shared ``post_with_retry`` helper is POST-only, so this node-local twin
+    covers the idempotent read (dataset list) and delete-by-id calls in ``reset``.
+    A 4xx other than 429 (e.g. a 404 on an already-deleted dataset) is raised
+    immediately without retry, and the final exception is re-raised on exhaustion.
+    """
+
+    def _attempt() -> requests.Response:
+        resp = requests.request(method, url, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        return resp
+
+    return Retrying(
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=2, max=60),
+        retry=retry_if_exception(_is_retryable),
+        reraise=True,
+    )(_attempt)
 
 
 def add(
@@ -138,15 +171,15 @@ def reset(
     cognee has no prune-over-REST and no delete-by-name, so this resolves the
     dataset name to its id via ``GET /api/v1/datasets`` and then
     ``DELETE /api/v1/datasets/{id}`` (which empties the graph/data and removes
-    the dataset record — a subsequent add recreates it). A dataset that does not
-    exist is reported as ``not_found`` rather than an error: there is nothing to
-    reset.
+    the dataset record — a subsequent add recreates it). Both calls are retried
+    on transient 429 / 5xx / timeout failures. A dataset that does not exist —
+    or one that a 404 says is already gone by delete time — is reported as
+    ``not_found`` rather than an error: there is nothing to reset.
     """
     headers = _headers(api_key)
     list_url = f'{base_url}{_DATASETS_PATH}'
     try:
-        resp = requests.get(list_url, headers=headers, timeout=timeout)
-        resp.raise_for_status()
+        resp = _request_with_retry('GET', list_url, headers=headers, timeout=timeout)
     except requests.RequestException as exc:
         raise _as_runtime_error(exc, 'reset') from None
 
@@ -156,8 +189,16 @@ def reset(
 
     delete_url = f'{base_url}{_DATASETS_PATH}/{dataset_id}'
     try:
-        resp = requests.delete(delete_url, headers=headers, timeout=timeout)
-        resp.raise_for_status()
+        _request_with_retry('DELETE', delete_url, headers=headers, timeout=timeout)
+    except requests.exceptions.HTTPError as exc:
+        # 404 = the dataset was already gone when the delete landed: a concurrent
+        # reset, or a retry after a delete that succeeded but whose response was
+        # lost to a timeout. The end state is exactly what the caller asked for,
+        # so report "already cleared" instead of surfacing a false failure.
+        resp = getattr(exc, 'response', None)
+        if resp is not None and resp.status_code == 404:
+            return {'dataset': dataset, 'status': 'not_found', 'deleted': False}
+        raise _as_runtime_error(exc, 'reset') from None
     except requests.RequestException as exc:
         raise _as_runtime_error(exc, 'reset') from None
 

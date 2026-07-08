@@ -23,7 +23,7 @@ from rocketlib import IInstanceBase, tool_function
 from ai.common.utils import normalize_tool_input
 
 from . import cognee_client
-from .IGlobal import IGlobal, _SEARCH_TYPES, _MAX_TOP_K
+from .IGlobal import IGlobal, SEARCH_TYPES, MAX_TOP_K
 
 
 class IInstance(IInstanceBase):
@@ -179,7 +179,7 @@ class IInstance(IInstanceBase):
             raise ValueError('cognee.search: "query" is required and must be a non-empty string')
 
         search_type = str(args.get('search_type') or cfg.search_type).strip().upper()
-        if search_type not in _SEARCH_TYPES:
+        if search_type not in SEARCH_TYPES:
             search_type = cfg.search_type
 
         dataset = str(args.get('dataset') or cfg.dataset).strip() or cfg.dataset
@@ -187,7 +187,7 @@ class IInstance(IInstanceBase):
         raw_top_k = args.get('top_k', cfg.top_k)
         if isinstance(raw_top_k, bool) or not isinstance(raw_top_k, int):
             raw_top_k = cfg.top_k
-        top_k = max(1, min(_MAX_TOP_K, raw_top_k))
+        top_k = max(1, min(MAX_TOP_K, raw_top_k))
 
         results = cognee_client.search(
             cfg.base_url,

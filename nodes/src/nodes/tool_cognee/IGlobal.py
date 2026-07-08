@@ -24,14 +24,14 @@ _DEFAULT_BASE_URL = 'http://localhost:8000'
 _DEFAULT_DATASET = 'main'
 _DEFAULT_SEARCH_TYPE = 'GRAPH_COMPLETION'
 _DEFAULT_TOP_K = 15
-_MAX_TOP_K = 100
+MAX_TOP_K = 100
 _DEFAULT_REQUEST_TIMEOUT = 120
 _MIN_REQUEST_TIMEOUT = 5
 _MAX_REQUEST_TIMEOUT = 600
 
 # Search types cognee's REST API accepts; the node clamps to this set so a bad
 # config value can't reach the server.
-_SEARCH_TYPES = frozenset(
+SEARCH_TYPES = frozenset(
     {
         'GRAPH_COMPLETION',
         'RAG_COMPLETION',
@@ -73,10 +73,10 @@ class IGlobal(IGlobalBase):
         self.dataset = str(cfg.get('dataset') or _DEFAULT_DATASET).strip() or _DEFAULT_DATASET
 
         search_type = str(cfg.get('search_type') or _DEFAULT_SEARCH_TYPE).strip().upper()
-        self.search_type = search_type if search_type in _SEARCH_TYPES else _DEFAULT_SEARCH_TYPE
+        self.search_type = search_type if search_type in SEARCH_TYPES else _DEFAULT_SEARCH_TYPE
 
         raw_top_k = cfg.get('top_k', _DEFAULT_TOP_K)
-        self.top_k = max(1, min(_MAX_TOP_K, _coerce_int(raw_top_k, _DEFAULT_TOP_K)))
+        self.top_k = max(1, min(MAX_TOP_K, _coerce_int(raw_top_k, _DEFAULT_TOP_K)))
 
         raw_timeout = cfg.get('request_timeout', _DEFAULT_REQUEST_TIMEOUT)
         self.request_timeout = max(
