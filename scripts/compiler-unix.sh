@@ -37,6 +37,16 @@ REQUIRES=()              # macOS (brew) package list
 COMMANDS=()              # macOS: install commands to print/run
 EXTRA_PKGS=()            # Linux: compiler/clang packages chosen by select_*_triplet
 NEED_CC_ALTERNATIVES=""  # apt: set when cc/c++ must be pointed at clang
+LLVM_APT_VERSION=""      # apt: clang major to pull from apt.llvm.org when the distro lacks it
+
+# Supported clang major range on Linux: [MIN_CLANG, MAX_CLANG].
+#  - Lower bound 16: Crashpad's bundled mini_chromium (base/containers/span.h)
+#    uses C++20 std::ranges that libc++ 14/15 don't fully implement.
+#  - Upper bound 18: the engine sources don't compile with clang >= 19, so a
+#    newer default clang (e.g. Fedora's clang-22) must NOT be selected.
+# clang-18 is the standard install target where the distro's clang is outside it.
+MIN_CLANG=16
+MAX_CLANG=18
 
 # Single source of truth for the shared Linux build deps: one row per logical
 # dependency as "apt|dnf". An empty field means the dep is not needed on that
@@ -129,30 +139,31 @@ detect_linux_distro() {
 # Triplet Selection
 # =============================================================================
 
-# Detect installed clang version (12 or later)
+# Detect an installed clang new enough for Crashpad (>= MIN_CLANG).
 detect_installed_clang() {
-    # Prefer the distro-DEFAULT unversioned `clang` when it's >=12. The image
-    # provisions the matching libc++ stack — including the UNVERSIONED
-    # libc++-dev / libc++abi-dev that own the multiarch symlink
-    # /usr/lib/x86_64-linux-gnu/libc++.so, which is what the linker resolves
-    # `-lc++` against. Picking a DIFFERENT (higher) versioned clang here makes
-    # the libc++ check below force-install libc++-<higher>-dev, and apt resolves
-    # the conflict by REMOVING the unversioned libc++-dev — deleting that
-    # symlink and breaking every `-stdlib=libc++` link with
-    # `/usr/bin/ld: cannot find -lc++`. Seen on GHA ubuntu-22.04 image
-    # 20260525: default clang is 14 but clang-15 is also present, so taking the
-    # highest version silently broke the build. Aligning to the default keeps
-    # compiler and its fully-installed libc++ in lockstep, no apt mutation.
+    # Prefer the distro-DEFAULT unversioned `clang` when it already satisfies
+    # MIN_CLANG — its matching libc++ stack (including the UNVERSIONED
+    # libc++-dev/libc++abi-dev that own the multiarch symlink
+    # /usr/lib/x86_64-linux-gnu/libc++.so the linker resolves `-lc++` against)
+    # is already installed and consistent, so no apt mutation is needed.
+    #
+    # When the default is too old (e.g. Ubuntu 22.04's clang-14) we do NOT try to
+    # bolt a higher Ubuntu-universe libc++-<n>-dev onto it — that made apt remove
+    # the unversioned libc++-dev and broke `-lc++` (seen on GHA ubuntu-22.04).
+    # Instead select_linux_triplet installs a self-consistent clang-<MIN+>
+    # toolchain from apt.llvm.org, which ships its own libc++ under
+    # /usr/lib/llvm-<n>/ and doesn't touch the distro multiarch symlink.
     if command_exists "clang"; then
         CLANG_VER=$(clang --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
-        if [ "$CLANG_VER" -ge 12 ] 2>/dev/null; then
+        if [ "$CLANG_VER" -ge "$MIN_CLANG" ] 2>/dev/null && \
+           [ "$CLANG_VER" -le "$MAX_CLANG" ] 2>/dev/null; then
             echo "$CLANG_VER"
             return 0
         fi
     fi
 
-    # Fallback: highest installed versioned clang (no usable default `clang`).
-    for ver in 18 17 16 15 14 13 12; do
+    # Fallback: highest installed versioned clang within [MIN_CLANG, MAX_CLANG].
+    for ver in 18 17 16; do
         if command_exists "clang-$ver"; then
             echo "$ver"
             return 0
@@ -178,16 +189,27 @@ select_linux_triplet() {   # $1 = apt | dnf
     if [ "$mgr" = "dnf" ]; then
         export CC=clang
         export CXX=clang++
-        if [ -n "$INSTALLED_CLANG" ] && [ "$INSTALLED_CLANG" -ge 12 ]; then
+        if [ -n "$INSTALLED_CLANG" ]; then
+            # detect_installed_clang only returns a version within [MIN,MAX].
             CLANG_VERSION="$INSTALLED_CLANG"
             echo "✓ Compiler: Using clang-$CLANG_VERSION (found and supported)"
             dep_installed dnf libcxx-devel    || EXTRA_PKGS+=("libcxx-devel")
             dep_installed dnf libcxxabi-devel || EXTRA_PKGS+=("libcxxabi-devel")
             dep_installed dnf lld             || EXTRA_PKGS+=("lld")
         else
-            echo "✗ Compiler: clang not found or too old (requires clang 12+)"
-            echo "→ Will install clang (Fedora unversioned)"
-            EXTRA_PKGS+=("clang" "lld" "libcxx-devel" "libcxxabi-devel")
+            # Fedora ships only its newest clang (unversioned) with no versioned
+            # clang-18 package, so dnf can't downgrade an out-of-range compiler.
+            # The engine doesn't build with clang >= 19, so fail with guidance
+            # rather than install an incompatible clang.
+            local sysver=""
+            command_exists clang && sysver=$(clang --version | head -n1 | grep -o '[0-9]\+' | head -1)
+            echo "=========================================="
+            echo "ERROR: no supported clang on PATH (need clang $MIN_CLANG-$MAX_CLANG)."
+            [ -n "$sysver" ] && echo "  Detected clang $sysver; the engine sources don't build with clang >= 19."
+            echo "  Install an LLVM $MIN_CLANG-$MAX_CLANG toolchain, put its clang/clang++"
+            echo "  first on PATH (and set CC/CXX to them), then re-run."
+            echo "=========================================="
+            exit 1
         fi
         TRIPLET_FILE="packages/server/cmake/triplets/$TRIPLET_NAME"
         return 0
@@ -195,17 +217,15 @@ select_linux_triplet() {   # $1 = apt | dnf
 
     # Debian/Ubuntu (apt): versioned clang packages.
     # Determine default/recommended version based on distro
+    # Crashpad needs clang/libc++ >= MIN_CLANG (C++20 ranges). We standardise on
+    # clang-18 across apt distros; where it isn't in the distro repos (e.g. Ubuntu
+    # 22.04) it's pulled from apt.llvm.org (see ensure_llvm_repo). The case still
+    # validates the distro/version is recognised.
     case "$DISTRO" in
         ubuntu)
             case "$VERSION_ID" in
-                24.*)
+                24.*|22.*|20.*)
                     DEFAULT_CLANG="18"
-                    ;;
-                22.*)
-                    DEFAULT_CLANG="15"
-                    ;;
-                20.*)
-                    DEFAULT_CLANG="10"
                     ;;
                 *)
                     echo "=========================================="
@@ -218,7 +238,7 @@ select_linux_triplet() {   # $1 = apt | dnf
         debian)
             case "$VERSION_ID" in
                 12|11)
-                    DEFAULT_CLANG="16"
+                    DEFAULT_CLANG="18"
                     ;;
                 *)
                     echo "=========================================="
@@ -237,7 +257,7 @@ select_linux_triplet() {   # $1 = apt | dnf
     esac
     
     # Check if we have a suitable clang
-    if [ -n "$INSTALLED_CLANG" ] && [ "$INSTALLED_CLANG" -ge 12 ]; then
+    if [ -n "$INSTALLED_CLANG" ] && [ "$INSTALLED_CLANG" -ge "$MIN_CLANG" ]; then
         # Use installed clang
         CLANG_VERSION="$INSTALLED_CLANG"
         echo "✓ Compiler: Using clang-$CLANG_VERSION (found and supported)"
@@ -268,21 +288,23 @@ select_linux_triplet() {   # $1 = apt | dnf
         
     elif [ -n "$INSTALLED_CLANG" ]; then
         # Clang found but too old - install recommended version
-        echo "✗ Compiler: clang-$INSTALLED_CLANG found but unsupported (requires clang 12+)"
+        echo "✗ Compiler: clang-$INSTALLED_CLANG found but unsupported (requires clang $MIN_CLANG+)"
         echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
-        
+
         CLANG_VERSION="$DEFAULT_CLANG"
+        LLVM_APT_VERSION="$CLANG_VERSION"   # may need apt.llvm.org (not in distro repos)
         EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
-        
+
     else
         # No clang found - install recommended version
-        echo "✗ Compiler: clang not found (requires clang 12+)"
+        echo "✗ Compiler: clang not found (requires clang $MIN_CLANG+)"
         echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
-        
+
         CLANG_VERSION="$DEFAULT_CLANG"
+        LLVM_APT_VERSION="$CLANG_VERSION"   # may need apt.llvm.org (not in distro repos)
         EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         export CC=clang-${CLANG_VERSION}
@@ -430,6 +452,30 @@ dep_install() {
     esac
 }
 
+# Ensure clang-$1 is installable via apt. If the distro repos don't offer it
+# (e.g. Ubuntu 22.04 tops out at clang-15) add the official apt.llvm.org repo.
+# Its versioned clang/libc++ ship their own libc++ under /usr/lib/llvm-$1/, so
+# they're self-consistent and don't disturb the distro's unversioned libc++
+# multiarch symlink (the breakage the detect_installed_clang note warns about).
+ensure_llvm_repo() {
+    local ver="$1" codename
+    # Already known to apt (distro repo, or we added it on a prior call)?
+    apt-cache show "clang-${ver}" >/dev/null 2>&1 && return 0
+
+    codename=$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")
+    if [ -z "$codename" ]; then
+        echo "ERROR: cannot determine apt codename for apt.llvm.org (clang-$ver)"
+        return 1
+    fi
+    echo "→ clang-$ver not in distro repos; adding apt.llvm.org ($codename)"
+    $SUDO install -d -m 0755 /etc/apt/keyrings || return 1
+    wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+        | $SUDO tee /etc/apt/keyrings/apt.llvm.org.asc >/dev/null || return 1
+    echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
+        | $SUDO tee "/etc/apt/sources.list.d/llvm-toolchain-${ver}.list" >/dev/null || return 1
+    $SUDO apt-get update || return 1
+}
+
 # The install command shown to the user in non-autoinstall mode ($1 = apt|dnf).
 dep_install_hint() {
     case "$1" in
@@ -550,6 +596,16 @@ check_dependencies() {
     if [ "$AUTOINSTALL" == "1" ]; then
         if [ ${#missing[@]} -ne 0 ]; then
             echo "Auto-installing missing dependencies with $mgr..."
+            # A clang version newer than the distro ships (e.g. clang-18 on Ubuntu
+            # 22.04) needs the apt.llvm.org repo added before it can be installed.
+            if [ "$mgr" = "apt" ] && [ -n "$LLVM_APT_VERSION" ]; then
+                if ! ensure_llvm_repo "$LLVM_APT_VERSION"; then
+                    echo "=========================================="
+                    echo "ERROR: could not set up apt.llvm.org for clang-$LLVM_APT_VERSION"
+                    echo "=========================================="
+                    exit 1
+                fi
+            fi
             # A failed install must stop the build. Without this the script would
             # continue and report success, and the missing runtime libs only
             # surface much later as "libc++.so.1: cannot open shared object file".
@@ -588,6 +644,11 @@ check_dependencies() {
         echo "=========================================="
         echo "ERROR: Missing required dependencies - install with:"
         echo ""
+        if [ "$mgr" = "apt" ] && [ -n "$LLVM_APT_VERSION" ] && ! apt-cache show "clang-$LLVM_APT_VERSION" >/dev/null 2>&1; then
+            echo "    # clang-$LLVM_APT_VERSION is not in your distro repos; add apt.llvm.org first:"
+            echo "    wget -qO- https://apt.llvm.org/llvm.sh | $SUDO bash -s -- $LLVM_APT_VERSION"
+            echo ""
+        fi
         if [ ${#missing[@]} -ne 0 ]; then
             echo "    $(dep_install_hint "$mgr") ${missing[*]}"
         fi
