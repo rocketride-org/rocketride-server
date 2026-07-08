@@ -208,6 +208,7 @@ class IInstance(IInstanceBase):
                     'description': 'Collection ids in the database.',
                 },
                 'infra': {'type': 'object', 'description': 'Infrastructure readiness flags.'},
+                'result': {'type': 'object', 'description': 'Raw HydraDB collections + status responses.'},
             },
         },
         description=(

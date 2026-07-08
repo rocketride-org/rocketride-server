@@ -24,10 +24,14 @@
 # ------------------------------------------------------------------------------
 # Main module
 # ------------------------------------------------------------------------------
-# No depends() bootstrap: this node has no node-local runtime deps. It talks to
-# HydraDB over REST via the shared ai.common.utils.post_with_retry helper.
+# Bootstrap the node's runtime dependency (requests) BEFORE importing node code, so the
+# node loads on workers that don't already have it (matches db_neo4j / db_arango). tenacity
+# comes transitively via ai.common.utils, so requirements.txt only lists requests.
+from depends import load_depends
 
-from .IGlobal import IGlobal
-from .IInstance import IInstance
+load_depends(__file__)  # installs the sibling requirements.txt
+
+from .IGlobal import IGlobal  # noqa: E402
+from .IInstance import IInstance  # noqa: E402
 
 __all__ = ['IGlobal', 'IInstance']
