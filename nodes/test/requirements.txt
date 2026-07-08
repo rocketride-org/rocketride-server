@@ -3,3 +3,9 @@ pytest
 pytest-asyncio
 pytest-timeout
 pytest-xdist
+
+# Runtime deps of nodes / helpers imported directly by node-behavior tests:
+#   json5  - pulled in by ai.common.config (image_cleanup's IGlobal)
+#   Pillow - image dimension decoding (ai.common.avi.descriptor.image_dims) + building test PNGs
+json5
+Pillow

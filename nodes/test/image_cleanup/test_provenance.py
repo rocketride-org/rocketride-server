@@ -6,11 +6,13 @@
 """Node-behavior test: image_cleanup carries nested source provenance across the hop.
 
 Drives the real ``IInstance`` (image lane BEGIN/WRITE/END) with the real descriptor
-helpers and a mocked ``IGlobal.process``, asserting the forwarded image ``BEGIN`` nests
-the input's source chain and keeps its name. This exercises the shared
-``forward_enriched_image`` wiring adopted by every image->image node (detect,
-detect_segment, pose_estimation, face_detection, background_removal, depth_estimate,
-image_cleanup) — image_cleanup is used because its inference is a single mockable call.
+helpers and a mocked ``IGlobal.process``, asserting the forwarded image ``BEGIN`` carries
+the transform's own detail (size + decoded dims), nests the input's source chain, and
+keeps its name. Exercises the shared ``forward_enriched_image`` wiring adopted by every
+image->image node; image_cleanup is used because its inference is a single mockable call.
+
+Imports the real node and uses Pillow (real PNG + dimension decoding); both ``json5``
+(via ``ai.common.config``) and ``Pillow`` are declared in ``nodes/test/requirements.txt``.
 """
 
 import io
@@ -60,7 +62,7 @@ class _FakeGlobal:
 def _send(inst, action, mime, buffer):
     """
     Drive one writeImage action. image_cleanup ends with ``return self.preventDefault()``
-    on every action (raises by engine contract); the emit has already happened, so swallow it.
+    on every action (raises by engine contract); the emit already happened, so swallow it.
     """
     try:
         inst.writeImage(action, mime, buffer)
@@ -90,7 +92,7 @@ def _frame_descriptor_payload():
 
 
 def test_image_cleanup_forwards_nested_source_and_name():
-    """The output image BEGIN nests the input's chain (frame -> video) and keeps its name."""
+    """The output image BEGIN carries dims, nests the input's chain (frame -> video), keeps its name."""
     inst = IInstance()
     capture = _Capture()
     inst.instance = capture
