@@ -38,6 +38,8 @@ def post_with_retry(
     *,
     headers: Optional[Dict[str, str]] = None,
     json: Any = None,
+    data: Any = None,
+    files: Any = None,
     timeout: float = 30,
     max_attempts: int = 4,
     base_delay: float = 2.0,
@@ -45,15 +47,17 @@ def post_with_retry(
 ) -> requests.Response:
     """POST with exponential-backoff retry (via ``tenacity``).
 
-    Retries on timeouts, connection errors, and 429 / 5xx responses. Returns the
-    successful ``requests.Response``. When all attempts are exhausted the last
-    exception is re-raised (``HTTPError`` for a final 429/5xx, ``Timeout`` /
-    ``ConnectionError`` for transport failures). 4xx responses other than 429
-    are raised immediately without retry.
+    Pass ``json`` for a JSON body, or ``data`` / ``files`` for a form / multipart
+    body (e.g. a file-upload or form endpoint); all three are forwarded to
+    ``requests.post`` unchanged. Retries on timeouts, connection errors, and
+    429 / 5xx responses. Returns the successful ``requests.Response``. When all
+    attempts are exhausted the last exception is re-raised (``HTTPError`` for a
+    final 429/5xx, ``Timeout`` / ``ConnectionError`` for transport failures).
+    4xx responses other than 429 are raised immediately without retry.
     """
 
     def _attempt() -> requests.Response:
-        resp = requests.post(url, headers=headers, json=json, timeout=timeout)
+        resp = requests.post(url, headers=headers, json=json, data=data, files=files, timeout=timeout)
         resp.raise_for_status()
         return resp
 

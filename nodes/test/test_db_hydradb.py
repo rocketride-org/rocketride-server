@@ -47,8 +47,8 @@ NODE_DIR = os.path.abspath(NODE_DIR)
 _POST = SimpleNamespace(calls=[], return_body={}, side_effect=None)
 
 
-def _stub_post_with_retry(url, *, headers=None, json=None, timeout=None, **_kw):
-    _POST.calls.append({'url': url, 'headers': headers, 'json': json, 'timeout': timeout})
+def _stub_post_with_retry(url, *, headers=None, json=None, data=None, files=None, timeout=None, **_kw):
+    _POST.calls.append({'url': url, 'headers': headers, 'json': json, 'data': data, 'files': files, 'timeout': timeout})
     if _POST.side_effect is not None:
         raise _POST.side_effect
     resp = SimpleNamespace()
@@ -188,12 +188,16 @@ def test_store_memory_builds_ingest_request(node):
     call = _POST.calls[-1]
     assert call['url'] == 'https://api.hydradb.com/context/ingest'
     assert call['headers']['Authorization'] == 'Bearer secret-key'
-    body = call['json']
-    assert body['type'] == 'memory'
-    assert body['database'] == 'acme'
-    assert body['collection'] == 'team'
-    assert body['infer'] is True and body['upsert'] is True
-    memories = json.loads(body['memories'])
+    # Ingest is multipart/form-data: no JSON body, and no Content-Type override
+    # (requests sets the multipart boundary itself).
+    assert call['json'] is None
+    assert 'Content-Type' not in call['headers']
+    form = {k: value for k, (_filename, value) in call['files'].items()}
+    assert form['type'] == 'memory'
+    assert form['database'] == 'acme'
+    assert form['collection'] == 'team'
+    assert form['infer'] == 'true' and form['upsert'] == 'true'
+    memories = json.loads(form['memories'])
     assert memories == [{'text': 'hello world', 'metadata': {'k': 'v'}}]
 
 

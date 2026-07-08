@@ -67,14 +67,34 @@ class HydraDBClient:
         self.base_url = (base_url or os.environ.get('HYDRA_DB_BASE_URL') or DEFAULT_BASE_URL).rstrip('/')
         self.timeout = timeout
 
+    def _auth_header(self) -> Dict[str, str]:
+        # Bearer auth only (no Content-Type) — for multipart requests, where
+        # ``requests`` must set the Content-Type + boundary itself. Never logged.
+        return {'Authorization': f'Bearer {self.api_key}'}
+
     def _headers(self) -> Dict[str, str]:
         # Bearer auth; never logged.
-        return {'Authorization': f'Bearer {self.api_key}', 'Content-Type': 'application/json'}
+        return {**self._auth_header(), 'Content-Type': 'application/json'}
 
     def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         url = f'{self.base_url}{path}'
         try:
             resp = post_with_retry(url, headers=self._headers(), json=body, timeout=self.timeout)
+        except Exception as e:  # transport error or exhausted retries (HTTPError on final 4xx/5xx)
+            # Do not include headers/body in the message so the API key never leaks.
+            raise HydraDBError(f'HydraDB request to {path} failed: {e}') from e
+        try:
+            return resp.json()
+        except ValueError:
+            return {}
+
+    def _post_multipart(self, path: str, form: Dict[str, str]) -> Dict[str, Any]:
+        url = f'{self.base_url}{path}'
+        # (None, value) tuples make ``requests`` send each field as a multipart
+        # form part (the ingest endpoint is multipart/form-data, not JSON).
+        files = {k: (None, v) for k, v in form.items()}
+        try:
+            resp = post_with_retry(url, headers=self._auth_header(), files=files, timeout=self.timeout)
         except Exception as e:  # transport error or exhausted retries (HTTPError on final 4xx/5xx)
             # Do not include headers/body in the message so the API key never leaks.
             raise HydraDBError(f'HydraDB request to {path} failed: {e}') from e
@@ -94,22 +114,25 @@ class HydraDBClient:
     ) -> Dict[str, Any]:
         """Ingest ``text`` as a memory (POST /context/ingest, type=memory).
 
-        ``infer=True`` triggers HydraDB's knowledge-graph extraction; ``upsert=True``
-        replaces an existing memory with the same content. The ``memories`` payload is
-        JSON-encoded to match HydraDB's documented ingest shape.
+        HydraDB's ingest endpoint is multipart/form-data (the same endpoint also
+        accepts file uploads for knowledge ingestion), so the fields are sent as
+        form parts and ``memories`` is a JSON-encoded string. ``infer=True``
+        triggers HydraDB's knowledge-graph extraction; ``upsert=True`` replaces an
+        existing memory with the same content. Returns the queued-ingestion
+        envelope (HTTP 202) with ``data.results[*].id``.
         """
         memory: Dict[str, Any] = {'text': text}
         if metadata:
             memory['metadata'] = metadata
-        body: Dict[str, Any] = {
+        form: Dict[str, str] = {
             'type': 'memory',
             'database': self.database,
             'collection': collection or self.collection,
             'memories': _json.dumps([memory]),
-            'infer': infer,
-            'upsert': upsert,
+            'infer': 'true' if infer else 'false',
+            'upsert': 'true' if upsert else 'false',
         }
-        return self._post('/context/ingest', body)
+        return self._post_multipart('/context/ingest', form)
 
     def query(
         self,

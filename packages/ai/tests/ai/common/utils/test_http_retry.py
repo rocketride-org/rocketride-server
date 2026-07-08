@@ -100,6 +100,19 @@ def test_does_not_retry_4xx(monkeypatch):
     assert calls['n'] == 1  # no retry on a non-429 4xx
 
 
+def test_post_forwards_files_for_multipart(monkeypatch):
+    seen = {}
+
+    def fake_post(url, **kwargs):
+        seen.update(kwargs)
+        return _FakeResp(200, {})
+
+    _patch_post(monkeypatch, fake_post)
+    post_with_retry('https://api.example.com', files={'field': (None, 'value')}, base_delay=0)
+    assert seen['files'] == {'field': (None, 'value')}
+    assert seen['json'] is None  # json and files are independent passthroughs
+
+
 def test_reraises_after_exhausting_attempts(monkeypatch):
     calls = {'n': 0}
 
