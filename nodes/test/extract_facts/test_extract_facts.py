@@ -391,3 +391,25 @@ def test_documents_lane_skipped_when_no_listener():
 
     assert captured.answers, 'answers lane should still emit'
     assert not captured.documents, 'documents lane must be skipped without a listener'
+
+
+# ---------------------------------------------------------------------------
+# (f) page metadata on documents-lane input reaches the extraction prompt
+# ---------------------------------------------------------------------------
+
+
+def test_page_marker_from_document_metadata_reaches_prompt():
+    """A doc carrying page metadata must surface a [Page N] marker in context."""
+
+    def side_effect(i, ask):
+        return _make_answer([])
+
+    inst, captured = _build_instance(side_effect)
+    inst.open(types.SimpleNamespace())
+    inst.writeDocuments([FakeDoc(page_content='Total due: $100', metadata={'page': 7})])
+    inst.closing()
+
+    assert captured.asks, 'extraction pass must call instance.invoke'
+    question = captured.asks[0].question
+    context = '\n'.join(question.documents) + '\n'.join(question.context)
+    assert '[Page 7]' in context, 'page metadata must be emitted as a [Page N] marker'

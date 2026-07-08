@@ -54,25 +54,23 @@ class IInstance(IInstanceBase):
     doc_text: str = ''
     table_text: str = ''
     table_id: int = 0
-    page: int = 0
 
     # Final reconciled facts, populated in closing().
     facts: List[Dict[str, Any]] = []
 
     # -- lifecycle ------------------------------------------------------------
 
-    def open(self, object: Entry):
+    def open(self, obj: Entry):
         """
         Initialize the instance for a new object. Resets all accumulators so
         each object is extracted independently.
 
         Args:
-            object (Entry): The object to initialize processing for.
+            obj (Entry): The object to initialize processing for.
         """
         self.doc_text = ''
         self.table_text = ''
         self.table_id = 0
-        self.page = 0
         self.facts = []
 
     # -- input lanes (buffered, not forwarded) --------------------------------
@@ -110,8 +108,9 @@ class IInstance(IInstanceBase):
         """
         Accumulate context arriving on the documents lane. Table documents are
         routed to the table buffer (with a fence + tableId from metadata when
-        available); all others feed the free-text buffer. Page numbers are
-        harvested from metadata for provenance seeding.
+        available); all others feed the free-text buffer. A [Page N] marker is
+        emitted inline with each chunk when the document carries page metadata,
+        so the extractor can cite the page in provenance.
 
         Args:
             documents (List[Doc]): Incoming documents.
@@ -120,15 +119,15 @@ class IInstance(IInstanceBase):
             content = doc.page_content or ''
             metadata = doc.metadata if isinstance(doc.metadata, dict) else {}
 
-            if metadata.get('page') is not None:
-                self.page = metadata.get('page')
+            page = metadata.get('page')
+            page_tag = f'[Page {page}]\n' if page is not None else ''
 
             if metadata.get('isTable'):
                 tid = metadata.get('tableId', self.table_id)
-                self.table_text += f'[TABLE {tid}]\n{content}\n[/TABLE {tid}]\n'
+                self.table_text += f'{page_tag}[TABLE {tid}]\n{content}\n[/TABLE {tid}]\n'
                 self.table_id = max(self.table_id, tid + 1)
             elif content:
-                self.doc_text += content + '\n'
+                self.doc_text += f'{page_tag}{content}\n'
 
         self.preventDefault()
 
@@ -187,7 +186,8 @@ class IInstance(IInstanceBase):
             normalize("""
             EVERY fact object you return MUST contain the target fields above AND a
             "_provenance" object with these keys:
-              page        - source page number if known, else null
+              page        - source page number from the nearest preceding [Page N]
+                            marker in the context, else null
               table_id    - the [TABLE <id>] id if the fact came from a table, else null
               row         - 0-based table row, else null
               col         - 0-based table column, else null

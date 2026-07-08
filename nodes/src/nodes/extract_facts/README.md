@@ -76,7 +76,7 @@ Provenance is filled on a **best-effort** basis by the model from the text it is
 
 ## Behaviour
 
-The LLM infers field values even when the source does not use the exact field names, reasoning about what each field likely contains from the surrounding context. When a `table` lane feeds the node, the extractor is told to read it cell by cell so it can cite the originating cell in provenance; `documents` lane input routes table documents (`metadata.isTable`) to the table buffer and everything else to the free-text buffer, harvesting page numbers from metadata where present. The validator pass gives the model a second, adversarial look at its own output before anything is emitted, keeping the value it can best justify from the source.
+The LLM infers field values even when the source does not use the exact field names, reasoning about what each field likely contains from the surrounding context. When a `table` lane feeds the node, the extractor is told to read it cell by cell so it can cite the originating cell in provenance; `documents` lane input routes table documents (`metadata.isTable`) to the table buffer and everything else to the free-text buffer, emitting an inline `[Page N]` marker with each chunk that carries page metadata so the extractor can cite the page in provenance. The validator pass gives the model a second, adversarial look at its own output before anything is emitted, keeping the value it can best justify from the source.
 
 ---
 
