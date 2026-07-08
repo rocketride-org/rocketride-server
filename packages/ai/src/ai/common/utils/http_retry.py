@@ -23,6 +23,16 @@ def _is_retryable(exc: BaseException) -> bool:
     return False
 
 
+def _retrying(max_attempts: int, base_delay: float, max_delay: float) -> Retrying:
+    """Shared tenacity retry policy so POST and GET helpers can't drift apart."""
+    return Retrying(
+        stop=stop_after_attempt(max_attempts),
+        wait=wait_exponential(multiplier=base_delay, max=max_delay),
+        retry=retry_if_exception(_is_retryable),
+        reraise=True,
+    )
+
+
 def post_with_retry(
     url: str,
     *,
@@ -47,10 +57,30 @@ def post_with_retry(
         resp.raise_for_status()
         return resp
 
-    retryer = Retrying(
-        stop=stop_after_attempt(max_attempts),
-        wait=wait_exponential(multiplier=base_delay, max=max_delay),
-        retry=retry_if_exception(_is_retryable),
-        reraise=True,
-    )
-    return retryer(_attempt)
+    return _retrying(max_attempts, base_delay, max_delay)(_attempt)
+
+
+def get_with_retry(
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    params: Any = None,
+    timeout: float = 30,
+    max_attempts: int = 4,
+    base_delay: float = 2.0,
+    max_delay: float = 60.0,
+) -> requests.Response:
+    """GET with exponential-backoff retry (via ``tenacity``).
+
+    Same policy as :func:`post_with_retry` (shared ``_retrying`` / ``_is_retryable``):
+    retries timeouts, connection errors, and 429 / 5xx responses; other 4xx are raised
+    immediately. Returns the successful ``requests.Response``; the last exception is
+    re-raised when all attempts are exhausted.
+    """
+
+    def _attempt() -> requests.Response:
+        resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+        resp.raise_for_status()
+        return resp
+
+    return _retrying(max_attempts, base_delay, max_delay)(_attempt)

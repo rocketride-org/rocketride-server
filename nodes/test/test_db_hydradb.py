@@ -109,6 +109,7 @@ def _install_stubs():
 
     ai_common_config.Config = _Config
     ai_common_utils.post_with_retry = _stub_post_with_retry
+    ai_common_utils.get_with_retry = _stub_get
 
     ai.common = ai_common
     ai_common.config = ai_common_config
@@ -151,9 +152,6 @@ def node():
     _WARNINGS.clear()
     Config = _install_stubs()
     client_mod, iglobal_mod, iinstance_mod = _load_package()
-    # _get() calls the module-level get_with_retry (real tenacity in prod); stub it so
-    # tests capture the GET via _stub_get with no network and no real backoff sleeps.
-    client_mod.get_with_retry = _stub_get
     yield SimpleNamespace(Config=Config, client_mod=client_mod, iglobal_mod=iglobal_mod, iinstance_mod=iinstance_mod)
     for name in [
         'db_hydradb',

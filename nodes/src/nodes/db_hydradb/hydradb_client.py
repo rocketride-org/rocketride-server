@@ -40,42 +40,9 @@ import json as _json
 import os
 from typing import Any, Dict, List, Optional
 
-import requests
-
-from ai.common.utils import post_with_retry
+from ai.common.utils import get_with_retry, post_with_retry
 
 DEFAULT_BASE_URL = 'https://api.hydradb.com'
-
-
-def get_with_retry(url, *, headers=None, params=None, timeout=30, max_attempts=4, base_delay=2.0, max_delay=60.0):
-    """GET with the same exponential-backoff retry policy as ai.common.utils.post_with_retry.
-
-    Retries on timeouts, connection errors, and 429/5xx responses; other 4xx raise
-    immediately. tenacity is imported lazily (the shared util only covers POST), so GETs
-    (``query_graph`` / ``get_schema``) get the same transient-failure handling as POSTs.
-    """
-    from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
-
-    def _is_retryable(exc):
-        if isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
-            return True
-        if isinstance(exc, requests.exceptions.HTTPError):
-            resp = exc.response
-            return resp is not None and (resp.status_code == 429 or 500 <= resp.status_code < 600)
-        return False
-
-    def _attempt():
-        resp = requests.get(url, headers=headers, params=params, timeout=timeout)
-        resp.raise_for_status()
-        return resp
-
-    retryer = Retrying(
-        stop=stop_after_attempt(max_attempts),
-        wait=wait_exponential(multiplier=base_delay, max=max_delay),
-        retry=retry_if_exception(_is_retryable),
-        reraise=True,
-    )
-    return retryer(_attempt)
 
 
 class HydraDBError(RuntimeError):
