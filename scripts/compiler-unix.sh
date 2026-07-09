@@ -542,14 +542,35 @@ link_points_to() {
 setup_cc_alternatives() {
     case "$1" in
         apt)
-            # apt already guards on NEED_CC_ALTERNATIVES (set only when cc/c++
-            # don't already resolve to clang), so the run path is reached only
-            # when a change is genuinely needed — no extra idempotency check here.
-            [ "$NEED_CC_ALTERNATIVES" = "1" ] || return 0
-            # Resolve now (runs after install; the select-time path was empty).
             local cc_path cxx_path
             cc_path=$(command -v "$CC" 2>/dev/null || true)
             cxx_path=$(command -v "$CXX" 2>/dev/null || true)
+
+            # The linux triplet and crashpad's gn toolchain both invoke bare
+            # clang/clang++; on CI runners that resolves to an older preinstalled
+            # clang. When we selected a versioned clang, point bare clang/clang++ at
+            # it via /usr/local/bin (ahead of /usr/bin in PATH) so every consumer of
+            # the bare name gets the right compiler.
+            if [ "$CC" != "clang" ]; then
+                if [ "$2" = "run" ] && [ -n "$cc_path" ] && [ -n "$cxx_path" ]; then
+                    if link_points_to /usr/local/bin/clang "$cc_path" && \
+                       link_points_to /usr/local/bin/clang++ "$cxx_path"; then
+                        echo "✓ clang/clang++ already -> $CC/$CXX (/usr/local/bin)"
+                    else
+                        run_privileged ln -sf "$cc_path" /usr/local/bin/clang
+                        run_privileged ln -sf "$cxx_path" /usr/local/bin/clang++
+                        echo "✓ clang/clang++ -> $CC/$CXX (/usr/local/bin)"
+                    fi
+                elif [ "$2" = "print" ]; then
+                    echo "    # Point bare clang/clang++ at the selected version"
+                    echo "    $SUDO ln -sf \"\$(command -v $CC)\" /usr/local/bin/clang"
+                    echo "    $SUDO ln -sf \"\$(command -v $CXX)\" /usr/local/bin/clang++"
+                fi
+            fi
+
+            # cc/c++ repointing is only needed when they don't already resolve to
+            # our clang (NEED_CC_ALTERNATIVES).
+            [ "$NEED_CC_ALTERNATIVES" = "1" ] || return 0
             if [ "$2" = "run" ]; then
                 if [ -z "$cc_path" ] || [ -z "$cxx_path" ]; then
                     echo "ERROR: $CC/$CXX not on PATH after install"
