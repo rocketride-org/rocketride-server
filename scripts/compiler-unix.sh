@@ -38,6 +38,7 @@ COMMANDS=()              # macOS: install commands to print/run
 EXTRA_PKGS=()            # Linux: compiler/clang packages chosen by select_*_triplet
 NEED_CC_ALTERNATIVES=""  # apt: set when cc/c++ must be pointed at clang
 LLVM_APT_VERSION=""      # apt: clang major to pull from apt.llvm.org when the distro lacks it
+DROP_UNVERSIONED_LIBCXX="" # apt: drop unversioned libc++1/libc++abi1 (they conflict with a versioned clang stack)
 
 # Supported clang range on Linux: 16 (Crashpad needs C++20 <ranges>) .. 18
 # (engine doesn't build with clang >= 19). Install target is clang-18.
@@ -265,27 +266,35 @@ select_linux_triplet() {   # $1 = apt | dnf
         # Use generic triplet and set CC/CXX to point to the installed version
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
 
-        # CLANG_VERSION is the DEFAULT clang's version (see
-        # detect_installed_clang), so its libc++ stack — including the
-        # unversioned multiarch libc++.so the linker needs for `-lc++` — is
-        # already installed and consistent. Prefer the versioned frontend, but
-        # fall back to the bare `clang`/`clang++` when no versioned symlink
-        # exists (clang via update-alternatives or a source build) — otherwise
-        # we'd set an invalid CC/CXX that only fails later at compile time.
+        # Prefer the versioned frontend, but fall back to the bare `clang`/`clang++`
+        # when no versioned symlink exists (clang via update-alternatives or a source
+        # build) — otherwise we'd set an invalid CC/CXX that only fails at compile time.
         if command_exists "clang-${CLANG_VERSION}" && command_exists "clang++-${CLANG_VERSION}"; then
             export CC=clang-${CLANG_VERSION}
             export CXX=clang++-${CLANG_VERSION}
+            # When CLANG_VERSION isn't the distro's default clang (e.g. clang-18 from
+            # apt.llvm.org on jammy, whose default is 14), the unversioned libc++1/
+            # libc++abi1 in LINUX_DEPS resolve to the OLD default and CONFLICT with the
+            # versioned libc++1-N. apt then removes one to install the other on every
+            # run (endless "libc++-N-dev absent" ping-pong). Pin the versioned runtime
+            # and drop the unversioned ones instead.
+            local default_major=""
+            command_exists clang && default_major=$(clang --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
+            if [ "$default_major" != "$CLANG_VERSION" ]; then
+                DROP_UNVERSIONED_LIBCXX="1"
+                EXTRA_PKGS+=("libc++1-${CLANG_VERSION}" "libc++abi1-${CLANG_VERSION}")
+            fi
         else
             export CC=clang
             export CXX=clang++
         fi
-        
+
         # Check if required libc++ libraries are installed for this version
         if ! dpkg -l "libc++-${CLANG_VERSION}-dev" 2>/dev/null | grep -q "^ii"; then
             echo "  → libc++-${CLANG_VERSION}-dev not found, will install"
             EXTRA_PKGS+=("libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
         fi
-        
+
     elif ARCHIVE_CLANG=$(apt_best_archive_clang); then
         # Distro archive has an in-range clang (e.g. Ubuntu 24.04) — use it; its
         # unversioned libc++ matches, so no apt.llvm.org and no dep tweaks.
@@ -546,13 +555,20 @@ setup_cc_alternatives() {
                     echo "ERROR: $CC/$CXX not on PATH after install"
                     exit 1
                 fi
+                # --install registers a candidate but won't switch the active link
+                # in manual mode or on a priority tie (an unversioned clang++ -> old
+                # clang can already hold the slot); --set forces our clang.
                 run_privileged update-alternatives --install /usr/bin/cc cc "$cc_path" 100
                 run_privileged update-alternatives --install /usr/bin/c++ c++ "$cxx_path" 100
+                run_privileged update-alternatives --set cc "$cc_path"
+                run_privileged update-alternatives --set c++ "$cxx_path"
                 echo "✓ cc/c++ -> $CC/$CXX"
             else
                 echo "    # Set default cc/c++ to $CC and $CXX"
                 echo "    $SUDO update-alternatives --install /usr/bin/cc cc ${cc_path:-\$(command -v $CC)} 100"
                 echo "    $SUDO update-alternatives --install /usr/bin/c++ c++ ${cxx_path:-\$(command -v $CXX)} 100"
+                echo "    $SUDO update-alternatives --set cc ${cc_path:-\$(command -v $CC)}"
+                echo "    $SUDO update-alternatives --set c++ ${cxx_path:-\$(command -v $CXX)}"
             fi
             ;;
         dnf)
@@ -593,7 +609,8 @@ check_dependencies() {
     while IFS= read -r p; do
         # Versioned-clang install uses libc++1-<n>/libc++abi1-<n>; the unversioned
         # ones conflict, so drop them.
-        if [ -n "$LLVM_APT_VERSION" ] && { [ "$p" = "libc++1" ] || [ "$p" = "libc++abi1" ]; }; then
+        if { [ -n "$LLVM_APT_VERSION" ] || [ "$DROP_UNVERSIONED_LIBCXX" = "1" ]; } && \
+           { [ "$p" = "libc++1" ] || [ "$p" = "libc++abi1" ]; }; then
             continue
         fi
         pkgs+=("$p")
