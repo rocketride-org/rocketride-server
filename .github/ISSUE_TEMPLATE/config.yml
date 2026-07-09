@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Documentation
-    url: https://docs.rocketride.ai
+    url: https://docs.rocketride.org
     about: Check the docs for guides, API references, and examples.
   - name: Wiki
     url: https://github.com/rocketride-org/rocketride-server/wiki
