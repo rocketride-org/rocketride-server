@@ -21,8 +21,10 @@ class IInstance(IInstanceBase):
 
     def writeAnswers(self, answer: Answer):
         """Process answer text through sklearn model and forward downstream."""
+        if not answer:
+            return
         answer = copy.deepcopy(answer)
-        text = answer.getText() if answer else ''
+        text = answer.getText()
         result = self._process(text)
         answer.setAnswer(result)
         self.instance.writeAnswers(answer)
