@@ -2292,8 +2292,8 @@ class Task(DAPBase):
             self.debug_message(f'Task started successfully with PID {self._engine_process.pid}')
 
         except Exception as e:
-            await self._terminated()
             self.debug_message(f'Task startup failed: {e}')
+            await self._terminated()
             raise
 
     async def stop_task(self, reason: str = 'user') -> None:
