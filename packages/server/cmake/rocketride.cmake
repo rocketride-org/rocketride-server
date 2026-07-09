@@ -81,9 +81,10 @@ function(rocketride_set_common_target_options target)
                 find_program(ROCKETRIDE_DUMP_SYMS dump_syms)
                 if(ROCKETRIDE_DUMP_SYMS)
                     set(TARGET_SYMBOLS_DIR ${TARGET_FILE_DIR}/symbols)
+                    # --store persists the .sym files; discard the duplicate dump on stdout.
                     add_custom_command(TARGET ${target} POST_BUILD
                         COMMAND ${CMAKE_COMMAND} -E make_directory ${TARGET_SYMBOLS_DIR}
-                        COMMAND ${ROCKETRIDE_DUMP_SYMS} ${TARGET_FILE} ${TARGET_DEBUG_FILE} --store ${TARGET_SYMBOLS_DIR}
+                        COMMAND sh -c "\"$0\" \"$1\" \"$2\" --store \"$3\" >/dev/null" ${ROCKETRIDE_DUMP_SYMS} ${TARGET_FILE} ${TARGET_DEBUG_FILE} ${TARGET_SYMBOLS_DIR}
                         COMMENT "Dumping symbols from ${TARGET_NAME} to ${TARGET_SYMBOLS_DIR}"
                         VERBATIM
                     )
