@@ -139,8 +139,12 @@ jobs:
           COMMENTS=$(gh api --paginate "/repos/$REPO/issues/$NUMBER/comments" \
             | jq -s 'add // [] | [.[] | {id: .id, body: .body, author: .user.login}]')
 
-          MARKER_BODY=$(echo "$COMMENTS" | \
-            jq -r --arg re "$DISCORD_MARKER_PATTERN" '.[] | select(.author == "github-actions[bot]" and (.body | test($re))) | .body' | head -1)
+          # First matching marker comment's FULL body. NB: the body is a multi-
+          # line <details> block, so this must NOT be piped through `head -1`
+          # (that keeps only "<details>" and drops the marker line, so the
+          # msg/thread ids never resolve and every event reposts a duplicate).
+          MARKER_BODY=$(printf '%s' "$COMMENTS" | \
+            jq -r --arg re "$DISCORD_MARKER_PATTERN" 'first(.[] | select(.author == "github-actions[bot]" and (.body | test($re))) | .body) // ""')
           DISCORD_MSG_ID=$(printf '%s' "$MARKER_BODY" | extract_discord_marker)
           DISCORD_THREAD_ID=$(printf '%s' "$MARKER_BODY" | extract_discord_thread)
 
