@@ -224,5 +224,6 @@ downloads/maven-3.9.6.tar.gz
 include/python3.12/greenlet/greenlet.h
 .rocketride/
 
-# Ignore ML models
-model.pkl
+# ML sklearn models
+**/model.pkl
+**/models/*.pkl

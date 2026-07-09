@@ -15,7 +15,9 @@ model.fit(X, y)
 
 import os
 
-save_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
+model_dir = os.path.join(os.path.dirname(__file__), 'models')
+os.makedirs(model_dir, exist_ok=True)
+save_path = os.path.join(model_dir, 'model.pkl')
 joblib.dump(model, save_path)
 
 print(f'✅ Model saved: {save_path}')

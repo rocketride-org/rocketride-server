@@ -4,15 +4,15 @@
 # =============================================================================
 import os
 import sys
+import shutil
 import joblib
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
 # ---- Build a temp model ----
-import tempfile
-
-tmp = tempfile.mkdtemp()
-model_path = os.path.join(tmp, 'model.pkl')
+model_dir = os.path.join(os.path.dirname(__file__), 'models')
+os.makedirs(model_dir, exist_ok=True)
+model_path = os.path.join(model_dir, 'test_model.pkl')
 
 X = np.array([[1.0], [2.0], [3.0], [4.0], [5.0]])
 y = np.array([3.0, 5.0, 7.0, 9.0, 11.0])
@@ -51,26 +51,30 @@ print('\nRunning ml_sklearn tests...\n')
 # Test 1: Normal prediction
 pp = PreProcessor({'model_path': model_path})
 result = pp.process('4.0')
-check('predict(4.0) ≈ 9.0', abs(float(result) - 9.0) < 0.1)
+check('predict(4.0) = 9.0', abs(float(result) - 9.0) < 0.1)
 
 # Test 2: predict(6.0)
 result2 = pp.process('6.0')
-check('predict(6.0) ≈ 13.0', abs(float(result2) - 13.0) < 0.1)
+check('predict(6.0) = 13.0', abs(float(result2) - 13.0) < 0.1)
 
 # Test 3: No model fallback
 pp2 = PreProcessor({'model_path': ''})
 result3 = pp2.process('hello world')
-check('no model → returns input unchanged', result3 == 'hello world')
+check('no model -> returns input unchanged', result3 == 'hello world')
 
 # Test 4: Bad input fallback
 pp3 = PreProcessor({'model_path': model_path})
 result4 = pp3.process('not a number')
-check('bad input → returns input unchanged', result4 == 'not a number')
+check('bad input -> returns input unchanged', result4 == 'not a number')
 
 # ---- Summary ----
 print(f'\n{passed} passed, {failed} failed')
+
+if os.path.exists(model_path):
+    os.remove(model_path)
+
 if failed == 0:
-    print('All tests passed! ✅')
+    print('All tests passed! (PASS)')
 else:
-    print('Some tests failed ❌')
+    print('Some tests failed (FAIL)')
     sys.exit(1)
