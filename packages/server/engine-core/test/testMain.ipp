@@ -95,7 +95,7 @@ Error TestMain() noexcept {
             volatile int* p = nullptr;
             *p = 1;
         }
-        std::quick_exit(0);
+        ap::application::quickExit(0);
     }
 #endif
 

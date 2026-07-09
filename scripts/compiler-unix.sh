@@ -440,8 +440,10 @@ dep_install() {
 # don't carry it (e.g. Ubuntu 22.04 tops out at clang-15).
 ensure_llvm_repo() {
     local ver="$1" codename
-    # Already known to apt (distro repo, or we added it on a prior call)?
-    apt-cache show "clang-${ver}" >/dev/null 2>&1 && return 0
+    # Idempotent: repo already added on a prior call. (apt-cache is not a reliable
+    # availability check — a clang-N "referred to by another package" reports as
+    # shown yet has no install candidate.)
+    [ -f "/etc/apt/sources.list.d/llvm-toolchain-${ver}.list" ] && return 0
 
     codename=$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")
     if [ -z "$codename" ]; then
