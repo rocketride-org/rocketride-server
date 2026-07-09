@@ -160,6 +160,18 @@ detect_installed_clang() {
     return 1
 }
 
+# Highest clang 16-18 with an install candidate in the distro archive, else empty.
+# (Match a real version: apt-cache says "Candidate: (none)" for unavailable ones.)
+apt_best_archive_clang() {
+    local v
+    for v in 18 17 16; do
+        if apt-cache policy "clang-$v" 2>/dev/null | grep -qE 'Candidate: [0-9]'; then
+            echo "$v"; return 0
+        fi
+    done
+    return 1
+}
+
 select_linux_triplet() {   # $1 = apt | dnf
     local mgr="$1"
     detect_linux_distro
@@ -184,16 +196,18 @@ select_linux_triplet() {   # $1 = apt | dnf
             dep_installed dnf libcxxabi-devel || EXTRA_PKGS+=("libcxxabi-devel")
             dep_installed dnf lld             || EXTRA_PKGS+=("lld")
         else
-            # Fedora ships only its newest (unversioned) clang; dnf can't provide
-            # an in-range clang-18, so fail with guidance rather than pick one the
-            # engine can't use (clang >= 19).
+            # Fedora's clang18 has no matching libc++ (libcxx tracks the newest
+            # clang), so dnf can't assemble a consistent 16-18 toolchain — require
+            # a self-contained one on PATH.
             local sysver=""
             command_exists clang && sysver=$(clang --version | head -n1 | grep -o '[0-9]\+' | head -1)
             echo "=========================================="
             echo "ERROR: no supported clang on PATH (need clang $MIN_CLANG-$MAX_CLANG)."
             [ -n "$sysver" ] && echo "  Detected clang $sysver; the engine sources don't build with clang >= 19."
-            echo "  Install an LLVM $MIN_CLANG-$MAX_CLANG toolchain, put its clang/clang++"
-            echo "  first on PATH (and set CC/CXX to them), then re-run."
+            echo "  Fedora's clang18 lacks a matching libc++, so install a self-contained"
+            echo "  LLVM $MIN_CLANG-$MAX_CLANG toolchain (e.g. a release from"
+            echo "  https://github.com/llvm/llvm-project/releases), put its clang/clang++"
+            echo "  first on PATH and set CC/CXX to them, then re-run."
             echo "=========================================="
             exit 1
         fi
@@ -270,26 +284,23 @@ select_linux_triplet() {   # $1 = apt | dnf
             EXTRA_PKGS+=("libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
         fi
         
-    elif [ -n "$INSTALLED_CLANG" ]; then
-        # Clang found but too old - install recommended version
-        echo "✗ Compiler: clang-$INSTALLED_CLANG found but unsupported (requires clang $MIN_CLANG+)"
-        echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
-
-        CLANG_VERSION="$DEFAULT_CLANG"
-        LLVM_APT_VERSION="$CLANG_VERSION"   # may need apt.llvm.org (not in distro repos)
+    elif ARCHIVE_CLANG=$(apt_best_archive_clang); then
+        # Distro archive has an in-range clang (e.g. Ubuntu 24.04) — use it; its
+        # unversioned libc++ matches, so no apt.llvm.org and no dep tweaks.
+        CLANG_VERSION="$ARCHIVE_CLANG"
+        echo "→ Installing clang-$CLANG_VERSION from the distro archive"
         EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
 
     else
-        # No clang found - install recommended version
-        echo "✗ Compiler: clang not found (requires clang $MIN_CLANG+)"
-        echo "→ Will install clang-$DEFAULT_CLANG (recommended for $DISTRO $VERSION_ID)"
-
+        # Not in the archive (e.g. Ubuntu 22.04) — install clang-18 from apt.llvm.org
+        # with its versioned libc++ (LLVM_APT_VERSION also drops the unversioned one).
         CLANG_VERSION="$DEFAULT_CLANG"
-        LLVM_APT_VERSION="$CLANG_VERSION"   # may need apt.llvm.org (not in distro repos)
-        EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "lld-${CLANG_VERSION}")
+        LLVM_APT_VERSION="$CLANG_VERSION"
+        echo "→ clang $MIN_CLANG-$MAX_CLANG not in distro archive; installing clang-$CLANG_VERSION from apt.llvm.org"
+        EXTRA_PKGS+=("clang-$CLANG_VERSION" "libc++-${CLANG_VERSION}-dev" "libc++abi-${CLANG_VERSION}-dev" "libc++1-${CLANG_VERSION}" "libc++abi1-${CLANG_VERSION}" "lld-${CLANG_VERSION}")
         TRIPLET_NAME="x64-linux-clang-rocketride.cmake"
         export CC=clang-${CLANG_VERSION}
         export CXX=clang++-${CLANG_VERSION}
@@ -440,9 +451,7 @@ dep_install() {
 # don't carry it (e.g. Ubuntu 22.04 tops out at clang-15).
 ensure_llvm_repo() {
     local ver="$1" codename
-    # Idempotent: repo already added on a prior call. (apt-cache is not a reliable
-    # availability check — a clang-N "referred to by another package" reports as
-    # shown yet has no install candidate.)
+    # Idempotent by the sources file (apt-cache availability checks are unreliable).
     [ -f "/etc/apt/sources.list.d/llvm-toolchain-${ver}.list" ] && return 0
 
     codename=$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")
@@ -452,8 +461,7 @@ ensure_llvm_repo() {
     fi
     echo "→ clang-$ver not in distro repos; adding apt.llvm.org ($codename)"
     $SUDO install -d -m 0755 /etc/apt/keyrings || return 1
-    # Dearmor to a binary keyring: apt on jammy won't verify against the raw
-    # armored key, giving NO_PUBKEY / "repository is not signed".
+    # Dearmor to binary: apt won't verify against a raw armored key (NO_PUBKEY).
     wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
         | gpg --dearmor \
         | $SUDO tee /etc/apt/keyrings/apt.llvm.org.gpg >/dev/null || return 1
@@ -574,7 +582,14 @@ check_dependencies() {
     # Package set = shared LINUX_DEPS column + the compiler packages the
     # select_*_triplet chose. This list is the ONLY per-distro input.
     local pkgs=() p
-    while IFS= read -r p; do pkgs+=("$p"); done < <(emit_distro_deps "$mgr")
+    while IFS= read -r p; do
+        # Versioned-clang install uses libc++1-<n>/libc++abi1-<n>; the unversioned
+        # ones conflict, so drop them.
+        if [ -n "$LLVM_APT_VERSION" ] && { [ "$p" = "libc++1" ] || [ "$p" = "libc++abi1" ]; }; then
+            continue
+        fi
+        pkgs+=("$p")
+    done < <(emit_distro_deps "$mgr")
     pkgs+=("${EXTRA_PKGS[@]}")
 
     local missing=()
