@@ -272,21 +272,20 @@ select_linux_triplet() {   # $1 = apt | dnf
         if command_exists "clang-${CLANG_VERSION}" && command_exists "clang++-${CLANG_VERSION}"; then
             export CC=clang-${CLANG_VERSION}
             export CXX=clang++-${CLANG_VERSION}
-            # When CLANG_VERSION isn't the distro's default clang (e.g. clang-18 from
-            # apt.llvm.org on jammy, whose default is 14), the unversioned libc++1/
-            # libc++abi1 in LINUX_DEPS resolve to the OLD default and CONFLICT with the
-            # versioned libc++1-N. apt then removes one to install the other on every
-            # run (endless "libc++-N-dev absent" ping-pong). Pin the versioned runtime
-            # and drop the unversioned ones instead.
-            local default_major=""
-            command_exists clang && default_major=$(clang --version | head -n1 | grep -o '[0-9]\+\.[0-9]\+' | head -1 | cut -d. -f1)
-            if [ "$default_major" != "$CLANG_VERSION" ]; then
-                DROP_UNVERSIONED_LIBCXX="1"
-                EXTRA_PKGS+=("libc++1-${CLANG_VERSION}" "libc++abi1-${CLANG_VERSION}")
-            fi
         else
             export CC=clang
             export CXX=clang++
+        fi
+
+        # The distro's unversioned libc++1/libc++abi1 (jammy: v14) CONFLICT with the
+        # versioned libc++1-N that libc++-N-dev pulls in, so apt swaps them on every
+        # run (endless "libc++-N-dev absent" ping-pong). When a separate versioned
+        # libc++1-N package exists (the apt.llvm.org layout), pin it and drop the
+        # unversioned ones. Probe the package, not `clang --version`: the
+        # /usr/local/bin/clang shadow we install would otherwise mask the mismatch.
+        if apt-cache policy "libc++1-${CLANG_VERSION}" 2>/dev/null | grep -qE 'Candidate: [0-9]'; then
+            DROP_UNVERSIONED_LIBCXX="1"
+            EXTRA_PKGS+=("libc++1-${CLANG_VERSION}" "libc++abi1-${CLANG_VERSION}")
         fi
 
         # Check if required libc++ libraries are installed for this version
