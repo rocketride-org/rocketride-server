@@ -6,6 +6,7 @@ import os
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 from ai.common.config import Config
 
+REQUIREMENTS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 
 class IGlobal(IGlobalBase):
     """Global state for the ml_sklearn node — holds the loaded sklearn model."""
@@ -17,8 +18,7 @@ class IGlobal(IGlobalBase):
         try:
             from depends import depends
 
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+            depends(REQUIREMENTS_PATH)
         except Exception as e:
             warning(str(e))
 
@@ -29,8 +29,7 @@ class IGlobal(IGlobalBase):
         else:
             from depends import depends
 
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+            depends(REQUIREMENTS_PATH)
 
             from .code import PreProcessor
 

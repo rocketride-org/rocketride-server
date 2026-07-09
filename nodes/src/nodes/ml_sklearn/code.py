@@ -4,12 +4,16 @@
 # =============================================================================
 import os
 import joblib
+import logging
+from pathlib import Path
 
 
 class PreProcessor:
     """Wraps a scikit-learn model/pipeline for text inference."""
 
     def __init__(self, config: dict):
+        self.config = config
+        self._logger = logging.getLogger(__name__)
         model_path = config.get('model_path', '')
 
         self._model = None
@@ -22,10 +26,19 @@ class PreProcessor:
             # Allowlist directory to prevent path traversal attacks
             allowed_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "models"))
             
-            if os.path.exists(resolved_path) and resolved_path.startswith(allowed_dir):
+            try:
+                Path(resolved_path).relative_to(allowed_dir)
+                is_safe = True
+            except ValueError:
+                is_safe = False
+            
+            if os.path.exists(resolved_path) and is_safe:
                 self._model = joblib.load(resolved_path)
             else:
-                pass # Model path is invalid or outside allowed directory
+                self._logger.warning(
+                    f"Rejected model_path '{model_path}': path does not exist or "
+                    f"resolves outside the allowed models directory ({allowed_dir})"
+                )
 
     def process(self, text: str) -> str:
         """
