@@ -22,16 +22,16 @@ class PreProcessor:
             # Ensure model_path is strictly controlled and only loads models from trusted sources.
             # TODO: Consider migrating to `skops` for secure serialization of scikit-learn models.
             resolved_path = os.path.abspath(model_path)
-            
+
             # Allowlist directory to prevent path traversal attacks
             allowed_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'models'))
-            
+
             try:
                 Path(resolved_path).relative_to(allowed_dir)
                 is_safe = True
             except ValueError:
                 is_safe = False
-            
+
             if os.path.exists(resolved_path) and is_safe:
                 self._model = joblib.load(resolved_path)
             else:

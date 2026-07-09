@@ -8,6 +8,7 @@ from ai.common.config import Config
 
 REQUIREMENTS_PATH = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 
+
 class IGlobal(IGlobalBase):
     """Global state for the ml_sklearn node — holds the loaded sklearn model."""
 
