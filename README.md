@@ -1,7 +1,7 @@
 <div align="center">
 
 <a href="https://rocketride.org">
-  <img src="https://raw.githubusercontent.com/rocketride-org/branding/main/assets/rocketride-branding-banner.png" alt="RocketRide" width="100%">
+  <img src="images/poster.png" alt="RocketRide: Open Source AI Pipeline Tool" width="100%">
 </a>
 
 <p>
