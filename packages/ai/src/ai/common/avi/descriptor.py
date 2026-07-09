@@ -45,15 +45,15 @@ _KIND_TO_TYPE = {'video': 'VideoStream', 'audio': 'AudioStream', 'image': 'Image
 # origin values: how the media entered the pipeline.
 ORIGINS = ('ingested', 'extracted', 'generated')
 
-# Source-backlink metadata keys the builder always emits for a real (non-generated)
-# stream. Kept in sync with the descriptor_keys.json guardrail fixture.
+# Source-backlink metadata keys the C++ builder always emits for a real (non-generated)
+# stream. `origin` is excluded: buildStreamDescriptor() never defaults it (only Tika/node
+# enrichment sets it), so a bare native BEGIN can omit it. Synced to descriptor_keys.json.
 REQUIRED_METADATA_KEYS = (
     'objectId',
     'parent',
     'permissionId',
     'signature',
     'nodeId',
-    'origin',
     'source_mime',
     'size',
     'stream_index',

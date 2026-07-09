@@ -5,7 +5,7 @@
 		"type_values": ["VideoStream", "AudioStream", "ImageStream"]
 	},
 	"metadata": {
-		"required": ["objectId", "parent", "permissionId", "signature", "nodeId", "origin", "source_mime", "size", "stream_index"],
+		"required": ["objectId", "parent", "permissionId", "signature", "nodeId", "source_mime", "size", "stream_index"],
 		"optional_common": ["start_offset", "duration", "container_mime", "resource_name"],
 		"optional_video": ["fps", "width", "height"],
 		"optional_audio": ["sample_rate", "channels", "format"],
