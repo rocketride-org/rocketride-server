@@ -27,7 +27,7 @@ import base64
 
 from rocketlib import IInstanceBase, IJson
 from ai.common.schema import Doc, Question, Answer
-from ai.common.avi.descriptor import descriptor_from_payload
+from ai.common.avi.descriptor import descriptor_from_payload, source_media_detail
 from rocketlib import AVI_ACTION, Entry
 
 from .IGlobal import IGlobal
@@ -40,10 +40,7 @@ class IInstance(IInstanceBase):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Per-lane media state so image/audio/video share one identical code path
-        # (see _write_media): buffer = the accumulated stream bytes, descriptor = the
-        # stream descriptor parsed from that lane's BEGIN payload. Initialized per instance
-        # (never a class-level mutable, which would be shared across every instance).
+        # Per-lane buffers + descriptors; per-instance, not class-level mutables (shared).
         self._media_buffers = {}
         self._media_descriptors = {}
 
@@ -231,8 +228,7 @@ class IInstance(IInstanceBase):
             data (bytes): The BEGIN descriptor payload, or a WRITE data chunk.
         """
         if action == AVI_ACTION.BEGIN:
-            # BEGIN carries the stream descriptor (not media bytes); keep it so the
-            # emitted entry can carry the source provenance.
+            # BEGIN carries the stream descriptor, not media bytes.
             self._media_buffers[lane] = bytearray()
             self._media_descriptors[lane] = descriptor_from_payload(data)
 
@@ -248,11 +244,11 @@ class IInstance(IInstanceBase):
             payload = base64.b64encode(self._media_buffers.get(lane, bytearray())).decode('utf-8')
             self._media_buffers[lane] = bytearray()
 
-            # The base64 media under its lane key + the descriptor metadata when present.
+            # source_media_detail() strips the identity/security backlink from the response.
             entry = {'mime_type': mimeType, lane: payload}
-            descriptor = self._media_descriptors.get(lane)
-            if descriptor is not None:
-                entry['metadata'] = descriptor.metadata.toDict()
+            detail = source_media_detail(self._media_descriptors.get(lane))
+            if detail:
+                entry['metadata'] = detail
             self.instance.currentObject.response[key].append(entry)
 
     def writeAudio(self, aviAction: int, mimeType: str, data: bytes):

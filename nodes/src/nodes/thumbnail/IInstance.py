@@ -132,12 +132,12 @@ class IInstance(IInstanceBase):
                 # Convert thumbnail image to raw PNG bytes
                 image_bytes = ImageProcessor.get_bytes(thumbnail)
 
-                # Enriched BEGIN: nests the input frame's source chain (frame -> video) and
-                # keeps the frame's name; the engine merges it into this thumbnail's descriptor.
+                # Enriched BEGIN carries the nested source chain + name. Bytes are always
+                # PNG (get_bytes), so emit 'image/png', not the incoming mime.
                 forward_enriched_image(
                     self.instance,
                     self._source_descriptor,
-                    mimeType,
+                    'image/png',
                     image_bytes,
                     width=thumbnail.width,
                     height=thumbnail.height,

@@ -274,7 +274,7 @@ class IInstance(IInstanceBase):
             try:
                 font = ImageFont.truetype('DejaVuSans.ttf', font_size)
             except Exception:
-                font = ImageFont.load_default()
+                font = ImageFont.load_default(size=font_size)
             stroke = max(1, font_size // 10)
 
             left, top, right, bottom = draw.textbbox((0, 0), text, font=font, stroke_width=stroke)

@@ -105,11 +105,15 @@ def test_all_three_media_lanes_emit_same_shape_with_metadata():
         assert entry['mime_type'] == mime
         assert base64.b64decode(entry[lane]) == b'\x00\x01\x02\x03'  # the accumulated stream
 
-        # metadata is the parsed descriptor, carrying the nested source chain.
+        # metadata is the sanitized provenance projection: media detail + nested source.
         md = entry['metadata']
         assert md['source_mime'] == mime
         assert md['name'] == 'clip.out'
         assert md['source'] == {'source_mime': 'video/mp4', 'duration': 12.5}
+
+        # The identity/security backlink is stripped — never leaked to the client response.
+        for leaked in ('objectId', 'parent', 'permissionId', 'signature', 'nodeId', 'origin'):
+            assert leaked not in md, f'{lane}: {leaked} leaked into response metadata'
 
 
 def test_media_lane_without_descriptor_omits_metadata():

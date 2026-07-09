@@ -1,1 +1,1 @@
-Pillow
+Pillow>=10.1.0 # ImageFont.load_default(size=)

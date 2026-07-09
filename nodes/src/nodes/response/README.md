@@ -14,7 +14,7 @@ Data handling per lane:
 - **table**, **documents**, **questions** - appended as-is; documents and questions are serialized to plain dicts.
 - **json** - appended as-is (one entry per write).
 - **answers** - appended as parsed JSON when the answer is JSON, otherwise as plain text.
-- **image**, **audio**, **video** - the three multimedia lanes are handled identically: streamed chunks are buffered via AVI_ACTION signals (BEGIN / WRITE / END), then the complete stream is base64-encoded and appended as `{"mime_type": ..., "<lane>": ...}`, where `<lane>` is the payload key (`image` / `audio` / `video`). When the stream's BEGIN carries a stream descriptor, its parsed fields are added as a `metadata` object (source provenance: mime, size, dimensions/duration, codec, and any nested `source` chain). The `metadata` key is omitted when no descriptor arrived.
+- **image**, **audio**, **video** - the three multimedia lanes are handled identically: streamed chunks are buffered via AVI_ACTION signals (BEGIN / WRITE / END), then the complete stream is base64-encoded and appended as `{"mime_type": ..., "<lane>": ...}`, where `<lane>` is the payload key (`image` / `audio` / `video`). When the stream's BEGIN carries a stream descriptor, a sanitized projection of it is added as a `metadata` object (source provenance: mime, size, dimensions/duration, codec, and any nested `source` chain; the identity/security backlink is stripped). The `metadata` key is omitted when no descriptor arrived.
 
 The node has no Python dependencies of its own (`requirements.txt` is empty); it relies on the separately installed AI module for document, question, and answer schemas and for image processing.
 
@@ -112,7 +112,7 @@ For the multimedia lanes (`image`, `audio`, `video`) each array element is a med
 }
 ```
 
-The `metadata` object is the stream descriptor parsed from the media BEGIN; its `source` block chains back through each transform hop to the original media (nested to any depth). It is omitted when the stream arrives without a descriptor.
+The `metadata` object is the **sanitized provenance projection** of the stream descriptor parsed from the media BEGIN — the media detail (mime, size, dimensions/duration, codec) plus the nested `source` chain, which chains back through each transform hop to the original media (nested to any depth). The identity/security backlink (`objectId`, `parent`, `permissionId`, `signature`, `nodeId`) is intentionally stripped and never reaches the client. `metadata` is omitted entirely when the stream arrives without a descriptor.
 
 ---
 

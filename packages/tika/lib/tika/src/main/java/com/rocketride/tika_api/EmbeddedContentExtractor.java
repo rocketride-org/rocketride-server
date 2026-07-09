@@ -186,8 +186,9 @@ public class EmbeddedContentExtractor {
                                 "Embedded media metadata parse failed (continuing to stream): " + e.getMessage());
                     }
 
-                    // Extracted from a document, so origin=extracted, container=this.mimeType.
-                    byte[] payload = buildMediaDescriptorPayload(metadata, "extracted", this.mimeType, this.mimeType);
+                    // Extracted from a document: sourceMime is this embedded stream's own
+                    // detected type (mimeType); container is the document (this.mimeType).
+                    byte[] payload = buildMediaDescriptorPayload(metadata, "extracted", mimeType, this.mimeType);
                     processEmbeddedMediaStream(dup.getBinaryStream(), mimeType, payload);
                 } else {
                     // For any other file type, either delegate to standard processing:

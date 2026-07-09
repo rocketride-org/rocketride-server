@@ -43,9 +43,9 @@ It then emits on whichever output lanes have listeners attached:
   hop per transform) and `metadata.name` (inherited from the input, else `<image-stem>.png`)
   when the input carried a stream descriptor.
 - **`image` listener**: the thumbnail is emitted as raw PNG bytes in a new
-  `BEGIN` / `WRITE` / `END` stream, keeping the incoming MIME type; the `BEGIN` carries the
-  same `source` provenance chain and `name` as an enrichment descriptor, so both lanes stay
-  consistent.
+  `BEGIN` / `WRITE` / `END` stream as `image/png` (the encoded format, regardless of the input
+  mime); the `BEGIN` carries the same `source` provenance chain and `name` as an enrichment
+  descriptor, so both lanes stay consistent.
 
 ### `documents` lane in
 
