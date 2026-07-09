@@ -452,9 +452,12 @@ ensure_llvm_repo() {
     fi
     echo "→ clang-$ver not in distro repos; adding apt.llvm.org ($codename)"
     $SUDO install -d -m 0755 /etc/apt/keyrings || return 1
+    # Dearmor to a binary keyring: apt on jammy won't verify against the raw
+    # armored key, giving NO_PUBKEY / "repository is not signed".
     wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
-        | $SUDO tee /etc/apt/keyrings/apt.llvm.org.asc >/dev/null || return 1
-    echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
+        | gpg --dearmor \
+        | $SUDO tee /etc/apt/keyrings/apt.llvm.org.gpg >/dev/null || return 1
+    echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
         | $SUDO tee "/etc/apt/sources.list.d/llvm-toolchain-${ver}.list" >/dev/null || return 1
     $SUDO apt-get update || return 1
 }
