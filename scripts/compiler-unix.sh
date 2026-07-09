@@ -163,6 +163,8 @@ detect_installed_clang() {
 # Highest clang 16-18 with an install candidate in the distro archive, else empty.
 # (Match a real version: apt-cache says "Candidate: (none)" for unavailable ones.)
 apt_best_archive_clang() {
+    # Refresh lists first, else a fresh container's stale index misses archive clang.
+    [ "$AUTOINSTALL" = "1" ] && $SUDO apt-get update -qq 2>/dev/null || true
     local v
     for v in 18 17 16; do
         if apt-cache policy "clang-$v" 2>/dev/null | grep -qE 'Candidate: [0-9]'; then
@@ -222,7 +224,7 @@ select_linux_triplet() {   # $1 = apt | dnf
     case "$DISTRO" in
         ubuntu)
             case "$VERSION_ID" in
-                24.*|22.*|20.*)
+                26.* | 24.*|22.*|20.*)
                     DEFAULT_CLANG="18"
                     ;;
                 *)
@@ -451,8 +453,9 @@ dep_install() {
 # don't carry it (e.g. Ubuntu 22.04 tops out at clang-15).
 ensure_llvm_repo() {
     local ver="$1" codename
+    local list="/etc/apt/sources.list.d/llvm-toolchain-${ver}.list"
     # Idempotent by the sources file (apt-cache availability checks are unreliable).
-    [ -f "/etc/apt/sources.list.d/llvm-toolchain-${ver}.list" ] && return 0
+    [ -f "$list" ] && return 0
 
     codename=$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")
     if [ -z "$codename" ]; then
@@ -466,8 +469,13 @@ ensure_llvm_repo() {
         | gpg --dearmor \
         | $SUDO tee /etc/apt/keyrings/apt.llvm.org.gpg >/dev/null || return 1
     echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
-        | $SUDO tee "/etc/apt/sources.list.d/llvm-toolchain-${ver}.list" >/dev/null || return 1
-    $SUDO apt-get update || return 1
+        | $SUDO tee "$list" >/dev/null || return 1
+    # Roll back on failure: a broken source (e.g. apt.llvm.org has no repo yet for
+    # a brand-new release) otherwise breaks every later apt-get update.
+    if ! $SUDO apt-get update; then
+        $SUDO rm -f "$list"
+        return 1
+    fi
 }
 
 # The install command shown to the user in non-autoinstall mode ($1 = apt|dnf).
