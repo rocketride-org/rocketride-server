@@ -4,7 +4,6 @@
 # =============================================================================
 import os
 import sys
-import shutil
 import joblib
 import numpy as np
 from sklearn.linear_model import LinearRegression
