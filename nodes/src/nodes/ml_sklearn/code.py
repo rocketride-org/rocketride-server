@@ -36,7 +36,7 @@ class PreProcessor:
                 self._model = joblib.load(resolved_path)
             else:
                 self._logger.warning(
-                    f'Rejected model_path \'{model_path}\': path does not exist or '
+                    f"Rejected model_path '{model_path}': path does not exist or "
                     f'resolves outside the allowed models directory ({allowed_dir})'
                 )
 
