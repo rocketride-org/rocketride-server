@@ -24,7 +24,7 @@ class PreProcessor:
             resolved_path = os.path.abspath(model_path)
             
             # Allowlist directory to prevent path traversal attacks
-            allowed_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "models"))
+            allowed_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'models'))
             
             try:
                 Path(resolved_path).relative_to(allowed_dir)
@@ -36,8 +36,8 @@ class PreProcessor:
                 self._model = joblib.load(resolved_path)
             else:
                 self._logger.warning(
-                    f"Rejected model_path '{model_path}': path does not exist or "
-                    f"resolves outside the allowed models directory ({allowed_dir})"
+                    f'Rejected model_path \'{model_path}\': path does not exist or '
+                    f'resolves outside the allowed models directory ({allowed_dir})'
                 )
 
     def process(self, text: str) -> str:
