@@ -139,7 +139,7 @@ ROCKETRIDE_URI=ws://localhost:5565
 ```
 
 <p align="center">
-  <a href="#quick-start"><strong>Quick Start</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.org/self-hosting">Read the Self-Hosting docs</a>
+  <a href="#quick-start"><strong>Quick Start</strong></a> &nbsp;&nbsp;·&nbsp;&nbsp; <a href="https://docs.rocketride.org/self-hosting">Read the On-Prem docs</a>
 </p>
 
 ## Features
