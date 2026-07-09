@@ -21,10 +21,10 @@ class PreProcessor:
             # SECURITY WARNING: Loading pickle/joblib files can execute arbitrary code.
             # Ensure model_path is strictly controlled and only loads models from trusted sources.
             # TODO: Consider migrating to `skops` for secure serialization of scikit-learn models.
-            resolved_path = os.path.abspath(model_path)
+            resolved_path = os.path.realpath(model_path)
 
             # Allowlist directory to prevent path traversal attacks
-            allowed_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'models'))
+            allowed_dir = os.path.realpath(os.path.join(os.path.dirname(__file__), 'models'))
 
             try:
                 Path(resolved_path).relative_to(allowed_dir)
