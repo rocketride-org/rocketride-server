@@ -6,21 +6,20 @@
 """Node-behavior test: image_cleanup carries nested source provenance across the hop.
 
 Drives the real ``IInstance`` (image lane BEGIN/WRITE/END) with the real descriptor
-helpers and a mocked ``IGlobal.process``, asserting the forwarded image ``BEGIN`` carries
-the transform's own detail (size + decoded dims), nests the input's source chain, and
-keeps its name. Exercises the shared ``forward_enriched_image`` wiring adopted by every
-image->image node; image_cleanup is used because its inference is a single mockable call.
+helpers and a mocked ``IGlobal.process``, asserting the forwarded image ``BEGIN`` nests
+the input's source chain and keeps its name. Exercises the shared
+``forward_enriched_image`` wiring adopted by every image->image node; image_cleanup is
+used because its inference is a single mockable call.
 
-Imports the real node and uses Pillow (real PNG + dimension decoding); both ``json5``
-(via ``ai.common.config``) and ``Pillow`` are declared in ``nodes/test/requirements.txt``.
+The nodes/test suite runs under the engine's bundled Python, which carries the engine's
+core deps (rocketlib, ai.common, json5) but not node-optional ones like Pillow. So the
+processed bytes are opaque here (no image library) and dimension decoding is asserted
+separately in the descriptor unit tests, where Pillow is available.
 """
 
-import io
 import json
 import sys
 from pathlib import Path
-
-from PIL import Image
 
 from rocketlib import AVI_ACTION
 from ai.common.avi.descriptor import build_stream_descriptor, descriptor_to_payload
@@ -31,12 +30,8 @@ if str(NODES_SRC) not in sys.path:
 
 from image_cleanup.IInstance import IInstance  # noqa: E402
 
-
-def _png(width, height):
-    """A tiny real PNG so best-effort dimension decoding has something to read."""
-    buf = io.BytesIO()
-    Image.new('RGB', (width, height), (10, 20, 30)).save(buf, format='PNG')
-    return buf.getvalue()
+# image_cleanup's IGlobal.process is mocked to return these opaque "cleaned" bytes.
+_OUT_BYTES = b'cleaned-image-bytes'
 
 
 class _Capture:
@@ -52,11 +47,8 @@ class _Capture:
 class _FakeGlobal:
     """image_cleanup calls ``IGlobal.process(mime, data) -> (mime, out_bytes)``."""
 
-    def __init__(self, out_bytes):
-        self._out = out_bytes
-
     def process(self, mime, data):
-        return mime, self._out
+        return mime, _OUT_BYTES
 
 
 def _send(inst, action, mime, buffer):
@@ -92,15 +84,14 @@ def _frame_descriptor_payload():
 
 
 def test_image_cleanup_forwards_nested_source_and_name():
-    """The output image BEGIN carries dims, nests the input's chain (frame -> video), keeps its name."""
+    """The output image BEGIN nests the input's chain (frame -> video) and keeps its name."""
     inst = IInstance()
     capture = _Capture()
     inst.instance = capture
-    out_png = _png(64, 48)
-    inst.IGlobal = _FakeGlobal(out_png)
+    inst.IGlobal = _FakeGlobal()
 
     _send(inst, AVI_ACTION.BEGIN, 'image/png', _frame_descriptor_payload())
-    _send(inst, AVI_ACTION.WRITE, 'image/png', _png(64, 48))
+    _send(inst, AVI_ACTION.WRITE, 'image/png', b'raw-bytes')
     _send(inst, AVI_ACTION.END, 'image/png', b'')
 
     # Exactly the enriched triplet was forwarded.
@@ -109,9 +100,8 @@ def test_image_cleanup_forwards_nested_source_and_name():
     assert begin_mime == 'image/png'
 
     payload = json.loads(begin_payload.decode('utf-8'))
-    # The transform's own detail at the top; the input's chain nested under `source`.
-    assert payload['size'] == len(out_png)
-    assert payload['width'] == 64 and payload['height'] == 48
+    # The transform's own size at the top; the input's chain nested under `source`.
+    assert payload['size'] == len(_OUT_BYTES)
     assert payload['name'] == 'BBC.frame0.png'  # inherited (one-to-one)
     assert payload['source']['source_mime'] == 'image/png'  # the input frame layer
     assert payload['source']['source'] == {'source_mime': 'video/mp4', 'duration': 74.05}  # video, nested deeper
