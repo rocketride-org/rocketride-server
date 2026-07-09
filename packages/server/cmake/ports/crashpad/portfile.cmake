@@ -96,6 +96,21 @@ elseif(VCPKG_TARGET_IS_LINUX)
     vcpkg_cmake_get_vars(cmake_vars_file)
     include("${cmake_vars_file}")
 
+    # mini_chromium's gn toolchain otherwise invokes bare clang/clang++ from PATH,
+    # which on CI runners is an older preinstalled clang that can't parse our libc++
+    # headers. Point it at the same toolchain vcpkg detected. Only when that lives in
+    # a versioned LLVM dir (e.g. /usr/lib/llvm-18); a bare /usr prefix would pull an
+    # unrelated system clang, so leave gn on its PATH default there.
+    get_filename_component(_cxx_real "${VCPKG_DETECTED_CMAKE_CXX_COMPILER}" REALPATH)
+    get_filename_component(_clang_bin "${_cxx_real}" DIRECTORY)
+    get_filename_component(_clang_root "${_clang_bin}" DIRECTORY)
+    if(NOT _clang_root STREQUAL "/usr"
+        AND EXISTS "${_clang_root}/bin/clang"
+        AND EXISTS "${_clang_root}/bin/clang++"
+        AND EXISTS "${_clang_root}/bin/llvm-ar")
+        string(APPEND OPTIONS " clang_path=\"${_clang_root}\"")
+    endif()
+
     # Force lld: gn's default (system ld.bfd) can emit a broken DT_INIT that makes
     # crashpad_handler SIGSEGV in _init before main. lld is always installed on
     # Linux here (compiler-unix.sh), so a missing-lld build error beats that crash.
