@@ -13,8 +13,19 @@ class PreProcessor:
         model_path = config.get('model_path', '')
 
         self._model = None
-        if model_path and os.path.exists(model_path):
-            self._model = joblib.load(model_path)
+        if model_path:
+            # SECURITY WARNING: Loading pickle/joblib files can execute arbitrary code.
+            # Ensure model_path is strictly controlled and only loads models from trusted sources.
+            # TODO: Consider migrating to `skops` for secure serialization of scikit-learn models.
+            resolved_path = os.path.abspath(model_path)
+            
+            # Allowlist directory to prevent path traversal attacks
+            allowed_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "models"))
+            
+            if os.path.exists(resolved_path) and resolved_path.startswith(allowed_dir):
+                self._model = joblib.load(resolved_path)
+            else:
+                pass # Model path is invalid or outside allowed directory
 
     def process(self, text: str) -> str:
         """
