@@ -213,14 +213,28 @@ _FIELDS = [
 _TABLE = '| item | amount |\n| ---- | ------ |\n| Widget | 100.00 |'
 
 
-def _build_instance(invoke_side_effect, listens=('answers', 'documents')):
+def _build_instance(
+    invoke_side_effect,
+    listens=('answers', 'documents'),
+    *,
+    validate=True,
+    include_provenance=True,
+    fields=None,
+):
     """Construct an IInstance wired to a fake IGlobal + captured engine.
 
     invoke_side_effect(call_index, ask) -> FakeAnswer  models the two prompt
     passes against the single LLM invoke lane.
+    validate / include_provenance / fields override the node config so callers
+    can exercise the validator and provenance toggles.
     Returns (inst, captured) where captured has .answers, .documents, .asks.
     """
-    IInstance, IGlobal = _load_iinstance_class({'fields': _FIELDS, 'validate': True, 'include_provenance': True})
+    config = {
+        'fields': _FIELDS if fields is None else fields,
+        'validate': validate,
+        'include_provenance': include_provenance,
+    }
+    IInstance, IGlobal = _load_iinstance_class(config)
 
     glob = IGlobal.__new__(IGlobal)
     glob.glb = types.SimpleNamespace(logicalType='extract_facts', connConfig={})
@@ -431,3 +445,33 @@ def test_page_marker_from_table_document_metadata_reaches_prompt():
     context = '\n'.join(question.documents) + '\n'.join(question.context)
     assert '[Page 3]' in context, 'table-document page metadata must be emitted as a [Page N] marker'
     assert '[TABLE 0]' in context, 'a null tableId must fall back to the running table id'
+
+
+# ---------------------------------------------------------------------------
+# (g) the extraction prompt pins the one-object-per-record output contract
+# ---------------------------------------------------------------------------
+
+
+def test_extraction_prompt_requests_one_object_per_record():
+    """Extraction must ask for one object per record, not one per field."""
+
+    def side_effect(i, ask):
+        return _make_answer([])
+
+    inst, captured = _build_instance(side_effect)
+    inst.open(types.SimpleNamespace())
+    inst.writeTable(_TABLE)
+    inst.closing()
+
+    assert captured.asks, 'extraction pass must call instance.invoke'
+    question = captured.asks[0].question
+    prompt = question.instruction_text().lower()
+    assert 'one object per logical record' in prompt, 'prompt must pin the per-record contract'
+    assert 'separate object per field' in prompt, 'prompt must forbid one object per field'
+
+    # The worked example demonstrates one record object per table row.
+    assert question.examples, 'extraction prompt must carry a worked example'
+    example_answer = question.examples[0][1]
+    assert len(example_answer) == 2, 'example must show one record object per table row'
+    for record in example_answer:
+        assert 'name' in record and 'age' in record, 'each example record carries all target fields'

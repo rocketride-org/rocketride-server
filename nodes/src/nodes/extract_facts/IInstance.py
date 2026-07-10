@@ -148,8 +148,9 @@ class IInstance(IInstanceBase):
 
     def _buildExtractionQuestion(self) -> Question:
         """
-        Build the first-pass extraction question. Asks for the user target
-        fields plus a mandatory _provenance block on every fact.
+        Build the first-pass extraction question. Asks for one object per logical
+        record (all target fields together) plus a mandatory _provenance block on
+        every record.
         """
         question: Question = Question(
             type=QuestionType.QUESTION,
@@ -160,9 +161,13 @@ class IInstance(IInstanceBase):
         question.addInstruction(
             'Fact Extraction',
             normalize("""
-            Examine the context carefully and extract every fact that fills one of
-            the target fields. Infer values where an exact label is absent, using
-            your understanding of the document.
+            Examine the context and assemble the target fields into RECORDS. Emit
+            exactly ONE fact object per logical record: a document describing a
+            single entity (for example one invoice) yields exactly ONE object that
+            carries all target fields; a table yields ONE object per data row.
+            Never emit a separate object per field, and never repeat the same
+            record. Infer values where an exact label is absent, using your
+            understanding of the source.
             """),
         )
 
@@ -174,41 +179,46 @@ class IInstance(IInstanceBase):
                 normalize("""
                 Tables are fenced with [TABLE <id>] ... [/TABLE <id>] markers and are
                 delimited (markdown or CSV-like). Treat the first row of each table as
-                the header. Read each table row by row, and within each row cell by
-                cell. For every value you take from a table cell, record:
+                the header. Read each table row by row and turn each data row into ONE
+                record, mapping its cells onto the target fields. For every record you
+                take from a table row, record:
                   - table_id: the id from the enclosing [TABLE <id>] fence
                   - row: the 0-based data row index (header row is -1)
-                  - col: the 0-based column index of the cell
-                  - source_text: the verbatim text of that exact cell
+                  - source_text: the verbatim text of that row
+                Set col only when the whole record comes from a single cell; otherwise
+                leave it null.
                 """),
             )
 
         question.addInstruction(
             'Provenance',
             normalize("""
-            EVERY fact object you return MUST contain the target fields above AND a
+            EVERY record object you return MUST contain the target fields above AND a
             "_provenance" object with these keys:
               page        - source page number from the nearest preceding [Page N]
                             marker in the context, else null
-              table_id    - the [TABLE <id>] id if the fact came from a table, else null
-              row         - 0-based table row, else null
-              col         - 0-based table column, else null
-              source_text - the exact snippet/cell the value was taken from
+              table_id    - the [TABLE <id>] id if the record came from a table, else null
+              row         - 0-based table row of the record, else null
+              col         - 0-based column index only when the whole record is a single
+                            cell; null when the record spans multiple columns
+              source_text - the exact snippet or row text the record was taken from
               confidence  - your confidence from 0.0 to 1.0
-            Never omit _provenance. For free-text facts set table_id/row/col to null.
+            Never omit _provenance. For free-text records set table_id/row/col to null.
             """),
         )
 
         question.addInstruction(
             'Return a List',
             normalize("""
-            Return a JSON array of fact objects. If you find nothing, return an empty
-            array. Do not wrap the array in another object.
+            Return a JSON array of record objects - one object per logical record,
+            each carrying all target fields. Do NOT emit a separate object per field.
+            If you find nothing, return an empty array. Do not wrap the array in
+            another object.
             """),
         )
 
         question.addExample(
-            '[TABLE 0]\n| Name | Age |\n| Alice | 30 |\n[/TABLE 0]',
+            '[TABLE 0]\n| Name | Age |\n| Alice | 30 |\n| Bob | 25 |\n[/TABLE 0]',
             [
                 {
                     'name': 'Alice',
@@ -217,11 +227,23 @@ class IInstance(IInstanceBase):
                         'page': None,
                         'table_id': 0,
                         'row': 0,
-                        'col': 0,
-                        'source_text': 'Alice',
+                        'col': None,
+                        'source_text': 'Alice | 30',
                         'confidence': 0.98,
                     },
-                }
+                },
+                {
+                    'name': 'Bob',
+                    'age': 25,
+                    '_provenance': {
+                        'page': None,
+                        'table_id': 0,
+                        'row': 1,
+                        'col': None,
+                        'source_text': 'Bob | 25',
+                        'confidence': 0.98,
+                    },
+                },
             ],
         )
 
@@ -236,7 +258,7 @@ class IInstance(IInstanceBase):
     def _buildValidatorQuestion(self, candidates: List[Dict[str, Any]]) -> Question:
         """
         Build the second-pass validator question. Re-reads the same source plus
-        the first-pass facts, and returns a reconciled, corrected list.
+        the first-pass records, and returns a reconciled, corrected list.
         """
         question: Question = Question(
             type=QuestionType.QUESTION,
@@ -247,10 +269,10 @@ class IInstance(IInstanceBase):
         question.addInstruction(
             'Re-verify',
             normalize("""
-            You are given a list of candidate facts and the original source. For each
+            You are given a list of candidate records and the original source. For each
             candidate, independently re-read the exact location named in its
-            _provenance (the cited page, or the [TABLE <id>] cell at row/col) and
-            decide whether the value truly matches the source there.
+            _provenance (the cited page, or the [TABLE <id>] row it cites) and decide
+            whether every target field truly matches the source there.
             """),
         )
 
@@ -258,9 +280,9 @@ class IInstance(IInstanceBase):
             'Disagreement Handling',
             normalize("""
             When a candidate disagrees with the source:
-              - If the value is wrong, replace it with the correct value from the source.
-              - If the cited cell is wrong, fix table_id/row/col/source_text.
-              - If the fact is unsupported by the source, drop it entirely.
+              - If a value is wrong, replace it with the correct value from the source.
+              - If the cited location is wrong, fix table_id/row/col/source_text.
+              - If the record is unsupported by the source, drop it entirely.
               - Lower confidence when the source is ambiguous.
             When a candidate is correct, keep it unchanged.
             """),
@@ -269,8 +291,10 @@ class IInstance(IInstanceBase):
         question.addInstruction(
             'Output Contract',
             normalize("""
-            Return the full reconciled JSON array. Each surviving fact keeps its target
-            fields and _provenance, and additionally carries a "_validation" object:
+            Return the full reconciled JSON array, preserving one object per record -
+            never split a record into per-field objects or merge distinct records.
+            Each surviving record keeps its target fields and _provenance, and
+            additionally carries a "_validation" object:
               changed        - true if you altered any field or provenance, else false
               reason         - short explanation of the check / correction
               original_value - the previous value you replaced, or null if unchanged

@@ -6,7 +6,7 @@ The extraction brain — a RocketRide filter node that reads document context to
 
 Accumulates the document and table context for an object across all of its chunks, then runs a two-pass LLM extraction when the object closes:
 
-1. **Extraction pass** — builds a prompt listing every configured field (name, type, optional default) and instructs the connected LLM (with `expectJson: true`) to read the source. Tables are fenced with `[TABLE <id>]` markers and read cell by cell so each value can carry the row/column it came from. Every fact must include a `_provenance` object (`page`, `table_id`, `row`, `col`, `source_text`, `confidence`).
+1. **Extraction pass** — builds a prompt listing every configured field (name, type, optional default) and instructs the connected LLM (with `expectJson: true`) to read the source and emit **one object per logical record** — a single-entity document (e.g. one invoice) yields exactly one object carrying all target fields; a table yields one object per data row. Tables are fenced with `[TABLE <id>]` markers and read row by row. Every record must include a `_provenance` object (`page`, `table_id`, `row`, `col`, `source_text`, `confidence`).
 2. **Validator pass** — a second prompt against the *same* LLM invoke lane. It re-reads the source at the location each fact cites, reconciles disagreements (correcting the value, fixing the cited cell, or dropping unsupported facts), and returns the reconciled list with a `_validation` annotation. If validation is disabled the extraction pass is emitted directly.
 
 Incoming chunks are buffered (via `preventDefault`) and never passed downstream; only the reconciled facts are emitted when the object closes. Fields with an empty name or type are skipped at pipeline start with a warning. Accumulated context is reset for every new object, so state never leaks between objects.
@@ -34,7 +34,7 @@ No third-party Python dependencies (requirements.txt is empty).
 | `documents` | `answers`   | Extract facts using document context, emit as JSON      |
 | `documents` | `documents` | Extract facts using document context, one doc per fact  |
 
-On close, the `answers` lane (if connected) receives one JSON answer containing the full list of reconciled facts. The `documents` lane (if connected) receives one document per fact, with the fact serialized as JSON in the document content.
+On close, the `answers` lane (if connected) receives one JSON answer containing the full list of reconciled records. The `documents` lane (if connected) receives one document per record, with the record serialized as JSON in the document content.
 
 ### Fields
 
@@ -59,24 +59,24 @@ A single configuration profile exists (`default`); it carries the field list and
 
 ### Provenance
 
-Each emitted fact carries a `_provenance` object alongside the configured fields:
+Each emitted record carries a `_provenance` object alongside the configured fields:
 
-| Provenance key | Description                                             |
-| -------------- | ------------------------------------------------------- |
-| `page`         | Source page the fact was read from                      |
-| `table_id`     | Identifier of the source table                          |
-| `row`          | Source row index within the table                       |
-| `col`          | Source column index within the table                    |
-| `source_text`  | Verbatim snippet the value was drawn from               |
-| `confidence`   | Extractor/validator confidence for the reconciled value |
+| Provenance key | Description                                                          |
+| -------------- | ------------------------------------------------------------------- |
+| `page`         | Source page the record was read from                                |
+| `table_id`     | Identifier of the source table                                      |
+| `row`          | Source row index of the record within the table                     |
+| `col`          | Column index only when the whole record is a single cell; else null |
+| `source_text`  | Verbatim snippet or row text the record was drawn from              |
+| `confidence`   | Extractor/validator confidence for the reconciled record            |
 
-Provenance is filled on a **best-effort** basis by the model from the text it is given: any field it cannot determine (for example a `page` when the input has no page markers, or `row`/`col` for a free-text fact) is returned as `null`.
+Provenance is filled on a **best-effort** basis by the model from the text it is given: any field it cannot determine (for example a `page` when the input has no page markers, or `row`/`col` for a free-text record) is returned as `null`.
 
 ---
 
 ## Behaviour
 
-The LLM infers field values even when the source does not use the exact field names, reasoning about what each field likely contains from the surrounding context. When a `table` lane feeds the node, the extractor is told to read it cell by cell so it can cite the originating cell in provenance; `documents` lane input routes table documents (`metadata.isTable`) to the table buffer and everything else to the free-text buffer, emitting an inline `[Page N]` marker with each chunk that carries page metadata so the extractor can cite the page in provenance. The validator pass gives the model a second, adversarial look at its own output before anything is emitted, keeping the value it can best justify from the source.
+The LLM infers field values even when the source does not use the exact field names, reasoning about what each field likely contains from the surrounding context. When a `table` lane feeds the node, the extractor is told to read it row by row and turn each data row into one record so it can cite the originating row in provenance; `documents` lane input routes table documents (`metadata.isTable`) to the table buffer and everything else to the free-text buffer, emitting an inline `[Page N]` marker with each chunk that carries page metadata so the extractor can cite the page in provenance. The validator pass gives the model a second, adversarial look at its own output before anything is emitted, keeping the value it can best justify from the source.
 
 ---
 
