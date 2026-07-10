@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]: since 2026-06-08
+## [Unreleased]: since 2026-07-10
+
+## [3.3.2] - 2026-07-10
+
+### Fixed
+
+- Register the public `GET /auth/vscode/google` OAuth bounce route on the release line, so the Gmail tool (and other editor) Google user-OAuth deep-link completes on cloud/prod instead of returning `401 Access denied`. The `vscode_oauth_bounce` handler was previously develop-only. (#1542)
+
 
 ## [3.3.0] - 2026-06-08
 
