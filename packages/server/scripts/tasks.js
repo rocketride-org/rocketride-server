@@ -836,9 +836,9 @@ function makeSetupTestDepsAction() {
 		description: 'Install build/test deps via depends',
 		run: async (ctx, task) => {
 			const enginePath = path.join(DIST_DIR, 'engine');
-			const testReq = path.join(SERVER_DIR, 'test-requirements.txt');
+			const buildReq = path.join(SERVER_DIR, 'build-requirements.txt');
 			task.output = 'Installing test/runtime deps via depends...';
-			await execCommand(enginePath, ['-c', `from depends import depends; depends(${JSON.stringify(testReq)})`], { task, cwd: DIST_DIR });
+			await execCommand(enginePath, ['-c', `from depends import depends; depends(${JSON.stringify(buildReq)})`], { task, cwd: DIST_DIR });
 		},
 	};
 }
