@@ -37,7 +37,6 @@
 import * as vscode from 'vscode';
 import { ConfigManager } from '../config';
 import { getConnectionManager, getEngineRegistry } from '../extension';
-import { isAllowedExternalUrl } from '../shared/util/externalUrl';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 
 const DISMISSED_KEY = 'welcomeDismissed';
@@ -110,11 +109,8 @@ export class WelcomeProvider {
 						break;
 
 					case 'openExternal':
-						if (message.url && isAllowedExternalUrl(message.url)) {
-							await vscode.env.openExternal(vscode.Uri.parse(message.url));
-						} else if (message.url) {
-							console.error('[WelcomeProvider] Blocked external URL with disallowed scheme');
-							this.panel?.webview.postMessage({ type: 'showMessage', level: 'error', message: 'Unsupported external URL.' });
+						if (message.url) {
+							vscode.env.openExternal(vscode.Uri.parse(message.url));
 						}
 						break;
 
