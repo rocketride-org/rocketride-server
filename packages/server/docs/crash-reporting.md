@@ -36,23 +36,94 @@ automatically with modern [Mozilla `dump_syms`](https://github.com/mozilla/dump_
 symbols/<module>/<debug-id>/<module>.sym
 ```
 
-The step is skipped with a warning if `dump_syms` is not on `PATH` (install with
-`cargo install dump_syms`, or override with `-DROCKETRIDE_DUMP_SYMS=/path`). The
-`symbols/` store is retained in the release artifact.
+The build setup (`server:setup-tools`) fetches a prebuilt `dump_syms` and puts it on
+the build `PATH` automatically, so symbols are generated out of the box. If it's
+still missing the build prints `WARNING: dump_syms not found` and the step is
+skipped (you can also install it manually with `cargo install dump_syms`, or
+override with `-DROCKETRIDE_DUMP_SYMS=/path`). The `symbols/` store is retained in
+the release artifact. See the compiler-toolchain section in the builder docs.
 
 ## Investigating a dump
 
-**Linux / macOS** -- symbolize to a stack trace with rust-minidump's
-`minidump-stackwalk`:
+`lldb`, `minidump-stackwalk`, and `minidump-2-core` are expected on your `PATH` (see
+Installing below). Use the exact binary that crashed (`dist/server/engine`,
+`build/engine-core/test/aptest`, ...); its symbols come from the shipped `symbols/`
+store or the separated `.debug` next to it (via `.gnu_debuglink`).
+
+### Installing the readers (one time)
+
+`dump_syms` (symbol generation) is installed by `server:setup-tools`; the dump
+readers are not. Build/fetch them and put them on your `PATH` (`/usr/local/bin`
+below; anywhere on `PATH` works). `lldb` and `gdb` come from your distro or LLVM.
 
 ```
-minidump-stackwalk --symbols-path ./symbols crash.dmp
+# minidump-stackwalk -- prebuilt from rust-minidump
+url=$(curl -fsSL https://api.github.com/repos/rust-minidump/rust-minidump/releases/latest \
+  | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 \
+  | grep 'minidump-stackwalk-x86_64-unknown-linux-gnu\.tar\.xz$')
+curl -fsSL "$url" | tar -xJ -C /tmp
+sudo install -m755 /tmp/minidump-stackwalk-*/minidump-stackwalk /usr/local/bin/
+
+# minidump-2-core -- built from breakpad (needs g++)
+git clone --depth 1 https://chromium.googlesource.com/breakpad/breakpad /tmp/breakpad
+git clone --depth 1 https://chromium.googlesource.com/linux-syscall-support /tmp/breakpad/src/third_party/lss
+g++ -std=c++17 -I/tmp/breakpad/src -o /tmp/minidump-2-core \
+  /tmp/breakpad/src/tools/linux/md2core/minidump-2-core.cc \
+  /tmp/breakpad/src/common/path_helper.cc \
+  /tmp/breakpad/src/common/linux/memory_mapped_file.cc \
+  /tmp/breakpad/src/common/linux/safe_readlink.cc
+sudo install -m755 /tmp/minidump-2-core /usr/local/bin/
+
+# gdb:  Fedora -> sudo dnf install -y gdb   |   Debian/Ubuntu -> sudo apt install -y gdb
 ```
 
-If frames show `module + offset` with no function names, the symbols don't match
-the crashed build (debug-ID mismatch). To use a live debugger instead, convert
-the dump to a core: `minidump-2-core crash.dmp > core && gdb <binary> core`
-(limited memory -- see below).
+### minidump-stackwalk + the `.sym` store (field workflow, no binary needed)
+
+```
+minidump-stackwalk --human --symbols-path dist/server/symbols crash.dmp
+```
+
+Frames showing `module + offset` with no names mean the build lacks a GNU build-id
+or the symbols don't match it (debug-ID mismatch).
+
+### LLDB -- reads the minidump directly (recommended when you have the binary)
+
+```
+lldb --batch -o "target create <binary> --core crash.dmp" -o "bt" -o quit
+```
+
+LLDB relocates the PIE automatically from the minidump's module base -- clean
+symbolized backtrace, no core conversion.
+
+### GDB -- via a converted core
+
+Crashpad minidumps carry no auxiliary vector, so a converted core has no PIE load
+bias for GDB to auto-apply -- pass the module base explicitly (read it from the dump):
+
+```
+minidump-2-core crash.dmp > crash.core
+base=$(minidump-stackwalk --json crash.dmp | python3 -c \
+  'import json,sys;b="<binary-basename>";print(next(m["base_addr"] for m in json.load(sys.stdin)["modules"] if b in (m["filename"] or "")))')
+gdb --core crash.core -ex "add-symbol-file <binary> -o $base" -ex "bt 7"
+```
+
+Do **not** pass the binary as GDB's first argument (that loads it at 0);
+`add-symbol-file ... -o <base>` places the symbols at the real address. Frames past
+`main` are stack-scan noise (no libc CFI) -- `bt 7` shows the meaningful ones, or
+`dnf debuginfo-install glibc` for a clean libc unwind.
+
+Wrap it in a shell function (convert -> read base -> launch GDB):
+
+```
+gdbdump() {  # gdbdump <binary> <dump.dmp>
+  local bin="$1" dmp="$2" core="/tmp/$(basename "$dmp").core"
+  minidump-2-core "$dmp" > "$core" || return 1
+  local base; base=$(minidump-stackwalk --json "$dmp" 2>/dev/null | python3 -c \
+    "import json,sys,os;b=os.path.basename('$bin');print(next(m['base_addr'] for m in json.load(sys.stdin)['modules'] if b in (m['filename'] or '')))")
+  gdb --core "$core" -ex "add-symbol-file $bin -o $base" -ex "bt 7"
+}
+# gdbdump dist/server/engine /tmp/<dump>.dmp
+```
 
 **Windows** -- open the `.dmp` directly in **WinDbg** or Visual Studio with the
 matching PDBs.

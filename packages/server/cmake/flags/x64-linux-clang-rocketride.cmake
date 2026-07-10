@@ -125,3 +125,8 @@ set(CMAKE_CXX_FLAGS_UBSAN
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} \
 -Xlinker \
 -export-dynamic")
+
+# GNU build-id lets crash minidumps be matched to their .sym files (Crashpad records
+# it; dump_syms keys on it). Without it the recorded id is zero and symbolication fails.
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--build-id")
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--build-id")

@@ -325,6 +325,27 @@ The external parsers shell out via the Unix `env` shim; if `env` or a required t
 
 ---
 
+## Debugging crash dumps
+
+The engine uses Crashpad; a crash writes a `.dmp` minidump (swept into the
+crash-dump location). To turn one into a stack trace:
+
+- **LLDB** (reads the minidump directly, auto-relocates the PIE):
+  ```
+  lldb --batch -o "target create <binary> --core crash.dmp" -o bt -o quit
+  ```
+- **GDB** (needs `minidump-2-core` + the module base, since minidumps carry no auxv):
+  ```
+  minidump-2-core crash.dmp > crash.core
+  gdb --core crash.core -ex "add-symbol-file <binary> -o <base>" -ex "bt 7"
+  ```
+- **No binary, just the shipped symbols**: `minidump-stackwalk --human --symbols-path dist/server/symbols crash.dmp`
+
+Full details (reading the base, symbol stores, Windows/WinDbg) are in
+[crash-reporting.md](../packages/server/docs/crash-reporting.md).
+
+---
+
 ## License
 
 MIT License -- see [LICENSE](../LICENSE).

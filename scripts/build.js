@@ -41,6 +41,7 @@ function parseArgs(args) {
 	const requests = [];
 	const options = {
 		autoinstall: false,
+		systemCompiler: false,
 		force: false,
 		verbose: false,
 		parallel: true, // Default to parallel execution
@@ -60,6 +61,8 @@ function parseArgs(args) {
 	for (const arg of args) {
 		if (arg === '--autoinstall') {
 			options.autoinstall = true;
+		} else if (arg === '--system-compiler') {
+			options.systemCompiler = true;
 		} else if (arg === '--force' || arg === '-f') {
 			options.force = true;
 		} else if (arg === '--verbose' || arg === '-v') {
