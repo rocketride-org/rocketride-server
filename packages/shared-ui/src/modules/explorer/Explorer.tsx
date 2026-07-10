@@ -42,13 +42,17 @@ const S = {
 		color: 'var(--rr-text-primary)',
 		overflow: 'hidden',
 	} as CSSProperties,
+	// No top border: the Explorer is often the first/only sidebar section (the
+	// File Explorer app, the vscode Pipelines panel), where a top border drew a
+	// stray line under the shell app label. Design-owner decision 2026-07-08:
+	// remove it entirely; where the Explorer follows another section (rocket-ui's
+	// SidebarMenu) the separation is carried by spacing.
 	sectionHeader: {
 		display: 'flex',
 		alignItems: 'center',
 		gap: 0,
 		padding: '6px 12px 4px',
 		flexShrink: 0,
-		borderTop: '1px solid var(--rr-border)',
 	} as CSSProperties,
 	sectionLabel: {
 		...commonStyles.labelUppercase,
@@ -87,7 +91,6 @@ const S = {
 		flex: 1,
 		minWidth: 0,
 	} as CSSProperties,
-	spacer: { flex: 1 } as CSSProperties,
 	dot: (color: string): CSSProperties => ({
 		width: 8,
 		height: 8,
@@ -343,7 +346,7 @@ function childTooltip(child: { id: string; name: string; provider?: string }, ta
  * sources, or any app-specific concepts.  The hosting container provides
  * entries, statuses, and callbacks.
  */
-export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, fileActions, onRefresh, onMove, onUpload }) => {
+export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, fileActions, onRefresh, onMove, onUpload }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -601,9 +604,8 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							) : (
 								<span style={S.rowName}>{dir.name}</span>
 							)}
-							<span style={S.spacer} />
 							{dirDot && <div style={S.dot(dirDot)} />}
-							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
+							{hasFileManage && (hoveredRow === rowKey || menuPath === dir.path) && !isRenaming && (
 								<button
 									style={S.menuBtn}
 									onClick={(e) => {
@@ -648,7 +650,6 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 				} else {
 					// ── File row ──────────────────────────────────────────────
 					const file = child as ExplorerEntry;
-					const name = fileName(file.path);
 					const displayName = getDisplayName(file.path);
 					const hasChildren = (file.children?.length ?? 0) > 0;
 					const isFileExpanded = expandedFiles.has(file.path);
@@ -692,9 +693,8 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							) : (
 								<span style={S.rowName}>{displayName}</span>
 							)}
-							<span style={S.spacer} />
 							{dotColor && <div style={S.dot(dotColor)} />}
-							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
+							{hasFileManage && (hoveredRow === rowKey || menuPath === file.path) && !isRenaming && (
 								<button
 									style={{ ...S.menuBtn, ...(isFileSelected ? { color: 'var(--rr-fg-list-active)' } : {}) }}
 									onClick={(e) => {
@@ -816,7 +816,6 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 									<span style={S.rowName}>{ch.name}</span>
 									{errCount > 0 && <span style={S.badge('var(--rr-color-error)')}>&#10006; {errCount}</span>}
 									{warnCount > 0 && <span style={S.badge('var(--rr-color-warning)')}>&#9888; {warnCount}</span>}
-									<span style={S.spacer} />
 									{hoveredRow === chRowKey && isConnected && showChildActions && onChildAction && file.documentId && (
 										<button
 											style={S.actionBtn(chRunning ? 'var(--rr-color-error)' : 'var(--rr-color-success)')}
@@ -826,7 +825,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 												onChildAction(chRunning ? 'stop' : 'run', file.path, ch.id, file.documentId);
 											}}
 										>
-											{chRunning ? <BxStop size={14} /> : <BxPlay size={14} />}
+											{chRunning ? <BxStop size={16} /> : <BxPlay size={16} />}
 										</button>
 									)}
 								</div>

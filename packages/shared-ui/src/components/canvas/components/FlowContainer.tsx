@@ -169,7 +169,7 @@ export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, 
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
-			<div style={{ position: 'relative', width: '100%', height: '100%' }} key={`${project.project_id ?? 'new'}-${project.name}`}>
+			<div style={{ position: 'relative', width: '100%', height: '100%' }} key={`${project.project_id ?? 'new'}-${(project as { name?: string }).name}`}>
 				<FlowProvider
 					project={project}
 					projectId={project.project_id ?? ''}

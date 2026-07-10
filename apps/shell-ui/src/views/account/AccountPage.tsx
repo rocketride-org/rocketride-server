@@ -102,17 +102,13 @@ const AccountPage: React.FC = () => {
 	const [usageByTeam, setUsageByTeam] = useState<UsageRollup[]>([]);
 	const [dashboardLoading, setDashboardLoading] = useState(false);
 
-	// ── Refresh signal (bumped by shell:accountUpdate) ─────────────────────
-	const [refreshSignal, setRefreshSignal] = useState(0);
-
 	// ── Section load error ──────────────────────────────────────────────────
 	const [sectionError, setSectionError] = useState<string | null>(null);
 
-	// Keep profile in sync with server-pushed account updates, bump refresh
-	// signal for env, and bump reload counter to re-fetch the active section
+	// Keep profile in sync with server-pushed account updates and bump the
+	// reload counter to re-fetch the active section
 	useEffect(() => ConnectionManager.getInstance().on('shell:accountUpdate', (data) => {
 		setProfile(data);
-		setRefreshSignal((n) => n + 1);
 		setReloadCounter((n) => n + 1);
 	}), []);
 
@@ -433,34 +429,6 @@ const AccountPage: React.FC = () => {
 		window.open(url, '_blank', 'noopener');
 	}, [client, orgId]);
 
-	// ── Environment callbacks ───────────────────────────────────────────────
-
-	/**
-	 * Loads environment variables for the given scope.
-	 * @param scope - The env scope: 'org', 'team', or 'user'.
-	 * @param scopeId - Required for 'org' and 'team' scopes.
-	 * @returns The env key-value pairs, or an empty object if not connected.
-	 */
-	const handleLoadEnv = useCallback(async (scope: 'org' | 'team' | 'user', scopeId?: string) => {
-		if (!client) return {};
-		return client.account.getEnv(scope, scopeId);
-	}, [client]);
-
-	/**
-	 * Persists environment variables for the given scope.
-	 * @param scope - The env scope: 'org', 'team', or 'user'.
-	 * @param env - The full env dict to save.
-	 * @param scopeId - Required for 'org' and 'team' scopes.
-	 */
-	const handleSaveEnv = useCallback(async (
-		scope: 'org' | 'team' | 'user',
-		env: Record<string, string>,
-		scopeId?: string,
-	) => {
-		if (!client) return;
-		await client.account.setEnv(scope, env, scopeId);
-	}, [client]);
-
 	// ── Memoized lookups ────────────────────────────────────────────────────
 	const memberNames = useMemo(
 		() => Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId])),
@@ -525,9 +493,6 @@ const AccountPage: React.FC = () => {
 			onEditTeamMemberPerms={handleEditTeamMemberPerms}
 			onRemoveTeamMember={handleRemoveTeamMember}
 			onLoadTeamDetail={handleLoadTeamDetail}
-			onLoadEnv={handleLoadEnv}
-			onSaveEnv={handleSaveEnv}
-			refreshSignal={refreshSignal}
 		/>
 		</div>
 	);

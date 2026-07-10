@@ -24,7 +24,7 @@
 import { Settings } from './SettingsWebview';
 import { mountComponent } from '../../../shared/util/mount';
 
-// Mount the Settings component
+// Mount the Settings component directly — it renders its own PageViewControl strip.
 mountComponent(Settings, 'Settings');
 
 export default Settings;

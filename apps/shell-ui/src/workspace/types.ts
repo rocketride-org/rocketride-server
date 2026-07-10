@@ -215,6 +215,13 @@ export interface AppManifestEntry {
 	appStatus?: string;
 	/** Whether this app is on the user's desktop. */
 	onDesktop?: boolean;
+	/**
+	 * The shell-api contract version this app was built against (stamped into
+	 * apps.json by the registration step from shell-ui's apiver.ts). The lowest
+	 * value across all registered apps is the oldest frozen version still in use,
+	 * which is what can be safely pruned once nothing depends on it.
+	 */
+	shellApiVersion?: number;
 	/** Async loader — dynamically imports and returns the full AppDescriptor. */
 	load: () => Promise<AppDescriptor>;
 }

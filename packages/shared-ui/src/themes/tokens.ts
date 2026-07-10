@@ -78,5 +78,12 @@ export type ThemeTokens = {
 	'--rr-font-weight-h5': string;
 	'--rr-font-weight-button': string;
 	'--rr-annotation-bg-default': string;
+	// Chart/category series palette — one distinct hue per categorical series.
+	'--rr-chart-blue': string;
+	'--rr-chart-green': string;
+	'--rr-chart-yellow': string;
+	'--rr-chart-purple': string;
+	'--rr-chart-orange': string;
+	'--rr-chart-red': string;
 	[key: string]: string;
 };

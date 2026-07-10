@@ -28,6 +28,7 @@ import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 import { pluginBasicSsl } from '@rsbuild/plugin-basic-ssl';
+import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -99,6 +100,13 @@ export default defineConfig(({ command }) => {
 
 			// Standard React JSX transform + Fast Refresh support.
 			pluginReact(),
+
+			// TypeScript type checking (fork-ts-checker) — fails production builds
+			// on any type error. Uses ./tsconfig.json, whose program covers all
+			// shell-ui sources AND the shared-ui sources pulled in via the
+			// 'shared' path alias (shared-ui is consumed as workspace TS source),
+			// so latent type errors in either package break the build here.
+			pluginTypeCheck(),
 
 			// SVGR + auto-currentcolor svgo plugin for node icons (used by canvas).
 			pluginRocketrideIcons(),

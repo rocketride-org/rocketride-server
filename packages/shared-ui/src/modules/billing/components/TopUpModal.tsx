@@ -69,17 +69,6 @@ const S = {
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 
-	/** Close button. */
-	close: {
-		background: 'none',
-		border: 'none',
-		fontSize: 20,
-		cursor: 'pointer',
-		color: 'var(--rr-text-secondary)',
-		padding: '4px 8px',
-		font: 'inherit',
-	} as CSSProperties,
-
 	/** Footer row with confirm button. */
 	footer: {
 		display: 'flex',
@@ -162,12 +151,15 @@ export const TopUpModal: React.FC<TopUpModalProps> = ({ plans, onPurchase, onClo
 	};
 
 	return (
-		<div style={S.overlay} onClick={purchasing ? undefined : onClose}>
-			<div style={S.dialog} onClick={(e) => e.stopPropagation()}>
-				{/* Header */}
+		/* Backdrop is inert: dismissal is deliberate-only (close button / Cancel)
+		   per the 2026-07-08 design decision — clicking outside must NOT close. */
+		<div style={S.overlay}>
+			<div style={S.dialog}>
+				{/* Header — no top-right ✕: this dialog dismisses via footer Cancel and
+				    auto-closes after a successful purchase (refined popup policy
+				    2026-07-08: no redundant ✕ when an explicit close or auto-dismiss exists). */}
 				<div style={S.header}>
 					<div style={S.title}>Add More Capacity</div>
-					<button style={S.close} onClick={purchasing ? undefined : onClose} disabled={purchasing}>&#10005;</button>
 				</div>
 
 				{success ? (

@@ -32,7 +32,8 @@
 import { Environment } from './Environment';
 import { mountComponent } from '../../../shared/util/mount';
 
-// Mount the Environment component into the webview DOM.
+// Mount the Environment component into the webview DOM. It renders its own
+// PageViewControl strip when it has multiple slots.
 mountComponent(Environment, 'Environment');
 
 export default Environment;

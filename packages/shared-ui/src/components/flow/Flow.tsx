@@ -4,7 +4,7 @@
 // =============================================================================
 
 import React, { CSSProperties } from 'react';
-import type { TaskStatus, Pipeline } from '../../modules/project/types';
+import type { TaskStatus } from '../../modules/project/types';
 import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
@@ -68,6 +68,15 @@ const styles = {
 // =============================================================================
 // Types
 // =============================================================================
+
+/**
+ * A single active pipeline derived from `taskStatus.pipeflow.byPipe`, whose
+ * entries map a numeric pipeline instance id to its ordered stage names.
+ */
+interface Pipeline {
+	id: number;
+	stages: string[];
+}
 
 interface FlowProps {
 	taskStatus: TaskStatus | null | undefined;

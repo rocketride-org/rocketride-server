@@ -299,12 +299,6 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 			});
 	};
 
-	const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
-		if (e.target === e.currentTarget) {
-			onCloseRef.current();
-		}
-	};
-
 	const iconBtn = (label: string): React.CSSProperties => ({
 		...styles.iconBtn,
 		...(copyFeedback === label ? styles.iconBtnSuccess : {}),
@@ -313,8 +307,10 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	const envHintText = isWebhookEndpoint ? (isLocalEndpoint ? 'This endpoint points to a local host. Use a public tunnel/domain before integrating external webhook providers.' : 'This endpoint uses a non-local host and can be used for external webhook integrations.') : isLocalEndpoint ? 'Local URL. For embedding outside VS Code, copy the URL with auth or use the integration examples below.' : 'Use the URL with auth query or the examples below to integrate into your application.';
 
 	return createPortal(
-		<div style={styles.overlay} onClick={handleBackdropClick}>
-			<div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+		/* Backdrop is inert: dismissal is deliberate-only (close button) per the
+		   2026-07-08 design decision — clicking outside must NOT close. */
+		<div style={styles.overlay}>
+			<div style={styles.modal}>
 				{/* Header */}
 				<div style={styles.header}>
 					<div style={styles.title}>Endpoint Configuration</div>

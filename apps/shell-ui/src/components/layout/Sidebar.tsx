@@ -41,8 +41,9 @@ import type { ShellThemeConfig, ShellAccountConfig } from '../../workspace/types
 import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
 import { useSubscriptions } from '../../hooks/useSubscriptions';
-import RocketRideMark from '../../icons/RocketRideMark';
+import { RocketRideMark, SidebarCollapsedProvider } from 'shared';
 import RocketRideWordmark from '../../icons/RocketRideWordmark';
+import { useHostChromeState } from './HostChromeContext';
 
 // =============================================================================
 // CONSTANTS
@@ -73,6 +74,14 @@ export interface SidebarProps {
 	hideAppSwitcher?: boolean;
 	/** Callback to open a shell overlay (account, settings, environment). */
 	onOverlay: (overlay: 'account' | 'settings' | 'environment') => void;
+	/**
+	 * Server-probed edition flag (the 'saas' capability from the bootstrap
+	 * probe). Gates SaaS-only footer items — the Account overlay has no
+	 * backend on OSS/local servers, so the item is hidden there. NOTE: the
+	 * connection mode is NOT a valid signal here (it defaults to 'cloud'
+	 * regardless of the server edition).
+	 */
+	isSaas?: boolean;
 }
 
 // =============================================================================
@@ -82,7 +91,7 @@ export interface SidebarProps {
 /**
  * Props for the NavButton component.
  */
-interface NavButtonProps {
+export interface NavButtonProps {
 	/** Icon component to render. */
 	icon: IconComponent;
 	/** Text label shown when the sidebar is expanded. */
@@ -119,9 +128,12 @@ export const NavButton: React.FC<NavButtonProps> = ({ icon: Icon, label, isActiv
 				padding: collapsed ? 0 : '0 10px', margin: collapsed ? '0 auto' : 0,
 				borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13,
 				fontWeight: isActive ? 600 : 400,
-				color: isActive ? 'var(--rr-brand)' : iconColor ?? 'var(--rr-text-secondary)',
+				// Active rows use the theme's standard list highlight
+				// (--rr-bg-list-active / --rr-fg-list-active): every theme maps it
+				// to its brand color + alternate foreground.
+				color: isActive ? 'var(--rr-fg-list-active)' : iconColor ?? 'var(--rr-text-secondary)',
 				background: isActive
-					? 'color-mix(in srgb, var(--rr-brand) 20%, transparent)'
+					? 'var(--rr-bg-list-active)'
 					: hovered ? 'var(--rr-bg-surface-alt)' : 'transparent',
 				transition: 'background 100ms ease, color 100ms ease', overflow: 'hidden',
 			}}
@@ -273,9 +285,9 @@ const AppIcon: React.FC<{ name: string; iconUrl?: string; size?: number }> = ({ 
  *
  * @param props - Sidebar configuration and callbacks.
  */
-const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher, onOverlay }) => {
+const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, hideAppSwitcher, onOverlay, isSaas }) => {
 	const identity = useContext(ShellIdentityContext);
-	const { prefs, updatePrefs, setTheme, themeOptions, activeAppId, loadedApps, appManifest } = useWorkspace();
+	const { prefs, updatePrefs: _updatePrefs, setTheme, themeOptions, activeAppId, loadedApps, appManifest } = useWorkspace();
 	const { isOnDesktop } = useSubscriptions();
 
 	// --- Collapse / resize state ---------------------------------------------
@@ -293,6 +305,17 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 	// --- App's Sidebar component from loaded descriptor ----------------------
 
 	const AppSidebar = loadedApps[activeAppId]?.components?.Sidebar;
+
+	// --- Opt-in host-chrome registration (new mechanism) ---------------------
+	// `sidebarContent` is an app-declared node for the scrolling slot. Empty for
+	// every app that has not adopted the new API.
+	const { sidebarContent } = useHostChromeState();
+
+	// Whether the scrolling slot has anything to show. Drives self-hiding so the
+	// shell renders NO sidebar (and the client area spans full width) when an app
+	// provides neither a legacy sidebar component nor registered content —
+	// exactly today's behavior for such apps.
+	const hasSlotContent = !!AppSidebar || sidebarContent != null;
 
 	// --- Collapse toggle -----------------------------------------------------
 
@@ -372,11 +395,12 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const showAppSwitcher = !hideAppSwitcher && appManifest.length > 1;
 
+
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
 			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' }) },
-			{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') },
-			{ id: 'environment', label: 'Variables', icon: BxLock, onClick: () => onOverlay('environment') },
+			...(isSaas ? [{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') } satisfies SidebarFooterMenuItem] : []),
+			{ id: 'environment', label: 'Variables', icon: BxLock, dividerBefore: !isSaas, onClick: () => onOverlay('environment') },
 			// Settings is a global workspace view (shell "General" plus any installed app's
 			// settings), so it's always available. Per-app gating lives in SettingsPage.
 			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
@@ -417,11 +441,17 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
 
 		return items;
-	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay]);
+	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay, isSaas]);
 
 	// --- Don't render sidebar when not authenticated -------------------------
 
 	if (!identity) return null;
+
+	// --- Don't render sidebar when the frame has no content to hold ----------
+	// Reproduces the prior gate (which mounted the sidebar only for apps with a
+	// `components.Sidebar`): with no slot content the shell shows no sidebar and
+	// the client area spans full width.
+	if (!hasSlotContent) return null;
 
 	const sidebarWidth = collapsed ? COLLAPSED_WIDTH : width;
 
@@ -439,7 +469,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			    HEADER — AppSwitcherButton + collapse toggle
 			    ================================================================ */}
 			<div
-				style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0 }}
+				style={{ display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : undefined, height: 52, padding: collapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0, marginBottom: 10 }}
 				onMouseEnter={() => setHeaderHover(true)}
 				onMouseLeave={() => setHeaderHover(false)}
 			>
@@ -486,10 +516,18 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 			</div>
 
 			{/* ================================================================
-			    APP SIDEBAR CONTENT SLOT
+			    APP SIDEBAR CONTENT SLOT — scrolls between fixed header/footer
 			    ================================================================ */}
-			<div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+			<div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
+				{/* Legacy per-app sidebar component (unchanged mechanism). */}
 				{AppSidebar && <AppSidebar collapsed={collapsed} />}
+				{/* Opt-in app-declared sidebar content — rendered ALWAYS, including
+				    while collapsed to the icon rail. The provider exposes the
+				    collapsed flag; each component inside decides its collapsed form
+				    (SidebarMenu iconifies, free-form content returns null). */}
+				<SidebarCollapsedProvider value={collapsed}>
+					{sidebarContent}
+				</SidebarCollapsedProvider>
 			</div>
 
 			{/* ================================================================

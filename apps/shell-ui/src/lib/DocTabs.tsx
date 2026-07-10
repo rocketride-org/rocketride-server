@@ -42,7 +42,7 @@ import type { Documents, SplitOrientation } from './Documents';
 const DND_MIME = 'application/x-rr-editor';
 
 const styles = {
-	bar: (isActiveGroup: boolean, isDragOver: boolean): CSSProperties => ({
+	bar: (_isActiveGroup: boolean, isDragOver: boolean): CSSProperties => ({
 		display: 'flex',
 		height: 36,
 		flexShrink: 0,
@@ -435,7 +435,9 @@ const SplitButton: React.FC<SplitButtonProps> = ({ btnRef, open, onToggle, onClo
 
 	return (
 		<button
-			ref={btnRef}
+			// React 18 typings expect a non-nullable RefObject here; useRef(null)
+			// infers RefObject<HTMLButtonElement | null>.
+			ref={btnRef as React.RefObject<HTMLButtonElement>}
 			style={styles.toolbarBtn}
 			onClick={onToggle}
 			onBlur={handleBlur}

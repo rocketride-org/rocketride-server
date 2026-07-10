@@ -43,6 +43,7 @@ import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
 import { getCommonKeys, resolveSettingsForApp } from '../../views/settings/settingsUtils';
 import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
+import { HostChromeProvider } from './HostChromeContext';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
@@ -257,9 +258,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	useEffect(() => {
 		// When a logged-in user navigates to an app they haven't subscribed to,
 		// open the checkout flow automatically. Skip the default app (always accessible).
-		if (subGateActive) {
+		if (subGateActive && activeManifest) {
 			if (subGateTriggeredRef.current === activeAppId) return;
 			subGateTriggeredRef.current = activeAppId;
+			// AppManifestEntry structurally satisfies the minimal ShellAppEntry
+			// contract, so it is passed directly.
 			ConnectionManager.getInstance().emit('shell:subscribe', { app: activeManifest });
 		} else {
 			subGateTriggeredRef.current = null;
@@ -270,7 +273,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	if (!loaded && !seeded) return null;
 
 	// --- Derived layout info -------------------------------------------------
-	const hasSidebar = !!activeApp?.components?.Sidebar;
+	// The sidebar is always mounted (inside HostChromeProvider) and self-hides
+	// when it has no content: a legacy `components.Sidebar` or app-registered
+	// sidebar content. Apps with neither render no sidebar and the client area
+	// spans full width — exactly as before, when the sidebar was gated on
+	// `components.Sidebar` here.
 	const appName = activeApp?.branding?.appName ?? config.apps[0]?.name ?? 'RocketRide';
 	// Only show the status bar once the app has actually loaded. During the app-load gap the
 	// client area shows the boot rocket (LoadingScreen); rendering the StatusBar there made it
@@ -281,18 +288,18 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Render --------------------------------------------------------------
 	return (
 		<ShellApiConfigProvider config={mergedApiConfig}>
+		<HostChromeProvider>
 		<OverlayManager>
 		<div style={styles.shell}>
 			{/* Main row: Sidebar | Client Area | Debug Panel */}
 			<div style={styles.main}>
-				{/* Sidebar zone */}
-				{hasSidebar && (
-					<SidebarWithOverlay
-						themeConfig={config.themeConfig}
-						account={config.account}
-						hideAppSwitcher={hideAppSwitcher}
-					/>
-				)}
+				{/* Sidebar zone — always mounted; self-hides when it has no content. */}
+				<SidebarWithOverlay
+					themeConfig={config.themeConfig}
+					account={config.account}
+					hideAppSwitcher={hideAppSwitcher}
+					isSaas={(config.capabilities ?? []).includes('saas')}
+				/>
 
 				{/* Client area */}
 				<div style={styles.overlayContainer}>
@@ -342,6 +349,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 			)}
 		</div>
 		</OverlayManager>
+		</HostChromeProvider>
 		</ShellApiConfigProvider>
 	);
 };
@@ -358,13 +366,16 @@ const SidebarWithOverlay: React.FC<{
 	themeConfig: ShellConfig['themeConfig'];
 	account: ShellConfig['account'];
 	hideAppSwitcher?: boolean;
-}> = ({ themeConfig, account, hideAppSwitcher }) => {
+	/** Server-probed edition flag ('saas' capability) — gates SaaS-only menu items. */
+	isSaas?: boolean;
+}> = ({ themeConfig, account, hideAppSwitcher, isSaas }) => {
 	const onOverlay = useOverlay();
 	return (
 		<Sidebar
 			themeConfig={themeConfig}
 			account={account}
 			hideAppSwitcher={hideAppSwitcher}
+			isSaas={isSaas}
 			onOverlay={onOverlay}
 		/>
 	);

@@ -22,9 +22,11 @@ const styles = {
 interface Props {
 	/** Blob URL pointing to the spreadsheet data. */
 	content: string;
+	/** Upstream failure message when the blob could not be loaded (empty content otherwise). */
+	loadError?: string;
 }
 
-export const SpreadsheetViewer: React.FC<Props> = ({ content }) => {
+export const SpreadsheetViewer: React.FC<Props> = ({ content, loadError }) => {
 	const [html, setHtml] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
@@ -55,6 +57,8 @@ export const SpreadsheetViewer: React.FC<Props> = ({ content }) => {
 		return () => { cancelled = true; };
 	}, [content]);
 
+	// Upstream load failure wins over any local render error and over "Loading...".
+	if (loadError) return <div style={viewerStyles.message}>{loadError}</div>;
 	if (error) return <div style={viewerStyles.message}>{error}</div>;
 	if (!html) return <div style={viewerStyles.message}>Loading spreadsheet...</div>;
 	return <div style={styles.container} dangerouslySetInnerHTML={{ __html: html }} />;

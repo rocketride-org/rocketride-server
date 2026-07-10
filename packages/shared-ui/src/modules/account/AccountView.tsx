@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * AccountView — account management tabs using the shared TabPanel overlay.
+ * AccountView — account management tabs behind a stock PageViewControl strip.
  *
  * This is the pure, host-agnostic root component for the Account module.
  * All data is received as props and all server mutations are delegated to
@@ -17,11 +17,14 @@
  *  - passing the results down as `IAccountViewProps`
  */
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { TabPanel } from '../../components/tab-panel/TabPanel';
+import { TabPanelContent } from '../../components/tab-panel/TabPanelContent';
+import { PageViewControl } from '../../components/page-view-control/PageViewControl';
+import { ContentHeader } from '../../components/content-header/ContentHeader';
 import { commonStyles } from '../../themes/styles';
-import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
+import type { ITabPanelPanel } from '../../components/tab-panel/TabPanelContent';
+import type { ViewMenu } from '../../types/viewMenu';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
 import type { ActiveTask } from '../billing/components/BillingDashboard';
@@ -32,7 +35,7 @@ import { ApiKeysPanel } from './components/ApiKeysPanel';
 import { OrganizationPanel } from './components/OrganizationPanel';
 import { TeamsPanel } from './components/TeamsPanel';
 import { MembersPanel } from './components/MembersPanel';
-import { S, Modal, PermGrid, PermPill, ExpiryOpts, Avatar, relativeTime, PERM_DISPLAY } from './components/shared';
+import { S, Modal, PermGrid, PermPill, ExpiryOpts, Avatar, relativeTime } from './components/shared';
 
 // =============================================================================
 // REVEAL STYLES
@@ -95,6 +98,17 @@ const styles = {
 		borderRadius: 6,
 		cursor: 'default',
 		letterSpacing: '0.05em',
+	} as CSSProperties,
+	/**
+	 * Fills the space below the top PageViewControl strip; TabPanelContent's
+	 * 100%-height wrapper resolves against this definite flex box.
+	 */
+	pageBody: {
+		display: 'flex',
+		flexDirection: 'column',
+		flex: 1,
+		minWidth: 0,
+		minHeight: 0,
 	} as CSSProperties,
 };
 
@@ -248,9 +262,6 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	// =========================================================================
 	// PERMISSION HELPERS
 	// =========================================================================
-
-	/** The organization's ID (used for org-scoped env calls). */
-	const orgId = profile?.organization?.id;
 
 	// Build appId → app lookup for display name resolution
 	const appMap = useMemo(() => {
@@ -682,19 +693,31 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	// =========================================================================
 
 	/**
-	 * Memoized tab descriptor array for the TabPanel overlay.
-	 * Badges on API Keys, Teams, and Members show the current count when non-zero.
+	 * ViewMenu declaration — rendered by this view's own PageViewControl strip.
+	 * Counts on Billing, API Keys, Teams, and Members show when non-zero.
 	 */
-	const tabs = useMemo<ITabPanelTab[]>(
-		() => [
-			{ id: 'profile', label: 'Profile' },
-			{ id: 'billing', label: 'Billing', badge: subscriptions.length > 0 ? subscriptions.length : undefined },
-			{ id: 'api-keys', label: 'API Keys', badge: keys.filter((k) => k.active).length > 0 ? keys.filter((k) => k.active).length : undefined },
-			{ id: 'organization', label: 'Organization' },
-			{ id: 'teams', label: 'Teams', badge: teams.length > 0 ? teams.length : undefined },
-			{ id: 'members', label: 'Members', badge: members.length > 0 ? members.length : undefined },
-		],
-		[subscriptions, keys, teams, members]
+	const activeKeyCount = keys.filter((k) => k.active).length;
+	const viewMenu = useMemo<ViewMenu>(
+		() => ({
+			entries: [
+				{ id: 'profile', label: 'Profile' },
+				{ id: 'billing', label: 'Billing', ...(subscriptions.length > 0 ? { count: subscriptions.length } : {}) },
+				{ id: 'api-keys', label: 'API Keys', ...(activeKeyCount > 0 ? { count: activeKeyCount } : {}) },
+				{ id: 'organization', label: 'Organization' },
+				{ id: 'teams', label: 'Teams', ...(teams.length > 0 ? { count: teams.length } : {}) },
+				{ id: 'members', label: 'Members', ...(members.length > 0 ? { count: members.length } : {}) },
+			],
+		}),
+		[subscriptions.length, activeKeyCount, teams.length, members.length]
+	);
+
+	/** Selecting an entry switches the section and drops any team drill-down. */
+	const handleSelectSection = useCallback(
+		(id: string) => {
+			onSectionChange(id as AccountSection);
+			onActiveTeamIdChange(null);
+		},
+		[onSectionChange, onActiveTeamIdChange]
 	);
 
 	// =========================================================================
@@ -709,38 +732,53 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 		() => ({
 			profile: {
 				content: (
-					<div style={commonStyles.tabContent}>
+					<>
+						{/* Page heading — below the strip, per the style guide (tabs first, title inside each page). */}
+						<ContentHeader title="Profile" subtitle="Your identity, sign-in, and defaults for this account." />
+						<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onSetDefaultOrg={onSetDefaultOrg} onLogout={onLogout} onDeleteAccount={onDeleteAccount} />
-					</div>
+						</div>
+					</>
 				),
 			},
 			billing: {
 				content: (
-					<div style={commonStyles.tabContent}>
+					<>
+						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
+						<div style={commonStyles.tabContent}>
 						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} memberNames={memberNames} teamNames={teamNames} onUpgradeSubscription={onUpgradeSubscription} />
-					</div>
+						</div>
+					</>
 				),
 			},
 			'api-keys': {
 				content: (
-					<div style={commonStyles.tabContent}>
+					<>
+						<ContentHeader title="API Keys" subtitle="Create and revoke keys for programmatic access." />
+						<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<ApiKeysPanel keys={keys} onCreateKey={openCreateKey} onRevokeKey={openRevokeKey} />
-					</div>
+						</div>
+					</>
 				),
 			},
 			organization: {
 				content: (
-					<div style={commonStyles.tabContent}>
+					<>
+						<ContentHeader title="Organization" subtitle="Your organization's name and settings." />
+						<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} />
-					</div>
+						</div>
+					</>
 				),
 			},
 			teams: {
 				content: (
-					<div style={commonStyles.tabContent}>
+					<>
+						<ContentHeader title="Teams" subtitle="Group members and scope their permissions." />
+						<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<TeamsPanel
 							teams={teams}
@@ -768,15 +806,19 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 							isOrgAdmin={isOrgAdmin}
 							isTeamAdmin={isActiveTeamAdmin}
 						/>
-					</div>
+						</div>
+					</>
 				),
 			},
 			members: {
 				content: (
-					<div style={commonStyles.tabContent}>
+					<>
+						<ContentHeader title="Members" subtitle="Everyone in this organization and their roles." />
+						<div style={commonStyles.tabContent}>
 						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
 						<MembersPanel org={org} members={members} profile={profile} onInvite={openInvite} onChangeRole={openChangeRole} onRemove={openRemoveMember} onResendInvite={(m) => onResendInvite(m.userId)} isOrgAdmin={isOrgAdmin} />
-					</div>
+						</div>
+					</>
 				),
 			},
 		}),
@@ -789,15 +831,12 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 
 	return (
 		<div style={styles.root}>
-			<TabPanel
-				tabs={tabs}
-				activeTab={section}
-				onTabChange={(id) => {
-					onSectionChange(id as AccountSection);
-					onActiveTeamIdChange(null);
-				}}
-				panels={panels}
-			/>
+			{/* Page strip — the view renders its own tabs at the very top. */}
+			<PageViewControl menu={viewMenu} activeId={section} onSelect={handleSelectSection} />
+			{/* Page bodies fill the space below the strip. */}
+			<div style={styles.pageBody}>
+				<TabPanelContent panels={panels} activeId={section} />
+			</div>
 
 			{/* Frosted-glass overlay with a disabled status button when disconnected. */}
 			{!isConnected && (

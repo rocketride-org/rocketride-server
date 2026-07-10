@@ -119,8 +119,10 @@ export const ConnectionDetailModal: React.FC<{
 	}, [onClose]);
 
 	return (
-		<div style={commonStyles.modalOverlay} onClick={onClose}>
-			<div role="dialog" aria-modal="true" aria-labelledby={`connection-detail-title-${connection.id}`} style={styles.modalDialog} onClick={(e) => e.stopPropagation()}>
+		/* Backdrop is inert: dismissal is deliberate-only (close button / Escape)
+		   per the 2026-07-08 design decision — clicking outside must NOT close. */
+		<div style={commonStyles.modalOverlay}>
+			<div role="dialog" aria-modal="true" aria-labelledby={`connection-detail-title-${connection.id}`} style={styles.modalDialog}>
 				<div style={commonStyles.cardHeader}>
 					<span id={`connection-detail-title-${connection.id}`}>
 						#{connection.id} &mdash; {connection.clientInfo?.name || connection.clientId || `Conn #${connection.id}`}
