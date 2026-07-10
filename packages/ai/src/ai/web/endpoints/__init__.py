@@ -44,5 +44,6 @@ from .version import version
 from .shutdown import shutdown
 from .status import status
 from .auth_callback import auth_callback
+from .vscode_oauth_bounce import vscode_oauth_bounce
 
-__all__ = ['use', 'ping', 'version', 'shutdown', 'status', 'auth_callback']
+__all__ = ['use', 'ping', 'version', 'shutdown', 'status', 'auth_callback', 'vscode_oauth_bounce']
