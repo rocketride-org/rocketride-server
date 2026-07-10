@@ -110,6 +110,9 @@ const TtlSettingsDialog: React.FC<ITtlSettingsDialogProps> = ({ ttlSeconds, onCo
 	);
 	const selectRef = useRef<HTMLSelectElement>(null);
 	const dialogRef = useRef<HTMLDivElement>(null);
+	// Capture the opener synchronously during the initial render — before any
+	// effect or the custom input's autoFocus can move focus into the dialog.
+	const openerRef = useRef<HTMLElement | null>(document.activeElement as HTMLElement | null);
 
 	const isCustom = selected === CUSTOM_OPTION;
 
@@ -118,12 +121,12 @@ const TtlSettingsDialog: React.FC<ITtlSettingsDialogProps> = ({ ttlSeconds, onCo
 
 	// Restore focus to the element that opened the dialog when it closes.
 	useEffect(() => {
-		const opener = document.activeElement as HTMLElement | null;
-		return () => { opener?.focus?.(); };
+		return () => { openerRef.current?.focus?.(); };
 	}, []);
 
-	// Trap Tab focus inside the dialog while it is open.
+	// Close on Escape and trap Tab focus inside the dialog while it is open.
 	const handleTrapKeyDown = useCallback((e: React.KeyboardEvent) => {
+		if (e.key === 'Escape') { onCancel(); return; }
 		if (e.key !== 'Tab') return;
 		const root = dialogRef.current;
 		if (!root) return;
@@ -138,7 +141,7 @@ const TtlSettingsDialog: React.FC<ITtlSettingsDialogProps> = ({ ttlSeconds, onCo
 			e.preventDefault();
 			first.focus();
 		}
-	}, []);
+	}, [onCancel]);
 
 	const parsedMinutes = Number(customMinutes);
 	const customValid = customMinutes.trim() !== '' && Number.isInteger(parsedMinutes) && parsedMinutes >= 1;
@@ -169,7 +172,6 @@ const TtlSettingsDialog: React.FC<ITtlSettingsDialogProps> = ({ ttlSeconds, onCo
 						onChange={(e) => setSelected(e.target.value)}
 						onKeyDown={(e) => {
 							if (e.key === 'Enter') handleConfirm();
-							if (e.key === 'Escape') onCancel();
 						}}
 					>
 						{TTL_PRESETS.map((p, i) => (
@@ -191,7 +193,6 @@ const TtlSettingsDialog: React.FC<ITtlSettingsDialogProps> = ({ ttlSeconds, onCo
 								onChange={(e) => setCustomMinutes(e.target.value)}
 								onKeyDown={(e) => {
 									if (e.key === 'Enter') handleConfirm();
-									if (e.key === 'Escape') onCancel();
 								}}
 								placeholder="Minutes"
 							/>
