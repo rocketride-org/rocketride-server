@@ -12,7 +12,6 @@
  *
  * Styling uses only predefined --rr-* CSS custom property tokens so the view
  * automatically adapts to every RocketRide theme (light, dark, VS Code, etc.).
- * ChatView never imports shell-ui: the disabled state arrives via `isConnected`.
  */
 
 import React, { type CSSProperties } from 'react';
@@ -25,7 +24,7 @@ import { ChatInputField } from './components/ChatInputField';
 // STYLES
 // =============================================================================
 
-const styles = {
+const S = {
 	/** Root — fills whatever container the host provides. */
 	root: {
 		...commonStyles.columnFill,
@@ -39,19 +38,10 @@ const styles = {
 // COMPONENT
 // =============================================================================
 
-/**
- * Renders the chat surface (message thread + composer).
- *
- * @param props - {@link IChatViewProps}. The composer is disabled whenever
- *   `isConnected` is false; `emptyTitle` / `emptyDescription` configure the
- *   EmptyState for new conversations; `leadingInputSlot` is rendered before the
- *   input (reserved for future attachments).
- * @returns The chat view element.
- */
-const ChatView: React.FC<IChatViewProps> = ({ messages, isTyping, isConnected, onSend, placeholder, emptyTitle, emptyDescription, leadingInputSlot }) => (
-	<div style={styles.root}>
-		<MessageList messages={messages} isTyping={isTyping} emptyTitle={emptyTitle} emptyDescription={emptyDescription} />
-		<ChatInputField onSend={onSend} disabled={!isConnected} placeholder={placeholder} leadingInputSlot={leadingInputSlot} />
+const ChatView: React.FC<IChatViewProps> = ({ messages, isTyping, isConnected, onSend, placeholder }) => (
+	<div style={S.root}>
+		<MessageList messages={messages} isTyping={isTyping} />
+		<ChatInputField onSend={onSend} disabled={!isConnected} placeholder={placeholder} />
 	</div>
 );
 

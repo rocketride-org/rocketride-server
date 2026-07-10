@@ -298,7 +298,6 @@ class ConnectResult(TypedDict, total=False):
         defaultTeam (str): ID of the team selected as the default context.
         organization (OrgInfo | None): The organisation the user belongs to, or None.
         apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
-        serverVersion (str): Version string of the server that handled the handshake; newer servers only.
         waitlisted (bool): True when authenticated but not yet granted full app access.
     """
 
@@ -316,7 +315,6 @@ class ConnectResult(TypedDict, total=False):
     defaultTeam: str
     organization: OrgInfo
     capabilities: list[str]
-    serverVersion: str
     sysPermissions: list[str]
     credits: dict
     apps: list[AppManifestEntry]

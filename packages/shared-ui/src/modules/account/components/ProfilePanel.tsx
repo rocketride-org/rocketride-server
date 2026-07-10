@@ -7,198 +7,16 @@
  * ProfilePanel — the Profile tab within AccountView.
  *
  * Displays the user's avatar card with identity information, organization
- * and team memberships with "Set default" actions, and an inline Edit Profile
- * modal. Grouped sections render as stock Cards. All server interactions are
- * delegated to the host via callback props.
+ * and team memberships with "Set default" actions, a Sign Out button, and
+ * an inline Edit Profile modal. All server interactions are delegated to
+ * the host via callback props.
  */
 
 import React, { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
-import { Card } from '../../../components/card/Card';
-import { Button } from '../../../components/button/Button';
 import type { ConnectResult, ProfileUpdate } from '../types';
-import { S, Badge, Avatar, Modal, initials, avatarColor } from './shared';
-
-// =============================================================================
-// STYLES
-// =============================================================================
-
-const styles = {
-	/** Vertical stack of the panel's cards (standard 16px rhythm). */
-	stack: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: 16,
-	} as CSSProperties,
-
-	/** Identity card inner row: avatar + identity block + edit action. */
-	identityRow: {
-		padding: '24px 24px 20px',
-		display: 'flex',
-		alignItems: 'center',
-		gap: 18,
-	} as CSSProperties,
-
-	/**
-	 * Large circular avatar with a deterministic color background.
-	 *
-	 * @param seed - Name or email seeding the color.
-	 */
-	avatarLarge: (seed: string): CSSProperties => ({
-		width: 64,
-		height: 64,
-		borderRadius: '50%',
-		background: avatarColor(seed),
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		fontSize: 24,
-		fontWeight: 700,
-		color: 'var(--rr-fg-button)',
-		flexShrink: 0,
-	}),
-
-	/** Flex-growing identity text block. */
-	identityInfo: {
-		flex: 1,
-		minWidth: 0,
-	} as CSSProperties,
-
-	/** Display name line. */
-	displayName: {
-		fontSize: 18,
-		fontWeight: 700,
-		color: 'var(--rr-text-primary)',
-		marginBottom: 4,
-	} as CSSProperties,
-
-	/** Preferred username line beneath the display name. */
-	username: {
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
-		marginBottom: 12,
-	} as CSSProperties,
-
-	/** Wrapping row of contact entries (email / phone). */
-	contactRow: {
-		display: 'flex',
-		flexWrap: 'wrap',
-		gap: '4px 16px',
-	} as CSSProperties,
-
-	/** One contact entry: value text + verification pill. */
-	contactItem: {
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
-		display: 'flex',
-		alignItems: 'center',
-		gap: 5,
-	} as CSSProperties,
-
-	/** Green "Verified" pill next to a verified email / phone. */
-	verifiedPill: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: 3,
-		fontSize: 10,
-		fontWeight: 600,
-		padding: '1px 6px',
-		borderRadius: 4,
-		background: 'var(--rr-bg-surface-alt)',
-		color: 'var(--rr-color-success)',
-	} as CSSProperties,
-
-	/** Amber "Unverified" pill next to an unverified email / phone. */
-	unverifiedPill: {
-		fontSize: 10,
-		fontWeight: 600,
-		padding: '1px 5px',
-		borderRadius: 4,
-		background: 'var(--rr-bg-surface-alt)',
-		color: 'var(--rr-color-warning)',
-	} as CSSProperties,
-
-	/**
-	 * Membership org row: dimmed when the org is not the active one.
-	 *
-	 * @param active - Whether the org is the user's active organization.
-	 */
-	orgRow: (active: boolean): CSSProperties => ({
-		...S.rowItem,
-		borderBottom: 'none',
-		opacity: active ? 1 : 0.45,
-	}),
-
-	/** Green check label for the active org / default team. */
-	activeLabel: {
-		fontSize: 11,
-		color: 'var(--rr-color-success)',
-		fontWeight: 600,
-	} as CSSProperties,
-
-	/** Indented "Teams" caption above the active org's team rows. */
-	teamsCaption: {
-		paddingLeft: 40,
-		paddingTop: 4,
-		paddingBottom: 4,
-	} as CSSProperties,
-
-	/** Small caption text for the "Teams" label. */
-	teamsCaptionText: {
-		...commonStyles.labelUppercase,
-		fontSize: 9,
-	} as CSSProperties,
-
-	/**
-	 * Team row under the active org: indented, tight vertical padding, and a
-	 * divider only after the last team when another org row follows.
-	 *
-	 * @param isLast    - Whether this is the last team in the org.
-	 * @param needsRule - Whether a divider should follow (another org is next).
-	 */
-	teamRow: (isLast: boolean, needsRule: boolean): CSSProperties => ({
-		...S.rowItem,
-		paddingLeft: 40,
-		paddingRight: 60,
-		paddingTop: 2,
-		paddingBottom: isLast ? 12 : 2,
-		borderBottom: isLast && needsRule ? '1px solid var(--rr-border)' : 'none',
-	}),
-
-	/**
-	 * Small square team chip with a deterministic color background.
-	 *
-	 * @param name - Team name seeding the color.
-	 */
-	teamChip: (name: string): CSSProperties => ({
-		width: 20,
-		height: 20,
-		borderRadius: 5,
-		background: avatarColor(name),
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		fontSize: 10,
-		fontWeight: 700,
-		color: 'var(--rr-fg-button)',
-		flexShrink: 0,
-	}),
-
-	/** Inline error message beneath the edit modal fields. */
-	modalError: {
-		fontSize: 11,
-		color: 'var(--rr-color-error)',
-		marginTop: 4,
-	} as CSSProperties,
-
-	/** Read-only input treatment (login name). */
-	inputReadOnly: {
-		...commonStyles.inputField,
-		opacity: 0.6,
-		cursor: 'default',
-	} as CSSProperties,
-};
+import { S, Badge, PermPill, Avatar, Modal, initials, avatarColor } from './shared';
 
 // =============================================================================
 // PROPS
@@ -227,7 +45,23 @@ export interface ProfilePanelProps {
 // =============================================================================
 
 /** A small green "Verified" pill shown next to a verified email or phone number. */
-const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} Verified</span>;
+const VerifiedBadge: React.FC = () => (
+	<span
+		style={{
+			display: 'inline-flex',
+			alignItems: 'center',
+			gap: 3,
+			fontSize: 10,
+			fontWeight: 600,
+			padding: '1px 6px',
+			borderRadius: 4,
+			background: 'var(--rr-bg-surface-alt)',
+			color: 'var(--rr-color-success)',
+		}}
+	>
+		{'\u2713'} Verified
+	</span>
+);
 
 // =============================================================================
 // PROFILE PANEL
@@ -238,9 +72,9 @@ const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} 
  *
  * Displays a large avatar card with the user's identity information,
  * a list of their organizations and team memberships with a "Set default"
- * action per team, and an inline Edit Profile modal.
+ * action per team, a Sign Out button, and an inline Edit Profile modal.
  */
-export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onSetDefaultOrg }) => {
+export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onSetDefaultOrg, onLogout, onDeleteAccount }) => {
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
 	 * Called both on mount and whenever the underlying data changes, so the
@@ -300,91 +134,93 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 	};
 
 	// Prefer the server-side profile value over the cached auth token value.
-	const displayName = profile?.displayName || authUser?.displayName || '—';
+	const displayName = profile?.displayName || authUser?.displayName || '\u2014';
 	const email = profile?.email || authUser?.email || '';
 	const org = profile?.organization ?? authUser?.organization ?? null;
 	const memberships = profile?.memberships ?? (org ? [org] : []);
 	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
 
 	return (
-		<section style={styles.stack}>
-			{/* Identity card — headerless Card with the padded avatar row. */}
-			<Card noBodyPadding>
-				<div style={styles.identityRow}>
+		<section>
+			<div style={{ ...commonStyles.card, marginBottom: 14 }}>
+				<div style={{ padding: '24px 24px 20px', display: 'flex', alignItems: 'center', gap: 18 }}>
 					{/* Avatar */}
-					<div style={styles.avatarLarge(displayName || email)}>{initials(displayName, email)}</div>
+					<div style={{ width: 64, height: 64, borderRadius: '50%', background: avatarColor(displayName || email), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{initials(displayName, email)}</div>
 
 					{/* Identity */}
-					<div style={styles.identityInfo}>
-						<div style={styles.displayName}>{displayName}</div>
-						{(profile?.preferredUsername || authUser?.preferredUsername) && <div style={styles.username}>{profile?.preferredUsername || authUser?.preferredUsername}</div>}
-						<div style={styles.contactRow}>
+					<div style={{ flex: 1, minWidth: 0 }}>
+						<div style={{ fontSize: 18, fontWeight: 700, color: 'var(--rr-text-primary)', marginBottom: 4 }}>{displayName}</div>
+						{(profile?.preferredUsername || authUser?.preferredUsername) && <div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginBottom: 12 }}>{profile?.preferredUsername || authUser?.preferredUsername}</div>}
+						<div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '4px 16px' }}>
 							{(profile?.email || authUser?.email) && (
-								<span style={styles.contactItem}>
+								<span style={{ fontSize: 12, color: 'var(--rr-text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
 									{profile?.email || authUser?.email}
 									{/* Show verified / unverified badge only when the server has provided the flag. */}
-									{profile?.emailVerified !== undefined && (profile.emailVerified ? <VerifiedBadge /> : <span style={styles.unverifiedPill}>Unverified</span>)}
+									{profile?.emailVerified !== undefined && (profile.emailVerified ? <VerifiedBadge /> : <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: 'var(--rr-bg-surface-alt)', color: 'var(--rr-color-warning)' }}>Unverified</span>)}
 								</span>
 							)}
 							{(profile?.phoneNumber || authUser?.phoneNumber) && (
-								<span style={styles.contactItem}>
+								<span style={{ fontSize: 12, color: 'var(--rr-text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
 									{profile?.phoneNumber || authUser?.phoneNumber}
-									{profile?.phoneNumberVerified !== undefined && (profile.phoneNumberVerified ? <VerifiedBadge /> : <span style={styles.unverifiedPill}>Unverified</span>)}
+									{profile?.phoneNumberVerified !== undefined && (profile.phoneNumberVerified ? <VerifiedBadge /> : <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: 'var(--rr-bg-surface-alt)', color: 'var(--rr-color-warning)' }}>Unverified</span>)}
 								</span>
 							)}
 						</div>
 					</div>
 
-					<Button variant="ghost" small onClick={openEdit}>
+					<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={openEdit}>
 						Edit Profile
-					</Button>
+					</button>
 				</div>
-			</Card>
+			</div>
 
-			{/* Organizations / workspaces card with team memberships. */}
 			{memberships.length > 0 && (
-				<Card header="Organizations / Workspaces" noBodyPadding>
+				<div style={{ ...commonStyles.card, marginBottom: 14 }}>
+					<div style={commonStyles.cardHeader}>
+						<span style={commonStyles.labelUppercase}>Organizations / Workspaces</span>
+					</div>
 					<div style={S.rowList}>
 						{memberships.map((o, oi) => {
 							const isActive = o.id === defaultOrgId;
+							const inactiveOpacity = isActive ? 1 : 0.45;
 							return (
 								<React.Fragment key={o.id}>
 									{/* Org row */}
-									<div style={styles.orgRow(isActive)}>
+									<div style={{ ...S.rowItem, borderBottom: 'none', opacity: inactiveOpacity }}>
 										<Avatar name={o.name} size={24} square />
 										<div style={S.rowInfo}>
 											<div style={S.rowName}>{o.name}</div>
 										</div>
 										{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
 										{isActive ? (
-											<span style={styles.activeLabel}>{'✓'} Active</span>
+											<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Active</span>
 										) : (
-											<Button variant="ghost" small onClick={() => onSetDefaultOrg(o.id)}>
+											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton, opacity: 1 } as CSSProperties} onClick={() => onSetDefaultOrg(o.id)}>
 												Switch to
-											</Button>
+											</button>
 										)}
 									</div>
 									{/* Teams — only shown for the active org */}
 									{isActive && o.teams.length > 0 && (
 										<>
-											<div style={styles.teamsCaption}>
-												<span style={styles.teamsCaptionText}>Teams</span>
+											<div style={{ paddingLeft: 40, paddingTop: 4, paddingBottom: 4 }}>
+												<span style={{ ...commonStyles.labelUppercase, fontSize: 9 }}>Teams</span>
 											</div>
 											{o.teams.map((t, i) => {
 												const isDefaultTeam = authUser?.defaultTeam === t.id;
 												const isLast = i === o.teams.length - 1;
 												return (
-													<div key={t.id} style={styles.teamRow(isLast, oi < memberships.length - 1)}>
-														<div style={styles.teamChip(t.name)}>{t.name[0]}</div>
+													<div key={t.id} style={{ ...S.rowItem, paddingLeft: 40, paddingRight: 60, paddingTop: 2, paddingBottom: isLast ? 12 : 2, borderBottom: isLast && oi < memberships.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
+														<div style={{ width: 20, height: 20, borderRadius: 5, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
 														<div style={S.rowInfo}>
 															<div style={S.rowName}>{t.name}</div>
 														</div>
 														{isDefaultTeam ? (
-															<span style={styles.activeLabel}>{'✓'} Default</span>
+															<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Default</span>
 														) : (
-															<Button variant="ghost" small onClick={() => onSetDefaultTeam(t.id)}>
+															<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
 																Set default
-															</Button>
+															</button>
 														)}
 													</div>
 												);
@@ -395,7 +231,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 							);
 						})}
 					</div>
-				</Card>
+				</div>
 			)}
 
 			{/* -- Edit Profile Dialog -- */}
@@ -405,12 +241,12 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 					onClose={closeEdit}
 					footer={
 						<>
-							<Button variant="ghost" onClick={closeEdit} disabled={saving}>
+							<button style={{ ...commonStyles.buttonSecondary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={closeEdit} disabled={saving}>
 								Cancel
-							</Button>
-							<Button variant="primary" onClick={handleSave} disabled={saving}>
-								{saving ? 'Saving…' : 'Save Changes'}
-							</Button>
+							</button>
+							<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleSave} disabled={saving}>
+								{saving ? 'Saving\u2026' : 'Save Changes'}
+							</button>
 						</>
 					}
 				>
@@ -422,7 +258,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Login Name</div>
-							<input value={fields.preferredUsername} readOnly style={styles.inputReadOnly} />
+							<input value={fields.preferredUsername} readOnly style={{ ...commonStyles.inputField, opacity: 0.6, cursor: 'default' }} />
 							<div style={commonStyles.textMuted}>Used to sign in -- contact support to change</div>
 						</div>
 						<div style={S.field}>
@@ -442,7 +278,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 							<input value={fields.phoneNumber} onChange={set('phoneNumber')} placeholder="+15550000000" style={commonStyles.inputField} />
 						</div>
 					</div>
-					{error && <div style={styles.modalError}>{error}</div>}
+					{error && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 4 }}>{error}</div>}
 				</Modal>
 			)}
 		</section>

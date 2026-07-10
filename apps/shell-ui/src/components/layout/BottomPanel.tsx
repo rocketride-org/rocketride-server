@@ -48,11 +48,7 @@ const styles = {
 // Types
 // =============================================================================
 
-// Exported so the frozen shell-api bundle can name the prop type of
-// `shellApi.BottomPanel` (dts-bundle-generator runs with
-// --export-referenced-types=false, so referenced types must be exported at
-// their source, matching the other zone components' prop-type exports).
-export interface BottomPanelProps {
+interface BottomPanelProps {
 	onClose: () => void;
 }
 

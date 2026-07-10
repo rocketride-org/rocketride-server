@@ -25,9 +25,9 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
-import { useShellConnection, useSidebarContent } from 'shell-ui';
-import { Explorer, BxDownload, BxDockLeft, useSidebarCollapsed } from 'shared';
+import type { ShellSidebarProps } from 'shell-ui';
+import { useShellConnection } from 'shell-ui';
+import { Explorer, BxDownload, BxDockLeft } from 'shared';
 import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction, IVirtualFileSystem } from 'shared';
 import { getDocs } from './docs';
 import { getMediaInfo } from './mediaTypes';
@@ -45,52 +45,6 @@ const EXPLORER_CONFIG: ExplorerConfig = {
 	allowFolders: true,
 };
 
-/**
- * No-op VFS for the file Explorer.
- *
- * The Explorer sidebar performs all file operations through the onFileManage /
- * onMove / onUpload callbacks (which call the RocketRide client directly), so
- * this stub satisfies the Explorer contract without exposing raw VFS access.
- */
-const NOOP_VFS: IVirtualFileSystem = {
-	list: async () => [],
-	read: async () => null,
-	write: async () => {},
-	rename: async () => {},
-	delete: async () => {},
-	mkdir: async () => {},
-};
-
-// =============================================================================
-// STYLES
-// =============================================================================
-
-const styles = {
-	/** Sidebar content wrapper — fills the shell frame's scrolling slot. */
-	sidebar: {
-		display: 'flex',
-		flexDirection: 'column',
-		height: '100%',
-	} as CSSProperties,
-};
-
-// =============================================================================
-// COLLAPSED GATE
-// =============================================================================
-
-/**
- * Root gate for the registered sidebar node. The shell renders registered
- * sidebar content even while the sidebar is collapsed to its icon rail; this
- * free-form file-tree content has no icon-rail form (a future per-app design
- * task), so the gate reads the shell-provided collapsed flag and renders
- * nothing while collapsed — preserving the previous look.
- */
-const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) => {
-	// Collapsed flag provided by the shell around the sidebar slot.
-	const collapsed = useSidebarCollapsed();
-	return collapsed ? null : <>{children}</>;
-};
-
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -98,15 +52,11 @@ const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) =
 /**
  * Sidebar for the File Explorer app.
  *
- * Registration-only component (models-ui / rocket-ui pattern): it builds the
- * file-tree Explorer node and publishes it into the shell sidebar's scrolling
- * slot via useSidebarContent(), so it composes with the shell's fixed
- * header/footer. Renders null itself; mounted by ExplorerApp (not the legacy
- * components.Sidebar slot). The registered node's root SidebarCollapsedGate
- * hides this free-form content while the sidebar is collapsed. Files open in
- * the Documents tab system on click.
+ * Uses the shared Explorer component for the file tree with built-in
+ * rename, delete, create file, and create folder support.  Files are
+ * opened in the Documents tab system on click.
  */
-const ExplorerSidebar: React.FC = () => {
+const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 	const { client, isConnected } = useShellConnection();
 	const [entries, setEntries] = useState<ExplorerEntry[]>([]);
 
@@ -331,15 +281,28 @@ const ExplorerSidebar: React.FC = () => {
 		{ id: 'download', label: 'Download', icon: <BxDownload size={16} />, onSelect: handleDownload },
 	], [buildOpenWithChildren, handleDownload]);
 
-	// --- Register sidebar content ---------------------------------------------
+	// --- Collapsed mode -------------------------------------------------------
 
-	// Build the file-tree node and publish it to the shell sidebar's scrolling
-	// slot. The shell frame owns the collapse behaviour and hides free-form
-	// content while collapsed, so no collapsed icon rail is drawn here.
-	const content = (
-		<div style={styles.sidebar}>
+	if (collapsed) {
+		return null;
+	}
+
+	// --- Expanded mode --------------------------------------------------------
+
+	// Use a no-op VFS for the Explorer — we handle all operations via callbacks
+	const noopVfs: IVirtualFileSystem = {
+		list: async () => [],
+		read: async () => null,
+		write: async () => {},
+		rename: async () => {},
+		delete: async () => {},
+		mkdir: async () => {},
+	};
+
+	return (
+		<div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 			<Explorer
-				vfs={NOOP_VFS}
+				vfs={noopVfs}
 				config={EXPLORER_CONFIG}
 				entries={entries}
 				isConnected={isConnected}
@@ -353,13 +316,6 @@ const ExplorerSidebar: React.FC = () => {
 			/>
 		</div>
 	);
-
-	// Publish to the shell sidebar slot (behind the collapse gate); withdrawn
-	// automatically on unmount.
-	useSidebarContent(<SidebarCollapsedGate>{content}</SidebarCollapsedGate>);
-
-	// Registration-only component — nothing rendered inline.
-	return null;
 };
 
 // =============================================================================

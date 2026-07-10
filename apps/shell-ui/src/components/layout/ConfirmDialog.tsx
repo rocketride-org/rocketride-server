@@ -5,7 +5,7 @@ import { commonStyles } from 'shared/themes/styles';
 // TYPES
 // =============================================================================
 
-export interface ConfirmDialogProps {
+interface ConfirmDialogProps {
 	title: string;
 	message: string;
 	confirmLabel?: string;
@@ -42,15 +42,11 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 	}, [onCancel]);
 
 	return (
-		/* Backdrop is inert: dismissal is deliberate-only (✕ / Cancel / Escape)
-		   per the 2026-07-08 design decision — clicking outside must NOT close. */
-		<div style={commonStyles.modalOverlay}>
+		<div style={commonStyles.modalOverlay} onClick={onCancel}>
 			<div
 				style={{ ...commonStyles.dialog, padding: '20px 24px', minWidth: 320, maxWidth: 420 }}
+				onClick={(e) => e.stopPropagation()}
 			>
-				{/* No top-right ✕: this dialog dismisses via its Cancel button (and
-				    Escape). Refined popup policy 2026-07-08 — no redundant ✕ when an
-				    explicit dismiss control already exists. */}
 				<div style={{ fontSize: 'var(--rr-font-size-h2)', fontWeight: 600, color: 'var(--rr-text-primary)', marginBottom: 8 }}>
 					{dialogTitle}
 				</div>

@@ -164,6 +164,7 @@ function FilesInfo<
 	registry,
 	preview,
 	onRemove,
+	options,
 }: {
 	filesInfo: FileInfoType[];
 	registry: Registry<T, S, F>;

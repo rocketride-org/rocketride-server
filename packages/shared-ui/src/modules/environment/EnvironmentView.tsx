@@ -12,20 +12,16 @@
  * client calls in shell-ui, postMessage bridge in VS Code).
  *
  * Rendering modes:
- *   - Single slot: no tab strip, renders scope cards directly
- *   - Multiple slots: PageViewControl strip with a tab per slot
- *     (e.g. Development / Deployment)
+ *   - Single slot: no tab bar, renders scope cards directly
+ *   - Multiple slots: TabPanel with a pill per slot (e.g. Development / Deployment)
  *   - Per slot: OSS server → single "Server" card; SaaS → Org/Team/User cards
  *   - Disconnected slot → empty-state message
  */
 
 import React, { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { TabPanelContent } from '../../components/tab-panel/TabPanelContent';
-import { PageViewControl } from '../../components/page-view-control/PageViewControl';
-import { ContentHeader } from '../../components/content-header/ContentHeader';
-import type { ITabPanelPanel } from '../../components/tab-panel/TabPanelContent';
-import type { ViewMenu } from '../../types/viewMenu';
+import { TabPanel } from '../../components/tab-panel/TabPanel';
+import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import { commonStyles } from '../../themes/styles';
 import { EnvScopeCard } from '../account/components/EnvironmentPanel';
 
@@ -90,27 +86,15 @@ const styles = {
 		...commonStyles.columnFill,
 	} as CSSProperties,
 
-	/** Content area when below the PageViewControl strip (multi-slot mode). */
+	/** Content area when inside a TabPanel. */
 	content: {
 		...commonStyles.tabContent,
 	} as CSSProperties,
 
-	/** Content area in single-slot mode (no tab strip). */
+	/** Content area in single-slot mode (no TabPanel / no pill bar). */
 	contentSingle: {
 		...commonStyles.tabContent,
 		paddingTop: 30,
-	} as CSSProperties,
-
-	/**
-	 * Fills the space below the top PageViewControl strip; TabPanelContent's
-	 * 100%-height wrapper resolves against this definite flex box.
-	 */
-	pageBody: {
-		display: 'flex',
-		flexDirection: 'column',
-		flex: 1,
-		minWidth: 0,
-		minHeight: 0,
 	} as CSSProperties,
 
 	/** Empty-state message shown when a slot is not connected. */
@@ -239,7 +223,7 @@ const SlotPanel: React.FC<{
  *
  * Renders env scope cards for one or more connection slots. When there
  * is a single slot, cards render directly. When there are multiple
- * slots, a PageViewControl strip switches between them.
+ * slots, a TabPanel provides a pill bar to switch between them.
  *
  * @param props - Environment view configuration and callbacks.
  */
@@ -256,10 +240,8 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({
 
 	const isSingle = slots.length <= 1;
 
-	// ── ViewMenu (multi-slot only; single/empty slot has no sub-views) ──
-	// Only the multi-slot layout renders a PageViewControl strip; single-slot
-	// renders cards directly with no strip.
-	const viewMenu: ViewMenu | null = isSingle ? null : { entries: slots.map((s) => ({ id: s.id, label: s.label })) };
+	// ── Build tab definitions ──────────────────────────────────────────
+	const tabs: ITabPanelTab[] = slots.map((s) => ({ id: s.id, label: s.label }));
 
 	const panels: Record<string, ITabPanelPanel> = {};
 	for (const slot of slots) {
@@ -281,12 +263,8 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({
 	if (slots.length === 0) {
 		return (
 			<div style={styles.container}>
-				<ContentHeader
-					title="Environment Variables"
-					subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade — a user variable overrides the same key on the team, which overrides the organization."
-				/>
 				{error && <div style={styles.errorBanner}>{error}</div>}
-				<div style={{ padding: '16px 24px', color: 'var(--rr-text-secondary)', fontFamily: 'var(--rr-font-family)' }}>
+				<div style={{ padding: 16, color: 'var(--rr-text-secondary)', fontFamily: 'var(--rr-font-family)' }}>
 					No connection slots available.
 				</div>
 			</div>
@@ -295,20 +273,11 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({
 
 	return (
 		<div style={styles.container}>
-			{/* Page heading — what this page is and how the scopes interact. */}
-			<ContentHeader
-				title="Environment Variables"
-				subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade — a user variable overrides the same key on the team, which overrides the organization."
-			/>
-
-			{/* Page strip — connection-slot tabs (multi-slot only). */}
-			{viewMenu && <PageViewControl menu={viewMenu} activeId={activeTab} onSelect={setActiveTab} />}
-
 			{/* Page-level error banner */}
 			{error && <div style={styles.errorBanner}>{error}</div>}
 
 			{isSingle ? (
-				// ── Single slot — no tab strip ──────────────────────────────
+				// ── Single slot — no tab bar ────────────────────────────────
 				<SlotPanel
 					slot={slots[0]}
 					single
@@ -318,10 +287,13 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({
 					requiredKeys={requiredKeys}
 				/>
 			) : (
-				// ── Multiple slots — bodies fill the space below the strip ──
-				<div style={styles.pageBody}>
-					<TabPanelContent panels={panels} activeId={activeTab} />
-				</div>
+				// ── Multiple slots — tab bar ────────────────────────────────
+				<TabPanel
+					tabs={tabs}
+					activeTab={activeTab}
+					onTabChange={setActiveTab}
+					panels={panels}
+				/>
 			)}
 		</div>
 	);

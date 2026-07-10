@@ -11,7 +11,7 @@
 // =============================================================================
 
 import React, { useState, type CSSProperties } from 'react';
-import { RocketRideMark } from 'shared';
+import RocketRideMark from '../../icons/RocketRideMark';
 
 const container: CSSProperties = {
 	display: 'flex',

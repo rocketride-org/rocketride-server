@@ -45,7 +45,6 @@ import type { ChatMessage } from 'shared';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { loadChat, saveChat, listChatDir, renameChat, deleteChat } from './chatStore';
 import pipeline from './aparavi.pipe';
-import AparaviSidebar from './AparaviSidebar';
 
 // =============================================================================
 // STYLES
@@ -79,25 +78,6 @@ const styles = {
 		fontSize: 14,
 		flexDirection: 'column',
 		gap: 12,
-	} as CSSProperties,
-	/** Title line inside the empty-group welcome message. */
-	welcomeTitle: {
-		fontSize: 16,
-		fontWeight: 600,
-	} as CSSProperties,
-	/** Per-tab editor pane — kept mounted so chat history survives tab switches. */
-	tabPane: {
-		flex: 1,
-		minHeight: 0,
-		flexDirection: 'column',
-	} as CSSProperties,
-	/** Active tab pane (visible). */
-	tabPaneVisible: {
-		display: 'flex',
-	} as CSSProperties,
-	/** Inactive tab pane (hidden but mounted). */
-	tabPaneHidden: {
-		display: 'none',
 	} as CSSProperties,
 };
 
@@ -227,10 +207,6 @@ const AparaviAppReady: React.FC<{
 
 	return (
 		<div style={styles.container}>
-			{/* Register the chat-file Explorer into the shell sidebar frame.
-			    Renders null; mounted here so it shares the ready Documents
-			    singleton (active-file highlight, file actions). */}
-			<AparaviSidebar />
 			<DocSplitLayout
 				docs={docs}
 				renderPane={(groupId: string) => {
@@ -257,7 +233,7 @@ const AparaviAppReady: React.FC<{
 							<div style={styles.content}>
 								{group.editorIds.length === 0 ? (
 									<div style={styles.welcome}>
-										<div style={styles.welcomeTitle}>Aparavi AQL</div>
+										<div style={{ fontSize: 16, fontWeight: 600 }}>Aparavi AQL</div>
 										<div>Create a new chat from the sidebar.</div>
 									</div>
 								) : (
@@ -268,7 +244,12 @@ const AparaviAppReady: React.FC<{
 										return (
 											<div
 												key={editorId}
-												style={{ ...styles.tabPane, ...(isActive ? styles.tabPaneVisible : styles.tabPaneHidden) }}
+												style={{
+													display: isActive ? 'flex' : 'none',
+													flex: 1,
+													minHeight: 0,
+													flexDirection: 'column',
+												}}
 											>
 												<ChatTab
 													uri={editor.documentUri}

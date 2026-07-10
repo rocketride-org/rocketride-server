@@ -26,17 +26,15 @@
 
 import type { AppDescriptor } from 'shell-ui';
 import ExplorerApp from './ExplorerApp';
+import ExplorerSidebar from './ExplorerSidebar';
 
 /**
  * AppDescriptor for the File Explorer application.
  *
  * Browse, view, and edit files stored on the RocketRide server.
  * Multi-tab + split-pane support via Documents library.
- * The sidebar is no longer a `components.Sidebar` slot: ExplorerApp mounts
- * ExplorerSidebar, which registers its file-tree content through the shell
- * frame via useSidebarContent, so it composes with the shell's fixed
- * header/footer (rocket-ui / models-ui pattern). Requires authentication
- * (authenticated: true in manifest).
+ * Sidebar with file tree; status bar enabled in manifest.
+ * Requires authentication (authenticated: true in manifest).
  */
 const EXPLORER_APP: AppDescriptor = {
 	id: 'rocketride.explorer',
@@ -46,6 +44,7 @@ const EXPLORER_APP: AppDescriptor = {
 	},
 	components: {
 		App: ExplorerApp,
+		Sidebar: ExplorerSidebar,
 	},
 };
 

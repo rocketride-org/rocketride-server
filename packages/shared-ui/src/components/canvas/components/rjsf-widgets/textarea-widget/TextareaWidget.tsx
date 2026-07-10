@@ -42,9 +42,7 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 	);
 
 	const handleKeyDown = useCallback(
-		// MUI TextField forwards onKeyDown from its root <div>, so the event is
-		// typed to HTMLDivElement even though the editable surface is a textarea.
-		(e: KeyboardEvent<HTMLDivElement>) => {
+		(e: KeyboardEvent<HTMLTextAreaElement>) => {
 			if (!autocomplete.isOpen) return;
 			if (e.key === 'ArrowDown') {
 				e.preventDefault();

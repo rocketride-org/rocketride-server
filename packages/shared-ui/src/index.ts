@@ -61,8 +61,8 @@ export type { IntegrationTabId } from './components/pipeline-actions/endpointInt
 
 export * from './components/BoxIcon';
 
-export { TabPanelContent } from './components/tab-panel/TabPanelContent';
-export type { ITabPanelContentProps, ITabPanelPanel } from './components/tab-panel/TabPanelContent';
+export { TabPanel } from './components/tab-panel/TabPanel';
+export type { ITabPanelTab, ITabPanelProps } from './components/tab-panel/TabPanel';
 
 // --- Sidebar footer ----------------------------------------------------------
 export { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
@@ -106,63 +106,3 @@ export { useFixedPopupPosition } from './hooks/useFixedPopupPosition';
 export { useAnnouncements } from './hooks/useAnnouncements';
 export type { Announcement } from './hooks/useAnnouncements';
 export { PopupRow } from './components/PopupRow';
-
-// --- Stock primitives (style guide section 6) --------------------------------
-export { Button } from './components/button/Button';
-export type { IButtonProps, ButtonVariant } from './components/button/Button';
-export { StatusBadge, StatusDot } from './components/status-badge/StatusBadge';
-export type { IStatusBadgeProps, IStatusDotProps, StatusVariant } from './components/status-badge/StatusBadge';
-export { EmptyState } from './components/empty-state/EmptyState';
-export type { IEmptyStateProps } from './components/empty-state/EmptyState';
-export { Banner } from './components/banner/Banner';
-export type { IBannerProps, BannerVariant } from './components/banner/Banner';
-export { InputField } from './components/input-field/InputField';
-export type { IInputFieldProps } from './components/input-field/InputField';
-export { ToggleGroup } from './components/toggle-group/ToggleGroup';
-export type { IToggleGroupProps, IToggleGroupOption } from './components/toggle-group/ToggleGroup';
-export { Chip, ChipAdd } from './components/chip/Chip';
-export type { IChipProps, IChipAddProps } from './components/chip/Chip';
-export { DropZone } from './components/drop-zone/DropZone';
-export type { IDropZoneProps } from './components/drop-zone/DropZone';
-
-// --- DataTable + DataSource (style guide section 6.1) ------------------------
-export { DataTable } from './components/data-table/DataTable';
-export type { DataTableColumn, IDataTableProps } from './components/data-table/DataTable';
-export { createArrayDataSource, createQueryDataSource } from './components/data-table/dataSource';
-export type { DataQuery, DataPage, DataSource } from './components/data-table/dataSource';
-
-// --- Stock composition components (style guide sections 5-6) ------------------
-export { ContentHeader } from './components/content-header/ContentHeader';
-export type { IContentHeaderProps } from './components/content-header/ContentHeader';
-export { Card } from './components/card/Card';
-export type { ICardProps } from './components/card/Card';
-export { MiniCard, MiniContainer } from './components/mini-card/MiniCard';
-export type { IMiniCardProps, IMiniContainerProps } from './components/mini-card/MiniCard';
-export { ConnectionCard, ConnectionCardAdd } from './components/connection-card/ConnectionCard';
-export type { IConnectionCardProps, IConnectionCardAddProps } from './components/connection-card/ConnectionCard';
-export { ConnectionManagerView } from './modules/connection-manager/ConnectionManagerView';
-export type {
-	IConnectionManagerViewProps,
-	IConnectionCardDisplay,
-	IConnectionFormField,
-} from './modules/connection-manager/ConnectionManagerView';
-export { Section, LabelValue } from './components/section/Section';
-export type { ISectionProps, ILabelValueProps } from './components/section/Section';
-export { DetailPanel } from './components/detail-panel/DetailPanel';
-export type { IDetailPanelProps } from './components/detail-panel/DetailPanel';
-export { PageViewControl } from './components/page-view-control/PageViewControl';
-export type { IPageViewControlProps } from './components/page-view-control/PageViewControl';
-export { Modal, CLOSE_GLYPH } from './components/modal/Modal';
-export type { IModalProps } from './components/modal/Modal';
-export { ConfirmDialog } from './components/modal/ConfirmDialog';
-export type { IConfirmDialogProps } from './components/modal/ConfirmDialog';
-export { SidebarMenu } from './components/sidebar-menu/SidebarMenu';
-export type { ISidebarMenuProps } from './components/sidebar-menu/SidebarMenu';
-export { SidebarCollapsedProvider, useSidebarCollapsed } from './components/sidebar-menu/SidebarCollapsedContext';
-export type { ISidebarCollapsedProviderProps } from './components/sidebar-menu/SidebarCollapsedContext';
-export type { ViewMenu, ViewMenuEntry } from './types/viewMenu';
-export { RocketRideMark } from './components/RocketRideMark';
-export type { IRocketRideMarkProps } from './components/RocketRideMark';
-
-// --- Shared value formatters -------------------------------------------------
-export { formatBytes, formatDate, formatDuration } from './utils/format';

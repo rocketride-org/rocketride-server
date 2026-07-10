@@ -103,26 +103,6 @@ type Handler<T = unknown> = (payload: T) => void;
 /** Handler type for wildcard listeners (debug panel). */
 type WildcardHandler = (event: string, payload: unknown) => void;
 
-/**
- * Runtime type guard narrowing an untyped DAP event body to a ConnectResult.
- *
- * The `apaext_account` push event carries a full ConnectResult payload, but
- * the transport types every event body as an untyped record. Confirming the
- * identifying fields (`userId`, `userToken`) are present lets us emit the
- * typed `shell:accountUpdate` event without an unsafe cast.
- *
- * @param body - The raw event body from a DAP message, or undefined.
- * @returns True when `body` carries the ConnectResult identity fields.
- */
-function isConnectResult(body: unknown): body is ConnectResult {
-	return (
-		typeof body === 'object' &&
-		body !== null &&
-		'userId' in body &&
-		'userToken' in body
-	);
-}
-
 // =============================================================================
 // CONNECTION MANAGER CLASS
 // =============================================================================
@@ -164,15 +144,11 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Returns the singleton ConnectionManager instance. */
 	public static getInstance(): ConnectionManager {
-		// Read/write the instance under a registry symbol on globalThis. Reflect
-		// accepts symbol keys and returns `any`, so we avoid an unsafe cast of
-		// globalThis (which has no symbol index signature) just to index it.
-		let instance: ConnectionManager | undefined = Reflect.get(globalThis, ConnectionManager.GLOBAL_KEY);
-		if (!instance) {
-			instance = new ConnectionManager();
-			Reflect.set(globalThis, ConnectionManager.GLOBAL_KEY, instance);
+		const g = globalThis as unknown as Record<symbol, ConnectionManager | undefined>;
+		if (!g[ConnectionManager.GLOBAL_KEY]) {
+			g[ConnectionManager.GLOBAL_KEY] = new ConnectionManager();
 		}
-		return instance;
+		return g[ConnectionManager.GLOBAL_KEY]!;
 	}
 
 	private constructor() {}
@@ -263,17 +239,14 @@ export class ConnectionManager implements IConnectionManager {
 			uri: this.serverUri,
 			clientName: options?.clientName || DEFAULT_CLIENT_NAME,
 			persist: true,
-			// Env values are strings in practice; the caller-facing option type is
-			// the looser Record<string, unknown>.
-			env: options?.env as Record<string, string> | undefined,
+			env: options?.env,
 
 			// Fired for every push event received from the server over WebSocket
 			onEvent: async (message) => {
 				// Transform apaext_account into shell:accountUpdate to avoid
-				// duplicate handling downstream. The guard narrows the untyped
-				// push body to a ConnectResult without a cast.
-				if (message.event === 'apaext_account' && isConnectResult(message.body)) {
-					this.emit('shell:accountUpdate', message.body);
+				// duplicate handling downstream
+				if (message.event === 'apaext_account' && message.body) {
+					this.emit('shell:accountUpdate', message.body as ConnectResult);
 					return;
 				}
 				// Broadcast all other server events

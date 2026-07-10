@@ -23,8 +23,7 @@
     "react-dom": "^18.2.0",
     "rocketride": "workspace:*",
     "shaders": "2.5.109",
-    "shared": "workspace:*",
-    "shell-api": "workspace:*"
+    "shared": "workspace:*"
   },
   "engines": {
     "node": ">=20.11.0"
@@ -33,9 +32,7 @@
     "@rsbuild/core": "~2.0.11",
     "@rsbuild/plugin-basic-ssl": "^1.2.3",
     "@rsbuild/plugin-react": "~2.0.1",
-    "@rsbuild/plugin-type-check": "~1.3.5",
     "@types/react": "~18.2.21",
-    "@types/react-dom": "~18.2.7",
-    "dts-bundle-generator": "^9.5.1"
+    "@types/react-dom": "~18.2.7"
   }
 }

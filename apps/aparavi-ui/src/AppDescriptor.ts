@@ -26,17 +26,15 @@
 
 import type { AppDescriptor } from 'shell-ui';
 import AparaviApp from './AparaviApp';
+import AparaviSidebar from './AparaviSidebar';
 
 /**
  * AppDescriptor for the Aparavi AQL Chat application.
  *
  * Chat interface for querying Aparavi data via natural language.
  * Multi-tab support via Documents library — each tab is an independent chat.
- * The sidebar is no longer a `components.Sidebar` slot: AparaviApp mounts
- * AparaviSidebar, which registers its content through the shell frame via
- * useSidebarContent, so it composes with the shell's fixed header/footer
- * (rocket-ui / models-ui pattern). Requires authentication (authenticated:
- * true in manifest).
+ * Sidebar with "New Chat" button; status bar enabled in manifest.
+ * Requires authentication (authenticated: true in manifest).
  */
 const APARAVI_APP: AppDescriptor = {
 	id: 'rocketride.aparavi',
@@ -46,6 +44,7 @@ const APARAVI_APP: AppDescriptor = {
 	},
 	components: {
 		App: AparaviApp,
+		Sidebar: AparaviSidebar,
 	},
 };
 

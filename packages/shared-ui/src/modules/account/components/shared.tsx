@@ -258,14 +258,18 @@ export const RowIcon: React.FC<{ children: React.ReactNode }> = ({ children }) =
  * footer action row. Uses commonStyles.modalOverlay for the backdrop.
  *
  * @param title    - Text shown in the modal header.
- * @param onClose  - Called when the user clicks the close button.
+ * @param onClose  - Called when the user clicks the close button or the backdrop.
  * @param footer   - Action buttons rendered in the modal footer.
  * @param children - Body content rendered inside the modal.
  */
 export const Modal: React.FC<{ title: string; onClose: () => void; footer: React.ReactNode; children: React.ReactNode }> = ({ title, onClose, footer, children }) => (
-	/* Backdrop is inert: dismissal is deliberate-only (close button / footer
-	   actions) per the 2026-07-08 design decision — outside clicks must NOT close. */
-	<div style={commonStyles.modalOverlay}>
+	<div
+		style={commonStyles.modalOverlay}
+		onClick={(e) => {
+			// Clicking the outer overlay (but not the card itself) dismisses the modal.
+			if (e.target === e.currentTarget) onClose();
+		}}
+	>
 		<div style={commonStyles.modalDialog}>
 			<div style={commonStyles.modalHeader}>
 				<span style={{ fontSize: 14, fontWeight: 700, color: 'var(--rr-text-primary)' }}>{title}</span>

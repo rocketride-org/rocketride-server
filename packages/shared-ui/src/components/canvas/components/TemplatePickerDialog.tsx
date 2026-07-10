@@ -47,8 +47,6 @@ const styles = {
 		zIndex: 100,
 	},
 	dialog: {
-		// Anchors the absolutely-positioned dialogClose button below.
-		position: 'relative' as const,
 		backgroundColor: 'var(--rr-bg-widget)',
 		border: '1px solid var(--rr-border)',
 		borderRadius: '8px',
@@ -59,19 +57,7 @@ const styles = {
 		overflowY: 'auto' as const,
 		fontFamily: 'var(--rr-font-family-widget)',
 		color: 'var(--rr-fg-widget)',
-		userSelect: 'none' as const,
-	},
-	// Close floats over the dialog's top-right corner (same pattern as the
-	// shell OverlayManager styles.dialogClose).
-	dialogClose: {
-		...commonStyles.buttonSecondary,
-		position: 'absolute' as const,
-		top: 12,
-		right: 12,
-		zIndex: 10,
-		fontFamily: 'var(--rr-font-family)',
-		lineHeight: 1,
-		padding: '4px 10px',
+		userSelect: 'none',
 	},
 	title: {
 		margin: '0 0 4px 0',
@@ -219,14 +205,13 @@ export default function TemplatePickerDialog({ template, onClose, instantiateTem
 	};
 
 	return (
-		/* Backdrop is inert: dismissal is deliberate-only (close button / Cancel)
-		   per the 2026-07-08 design decision — clicking outside must NOT close. */
-		<div style={styles.backdrop}>
+		<div
+			style={styles.backdrop}
+			onClick={(e) => {
+				if (e.target === e.currentTarget) onClose();
+			}}
+		>
 			<div style={styles.dialog}>
-				{/* Top-right close button (same dismissal as Cancel). */}
-				<button style={styles.dialogClose} onClick={onClose} aria-label="Close">
-					&#x2715;
-				</button>
 				<h3 style={styles.title}>{template.title}</h3>
 				<p style={styles.description}>{template.description}</p>
 
