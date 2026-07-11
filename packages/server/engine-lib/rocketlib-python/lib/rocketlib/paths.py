@@ -113,8 +113,32 @@ def extended_length_path(path: str) -> str:
     return _win_extended_length(os.path.abspath(path))
 
 
+def _utf16_len(value: str) -> int:
+    """Length of *value* in UTF-16 code units — the unit NTFS/SMB actually cap at
+    255. An astral character (e.g. an emoji) is one code point but two units.
+    """
+    return len(value.encode('utf-16-le', 'surrogatepass')) // 2
+
+
+def _truncate_utf16(value: str, max_units: int) -> str:
+    """Longest prefix of *value* whose UTF-16 length is <= *max_units*.
+
+    Iterates whole code points, so an astral character is never split across its
+    surrogate pair — it is kept whole or dropped.
+    """
+    if max_units <= 0:
+        return ''
+    units = 0
+    for i, ch in enumerate(value):
+        width = 2 if ord(ch) > 0xFFFF else 1
+        if units + width > max_units:
+            return value[:i]
+        units += width
+    return value
+
+
 def shorten_path_component(name: str, max_len: int = DEFAULT_MAX_COMPONENT) -> str:
-    """Shorten a single path component so it fits within *max_len* characters.
+    """Shorten a single path component so it fits within *max_len* UTF-16 code units.
 
     Components at or under the limit are returned unchanged (the common case, so
     normal filenames are untouched). Over-long components are truncated and made
@@ -128,23 +152,23 @@ def shorten_path_component(name: str, max_len: int = DEFAULT_MAX_COMPONENT) -> s
     across runs. The function is idempotent: the result is at or under the limit,
     so re-applying it is a no-op.
     """
-    if len(name) <= max_len:
+    if _utf16_len(name) <= max_len:
         return name
 
     stem, ext = os.path.splitext(name)
     digest = hashlib.sha1(name.encode('utf-8', 'surrogatepass')).hexdigest()[:16]
 
-    # Budget is [stem][_][digest][ext] within max_len. Shrink the extension
-    # first, then the digest, so the bound holds even for a max_len smaller than
-    # the digest (well below any real filesystem limit, but keeps the contract
-    # total).
-    if len(ext) + len(digest) + 1 > max_len:
+    # Budget is [stem][_][digest][ext] within max_len, all measured in UTF-16
+    # code units (what NTFS/SMB cap). The digest is ASCII (1 unit each). Shrink
+    # the extension first, then the digest, so the bound holds even for a max_len
+    # smaller than the digest.
+    if _utf16_len(ext) + len(digest) + 1 > max_len:
         ext = ''
     if len(digest) + 1 > max_len:
         # Not even '_' + digest fits: fall back to a bare (truncated) digest.
         return digest[:max_len]
-    keep = max_len - len(digest) - 1 - len(ext)
-    return f'{stem[:keep]}_{digest}{ext}'
+    keep = max_len - len(digest) - 1 - _utf16_len(ext)
+    return f'{_truncate_utf16(stem, keep)}_{digest}{ext}'
 
 
 def shorten_path_components(path: str, max_len: int = DEFAULT_MAX_COMPONENT) -> str:

@@ -170,6 +170,39 @@ def test_result_never_exceeds_max_len(max_len):
 
 
 # ---------------------------------------------------------------------------
+# UTF-16 code-unit budgeting (NTFS/SMB cap is 255 UTF-16 units, not code points)
+# ---------------------------------------------------------------------------
+
+
+def test_utf16_len_counts_astral_as_two_units():
+    assert paths._utf16_len('a') == 1
+    assert paths._utf16_len('\U0001f680') == 2  # 🚀 (astral) = 2 UTF-16 units
+    assert paths._utf16_len('a\U0001f680b') == 4
+
+
+def test_truncate_utf16_keeps_astral_chars_whole():
+    rocket = '\U0001f680'
+    # A 3-unit budget holds one 2-unit emoji but not a second; the leftover
+    # unit is never used to split the surrogate pair.
+    assert paths._truncate_utf16(rocket + rocket, 3) == rocket
+    assert paths._truncate_utf16(rocket + rocket, 2) == rocket
+    assert paths._truncate_utf16(rocket + rocket, 1) == ''
+    assert paths._truncate_utf16('abc', 2) == 'ab'
+
+
+def test_astral_component_bounded_in_utf16_units():
+    # 200 emoji = 200 code points but 400 UTF-16 units: a naive len() check
+    # passes at max_len=255 yet the name overflows the real NTFS/SMB limit.
+    name = '\U0001f680' * 200 + '.txt'
+    assert len(name) <= 255  # code-point count is misleadingly small...
+    assert paths._utf16_len(name) > paths.DEFAULT_MAX_COMPONENT  # ...but UTF-16 isn't
+    out = paths.shorten_path_component(name)
+    assert paths._utf16_len(out) <= paths.DEFAULT_MAX_COMPONENT
+    assert out.endswith('.txt')
+    out.encode('utf-16-le')  # would raise on a split (lone) surrogate
+
+
+# ---------------------------------------------------------------------------
 # shorten_path_components
 # ---------------------------------------------------------------------------
 
