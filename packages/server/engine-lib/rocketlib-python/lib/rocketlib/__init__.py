@@ -81,6 +81,7 @@ from .types import OPEN_MODE
 from .types import PROTOCOL_CAPS
 from .types import SERVICE_MODE
 from .types import TAG, TAG_ID
+from .paths import DEFAULT_MAX_COMPONENT
 from .paths import extended_length_path
 from .paths import shorten_path_component
 from .paths import shorten_path_components
@@ -94,6 +95,7 @@ __all__ = [
     'AVI_ACTION',
     'configureLogger',
     'debug',
+    'DEFAULT_MAX_COMPONENT',
     'Ec',
     'error',
     'Entry',

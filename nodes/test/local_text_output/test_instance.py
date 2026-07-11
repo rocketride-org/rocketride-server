@@ -127,6 +127,28 @@ def test_close_shortens_overlong_filename_component(tmp_path):
     assert _read(os.path.join(out_dir, name)) == 'content'
 
 
+def test_close_shortens_overlong_intermediate_directory(tmp_path):
+    """An overlong intermediate *directory* segment is hash-truncated, not aborted.
+
+    Deep source trees (long directory names) are the scenario most likely to
+    trigger issue #1415 in practice, so exercise it end to end.
+    """
+    source = '/' + ('d' * 300) + '/doc.md'
+
+    inst = _make_instance(str(tmp_path))
+    _drive(inst, source, 'content')
+
+    # The 300-char directory is the sole child of the output dir, shortened to
+    # <= 255; the file lands inside it with the original (short) filename.
+    dirs = os.listdir(extended_length_path(str(tmp_path)))
+    assert len(dirs) == 1
+    assert len(dirs[0]) <= 255
+
+    sub = os.path.join(str(tmp_path), dirs[0])
+    assert os.listdir(extended_length_path(sub)) == ['doc.txt']
+    assert _read(os.path.join(sub, 'doc.txt')) == 'content'
+
+
 def test_close_skips_failed_object(tmp_path):
     """A failed object writes nothing."""
     inst = _make_instance(str(tmp_path))
