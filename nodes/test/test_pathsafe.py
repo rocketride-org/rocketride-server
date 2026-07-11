@@ -169,6 +169,11 @@ def test_result_never_exceeds_max_len(max_len):
     assert len(out) <= max_len
 
 
+def test_negative_max_len_rejected():
+    with pytest.raises(ValueError):
+        paths.shorten_path_component('a-name-well-over-the-limit', max_len=-1)
+
+
 # ---------------------------------------------------------------------------
 # UTF-16 code-unit budgeting (NTFS/SMB cap is 255 UTF-16 units, not code points)
 # ---------------------------------------------------------------------------

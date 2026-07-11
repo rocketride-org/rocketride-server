@@ -150,8 +150,10 @@ def shorten_path_component(name: str, max_len: int = DEFAULT_MAX_COMPONENT) -> s
     The hash is content-derived (not random), so the same input always maps to
     the same output — keeping downstream change-detection / skip logic stable
     across runs. The function is idempotent: the result is at or under the limit,
-    so re-applying it is a no-op.
+    so re-applying it is a no-op. Raises ValueError for a negative *max_len*.
     """
+    if max_len < 0:
+        raise ValueError('max_len must be non-negative')
     if _utf16_len(name) <= max_len:
         return name
 
