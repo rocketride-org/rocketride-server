@@ -53,17 +53,23 @@ function(replace_gn_dependency INPUT_FILE OUTPUT_FILE LIBRARY_NAMES)
         endif()
     endif()
 
-    unset(_LIBRARY_REL CACHE)
-    find_library(_LIBRARY_REL NAMES ${LIBRARY_NAMES}
-        PATHS "${CURRENT_INSTALLED_DIR}/lib"
-        NO_DEFAULT_PATH)
+    if(NOT DEFINED VCPKG_BUILD_TYPE OR VCPKG_BUILD_TYPE STREQUAL "release")
+        unset(_LIBRARY_REL CACHE)
+        find_library(_LIBRARY_REL NAMES ${LIBRARY_NAMES}
+            PATHS "${CURRENT_INSTALLED_DIR}/lib"
+            NO_DEFAULT_PATH)
 
-    if(_LIBRARY_REL MATCHES "-NOTFOUND")
-        message(FATAL_ERROR "Could not find release library with names: ${LIBRARY_NAMES}")
+        if(_LIBRARY_REL MATCHES "-NOTFOUND")
+            message(FATAL_ERROR "Could not find release library with names: ${LIBRARY_NAMES}")
+        endif()
     endif()
 
     if(VCPKG_BUILD_TYPE STREQUAL "release")
         set(_LIBRARY_DEB ${_LIBRARY_REL})
+    endif()
+
+    if(VCPKG_BUILD_TYPE STREQUAL "debug")
+        set(_LIBRARY_REL ${_LIBRARY_DEB})
     endif()
 
     set(_INCLUDE_DIR "${CURRENT_INSTALLED_DIR}/include")

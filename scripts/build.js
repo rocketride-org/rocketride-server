@@ -256,6 +256,7 @@ Options:
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
   --stamp=STAMP       Set build stamp
+  --system-compiler   Install a compatible clang system-wide via apt/dnf (needs --autoinstall + root)
   --taskserver=ADDR   Use existing task server (port or host:port) for tests/run
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
   --verbose, -v       Show detailed output

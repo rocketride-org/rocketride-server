@@ -217,12 +217,23 @@ apt_archive_has_clang() {
 ensure_llvm_repo() {
     local ver="$1" codename list="/etc/apt/sources.list.d/llvm-toolchain-$1.list"
     [ -f "$list" ] && return 0
+    command_exists wget || { echo "ERROR: wget is required to add apt.llvm.org (install it or re-run with --autoinstall)"; return 1; }
+    command_exists gpg  || { echo "ERROR: gpg is required to add apt.llvm.org (install it or re-run with --autoinstall)"; return 1; }
     codename=$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")
     [ -z "$codename" ] && { echo "ERROR: cannot determine apt codename for apt.llvm.org (clang-$ver)"; return 1; }
     echo "→ adding apt.llvm.org ($codename) for clang-$ver"
     $SUDO install -d -m 0755 /etc/apt/keyrings || return 1
-    wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor \
-        | $SUDO tee /etc/apt/keyrings/apt.llvm.org.gpg >/dev/null || return 1
+    # Stage via temp files: a plain wget|gpg|tee pipe reports tee's exit (not
+    # wget's), so a failed key download would silently write an empty keyring.
+    # (Can't capture the dearmored key in a var — it's binary, and bash strips NULs.)
+    local tmpkey; tmpkey=$(mktemp)
+    wget -qO "$tmpkey" https://apt.llvm.org/llvm-snapshot.gpg.key \
+        || { rm -f "$tmpkey"; echo "ERROR: failed to download the apt.llvm.org GPG key"; return 1; }
+    gpg --dearmor < "$tmpkey" > "$tmpkey.gpg" \
+        || { rm -f "$tmpkey" "$tmpkey.gpg"; echo "ERROR: failed to dearmor the apt.llvm.org GPG key"; return 1; }
+    $SUDO install -m 0644 "$tmpkey.gpg" /etc/apt/keyrings/apt.llvm.org.gpg \
+        || { rm -f "$tmpkey" "$tmpkey.gpg"; return 1; }
+    rm -f "$tmpkey" "$tmpkey.gpg"
     echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
         | $SUDO tee "$list" >/dev/null || return 1
     $SUDO apt-get update || { $SUDO rm -f "$list"; return 1; }
@@ -819,7 +830,7 @@ check_mac_dependencies() {
     fi
 
     # dump_syms: root-free download, always installed (best-effort).
-    if command_exists dump_syms || [ -x "$DUMP_SYMS_DIR/dump_syms" ]; then
+    if command_exists dump_syms || { [ -x "$DUMP_SYMS_DIR/dump_syms" ] && "$DUMP_SYMS_DIR/dump_syms" --version >/dev/null 2>&1; }; then
         echo "[OK] dump_syms"
     else
         install_dump_syms run

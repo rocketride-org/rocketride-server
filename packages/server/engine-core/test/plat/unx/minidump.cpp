@@ -48,8 +48,12 @@ static int runCrashChild(const char *mode) {
     auto exe = _ts(application::execPath());
     // Resolve the handler here (parent) and hand it to the child explicitly: a
     // re-exec'd child can compute an empty execDir(), so it can't self-locate the
-    // handler sitting next to the binary.
-    auto handler = _ts(application::execDir() / "crashpad_handler");
+    // handler sitting next to the binary. Honor a caller-provided override (CI,
+    // relocated installs); otherwise use the handler next to the binary.
+    const char *handlerEnv = ::getenv("ROCKETRIDE_CRASHPAD_HANDLER");
+    auto handler = (handlerEnv && *handlerEnv)
+                       ? std::string(handlerEnv)
+                       : _ts(application::execDir() / "crashpad_handler");
 
     pid_t pid = ::fork();
     REQUIRE(pid >= 0);

@@ -26,6 +26,8 @@
 #include <apLib/plat/lin/init.h>
 #elif ROCKETRIDE_PLAT_MAC
 #include <apLib/plat/mac/init.h>
+#else
+#error "Unsupported UNIX platform"
 #endif
 
 namespace ap::plat {
@@ -35,6 +37,8 @@ void init() noexcept {
     ap::plat::lin::init();
 #elif ROCKETRIDE_PLAT_MAC
     ap::plat::mac::init();
+#else
+#error "Unsupported UNIX platform"
 #endif
 }
 
@@ -43,6 +47,8 @@ void deinit() noexcept {
     ap::plat::lin::deinit();
 #elif ROCKETRIDE_PLAT_MAC
     ap::plat::mac::deinit();
+#else
+#error "Unsupported UNIX platform"
 #endif
 }
 
