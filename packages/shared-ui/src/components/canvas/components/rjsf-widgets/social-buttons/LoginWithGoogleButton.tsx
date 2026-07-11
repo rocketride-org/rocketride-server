@@ -76,9 +76,10 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 			);
 		}
 
-		// Default to 'user' auth type for personal Google OAuth (as opposed to service account)
-		const authType = formValues.parameters?.authType || 'user';
-		url.searchParams.set('type', authType);
+		// "Login with Google" is personal OAuth by definition; service accounts
+		// use an uploaded key, never this flow. The broker echoes the type back
+		// in `state`, which switches the node's authType to 'user' on success.
+		url.searchParams.set('type', 'user');
 
 		// Tell the broker where to return tokens. Web hosts redirect back to the
 		// current page; hosts that can't receive a web redirect (VS Code) supply

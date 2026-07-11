@@ -132,7 +132,9 @@ export function mergeAuthTokensIntoFormData(formData: IFormDataWithParameters, p
 
 	// Resolve each token: previousParams > persistedRef > newParams
 	const userToken = prevParams.userToken || persisted.userToken;
-	const authType = prevParams.authType || persisted.authType || newParams.authType;
+	// authType is a visible dropdown, not a hidden field RJSF drops — the new
+	// form value must win or the user's selection reverts on every change.
+	const authType = newParams.authType || prevParams.authType || persisted.authType;
 	const googleUserToken = prevParams.google?.userToken || persisted.google?.userToken;
 	const googleAccessToken = prevParams.google?.accessToken || persisted.google?.accessToken;
 	const googleTokenExpiry = prevParams.google?.tokenExpiry || persisted.google?.tokenExpiry;
@@ -185,8 +187,9 @@ export function mergeAuthTokensIntoFormData(formData: IFormDataWithParameters, p
  * @param onChanged  - Callback to notify the host that content changed.
  */
 export async function persistOAuthTokensAndSave(nodeId: string, formData: IFormDataWithParameters, updateNode: (nodeId: string, data: Record<string, unknown>) => void, onChanged: () => void): Promise<void> {
-	// Apply token-enriched form data to the node
-	updateNode(nodeId, { formData });
+	// Apply token-enriched form data to the node's canonical config field —
+	// serialization reads data.config, so any other key is never saved.
+	updateNode(nodeId, { config: formData });
 
 	// Wait for React to flush: microtask → animation frame → resolved
 	await new Promise<void>((resolve) => {
