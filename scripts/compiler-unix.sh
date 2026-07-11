@@ -439,11 +439,45 @@ dep_install() {
     esac
 }
 
-# Fedora fallback: unpack the latest ver.x clang+llvm release (bundles libc++)
-# into ~/toolchains, root-free — dnf has no clang 16-18 with a matching libc++.
-# $1 = major version, $2 = run|print.
+# Put a genuine libtinfo.so.5 into $1 (a dir on the build LD_LIBRARY_PATH) WITHOUT
+# root. The llvm.org clang is built against ncurses 5: it needs libtinfo.so.5 with
+# the NCURSES_TINFO_5 versioned symbols, which libtinfo.so.6 does NOT export — so a
+# .so.6 -> .so.5 symlink fails to load. This is the root-free fallback; the
+# --autoinstall path installs libtinfo5 system-wide instead (see check_dependencies).
+# $1 = target dir, $2 = apt|dnf.
+provide_libtinfo5() {
+    local compat="$1" mgr="$2" existing real tmp deb rpm
+
+    # A genuine libtinfo.so.5 already on the system (e.g. installed above) → link it.
+    existing=$(ldconfig -p 2>/dev/null | grep -oE '/[^ ]*/libtinfo\.so\.5(\.[0-9]+)*' | head -1)
+    [ -n "$existing" ] && { as_user ln -sf "$existing" "$compat/libtinfo.so.5"; return 0; }
+
+    # Otherwise fetch the distro's compat package and extract just the .so (no root).
+    tmp=$(as_user mktemp -d)
+    case "$mgr" in
+        apt)
+            as_user sh -c "cd '$tmp' && apt-get download libtinfo5" >/dev/null 2>&1 || true
+            deb=$(ls "$tmp"/*.deb 2>/dev/null | head -1)
+            [ -n "$deb" ] && as_user dpkg-deb -x "$deb" "$tmp/x" >/dev/null 2>&1 || true
+            ;;
+        dnf)
+            as_user sh -c "cd '$tmp' && dnf download ncurses-compat-libs" >/dev/null 2>&1 || true
+            rpm=$(ls "$tmp"/*.rpm 2>/dev/null | head -1)
+            [ -n "$rpm" ] && { as_user mkdir -p "$tmp/x"; as_user sh -c "cd '$tmp/x' && rpm2cpio '$rpm' | cpio -idm" >/dev/null 2>&1 || true; }
+            ;;
+    esac
+    real=$(find "$tmp/x" -name 'libtinfo.so.5*' -type f 2>/dev/null | head -1)
+    [ -n "$real" ] && as_user cp -f "$real" "$compat/libtinfo.so.5"
+    as_user rm -rf "$tmp"
+    [ -e "$compat/libtinfo.so.5" ]
+}
+
+# Linux fallback: unpack the latest ver.x clang+llvm release (bundles libc++)
+# into ~/toolchains, root-free — used when no in-range system clang is available
+# (all of Fedora; Ubuntu without --system-compiler).
+# $1 = major version, $2 = run|print, $3 = apt|dnf.
 install_llvm_tarball() {
-    local ver="$1" mode="$2"
+    local ver="$1" mode="$2" mgr="${3:-apt}"
     local prefix="$LLVM_TARBALL_PREFIX-$ver"
 
     if [ "$mode" = "print" ]; then
@@ -504,18 +538,14 @@ install_llvm_tarball() {
         echo "✓ LLVM $pin toolchain installed at $prefix"
     fi
 
-    # The ubuntu-built clang needs libtinfo.so.5; Fedora has .so.6 (ABI-compatible).
-    # Bridge it in lib-compat (on the build LD_LIBRARY_PATH). A benign "no version
-    # information" note may print — harmless.
+    # The llvm.org clang needs a real libtinfo.so.5 (a libtinfo.so.6 symlink fails:
+    # the NCURSES_TINFO_5 versioned symbols are absent). Under --autoinstall it's
+    # already installed system-wide; otherwise fetch it root-free into lib-compat,
+    # which tasks.js puts on the build LD_LIBRARY_PATH.
     local compat="$prefix/lib-compat"
     as_user mkdir -p "$compat"
     if ! LD_LIBRARY_PATH="$compat" "$prefix/bin/clang" --version >/dev/null 2>&1; then
-        local sys_tinfo="" c
-        for c in $(ldconfig -p 2>/dev/null | grep -oE '/[^ ]*/libtinfo\.so\.6') \
-                 /usr/lib64/libtinfo.so.6 /lib64/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.6; do
-            [ -e "$c" ] && { sys_tinfo="$c"; break; }
-        done
-        [ -n "$sys_tinfo" ] && as_user ln -sf "$sys_tinfo" "$compat/libtinfo.so.5"
+        provide_libtinfo5 "$compat" "$mgr" || true
         LD_LIBRARY_PATH="$compat" "$prefix/bin/clang" --version >/dev/null 2>&1 \
             || echo "⚠ $prefix/bin/clang still can't load its libs (check: ldd $prefix/bin/clang)"
     fi
@@ -590,6 +620,16 @@ check_dependencies() {
     done < <(emit_distro_deps "$mgr")
     pkgs+=("${CLANG_PKGS[@]}")
 
+    # The llvm.org tarball clang needs a real libtinfo.so.5 (ncurses 5). When we're
+    # installing system packages anyway (--autoinstall), pull it in the normal way so
+    # it lands system-wide; the root-free path (provide_libtinfo5) covers the rest.
+    if [ -n "$LLVM_TARBALL_VERSION" ] && [ "$AUTOINSTALL" = "1" ]; then
+        case "$mgr" in
+            apt) pkgs+=(libtinfo5) ;;
+            dnf) pkgs+=(ncurses-compat-libs) ;;
+        esac
+    fi
+
     local missing=()
     for p in "${pkgs[@]}"; do
         if dep_installed "$mgr" "$p"; then
@@ -661,7 +701,7 @@ check_dependencies() {
     [ "$AUTOINSTALL" == "1" ] && [ -n "$CLANG_ALT_VERSION" ] && force_system_clang "$CLANG_ALT_VERSION"
 
     # Root-free tools: always (after package install so curl/tar are present).
-    [ -n "$LLVM_TARBALL_VERSION" ] && install_llvm_tarball "$LLVM_TARBALL_VERSION" run
+    [ -n "$LLVM_TARBALL_VERSION" ] && install_llvm_tarball "$LLVM_TARBALL_VERSION" run "$mgr"
     [ -z "$dump_syms_ok" ] && install_dump_syms run
 
     # Missing distro packages without --autoinstall? Report + stop.
