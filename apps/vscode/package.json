@@ -207,6 +207,21 @@
 					"default": false,
 					"description": "Install RocketRide instructions to AGENTS.md at the repo root (generic agent support)"
 				},
+				"rocketride.voiceBuilder.enabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable push-to-talk Voice Builder in the pipeline editor"
+				},
+				"rocketride.voiceBuilder.llmProvider": {
+					"type": "string",
+					"default": "",
+					"description": "Optional RocketRide LLM provider used by Voice Builder, such as llm_gemini or llm_anthropic. If empty, Voice Builder reuses the first LLM node in the open pipeline."
+				},
+				"rocketride.voiceBuilder.llmProfile": {
+					"type": "string",
+					"default": "",
+					"description": "Optional provider profile/model for the Voice Builder LLM node."
+				},
 				"rocketride.connectionMode": {
 					"type": "string",
 					"default": "local",

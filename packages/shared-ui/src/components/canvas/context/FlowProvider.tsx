@@ -41,7 +41,7 @@
 
 import { ReactElement, ReactNode } from 'react';
 
-import { IProject, IValidateResponse, ITaskStatus } from '../types';
+import { IProject, IValidateResponse, ITaskStatus, IVoiceBuilderAdapter } from '../types';
 
 import { FlowPreferencesProvider } from './FlowPreferencesContext';
 import { FlowProjectProvider } from './FlowProjectContext';
@@ -122,6 +122,8 @@ export interface IFlowProviderProps {
 	onSave?: () => void;
 	onExport?: () => void;
 
+	voiceBuilder?: IVoiceBuilderAdapter;
+
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
 }
@@ -142,7 +144,7 @@ export interface IFlowProviderProps {
  * </ReactFlowProvider>
  * ```
  */
-export function FlowProvider({ children, project, projectId, getPreference, setPreference, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProviderProps): ReactElement {
+export function FlowProvider({ children, project, projectId, getPreference, setPreference, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, voiceBuilder, envKeys }: IFlowProviderProps): ReactElement {
 	return (
 		<FlowPreferencesProvider projectId={projectId} getPreference={getPreference} setPreference={setPreference} isReadonly={isReadonly}>
 			<FlowProjectProvider
@@ -179,6 +181,7 @@ export function FlowProvider({ children, project, projectId, getPreference, setP
 				isNew={isNew}
 				onSave={onSave}
 				onExport={onExport}
+				voiceBuilder={voiceBuilder}
 				envKeys={envKeys}
 			>
 				<FlowGraphProvider>{children}</FlowGraphProvider>

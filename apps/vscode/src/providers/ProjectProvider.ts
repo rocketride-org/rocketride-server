@@ -25,6 +25,7 @@ import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { getVoiceBuilderStatus, processVoiceBuilderRecording, type IVoiceBuilderConfig, type IVoiceBuilderSecrets } from './voice/voiceBuilder';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
 
 // =============================================================================
@@ -83,6 +84,19 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 		}
 		return undefined;
+	}
+
+	private getVoiceBuilderRuntime(currentProject: Record<string, any> = {}, services: Record<string, unknown> = {}): { config: IVoiceBuilderConfig; secrets: IVoiceBuilderSecrets; status: ReturnType<typeof getVoiceBuilderStatus> } {
+		const voiceBuilder = ConfigManager.getInstance().getConfig().voiceBuilder;
+		const config = {
+			enabled: voiceBuilder.enabled,
+			llmProvider: voiceBuilder.llmProvider,
+			llmProfile: voiceBuilder.llmProfile,
+		};
+		const secrets = {
+			llmApiKey: voiceBuilder.llmApiKey,
+		};
+		return { config, secrets, status: getVoiceBuilderStatus(config, secrets, currentProject, services) };
 	}
 
 	// =========================================================================
@@ -374,6 +388,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						isSubscribed: isSubscribed(client, PIPE_BUILDER_APP_ID),
 						statuses: editorState.cachedStatuses,
 						serverHost: this.connectionManager.getHttpUrl(),
+						voiceStatus: this.getVoiceBuilderRuntime(project ?? {}, cached.services).status,
 						// The OAuth broker only allows https://*.rocketride.ai redirect URLs,
 						// so tokens bounce off this hosted page, which forwards them to the
 						// `<uriScheme>://rocketride.rocketride/auth/google` deep link.
@@ -423,6 +438,32 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 				case 'project:requestSave': {
 					await document.save();
+					break;
+				}
+
+				case 'voice:process': {
+					try {
+						const currentProject = data.currentProject as Record<string, any>;
+						const services = data.services as Record<string, unknown>;
+						const { config, secrets } = this.getVoiceBuilderRuntime(currentProject, services);
+						const client = this.connectionManager.getClient();
+						if (!client) throw new Error('Not connected to server');
+						const result = await processVoiceBuilderRecording(
+							{
+								audioBase64: data.audioBase64 as string,
+								mimeType: data.mimeType as string | undefined,
+								currentProject,
+								services,
+							},
+							config,
+							secrets,
+							client
+						);
+						webview.postMessage({ type: 'voice:processResponse', requestId: data.requestId, ...result });
+					} catch (error: unknown) {
+						const msg = error instanceof Error ? error.message : String(error);
+						webview.postMessage({ type: 'voice:processResponse', requestId: data.requestId, error: msg });
+					}
 					break;
 				}
 

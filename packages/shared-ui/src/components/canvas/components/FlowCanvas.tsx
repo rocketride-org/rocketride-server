@@ -36,7 +36,7 @@
 
 import { ReactElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
-import { Settings } from 'lucide-react';
+import { Mic, MicOff, Settings } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
 
 import './reactflow-overrides.css';
@@ -59,6 +59,8 @@ import { useToolbarOrientation } from './toolbar';
 import CreateNodePanel from './panels/create-node/CreateNodePanel';
 import EmptyCanvasPrompt from './EmptyCanvasPrompt';
 import NodeConfigPanel from './panels/node-config';
+import { VoiceBuilderPanel, type VoiceBuilderPanelState } from './voice/VoiceBuilderPanel';
+import { usePushToTalkRecorder } from './voice/usePushToTalkRecorder';
 import FitIcon from '../../../assets/icons/FitIcon';
 import LockIcon from '../../../assets/icons/LockIcon';
 import UnlockIcon from '../../../assets/icons/UnlockIcon';
@@ -200,7 +202,7 @@ const ToolbarDivider = () => {
  */
 export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
-	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady, configSnackbar, setConfigSnackbar } = useFlowGraph();
+	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, loadData, isFlowReady, configSnackbar, setConfigSnackbar } = useFlowGraph();
 
 	// --- Preferences from context ------------------------------------------
 	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
@@ -214,8 +216,12 @@ export default function Canvas(): ReactElement {
 		[setPreference]
 	);
 
-	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, initialViewport } = useFlowProject();
+	const { currentProject, onUndo, onRedo, onViewportChange, onContentChanged, isDirty, isNew, onSave, onExport, initialViewport, voiceBuilder } = useFlowProject();
 	const { fitView, zoomIn, zoomOut, setViewport } = useReactFlow();
+	const currentProjectRef = useRef(currentProject);
+	useEffect(() => {
+		currentProjectRef.current = currentProject;
+	}, [currentProject]);
 
 	// Keep a ref so the restore handler always sees the latest viewport value
 	// without needing to re-register the event listener.
@@ -264,6 +270,21 @@ export default function Canvas(): ReactElement {
 
 	// --- Template instantiation (must live here, not in the dialog) ---------
 	const { instantiateTemplate: rawInstantiateTemplate, requestFitView } = useTemplateInstantiator();
+	const [showVoicePanel, setShowVoicePanel] = useState(false);
+	const [voicePanelState, setVoicePanelState] = useState<{
+		state: VoiceBuilderPanelState;
+		transcript?: string;
+		summary?: string;
+		error?: string | null;
+	}>({ state: 'ready' });
+	const { isStarting: isVoiceStarting, isRecording: isVoiceRecording, error: recorderError, start: startRecording, stop: stopRecording } = usePushToTalkRecorder();
+	const voiceSetupErrors = useMemo(() => voiceBuilder?.status.errors ?? [], [voiceBuilder?.status.errors]);
+
+	useEffect(() => {
+		if (!recorderError) return;
+		setShowVoicePanel(true);
+		setVoicePanelState((prev) => ({ ...prev, state: 'error', error: recorderError }));
+	}, [recorderError]);
 
 	const instantiateTemplate = useCallback(
 		(...args: Parameters<typeof rawInstantiateTemplate>) => {
@@ -275,6 +296,50 @@ export default function Canvas(): ReactElement {
 		},
 		[rawInstantiateTemplate, setConfigSnackbar]
 	);
+
+	const handleVoiceToggle = useCallback(async () => {
+		setShowVoicePanel(true);
+
+		if (!voiceBuilder) {
+			setVoicePanelState({ state: 'error', error: 'Voice Builder is not available' });
+			return;
+		}
+
+		if (voiceSetupErrors.length > 0) {
+			setVoicePanelState({ state: 'error', error: null });
+			return;
+		}
+
+		if (isVoiceRecording) {
+			try {
+				setVoicePanelState((prev) => ({ ...prev, state: 'transcribing', error: null }));
+				const recording = await stopRecording();
+				if (!recording) {
+					setVoicePanelState({ state: 'error', error: 'Voice recording was empty' });
+					return;
+				}
+
+				const result = await voiceBuilder.processRecording(recording.audioBase64, recording.mimeType, currentProjectRef.current);
+				setVoicePanelState({ state: 'applying', transcript: result.transcript, summary: result.summary, error: null });
+
+				currentProjectRef.current = result.project;
+				loadData(result.project);
+				onContentChanged?.(result.project);
+
+				setVoicePanelState({ state: 'applied', transcript: result.transcript, summary: result.summary, error: null });
+			} catch (err) {
+				setVoicePanelState((prev) => ({ ...prev, state: 'error', error: err instanceof Error ? err.message : 'Voice Builder failed' }));
+			}
+			return;
+		}
+
+		setVoicePanelState({ state: 'recording', error: null });
+		try {
+			await startRecording();
+		} catch (err) {
+			setVoicePanelState({ state: 'error', error: err instanceof Error ? err.message : 'Could not start microphone recording' });
+		}
+	}, [isVoiceRecording, loadData, onContentChanged, startRecording, stopRecording, voiceBuilder, voiceSetupErrors]);
 
 	// --- Callback for when a source node is added from the welcome screen ----
 	const onNodeAdded = useCallback(
@@ -363,6 +428,11 @@ export default function Canvas(): ReactElement {
 					<NoteIcon color="currentColor" size={18} />
 				</ToolbarButton>
 			)}
+			{!isLocked && !isReadonly && voiceBuilder && (
+				<ToolbarButton title={isVoiceRecording ? 'Stop voice command' : 'Voice Builder'} onClick={handleVoiceToggle} isActive={showVoicePanel || isVoiceRecording} disabled={isVoiceStarting || voicePanelState.state === 'transcribing' || voicePanelState.state === 'applying'} forceColor={isVoiceRecording ? 'var(--rr-brand)' : undefined}>
+					{isVoiceRecording ? <MicOff size={16} /> : <Mic size={16} />}
+				</ToolbarButton>
+			)}
 			{!isLocked && <ToolbarDivider />}
 			{!isReadonly && (
 				<ToolbarButton title={isLocked ? 'Unlock canvas' : 'Lock canvas'} onClick={toggleLock} isActive={isLocked}>
@@ -425,6 +495,20 @@ export default function Canvas(): ReactElement {
 			<FloatingToolbar position={toolbarPosition} onPositionChange={handleToolbarPositionChange}>
 				{canvasToolbar}
 			</FloatingToolbar>
+			{showVoicePanel && voiceBuilder && (
+				<VoiceBuilderPanel
+					state={voicePanelState.state}
+					transcript={voicePanelState.transcript}
+					summary={voicePanelState.summary}
+					error={voicePanelState.error}
+					setupErrors={voiceSetupErrors}
+					model={voiceBuilder.status.model}
+					isRecording={isVoiceRecording}
+					isStarting={isVoiceStarting}
+					onToggleRecording={handleVoiceToggle}
+					onClose={() => setShowVoicePanel(false)}
+				/>
+			)}
 			<ReactFlow
 				id={rfInstanceId}
 				nodes={nodes}

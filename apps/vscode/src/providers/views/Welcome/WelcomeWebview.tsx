@@ -147,6 +147,13 @@ const DEFAULT_SETTINGS: SettingsData = {
 	defaultPipelinePath: 'pipelines',
 	pipelineRestartBehavior: 'prompt',
 	envVars: {},
+	voiceBuilder: {
+		enabled: false,
+		llmProvider: '',
+		llmProfile: '',
+		hasLlmApiKey: false,
+		llmApiKey: '',
+	},
 	autoAgentIntegration: true,
 	integrationCopilot: false,
 	integrationClaudeCode: false,

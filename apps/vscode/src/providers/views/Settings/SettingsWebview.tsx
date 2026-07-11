@@ -70,6 +70,14 @@ export interface ConnectionGroupSettings {
 	};
 }
 
+export interface VoiceBuilderSettings {
+	enabled: boolean;
+	llmProvider: string;
+	llmProfile: string;
+	hasLlmApiKey: boolean;
+	llmApiKey: string;
+}
+
 /** Root settings object persisted by the extension. */
 export interface SettingsData {
 	development: ConnectionGroupSettings;
@@ -79,6 +87,7 @@ export interface SettingsData {
 	/** How pipelines behave after file changes: auto-restart, manual, or prompt the user. */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
 	envVars?: Record<string, string>;
+	voiceBuilder: VoiceBuilderSettings;
 	/** Auto-install RocketRide docs for detected coding agents. */
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
@@ -379,6 +388,13 @@ export const Settings: React.FC = () => {
 		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
 		envVars: {},
+		voiceBuilder: {
+			enabled: false,
+			llmProvider: '',
+			llmProfile: '',
+			hasLlmApiKey: false,
+			llmApiKey: '',
+		},
 		autoAgentIntegration: true,
 		integrationCopilot: false,
 		integrationClaudeCode: false,
@@ -714,8 +730,12 @@ export const Settings: React.FC = () => {
 				}
 			}
 
+			if (changes.voiceBuilder) {
+				next.voiceBuilder = { ...prev.voiceBuilder, ...changes.voiceBuilder };
+			}
+
 			// Top-level fields
-			const { development, deployment, ...topLevel } = changes;
+			const { development, deployment, voiceBuilder, ...topLevel } = changes;
 			Object.assign(next, topLevel);
 
 			// Side effects: fetch engine versions when switching to local mode
