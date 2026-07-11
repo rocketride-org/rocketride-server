@@ -422,11 +422,11 @@ dep_install() {
     local mgr="$1"; shift
     case "$mgr" in
         apt)
-            $SUDO apt-get update
+            $SUDO apt-get update || return 1
             local p
-            for p in "$@"; do $SUDO apt-get install -y "$p"; done
+            for p in "$@"; do $SUDO apt-get install -y "$p" || return 1; done
             ;;
-        dnf) $SUDO dnf install -y "$@" ;;
+        dnf) $SUDO dnf install -y "$@" || return 1 ;;
     esac
 }
 
@@ -438,6 +438,46 @@ dep_install_hint() {
     esac
 }
 
+# Run a command that needs root, prefixing sudo when we're not already root
+# ($SUDO is "" under root, unquoted so it disappears cleanly). The build harness
+# spawns this script with stdio captured and no controlling terminal for the
+# child, so a sudo that needs a password can't prompt and dies with
+# "sudo: a password is required". Rather than let `set -e` abort with that bare,
+# contextless error, catch the failure and tell the user exactly how to recover:
+# run this script standalone in a real terminal where sudo CAN prompt. This is
+# what keeps a privileged step (e.g. the cc/c++ symlinks below) from failing the
+# whole build with an unexplained exit 1. $*: the command to run (without sudo).
+run_privileged() {
+    if $SUDO "$@"; then
+        return 0
+    fi
+    echo ""
+    echo "=========================================="
+    echo "ERROR: a required privileged step failed:"
+    echo "    $SUDO $*"
+    if [ -n "$SUDO" ]; then
+        echo ""
+        echo "sudo could not obtain credentials. When the build runs this check it"
+        echo "captures output, so sudo has no terminal to prompt for a password."
+        echo ""
+        echo "Run the prerequisite setup once, directly in your terminal:"
+        echo "    ./scripts/compiler-unix.sh --autoinstall"
+        echo ""
+        echo "then re-run the build. Alternatives: pre-authenticate with 'sudo -v'"
+        echo "before building, or grant passwordless sudo for this command."
+    fi
+    echo "=========================================="
+    exit 1
+}
+
+# True when path $1 exists and resolves to the same file as $2. Used to make the
+# cc/c++ -> clang symlinking idempotent, so a fully-provisioned machine doesn't
+# invoke sudo just to recreate links that are already correct.
+link_points_to() {
+    [ -e "$1" ] || return 1
+    [ "$(readlink -f "$1" 2>/dev/null)" = "$(readlink -f "$2" 2>/dev/null)" ]
+}
+
 # Point the default cc/c++ at clang so vcpkg's compiler detection doesn't pick
 # gcc (which rejects the triplet's -stdlib=libc++). $1 = apt|dnf, $2 = run|print.
 # apt uses update-alternatives; Fedora symlinks into /usr/local/bin (ahead of
@@ -445,10 +485,13 @@ dep_install_hint() {
 setup_cc_alternatives() {
     case "$1" in
         apt)
+            # apt already guards on NEED_CC_ALTERNATIVES (set only when cc/c++
+            # don't already resolve to clang), so the run path is reached only
+            # when a change is genuinely needed — no extra idempotency check here.
             [ "$NEED_CC_ALTERNATIVES" = "1" ] || return 0
             if [ "$2" = "run" ]; then
-                $SUDO update-alternatives --install /usr/bin/cc cc "$CC_PATH" 100
-                $SUDO update-alternatives --install /usr/bin/c++ c++ "$CXX_PATH" 100
+                run_privileged update-alternatives --install /usr/bin/cc cc "$CC_PATH" 100
+                run_privileged update-alternatives --install /usr/bin/c++ c++ "$CXX_PATH" 100
                 echo "✓ cc/c++ -> $CC/$CXX"
             else
                 echo "    # Set default cc/c++ to $CC and $CXX"
@@ -458,9 +501,19 @@ setup_cc_alternatives() {
             ;;
         dnf)
             if [ "$2" = "run" ] && command_exists clang && command_exists clang++; then
-                $SUDO ln -sf "$(command -v clang)" /usr/local/bin/cc
-                $SUDO ln -sf "$(command -v clang++)" /usr/local/bin/c++
-                echo "✓ cc/c++ -> clang (/usr/local/bin)"
+                local clang_path clangxx_path
+                clang_path=$(command -v clang)
+                clangxx_path=$(command -v clang++)
+                # Already pointing at clang? Skip — never invoke sudo on a box
+                # whose symlinks are already correct (the common re-run case).
+                if link_points_to /usr/local/bin/cc "$clang_path" && \
+                   link_points_to /usr/local/bin/c++ "$clangxx_path"; then
+                    echo "✓ cc/c++ already -> clang (/usr/local/bin)"
+                else
+                    run_privileged ln -sf "$clang_path" /usr/local/bin/cc
+                    run_privileged ln -sf "$clangxx_path" /usr/local/bin/c++
+                    echo "✓ cc/c++ -> clang (/usr/local/bin)"
+                fi
             elif [ "$2" = "print" ]; then
                 # Fedora's cc defaults to gcc; point it at clang (ahead of /usr/bin
                 # in PATH) so vcpkg's compiler detection doesn't choke on -stdlib=libc++.
@@ -497,7 +550,35 @@ check_dependencies() {
     if [ "$AUTOINSTALL" == "1" ]; then
         if [ ${#missing[@]} -ne 0 ]; then
             echo "Auto-installing missing dependencies with $mgr..."
-            dep_install "$mgr" "${missing[@]}"
+            # A failed install must stop the build. Without this the script would
+            # continue and report success, and the missing runtime libs only
+            # surface much later as "libc++.so.1: cannot open shared object file".
+            if ! dep_install "$mgr" "${missing[@]}"; then
+                echo ""
+                echo "=========================================="
+                echo "ERROR: $mgr failed to install dependencies."
+                echo "Read the package manager errors above, fix them, then re-run:"
+                echo "  ./scripts/compiler-unix.sh --autoinstall"
+                echo "=========================================="
+                exit 1
+            fi
+            # Re-check every package. A package manager can exit 0 without
+            # installing everything (unknown package name, held package). Verify
+            # before claiming success so a partial install is not silently accepted.
+            local still_missing=() m
+            for m in "${missing[@]}"; do
+                dep_installed "$mgr" "$m" || still_missing+=("$m")
+            done
+            if [ ${#still_missing[@]} -ne 0 ]; then
+                echo ""
+                echo "=========================================="
+                echo "ERROR: these packages are still missing after install:"
+                echo "    ${still_missing[*]}"
+                echo "Check the package names for this distro, then re-run:"
+                echo "  ./scripts/compiler-unix.sh --autoinstall"
+                echo "=========================================="
+                exit 1
+            fi
             echo ""
             echo "Dependencies installed successfully."
             echo ""

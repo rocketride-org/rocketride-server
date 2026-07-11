@@ -84,11 +84,17 @@ export default function LoginWithMicrosoftButton<T = unknown, S extends StrictRJ
 	// Microsoft auth requires all three: clientId, clientSecret, and refreshToken to be considered authenticated
 	const authenticated = formValues?.parameters?.clientId?.length && formValues?.parameters?.clientSecret?.length && formValues?.parameters?.refreshToken?.length;
 
-	const text = authenticated ? t('addSource.formStep.authenticated') : t('addSource.formStep.loginWithMicrosoftButton');
+	// i18n is not initialized in every host (e.g. the VS Code webview); fall back
+	// to a literal when t() echoes the key back so the button never shows a raw key.
+	const label = (key: string, fallback: string): string => {
+		const value = t(key) as string;
+		return value && value !== key ? value : fallback;
+	};
+	const text = authenticated ? label('addSource.formStep.authenticated', 'Authenticated') : label('addSource.formStep.loginWithMicrosoftButton', 'Login with Microsoft');
 
 	return (
 		<Box sx={{ mt: 1, pl: 6.2, pr: 5.4 }}>
-			<Button startIcon={<MicrosoftIcon />} onClick={handleHybridSignIn} {...props} sx={{ width: 1 }} color={color} variant="outlined" disabled={authenticated}>
+			<Button startIcon={<MicrosoftIcon />} onClick={handleHybridSignIn} {...props} sx={{ width: 1, textTransform: 'none' }} color={color} variant="outlined" disabled={authenticated}>
 				{text}
 			</Button>
 		</Box>

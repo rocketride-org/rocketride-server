@@ -1,0 +1,179 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Currency Convert (Explicit)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "currency_convert_explicit://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["text"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine. "experimental" marks this node as not yet production-ready.
+	//
+	"capabilities": ["experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code
+	//
+	"path": "nodes.currency_convert_explicit",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "currency_convert_explicit",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["An opt-in currency converter for the audit-grade financial extraction suite. ", "Converts fact values from a source currency to a target currency at a stated rate ", "and date supplied in the configuration — conversion is never implicit or fetched ", "from a live rate. Reads and writes the <code>answers</code> lane.</br>", "</br>", "The conversion is <b>non-destructive</b>: the original amount and currency are kept, ", "a <code>converted</code> block is added, and a <code>provenance</code> entry records ", "the rate, date and source/target currencies. Records that are not fact objects, or whose ", "currency does not match the configured source, pass through unchanged."],
+	//
+	// Optional:
+	//		The icon is the icon to display in the UI for this node
+	//
+	"icon": "util-text.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"answers": ["answers"]
+	},
+	//
+	//	Note: no "test" block. The dynamic node-test harness injects lane input
+	//	via data_conn, which builds answers with `Answer.model_validate_json`.
+	//	The Answer schema's field validator forbids populating `answer` at
+	//	construction, so a webhook-injected `answers` input is always empty —
+	//	an engine-level dynamic test for an answers-consuming node cannot deliver
+	//	a populated fact. Conversion logic is covered by the unit tests in
+	//	nodes/test/test_currency_convert_explicit.py and the contract suite.
+	//
+	//	Optional:
+	//		Profile section - configuration defaults used by the driver.
+	//		A single "default" profile supplies the base values; individual
+	//		fields below override them from the UI.
+	//
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Explicit conversion at a stated rate",
+				"source_currency": "EUR",
+				"target_currency": "USD",
+				"rate": 1.0,
+				"rate_date": "",
+				"amount_field": "amount",
+				"currency_field": "currency",
+				"decimals": 2
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions
+	//
+	"fields": {
+		"currency_convert_explicit.source_currency": {
+			"type": "string",
+			"title": "Source currency",
+			"description": "Currency code to convert FROM (e.g. EUR). Only facts tagged with this currency are converted; case-insensitive.",
+			"default": "EUR",
+			"minLength": 1,
+			"maxLength": 16
+		},
+		"currency_convert_explicit.target_currency": {
+			"type": "string",
+			"title": "Target currency",
+			"description": "Currency code to convert TO (e.g. USD).",
+			"default": "USD",
+			"minLength": 1,
+			"maxLength": 16
+		},
+		"currency_convert_explicit.rate": {
+			"type": "number",
+			"title": "Conversion rate",
+			"description": "The stated multiplier applied to the source amount (target = source × rate). Supply the rate deliberately; nothing is fetched.",
+			"default": 1.0,
+			"minimum": 0
+		},
+		"currency_convert_explicit.rate_date": {
+			"type": "string",
+			"title": "Rate date",
+			"description": "The date the rate applies to (ISO 8601, e.g. 2026-06-30). Recorded in the conversion provenance.",
+			"default": "",
+			"maxLength": 32
+		},
+		"currency_convert_explicit.amount_field": {
+			"type": "string",
+			"title": "Amount field",
+			"description": "The fact field holding the numeric amount to convert.",
+			"default": "amount",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"currency_convert_explicit.currency_field": {
+			"type": "string",
+			"title": "Currency field",
+			"description": "The fact field holding the currency code.",
+			"default": "currency",
+			"minLength": 1,
+			"maxLength": 128
+		},
+		"currency_convert_explicit.decimals": {
+			"type": "integer",
+			"title": "Rounding decimals",
+			"description": "Number of fractional digits for the converted amount (rounded half-up).",
+			"default": 2,
+			"minimum": 0,
+			"maximum": 10
+		},
+		"currency_convert_explicit.default": {
+			"object": "default",
+			"properties": ["currency_convert_explicit.source_currency", "currency_convert_explicit.target_currency", "currency_convert_explicit.rate", "currency_convert_explicit.rate_date", "currency_convert_explicit.amount_field", "currency_convert_explicit.currency_field", "currency_convert_explicit.decimals"]
+		},
+		"currency_convert_explicit.profile": {
+			"title": "Conversion",
+			"description": "Explicit currency conversion configuration",
+			"type": "string",
+			"default": "default",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["currency_convert_explicit.default"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Currency Convert (Explicit)",
+			"properties": ["currency_convert_explicit.profile"]
+		}
+	]
+}

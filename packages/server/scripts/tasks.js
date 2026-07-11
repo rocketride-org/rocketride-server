@@ -788,12 +788,11 @@ function makeInstallPipAction() {
 		run: async (ctx, task) => {
 			const enginePath = path.join(DIST_DIR, 'engine');
 
-            // Bootstrap pip, then install all build, test, and runtime dependencies.
-            // uv is left for depends.py at runtime; the builder just uses pip.
-            // State key version bumped to force re-run when deps change.
-            const pipInstalled = await getState('server.pipInstalledV9');
+            // Bootstrap the Python toolchain only (pip + wheel/setuptools/uv). Test and runtime
+            // deps install later via server:setup-test-deps — through depends() so they respect
+            // the merged constraints; that step runs after nodes:sync/ai:sync.
+            const pipInstalled = await getState('server.pipInstalledV11');
             if (!pipInstalled) {
-                // Bootstrap pip
                 // Add the engine's Scripts/bin dir to PATH so pip doesn't warn about it
                 const scriptsDir = path.join(DIST_DIR, process.platform === 'win32' ? 'Scripts' : 'bin');
                 const pipEnv = { ...process.env, PATH: [scriptsDir, process.env.PATH].filter(Boolean).join(path.delimiter) };
@@ -801,35 +800,16 @@ function makeInstallPipAction() {
                 task.output = 'Bootstrapping pip...';
                 await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR, env: pipEnv });
 
-                const pipInstall = (...deps) => execCommand(enginePath, [
-                    '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', ...deps,
-                ], { task, cwd: DIST_DIR, env: pipEnv });
-
                 task.output = 'Installing build tools...';
-                await pipInstall('setuptools>=75', 'wheel', 'build', 'uv');
+                // wheel/setuptools/uv through depends.bootstrap() so their versions come from one
+                // place (depends.py _BOOTSTRAP_TOOL_VERSIONS), not hardcoded here.
+                await execCommand(enginePath, ['-c', 'import depends; depends.bootstrap()'], { task, cwd: DIST_DIR, env: pipEnv });
+                // `build` (PEP 517 frontend) is build-only; bootstrap doesn't install it.
+                await execCommand(enginePath, ['-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', 'build'], { task, cwd: DIST_DIR, env: pipEnv });
 
-                task.output = 'Installing test and runtime dependencies...';
-                await pipInstall(
-                    // Test framework
-                    'pytest', 'pytest-asyncio', 'pytest-timeout', 'pytest-xdist',
-                    // Runtime deps needed by client-python tests and AI modules
-                    'pydantic', 'python-dotenv',
-                    // MCP client tests
-                    'mcp>=1.2.0',
-                    // Model server
-                    'huggingface_hub[hf_xet]',
-                    // Pin cryptography to the node-requirements range so the build
-                    // installs the right version up front. Unconstrained, the build
-                    // pulls the latest (transitively, via mcp/huggingface_hub) and
-                    // depends() then downgrades it during parallel pytest collection;
-                    // on Windows the workers race to overwrite the already-loaded
-                    // cryptography _rust.pyd DLL and the whole suite fails. Keep this
-                    // in lockstep with nodes/src/nodes/requirements.txt.
-                    'cryptography>=46.0.7,<47',
-                );
-                await setState('server.pipInstalledV9', true);
+                await setState('server.pipInstalledV11', true);
             } else {
-                task.output = 'Build and test deps already installed (skipped)';
+                task.output = 'Build tools already installed (skipped)';
             }
 
 			const preinstall = ctx.options && ctx.options.pytestPreinstall;
@@ -841,6 +821,24 @@ function makeInstallPipAction() {
 				task.output = `Pre-installing: ${deps.join(', ')}...`;
 				await execCommand(enginePath, ['-m', 'pip', 'install', ...deps], { task, cwd: DIST_DIR });
 			}
+		},
+	};
+}
+
+// Install the build/test harness deps (pytest, huggingface_hub, ...) through depends()
+// rather than a direct pip install, so they resolve under the same merged constraints
+// as everything else — the pydantic/cryptography pins in the node/ai requirements apply
+// here too, so nothing floats to 'latest' that a later install would downgrade. Runs
+// after nodes:sync/ai:sync so those requirement files are in the dist for the constraint
+// compile; depends() is idempotent (dry-run skips already-satisfied installs).
+function makeSetupTestDepsAction() {
+	return {
+		description: 'Install build/test deps via depends',
+		run: async (ctx, task) => {
+			const enginePath = path.join(DIST_DIR, 'engine');
+			const buildReq = path.join(SERVER_DIR, 'build-requirements.txt');
+			task.output = 'Installing test/runtime deps via depends...';
+			await execCommand(enginePath, ['-c', `from depends import depends; depends(${JSON.stringify(buildReq)})`], { task, cwd: DIST_DIR });
 		},
 	};
 }
@@ -950,6 +948,9 @@ function makeBuildAction() {
 			// the engine was downloaded or compiled — the prebuilt binary doesn't
 			// include these modules, and they must match the current repo checkout.
 			parallel(['nodes:sync', 'ai:sync', 'client-python:sync-source'], 'Sync modules'),
+			// After sync, the node/ai requirement files are in the dist, so depends()
+			// has the full constraint set — install the test/runtime deps through it.
+			'server:setup-test-deps',
 		],
 	};
 }
@@ -1154,6 +1155,7 @@ module.exports = {
 		{ name: 'server:compile-engine', action: makeCompileEngineAction },
 		{ name: 'server:compile-tests', action: makeCompileTestsAction },
 		{ name: 'server:setup-pip', action: makeInstallPipAction },
+		{ name: 'server:setup-test-deps', action: makeSetupTestDepsAction },
 		{ name: 'server:copy-test-data', action: makeCopyTestDataAction },
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },

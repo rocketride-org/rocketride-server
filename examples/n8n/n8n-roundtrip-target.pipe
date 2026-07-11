@@ -1,0 +1,20 @@
+{
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" },
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_text_1",
+			"provider": "response_text",
+			"config": { "laneName": "text" },
+			"input": [{ "lane": "text", "from": "webhook_1" }],
+			"ui": { "position": { "x": 260, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "a1f0c0de-0004-4a04-8b04-0123456789ae",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

@@ -152,17 +152,7 @@ function resolveVoiceLlmComponent(request: IVoiceBuilderPipelineRequest): Pipeli
 }
 
 function buildPlannerInstructions(currentProject: Record<string, any>, services: Record<string, unknown>): string[] {
-	return [
-		'You are RocketRide Voice Builder.',
-		'The incoming text is a transcribed voice command for editing a RocketRide .pipe project.',
-		'Return JSON only with this shape: {"project": <full updated project>, "summary": "short change summary"}.',
-		'The project must keep the same project_id.',
-		'The project must include a components array.',
-		'Use only providers present in the service catalog or already present in the project.',
-		'Preserve existing component IDs unless the user explicitly asks to delete or replace those components.',
-		`Current project JSON: ${JSON.stringify(currentProject)}`,
-		`Available services JSON: ${JSON.stringify(summarizeServices(services))}`,
-	];
+	return ['You are RocketRide Voice Builder.', 'The incoming text is a transcribed voice command for editing a RocketRide .pipe project.', 'Return JSON only with this shape: {"project": <full updated project>, "summary": "short change summary"}.', 'The project must keep the same project_id.', 'The project must include a components array.', 'Use only providers present in the service catalog or already present in the project.', 'Preserve existing component IDs unless the user explicitly asks to delete or replace those components.', `Current project JSON: ${JSON.stringify(currentProject)}`, `Available services JSON: ${JSON.stringify(summarizeServices(services))}`];
 }
 
 export function getVoiceBuilderStatus(config: IVoiceBuilderConfig, secrets: Partial<IVoiceBuilderSecrets>, currentProject: Record<string, any> = {}, services: Record<string, unknown> = {}): IVoiceBuilderStatus {
@@ -304,7 +294,11 @@ export function buildVoiceBuilderPipeline(request: IVoiceBuilderPipelineRequest)
 
 function resultValueToText(value: unknown): string {
 	if (Array.isArray(value)) {
-		return value.map((item) => resultValueToText(item)).filter(Boolean).join('\n').trim();
+		return value
+			.map((item) => resultValueToText(item))
+			.filter(Boolean)
+			.join('\n')
+			.trim();
 	}
 	if (typeof value === 'string') return value.trim();
 	if (value === null || value === undefined) return '';

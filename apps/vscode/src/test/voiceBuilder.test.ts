@@ -5,14 +5,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-	buildVoiceBuilderPipeline,
-	extractJsonObject,
-	getVoiceBuilderStatus,
-	parseVoicePipelineResult,
-	processVoiceBuilderRecording,
-	sanitizeVoiceProjectEdit,
-} from '../providers/voice/voiceBuilder';
+import { buildVoiceBuilderPipeline, extractJsonObject, getVoiceBuilderStatus, parseVoicePipelineResult, processVoiceBuilderRecording, sanitizeVoiceProjectEdit } from '../providers/voice/voiceBuilder';
 
 const SERVICES = {
 	llm_gemini: {
@@ -75,7 +68,10 @@ test('sanitizeVoiceProjectEdit strips viewport and increments document revision'
 		project_id: 'project-1',
 		docRevision: 2,
 		viewport: { x: 10, y: 20, zoom: 1 },
-		components: [{ id: 'chat', provider: 'chat' }, { id: 'llm', provider: 'llm_gemini' }],
+		components: [
+			{ id: 'chat', provider: 'chat' },
+			{ id: 'llm', provider: 'llm_gemini' },
+		],
 	};
 
 	const sanitized = sanitizeVoiceProjectEdit(currentProject, generatedProject);
@@ -87,50 +83,29 @@ test('sanitizeVoiceProjectEdit strips viewport and increments document revision'
 });
 
 test('sanitizeVoiceProjectEdit rejects missing components', () => {
-	assert.throws(
-		() => sanitizeVoiceProjectEdit({ project_id: 'project-1', components: [] }, { project_id: 'project-1' }),
-		/return project components/
-	);
+	assert.throws(() => sanitizeVoiceProjectEdit({ project_id: 'project-1', components: [] }, { project_id: 'project-1' }), /return project components/);
 });
 
 test('sanitizeVoiceProjectEdit rejects project_id changes', () => {
-	assert.throws(
-		() => sanitizeVoiceProjectEdit({ project_id: 'project-1', components: [] }, { project_id: 'project-2', components: [] }),
-		/change project_id/
-	);
+	assert.throws(() => sanitizeVoiceProjectEdit({ project_id: 'project-1', components: [] }, { project_id: 'project-2', components: [] }), /change project_id/);
 });
 
 test('getVoiceBuilderStatus is disabled when the feature flag is off', () => {
-	const status = getVoiceBuilderStatus(
-		{ enabled: false, llmProvider: 'llm_gemini', llmProfile: 'gemini-2_5-flash' },
-		{ llmApiKey: 'provider-key' },
-		CURRENT_PROJECT,
-		SERVICES
-	);
+	const status = getVoiceBuilderStatus({ enabled: false, llmProvider: 'llm_gemini', llmProfile: 'gemini-2_5-flash' }, { llmApiKey: 'provider-key' }, CURRENT_PROJECT, SERVICES);
 
 	assert.equal(status.enabled, false);
 	assert.deepEqual(status.errors, ['Voice Builder is disabled']);
 });
 
 test('getVoiceBuilderStatus reports missing LLM provider', () => {
-	const status = getVoiceBuilderStatus(
-		{ enabled: true, llmProvider: '', llmProfile: '' },
-		{ llmApiKey: '' },
-		{ project_id: 'project-1', components: [] },
-		SERVICES
-	);
+	const status = getVoiceBuilderStatus({ enabled: true, llmProvider: '', llmProfile: '' }, { llmApiKey: '' }, { project_id: 'project-1', components: [] }, SERVICES);
 
 	assert.equal(status.enabled, false);
 	assert.deepEqual(status.errors, ['Select a Voice Builder LLM provider or add a configured LLM node to this pipeline']);
 });
 
 test('getVoiceBuilderStatus is enabled when a configured provider is selected', () => {
-	const status = getVoiceBuilderStatus(
-		{ enabled: true, llmProvider: 'llm_gemini', llmProfile: 'gemini-2_5-flash' },
-		{ llmApiKey: 'provider-key' },
-		CURRENT_PROJECT,
-		SERVICES
-	);
+	const status = getVoiceBuilderStatus({ enabled: true, llmProvider: 'llm_gemini', llmProfile: 'gemini-2_5-flash' }, { llmApiKey: 'provider-key' }, CURRENT_PROJECT, SERVICES);
 
 	assert.equal(status.enabled, true);
 	assert.equal(status.model, 'llm_gemini');

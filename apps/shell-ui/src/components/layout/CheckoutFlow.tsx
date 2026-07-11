@@ -106,10 +106,20 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 				if (!c) throw new Error('Not connected');
 				return c.billing.getProductPrices(checkoutApp.id);
 			}}
-			onCreateCheckout={async (priceId: string) => {
+			onCreateCheckout={async (priceId: string, promotionCode?: string) => {
 				const c = cm.getClient();
 				if (!c) throw new Error('Not connected');
-				return c.billing.createCheckoutSession(orgId, checkoutApp.id, priceId);
+				return c.billing.createCheckoutSession(orgId, checkoutApp.id, priceId, promotionCode);
+			}}
+			onValidatePromoCode={async (code: string, priceId?: string) => {
+				const c = cm.getClient();
+				if (!c) throw new Error('Not connected');
+				return c.billing.validatePromoCode(orgId, code, priceId);
+			}}
+			onRedeemPromoCode={async (code: string) => {
+				const c = cm.getClient();
+				if (!c) throw new Error('Not connected');
+				return c.billing.redeemPromoCode(orgId, code);
 			}}
 			onConfirmPending={async (subscriptionId: string, priceId: string) => {
 				const c = cm.getClient();

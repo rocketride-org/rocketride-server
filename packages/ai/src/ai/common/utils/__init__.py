@@ -15,7 +15,7 @@ Public surface:
   via the optional ``filetype`` package (lazy; node-provided dependency).
 - ``pick_torch_device``, ``pick_torch_dtype``, ``resolve_pipeline_device`` —
   select a Torch device/dtype for local-inference nodes.
-- ``post_with_retry`` — HTTP POST with retry/backoff.
+- ``post_with_retry`` / ``get_with_retry`` — HTTP POST/GET with retry/backoff.
 - ``colorize_depth``, ``decode_ndarray``, ``encode_ndarray``, ``image_to_bytes``
   — image/ndarray (de)serialization helpers.
 - ``validate_public_url`` — reject non-public/SSRF-prone URLs.
@@ -30,7 +30,7 @@ from .agent_tools import langchain_messages_to_transcript, normalize_bound_tools
 from .config_utils import config_int, parse_bool
 from .file_utils import decode_data_url, guess_filename
 from .cuda_utils import pick_torch_device, pick_torch_dtype, resolve_pipeline_device
-from .http_retry import post_with_retry
+from .http_retry import get_with_retry, post_with_retry
 from .image_utils import colorize_depth, decode_ndarray, encode_ndarray, image_to_bytes
 from .string_utils import safe_str
 from .tool_args import (
@@ -51,6 +51,7 @@ __all__ = [
     'config_int',
     'decode_data_url',
     'guess_filename',
+    'get_with_retry',
     'decode_ndarray',
     'encode_ndarray',
     'image_to_bytes',

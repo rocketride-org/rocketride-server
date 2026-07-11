@@ -80,27 +80,32 @@ discord_curl() {
 # ── Discord sync marker contract ─────────────────────────────────────────
 # The notifier stores the linked Discord message ID in a GitHub comment so
 # follow-up events PATCH the existing embed instead of posting a duplicate.
-# All three notifier workflows (pr/issues/discussions) go through the helpers
-# below — change the marker format here only.
+# For forum-channel webhooks the marker also stores the forum thread ID: the
+# webhook POST creates a forum post/thread and every later PATCH/DELETE of that
+# message must be scoped with ?thread_id=<thread>. All three notifier workflows
+# (pr/issues/discussions) go through the helpers below — change the format here
+# only.
 
 # jq/PCRE pattern matching the marker anywhere in a comment body. Pass to jq
 # via --arg, e.g.  jq --arg re "$DISCORD_MARKER_PATTERN" '... test($re) ...'.
-# Unanchored so it still matches once wrapped in <details>, staying
-# backward-compatible with legacy bare-marker comments.
+# Unanchored (matches the msg-id token without requiring the trailing ` -->`)
+# so it still matches once wrapped in <details> and stays backward-compatible
+# with both legacy single-id markers and the new msg-id + thread-id markers.
 # shellcheck disable=SC2034  # consumed by the sourcing workflows, not here
-DISCORD_MARKER_PATTERN='<!-- discord-msg-id:[0-9]+ -->'
+DISCORD_MARKER_PATTERN='<!-- discord-msg-id:[0-9]+'
 
-# render_discord_marker <msg_id> — emit the GitHub comment body that stores
-# <msg_id>. Wrapped in <details> so it renders as a collapsible note instead
-# of a blank "No description provided" comment.
+# render_discord_marker <msg_id> [thread_id] — emit the GitHub comment body
+# that stores <msg_id> (and the forum <thread_id>, if any). Wrapped in
+# <details> so it renders as a collapsible note instead of a blank
+# "No description provided" comment.
 render_discord_marker() {
   printf '%s\n' \
     '<details>' \
     '<summary>🤖 Internal: Discord sync marker</summary>' \
     '' \
-    'Auto-managed by the Discord notification workflow. Stores the linked Discord message ID. Do not edit or delete.' \
+    'Auto-managed by the Discord notification workflow. Stores the linked Discord message ID and forum thread ID. Do not edit or delete.' \
     '' \
-    "<!-- discord-msg-id:${1} -->" \
+    "<!-- discord-msg-id:${1} discord-thread-id:${2} -->" \
     '</details>'
 }
 
@@ -108,4 +113,58 @@ render_discord_marker() {
 # print the stored Discord message ID, or nothing if absent.
 extract_discord_marker() {
   grep -oE 'discord-msg-id:[0-9]+' | cut -d':' -f2 | head -n1
+}
+
+# extract_discord_thread — read a comment body (or marker line) on stdin and
+# print the stored forum thread ID, or nothing (legacy markers, or a message
+# posted to a non-forum channel, carry no thread ID).
+extract_discord_thread() {
+  grep -oE 'discord-thread-id:[0-9]+' | cut -d':' -f2 | head -n1
+}
+
+# ── Forum tag resolution ─────────────────────────────────────────────────
+# discord_applied_tags <config> <section> <state> <labels_json> [answer] [category]
+# — emit a JSON array of Discord tag IDs to pass as applied_tags on the forum
+# create POST. Resolves the GitHub state / answer / category / labels to tag
+# NAMES via <section> of the config, then those names to IDs, deduped and capped
+# at Discord's 5-per-post limit. Prints [] when the config file is absent or the
+# section has no ids yet (e.g. a channel whose tags aren't created), so callers
+# stay safe to POST unconditionally. Tags are applied only at creation (webhooks
+# cannot change applied_tags afterward — that would need a bot token).
+discord_applied_tags() {
+  local cfg="$1" section="$2" state="$3" labels="$4" answer="${5:-}" category="${6:-}"
+  [ -f "$cfg" ] || { printf '[]'; return 0; }
+  # Resolve in priority order (state first, then labels, answer, category) and
+  # dedupe *preserving order* before the 5-tag cap, so a state tag (open/closed/
+  # merged/…) is never dropped when an item maps to more than five tags.
+  jq -nc --slurpfile c "$cfg" --arg s "$section" --arg st "$state" \
+     --argjson lbls "$labels" --arg ans "$answer" --arg cat "$category" '
+    ($c[0][$s] // {}) as $sec
+    | ($sec.ids // {}) as $ids
+    | ( [ ($sec.state[$st]      // empty) ]
+      + [ $lbls[] | ($sec.labels[.] // empty) ]
+      + [ ($sec.answer[$ans]     // empty) ]
+      + [ ($sec.categories[$cat] // empty) ] ) as $names
+    | ( [ $names[] | ($ids[.] // empty) ]
+        | reduce .[] as $id ([]; if any(.[]; . == $id) then . else . + [$id] end) )
+    | .[0:5]'
+}
+
+# ── Forum thread archiving ───────────────────────────────────────────────
+# discord_archive_thread <thread_id> <true|false> — archive/unarchive a forum
+# thread so its Discord state mirrors the GitHub issue/PR/discussion (closed →
+# archived, reopened → unarchived). Forum threads can only be (un)archived with
+# a BOT token that has Manage Threads — webhooks cannot do it — so this is a
+# no-op (returns 0) unless DISCORD_GITHUB_BOT_TOKEN is set and a thread id is known.
+# Best-effort: archiving is cosmetic (the embed already reflects state), so a
+# transient failure must never abort the calling workflow.
+discord_archive_thread() {
+  local thread_id="$1" archived="$2"
+  [ -z "${DISCORD_GITHUB_BOT_TOKEN:-}" ] && return 0
+  [ -z "$thread_id" ] && return 0
+  curl -sS -o /dev/null --connect-timeout 10 --max-time 30 -X PATCH \
+    -H "Authorization: Bot ${DISCORD_GITHUB_BOT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"archived\": ${archived}}" \
+    "https://discord.com/api/v10/channels/${thread_id}" || true
 }

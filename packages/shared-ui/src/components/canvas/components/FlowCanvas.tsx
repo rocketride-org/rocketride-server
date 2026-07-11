@@ -334,7 +334,11 @@ export default function Canvas(): ReactElement {
 		}
 
 		setVoicePanelState({ state: 'recording', error: null });
-		await startRecording();
+		try {
+			await startRecording();
+		} catch (err) {
+			setVoicePanelState({ state: 'error', error: err instanceof Error ? err.message : 'Could not start microphone recording' });
+		}
 	}, [isVoiceRecording, loadData, onContentChanged, startRecording, stopRecording, voiceBuilder, voiceSetupErrors]);
 
 	// --- Callback for when a source node is added from the welcome screen ----
