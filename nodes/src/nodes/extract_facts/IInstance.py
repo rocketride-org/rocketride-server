@@ -124,7 +124,11 @@ class IInstance(IInstanceBase):
 
             if metadata.get('isTable'):
                 tid = metadata.get('tableId')
-                if tid is None:
+                try:
+                    tid = self.table_id if tid is None else int(tid)
+                except (TypeError, ValueError):
+                    # Non-numeric tableId from upstream metadata: fall back to
+                    # the running counter rather than crashing on tid + 1.
                     tid = self.table_id
                 self.table_text += f'{page_tag}[TABLE {tid}]\n{content}\n[/TABLE {tid}]\n'
                 self.table_id = max(self.table_id, tid + 1)

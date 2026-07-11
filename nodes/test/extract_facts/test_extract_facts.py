@@ -475,3 +475,72 @@ def test_extraction_prompt_requests_one_object_per_record():
     assert len(example_answer) == 2, 'example must show one record object per table row'
     for record in example_answer:
         assert 'name' in record and 'age' in record, 'each example record carries all target fields'
+
+
+# ---------------------------------------------------------------------------
+# (g) config toggles: validate / include_provenance
+# ---------------------------------------------------------------------------
+
+
+_FACT_WITH_PROV = {
+    'invoice_total': 100.0,
+    '_provenance': {
+        'page': 1,
+        'table_id': 0,
+        'row': 1,
+        'col': 1,
+        'source_text': 'Widget 100.00',
+        'confidence': 0.9,
+    },
+}
+
+
+def test_validate_false_skips_validator_pass():
+    """validate=False runs only the extraction pass (no second validator invoke)."""
+
+    def side_effect(i, ask):
+        return _make_answer([_FACT_WITH_PROV])
+
+    inst, captured = _build_instance(side_effect, validate=False)
+    inst.open(types.SimpleNamespace())
+    inst.writeTable(_TABLE)
+    inst.closing()
+
+    assert len(captured.asks) == 1, 'validator pass must be skipped when validate=False'
+    emitted = captured.answers[0].getJson()
+    assert '_validation' not in emitted[0], 'no validator metadata when validate=False'
+    assert _PROVENANCE_KEYS.issubset(emitted[0]['_provenance'].keys())
+
+
+def test_include_provenance_false_strips_provenance():
+    """include_provenance=False removes _provenance from every emitted fact."""
+
+    def side_effect(i, ask):
+        return _make_answer([_FACT_WITH_PROV])
+
+    inst, captured = _build_instance(side_effect, include_provenance=False)
+    inst.open(types.SimpleNamespace())
+    inst.writeTable(_TABLE)
+    inst.closing()
+
+    emitted = captured.answers[0].getJson()
+    assert emitted, 'answers lane must emit'
+    assert '_provenance' not in emitted[0], 'provenance must be stripped when include_provenance=False'
+    assert emitted[0]['invoice_total'] == 100.0, 'target fields survive provenance stripping'
+
+
+def test_string_tableid_from_metadata_is_coerced():
+    """A non-int tableId in documents metadata is coerced to int instead of crashing."""
+
+    def side_effect(i, ask):
+        return _make_answer([])
+
+    inst, captured = _build_instance(side_effect)
+    inst.open(types.SimpleNamespace())
+    inst.writeDocuments([FakeDoc(page_content=_TABLE, metadata={'isTable': True, 'tableId': '3'})])
+    inst.closing()
+
+    assert captured.asks, 'extraction pass must call instance.invoke'
+    question = captured.asks[0].question
+    context = '\n'.join(question.documents) + '\n'.join(question.context)
+    assert '[TABLE 3]' in context, 'string tableId must be coerced to int and fenced'
