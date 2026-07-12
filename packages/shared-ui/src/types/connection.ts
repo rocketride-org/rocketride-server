@@ -101,6 +101,13 @@ export interface ConnectionStatus {
 	lastError?: string;
 
 	/**
+	 * Discriminates AUTH_FAILED origins so recovery UI can phrase the message:
+	 * 'oauth-callback' — the IdP returned an error on the OAuth callback;
+	 * 'session' — an existing session was rejected or expired.
+	 */
+	errorKind?: 'oauth-callback' | 'session';
+
+	/**
 	 * Most recent unrecovered failure, latched across later transitions.
 	 * Persist-mode reconnect attempts report CONNECTING and a post-failure
 	 * anonymous connect reports CONNECTED — recovery UI reads this field so
@@ -110,6 +117,7 @@ export interface ConnectionStatus {
 	lastFailure?: {
 		state: ConnectionState.NETWORK_ERROR | ConnectionState.AUTH_FAILED;
 		lastError?: string;
+		errorKind?: 'oauth-callback' | 'session';
 	};
 
 	/** True if we have necessary credentials/config to attempt connection. */

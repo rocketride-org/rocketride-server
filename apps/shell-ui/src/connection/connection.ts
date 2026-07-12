@@ -260,6 +260,7 @@ export class ConnectionManager implements IConnectionManager {
 					state: ConnectionState.CONNECTED,
 					lastConnected: new Date(),
 					lastError: undefined,
+					errorKind: undefined,
 					retryAttempt: 0,
 					progressMessage: undefined,
 				});
@@ -277,7 +278,7 @@ export class ConnectionManager implements IConnectionManager {
 				this.clearServicesCache();
 				// Don't overwrite AUTH_FAILED state
 				if (this.connectionStatus.state !== ConnectionState.AUTH_FAILED) {
-					this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
+					this.updateConnectionStatus({ state: ConnectionState.CONNECTING, errorKind: undefined });
 				}
 				this.emit('shell:disconnected', { reason: reason ?? 'unknown', hasError: hasError ?? false });
 			},
@@ -453,6 +454,20 @@ export class ConnectionManager implements IConnectionManager {
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
+		const errorDescription = params.get('auth_error') ?? params.get('error_description') ?? params.get('error');
+
+		if (errorDescription) {
+			window.history.replaceState({}, '', window.location.pathname);
+			this.updateConnectionStatus({
+				state: ConnectionState.AUTH_FAILED,
+				lastError: errorDescription,
+				progressMessage: undefined,
+				errorKind: 'oauth-callback',
+			});
+			this.clearPendingAppId();
+			return null;
+		}
+
 		const sessionAppId = this.getSessionAppId();
 
 		// ── OAuth callback — exchange authorization code for a session ────
@@ -644,6 +659,7 @@ export class ConnectionManager implements IConnectionManager {
 		this.updateConnectionStatus({
 			state: ConnectionState.CONNECTING,
 			lastError: undefined,
+			errorKind: undefined,
 		});
 
 		try {
@@ -678,6 +694,7 @@ export class ConnectionManager implements IConnectionManager {
 				state: this.getConnectionFailureState(error),
 				lastError: errorMessage,
 				progressMessage: undefined,
+				errorKind: undefined,
 			});
 
 			this.emit('shell:error', { error });
@@ -702,6 +719,7 @@ export class ConnectionManager implements IConnectionManager {
 		this.updateConnectionStatus({
 			state: ConnectionState.DISCONNECTED,
 			progressMessage: undefined,
+			errorKind: undefined,
 		});
 	}
 
@@ -749,6 +767,7 @@ export class ConnectionManager implements IConnectionManager {
 					? 'Your session has expired — please sign in again.'
 					: error instanceof Error ? error.message : String(error),
 			progressMessage: undefined,
+			errorKind: state === ConnectionState.AUTH_FAILED ? 'session' : undefined,
 		});
 		return !isNetworkFailure;
 	}
@@ -1118,6 +1137,7 @@ export class ConnectionManager implements IConnectionManager {
 			this.connectionStatus.lastFailure = {
 				state: updates.state,
 				lastError: updates.lastError ?? this.connectionStatus.lastError,
+				errorKind: updates.errorKind ?? this.connectionStatus.errorKind,
 			};
 		} else if (
 			updates.state === ConnectionState.CONNECTED &&

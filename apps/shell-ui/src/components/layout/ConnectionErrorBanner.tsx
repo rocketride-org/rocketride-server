@@ -69,10 +69,13 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 	if (dismissed || !failure) return null;
 
 	const isNetworkFailure = failure.state === ConnectionState.NETWORK_ERROR;
+	const isOAuthCallbackFailure = !isNetworkFailure && failure.errorKind === 'oauth-callback';
 	const defaultMessage = isNetworkFailure
 		? 'Can\'t reach the server — check your connection and retry.'
-		: 'Your session has expired — please sign in again.';
-	const action = isNetworkFailure ? 'Retry' : 'Sign in';
+		: isOAuthCallbackFailure
+			? `Sign-in didn't complete: ${failure.lastError}`
+			: 'Your session has expired — please sign in again.';
+	const action = isNetworkFailure ? 'Retry' : isOAuthCallbackFailure ? 'Try again' : 'Sign in';
 	const onAction = isNetworkFailure
 		? onRetry ?? (() => ConnectionManager.getInstance().reconnect())
 		: onSignIn ?? (() => ConnectionManager.getInstance().startOAuth(false));
