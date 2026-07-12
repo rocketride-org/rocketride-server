@@ -12,7 +12,7 @@ Stands up its own HTTP endpoint and forwards incoming data into the attached pip
 
 The server is a **FastAPI / Uvicorn** wrapper (`ai.web.WebServer`). The engine passes the bind address on the command line (`--data_host`, `--data_port`, defaulting to `localhost:5567`); the node loads the `data` module, which registers a `/task/data` websocket as the data plane between the public endpoint and the pipeline. The node keeps running until the pipeline is stopped, the source task completes only when the server exits.
 
-After the pipeline starts, the Project Log displays the interface URL, the public authorization key, and the private token, so callers know how to reach the endpoint (the chat link form is `{host}/chat?auth={public_auth}`).
+After the pipeline starts, the Project Log displays a stable, pipe-specific interface URL, the public authorization key, and the private token, so callers know how to reach the endpoint. The URL forms are `{host}/chat/{project_id}/{source}?auth={public_auth}`, `{host}/dropper/{project_id}/{source}?auth={public_auth}`, and `{host}/webhook/{project_id}/{source}`. The legacy `/chat`, `/dropper`, `/webhook`, and `/task/data` URLs continue to work for existing integrations.
 
 ---
 

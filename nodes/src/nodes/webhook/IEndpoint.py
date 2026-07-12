@@ -64,9 +64,9 @@ class IEndpoint(IEndpointBase):
                 # These should NOT be replacable strings!!!
                 info = {
                     'button-text': 'Chat now',
-                    'button-link': '{host}/chat?auth={public_auth}',
+                    'button-link': '{host}/chat/{project_id}/{source}?auth={public_auth}',
                     'url-text': 'Chat interface URL',
-                    'url-link': '{host}/chat',
+                    'url-link': '{host}/chat/{project_id}/{source}',
                     'auth-text': 'Public Authorization Key',
                     'auth-key': '{public_auth}',
                     'token-text': 'Private Token',
@@ -88,9 +88,9 @@ class IEndpoint(IEndpointBase):
                 # These should NOT be replacable strings!!!
                 info = {
                     'button-text': 'Drop now',
-                    'button-link': '{host}/dropper?auth={public_auth}',
+                    'button-link': '{host}/dropper/{project_id}/{source}?auth={public_auth}',
                     'url-text': 'Dropper interface URL',
-                    'url-link': '{host}/dropper',
+                    'url-link': '{host}/dropper/{project_id}/{source}',
                     'auth-text': 'Public Authorization Key',
                     'auth-key': '{public_auth}',
                     'token-text': 'Private Token',
@@ -115,7 +115,7 @@ class IEndpoint(IEndpointBase):
                 }
                 info = {
                     'url-text': url_text_map[self.endpoint.logicalType],
-                    'url-link': '{host}/webhook',
+                    'url-link': '{host}/webhook/{project_id}/{source}',
                     'auth-text': 'Public Authorization Key',
                     'auth-key': '{public_auth}',
                     'token-text': 'Private Token',

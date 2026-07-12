@@ -469,6 +469,16 @@ async def task_Data(
     client = None
 
     try:
+        if token is None:
+            project_id = request.path_params.get('project_id')
+            source = request.path_params.get('source')
+            if project_id is not None and source is not None:
+                try:
+                    control = request.app.state.task.get_task_control_by_project(project_id, source)
+                    token = control.token
+                except Exception:
+                    pass
+
         # Get the WebServer instance from application state
         server: WebServer = request.app.state.server
         port = server.get_port()
