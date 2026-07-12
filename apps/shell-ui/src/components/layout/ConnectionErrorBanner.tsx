@@ -74,13 +74,24 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 		: 'Your session has expired — please sign in again.';
 	const action = isNetworkFailure ? 'Retry' : 'Sign in';
 	const onAction = isNetworkFailure
-		? onRetry ?? (() => ConnectionManager.getInstance().reconnect())
+		? onRetry ?? (() => {
+			const connection = ConnectionManager.getInstance();
+			if (!connection.hasAttached()) {
+				window.location.reload();
+				return;
+			}
+			return connection.reconnect();
+		})
 		: onSignIn ?? (() => ConnectionManager.getInstance().startOAuth(false));
 
 	return (
 		<div style={styles.banner} role="alert">
 			<span style={styles.message} title={failure.lastError}>{message ?? defaultMessage}</span>
-			<button type="button" style={styles.action} onClick={() => { void Promise.resolve(onAction()).catch(() => {}); }}>
+			<button type="button" style={styles.action} onClick={() => {
+				void Promise.resolve().then(onAction).catch((error) => {
+					console.error('[ConnectionErrorBanner] Recovery action failed:', error);
+				});
+			}}>
 				{action}
 			</button>
 			<button type="button" style={styles.dismiss} aria-label="Dismiss connection error" onClick={() => setDismissed(true)}>
