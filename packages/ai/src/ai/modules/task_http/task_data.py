@@ -476,7 +476,10 @@ async def task_Data(
                 try:
                     control = request.app.state.task.get_task_control_by_project(project_id, source)
                     token = control.token
-                except Exception:
+                except RuntimeError:
+                    # Documented missing-task case ('Your pipeline is not
+                    # running') — fall back to token=None so the request takes
+                    # the normal auth/404 path. Anything else propagates.
                     pass
 
         # Get the WebServer instance from application state
