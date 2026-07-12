@@ -22,8 +22,13 @@ browser and receives the resulting tokens through a deep link.
 4. The broker redirects to the bounce page
    (`https://api.rocketride.ai/auth/vscode/google`), which forwards the result
    to the editor deep link `vscode://rocketride.rocketride/auth/google`.
-5. The extension routes the tokens back to the node that started the login and
-   saves them into the node's configuration.
+5. The extension routes the tokens to the **live** editor for the document
+   that started the login (resolved at delivery time — the original webview
+   may have been recycled during the browser round-trip). If no live editor
+   exists, the tokens are held and redelivered after the next editor load;
+   undelivered tokens expire after 5 minutes. After the webview applies the
+   tokens, the host saves the document, so the tokens reach the `.pipe` file
+   without a manual save.
 
 ## Host and webview contract
 
@@ -31,14 +36,30 @@ Messages exchanged between the extension host and the pipeline editor webview:
 
 | Direction | Message | Payload | Purpose |
 | --- | --- | --- | --- |
-| host to webview | `project:load` | `oauthReturnUrl: string` | The `baseURL` the webview passes to the broker. In VS Code this is the bounce page URL carrying the editor's URI scheme (`?scheme=vscode`, `vscode-insiders`, etc.). Sent on every load; a load also clears any pending tokens. |
+| host to webview | `project:load` | `oauthReturnUrl: string` | The `baseURL` the webview passes to the broker. In VS Code this is the bounce page URL carrying the editor's URI scheme (`?scheme=vscode`, `vscode-insiders`, etc.). Sent on every load; a load also clears any webview-held pending tokens — but the host redelivers undelivered broker tokens right after the load, so a reload during the browser trip does not lose them. |
 | webview to host | `project:openExternal` | `url: string` | Ask the host to open the broker URL in the system browser. The host registers a one-shot token waiter keyed by the URL's `node_id` before opening. If the browser fails to open, the waiter is unregistered and an error is shown. |
-| host to webview | `project:oauthTokens` | `tokens: string, state: string` | Raw broker result delivered after the deep link returns. `state` is JSON echoing the originating `node_id`; the config panel applies tokens only to the matching node, then clears them. |
+| host to webview | `project:oauthTokens` | `tokens: string, state: string` | Raw broker result, delivered to the current live webview for the originating document. `state` is JSON echoing the originating `node_id`; the config panel applies tokens only to the matching node, then clears them. The host saves the document after the first `project:contentChanged` that follows a delivery (one-shot), so no manual save is needed. |
 
 The deep link handled by the extension is
 `<uriScheme>://rocketride.rocketride/auth/google` with query parameters
 `tokens`, `state`, and on failure `oauth_error` / `error` /
 `error_description` (see `CloudAuthProvider.handleGoogleOAuth`).
+
+## Saved config shape
+
+Tokens land at the node config **root**: `authType: "user"` and
+`userToken: "<JSON token string>"`. Node configs are flat — the engine reads
+`cfg.get('authType')` / `cfg.get('userToken')` at the top level, and the
+generated form schema names dotted `services.json` field ids (for example
+`google.userToken`) by their last component. The `parameters.*` locations some
+widgets also read are legacy and are never written by this flow.
+
+## Limitation
+
+Tokens are applied by the node config panel. If the panel is closed when the
+deep link returns, the tokens stay pending in the editor until the panel is
+reopened for the node that started the login (or until the editor reloads and
+the redelivery expires).
 
 ## Token refresh
 

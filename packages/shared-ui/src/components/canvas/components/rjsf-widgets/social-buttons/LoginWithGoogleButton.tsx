@@ -98,7 +98,7 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 			settings_sharing: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`, `${_G}/gmail.settings.sharing`],
 			full: ['https://mail.google.com/'],
 		};
-		const accessTier = formValues.parameters?.access as string | undefined;
+		const accessTier = (formValues.access ?? formValues.parameters?.access) as string | undefined;
 		const tierScopes = accessTier ? GMAIL_EXTENDED_SCOPES[accessTier] : undefined;
 		if (tierScopes?.length) {
 			url.searchParams.set('scope', tierScopes.join(' '));
@@ -120,8 +120,9 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		return 'primary';
 	}, [formContext?.formDataErrors]);
 
-	// Check if user is already authenticated by looking for a userToken in either nested or flat location
-	const authenticated = formValues?.parameters?.google?.userToken?.length || formValues?.parameters?.userToken?.length;
+	// Check if user is already authenticated. Flat node schemas (tool_gmail)
+	// keep userToken at the config root; the parameters.* locations are legacy.
+	const authenticated = formValues?.userToken?.length || formValues?.parameters?.google?.userToken?.length || formValues?.parameters?.userToken?.length;
 
 	// i18n is not initialized in every host (e.g. the VS Code webview). When a key
 	// doesn't resolve, t() returns the key itself — fall back to a literal so the
@@ -137,8 +138,8 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 	// marker so GoogleDrivePickerWidget can detect when a fresh token is available after OAuth.
 	// This effect does NOT open the picker - it only signals token availability.
 	useEffect(() => {
-		// Look for the user token in both possible locations (nested under google or flat)
-		const savedUserToken = formValues.parameters?.google?.userToken || formValues.parameters?.userToken;
+		// Look for the user token in all possible locations (config root first, then legacy nested)
+		const savedUserToken = formValues.userToken || formValues.parameters?.google?.userToken || formValues.parameters?.userToken;
 		const pickerWindow = window as typeof window & { __googlePickerLastToken?: string };
 
 		if (!savedUserToken) {
