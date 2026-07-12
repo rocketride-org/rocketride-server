@@ -454,7 +454,7 @@ export class ConnectionManager implements IConnectionManager {
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
-		const errorDescription = params.get('auth_error') ?? params.get('error_description') ?? params.get('error');
+		const errorDescription = params.get('auth_error') || params.get('error_description') || params.get('error');
 
 		if (errorDescription) {
 			window.history.replaceState({}, '', window.location.pathname);

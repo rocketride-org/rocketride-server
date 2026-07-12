@@ -64,7 +64,7 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 
 	useEffect(() => {
 		setDismissed(false);
-	}, [failure?.state, failure?.lastError]);
+	}, [failure?.state, failure?.lastError, failure?.errorKind]);
 
 	if (dismissed || !failure) return null;
 
