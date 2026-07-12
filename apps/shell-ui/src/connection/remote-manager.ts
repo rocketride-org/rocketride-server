@@ -34,10 +34,11 @@
 // No engine process management (that's VSCode-only via LocalManager).
 // =============================================================================
 
-import { RocketRideClient, ConnectResult } from 'rocketride';
+import { RocketRideClient, ConnectResult, AuthenticationException } from 'rocketride';
 import type { ManagerInfo } from 'shared';
 import { BaseManager, ShellConnectionConfig } from './base-manager';
 import { CONNECT_TIMEOUT_MS } from '../constants';
+import { ConnectionFailure } from './errors';
 
 // =============================================================================
 // REMOTE MANAGER
@@ -62,20 +63,32 @@ export class RemoteManager extends BaseManager {
 	async connect(client: RocketRideClient, config: ShellConnectionConfig): Promise<void> {
 		// Validate that we have something to connect with
 		if (!config.credential) {
-			throw new Error('No credential provided for connection.');
+			throw new ConnectionFailure('No credential provided for connection.', 'auth');
 		}
 
 		// Login with timeout to avoid indefinite hangs (transport already attached)
-		const result = await Promise.race([
-			client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }),
-			new Promise<never>((_, reject) =>
-				setTimeout(() => reject(new Error(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`)), CONNECT_TIMEOUT_MS),
-			),
-		]) as ConnectResult;
+		let result: ConnectResult;
+		try {
+			result = await Promise.race([
+				client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }),
+				new Promise<never>((_, reject) =>
+					setTimeout(
+						() => reject(new ConnectionFailure(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`, 'network')),
+						CONNECT_TIMEOUT_MS,
+					),
+				),
+			]) as ConnectResult;
+		} catch (error) {
+			if (error instanceof ConnectionFailure) throw error;
+			if (error instanceof AuthenticationException) {
+				throw new ConnectionFailure(error.message, 'auth');
+			}
+			throw new ConnectionFailure(error instanceof Error ? error.message : String(error), 'network');
+		}
 
 		// Validate the result — SDK resolves even on auth failure
 		if (!result.userId) {
-			throw new Error('Authentication failed: unknown user or invalid credentials.');
+			throw new ConnectionFailure('Authentication failed: unknown user or invalid credentials.', 'auth');
 		}
 
 		// Cache server info if available

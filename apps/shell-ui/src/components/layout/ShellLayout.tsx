@@ -47,6 +47,7 @@ import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
+import { ConnectionErrorBanner } from './ConnectionErrorBanner';
 import type { ShellConfig } from '../../workspace/types';
 import { commonStyles } from 'shared/themes/styles';
 
@@ -283,6 +284,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		<ShellApiConfigProvider config={mergedApiConfig}>
 		<OverlayManager>
 		<div style={styles.shell}>
+			<ConnectionErrorBanner />
 			{/* Main row: Sidebar | Client Area | Debug Panel */}
 			<div style={styles.main}>
 				{/* Sidebar zone */}

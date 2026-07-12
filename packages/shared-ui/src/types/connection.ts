@@ -51,11 +51,14 @@ export enum ConnectionState {
 	/** Successfully connected and authenticated. */
 	CONNECTED = 'connected',
 
-	/** Connection attempt failed (network, timeout, server error). */
+	/** Connection attempt failed due to a server error. */
 	FAILED = 'failed',
 
 	/** Authentication was rejected by the server (bad/expired/revoked key). */
 	AUTH_FAILED = 'auth-failed',
+
+	/** Transport/network failure — retryable. */
+	NETWORK_ERROR = 'network-error',
 }
 
 // =============================================================================
@@ -96,6 +99,18 @@ export interface ConnectionStatus {
 
 	/** Last error message (cleared on successful connect). */
 	lastError?: string;
+
+	/**
+	 * Most recent unrecovered failure, latched across later transitions.
+	 * Persist-mode reconnect attempts report CONNECTING and a post-failure
+	 * anonymous connect reports CONNECTED — recovery UI reads this field so
+	 * the failure stays visible until it is actually resolved. Network
+	 * failures clear on reconnection; auth failures clear on re-auth.
+	 */
+	lastFailure?: {
+		state: ConnectionState.NETWORK_ERROR | ConnectionState.AUTH_FAILED;
+		lastError?: string;
+	};
 
 	/** True if we have necessary credentials/config to attempt connection. */
 	hasCredentials: boolean;

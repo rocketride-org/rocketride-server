@@ -40,12 +40,13 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { RocketRideClient, ConnectResult } from 'rocketride';
+import { RocketRideClient, ConnectResult, AuthenticationException } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager, IAuthProvider } from 'shared';
 import { ConnectionState, ConnectionStatus } from 'shared';
 import type { ConnectionMode } from 'shared';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
+import { ConnectionFailure } from './errors';
 import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
@@ -429,8 +430,26 @@ export class ConnectionManager implements IConnectionManager {
 	}): Promise<{ result: ConnectResult; appId: string } | null> {
 		if (!this.client) throw new Error('Client not initialized — call init() first.');
 
-		// Ensure the transport is attached before any login attempt
-		await this._attachPromise;
+		// Ensure the transport is attached before any login attempt. Bound the
+		// wait: with the server fully unreachable the attach can pend forever,
+		// which used to leave the shell on an indefinite splash. Surfacing it
+		// as a network failure lets the recovery banner render instead.
+		try {
+			await Promise.race([
+				this._attachPromise,
+				new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new ConnectionFailure('Could not reach the server.', 'network')), 10000),
+				),
+			]);
+		} catch (error) {
+			// Transport attach failures are network problems by definition.
+			this.handleStoredTokenFailure(
+				error instanceof ConnectionFailure
+					? error
+					: new ConnectionFailure(error instanceof Error ? error.message : String(error), 'network'),
+			);
+			return null;
+		}
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
@@ -451,10 +470,11 @@ export class ConnectionManager implements IConnectionManager {
 				const staleToken = this.loadToken();
 				if (staleToken) {
 					try {
-						const result = await this.client.login(staleToken);
+						const result = await this.loginWithStoredToken(staleToken);
 						return await this.finishConnect(result, sessionAppId, config);
-					} catch {
-						this.clearToken();
+					} catch (error) {
+						if (this.handleStoredTokenFailure(error)) this.clearToken();
+						else return null;
 					}
 				}
 				// No usable token — restart auth only for session-locked apps.
@@ -471,12 +491,14 @@ export class ConnectionManager implements IConnectionManager {
 			const token = this.loadToken();
 			if (token) {
 				try {
-					const result = await this.client.login(token);
+					const result = await this.loginWithStoredToken(token);
 					return await this.finishConnect(result, sessionAppId, config);
-				} catch {
-					// Token expired or invalid — clear and restart OAuth
-					this.clearToken();
-					await this.startOAuth();
+				} catch (error) {
+					// Token expired or invalid — clear and restart OAuth.
+					if (this.handleStoredTokenFailure(error)) {
+						this.clearToken();
+						await this.startOAuth();
+					}
 					return null;
 				}
 			}
@@ -490,15 +512,15 @@ export class ConnectionManager implements IConnectionManager {
 		if (token) {
 			try {
 				const result = await Promise.race([
-					this.client.login(token),
+					this.loginWithStoredToken(token),
 					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new Error('timeout')), 8000),
+						setTimeout(() => reject(new ConnectionFailure('timeout', 'network')), 8000),
 					),
 				]);
 				return await this.finishConnect(result, '', config);
 			} catch (err) {
-				// Connect failed — clear stale token
-				this.clearToken();
+				// Connect failed — retain the token when the server is unreachable.
+				if (this.handleStoredTokenFailure(err)) this.clearToken();
 				return null;
 			}
 		}
@@ -531,6 +553,9 @@ export class ConnectionManager implements IConnectionManager {
 		// Persist the token for future page loads
 		if (result.userToken) this.saveToken(result.userToken);
 
+		// An authenticated connect resolves any latched failure (incl. auth).
+		this.connectionStatus.lastFailure = undefined;
+
 		// Cache the account info
 		this.accountInfo = result;
 
@@ -556,6 +581,23 @@ export class ConnectionManager implements IConnectionManager {
 		}
 
 		return { result, appId: resolvedAppId };
+	}
+
+	/** Login with a stored token and type failures for bootstrap recovery. */
+	private async loginWithStoredToken(token: string): Promise<ConnectResult> {
+		try {
+			const result = await this.client!.login(token);
+			if (!result.userId) {
+				throw new ConnectionFailure('Authentication failed: unknown user or invalid credentials.', 'auth');
+			}
+			return result;
+		} catch (error) {
+			if (error instanceof ConnectionFailure) throw error;
+			if (this.getConnectionFailureState(error) === ConnectionState.AUTH_FAILED) {
+				throw new ConnectionFailure(error instanceof Error ? error.message : String(error), 'auth');
+			}
+			throw new ConnectionFailure(error instanceof Error ? error.message : String(error), 'network');
+		}
 	}
 
 	// =========================================================================
@@ -632,13 +674,8 @@ export class ConnectionManager implements IConnectionManager {
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
 
-			// Determine if this is an auth failure vs network failure
-			const isAuthError = errorMessage.includes('Authentication failed') ||
-				errorMessage.includes('unknown user') ||
-				errorMessage.includes('invalid credentials');
-
 			this.updateConnectionStatus({
-				state: isAuthError ? ConnectionState.AUTH_FAILED : ConnectionState.FAILED,
+				state: this.getConnectionFailureState(error),
 				lastError: errorMessage,
 				progressMessage: undefined,
 			});
@@ -677,6 +714,43 @@ export class ConnectionManager implements IConnectionManager {
 		if (token) {
 			await this.connect(token);
 		}
+	}
+
+	/** Map a connection failure to the status state that determines recovery UI. */
+	private getConnectionFailureState(error: unknown): ConnectionState {
+		if (error instanceof ConnectionFailure) {
+			switch (error.kind) {
+				case 'auth': return ConnectionState.AUTH_FAILED;
+				case 'network': return ConnectionState.NETWORK_ERROR;
+				case 'server': return ConnectionState.FAILED;
+			}
+		}
+
+		// The SDK types auth rejections (invalid/revoked/expired credentials).
+		if (error instanceof AuthenticationException) return ConnectionState.AUTH_FAILED;
+
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		// Legacy fallback for untyped errors from older connection paths.
+		const isAuthError = errorMessage.includes('Authentication failed') ||
+			errorMessage.includes('unknown user') ||
+			errorMessage.includes('invalid credentials');
+		return isAuthError ? ConnectionState.AUTH_FAILED : ConnectionState.FAILED;
+	}
+
+	/** Surface a stored-token failure and return whether the token should be cleared. */
+	private handleStoredTokenFailure(error: unknown): boolean {
+		const state = this.getConnectionFailureState(error);
+		const isNetworkFailure = state === ConnectionState.NETWORK_ERROR;
+		this.updateConnectionStatus({
+			state,
+			lastError: isNetworkFailure
+				? 'Can\'t reach the server — check your connection and retry.'
+				: state === ConnectionState.AUTH_FAILED
+					? 'Your session has expired — please sign in again.'
+					: error instanceof Error ? error.message : String(error),
+			progressMessage: undefined,
+		});
+		return !isNetworkFailure;
 	}
 
 	/**
@@ -1033,6 +1107,25 @@ export class ConnectionManager implements IConnectionManager {
 	/** Update connection status and emit shell:statusChange. */
 	private updateConnectionStatus(updates: Partial<ConnectionStatus>): void {
 		Object.assign(this.connectionStatus, updates);
+
+		// Latch failures across later transitions. The SDK's persist mode keeps
+		// the state cycling through CONNECTING while it retries, and a
+		// post-failure anonymous connect reports CONNECTED — either would erase
+		// a purely state-driven failure before recovery UI could render it.
+		// A network failure clears once a connection is re-established; an
+		// auth failure persists until the user acts on it (sign-in navigates).
+		if (updates.state === ConnectionState.NETWORK_ERROR || updates.state === ConnectionState.AUTH_FAILED) {
+			this.connectionStatus.lastFailure = {
+				state: updates.state,
+				lastError: updates.lastError ?? this.connectionStatus.lastError,
+			};
+		} else if (
+			updates.state === ConnectionState.CONNECTED &&
+			this.connectionStatus.lastFailure?.state === ConnectionState.NETWORK_ERROR
+		) {
+			this.connectionStatus.lastFailure = undefined;
+		}
+
 		this.emit('shell:statusChange' as keyof ShellConnectionEventMap, this.connectionStatus as any);
 
 		// Also emit statusMessage for simple UI consumers
