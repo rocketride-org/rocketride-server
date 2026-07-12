@@ -71,7 +71,7 @@ from ai.web import exception, error, Result
 from ai.account import account, AccountInfo, Reporter
 from ai.modules import ALL as ALLOWED_MODULES
 from .middleware import AuthMiddleware
-from .endpoints import use, ping, version, shutdown, status, auth_callback
+from .endpoints import use, ping, version, shutdown, status, auth_callback, vscode_oauth_bounce
 from .denied import (
     CONST_ACCESS_DENIED_HTML,
     CONST_ACCESS_DENIED_TEXT,
@@ -317,6 +317,9 @@ class WebServer:
         # These are always there - no way to turn them off
         self.add_route('/status', status, ['GET'])
         self.add_route('/version', version, ['GET'], public=True)
+        # OAuth bounce endpoints must stay registered even when standardEndpoints
+        # is off (cloud/eaas), else the Gmail-tool Google OAuth deep-link 401s.
+        self.add_route('/auth/vscode/google', vscode_oauth_bounce, ['GET'], public=True)
 
         # Configure the Uvicorn server immediately upon initialization
         self.server = self._configure_server()

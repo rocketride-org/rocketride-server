@@ -169,10 +169,14 @@
 			"default": "localhost"
 		},
 		"vector.cloud.port": {
-			"default": 443
+			"type": ["number", "string"],
+			"default": "443",
+			"description": "Port number. Enter a plain integer such as 443, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}. Placeholders resolve to a string at run time, so this field accepts both a number and a string; the node coerces the value to an integer before connecting, so either form works."
 		},
 		"vector.local.port": {
-			"default": 8330
+			"type": ["number", "string"],
+			"default": "8330",
+			"description": "Port number. Enter a plain integer such as 8000, or an env-var placeholder like ${ROCKETRIDE_CHROMA_PORT}. Placeholders resolve to a string at run time, so this field accepts both a number and a string; the node coerces the value to an integer before connecting, so either form works."
 		},
 		//
 		// Cloud configuration for ChromaDB

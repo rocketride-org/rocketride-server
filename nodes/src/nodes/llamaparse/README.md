@@ -2,6 +2,8 @@
 
 A RocketRide data node that parses documents with the LlamaParse cloud service and emits the extracted text and tables into the pipeline.
 
+> **⚠️ Provenance limitation — not for audit-grade extraction.** This node flattens documents to Markdown: it drops page boundaries, bbox/polygon coordinates, and the table-HTML cell grid, so cell-level provenance and coordinate-based review cannot be reconstructed from its output. Do not use it where every value must trace back to its exact source cell (e.g. financial-table / regulatory extraction). For structure-preserving parsing that retains table HTML plus page and coordinate data, use the **`datalab_parse`** node instead.
+
 ## What it does
 
 Sends incoming documents to the LlamaIndex / LlamaParse cloud API (via the `llama-parse` Python library) and emits the results. Handles PDFs, images, Word documents, Excel spreadsheets, and other formats, with table extraction, layout preservation, and Markdown output. Processing happens in the cloud: a LlamaIndex API key is required, and the run aborts at startup if none is configured.

@@ -1,0 +1,8 @@
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+# Transitive floors: OSV flagged the resolved versions (CVE-2026-45409 idna,
+# CVE-2025-4565 protobuf).
+idna>=3.15
+protobuf>=4.25.8

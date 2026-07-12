@@ -61,6 +61,21 @@ REQUIREMENTS_GLOBS = [
     'ai/**/requirement*.txt',
 ]
 
+# Bootstrap tools install outside any constraint, so pin them or they float to 'latest' and a
+# later install downgrades them. Lockstep with packages/server/scripts/tasks.js.
+_BOOTSTRAP_TOOL_VERSIONS: dict[str, str] = {
+    'wheel': '0.47.0',
+    'setuptools': '82.0.1',
+    'uv': '0.11.25',
+}
+
+
+def _tool_spec(name: str) -> str:
+    """Pinned pip spec for a bootstrap tool; bare name if unpinned."""
+    version = _BOOTSTRAP_TOOL_VERSIONS.get(name)
+    return f'{name}=={version}' if version else name
+
+
 # Track processed requirements to avoid redundant installs in same session
 _processed: set[str] = set()
 
@@ -443,7 +458,8 @@ def _ensure_wheel():
 
     updateProgress('Installing wheel...')
     result = _run(
-        [sys.executable, '-m', 'pip', 'install', 'wheel', '--quiet', '--disable-pip-version-check'], check=False
+        [sys.executable, '-m', 'pip', 'install', _tool_spec('wheel'), '--quiet', '--disable-pip-version-check'],
+        check=False,
     )
 
     if result.returncode != 0:
@@ -479,7 +495,8 @@ def _ensure_setuptools():
 
     updateProgress('Installing setuptools...')
     result = _run(
-        [sys.executable, '-m', 'pip', 'install', 'setuptools', '--quiet', '--disable-pip-version-check'], check=False
+        [sys.executable, '-m', 'pip', 'install', _tool_spec('setuptools'), '--quiet', '--disable-pip-version-check'],
+        check=False,
     )
 
     if result.returncode != 0:
@@ -500,7 +517,10 @@ def _ensure_uv():
         return
 
     updateProgress('Installing uv...')
-    result = _run([sys.executable, '-m', 'pip', 'install', 'uv', '--quiet', '--disable-pip-version-check'], check=False)
+    result = _run(
+        [sys.executable, '-m', 'pip', 'install', _tool_spec('uv'), '--quiet', '--disable-pip-version-check'],
+        check=False,
+    )
 
     if result.returncode != 0:
         error(f'Failed to install uv: {result.stderr}')

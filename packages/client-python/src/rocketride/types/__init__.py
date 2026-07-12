@@ -153,7 +153,7 @@ from .account import (
 # Deploy types: deployment records.
 from .deploy import DeploymentRecord
 
-# Billing types: subscriptions, Stripe plans, compute credits.
+# Billing types: subscriptions, Stripe plans, compute credits, promo codes.
 from .billing import (
     AppPrice,
     BillingDetail,
@@ -162,6 +162,8 @@ from .billing import (
     CreditBalance,
     CreditPack,
     LedgerTransaction,
+    PromoRedemption,
+    PromoValidation,
     TransactionsResult,
     UsageRollup,
 )
@@ -266,6 +268,8 @@ __all__ = [
     'CreditBalance',
     'CreditPack',
     'LedgerTransaction',
+    'PromoRedemption',
+    'PromoValidation',
     'TransactionsResult',
     'UsageRollup',
 ]

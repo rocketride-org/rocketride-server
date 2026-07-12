@@ -75,6 +75,18 @@ export interface IFlowProps {
 	/** Validates the pipeline server-side. */
 	handleValidatePipeline: (pipeline: IProject) => Promise<IValidateResponse>;
 
+	/** OAuth broker return URL for hosts that intercept a deep link (e.g. VS Code). */
+	oauthReturnUrl?: string;
+
+	/** Opens an external URL in the host's system browser to start an OAuth login. */
+	onOpenExternal?: (url: string) => void;
+
+	/** OAuth tokens delivered out-of-band by the host (e.g. VS Code deep-link callback). */
+	pendingOAuthTokens?: { tokens: string; state: string };
+
+	/** Clears `pendingOAuthTokens` once a config panel has consumed them. */
+	clearPendingOAuthTokens?: () => void;
+
 	/** Opens a URL in the host browser. */
 	onOpenLink?: (url: string, displayName?: string) => void;
 
@@ -139,7 +151,7 @@ export interface IFlowProps {
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, isReadonly = false, envKeys }: IFlowProps) {
+export default function Flow({ oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, getPreference, setPreference, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, isReadonly = false, envKeys }: IFlowProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 
@@ -198,7 +210,7 @@ export default function Flow({ oauth2RootUrl, project, servicesJson, taskStatuse
 					overflow: 'hidden',
 				}}
 			>
-				<FlowContainer oauth2RootUrl={oauth2RootUrl} project={project} servicesJson={servicesJson} inventory={inventory} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} handleValidatePipeline={handleValidatePipeline} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} onExport={onExport} isReadonly={isReadonly} envKeys={envKeys}>
+				<FlowContainer oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} inventory={inventory} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} handleValidatePipeline={handleValidatePipeline} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} onExport={onExport} isReadonly={isReadonly} envKeys={envKeys}>
 					<FlowCanvas />
 				</FlowContainer>
 			</div>

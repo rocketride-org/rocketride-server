@@ -78,8 +78,108 @@ export interface CheckoutPlan {
 }
 
 // =============================================================================
+// PROMO CODES
+// =============================================================================
+
+/**
+ * UI-local result of validating a promo code via the host callback.
+ *
+ * Mirrors the SDK's `PromoValidation` response shape. A grant/hackathon
+ * code is recognisable by `appId` + `creditsGranted`; a discount-only code
+ * has neither and applies to whichever plan is selected.
+ */
+export interface PromoValidation {
+	/** Whether the code resolved to an active Stripe promotion code. */
+	valid: boolean;
+
+	/** Human-readable failure reason when `valid` is false. */
+	reason?: string;
+
+	/** Canonical code string as stored in Stripe. */
+	code?: string;
+
+	/** Human-readable description, e.g. "25% off for 3 months". */
+	description?: string;
+
+	/** Percentage discount (e.g. 25 or 100), if percent-based. */
+	percentOff?: number | null;
+
+	/** Fixed discount in cents, if amount-based. */
+	amountOffCents?: number | null;
+
+	/** ISO currency for `amountOffCents`. */
+	currency?: string | null;
+
+	/** Coupon duration: 'once' | 'repeating' | 'forever'. */
+	duration?: string | null;
+
+	/** Months the discount repeats for (duration === 'repeating'). */
+	durationInMonths?: number | null;
+
+	/** Credits granted on redemption ({resource: amount}) — grant codes only. */
+	creditsGranted?: Record<string, number> | null;
+
+	/** Target app for a grant code — presence marks a hackathon/grant code. */
+	appId?: string | null;
+
+	/** List price in cents of the plan passed as priceId (if any). */
+	amountCents?: number;
+
+	/** First-invoice price in cents after the discount (if priceId given). */
+	discountedAmountCents?: number;
+}
+
+/**
+ * UI-local result of redeeming a credit-grant code via the host callback.
+ * Mirrors the SDK's `PromoRedemption` response shape.
+ */
+export interface PromoRedemption {
+	/** True when the redemption succeeded. */
+	redeemed: boolean;
+
+	/** 'subscribed' = new $0 subscription; 'credits_only' = already subscribed. */
+	mode: 'subscribed' | 'credits_only';
+
+	/** App the code targets. */
+	appId: string;
+
+	/** Subscription status after redemption (e.g. 'active'). */
+	status?: string;
+
+	/** Credits granted ({resource: amount}). */
+	credits: Record<string, number>;
+}
+
+// =============================================================================
 // CHECKOUT MODAL PROPS
 // =============================================================================
+
+/**
+ * Promo-code callbacks — both or neither.
+ *
+ * The modal's grant-code path needs `onRedeemPromoCode` whenever
+ * `onValidatePromoCode` resolves a hackathon code, so providing only one
+ * of the pair is a misconfiguration; this union makes it a compile-time
+ * error instead of a silent wrong-path fallback.
+ */
+export type CheckoutModalPromoProps =
+	| {
+		/**
+		 * Resolves a promo code without side effects. Providing the pair
+		 * renders a Promo Code box under the plan cards.
+		 */
+		onValidatePromoCode: (code: string, priceId?: string) => Promise<PromoValidation>;
+
+		/**
+		 * Redeems a credit-grant (hackathon) code — $0 subscription plus
+		 * immediate credits, no plan selection or payment step.
+		 */
+		onRedeemPromoCode: (code: string) => Promise<PromoRedemption>;
+	}
+	| {
+		onValidatePromoCode?: undefined;
+		onRedeemPromoCode?: undefined;
+	};
 
 /**
  * Props for the host-agnostic CheckoutModal component.
@@ -87,7 +187,7 @@ export interface CheckoutPlan {
  * All server communication is delegated to the host via callbacks —
  * the component never imports the SDK or any transport layer directly.
  */
-export interface CheckoutModalProps {
+export interface CheckoutModalBaseProps {
 	/** Display name of the app being subscribed to (e.g. "RocketRide"). */
 	appName: string;
 
@@ -112,8 +212,12 @@ export interface CheckoutModalProps {
 	/**
 	 * Creates a Stripe subscription on the server and returns the
 	 * client secret needed by Stripe Elements to confirm the payment.
+	 *
+	 * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
+	 * promotion code) — the subscription is already active and the payment
+	 * step is skipped entirely.
 	 */
-	onCreateCheckout: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onCreateCheckout: (priceId: string, promotionCode?: string) => Promise<{ clientSecret: string | null; subscriptionId: string; status?: string }>;
 
 	/**
 	 * Notifies the server that payment was confirmed client-side.
@@ -135,3 +239,6 @@ export interface CheckoutModalProps {
 	 */
 	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }
+
+/** Full CheckoutModal props: base props plus the paired promo callbacks. */
+export type CheckoutModalProps = CheckoutModalBaseProps & CheckoutModalPromoProps;

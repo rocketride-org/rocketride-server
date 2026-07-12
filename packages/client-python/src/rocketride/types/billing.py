@@ -32,6 +32,8 @@ Types Defined:
     StripePlan: Stripe plan/price row for a given product.
     CreditBalance: Current credit balance for an org's compute wallet.
     CreditPack: Per-pack pricing row for the credit top-up modal.
+    PromoValidation: Result of resolving a promo code.
+    PromoRedemption: Result of redeeming a credit-grant code.
 """
 
 from typing import Literal, NotRequired, TypedDict
@@ -173,6 +175,72 @@ class CreditPack(TypedDict):
     usdCents: int
     credits: int
     nickname: str
+
+
+# =============================================================================
+# PROMO CODE TYPES
+# =============================================================================
+
+
+class PromoValidation(TypedDict):
+    """
+    Result of resolving a promo code via the ``promo_validate`` subcommand.
+
+    ``valid: False`` carries a human-readable ``reason``. A grant/hackathon
+    code is recognisable by ``appId`` + ``creditsGranted``; a discount-only
+    code has neither and applies to whichever plan is selected at checkout.
+
+    Attributes:
+        valid: Whether the code resolved to an active Stripe promotion code.
+        reason: Human-readable failure reason when ``valid`` is False.
+        code: Canonical code string as stored in Stripe.
+        promotionCodeId: Stripe promo_* identifier (informational).
+        description: Human-readable description, e.g. "25% off for 3 months".
+        percentOff: Percentage discount (e.g. 25 or 100), if percent-based.
+        amountOffCents: Fixed discount in cents, if amount-based.
+        currency: ISO currency for ``amountOffCents``.
+        duration: Coupon duration: 'once' | 'repeating' | 'forever'.
+        durationInMonths: Months the discount repeats for.
+        creditsGranted: Credits granted on redemption ({resource: amount}).
+        appId: Target app for a grant code.
+        amountCents: List price in cents of the plan passed as priceId.
+        discountedAmountCents: First-invoice price in cents after the discount.
+    """
+
+    valid: bool
+    reason: NotRequired[str]
+    code: NotRequired[str]
+    promotionCodeId: NotRequired[str]
+    description: NotRequired[str]
+    percentOff: NotRequired[float | None]
+    amountOffCents: NotRequired[int | None]
+    currency: NotRequired[str | None]
+    duration: NotRequired[str | None]
+    durationInMonths: NotRequired[int | None]
+    creditsGranted: NotRequired[dict[str, float] | None]
+    appId: NotRequired[str | None]
+    amountCents: NotRequired[int]
+    discountedAmountCents: NotRequired[int]
+
+
+class PromoRedemption(TypedDict):
+    """
+    Result of redeeming a credit-grant code via the ``promo_redeem`` subcommand.
+
+    Attributes:
+        redeemed: True when the redemption succeeded.
+        mode: 'subscribed' = new $0 subscription created;
+            'credits_only' = org was already subscribed.
+        appId: App the code targets.
+        status: Subscription status after redemption (e.g. 'active').
+        credits: Credits granted ({resource: amount}).
+    """
+
+    redeemed: bool
+    mode: Literal['subscribed', 'credits_only']
+    appId: str
+    status: NotRequired[str]
+    credits: dict[str, float]
 
 
 # =============================================================================
