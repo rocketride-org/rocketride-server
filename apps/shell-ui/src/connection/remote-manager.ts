@@ -38,7 +38,7 @@ import { RocketRideClient, ConnectResult, AuthenticationException } from 'rocket
 import type { ManagerInfo } from 'shared';
 import { BaseManager, ShellConnectionConfig } from './base-manager';
 import { CONNECT_TIMEOUT_MS } from '../constants';
-import { ConnectionFailure } from './errors';
+import { ConnectionFailure, withTimeout } from './errors';
 
 // =============================================================================
 // REMOTE MANAGER
@@ -69,15 +69,11 @@ export class RemoteManager extends BaseManager {
 		// Login with timeout to avoid indefinite hangs (transport already attached)
 		let result: ConnectResult;
 		try {
-			result = await Promise.race([
+			result = await withTimeout(
 				client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }),
-				new Promise<never>((_, reject) =>
-					setTimeout(
-						() => reject(new ConnectionFailure(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`, 'network')),
-						CONNECT_TIMEOUT_MS,
-					),
-				),
-			]) as ConnectResult;
+				CONNECT_TIMEOUT_MS,
+				new ConnectionFailure(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`, 'network'),
+			);
 		} catch (error) {
 			if (error instanceof ConnectionFailure) throw error;
 			if (error instanceof AuthenticationException) {

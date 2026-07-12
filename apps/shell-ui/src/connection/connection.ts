@@ -46,7 +46,7 @@ import { ConnectionState, ConnectionStatus } from 'shared';
 import type { ConnectionMode } from 'shared';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
-import { ConnectionFailure } from './errors';
+import { ConnectionFailure, withTimeout } from './errors';
 import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
@@ -161,6 +161,7 @@ export class ConnectionManager implements IConnectionManager {
 	/** The shared RocketRideClient instance. */
 	private client: RocketRideClient | null = null;
 	private _attachPromise: Promise<void> | undefined;
+	private hasAttachedOnce = false;
 
 	/** Active backend manager (RemoteManager). */
 	private manager: BaseManager | null = null;
@@ -301,7 +302,10 @@ export class ConnectionManager implements IConnectionManager {
 
 		// Attach immediately so public APIs (rrext_public_*) work before login.
 		// The promise is stored so bootstrap() can await it before login().
-		this._attachPromise = this.client.attach().catch((err) => {
+		this._attachPromise = this.client.attach();
+		void this._attachPromise.then(() => {
+			this.hasAttachedOnce = true;
+		}).catch((err) => {
 			console.error('[ConnectionManager] Failed to attach:', err);
 		});
 
@@ -435,12 +439,11 @@ export class ConnectionManager implements IConnectionManager {
 		// which used to leave the shell on an indefinite splash. Surfacing it
 		// as a network failure lets the recovery banner render instead.
 		try {
-			await Promise.race([
-				this._attachPromise,
-				new Promise<never>((_, reject) =>
-					setTimeout(() => reject(new ConnectionFailure('Could not reach the server.', 'network')), 10000),
-				),
-			]);
+			await withTimeout(
+				this._attachPromise!,
+				10000,
+				new ConnectionFailure('Could not reach the server.', 'network'),
+			);
 		} catch (error) {
 			// Transport attach failures are network problems by definition.
 			this.handleStoredTokenFailure(
@@ -511,12 +514,11 @@ export class ConnectionManager implements IConnectionManager {
 		const token = this.loadToken();
 		if (token) {
 			try {
-				const result = await Promise.race([
+				const result = await withTimeout(
 					this.loginWithStoredToken(token),
-					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new ConnectionFailure('timeout', 'network')), 8000),
-					),
-				]);
+					8000,
+					new ConnectionFailure('timeout', 'network'),
+				);
 				return await this.finishConnect(result, '', config);
 			} catch (err) {
 				// Connect failed — retain the token when the server is unreachable.
@@ -554,7 +556,7 @@ export class ConnectionManager implements IConnectionManager {
 		if (result.userToken) this.saveToken(result.userToken);
 
 		// An authenticated connect resolves any latched failure (incl. auth).
-		this.connectionStatus.lastFailure = undefined;
+		this.updateConnectionStatus({ lastFailure: undefined });
 
 		// Cache the account info
 		this.accountInfo = result;
@@ -714,6 +716,11 @@ export class ConnectionManager implements IConnectionManager {
 		if (token) {
 			await this.connect(token);
 		}
+	}
+
+	/** Whether the client has attached successfully during this page lifetime. */
+	public hasAttached(): boolean {
+		return this.hasAttachedOnce;
 	}
 
 	/** Map a connection failure to the status state that determines recovery UI. */
