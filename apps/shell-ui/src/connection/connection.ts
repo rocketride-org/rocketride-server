@@ -328,6 +328,16 @@ export class ConnectionManager implements IConnectionManager {
 					return;
 				}
 
+				if (
+					event.oldValue !== null &&
+					event.newValue !== null &&
+					this.isConnected() &&
+					this.accountInfo?.userToken === event.oldValue
+				) {
+					window.location.reload();
+					return;
+				}
+
 				if (event.oldValue === null && !this.accountInfo) {
 					window.location.reload();
 				}
