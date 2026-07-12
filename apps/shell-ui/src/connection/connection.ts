@@ -47,6 +47,7 @@ import type { ConnectionMode } from 'shared';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
 import { ConnectionFailure } from './errors';
+import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
 import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
@@ -328,17 +329,12 @@ export class ConnectionManager implements IConnectionManager {
 					return;
 				}
 
-				if (
-					event.oldValue !== null &&
-					event.newValue !== null &&
-					this.isConnected() &&
-					this.accountInfo?.userToken === event.oldValue
-				) {
-					window.location.reload();
-					return;
-				}
-
-				if (event.oldValue === null && !this.accountInfo) {
+				if (shouldReloadForTokenStorageUpdate({
+					oldValue: event.oldValue,
+					newValue: event.newValue,
+					currentUserToken: this.accountInfo?.userToken,
+					hasAccountInfo: Boolean(this.accountInfo),
+				})) {
 					window.location.reload();
 				}
 			});
