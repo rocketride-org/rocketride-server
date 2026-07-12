@@ -170,6 +170,8 @@
 		//
 		"langchain.splitter.default.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to RecursiveCharacterTextSplitter by the 'Default' text-splitter profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile (for example Markdown for MarkdownTextSplitter). Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "RecursiveCharacterTextSplitter",
 			"const": "RecursiveCharacterTextSplitter"
 		},
@@ -187,6 +189,8 @@
 		},
 		"langchain.splitter.recursive.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to RecursiveCharacterTextSplitter by the 'Recursive Character Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "RecursiveCharacterTextSplitter",
 			"const": "RecursiveCharacterTextSplitter"
 		},
@@ -204,6 +208,8 @@
 		},
 		"langchain.splitter.character.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to CharacterTextSplitter by the 'Character Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "CharacterTextSplitter",
 			"const": "CharacterTextSplitter"
 		},
@@ -216,6 +222,8 @@
 		//
 		"langchain.splitter.markdown.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to MarkdownTextSplitter by the 'Markdown Text Splitter' profile and cannot be changed here. To use MarkdownTextSplitter, select 'Markdown Text Splitter' in the 'Text splitter' selector above rather than editing this field. Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "MarkdownTextSplitter",
 			"const": "MarkdownTextSplitter"
 		},
@@ -228,6 +236,8 @@
 		//
 		"langchain.splitter.latex.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to LatexTextSplitter by the 'Latex Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "LatexTextSplitter",
 			"const": "LatexTextSplitter"
 		},
@@ -240,6 +250,8 @@
 		//
 		"langchain.splitter.nltk.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to NLTKTextSplitter by the 'NLTK Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "NLTKTextSplitter",
 			"const": "NLTKTextSplitter"
 		},
@@ -252,6 +264,8 @@
 		//
 		"langchain.splitter.spacy.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to SpacyTextSplitter by the 'Spacy Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "SpacyTextSplitter",
 			"const": "SpacyTextSplitter"
 		},
@@ -284,9 +298,10 @@
 		//
 		"langchain.splitter.custom.splitter": {
 			"type": "string",
+			"title": "Splitter class (set by profile)",
+			"description": "Fixed to RecursiveCharacterTextSplitter by the 'Custom' text-splitter profile and cannot be changed here; the custom profile currently behaves like default. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'.",
 			"default": "RecursiveCharacterTextSplitter",
-			"const": "RecursiveCharacterTextSplitter",
-			"title": "Splitter class name"
+			"const": "RecursiveCharacterTextSplitter"
 		},
 		"langchain.splitter.custom": {
 			"object": "custom",
@@ -298,6 +313,7 @@
 		"langchain.splitter.profile": {
 			"type": "string",
 			"title": "Text splitter",
+			"description": "Selects the splitter profile. Each profile locks one LangChain splitter class and shows only that splitter's options, so the splitter class is not chosen independently of the profile. Pick the profile that matches your content: Markdown for .md, Latex for LaTeX, Character/NLTK/Spacy as needed. Editing a profile's splitter field to a different class fails schema validation with a 'must be equal to constant' error; change this selector instead.",
 			"default": "default",
 			"enum": [
 				["default", "Default Text Splitter - General-purpose, best balance of structure & size"],

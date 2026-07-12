@@ -1,0 +1,57 @@
+{
+	"title": "Gmail",
+	"protocol": "tool_gmail://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_gmail",
+	"prefix": "gmail",
+	"icon": "gmail.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Gmail operations as agent tools.", "Read, search, label, draft, send, and organize mail; permanent delete available with full access.", "Authenticates via a Google service account or user OAuth."],
+	"tile": ["Gmail (${parameters.gmail.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Gmail",
+				"authType": "service",
+				"serviceKey": "",
+				"adminEmail": "",
+				"userToken": "",
+				"access": "modify"
+			}
+		}
+	},
+	"fields": {
+		"gmail.access": {
+			"type": "string",
+			"title": "Access level",
+			"description": "Gmail scopes to request. readonly: read only. modify: read + label/organize. send: modify + send mail. settings: modify + filters/IMAP/POP/vacation/forwarding. settings_sharing: settings + sendAs/delegation/S⁠MIME. full: complete mailbox access, required for permanent delete.",
+			"default": "modify",
+			"enum": [
+				["readonly", "Read-only"],
+				["modify", "Modify (read + organize)"],
+				["send", "Send (modify + send mail)"],
+				["settings", "Settings (modify + filters/IMAP/vacation/forwarding)"],
+				["settings_sharing", "Settings sharing (settings + sendAs/delegation/S⁠MIME)"],
+				["full", "Full (allows permanent delete)"]
+			]
+		},
+		"gmail.allowHardDelete": {
+			"type": "boolean",
+			"title": "Allow permanent delete",
+			"description": "Enable permanent message/thread deletion (requires full access tier). Disabled by default to protect against accidental data loss.",
+			"default": false
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Gmail",
+			"properties": ["type", "google.authType", "gmail.access"]
+		}
+	]
+}

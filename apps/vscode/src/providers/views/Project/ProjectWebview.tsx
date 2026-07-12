@@ -39,6 +39,8 @@ const ProjectWebview: React.FC = () => {
 	const [viewState, setViewState] = useState<ViewState | undefined>(undefined);
 	const [prefs, setPrefs] = useState<Record<string, unknown> | undefined>(undefined);
 	const [serverHost, setServerHost] = useState<string>('');
+	const [oauthReturnUrl, setOauthReturnUrl] = useState<string | undefined>(undefined);
+	const [pendingOAuthTokens, setPendingOAuthTokens] = useState<{ tokens: string; state: string } | undefined>(undefined);
 	const [isDirty, setIsDirty] = useState(false);
 	const [isNew, setIsNew] = useState(false);
 	const [subscribed, setSubscribed] = useState(true);
@@ -94,9 +96,16 @@ const ProjectWebview: React.FC = () => {
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
 				if (msg.serverHost) setServerHost(msg.serverHost);
+				// Unconditional: a load without a return URL must clear any stale
+				// one, and a reload must not keep tokens from a previous session.
+				setOauthReturnUrl(msg.oauthReturnUrl);
+				setPendingOAuthTokens(undefined);
 				setEnvKeys(msg.envKeys ?? []);
 				break;
 			}
+			case 'project:oauthTokens':
+				setPendingOAuthTokens({ tokens: msg.tokens, state: msg.state });
+				break;
 			case 'shell:init':
 				if (msg.theme) applyTheme(msg.theme as ThemeTokens);
 				setIsConnected(msg.isConnected);
@@ -278,6 +287,17 @@ const ProjectWebview: React.FC = () => {
 		[sendMessage]
 	);
 
+	const handleOpenExternal = useCallback(
+		(url: string) => {
+			sendMessage({ type: 'project:openExternal', url });
+		},
+		[sendMessage]
+	);
+
+	const clearPendingOAuthTokens = useCallback(() => {
+		setPendingOAuthTokens(undefined);
+	}, []);
+
 	const handleSave = useCallback(() => {
 		sendMessage({ type: 'project:requestSave' });
 	}, [sendMessage]);
@@ -331,7 +351,7 @@ const ProjectWebview: React.FC = () => {
 
 	return (
 		<>
-			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} onSave={handleSave} onTraceClear={handleTraceClear} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
+			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} oauthReturnUrl={oauthReturnUrl} onOpenExternal={handleOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} onSave={handleSave} onTraceClear={handleTraceClear} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
 		</>
 	);

@@ -17,8 +17,8 @@ paths = ['''\.pipe(\.json)?$''']
 
     [rules.allowlist]
     regexes = [
-        '''\$[A-Z_]+''',
-        '''\$\{[A-Z_]+\}''',
+        '''\$[A-Z0-9_]+''',
+        '''\$\{[A-Z0-9_]+\}''',
     ]
 
 # Custom rule: detect hardcoded keys in services.json node configs
@@ -32,8 +32,8 @@ paths = ['''services.*\.json$''']
 
     [rules.allowlist]
     regexes = [
-        '''\$[A-Z_]+''',
-        '''\$\{[A-Z_]+\}''',
+        '''\$[A-Z0-9_]+''',
+        '''\$\{[A-Z0-9_]+\}''',
     ]
 
 # Global allowlist — skip lock files, build output, test fixtures

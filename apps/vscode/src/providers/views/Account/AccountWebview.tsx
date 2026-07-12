@@ -17,7 +17,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { AccountView, CheckoutModal } from 'shared';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan } from 'shared';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan, PromoRedemption, PromoValidation } from 'shared';
 import type { ConnectResult } from 'rocketride';
 import { useMessaging } from '../hooks/useMessaging';
 import type { AccountHostToWebview, AccountWebviewToHost } from '../types';
@@ -68,8 +68,10 @@ const AccountWebview: React.FC = () => {
 	const [showCheckout, setShowCheckout] = useState(false);
 	const checkoutResolvers = useRef<{
 		plans?: { resolve: (v: CheckoutPlan[]) => void; reject: (e: Error) => void };
-		session?: { resolve: (v: { clientSecret: string; subscriptionId: string }) => void; reject: (e: Error) => void };
+		session?: { resolve: (v: { clientSecret: string | null; subscriptionId: string; status?: string }) => void; reject: (e: Error) => void };
 		confirm?: { resolve: () => void; reject: (e: Error) => void };
+		validatePromo?: { resolve: (v: PromoValidation) => void; reject: (e: Error) => void };
+		redeemPromo?: { resolve: (v: PromoRedemption) => void; reject: (e: Error) => void };
 	}>({});
 
 	// Section load error
@@ -196,7 +198,11 @@ const AccountWebview: React.FC = () => {
 				if (r) {
 					checkoutResolvers.current.session = undefined;
 					if ((message as any).error) r.reject(new Error((message as any).error));
-					else r.resolve({ clientSecret: (message as any).clientSecret, subscriptionId: (message as any).subscriptionId });
+					else r.resolve({
+						clientSecret: (message as any).clientSecret,
+						subscriptionId: (message as any).subscriptionId,
+						status: (message as any).status,
+					});
 				}
 				break;
 			}
@@ -206,6 +212,24 @@ const AccountWebview: React.FC = () => {
 					checkoutResolvers.current.confirm = undefined;
 					if ((message as any).error) r.reject(new Error((message as any).error));
 					else r.resolve();
+				}
+				break;
+			}
+			case 'checkout:validatePromoResult': {
+				const r = checkoutResolvers.current.validatePromo;
+				if (r) {
+					checkoutResolvers.current.validatePromo = undefined;
+					if (message.error || !message.result) r.reject(new Error(message.error ?? 'Promo validation failed'));
+					else r.resolve(message.result);
+				}
+				break;
+			}
+			case 'checkout:redeemPromoResult': {
+				const r = checkoutResolvers.current.redeemPromo;
+				if (r) {
+					checkoutResolvers.current.redeemPromo = undefined;
+					if (message.error || !message.result) r.reject(new Error(message.error ?? 'Promo redemption failed'));
+					else r.resolve(message.result);
 				}
 				break;
 			}
@@ -356,11 +380,32 @@ const AccountWebview: React.FC = () => {
 		});
 	}, []);
 
-	/** Creates a Stripe checkout session via the host. */
-	const handleCreateCheckout = useCallback((priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
+	/**
+	 * Creates a Stripe checkout session via the host.
+	 *
+	 * `clientSecret` is null for a $0 first invoice (100%-off promo code) —
+	 * the CheckoutModal skips the payment step in that case.
+	 */
+	const handleCreateCheckout = useCallback((priceId: string, promotionCode?: string): Promise<{ clientSecret: string | null; subscriptionId: string; status?: string }> => {
 		return new Promise((resolve, reject) => {
 			checkoutResolvers.current.session = { resolve, reject };
-			sendMessageRef.current({ type: 'checkout:createSession', priceId } as any);
+			sendMessageRef.current({ type: 'checkout:createSession', priceId, promotionCode } as any);
+		});
+	}, []);
+
+	/** Resolves a promo code (read-only) via the host. */
+	const handleValidatePromo = useCallback((code: string, priceId?: string): Promise<PromoValidation> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.validatePromo = { resolve, reject };
+			sendMessageRef.current({ type: 'checkout:validatePromo', code, priceId });
+		});
+	}, []);
+
+	/** Redeems a credit-grant (hackathon) code via the host. */
+	const handleRedeemPromo = useCallback((code: string): Promise<PromoRedemption> => {
+		return new Promise((resolve, reject) => {
+			checkoutResolvers.current.redeemPromo = { resolve, reject };
+			sendMessageRef.current({ type: 'checkout:redeemPromo', code });
 		});
 	}, []);
 
@@ -466,6 +511,8 @@ const AccountWebview: React.FC = () => {
 					onFetchPlans={handleFetchPlans}
 					onCreateCheckout={handleCreateCheckout}
 					onConfirmPending={handleConfirmPending}
+					onValidatePromoCode={handleValidatePromo}
+					onRedeemPromoCode={handleRedeemPromo}
 					onSuccess={handleCheckoutSuccess}
 					onClose={() => setShowCheckout(false)}
 				/>

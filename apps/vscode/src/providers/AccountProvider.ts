@@ -47,6 +47,8 @@ interface AccountWebviewMessage {
 	newPriceId?: string;
 	orgId?: string;
 	subscriptionId?: string;
+	promotionCode?: string;
+	code?: string;
 }
 
 // =============================================================================
@@ -256,6 +258,14 @@ export class AccountProvider {
 
 			case 'checkout:confirmPending':
 				await this.handleCheckoutConfirmPending(panel, message);
+				break;
+
+			case 'checkout:validatePromo':
+				await this.handleCheckoutValidatePromo(panel, message);
+				break;
+
+			case 'checkout:redeemPromo':
+				await this.handleCheckoutRedeemPromo(panel, message);
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
@@ -990,11 +1000,59 @@ export class AccountProvider {
 			const { client, orgId } = this.resolveClient();
 			if (!client) throw new Error('Not connected');
 			if (!orgId) throw new Error('No organisation found');
-			const result = await client.billing.createCheckoutSession(orgId, PIPE_BUILDER_APP_ID, message.priceId as string);
+			// clientSecret is null for a $0 first invoice (100%-off promo code) —
+			// the webview must treat that as "no payment step", not an error.
+			const result = await client.billing.createCheckoutSession(
+				orgId,
+				PIPE_BUILDER_APP_ID,
+				message.priceId as string,
+				message.promotionCode as string | undefined,
+			);
 			await panel.webview.postMessage({ type: 'checkout:sessionResult', ...result, error: null });
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : String(err);
 			await panel.webview.postMessage({ type: 'checkout:sessionResult', clientSecret: '', subscriptionId: '', error: msg });
+		}
+	}
+
+	/**
+	 * Resolves a promo code (read-only) and posts the validation result.
+	 *
+	 * @param panel   - The webview panel to post the result to.
+	 * @param message - The incoming message containing code and optional priceId.
+	 */
+	private async handleCheckoutValidatePromo(panel: vscode.WebviewPanel, message: AccountWebviewMessage): Promise<void> {
+		try {
+			const { client, orgId } = this.resolveClient();
+			if (!client) throw new Error('Not connected');
+			if (!orgId) throw new Error('No organisation found');
+			const result = await client.billing.validatePromoCode(orgId, message.code as string, message.priceId as string | undefined);
+			await panel.webview.postMessage({ type: 'checkout:validatePromoResult', result, error: null });
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			await panel.webview.postMessage({ type: 'checkout:validatePromoResult', result: null, error: msg });
+		}
+	}
+
+	/**
+	 * Redeems a credit-grant (hackathon) code and refreshes billing data so
+	 * the new subscription and credits appear immediately.
+	 *
+	 * @param panel   - The webview panel to post the result to.
+	 * @param message - The incoming message containing the code.
+	 */
+	private async handleCheckoutRedeemPromo(panel: vscode.WebviewPanel, message: AccountWebviewMessage): Promise<void> {
+		try {
+			const { client, orgId } = this.resolveClient();
+			if (!client) throw new Error('Not connected');
+			if (!orgId) throw new Error('No organisation found');
+			const result = await client.billing.redeemPromoCode(orgId, message.code as string);
+			await panel.webview.postMessage({ type: 'checkout:redeemPromoResult', result, error: null });
+			// Refresh subscriptions + credit balance so the grant shows up
+			await this.fetchBillingData(panel);
+		} catch (err: unknown) {
+			const msg = err instanceof Error ? err.message : String(err);
+			await panel.webview.postMessage({ type: 'checkout:redeemPromoResult', result: null, error: msg });
 		}
 	}
 

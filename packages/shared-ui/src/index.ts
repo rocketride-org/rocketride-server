@@ -84,7 +84,7 @@ export type { UpgradeModalProps } from './modules/billing';
 
 // --- Checkout module (subscription checkout flow) ----------------------------
 export { CheckoutModal, PlanPicker } from './modules/checkout';
-export type { CheckoutModalProps, CheckoutPlan, PlanAction, PlanPickerProps } from './modules/checkout';
+export type { CheckoutModalProps, CheckoutPlan, PlanAction, PlanPickerProps, PromoRedemption, PromoValidation } from './modules/checkout';
 
 // --- Chat module (conversational chat surface) --------------------------------
 export { ChatView } from './modules/chat';

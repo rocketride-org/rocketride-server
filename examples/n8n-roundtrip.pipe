@@ -1,0 +1,34 @@
+{
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" },
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "tool_n8n_1",
+			"provider": "tool_n8n",
+			"config": {
+				"type": "tool_n8n",
+				"baseUrl": "${ROCKETRIDE_N8N_URL}",
+				"apiKey": "${ROCKETRIDE_N8N_KEY}",
+				"workflow": "rocketride-demo",
+				"mode": "sync",
+				"parameters": {}
+			},
+			"input": [{ "lane": "text", "from": "webhook_1" }],
+			"ui": { "position": { "x": 240, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_text_1",
+			"provider": "response_text",
+			"config": { "laneName": "text" },
+			"input": [{ "lane": "text", "from": "tool_n8n_1" }],
+			"ui": { "position": { "x": 460, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "00000000-0000-0000-0000-000000000000",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}
