@@ -234,6 +234,26 @@ async function copyFileEnsure(src, dest) {
 }
 
 /**
+ * Byte-compare the contents of two files.
+ *
+ * Used by the incremental sync to decide whether a file actually changed.
+ * File size is a cheap pre-filter — differently-sized files are never equal,
+ * so callers should skip this call when sizes differ. Same-size files must be
+ * compared by content, because a same-length edit (e.g. a swapped
+ * content-hash string in an index.html) does not change the size and cannot
+ * be detected by size or mtime alone.
+ *
+ * @param {string} a - First file path
+ * @param {string} b - Second file path
+ * @returns {Promise<boolean>} True if both files have identical bytes
+ */
+async function filesEqual(a, b) {
+    // Read as raw Buffers (no encoding) so the compare is byte-exact.
+    const [bufA, bufB] = await Promise.all([fsp.readFile(a), fsp.readFile(b)]);
+    return bufA.equals(bufB);
+}
+
+/**
  * Copy a directory recursively
  * @param {string} src - Source directory path
  * @param {string} dest - Destination directory path
@@ -686,6 +706,9 @@ module.exports = {
     copyFileEnsure,
     copyDir,
     copyDirEnsure,
+
+    // Comparing
+    filesEqual,
     
     // Stats
     stat,
