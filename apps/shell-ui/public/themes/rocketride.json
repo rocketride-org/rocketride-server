@@ -68,5 +68,11 @@
 	"--rr-font-size-subtitle": "0.875rem",
 	"--rr-font-weight-h5": "400",
 	"--rr-font-weight-button": "600",
-	"--rr-annotation-bg-default": "#1e1e1e"
+	"--rr-annotation-bg-default": "#1e1e1e",
+	"--rr-chart-blue": "#748ffc",
+	"--rr-chart-green": "#69db7c",
+	"--rr-chart-yellow": "#ffd43b",
+	"--rr-chart-purple": "#b197fc",
+	"--rr-chart-orange": "#ffa94d",
+	"--rr-chart-red": "#ff8787"
 }

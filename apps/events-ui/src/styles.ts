@@ -95,6 +95,13 @@ export const styles = {
 		fontVariantNumeric: 'tabular-nums',
 	} as CSSProperties,
 
+	// Status indicator item in the stats bar (dot + label).
+	statusItem: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 6,
+	} as CSSProperties,
+
 	// ─── Event type toggle chips ───
 	typeChipsRow: {
 		...commonStyles.toggleGroup,

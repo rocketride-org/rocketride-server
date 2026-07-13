@@ -61,7 +61,7 @@ const styles = {
 		height: 'auto',
 		borderRadius: 12,
 		border: '1px solid var(--rr-border)',
-		boxShadow: '0 8px 32px rgba(0, 0, 0, 0.35)',
+		boxShadow: '0 8px 32px var(--rr-shadow-widget)',
 	} as CSSProperties,
 };
 

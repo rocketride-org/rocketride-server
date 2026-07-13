@@ -379,6 +379,13 @@ export interface ConnectResult {
 	capabilities: string[];
 
 	/**
+	 * Version string of the server that handled the auth handshake.
+	 * Sent by newer servers alongside the identity payload; older servers
+	 * omit it, hence optional.
+	 */
+	serverVersion?: string;
+
+	/**
 	 * Platform-level permission strings (e.g. ``['sys.admin']``).
 	 * Set manually in the database, never via API.
 	 */

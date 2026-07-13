@@ -72,6 +72,27 @@ export interface ServerAppEntry {
  * @param serverApps - App entries from the server.
  * @returns Array of AppManifestEntry objects ready for the shell.
  */
+// Module-level record of registered remotes (moduleId -> entry URL) so
+// resetRemote() can tear down and re-register a container without callers
+// having to thread the entry URL through.
+const registeredEntries = new Map<string, string>();
+
+/**
+ * Tear down a remote's (possibly half-initialized) MF container and register
+ * it fresh. Used by the app-load retry path: a failed first load leaves the
+ * container partially executed, and re-loading the CACHED container throws
+ * TDZ errors ("Cannot access 'x' before initialization") instead of retrying
+ * the real fetch. Safe for failed containers — nothing has successfully
+ * consumed them, unlike force-re-registering a live, loaded remote.
+ *
+ * @param moduleId - The MF container name (AppManifestEntry.moduleId).
+ */
+export function resetRemote(moduleId: string): void {
+	const entry = registeredEntries.get(moduleId);
+	if (!entry) return;
+	registerRemotes([{ name: moduleId, entry }], { force: true });
+}
+
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
 	// Drop entries missing a remoteEntry URL — the server may include
 	// apps that have no built UI yet (e.g. server-only nodes).
@@ -85,6 +106,9 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		validApps.map((a) => ({ name: a.moduleId, entry: a.entry })),
 		{ force: true },
 	);
+
+	// Record the registered URLs so resetRemote() can rebuild a container.
+	for (const a of validApps) registeredEntries.set(a.moduleId, a.entry);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return validApps.map((a) => ({

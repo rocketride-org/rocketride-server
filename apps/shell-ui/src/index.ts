@@ -88,6 +88,11 @@ export { useShellEvent } from './hooks/useShellEvent';
 
 // Connection-aware interval polling
 export { usePolling } from './hooks/usePolling';
+export type { IUsePollingOptions } from './hooks/usePolling';
+
+// Shared 3s dashboard snapshot + live activity events (module-level singleton)
+export { useDashboardData } from './hooks/useDashboardData';
+export type { DashboardData } from './hooks/useDashboardData';
 
 // Null-safe client access (only returns client when connected)
 export { useClient } from './hooks/useClient';
@@ -128,6 +133,17 @@ export { useFixedPopupPosition } from 'shared/hooks/useFixedPopupPosition';
 
 // Debug panel
 export { default as DebugPanel } from './components/layout/DebugPanel';
+
+// =============================================================================
+// HOST CHROME — opt-in sidebar-content registration
+// =============================================================================
+
+// Declare sidebar content for the calling view; the shell frame mounts it in
+// the sidebar's scrolling slot (rendered even while collapsed — components
+// inside read shared-ui's useSidebarCollapsed to pick their collapsed form).
+export { useSidebarContent } from './components/layout/HostChromeContext';
+// ViewMenu declaration types (re-exported from shared for app convenience).
+export type { ViewMenu, ViewMenuEntry } from 'shared';
 
 // =============================================================================
 // AUTH
@@ -184,3 +200,15 @@ export { useAppComponent } from './lib/useAppComponent';
 // =============================================================================
 
 export * from './icons/BoxIcon';
+
+// =============================================================================
+// CURATED API SURFACE — versioned contract entry (see api.ts)
+// =============================================================================
+
+// One typed object bundling every shell-provided symbol apps consume. Frozen by
+// `./builder shell:freeze` into packages/shell-api.
+export { getShellApi } from './api';
+export type { ShellApiShape } from './api';
+// The contract version — its own file so freeze can auto-write it (not part of
+// the frozen surface).
+export { SHELL_API_VERSION } from './apiver';

@@ -26,7 +26,6 @@
 
 import { useState, useEffect } from 'react';
 import type { ConnectionStatus } from 'shared';
-import { ConnectionState } from 'shared';
 import { ConnectionManager } from '../connection/connection';
 
 /**

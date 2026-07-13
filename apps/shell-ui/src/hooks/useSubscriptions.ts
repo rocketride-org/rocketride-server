@@ -25,7 +25,7 @@
 // =============================================================================
 
 import { useMemo } from 'react';
-import type { AppManifestEntry } from '../workspace/types';
+import type { AppManifestEntry } from 'rocketride';
 import { useAuthUser } from './useAuthUser';
 
 // =============================================================================
@@ -59,6 +59,8 @@ export function useSubscriptions(): {
 	const identity = useAuthUser();
 
 	return useMemo(() => {
+		// ``identity.apps`` is already the SDK's AppManifestEntry[] (from
+		// ConnectResult.apps) — the true runtime shape of these desktop entries.
 		const raw: AppManifestEntry[] = identity?.apps ?? [];
 
 		// Build lookup maps for fast access

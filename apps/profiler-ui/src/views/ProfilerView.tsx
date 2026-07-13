@@ -851,21 +851,19 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 			{/* Report modal */}
 			{showReportModal && (
-				<div
-					style={styles.modalBackdrop}
-					onClick={() => setShowReportModal(false)}
-				>
-					<div
-						style={styles.modalDialog}
-						onClick={(e) => e.stopPropagation()}
-					>
+				/* Backdrop is inert: dismissal is deliberate-only (close button) per
+				   the 2026-07-08 design decision — clicking outside must NOT close. */
+				<div style={styles.modalBackdrop}>
+					<div style={styles.modalDialog}>
 						<div style={styles.modalHeader}>
 							<h3 style={{ margin: 0, fontSize: 14 }}>Raw Profile Report</h3>
+							{/* Top-right close button. */}
 							<button
 								style={styles.button}
 								onClick={() => setShowReportModal(false)}
+								aria-label="Close"
 							>
-								Close
+								✕
 							</button>
 						</div>
 						<div style={styles.modalBody}>

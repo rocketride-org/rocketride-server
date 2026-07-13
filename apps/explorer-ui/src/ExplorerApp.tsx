@@ -41,7 +41,7 @@ import { commonStyles } from 'shared/themes/styles';
 import { useShellConnection, useWorkspace, DocTabs, DocSplitLayout } from 'shell-ui';
 import type { Documents } from 'shell-ui';
 import { createDocs, destroyDocs, getDocs } from './docs';
-import { createStoreVfs } from './store';
+import { createStoreVfs, isFileLoadError } from './store';
 import { getMediaInfo } from './mediaTypes';
 import {
 	AudioViewer, BinaryViewer, DocxViewer, HexViewer, ImageViewer,
@@ -49,6 +49,7 @@ import {
 	TextViewer, VideoViewer,
 } from './viewers';
 import type { ViewerId } from './viewerRegistry';
+import ExplorerSidebar from './ExplorerSidebar';
 
 // =============================================================================
 // BLOB URL REF-COUNTING
@@ -106,6 +107,25 @@ const styles = {
 		flexDirection: 'column',
 		gap: 12,
 	} as CSSProperties,
+	/** Title line inside the empty-group welcome message. */
+	welcomeTitle: {
+		fontSize: 16,
+		fontWeight: 600,
+	} as CSSProperties,
+	/** Per-tab file pane — kept mounted so per-viewer state survives tab switches. */
+	tabPane: {
+		flex: 1,
+		minHeight: 0,
+		flexDirection: 'column',
+	} as CSSProperties,
+	/** Active tab pane (visible). */
+	tabPaneVisible: {
+		display: 'flex',
+	} as CSSProperties,
+	/** Inactive tab pane (hidden but mounted). */
+	tabPaneHidden: {
+		display: 'none',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -158,6 +178,10 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 
 	return (
 		<div style={styles.container}>
+			{/* Register the file-tree Explorer into the shell sidebar frame.
+			    Renders null; mounted here so it shares the ready Documents
+			    singleton (active-file highlight, file actions). */}
+			<ExplorerSidebar />
 			<DocSplitLayout
 				docs={docs}
 				renderPane={(groupId: string) => {
@@ -181,7 +205,7 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 							<div style={styles.content}>
 								{group.editorIds.length === 0 ? (
 									<div style={styles.welcome}>
-										<div style={{ fontSize: 16, fontWeight: 600 }}>File Explorer</div>
+										<div style={styles.welcomeTitle}>File Explorer</div>
 										<div>Open a file from the sidebar to view its contents.</div>
 									</div>
 								) : (
@@ -192,12 +216,7 @@ const ExplorerAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 										return (
 											<div
 												key={editorId}
-												style={{
-													display: isActive ? 'flex' : 'none',
-													flex: 1,
-													minHeight: 0,
-													flexDirection: 'column',
-												}}
+												style={{ ...styles.tabPane, ...(isActive ? styles.tabPaneVisible : styles.tabPaneHidden) }}
 											>
 												<FilePane
 													docs={docs}
@@ -266,6 +285,10 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 
 	if (!doc) return null;
 
+	// A blob load that failed leaves a FileLoadError sentinel as content; extract
+	// its message so viewers can show the error instead of hanging on "Loading...".
+	// Genuine pending loads keep content === '' (loadError undefined) → "Loading...".
+	const loadError = isFileLoadError(doc.content) ? doc.content.message : undefined;
 	const content = typeof doc.content === 'string' ? doc.content : '';
 
 	// --- Viewer override: if the user chose "Open with…", use that viewer ---
@@ -277,10 +300,10 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 			case 'json':        return <JsonViewer content={content} />;
 			case 'markdown':    return <MarkdownViewer content={content} />;
 			case 'hex':         return client ? <HexViewer client={client} uri={uri} /> : null;
-			case 'image':       return <ImageViewer content={content} uri={uri} />;
-			case 'pdf':         return <PdfViewer content={content} uri={uri} />;
-			case 'docx':        return <DocxViewer content={content} />;
-			case 'spreadsheet': return <SpreadsheetViewer content={content} />;
+			case 'image':       return <ImageViewer content={content} uri={uri} error={loadError} />;
+			case 'pdf':         return <PdfViewer content={content} uri={uri} error={loadError} />;
+			case 'docx':        return <DocxViewer content={content} loadError={loadError} />;
+			case 'spreadsheet': return <SpreadsheetViewer content={content} loadError={loadError} />;
 			case 'video':       return client ? <VideoViewer client={client} uri={uri} /> : null;
 			case 'audio':       return client ? <AudioViewer client={client} uri={uri} /> : null;
 			case 'binary':      return <BinaryViewer />;
@@ -294,10 +317,10 @@ const FilePane: React.FC<{ docs: Documents; uri: string; editorId: string }> = (
 	if (category === 'audio' && client) return <AudioViewer client={client} uri={uri} />;
 
 	// Blob viewers: content is a blob: URL loaded by the store
-	if (category === 'image') return <ImageViewer content={content} uri={uri} />;
-	if (category === 'pdf') return <PdfViewer content={content} uri={uri} />;
-	if (category === 'docx') return <DocxViewer content={content} />;
-	if (category === 'spreadsheet') return <SpreadsheetViewer content={content} />;
+	if (category === 'image') return <ImageViewer content={content} uri={uri} error={loadError} />;
+	if (category === 'pdf') return <PdfViewer content={content} uri={uri} error={loadError} />;
+	if (category === 'docx') return <DocxViewer content={content} loadError={loadError} />;
+	if (category === 'spreadsheet') return <SpreadsheetViewer content={content} loadError={loadError} />;
 
 	// Inline viewers: content is the file text
 	if (category === 'markdown') return <MarkdownViewer content={content} />;

@@ -29,7 +29,7 @@
 // and the shell connects directly.
 // =============================================================================
 
-import React, { useState, useCallback, type CSSProperties } from 'react';
+import React, { useState, useCallback } from 'react';
 
 // =============================================================================
 // STYLES

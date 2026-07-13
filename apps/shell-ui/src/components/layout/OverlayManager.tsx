@@ -71,10 +71,15 @@ const styles = {
 		flexDirection: 'column',
 		overflow: 'hidden',
 	} as CSSProperties,
+	// Close floats over the dialog's top-right corner. Shared views draw their
+	// own 38px PageViewControl strip at the top of the dialog, so the button is
+	// vertically centered within that band ((38 - ~24px button) / 2 = 7) and
+	// reads as the strip row's trailing control. Strip entries are left-aligned,
+	// so they never reach the button at standard dialog widths.
 	dialogClose: {
 		...commonStyles.buttonSecondary,
 		position: 'absolute',
-		top: 12,
+		top: 7,
 		right: 14,
 		zIndex: 10,
 		fontFamily: 'var(--rr-font-family)',
@@ -138,10 +143,14 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 		<OverlayContext.Provider value={setOverlay}>
 			{children}
 
-			{/* Shell-owned overlays render as modal dialogs over client area */}
+			{/* Shell-owned overlays render as modal dialogs over client area.
+			    Pages render directly; views with sub-views draw their own
+			    PageViewControl strip at the top of the dialog. Dismissal is
+			    deliberate only (design-owner decision 2026-07-08): the ✕ button
+			    or Escape — clicking the backdrop must NOT close the dialog. */}
 			{overlay !== null && (
-				<div style={styles.backdrop} onClick={closeOverlay}>
-					<div style={styles.dialog} onClick={(e) => e.stopPropagation()}>
+				<div style={styles.backdrop}>
+					<div style={styles.dialog}>
 						<button style={styles.dialogClose} onClick={closeOverlay}>✕</button>
 						{overlay === 'account' && <AccountPage />}
 						{overlay === 'settings' && <SettingsPage />}

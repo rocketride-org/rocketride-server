@@ -18,9 +18,12 @@ interface Props {
 	/** Blob URL pointing to the PDF data. */
 	content: string;
 	uri: string;
+	/** Failure message when the blob could not be loaded (empty content otherwise). */
+	error?: string;
 }
 
-export const PdfViewer: React.FC<Props> = ({ content, uri }) => {
+export const PdfViewer: React.FC<Props> = ({ content, uri, error }) => {
+	if (error) return <div style={viewerStyles.message}>{error}</div>;
 	if (!content) return <div style={viewerStyles.message}>Loading PDF...</div>;
 	return <iframe src={content} style={styles.frame} title={uri} />;
 };
