@@ -33,6 +33,13 @@
  *
  * These helpers swallow the exception and fall back to a harmless default so
  * the app degrades to in-memory/limited functionality instead of crashing.
+ *
+ * NOTE: This helper is intentionally duplicated across the UI apps that do not
+ * share a common workspace package. Keep the copies in sync — apply any bug fix
+ * or new method (e.g. `clear`) to all three:
+ *   - apps/chat-ui/src/utils/safeStorage.ts
+ *   - apps/dropper-ui/src/utils/safeStorage.ts
+ *   - apps/shell-ui/src/util/safeStorage.ts
  */
 export const safeSessionStorage = {
 	/**
