@@ -15,7 +15,11 @@ browser and receives the resulting tokens through a deep link.
 1. The webview asks the host to open the hosted OAuth broker URL.
 2. The extension opens the system browser at the broker
    (`https://oauth2.rocketride.ai/google?...`), passing the node's service
-   config and a `baseURL` return address.
+   config, a `baseURL` return address, and an explicit `scope` parameter for
+   the node's selected access tier. The broker's default consent grants only
+   Drive and profile scopes — never Gmail — so the tier's Gmail scopes must
+   always be requested explicitly (see `GMAIL_TIER_SCOPES` in
+   `LoginWithGoogleButton.tsx`, mirroring `google_access.py`).
 3. The user completes Google's consent screen. The broker exchanges the code
    using its own verified Google application; no client secret ever reaches
    the extension or the pipeline config.
@@ -54,12 +58,24 @@ generated form schema names dotted `services.json` field ids (for example
 `google.userToken`) by their last component. The `parameters.*` locations some
 widgets also read are legacy and are never written by this flow.
 
+## Scopes and access tiers
+
+The granted scopes are fixed at consent time. Raising a node's access tier
+after connecting (for example `modify` → `send`) requires disconnecting and
+reconnecting the Google account so the new tier's scopes are consented.
+Lowering the tier does not: the engine's scope check treats
+`https://mail.google.com/` as covering every Gmail scope and `gmail.modify`
+as covering `gmail.readonly` (`missing_scopes` in `core/google_access.py`).
+Tokens without a `scope` field are accepted (fail-open, for older tokens).
+
 ## Limitation
 
 Tokens are applied by the node config panel. If the panel is closed when the
 deep link returns, the tokens stay pending in the editor until the panel is
 reopened for the node that started the login (or until the editor reloads and
-the redelivery expires).
+the redelivery expires). There is also no disconnect affordance yet — the
+login button disables once authenticated; clearing a token currently means
+editing the `.pipe` by hand.
 
 ## Token refresh
 

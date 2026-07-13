@@ -145,15 +145,16 @@ def build_service(auth_type: str, cfg: dict, scopes: list[str]) -> Any:
         if expiry_date_ms:
             expiry = _dt.datetime.utcfromtimestamp(expiry_date_ms / 1000)
 
+        from nodes.core.google_access import missing_scopes
+
         granted_scopes = set((info.get('scope') or '').split())
-        if granted_scopes and _GMAIL_FULL_SCOPE not in granted_scopes:
-            missing = [s for s in scopes if s not in granted_scopes]
-            if missing:
-                raise ValueError(
-                    'Gmail: your Google account authorization is missing required scopes '
-                    'for the selected access tier. Please disconnect and reconnect your '
-                    f'Google account. Missing: {", ".join(missing)}'
-                )
+        missing = missing_scopes(granted_scopes, scopes)
+        if missing:
+            raise ValueError(
+                'Gmail: your Google account authorization is missing required scopes '
+                'for the selected access tier. Please disconnect and reconnect your '
+                f'Google account. Missing: {", ".join(missing)}'
+            )
 
         if client_id and client_secret:
             # Standard Google OAuth2 credentials: the library handles refresh automatically.

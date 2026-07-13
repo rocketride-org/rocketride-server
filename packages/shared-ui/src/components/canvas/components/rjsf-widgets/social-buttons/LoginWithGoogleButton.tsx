@@ -86,20 +86,22 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		// a deep link via oauthReturnUrl that they intercept out-of-band.
 		url.searchParams.set('baseURL', oauthReturnUrl || window.location.href);
 
-		// For Gmail tiers beyond the broker's default (modify), pass the required
-		// scopes explicitly so the broker requests the right Google consent. Keys
-		// mirror google_access.py GMAIL.scopes. readonly/modify are omitted because
-		// the broker handles them by default; non-Gmail services whose access field
+		// Pass the selected tier's Gmail scopes explicitly — the broker's default
+		// consent grants only Drive + profile scopes, never Gmail, so every tier
+		// (including readonly/modify) must request its scopes here. Keys mirror
+		// google_access.py GMAIL.scopes; non-Gmail services whose access field
 		// uses different values (e.g. 'write') won't match any key here.
 		const _G = 'https://www.googleapis.com/auth';
-		const GMAIL_EXTENDED_SCOPES: Record<string, string[]> = {
+		const GMAIL_TIER_SCOPES: Record<string, string[]> = {
+			readonly: [`${_G}/gmail.readonly`],
+			modify: [`${_G}/gmail.modify`],
 			send: [`${_G}/gmail.modify`, `${_G}/gmail.send`],
 			settings: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`],
 			settings_sharing: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`, `${_G}/gmail.settings.sharing`],
 			full: ['https://mail.google.com/'],
 		};
 		const accessTier = (formValues.access ?? formValues.parameters?.access) as string | undefined;
-		const tierScopes = accessTier ? GMAIL_EXTENDED_SCOPES[accessTier] : undefined;
+		const tierScopes = accessTier ? GMAIL_TIER_SCOPES[accessTier] : undefined;
 		if (tierScopes?.length) {
 			url.searchParams.set('scope', tierScopes.join(' '));
 		}

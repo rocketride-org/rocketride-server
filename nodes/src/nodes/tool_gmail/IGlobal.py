@@ -78,15 +78,18 @@ class IGlobal(IGlobalBase):
                     warning('Gmail: sign in with Google to provide an access token')
                 else:
                     try:
+                        from nodes.core.google_access import missing_scopes
+
                         from .gmail_client import _decode_blob
                         import json as _json
 
                         token_info = _json.loads(_decode_blob(token_str))
                         granted = set((token_info.get('scope') or '').split())
                         resolved = resolve_google_access(cfg, GMAIL)
-                        _full = 'https://mail.google.com/'
-                        missing = [] if _full in granted else [s for s in resolved.scopes if s not in granted]
-                        if missing and granted:
+                        # Superset-aware (full mailbox, modify covers readonly);
+                        # empty scope field is fail-open.
+                        missing = missing_scopes(granted, resolved.scopes)
+                        if missing:
                             warning(
                                 'Gmail: your Google account authorization is missing scopes '
                                 'for the selected access tier. Please disconnect and reconnect '
