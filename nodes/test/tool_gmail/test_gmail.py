@@ -213,6 +213,38 @@ def test_refresh_url_env_override_adds_host(monkeypatch):
     assert gmail_client.resolve_refresh_url('https://oauth2.rocketride.ai/refresh')
 
 
+def test_token_uri_accepts_google_endpoints():
+    for url in (
+        'https://oauth2.googleapis.com/token',
+        'https://accounts.google.com/o/oauth2/token',
+    ):
+        assert gmail_client.resolve_token_uri(url) == url
+
+
+def test_token_uri_absent_falls_back_to_canonical():
+    assert gmail_client.resolve_token_uri(None) == 'https://oauth2.googleapis.com/token'
+    assert gmail_client.resolve_token_uri('') == 'https://oauth2.googleapis.com/token'
+
+
+@pytest.mark.parametrize(
+    'bad',
+    [
+        'http://oauth2.googleapis.com/token',  # scheme downgrade
+        'https://evil.example.com/token',  # attacker host — would exfiltrate refresh_token
+        'https://oauth2.googleapis.com.evil.com/token',  # suffix confusion
+        'ftp://oauth2.googleapis.com/token',
+    ],
+)
+def test_token_uri_rejects_untrusted(bad):
+    with pytest.raises(ValueError):
+        gmail_client.resolve_token_uri(bad)
+
+
+def test_token_uri_rejects_non_string():
+    with pytest.raises(ValueError):
+        gmail_client.resolve_token_uri({'url': 'https://oauth2.googleapis.com/token'})
+
+
 def test_message_get_cleans_headers():
     raw = {
         'id': 'm1',

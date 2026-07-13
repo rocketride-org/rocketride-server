@@ -87,6 +87,45 @@ def resolve_refresh_url(token_url: object) -> str | None:
     return token_url
 
 
+# Google's canonical OAuth token endpoint, used when a token omits token_uri.
+_GOOGLE_TOKEN_URI = 'https://oauth2.googleapis.com/token'
+
+# Hosts the google-auth library may POST the refresh_token to when minting a
+# new access token. Like the broker URL, token_uri rides in the untrusted token
+# payload, so a token-supplied value is honored only if it is https and its host
+# is one of Google's official token endpoints — otherwise a tampered token could
+# redirect the refresh_token to an attacker host.
+_GOOGLE_TOKEN_HOSTS = frozenset({'oauth2.googleapis.com', 'accounts.google.com'})
+
+
+def resolve_token_uri(token_uri: object) -> str:
+    """Validate a token-supplied OAuth token endpoint against Google's hosts.
+
+    ``token_uri`` is where the google-auth library POSTs the ``refresh_token``
+    to obtain a fresh access token. The token payload is untrusted (it rides in
+    saved pipes and broker responses), so a tampered token could point this at
+    an attacker host and exfiltrate the refresh_token.
+
+    Returns the URL when it is https and its host is one of Google's official
+    token endpoints. Falls back to the canonical endpoint when the token omits
+    the field. Raises ValueError for any other value so a tampered token fails
+    loud instead of silently posting credentials elsewhere.
+    """
+    if not token_uri:
+        return _GOOGLE_TOKEN_URI
+    if not isinstance(token_uri, str):
+        raise ValueError('Gmail token token_uri must be a string')
+
+    parsed = urlparse(token_uri)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.hostname.lower() not in _GOOGLE_TOKEN_HOSTS:
+        raise ValueError(
+            f'Gmail token token_uri {token_uri!r} is not a trusted Google OAuth token endpoint '
+            '(expected https and one of: ' + ', '.join(sorted(_GOOGLE_TOKEN_HOSTS)) + '). '
+            'Reconnect your Google account.'
+        )
+    return token_uri
+
+
 # HTTP status codes worth retrying (rate-limit + transient server errors).
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 
@@ -136,7 +175,9 @@ def build_service(auth_type: str, cfg: dict, scopes: list[str]) -> Any:
         refresh_token = info.get('refresh_token')
         client_id = info.get('client_id')
         client_secret = info.get('client_secret')
-        token_uri = info.get('token_uri', 'https://oauth2.googleapis.com/token')
+        # Untrusted input: reject any token endpoint not owned by Google so a
+        # tampered token can never redirect the refresh_token POST.
+        token_uri = resolve_token_uri(info.get('token_uri'))
         # Untrusted input: reject any refresh URL not pointing at a known broker.
         oauth_server_url = resolve_refresh_url(info.get('oauth_server_url'))
         expiry_date_ms = info.get('expiry_date')
