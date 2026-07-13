@@ -268,6 +268,50 @@ def build_install_argv(
 
 
 # ---------------------------------------------------------------------------
+# scoped-install orchestration (side effects injected -> unit-testable)
+# ---------------------------------------------------------------------------
+
+
+def run_scoped_install(
+    exe_dir: str,
+    project_id: Optional[str],
+    env_id: Optional[str],
+    providers,
+    *,
+    discover,
+    compile_and_install,
+    mode: Optional[str] = None,
+    has_isolated_group: bool = False,
+    on_overlay=None,
+) -> Optional[str]:
+    """Orchestrate a scoped per-environment install; return the overlay site-packages.
+
+    Pure control flow — every side effect is injected, so this is fully
+    unit-testable without an engine or ``uv``:
+
+    * ``discover(providers) -> list[str]`` — the env's requirement files (ast_deps).
+    * ``compile_and_install(plan)`` — run the uv compile + install ``--target``.
+    * ``on_overlay(site_packages)`` — e.g. ``sys.path.insert`` (optional).
+
+    Returns ``None`` when scoping does not apply for this run (the legacy/base
+    path — §4.15), otherwise the overlay ``site-packages`` path. Installs/rebuilds
+    only when the requirement set drifted (§4.9).
+    """
+    if mode is None:
+        mode = use_venv_mode()
+    if not scoping_enabled(mode, has_isolated_group):
+        return None
+    req_files = list(discover(providers))
+    plan = plan_install(exe_dir, project_id, env_id, req_files)
+    if plan.needs_rebuild:
+        compile_and_install(plan)
+        mark_installed(plan)
+    if on_overlay is not None:
+        on_overlay(plan.paths.site_packages)
+    return plan.paths.site_packages
+
+
+# ---------------------------------------------------------------------------
 # internal
 # ---------------------------------------------------------------------------
 

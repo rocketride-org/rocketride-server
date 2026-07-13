@@ -51,6 +51,10 @@ else:
 # engLib is built into engine.exe, always available
 from engLib import debug, monitorStatus, error
 
+# Sibling pure modules (stdlib-only, no engLib) for per-environment scoped installs (Phase 2A).
+import ast_deps
+import venv_env
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -1027,6 +1031,165 @@ def load_depends(current_file: str, requirements_file: str = 'requirements.txt')
     """
     requirements = os.path.join(os.path.dirname(os.path.realpath(current_file)), requirements_file)
     depends(requirements)
+
+
+# ---------------------------------------------------------------------------
+# Per-environment scoped install (Phase 2A — design 4.7 / 4.9 / 4.15)
+# ---------------------------------------------------------------------------
+
+
+def _compile_constraints_at(combined_path: str, constraints_path: str) -> None:
+    """Compile ``combined_path`` -> ``constraints_path`` for one environment.
+
+    Parameterized twin of :func:`_compile_constraints` that takes explicit paths
+    instead of the global cache locations, so each env compiles its own scoped set.
+    """
+    if not _uv_available():
+        raise RuntimeError('uv executable not found')
+    exe_dir = _get_executable_dir()
+    updateProgress('Compiling constraints...')
+    args = [
+        _uv_abs_path(),
+        'pip',
+        'compile',
+        combined_path,
+        '--output-file',
+        constraints_path,
+        '--python',
+        sys.executable,
+        '--index-strategy',
+        'unsafe-best-match',
+        '--no-build-isolation',
+        '--emit-index-url',
+    ]
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        check=False,
+        stdin=subprocess.PIPE,
+        encoding='utf-8',
+        errors='replace',
+        cwd=exe_dir,
+    )
+    if result.returncode != 0:
+        error(f'Failed to compile constraints: {result.stderr}')
+        raise RuntimeError('Failed to compile constraints')
+    debug(f'Constraints compiled: {constraints_path}')
+
+
+def _install_target(requirements_path: str, constraints_path: str, target_site: str) -> None:
+    """Install ``requirements_path`` into an overlay ``target_site`` (uv ``--target``).
+
+    Mirrors :func:`_install_requirements_inner` but lands packages in the env's
+    overlay ``site-packages`` instead of the base runtime.
+    """
+    with open(requirements_path, 'r', encoding='utf-8') as f:
+        has_deps = any(line.strip() and not line.strip().startswith('#') for line in f)
+    if not has_deps:
+        debug(f'  Empty scoped requirements, nothing to install: {requirements_path}')
+        return
+
+    exe_dir = _get_executable_dir()
+    excludes_rel = os.path.relpath(_write_excludes_file(), exe_dir)
+    argv = venv_env.build_install_argv(
+        uv_path=_uv_abs_path(),
+        python_exe=sys.executable,
+        requirements_path=requirements_path,
+        target_site=target_site,
+        excludes_path=excludes_rel,
+    )
+    argv.extend(_constraints_args(constraints_path, exe_dir))
+
+    _start_heartbeat()
+    try:
+        debug(f'Scoped install: {argv}')
+        proc = subprocess.Popen(
+            argv,
+            cwd=exe_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            bufsize=1,
+        )
+        lines: list[str] = []
+        for line in proc.stdout:
+            line = line.rstrip()
+            lines.append(line)
+            updateProgress(line)
+        proc.wait()
+        if proc.returncode != 0:
+            tail = '\n'.join(lines[-10:])
+            error(f'Scoped install failed: {tail}')
+            raise RuntimeError(f'Failed scoped install into {target_site}\n{tail}')
+    finally:
+        _stop_heartbeat()
+
+    import importlib
+
+    importlib.invalidate_caches()
+    sys.path_importer_cache.pop(target_site, None)
+    debug(f'Scoped install complete: {target_site}')
+
+
+def ensure_env_scoped(
+    project_id: Optional[str],
+    env_id: Optional[str],
+    providers,
+    has_isolated_group: bool = False,
+) -> Optional[str]:
+    """Install only what a pipeline environment uses, into its own overlay.
+
+    Discovers the requirement-file set for ``providers`` (``ast_deps``), compiles +
+    installs it into ``venvs/<project_id>/<env_id>/site-packages`` (on drift), and
+    inserts that overlay ahead of the base runtime on ``sys.path``.
+
+    Gated by the ``ROCKETRIDE_SERVER_USE_VENV`` switch (§4.15): returns ``None``
+    when scoping does not apply, in which case the caller keeps today's global-glob
+    behavior (:func:`ensure_constraints` + base site-packages).
+
+    Args:
+        project_id: Pipe id (``config.pipeline.project_id``), or ``None`` -> default env.
+        env_id: ``'main'`` or a group id.
+        providers: The environment's node ``provider`` strings.
+        has_isolated_group: Whether the pipeline has an isolated group (auto mode).
+
+    Returns:
+        The overlay ``site-packages`` path (now on ``sys.path``), or ``None`` for the
+        legacy path.
+    """
+    exe_dir = _get_executable_dir()
+
+    def _discover(provs):
+        # In the deployed engine both packages sit directly under the exe dir.
+        return ast_deps.discover_for_providers(provs, exe_dir, exe_dir).requirement_files
+
+    def _compile_and_install(plan):
+        # Per-env lock (design 4.10): one lock per overlay, not the single global lock.
+        with FileLock(plan.paths.lock_file):
+            bootstrap()
+            _compile_constraints_at(plan.paths.combined, plan.paths.constraints)
+            _install_target(plan.paths.combined, plan.paths.constraints, plan.paths.site_packages)
+
+    def _overlay(site):
+        if site not in sys.path:
+            sys.path.insert(0, site)  # overlay precedence: venv wins over base (§4.11)
+        import importlib
+
+        importlib.invalidate_caches()
+
+    return venv_env.run_scoped_install(
+        exe_dir,
+        project_id,
+        env_id,
+        providers,
+        discover=_discover,
+        compile_and_install=_compile_and_install,
+        has_isolated_group=has_isolated_group,
+        on_overlay=_overlay,
+    )
 
 
 # ---------------------------------------------------------------------------

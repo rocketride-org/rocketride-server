@@ -150,3 +150,76 @@ def test_build_install_argv_targets_overlay():
 def test_build_install_argv_optional_flags_omitted():
     argv = V.build_install_argv('uv', 'py', 'r.txt', '/site')
     assert '-c' not in argv and '--excludes' not in argv
+
+
+# --- run_scoped_install orchestration (injected side effects) ---------------
+
+
+def _stub_discover(files):
+    def _d(providers):
+        _d.called_with = list(providers)
+        return files
+
+    _d.called_with = None
+    return _d
+
+
+def test_run_scoped_install_off_is_noop(tmp_path):
+    d = _stub_discover([])
+    calls = []
+    site = V.run_scoped_install(
+        str(tmp_path),
+        'p',
+        'main',
+        ['webhook'],
+        discover=d,
+        compile_and_install=lambda plan: calls.append('install'),
+        mode=V.USE_OFF,
+    )
+    assert site is None  # legacy/base path
+    assert d.called_with is None  # discover not even called
+    assert calls == []  # nothing installed
+
+
+def test_run_scoped_install_on_installs_and_overlays(tmp_path):
+    req = _req(tmp_path, 'r.txt', 'tabulate==0.8.10\n')
+    d = _stub_discover([req])
+    installed, overlaid = [], []
+    site = V.run_scoped_install(
+        str(tmp_path),
+        'proj-aaaa',
+        'main',
+        ['webhook', 'detect'],
+        discover=d,
+        compile_and_install=lambda plan: installed.append(plan.paths.site_packages),
+        on_overlay=overlaid.append,
+        mode=V.USE_ON,
+    )
+    assert site.endswith('site-packages')
+    assert d.called_with == ['webhook', 'detect']
+    assert installed == [site]  # compile+install ran (first run = drift)
+    assert overlaid == [site]  # overlay hook invoked with the overlay
+    assert os.path.isfile(V.env_paths(os.path.dirname(site)).hash_file)  # marked installed
+
+
+def test_run_scoped_install_skips_install_when_up_to_date(tmp_path):
+    req = _req(tmp_path, 'r.txt', 'tabulate==0.8.10\n')
+    d = _stub_discover([req])
+
+    def ci(plan):
+        open(plan.paths.constraints, 'w').close()  # simulate uv producing constraints
+        ci.n += 1
+
+    ci.n = 0
+    V.run_scoped_install(str(tmp_path), 'p', 'main', ['x'], discover=d, compile_and_install=ci, mode=V.USE_ON)
+    assert ci.n == 1
+    # unchanged reqs + constraints present -> no reinstall
+    V.run_scoped_install(str(tmp_path), 'p', 'main', ['x'], discover=d, compile_and_install=ci, mode=V.USE_ON)
+    assert ci.n == 1
+
+
+def test_run_scoped_install_auto_needs_isolated_group(tmp_path):
+    req = _req(tmp_path, 'r.txt', 'x\n')
+    base = dict(discover=_stub_discover([req]), compile_and_install=lambda plan: None, mode=V.USE_AUTO)
+    assert V.run_scoped_install(str(tmp_path), 'p', 'main', ['x'], has_isolated_group=False, **base) is None
+    assert V.run_scoped_install(str(tmp_path), 'p', 'main', ['x'], has_isolated_group=True, **base) is not None
