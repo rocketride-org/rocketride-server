@@ -178,6 +178,14 @@ class EventMixin(DAPClient):
         # Resubscribe all monitor subscriptions after reconnect
         await self._resubscribe_all_monitors()
 
+        # Re-send app identity if previously set
+        app_name = getattr(self, '_app_name', '')
+        if app_name:
+            try:
+                await self.call('rrext_identify', appName=app_name, clientName=app_name)
+            except Exception:
+                pass  # Best-effort — don't block reconnect
+
         if self._caller_on_connected is not None:
             try:
                 await self._caller_on_connected(connection_info)
@@ -455,17 +463,27 @@ class EventMixin(DAPClient):
                     pass  # Best-effort — server may have already cleared
         self._monitor_keys.clear()
 
-    async def identify(self, client_name: str) -> None:
-        """Update this connection's display name on the server.
+    async def identify(self, app_name: Optional[str] = None, *, client_name: Optional[str] = None) -> None:
+        """Set the app-level display name for this connection.
 
         Useful when an app plugin loads and wants the server monitor to show
-        a more descriptive name instead of the generic client name sent at
-        auth time.
+        a more descriptive name in addition to the SDK identity sent at auth
+        time.  The name is stored locally and re-sent automatically on
+        reconnect.
 
         Args:
-            client_name: The new display name for this connection.
+            app_name: The app-level display name for this connection.
+            client_name: Deprecated alias for ``app_name`` (pre-rename callers).
         """
-        await self.call('rrext_identify', clientName=client_name)
+        if app_name is None:
+            if client_name is None:
+                raise TypeError("identify() missing required argument: 'app_name'")
+            app_name = client_name
+        self._app_name = app_name
+        if getattr(self, '_authenticated', False):
+            # Send both appName (new) and clientName (legacy) for back-compat
+            # with older servers that only read clientName
+            await self.call('rrext_identify', appName=app_name, clientName=app_name)
 
     async def _sync_monitor(self, key: Dict[str, Any], ref_counts: Dict[str, int]) -> None:
         """Send the merged type list for a monitor key to the server."""

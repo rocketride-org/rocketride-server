@@ -27,22 +27,28 @@ Pipeline billing hooks called by C++ rocketlib at well-defined lifecycle points.
 These four functions are invoked by the C++ engine at task/object boundaries.
 Their signatures must not change (they are part of the C++/Python contract).
 
+Two stdio protocols carry subprocess metrics to the parent:
+
+- ``>MET*`` — live point-in-time metrics for the dashboard (cpu_percent,
+  cpu_memory_mb, gpu_memory_mb).  Emitted every ~1 second by ProcessReporter.
+- ``>USG*`` — cumulative billing values for token calculation.  Emitted at
+  each object boundary and at task end.
+
 Lifecycle::
 
-    taskMetricsBegin(taskId)                       # once per task
-        taskMetricsObjectBegin(taskId, pipe_id, obj)   # once per object per pipe
+    taskMetricsBegin(taskId)                           # start ProcessReporter
+        taskMetricsObjectBegin(taskId, pipe_id, obj)   # count request
         ... node processes the object ...
-        taskMetricsObjectEnd(taskId, pipe_id, obj)     # emits >MET* snapshot
-    taskMetricsEnd(taskId)                         # emits final >MET* snapshot
-
-The ``>MET*`` protocol emits cumulative metric snapshots to stdout via
-``rocketlib.monitorMetrics``.  The parent process (``TaskMetrics``) replaces
-its previous snapshot on each report — values are running totals.
+        taskMetricsObjectEnd(taskId, pipe_id, obj)     # emit >USG* snapshot
+    taskMetricsEnd(taskId)                             # stop ProcessReporter, final >USG*
 """
 
-from rocketlib import Entry, monitorMetrics
+import json
+
+from rocketlib import Entry, monitorOther
 
 from .metrics import metrics
+from .process_reporter import process_reporter
 
 
 # ============================================================================
@@ -54,14 +60,18 @@ def taskMetricsBegin(taskId: str):
     """
     Signal beginning of a task in a pipeline.
 
-    Resets all metric accumulators so the new task starts with a clean
-    slate.  Called on the main thread by C++ rocketlib.
+    Resets all metric accumulators and starts the ProcessReporter thread
+    so the new task starts with a clean slate.  Called on the main thread
+    by C++ rocketlib.
 
     Args:
         taskId: Unique identifier for the task.
     """
     # Clear any leftover state from a previous task
     metrics.reset()
+
+    # Start live metrics reporting (>MET* every ~1s)
+    process_reporter.start()
 
 
 def taskMetricsObjectBegin(taskId: str, pipe_id: int, obj: Entry):
@@ -84,35 +94,38 @@ def taskMetricsObjectEnd(taskId: str, pipe_id: int, obj: Entry):
     """
     Signal end of an object in a pipeline.
 
-    Emits a cumulative ``>MET*`` billing snapshot via ``monitorMetrics``
-    so the parent process can track progress.  Called on the pipe's
-    instance thread by C++ rocketlib.
+    Emits a cumulative ``>USG*`` billing snapshot so the parent process
+    can update token charges.  Called on the pipe's instance thread by
+    C++ rocketlib.
 
     Args:
         taskId: Task identifier.
         pipe_id: Pipe instance identifier.
         obj: The rocketlib Entry that was processed.
     """
-    # Build a cumulative snapshot of all metrics collected so far
+    # Build a cumulative snapshot of all billing values
     report = metrics.report()
 
-    # Emit to parent process via the >MET* stdout protocol
+    # Emit to parent process via the >USG* stdout protocol
     if report:
-        monitorMetrics(report)
+        monitorOther('USG', json.dumps(report, separators=(',', ':')))
 
 
 def taskMetricsEnd(taskId: str):
     """
     Signal end of a task in a pipeline.
 
-    Emits a final ``>MET*`` billing snapshot capturing any metrics
-    accumulated after the last object-end report.  Called on the
-    main thread by C++ rocketlib.
+    Stops the ProcessReporter (which does a final sample to ensure
+    billing accumulators are up to date), then emits a final ``>USG*``
+    snapshot.  Called on the main thread by C++ rocketlib.
 
     Args:
         taskId: Task identifier.
     """
-    # Emit final snapshot — captures any trailing metrics
+    # Stop live reporting and do final sample
+    process_reporter.stop()
+
+    # Emit final billing snapshot
     report = metrics.report()
     if report:
-        monitorMetrics(report)
+        monitorOther('USG', json.dumps(report, separators=(',', ':')))

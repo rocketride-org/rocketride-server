@@ -193,7 +193,7 @@ class ConnectionMixin(DAPClient):
 
     def _schedule_reconnect(self) -> None:
         """Schedule a reconnect attempt driven by ``_desired_state``."""
-        self._debug_message(f'Scheduling reconnect in {self._current_reconnect_delay}s')
+        self.debug_message(f'Scheduling reconnect in {self._current_reconnect_delay}s')
         self._reconnect_timer = asyncio.create_task(self._do_reconnect())
 
     async def _do_reconnect(self) -> None:
@@ -214,7 +214,7 @@ class ConnectionMixin(DAPClient):
             # Success — reset backoff
             self._reconnect_timer = None
             self._current_reconnect_delay = 0.25
-            self._debug_message('Reconnect successful')
+            self.debug_message('Reconnect successful')
         except AuthenticationException as e:
             # Auth rejected — downgrade to attached, stop retrying auth
             if self._desired_state == 'detached':
@@ -253,7 +253,9 @@ class ConnectionMixin(DAPClient):
             if self._desired_state == 'detached':
                 self._desired_state = 'attached'
             return
-        self._desired_state = 'attached'
+        # Only upgrade — don't downgrade from 'authenticated' to 'attached'
+        if self._desired_state == 'detached':
+            self._desired_state = 'attached'
         await self._internal_attach(timeout)
 
     async def detach(self) -> None:
@@ -344,6 +346,7 @@ class ConnectionMixin(DAPClient):
         DAP message and returns the full ConnectResult on success.
         """
         self._current_reconnect_delay = 0.25
+        self._desired_state = 'authenticated'
         await self.attach(timeout=timeout)
         return await self.login(credential, timeout=timeout)
 

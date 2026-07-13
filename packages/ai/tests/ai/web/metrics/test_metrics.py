@@ -26,13 +26,16 @@ Unit tests for MetricsManager.
 
 Tests cover:
 - timer() context manager — timing and accumulation
-- add_time() — dict-based timer accumulation
+- add_value() — dict-based value accumulation
 - counter() — counter increment
 - event() — structured event recording
 - reset() — clearing all accumulators
 - report() — snapshot generation
 - Thread safety — concurrent access from multiple threads
-- Both paths combine — timer() and add_time() accumulate into same key
+- Both paths combine — timer() and add_value() accumulate into same key
+
+report() returns a flat snapshot: {'values': {name: amount, ...}, 'events': [...]}.
+Timers and counters are merged into the single 'values' dict.
 """
 
 import threading
@@ -68,8 +71,8 @@ class TestTimer:
             time.sleep(0.01)  # 10ms
 
         report = m.report()
-        assert 'gpu' in report['timers']
-        assert report['timers']['gpu'] > 0
+        assert 'gpu' in report['values']
+        assert report['values']['gpu'] > 0
 
     def test_timer_accumulates(self, m):
         """Multiple timer() calls with the same name should accumulate."""
@@ -77,13 +80,13 @@ class TestTimer:
         with m.timer('gpu'):
             time.sleep(0.01)
 
-        first = m.report()['timers']['gpu']
+        first = m.report()['values']['gpu']
 
         # Second call — should add to the first
         with m.timer('gpu'):
             time.sleep(0.01)
 
-        second = m.report()['timers']['gpu']
+        second = m.report()['values']['gpu']
         assert second > first
 
     def test_timer_different_names(self, m):
@@ -94,28 +97,28 @@ class TestTimer:
             time.sleep(0.005)
 
         report = m.report()
-        assert 'gpu' in report['timers']
-        assert 'preprocess' in report['timers']
+        assert 'gpu' in report['values']
+        assert 'preprocess' in report['values']
 
 
 # ============================================================================
-# ADD_TIME TESTS
+# ADD_VALUE TESTS
 # ============================================================================
 
 
 class TestAddTime:
-    """Tests for the add_time() dict-based timer accumulation."""
+    """Tests for the add_value() dict-based value accumulation."""
 
     def test_add_time_single_key(self, m):
-        """add_time() should set a timer value."""
-        m.add_time({'gpu': 42.5})
+        """add_value() should set a value."""
+        m.add_value({'gpu': 42.5})
 
         report = m.report()
-        assert report['timers']['gpu'] == 42.5
+        assert report['values']['gpu'] == 42.5
 
     def test_add_time_multiple_keys(self, m):
-        """add_time() should set multiple timer values in one call."""
-        m.add_time(
+        """add_value() should set multiple values in one call."""
+        m.add_value(
             {
                 'preprocess': 5.0,
                 'gpu': 100.0,
@@ -126,24 +129,24 @@ class TestAddTime:
         )
 
         report = m.report()
-        assert report['timers']['preprocess'] == 5.0
-        assert report['timers']['gpu'] == 100.0
-        assert report['timers']['postprocess'] == 3.0
-        assert report['timers']['queue_wait'] == 12.0
-        assert report['timers']['latency'] == 120.0
+        assert report['values']['preprocess'] == 5.0
+        assert report['values']['gpu'] == 100.0
+        assert report['values']['postprocess'] == 3.0
+        assert report['values']['queue_wait'] == 12.0
+        assert report['values']['latency'] == 120.0
 
     def test_add_time_accumulates(self, m):
-        """Multiple add_time() calls should accumulate values."""
-        m.add_time({'gpu': 50.0})
-        m.add_time({'gpu': 30.0})
+        """Multiple add_value() calls should accumulate values."""
+        m.add_value({'gpu': 50.0})
+        m.add_value({'gpu': 30.0})
 
         report = m.report()
-        assert report['timers']['gpu'] == 80.0
+        assert report['values']['gpu'] == 80.0
 
     def test_timer_and_add_time_combine(self, m):
-        """timer() and add_time() should accumulate into the same key."""
-        # Start with add_time
-        m.add_time({'gpu': 50.0})
+        """timer() and add_value() should accumulate into the same key."""
+        # Start with add_value
+        m.add_value({'gpu': 50.0})
 
         # Then use timer context manager
         with m.timer('gpu'):
@@ -151,7 +154,7 @@ class TestAddTime:
 
         report = m.report()
         # Should be 50ms + whatever the timer measured (~10ms)
-        assert report['timers']['gpu'] > 50.0
+        assert report['values']['gpu'] > 50.0
 
 
 # ============================================================================
@@ -163,11 +166,11 @@ class TestCounter:
     """Tests for the counter() method."""
 
     def test_counter_basic(self, m):
-        """counter() should record an integer value."""
+        """counter() should record a value merged into 'values'."""
         m.counter('gpu_inference_count', 1)
 
         report = m.report()
-        assert report['counters']['gpu_inference_count'] == 1
+        assert report['values']['gpu_inference_count'] == 1
 
     def test_counter_accumulates(self, m):
         """Multiple counter() calls should accumulate."""
@@ -176,14 +179,14 @@ class TestCounter:
         m.counter('gpu_inference_count', 1)
 
         report = m.report()
-        assert report['counters']['gpu_inference_count'] == 3
+        assert report['values']['gpu_inference_count'] == 3
 
     def test_counter_arbitrary_value(self, m):
         """counter() should accept values other than 1."""
         m.counter('pages', 42)
 
         report = m.report()
-        assert report['counters']['pages'] == 42
+        assert report['values']['pages'] == 42
 
 
 # ============================================================================
@@ -224,14 +227,13 @@ class TestReset:
     def test_reset_clears_everything(self, m):
         """reset() should clear all timers, counters, and events."""
         # Populate all three collections
-        m.add_time({'gpu': 100.0})
+        m.add_value({'gpu': 100.0})
         m.counter('gpu_inference_count', 5)
         m.event({'test': True})
 
-        # Verify they're populated
+        # Verify they're populated (timers + counters merged into 'values')
         report = m.report()
-        assert len(report['timers']) > 0
-        assert len(report['counters']) > 0
+        assert len(report['values']) > 0
         assert len(report['events']) > 0
 
         # Reset
@@ -239,8 +241,7 @@ class TestReset:
 
         # Verify everything is empty
         report = m.report()
-        assert report['timers'] == {}
-        assert report['counters'] == {}
+        assert report['values'] == {}
         assert report['events'] == []
 
 
@@ -254,27 +255,26 @@ class TestReport:
 
     def test_report_returns_snapshot(self, m):
         """report() should return a snapshot independent of future mutations."""
-        m.add_time({'gpu': 100.0})
+        m.add_value({'gpu': 100.0})
         report1 = m.report()
 
         # Mutate after snapshot
-        m.add_time({'gpu': 50.0})
+        m.add_value({'gpu': 50.0})
         report2 = m.report()
 
         # First snapshot should be unchanged
-        assert report1['timers']['gpu'] == 100.0
-        assert report2['timers']['gpu'] == 150.0
+        assert report1['values']['gpu'] == 100.0
+        assert report2['values']['gpu'] == 150.0
 
     def test_report_empty(self, m):
         """report() on a fresh manager should return empty collections."""
         report = m.report()
-        assert report == {'timers': {}, 'counters': {}, 'events': []}
+        assert report == {'values': {}, 'events': []}
 
     def test_report_shape(self, m):
-        """report() should always have timers, counters, and events keys."""
+        """report() should always have values and events keys."""
         report = m.report()
-        assert 'timers' in report
-        assert 'counters' in report
+        assert 'values' in report
         assert 'events' in report
 
 
@@ -308,7 +308,7 @@ class TestThreadSafety:
         report = m.report()
         # Each thread added ~10ms, total should be roughly 200ms
         # (they run in parallel so wall-clock is ~10ms, but accumulated is ~200ms)
-        assert report['timers']['gpu'] >= num_threads * sleep_ms * 0.5  # Allow some slack
+        assert report['values']['gpu'] >= num_threads * sleep_ms * 0.5  # Allow some slack
 
     def test_concurrent_counters(self, m):
         """N threads incrementing the same counter should all be counted."""
@@ -331,7 +331,7 @@ class TestThreadSafety:
 
         report = m.report()
         # Must be exactly num_threads * increments_per_thread — no lost updates
-        assert report['counters']['gpu_inference_count'] == num_threads * increments_per_thread
+        assert report['values']['gpu_inference_count'] == num_threads * increments_per_thread
 
     def test_concurrent_mixed(self, m):
         """Mixed timer + counter + add_time from multiple threads."""
@@ -344,7 +344,7 @@ class TestThreadSafety:
             with m.timer('gpu'):
                 time.sleep(0.005)
             m.counter('gpu_inference_count', 1)
-            m.add_time({'preprocess': 1.0, 'postprocess': 0.5})
+            m.add_value({'preprocess': 1.0, 'postprocess': 0.5})
 
         # Launch all threads
         threads = [threading.Thread(target=worker) for _ in range(num_threads)]
@@ -354,10 +354,10 @@ class TestThreadSafety:
             t.join()
 
         report = m.report()
-        # All counters should equal num_threads
-        assert report['counters']['gpu_inference_count'] == num_threads
-        # All add_time values should accumulate correctly
-        assert report['timers']['preprocess'] == num_threads * 1.0
-        assert report['timers']['postprocess'] == num_threads * 0.5
+        # All counters (merged into 'values') should equal num_threads
+        assert report['values']['gpu_inference_count'] == num_threads
+        # All add_value values should accumulate correctly
+        assert report['values']['preprocess'] == num_threads * 1.0
+        assert report['values']['postprocess'] == num_threads * 0.5
         # timer('gpu') should have some positive value from all threads
-        assert report['timers']['gpu'] > 0
+        assert report['values']['gpu'] > 0

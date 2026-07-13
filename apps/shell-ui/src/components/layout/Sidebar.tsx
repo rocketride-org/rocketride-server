@@ -374,8 +374,8 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
-			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' }) },
-			{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') },
+			...(!hideAppSwitcher ? [{ id: 'home' as const, label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' }) }] : []),
+			{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: !hideAppSwitcher, onClick: () => onOverlay('account') },
 			{ id: 'environment', label: 'Variables', icon: BxLock, onClick: () => onOverlay('environment') },
 			// Settings is a global workspace view (shell "General" plus any installed app's
 			// settings), so it's always available. Per-app gating lives in SettingsPage.
@@ -462,12 +462,12 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig, account, hideAppSwitcher
 				) : (
 					<>
 						<button
-							title="Go to home"
-							aria-label="Go to home"
-							onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' })}
-							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
-							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-							style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
+							title={hideAppSwitcher ? '' : 'Go to home'}
+							aria-label={hideAppSwitcher ? '' : 'Go to home'}
+							onClick={hideAppSwitcher ? undefined : () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'rocketride.home' })}
+							onMouseEnter={hideAppSwitcher ? undefined : (e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
+							onMouseLeave={hideAppSwitcher ? undefined : (e) => { e.currentTarget.style.background = 'transparent'; }}
+							style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: hideAppSwitcher ? 'default' : 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
 						>
 							<AppSwitcherButton collapsed={collapsed} />
 						</button>

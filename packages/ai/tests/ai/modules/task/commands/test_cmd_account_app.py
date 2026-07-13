@@ -15,9 +15,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from ai.account.models import RequestContext
 from ai.modules.task.commands import cmd_account, cmd_app
 from ai.modules.task.commands.cmd_account import AccountCommands
 from ai.modules.task.commands.cmd_app import AppCommands
+
+
+def _ctx(account_info=None, conn_id='conn-1', source='local'):
+    """Build a RequestContext for the trailing ctx arg on DAP handlers."""
+    return RequestContext(account_info=account_info, conn_id=conn_id, source=source)
 
 
 # ---------------------------------------------------------------------------
@@ -38,16 +44,17 @@ from ai.modules.task.commands.cmd_app import AppCommands
     ],
 )
 async def test_account_handler_delegates_to_account_handle_account(monkeypatch, handler_name):
-    """Every rrext_account_* handler must call account.handle_account(self, request)."""
+    """Every rrext_account_* handler must call account.handle_account(self, request, ctx)."""
     fake_handler = AsyncMock(return_value={'type': 'response', 'body': {'ok': True}})
     monkeypatch.setattr(cmd_account.account, 'handle_account', fake_handler)
 
     conn = AccountCommands.__new__(AccountCommands)
     request = {'command': handler_name.replace('on_', ''), 'arguments': {'x': 1}}
+    ctx = _ctx()
 
-    result = await getattr(AccountCommands, handler_name)(conn, request)
+    result = await getattr(AccountCommands, handler_name)(conn, request, ctx)
 
-    fake_handler.assert_awaited_once_with(conn, request)
+    fake_handler.assert_awaited_once_with(conn, request, ctx)
     assert result == {'type': 'response', 'body': {'ok': True}}
 
 
@@ -68,16 +75,17 @@ async def test_account_handler_delegates_to_account_handle_account(monkeypatch, 
     ],
 )
 async def test_app_handler_delegates_to_account_handle_app(monkeypatch, handler_name):
-    """Every rrext_app_* handler must call account.handle_app(self, request)."""
+    """Every rrext_app_* handler must call account.handle_app(self, request, ctx)."""
     fake_handler = AsyncMock(return_value={'type': 'response', 'body': {'ok': True}})
     monkeypatch.setattr(cmd_app.account, 'handle_app', fake_handler)
 
     conn = AppCommands.__new__(AppCommands)
     request = {'command': handler_name.replace('on_', ''), 'arguments': {'y': 2}}
+    ctx = _ctx()
 
-    result = await getattr(AppCommands, handler_name)(conn, request)
+    result = await getattr(AppCommands, handler_name)(conn, request, ctx)
 
-    fake_handler.assert_awaited_once_with(conn, request)
+    fake_handler.assert_awaited_once_with(conn, request, ctx)
     assert result == {'type': 'response', 'body': {'ok': True}}
 
 

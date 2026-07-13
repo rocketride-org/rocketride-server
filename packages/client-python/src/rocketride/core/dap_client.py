@@ -94,6 +94,8 @@ class DAPClient(DAPBase):
         Args:
             message: The DAP message to send
         """
+        if not self._transport:
+            raise ConnectionError('Transport is not available')
         return await self._transport.send(message)
 
     async def on_connected(self, connection_info: Optional[str] = None) -> None:
@@ -211,7 +213,7 @@ class DAPClient(DAPBase):
             self.raise_exception(RuntimeError("Request message must include a 'seq' field"))
 
         # Verify connection
-        if not self._transport.is_connected():
+        if not self._transport or not self._transport.is_connected():
             self.raise_exception(RuntimeError('Server is not connected'))
 
         # Get sequence number for correlation
@@ -243,7 +245,8 @@ class DAPClient(DAPBase):
             # member of TransportWebSocket._message_tasks: the drain gather closes back
             # on the calling task, and asyncio's cancel propagation recurses on
             # _GatheringFuture.cancel until the recursion limit fires.
-            self._transport.disconnect()
+            if self._transport:
+                self._transport.disconnect()
             self.raise_exception(ConnectionError(f'{e}'))
 
         except asyncio.TimeoutError:
@@ -304,6 +307,8 @@ class DAPClient(DAPBase):
             ConnectionError: If connection fails.
             TimeoutError: If connection times out.
         """
+        if not self._transport:
+            raise ConnectionError('Transport is not available')
         await self._transport.connect(timeout)
 
     async def disconnect(self) -> None:
@@ -313,5 +318,6 @@ class DAPClient(DAPBase):
         Gracefully closes the transport connection and cleans up any
         remaining connection state or pending operations.
         """
-        # Close transport connection
-        await self._transport.disconnect()
+        # Close transport connection (guard against missing transport)
+        if self._transport:
+            await self._transport.disconnect()

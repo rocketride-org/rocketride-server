@@ -25,14 +25,14 @@
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardRequest, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
-import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
+import { AuthenticationException, ConnectionException, DAPException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
 let clientId = 0;
@@ -59,6 +59,11 @@ let clientId = 0;
  * ```
  */
 export class DataPipe {
+	/** Maximum bytes per write subcommand.  Larger buffers are auto-chunked to
+	 *  prevent head-of-line blocking on the multiplexed orchestrator<->EAAS
+	 *  WebSocket.  Matches the Python client constant. */
+	private static readonly MAX_WRITE_CHUNK = 512 * 1024; // 512 KB
+
 	private _client: RocketRideClient;
 	private _token: string;
 	private _objinfo: Record<string, unknown>;
@@ -181,6 +186,18 @@ export class DataPipe {
 	 * @throws Error if the pipe is not opened or buffer is invalid
 	 * @throws PipeException if the server reports a write failure
 	 */
+	/**
+	 * Write data to the pipe, auto-chunking buffers larger than 512 KB.
+	 *
+	 * Buffers at or below 512 KB are sent in a single subcommand.  Larger
+	 * buffers are split into sequential 512 KB chunks so that no single write
+	 * monopolises the multiplexed orchestrator<->EAAS WebSocket and causes
+	 * head-of-line blocking for other clients.
+	 *
+	 * @param buffer - Data to send as a Uint8Array.
+	 * @throws Error if the pipe is not opened.
+	 * @throws PipeException if the server reports a write failure.
+	 */
 	async write(buffer: Uint8Array): Promise<void> {
 		if (!this._opened) {
 			throw new Error('Pipe not opened');
@@ -190,20 +207,33 @@ export class DataPipe {
 			throw new Error('Buffer must be Uint8Array');
 		}
 
-		const request = this._client.buildRequest('rrext_process', {
-			arguments: {
-				subcommand: 'write',
-				pipe_id: this._pipeId,
-				data: buffer,
-			},
-			token: this._token,
-		});
+		// Split into ≤ 512 KB chunks; a single-chunk path has no overhead. A
+		// zero-length buffer still issues exactly one empty write so the payload
+		// is delivered, matching the pre-chunking single-request path.
+		const chunks =
+			buffer.length === 0
+				? [buffer]
+				: Array.from({ length: Math.ceil(buffer.length / DataPipe.MAX_WRITE_CHUNK) }, (_, index) => {
+						const offset = index * DataPipe.MAX_WRITE_CHUNK;
+						return buffer.subarray(offset, offset + DataPipe.MAX_WRITE_CHUNK);
+					});
 
-		const response = await this._client.request(request);
+		for (const chunk of chunks) {
+			const request = this._client.buildRequest('rrext_process', {
+				arguments: {
+					subcommand: 'write',
+					pipe_id: this._pipeId,
+					data: chunk,
+				},
+				token: this._token,
+			});
 
-		if (this._client.didFail(response)) {
-			const msg = response.message || 'Failed to write to a data pipe.';
-			throw new PipeException({ ...response, message: msg });
+			const response = await this._client.request(request);
+
+			if (this._client.didFail(response)) {
+				const msg = response.message || 'Failed to write to a data pipe.';
+				throw new PipeException({ ...response, message: msg });
+			}
 		}
 	}
 
@@ -349,6 +379,9 @@ export class RocketRideClient extends DAPClient {
 	private _persist: boolean = false;
 	private _reconnectTimer?: ReturnType<typeof setTimeout>;
 	private _currentReconnectDelay: number = 250;
+
+	/** App-level display name set by identify(), re-sent on reconnect. */
+	private _appName?: string;
 
 	/** Reference-counted monitor subscriptions: keyString → Map<eventType, refCount> */
 	private _monitorKeys = new Map<string, Map<string, number>>();
@@ -610,8 +643,12 @@ export class RocketRideClient extends DAPClient {
 			this._apikey = this._connectResult.userToken;
 		}
 
-		// Resubscribe monitors and notify
+		// Resubscribe monitors and re-send app identity
 		await this._resubscribeAllMonitors();
+		if (this._appName) {
+			try { await this.call('rrext_identify', { appName: this._appName, clientName: this._appName }); }
+			catch { /* best-effort — don't block login */ }
+		}
 		const connectionInfo = this._transport?.getConnectionInfo() ?? '';
 		if (this._callerOnConnected) {
 			try { await this._callerOnConnected(connectionInfo); }
@@ -731,7 +768,10 @@ export class RocketRideClient extends DAPClient {
 			this._desiredState = this._desiredState === 'detached' ? 'attached' : this._desiredState;
 			return;
 		}
-		this._desiredState = 'attached';
+		// Only upgrade — don't downgrade from 'authenticated' to 'attached'
+		if (this._desiredState === 'detached') {
+			this._desiredState = 'attached';
+		}
 		await this._internalAttach(options?.timeout);
 	}
 
@@ -860,8 +900,21 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		this._currentReconnectDelay = 250;
-		await this.attach(options?.uri, { timeout: options?.timeout });
-		return this.login(credential, options);
+		// Handle a URI change up front — detach() resets _desiredState to
+		// 'detached', so it must run before we set the authenticated target
+		// below. Doing it here also means attach()/login() never re-run the
+		// detach/re-attach dance and clobber the authenticated intent (leaving a
+		// failed persist-mode reconnect stuck at 'attached', never re-logging in).
+		if (options?.uri) {
+			const normalised = this._getWebsocketUri(options.uri);
+			if (normalised !== this._uri) {
+				if (this.isAttached()) await this.detach();
+				this._setUri(options.uri);
+			}
+		}
+		this._desiredState = 'authenticated';
+		await this.attach(undefined, { timeout: options?.timeout });
+		return this.login(credential, { timeout: options?.timeout });
 	}
 
 	/**
@@ -1793,16 +1846,23 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Update this connection's display name on the server.
+	 * Set the app-level display name for this connection.
 	 *
 	 * Useful when an app plugin loads and wants the server monitor to show
-	 * a more descriptive name (e.g. "Cloud Shell-UI — rocketride.pipeBuilder")
-	 * instead of the generic client name sent at auth time.
+	 * a more descriptive name (e.g. "rocketride.pipeBuilder")
+	 * in addition to the SDK identity sent at auth time.
 	 *
-	 * @param clientName - The new display name for this connection.
+	 * The name is stored locally and re-sent automatically on reconnect.
+	 *
+	 * @param appName - The app-level display name for this connection.
 	 */
-	async identify(clientName: string): Promise<void> {
-		await this.call('rrext_identify', { clientName });
+	async identify(appName: string): Promise<void> {
+		this._appName = appName;
+		if (this._authenticated) {
+			// Send both appName (new) and clientName (legacy) for back-compat
+			// with older servers that only read clientName
+			await this.call('rrext_identify', { appName, clientName: appName });
+		}
 	}
 
 	/**
@@ -2329,6 +2389,12 @@ export class RocketRideClient extends DAPClient {
 		if (path.startsWith('/') || path.startsWith('\\')) {
 			throw new Error(`Path must be relative (got ${path})`);
 		}
+		// Reject Windows drive-letter absolute paths (e.g. C:\... or C:/...) — these
+		// don't start with a slash so they slip past the check above, and ':' is a
+		// legal path char on POSIX so it isn't in INVALID_PATH_CHARS.
+		if (/^[a-zA-Z]:/.test(path)) {
+			throw new Error(`Path must be relative (got ${path})`);
+		}
 		// Normalise Windows-style backslashes to forward slashes before splitting
 		for (const segment of path.replace(/\\/g, '/').split('/')) {
 			// Reject parent-directory traversal attempts in any position of the path
@@ -2382,8 +2448,8 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @returns DashboardResponse containing overview, connections, and tasks
 	 */
-	async getDashboard(): Promise<DashboardResponse> {
-		return this.call<DashboardResponse>('rrext_dashboard', {});
+	async getDashboard(options?: DashboardRequest): Promise<DashboardResponse> {
+		return this.call<DashboardResponse>('rrext_dashboard', (options ?? {}) as Record<string, unknown>);
 	}
 
 	// ============================================================================
@@ -2694,7 +2760,7 @@ export class RocketRideClient extends DAPClient {
 		// Throw on server-reported failure
 		if (response.success === false) {
 			this._onTrace?.(TraceType.Error, response);
-			throw new Error(response.message ?? `${command} failed`);
+			throw new DAPException(response as unknown as Record<string, unknown>);
 		}
 
 		// Trace: success response

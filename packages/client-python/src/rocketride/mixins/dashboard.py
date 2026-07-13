@@ -32,8 +32,10 @@ Usage:
     print(f"Active tasks: {dashboard['overview']['activeTasks']}")
 """
 
+from typing import Optional
+
 from ..core import DAPClient
-from ..types.dashboard import DASHBOARD_RESPONSE
+from ..types.dashboard import DASHBOARD_PAGE_PARAMS, DASHBOARD_RESPONSE
 
 
 class DashboardMixin(DAPClient):
@@ -51,24 +53,42 @@ class DashboardMixin(DAPClient):
         """Initialize dashboard functionality."""
         super().__init__(**kwargs)
 
-    async def get_dashboard(self) -> DASHBOARD_RESPONSE:
+    async def get_dashboard(
+        self,
+        tasks: Optional[DASHBOARD_PAGE_PARAMS] = None,
+        connections: Optional[DASHBOARD_PAGE_PARAMS] = None,
+    ) -> DASHBOARD_RESPONSE:
         """
-        Retrieve a server dashboard snapshot.
+        Retrieve a server dashboard snapshot, optionally paginated per section.
 
-        Returns the current state of all connections, tasks, and aggregate
-        metrics from the server. This is a point-in-time snapshot; for
-        real-time updates, subscribe to DASHBOARD events via set_events().
+        Returns the current state of connections, tasks, and aggregate metrics.
+        This is a point-in-time snapshot; for real-time updates, subscribe to
+        DASHBOARD events via set_events().
+
+        Args:
+            tasks: Optional ``{offset, limit, sort_by, sort_order, state_filter}``
+                pagination for the tasks section. ``limit=0`` omits the section;
+                omitted returns all rows. Absent = unpaginated (all tasks).
+            connections: Same pagination shape for the connections section.
 
         Returns:
-            DASHBOARD_RESPONSE containing overview metrics, connection
-            details, and task information.
+            DASHBOARD_RESPONSE with ``overview`` and, per section, the requested
+            page (``tasks`` / ``connections``, omitted when ``limit=0``) plus
+            ``tasks_total`` / ``connections_total`` (rows matching the filter).
 
         Raises:
             RuntimeError: If the server returns an error (e.g. permission denied).
 
         Example:
-            dashboard = await client.get_dashboard()
-            for task in dashboard['tasks']:
-                print(f"{task['id']}: {task['status']} ({task['elapsedTime']:.0f}s)")
+            page = await client.get_dashboard(
+                tasks={'offset': 0, 'limit': 25, 'sort_by': 'startTime', 'sort_order': 'desc'},
+            )
+            print(f"{len(page['tasks'])} of {page['tasks_total']} tasks")
         """
-        return await self.call('rrext_dashboard')
+        # Only forward sections the caller supplied; empty kwargs -> unpaginated.
+        kwargs = {}
+        if tasks:
+            kwargs['tasks'] = tasks
+        if connections:
+            kwargs['connections'] = connections
+        return await self.call('rrext_dashboard', **kwargs)

@@ -32,8 +32,10 @@ This module works in conjunction with TaskServer to:
 - Handle processing errors and edge cases
 """
 
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING
+from ai.account.models import RequestContext
 from ai.common.dap import DAPConn, TransportBase
+from rocketride.types.client import DAPRequest, DAPResponse
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -91,7 +93,7 @@ class DataCommands(DAPConn):
         """
         pass
 
-    async def on_rrext_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_process(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_process' command for data processing requests.
 
@@ -133,7 +135,7 @@ class DataCommands(DAPConn):
         """
         try:
             # Locate the target task instance using authentication and token
-            task = self.get_task(request, 'task.data')
+            task = self.get_task(request, ctx, 'task.data')
 
             # Ensure the task is ready to process data (blocks until running)
             # This is critical as tasks may be in startup, initialization, or other states

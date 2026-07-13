@@ -39,6 +39,15 @@ os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['HF_HUB_DISABLE_SYMLINKS'] = '1'
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 
+# Uncomment to debug asyncio stalls. NOTE: this block AND the loop.set_debug(True)
+# block in ai/eaas.py must BOTH be uncommented for asyncio debug mode to take full effect.
+# os.environ['PYTHONASYNCIODEBUG'] = '1'
+# _asyncio_logger = logging.getLogger('asyncio')
+# _asyncio_logger.setLevel(logging.WARNING)
+# _asyncio_handler = logging.StreamHandler(sys.stderr)
+# _asyncio_handler.setFormatter(logging.Formatter('[ASYNCIO-DEBUG] %(message)s'))
+# _asyncio_logger.addHandler(_asyncio_handler)
+
 # Track if we've already run suppression
 _suppressed = False
 

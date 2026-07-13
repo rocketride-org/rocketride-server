@@ -205,24 +205,34 @@ class DataMixin(DAPClient):
 
             return self
 
+        # Maximum bytes per write subcommand.  Larger buffers are auto-chunked
+        # to prevent head-of-line blocking on the multiplexed orchestrator<->EAAS
+        # WebSocket connection.  Matches the TypeScript client constant.
+        _MAX_WRITE_CHUNK = 512 * 1024  # 512 KB
+
         async def write(self, buffer: bytes) -> None:
             """
-            Write data to the pipe.
+            Write data to the pipe, auto-chunking buffers larger than 512 KB.
 
-            Can be called multiple times to send data in chunks. Data must
-            be bytes - convert strings using .encode() first.
+            Buffers at or below 512 KB are sent in a single subcommand.
+            Larger buffers are split into sequential 512 KB chunks so that no
+            single write monopolises the multiplexed orchestrator<->EAAS
+            WebSocket and causes head-of-line blocking for other clients.
+
+            Can be called multiple times to stream data in pieces.  Data must
+            be bytes — convert strings with ``.encode()`` first.
 
             Args:
-                buffer: Data to send (must be bytes, not string)
+                buffer: Data to send (must be bytes, not string).
 
             Raises:
-                RuntimeError: If the pipe is not opened.
-                PipeException: If the server reports a write failure.
-                ValueError: If buffer is not bytes
+                RuntimeError:   If the pipe is not opened.
+                PipeException:  If the server reports a write failure.
+                ValueError:     If buffer is not bytes.
 
             Example:
-                await pipe.write(b"First chunk of data")
-                await pipe.write("Second chunk".encode())
+                await pipe.write(b'First chunk of data')
+                await pipe.write('Second chunk'.encode())
                 await pipe.write(json.dumps(data).encode())
             """
             if not self._opened:
@@ -231,23 +241,34 @@ class DataMixin(DAPClient):
             if not isinstance(buffer, bytes):
                 raise ValueError('Buffer must be bytes')
 
-            request = self._client.build_request(
-                'rrext_process',
-                arguments={
-                    'subcommand': 'write',
-                    'pipe_id': self._pipe_id,
-                    'data': buffer,
-                },
-                token=self._token,
-            )
+            # Split into ≤ 512 KB chunks; a single-chunk path has no overhead.
+            # A zero-length buffer still issues exactly one empty write so the
+            # payload is delivered, matching the pre-chunking single-request path.
+            total = len(buffer)
+            if total == 0:
+                chunks = (buffer,)
+            else:
+                chunks = (
+                    buffer[offset : offset + self._MAX_WRITE_CHUNK] for offset in range(0, total, self._MAX_WRITE_CHUNK)
+                )
+            for chunk in chunks:
+                request = self._client.build_request(
+                    'rrext_process',
+                    arguments={
+                        'subcommand': 'write',
+                        'pipe_id': self._pipe_id,
+                        'data': chunk,
+                    },
+                    token=self._token,
+                )
 
-            response = await self._client.request(request)
+                response = await self._client.request(request)
 
-            if self._client.did_fail(response):
-                msg = response.get('message') or 'Failed to write to a data pipe.'
-                response = dict(response)
-                response['message'] = msg
-                raise PipeException(response)
+                if self._client.did_fail(response):
+                    msg = response.get('message') or 'Failed to write to a data pipe.'
+                    response = dict(response)
+                    response['message'] = msg
+                    raise PipeException(response)
 
         async def close(self) -> PIPELINE_RESULT:
             """

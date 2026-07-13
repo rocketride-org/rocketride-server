@@ -245,7 +245,7 @@ class DepthEstimator:
         out = DepthEstimatorLoader.postprocess(self._bundle, raw, 1, ['depth'], metadata=self._metadata)
         t_post = (time.perf_counter() - t0) * 1000
         inference_sec = (t_pre + t_gpu + t_post) / 1000.0
-        metrics.add_time(
+        metrics.add_value(
             {
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,

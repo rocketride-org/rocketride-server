@@ -100,6 +100,73 @@ class DAPMessage(TypedDict, total=False):
     trace: TraceInfo  # Stack trace information for errors
 
 
+class DAPRequest(TypedDict, total=False):
+    """
+    A DAP request message sent from client to server.
+
+    Requests carry a ``command`` and optional ``arguments``.  The server
+    responds with a ``DAPResponse`` whose ``request_seq`` matches the
+    request's ``seq``.
+
+    Required fields: ``type`` (always ``'request'``), ``seq``, ``command``.
+    """
+
+    # Required fields
+    type: Literal['request']  # Always 'request'
+    seq: int  # Unique sequence number for correlation
+    command: str  # Command name (e.g. 'execute', 'rrext_account_me')
+
+    # Optional fields
+    arguments: dict[str, Any]  # Command-specific parameters
+    token: str  # Task or pipeline token for operation context
+
+
+class DAPResponse(TypedDict, total=False):
+    """
+    A DAP response message sent from server to client.
+
+    Every response corresponds to a request identified by ``request_seq``.
+    ``success`` indicates whether the command succeeded; on failure
+    ``message`` carries the error description.
+
+    Required fields: ``type`` (always ``'response'``), ``seq``,
+    ``request_seq``, ``command``, ``success``.
+    """
+
+    # Required fields
+    type: Literal['response']  # Always 'response'
+    seq: int  # Sequence number of this response
+    request_seq: int  # Sequence number of the original request
+    command: str  # Command this response corresponds to
+    success: bool  # True if the command succeeded
+
+    # Optional fields
+    body: dict[str, Any]  # Response payload
+    message: str  # Error description when success is False
+    arguments: dict[str, Any]  # Additional data (e.g. binary payloads)
+    trace: TraceInfo  # Stack trace on error
+
+
+class DAPEvent(TypedDict, total=False):
+    """
+    A DAP event message sent from server to client.
+
+    Events are server-initiated notifications about state changes,
+    output, or other asynchronous occurrences.
+
+    Required fields: ``type`` (always ``'event'``), ``seq``, ``event``.
+    """
+
+    # Required fields
+    type: Literal['event']  # Always 'event'
+    seq: int  # Sequence number of this event
+    event: str  # Event type name (e.g. 'apaevt_status_update')
+
+    # Optional fields
+    body: dict[str, Any]  # Event-specific payload
+    id: str  # Optional event correlation ID
+
+
 class TransportCallbacks(TypedDict, total=False):
     """
     Callback functions for transport layer events and debugging.
@@ -297,7 +364,6 @@ class ConnectResult(TypedDict, total=False):
         locale (str): BCP-47 locale tag (e.g. "en-US").
         defaultTeam (str): ID of the team selected as the default context.
         organization (OrgInfo | None): The organisation the user belongs to, or None.
-        apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
         waitlisted (bool): True when authenticated but not yet granted full app access.
     """
 
@@ -316,9 +382,11 @@ class ConnectResult(TypedDict, total=False):
     organization: OrgInfo
     capabilities: list[str]
     sysPermissions: list[str]
-    credits: dict
-    apps: list[AppManifestEntry]
     waitlisted: bool
+    # Per-app subscription status keyed by appId ('subscribed' | 'trialing' |
+    # 'free' | 'unsubscribed' | 'past_due' | 'canceled' | 'auth'). Lightweight
+    # source for subscription gating; SaaS populates from billing, OSS = 'free'.
+    subscriptions: dict[str, str]
 
 
 class ServerInfoResult(TypedDict, total=False):
@@ -334,10 +402,8 @@ class ServerInfoResult(TypedDict, total=False):
         capabilities (list[str]): Capability tags — ``['oss']`` for open-source,
             ``['saas']`` for cloud.
         platform (str): Server platform (e.g. ``'linux'``, ``'win32'``, ``'darwin'``).
-        apps (list[AppManifestEntry]): Public apps visible without authentication.
     """
 
     version: str
     capabilities: list[str]
     platform: str
-    apps: list[AppManifestEntry]

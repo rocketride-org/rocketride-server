@@ -125,8 +125,9 @@ export default defineConfig(({ command }) => {
 					// (requiredVersion: false) because it is always co-deployed.
 					// MF shared resolution bypasses rsbuild aliases — explicit import
 					// paths are required so MF can find the modules at build time.
-					'shell-ui': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
-					'shared':   { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts') },
+					'shell-ui':   { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
+					'shared':     { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts') },
+					'rocketride': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
 					// shaders bundles Three.js internally — do NOT add 'three' to shared or
 				// the host exposes a copy that shaders never imports, wasting ~1-2MB.
 				'shaders':  { singleton: true, version: '1.0.0', requiredVersion: false, eager: true },

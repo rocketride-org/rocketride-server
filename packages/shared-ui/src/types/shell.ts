@@ -128,6 +128,16 @@ export interface ShellConnectionEventMap {
 	'shell:accountUpdate': ConnectResult;
 
 	/**
+	 * Server-pushed desktop apps update (e.g. app added/removed from desktop,
+	 * subscription status change).
+	 *
+	 * Triggered by the `apaext_desktop` DAP event. Contains only the desktop
+	 * apps list — separate from identity updates to avoid sending the full
+	 * app catalog on every account mutation.
+	 */
+	'shell:desktopUpdate': { apps: ShellAppEntry[] };
+
+	/**
 	 * Emitted when the service catalog is fetched or refreshed.
 	 *
 	 * Contains the full services map and an optional error string if

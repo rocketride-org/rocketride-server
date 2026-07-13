@@ -95,6 +95,77 @@ export interface DAPMessage {
 }
 
 /**
+ * A DAP request message sent from client to server.
+ *
+ * Requests carry a {@link command} and optional {@link arguments}.  The server
+ * responds with a {@link DAPResponse} whose `request_seq` matches the
+ * request's `seq`.
+ */
+export interface DAPRequest extends DAPMessage {
+	/** Always 'request' for request messages */
+	type: 'request';
+
+	/** Command name (e.g. 'execute', 'rrext_account_me') */
+	command: string;
+
+	/** Command-specific parameters */
+	arguments?: Record<string, unknown>;
+
+	/** Task or pipeline token for operation context */
+	token?: string;
+}
+
+/**
+ * A DAP response message sent from server to client.
+ *
+ * Every response corresponds to a request identified by `request_seq`.
+ * `success` indicates whether the command succeeded; on failure `message`
+ * carries the error description.
+ */
+export interface DAPResponse extends DAPMessage {
+	/** Always 'response' for response messages */
+	type: 'response';
+
+	/** Sequence number of the original request */
+	request_seq: number;
+
+	/** Command this response corresponds to */
+	command: string;
+
+	/** True if the command succeeded */
+	success: boolean;
+
+	/** Response payload */
+	body?: Record<string, unknown>;
+
+	/** Error description when success is false */
+	message?: string;
+
+	/** Additional data (e.g. binary payloads) */
+	arguments?: Record<string, unknown>;
+
+	/** Stack trace on error */
+	trace?: TraceInfo;
+}
+
+/**
+ * A DAP event message sent from server to client.
+ *
+ * Events are server-initiated notifications about state changes,
+ * output, or other asynchronous occurrences.
+ */
+export interface DAPEvent extends DAPMessage {
+	/** Always 'event' for event messages */
+	type: 'event';
+
+	/** Event type name (e.g. 'apaevt_status_update') */
+	event: string;
+
+	/** Event-specific payload */
+	body?: Record<string, unknown>;
+}
+
+/**
  * Callback functions for transport layer events and debugging.
  *
  * These callbacks provide hooks for monitoring transport activity,
@@ -306,6 +377,23 @@ export interface OrgInfo {
 }
 
 /**
+ * Per-app subscription lifecycle status, computed server-side. OSS reports
+ * every app as `'free'`.
+ */
+export type AppStatus = 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled';
+
+/**
+ * Statuses that grant access to an app — the subscription gate treats these as
+ * active. `'free'` needs no subscription; `'subscribed'`/`'trialing'` are paid-active.
+ */
+export const ACTIVE_APP_STATUSES: readonly AppStatus[] = ['subscribed', 'trialing', 'free'];
+
+/** True when `status` grants access to the app (see {@link ACTIVE_APP_STATUSES}). */
+export function isActiveStatus(status: AppStatus | string | undefined): boolean {
+	return status !== undefined && (ACTIVE_APP_STATUSES as readonly string[]).includes(status);
+}
+
+/**
  * Full identity and authorisation payload returned by the server after a
  * successful authentication handshake (`auth` command).
  *
@@ -366,13 +454,6 @@ export interface ConnectResult {
 	organization: OrgInfo | null;
 
 	/**
-	 * Apps on the user's desktop with ``appStatus`` and ``onDesktop``.
-	 * OSS: all apps with ``appStatus: "free"``, ``onDesktop: true``.
-	 * SaaS: populated from the ``app_users`` table, enriched with billing info.
-	 */
-	apps: AppManifestEntry[];
-
-	/**
 	 * Server capability tags describing the account provider in use.
 	 * OSS servers report `['oss']`; SaaS servers report `['saas']`.
 	 */
@@ -384,14 +465,20 @@ export interface ConnectResult {
 	 */
 	sysPermissions?: string[];
 
-	/** Credit wallet balance snapshot — resource→balance pairs. */
-	credits?: Record<string, unknown>;
-
 	/**
 	 * True when the user is authenticated but not yet granted full app access.
 	 * The shell should show a waitlist page instead of the main workspace.
 	 */
 	waitlisted?: boolean;
+
+	/**
+	 * Per-app subscription status keyed by appId — the lightweight source for
+	 * subscription gating (see {@link isActiveStatus}). SaaS populates it from
+	 * the billing layer; OSS marks every app `'free'`. Full billing detail
+	 * (plan/price/seats/credits) is fetched separately via `rrext_account_billing`.
+	 * Refreshed on every `apaext_account` push, so no separate fetch/cache is needed.
+	 */
+	subscriptions?: Record<string, AppStatus>;
 
 	/**
 	 * All org memberships the user has (for the org switcher UI).
@@ -461,8 +548,8 @@ export interface AppManifestEntry {
 	/** Available pricing tiers (SaaS paid apps only). */
 	stripePrices?: StripePriceEntry[];
 
-	/** App lifecycle status: 'auth' | 'free' | 'unsubscribed' | 'subscribed' | 'trialing' | 'past_due' | 'canceled'. */
-	appStatus?: string;
+	/** App lifecycle / subscription status. */
+	appStatus?: AppStatus;
 
 	/** Whether this app is on the user's desktop. */
 	onDesktop?: boolean;
@@ -513,12 +600,4 @@ export interface ServerInfoResult {
 
 	/** Server platform (e.g. `'linux'`, `'win32'`, `'darwin'`). */
 	platform?: string;
-
-	/**
-	 * Public apps visible without authentication.
-	 *
-	 * Returned by the pre-auth probe so the shell can render
-	 * public apps (e.g. landing page) before login.
-	 */
-	apps?: AppManifestEntry[];
 }

@@ -24,8 +24,7 @@
 StoreCommands: DAP command handler for user-scoped file storage.
 
 Handles the ``rrext_store`` command and its ``fs_*`` subcommands
-(open, read, write, close, delete, list_dir, mkdir, rmdir, stat, rename,
-geturl).
+(open, read, write, close, delete, list_dir, mkdir, rmdir, stat, rename).
 
 Extracted from TaskCommands so that any pod needing file storage
 (EAAS, Account) can include it via MRO without pulling in the full
@@ -33,7 +32,9 @@ task lifecycle.
 """
 
 from typing import TYPE_CHECKING, Dict, Any
+from ai.account.models import RequestContext
 from ai.common.dap import DAPConn, TransportBase
+from rocketride.types.client import DAPRequest, DAPResponse
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -50,7 +51,7 @@ class StoreCommands(DAPConn):
 
     Provides ``on_rrext_store`` which dispatches to ``fs_*`` subcommands.
     Requires ``self._server.store`` for the Store instance and
-    ``self._account_info.userId`` for user-scoped file access.
+    ``ctx.account_info.userId`` (via RequestContext) for user-scoped file access.
     """
 
     def __init__(
@@ -80,7 +81,7 @@ class StoreCommands(DAPConn):
     # DISPATCHER
     # =========================================================================
 
-    async def on_rrext_store(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_store(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_store' command — unified file storage operations.
 
@@ -88,13 +89,14 @@ class StoreCommands(DAPConn):
 
         Args:
             request: DAP request with arguments.subcommand and subcommand-specific args.
+            ctx: RequestContext with account_info, conn_id, and source.
 
         Returns:
             DAP response (format depends on subcommand).
         """
         try:
             # Require store permission (once for all subcommands)
-            self.verify_permission('task.store')
+            self.verify_permission('task.store', ctx)
 
             # Extract subcommand
             args = request.get('arguments', {})
@@ -105,7 +107,7 @@ class StoreCommands(DAPConn):
 
             # Dispatch to appropriate handler
             if handler := self._store_subcommand_handlers.get(subcommand):
-                return await handler(request, args)
+                return await handler(request, args, ctx)
             else:
                 raise ValueError(f'Unknown subcommand: {subcommand}')
 
@@ -117,34 +119,38 @@ class StoreCommands(DAPConn):
     # FILE STORE ACCESS
     # =========================================================================
 
-    def _get_file_store(self):
+    def _get_file_store(self, ctx: RequestContext):
         """
         Get a FileStore scoped to the authenticated user.
+
+        Args:
+            ctx: RequestContext with account_info for user scoping.
 
         Returns:
             FileStore instance that isolates all paths under the current
             user's storage namespace.
         """
-        # Scope the file store to the calling user so users cannot access each
-        # other's files through the store API.
-        return self._server.store.get_file_store(self._account_info.userId)
+        return self._server.store.get_file_store(ctx.account_info.userId)
 
     # =========================================================================
     # FS SUBCOMMAND HANDLERS
     # =========================================================================
 
-    async def _store_fs_open(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_open(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Open a file handle for reading or writing.
 
         Args:
             request: Original DAP request.
             args:    Must contain ``path``.  Optional ``mode`` ('r' or 'w', default 'r').
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             DAP response with handle ID (and metadata for read mode).
         """
-        fs = self._get_file_store()
+        fs = self._get_file_store(ctx)
         path = args.get('path')
         mode = args.get('mode', 'r')
 
@@ -157,7 +163,9 @@ class StoreCommands(DAPConn):
             result = await fs.open_read(path, self._connection_id)
             return self.build_response(request, body=result)
 
-    async def _store_fs_read(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_read(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Read data from an open read handle.
 
@@ -165,11 +173,12 @@ class StoreCommands(DAPConn):
             request: Original DAP request.
             args:    Must contain ``handle``.  Optional ``offset`` (default 0)
                      and ``length`` (default and max 4 MiB).
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             DAP response with body.size and arguments.data.
         """
-        fs = self._get_file_store()
+        fs = self._get_file_store(ctx)
         handle = args.get('handle')
         offset = args.get('offset', 0)
         length = args.get('length', 4_194_304)
@@ -189,18 +198,21 @@ class StoreCommands(DAPConn):
         response['arguments'] = {'data': data}
         return response
 
-    async def _store_fs_write(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_write(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Write data to an open write handle.
 
         Args:
             request: Original DAP request.
             args:    Must contain ``handle``.  Optional ``data`` (bytes or str).
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             DAP response with body.bytesWritten.
         """
-        fs = self._get_file_store()
+        fs = self._get_file_store(ctx)
         handle = args.get('handle')
         data = args.get('data', b'')
 
@@ -211,18 +223,21 @@ class StoreCommands(DAPConn):
         written = await fs.write_chunk(handle, data, connection_id=self._connection_id)
         return self.build_response(request, body={'bytesWritten': written})
 
-    async def _store_fs_close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_close(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Close a file handle.
 
         Args:
             request: Original DAP request.
             args:    Must contain ``handle``.  Optional ``mode`` ('r' or 'w', default 'r').
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             Empty success DAP response.
         """
-        fs = self._get_file_store()
+        fs = self._get_file_store(ctx)
         handle = args.get('handle')
         mode = args.get('mode', 'r')
 
@@ -232,49 +247,60 @@ class StoreCommands(DAPConn):
             await fs.close_read(handle, connection_id=self._connection_id)
         return self.build_response(request)
 
-    async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_delete(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Delete a file.
 
         Args:
             request: Original DAP request.
             args:    Must contain ``path``.
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             Empty success DAP response.
         """
-        await self._get_file_store().delete(args.get('path'))
+        await self._get_file_store(ctx).delete(args.get('path'))
         return self.build_response(request)
 
-    async def _store_fs_list_dir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_list_dir(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         List directory contents.
 
         Args:
             request: Original DAP request.
             args:    Optional ``path`` (defaults to root).
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             DAP response with directory listing.
         """
-        result = await self._get_file_store().list_dir(args.get('path', ''))
+        result = await self._get_file_store(ctx).list_dir(args.get('path', ''))
         return self.build_response(request, body=result)
 
-    async def _store_fs_mkdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_mkdir(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Create a directory.
 
         Args:
             request: Original DAP request.
             args:    Must contain ``path``.
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             Empty success DAP response.
         """
-        await self._get_file_store().mkdir(args.get('path'))
+        await self._get_file_store(ctx).mkdir(args.get('path'))
         return self.build_response(request)
 
-    async def _store_fs_rmdir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_rmdir(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Remove a directory.
 
@@ -282,6 +308,7 @@ class StoreCommands(DAPConn):
             request: Original DAP request.
             args:    Must contain ``path`` (non-empty string).  Optional ``recursive``
                      (strict bool).
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             Empty success DAP response, or error if validation fails.
@@ -294,30 +321,36 @@ class StoreCommands(DAPConn):
         if not isinstance(recursive, bool):
             return self.build_error(request, 'rmdir "recursive" must be a boolean')
 
-        await self._get_file_store().rmdir(path, recursive=recursive)
+        await self._get_file_store(ctx).rmdir(path, recursive=recursive)
         return self.build_response(request)
 
-    async def _store_fs_stat(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_stat(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Get file/directory metadata.
 
         Args:
             request: Original DAP request.
             args:    Must contain ``path``.
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             DAP response with metadata (size, modified time, type, etc.).
         """
-        result = await self._get_file_store().stat(args.get('path'))
+        result = await self._get_file_store(ctx).stat(args.get('path'))
         return self.build_response(request, body=result)
 
-    async def _store_fs_rename(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_rename(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Rename a file or directory.
 
         Args:
             request: Original DAP request.
             args:    Must contain ``old_path`` and ``new_path`` (non-empty strings).
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             Empty success DAP response, or error if validation fails.
@@ -329,10 +362,12 @@ class StoreCommands(DAPConn):
         if not isinstance(new_path, str) or not new_path:
             return self.build_error(request, 'rename requires a non-empty "new_path" string')
 
-        await self._get_file_store().rename(old_path, new_path)
+        await self._get_file_store(ctx).rename(old_path, new_path)
         return self.build_response(request)
 
-    async def _store_fs_geturl(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+    async def _store_fs_geturl(
+        self, request: Dict[str, Any], args: Dict[str, Any], ctx: RequestContext
+    ) -> Dict[str, Any]:
         """
         Get a direct HTTP URL for accessing a file in the store.
 
@@ -346,6 +381,7 @@ class StoreCommands(DAPConn):
                      ``expires_in`` (seconds, default 3600) and ``download_name``
                      (forces a browser download with this filename via
                      ``Content-Disposition: attachment``).
+            ctx:     RequestContext for user-scoped file store access.
 
         Returns:
             DAP response with ``url`` in the body, or error if validation fails.
@@ -358,5 +394,5 @@ class StoreCommands(DAPConn):
         # Optional download filename — when present the fetch URL forces a
         # browser download via Content-Disposition: attachment.
         download_name = args.get('download_name') or None
-        url = await self._get_file_store().get_url(path, expires_in, download_name=download_name)
+        url = await self._get_file_store(ctx).get_url(path, expires_in, download_name=download_name)
         return self.build_response(request, body={'url': url})

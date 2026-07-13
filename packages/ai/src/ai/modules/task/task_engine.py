@@ -712,7 +712,8 @@ class Task(DAPBase):
             # Clean up attached debugger
             if self._debugger:
                 await self._debugger.send_event('terminated', id=self.id)
-                await self._debugger._transport.disconnect()
+                if self._debugger._transport:
+                    await self._debugger._transport.disconnect()
 
                 self._debugger = None
                 self._status.debuggerAttached = False
@@ -737,6 +738,19 @@ class Task(DAPBase):
             self._status.status = 'Stopped'
             self._status.state = TASK_STATE.CANCELLED.value
             self.debug_message(f'Task terminated abnormally with exit code {exit_code}')
+
+        # Zero the live point-in-time metrics after stop_monitoring() has audited
+        # them. The audit in stop_monitoring() freezes the final token totals for
+        # billing. Clearing the live values makes the client chart read zero after
+        # completion instead of showing stale values. The peak_* watermarks are
+        # left intact so the terminal status still reports the task's lifetime
+        # resource peaks.
+        try:
+            self._status.metrics.cpu_percent = 0.0
+            self._status.metrics.cpu_memory_mb = 0.0
+            self._status.metrics.gpu_memory_mb = 0.0
+        except Exception:
+            pass
 
         # Send final status update
         await self._send_status_update()
@@ -792,7 +806,7 @@ class Task(DAPBase):
                 # Notify dashboard of task errors (non-zero exit)
                 if self._status.exitCode and self._status.exitCode != 0:
                     try:
-                        task_user_id = self._server.get_task_control(self.token).userId if self.token else None
+                        task_user_id = self._server.get_task_control_by_token(self.token).userId if self.token else None
                     except Exception:
                         task_user_id = None
                     await self._server.broadcast_server_event(
@@ -900,6 +914,15 @@ class Task(DAPBase):
                     self.debug_message(f'Failed to send event to debugger: {e}')
 
         else:
+            # Inject routing fields into the event body so consumers
+            # (orchestrator on_event callback, clients) can identify the
+            # task and event type without needing a TASK_CONTROL lookup.
+            body = message.get('body') if message else None
+            if isinstance(body, dict):
+                body['event_type'] = type.value
+                body.setdefault('project_id', self.project_id)
+                body.setdefault('source', self.source)
+
             # Route through server broadcast system
             await self._server.broadcast_task_event(
                 event_type=type,
@@ -957,11 +980,25 @@ class Task(DAPBase):
             download_name = download_info.get('name', 'unknown')
             self._status.status = f'Downloading "{download_name}"'
 
-        # Handle subprocess billing metrics (from >MET* protocol)
+        # Handle live metrics from >MET* (point-in-time resource snapshot)
         elif event_type == 'apaevt_status_metrics':
-            new_metrics = body.get('metrics', {})
+            cpu = body.get('cpu_percent', 0.0)
+            mem = body.get('cpu_memory_mb', 0.0)
+            gpu = body.get('gpu_memory_mb', 0.0)
+            # Update live snapshot
+            self._status.metrics.cpu_percent = cpu
+            self._status.metrics.cpu_memory_mb = mem
+            self._status.metrics.gpu_memory_mb = gpu
+            # Track lifetime peaks
+            self._status.metrics.peak_cpu_percent = max(self._status.metrics.peak_cpu_percent, cpu)
+            self._status.metrics.peak_cpu_memory_mb = max(self._status.metrics.peak_cpu_memory_mb, mem)
+            self._status.metrics.peak_gpu_memory_mb = max(self._status.metrics.peak_gpu_memory_mb, gpu)
+            self._status_updated = True
+
+        # Handle billing usage from >USG* (cumulative values for token calc)
+        elif event_type == 'apaevt_status_tokens':
             if self._task_metrics:
-                self._task_metrics.merge_subprocess_metrics(new_metrics)
+                self._task_metrics.merge_subprocess_usage(body)
 
         # Handle general status messages
         elif event_type == 'apaevt_status_message':
@@ -1558,6 +1595,11 @@ class Task(DAPBase):
             if self._pipeline.get('avoidMocks'):
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
 
+            # EXPERIMENT: Yield before and after subprocess creation to
+            # test if other coroutines (ping, other use() requests) can
+            # interleave when given explicit yield points.
+            await asyncio.sleep(0)
+
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
                 *child_args,
@@ -1568,6 +1610,8 @@ class Task(DAPBase):
                 limit=CONST_SUBPROCESS_BUFFER_LIMIT,
                 env=subprocess_env,
             )
+
+            await asyncio.sleep(0)
 
             # Initialize stdio interface
             try:
@@ -1586,9 +1630,8 @@ class Task(DAPBase):
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
                 # Resolve billing identity from task control
-                _control = self._server.get_task_control(self.token) if self.token else None
+                _control = self._server.get_task_control_by_token(self.token) if self.token else None
                 self._task_metrics = TaskMetrics(
-                    pid=self._engine_process.pid,
                     task_status=self._status,
                     task_id=self.id,
                     client_id=self.client_id,

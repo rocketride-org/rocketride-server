@@ -51,11 +51,12 @@ The actual task execution and management is delegated to the TaskServer.
 """
 
 import os
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
-from ai.account.models import resolve_task_permissions
+from ai.account.models import RequestContext, resolve_task_permissions
 from rocketride import TASK_STATE
+from rocketride.types.client import DAPRequest, DAPResponse
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -106,7 +107,7 @@ class TaskCommands(DAPConn):
         """
         pass
 
-    async def on_execute(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_execute(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'execute' command to start a task without debugging.
 
@@ -126,21 +127,21 @@ class TaskCommands(DAPConn):
         """
         try:
             # Verify permission
-            self.verify_permission('task.control')
+            self.verify_permission('task.control', ctx)
 
             # Verify required pipeline plans
             args = request.get('arguments') or {}
             pipeline = args.get('pipeline')
             if pipeline is not None:
                 # Check that the pipeline's required plan is available for this account.
-                self.verify_plans(self._account_info, pipeline)
+                self.verify_plans(ctx.account_info, pipeline)
 
             # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
-            team_id = args.get('teamId') or self._account_info.defaultTeam
+            team_id = args.get('teamId') or ctx.account_info.defaultTeam
 
             # Resolve org_id from the user's single organization.
             org_id = ''
-            org = self._account_info.organization
+            org = ctx.account_info.organization
             if org:
                 for team in org.get('teams', []):
                     if team.get('id') == team_id:
@@ -156,7 +157,7 @@ class TaskCommands(DAPConn):
             # sys.admin: seed with server RR_* keys mapped to ROCKETRIDE_* so
             # admin pipelines can reference internal secrets via ${ROCKETRIDE_*}.
             # This is the bottom layer — org/team/user secrets override it.
-            if 'sys.admin' in (self._account_info.sysPermissions or []):
+            if 'sys.admin' in (ctx.account_info.sysPermissions or []):
                 merged_env = {'ROCKETRIDE_' + k[3:]: v for k, v in os.environ.items() if k.startswith('RR_')}
             else:
                 merged_env = {}
@@ -164,7 +165,7 @@ class TaskCommands(DAPConn):
             # Layer org → team → user secrets on top
             merged_env.update(
                 await account.get_merged_env(
-                    user_id=self._account_info.userId,
+                    user_id=ctx.account_info.userId,
                     org_id=org_id,
                     team_id=team_id,
                 )
@@ -177,8 +178,8 @@ class TaskCommands(DAPConn):
                 request,
                 self,
                 wait_for_running=True,
-                client_id=self._account_info.userId,
-                user_id=self._account_info.userId,
+                client_id=ctx.account_info.userId,
+                user_id=ctx.account_info.userId,
                 team_id=team_id,
                 org_id=org_id,
                 env=merged_env,
@@ -192,7 +193,7 @@ class TaskCommands(DAPConn):
             self.debug_message(f'Failed to execute task: {str(e)}')
             raise
 
-    async def on_restart(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_restart(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'restart' command to restart a task.
 
@@ -211,7 +212,7 @@ class TaskCommands(DAPConn):
         """
         try:
             # Verify permission
-            self.verify_permission('task.control')
+            self.verify_permission('task.control', ctx)
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(
@@ -228,7 +229,7 @@ class TaskCommands(DAPConn):
             self.debug_message(f'Failed to restart task: {str(e)}')
             raise
 
-    async def on_rrext_get_task_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_get_task_status(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_get_task_status' command to retrieve the current status of a task.
 
@@ -261,7 +262,7 @@ class TaskCommands(DAPConn):
         """
         try:
             # Get the task instance
-            task = self.get_task(request, 'task.monitor')
+            task = self.get_task(request, ctx, 'task.monitor')
 
             # Retrieve current task status
             status = task.get_status()
@@ -279,7 +280,7 @@ class TaskCommands(DAPConn):
             # Re-raise to let DAP error handling create proper error response
             raise
 
-    async def on_rrext_get_pipeline(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_get_pipeline(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_get_pipeline' command to retrieve the unresolved pipeline for a task.
 
@@ -299,7 +300,7 @@ class TaskCommands(DAPConn):
         """
         try:
             # Step 1: locate the task — verifies task.monitor permission.
-            task = self.get_task(request, 'task.monitor')
+            task = self.get_task(request, ctx, 'task.monitor')
 
             # Step 2: return the unresolved pipeline (${...} placeholders intact).
             return self.build_response(request, body={'pipeline': task._pipeline})
@@ -308,7 +309,7 @@ class TaskCommands(DAPConn):
             self.debug_message(f'Failed to get pipeline from task: {str(e)}')
             raise
 
-    async def on_rrext_get_token(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_get_token(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_status' command to retrieve the current status of a task.
 
@@ -329,18 +330,14 @@ class TaskCommands(DAPConn):
             Exception: If task does not exist
         """
         try:
-            # Verify permission
-            self.verify_permission('task.monitor')
-
             # Get the arguments
             args = request.get('arguments', {})
             project_id = args.get('projectId', None)
             source = args.get('source', None)
 
-            # Get the task control (ownership + permission check inside)
-            control = self._server.get_task_control_by_project(
-                project_id, source, self._account_info, require='task.monitor'
-            )
+            # Look up the task and verify access
+            control = self._server.get_task_control_by_project(project_id, source)
+            self._server.verify_task_access(control, ctx, require='task.monitor')
 
             # Return successful response with status data
             return self.build_response(
@@ -355,7 +352,7 @@ class TaskCommands(DAPConn):
             # Re-raise to let DAP error handling create proper error response
             raise
 
-    async def on_rrext_get_tasks(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_get_tasks(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'rrext_get_tasks' command to retrieve list of all active tasks.
 
@@ -374,13 +371,13 @@ class TaskCommands(DAPConn):
         """
         try:
             # Require monitor permission to list tasks
-            self.verify_permission('task.monitor')
+            self.verify_permission('task.monitor', ctx)
 
             tasks = []
 
             # Iterate all tasks the caller has access to (own, teammate, or org admin).
             for control in self._server._task_control.values():
-                if not resolve_task_permissions(self._account_info, control.teamId):
+                if not resolve_task_permissions(ctx.account_info, control.teamId):
                     continue
 
                 # Get current status for name and status string

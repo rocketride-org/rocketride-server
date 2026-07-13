@@ -227,6 +227,9 @@ export interface TASK_STATUS {
 	/** Source component to execute */
 	source: string;
 
+	/** EVENT_TYPE bitmask indicating the event category that produced this status update */
+	event_type: number;
+
 	/** Task completion flag - true when task has finished execution */
 	completed: boolean;
 
@@ -386,14 +389,4 @@ export interface TASK_METRICS {
 
 	/** Peak GPU memory usage in megabytes during task execution */
 	peak_gpu_memory_mb: number;
-
-	// Average values
-	/** Average CPU utilization percentage over task lifetime */
-	avg_cpu_percent: number;
-
-	/** Average CPU memory usage in megabytes over task lifetime */
-	avg_cpu_memory_mb: number;
-
-	/** Average GPU memory usage in megabytes over task lifetime */
-	avg_gpu_memory_mb: number;
 }

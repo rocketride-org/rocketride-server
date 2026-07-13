@@ -14,12 +14,14 @@ Covers three files that are too small for their own test modules:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 from ai.account.base import AccountBase
 from ai.account.keystore import KeyStore
+from ai.account.models import RequestContext
 from ai.account.report import Reporter
 
 
@@ -76,7 +78,7 @@ async def test_handle_account_raises_not_implemented_in_oss():
     """OSS deployments do not implement account management."""
     acct = _ConcreteAccount()
     with pytest.raises(NotImplementedError, match='Account management requires SaaS'):
-        await acct.handle_account(MagicMock(), {})
+        await acct.handle_account(MagicMock(), {}, RequestContext())
 
 
 @pytest.mark.asyncio
@@ -84,7 +86,7 @@ async def test_handle_app_raises_not_implemented_in_oss():
     """OSS deployments do not implement the app marketplace."""
     acct = _ConcreteAccount()
     with pytest.raises(NotImplementedError, match='App marketplace requires SaaS'):
-        await acct.handle_app(MagicMock(), {})
+        await acct.handle_app(MagicMock(), {}, RequestContext())
 
 
 # ---------------------------------------------------------------------------
@@ -271,3 +273,97 @@ async def test_get_tokens_unknown_apikey_returns_empty():
     """An apikey with no reserved tokens yields an empty list."""
     ks = KeyStore()
     assert await ks.get_tokens('ak_nobody') == []
+
+
+# ---------------------------------------------------------------------------
+# models — permission resolution + pod context
+# ---------------------------------------------------------------------------
+
+
+def _acct(sys_perms=None, organization=None, waitlisted=False):
+    """Build an AccountInfo-shaped stub for the resolve_* permission helpers."""
+    return SimpleNamespace(sysPermissions=sys_perms or [], organization=organization, waitlisted=waitlisted)
+
+
+def test_resolve_team_permissions_grants_sys_admin_without_membership():
+    """A sys.admin caller with no org/team membership still gets full perms."""
+    from ai.account.models import _FULL_TEAM_PERMISSIONS, resolve_team_permissions
+
+    assert resolve_team_permissions(_acct(sys_perms=['sys.admin']), 'team-x') == list(_FULL_TEAM_PERMISSIONS)
+
+
+def test_resolve_team_permissions_grants_internal_without_membership():
+    """The pod 'internal' service credential also bypasses team membership."""
+    from ai.account.models import _FULL_TEAM_PERMISSIONS, resolve_team_permissions
+
+    assert resolve_team_permissions(_acct(sys_perms=['internal']), 'team-x') == list(_FULL_TEAM_PERMISSIONS)
+
+
+def test_resolve_task_permissions_grants_sys_admin_without_membership():
+    """The task-scoped resolver applies the same sys.admin bypass."""
+    from ai.account.models import _FULL_TEAM_PERMISSIONS, resolve_task_permissions
+
+    assert resolve_task_permissions(_acct(sys_perms=['sys.admin']), 'team-x') == list(_FULL_TEAM_PERMISSIONS)
+
+
+def test_resolve_task_permissions_grants_internal_without_membership():
+    """The task-scoped resolver also honours the pod 'internal' service credential."""
+    from ai.account.models import _FULL_TEAM_PERMISSIONS, resolve_task_permissions
+
+    assert resolve_task_permissions(_acct(sys_perms=['internal']), 'team-x') == list(_FULL_TEAM_PERMISSIONS)
+
+
+def test_resolve_team_permissions_raises_for_normal_user_without_membership():
+    """A normal caller with no membership in the team still raises (unchanged)."""
+    from ai.account.models import resolve_team_permissions
+
+    acct = _acct(organization={'id': 'org-1', 'permissions': [], 'teams': []})
+    with pytest.raises(PermissionError, match='No membership'):
+        resolve_team_permissions(acct, 'team-x')
+
+
+def test_to_pod_context_includes_waitlisted():
+    """The waitlisted flag must be forwarded so verify_auth can reject in pod mode."""
+    from ai.account.models import AccountInfo
+
+    assert AccountInfo(userId='u1', waitlisted=True).to_pod_context()['waitlisted'] is True
+    assert AccountInfo(userId='u2').to_pod_context()['waitlisted'] is False
+
+
+# ---------------------------------------------------------------------------
+# OSS account — subscriptions + desktop subcommand
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_oss_authenticate_marks_all_catalog_apps_free(monkeypatch):
+    """OSS authenticate populates subscriptions = {appId: 'free'} for the catalog."""
+    from ai.account.oss import Account
+
+    acct = Account.__new__(Account)  # bypass __init__
+    acct.capabilities = ['oss']
+    monkeypatch.setattr(acct, '_read_apps_json', lambda public_only=False: [{'id': 'a1'}, {'id': 'a2'}])
+    monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)  # unconfigured -> any credential matches
+
+    info = await acct.authenticate('ak_dev')
+    assert info.subscriptions == {'a1': 'free', 'a2': 'free'}
+
+
+@pytest.mark.asyncio
+async def test_oss_desktop_subcommand_returns_all_apps_free_and_on_desktop(monkeypatch):
+    """OSS 'desktop' subcommand mirrors the catalog: every app free + onDesktop."""
+    from ai.account.oss import Account
+
+    acct = Account.__new__(Account)
+    monkeypatch.setattr(
+        acct, '_read_apps_json', lambda public_only=False: [{'id': 'a1', 'name': 'A'}, {'id': 'a2', 'name': 'B'}]
+    )
+    conn = MagicMock()
+    conn.build_response = MagicMock(side_effect=lambda req, body=None: {'type': 'response', 'body': body})
+
+    req = {'command': 'rrext_account_me', 'arguments': {'subcommand': 'desktop'}}
+    result = await acct.handle_account(conn, req, RequestContext())
+
+    apps = result['body']['apps']
+    assert {a['id'] for a in apps} == {'a1', 'a2'}
+    assert all(a['appStatus'] == 'free' and a['onDesktop'] is True for a in apps)

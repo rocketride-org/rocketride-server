@@ -137,8 +137,11 @@ export { default as DebugPanel } from './components/layout/DebugPanel';
 export { useAuthUser, useLogout } from './hooks/useAuthUser';
 export type { AuthUser } from './hooks/useAuthUser';
 
-// Hook for reading subscription state from the authenticated identity
+// Hook for reading subscription state from the app registry
 export { useSubscriptions } from './hooks/useSubscriptions';
+
+// App registry — single source of truth for all registered apps
+export { AppRegistryProvider, useAppRegistry } from './hooks/AppRegistryContext';
 
 // =============================================================================
 // VIEWS — shell-owned overlays

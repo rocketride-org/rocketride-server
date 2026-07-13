@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ai.account.models import RequestContext
 from ai.common.dap.dap_conn import DAPConn
 
 
@@ -65,7 +66,11 @@ async def test_on_receive_dispatches_request_to_on_command():
     msg = {'type': 'request', 'command': 'launch', 'seq': 1}
     await conn.on_receive(msg)
 
-    conn._call_method.assert_awaited_once_with(msg, 'on_launch', 'on_command')
+    # on_receive builds a RequestContext from connection state and passes it as
+    # the trailing arg. The test conn is built via __new__, so neither
+    # _account_info nor _connection_id are set -> account_info=None, conn_id='0'.
+    expected_ctx = RequestContext(account_info=None, conn_id='0', source='local')
+    conn._call_method.assert_awaited_once_with(msg, 'on_launch', 'on_command', expected_ctx)
     conn._transport.send.assert_awaited_once_with({'type': 'response', 'body': 'ok'})
     # No fallback default response should be built when a handler answered.
     conn.build_response.assert_not_called()

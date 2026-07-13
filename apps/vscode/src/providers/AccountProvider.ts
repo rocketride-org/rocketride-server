@@ -301,6 +301,9 @@ export class AccountProvider {
 		let members: any[] = [];
 		let teams: any[] = [];
 		let keys: any[] = [];
+		// Minimal app label list ({id, name, icon}) for the billing panel — replaces
+		// the removed ConnectResult.apps. Sourced from the desktop manifest.
+		let appLabels: Array<{ id: string; name: string; icon?: string }> = [];
 
 		if (client && isConnected) {
 			const results = await Promise.all([
@@ -309,12 +312,15 @@ export class AccountProvider {
 				orgId ? client.account.listMembers(orgId).catch(() => []) : [],
 				orgId ? client.account.listTeams(orgId).catch(() => []) : [],
 				client.account.listKeys().catch(() => []),
+				client.account.getDesktop().catch(() => []),
 			]);
 			if (results[0]) profile = results[0];
 			org = results[1];
 			members = results[2] as any[];
 			teams = results[3] as any[];
 			keys = results[4] as any[];
+			// Keep only the fields BillingPanel needs to resolve appId → label/icon.
+			appLabels = (results[5] as any[]).map((a) => ({ id: a.id, name: a.name, icon: a.icon }));
 		}
 
 		await panel.webview.postMessage({
@@ -326,6 +332,7 @@ export class AccountProvider {
 			members,
 			teams,
 			keys,
+			appLabels,
 		});
 
 		// Also fetch billing data immediately

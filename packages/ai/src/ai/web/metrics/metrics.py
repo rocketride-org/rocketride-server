@@ -25,7 +25,7 @@
 Metrics collection singleton for pipeline billing and monitoring.
 
 Provides a flat, thread-safe metrics accumulator.  Multiple pipe threads
-can call ``timer()``, ``add_time()``, ``counter()``, and ``event()``
+can call ``timer()``, ``add_value()``, ``counter()``, and ``event()``
 concurrently — each method acquires the lock only briefly.
 
 Accumulated metrics are emitted to the parent process via the ``>MET*``
@@ -40,7 +40,7 @@ Architecture:
     - All mutations are protected by a single threading.Lock.
     - ``timer()`` captures perf_counter locally; only touches shared
       state under the lock on exit — safe for concurrent pipe threads.
-    - ``add_time()`` accepts a dict of timer values, used by ModelClient
+    - ``add_value()`` accepts a dict of values, used by ModelClient
       to record server-reported perf counters in a single lock acquisition.
     - ``report()`` returns a snapshot (shallow copies) without clearing.
 
@@ -60,7 +60,7 @@ Usage:
         t_post = (time.perf_counter() - t0) * 1000
 
         # Keys match model server's build_dap_result() perf dict
-        metrics.add_time(
+        metrics.add_value(
             {
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
@@ -76,7 +76,7 @@ Usage:
         # In ModelClient.send_command(), after receiving response:
         perf = body.get('perf')
         if perf:
-            metrics.add_time(perf)
+            metrics.add_value(perf)
 
     Node-level (nodes report what they own)::
 
@@ -103,7 +103,10 @@ class MetricsManager:
     owns the ``>MET*`` output, so no task_id tracking is needed here.
 
     Attributes:
-        _timers: Accumulated milliseconds per named timer (e.g. 'gpu').
+        _values: Named float accumulators. ``timer``/``add_value`` add into a
+            key (additive); ``set_value`` overwrites it with an absolute
+            cumulative total (e.g. getrusage/RSS). Both semantics share this
+            dict — the key's producer decides which applies.
         _counters: Accumulated integer values per named counter.
         _events: List of structured event dicts.
         _lock: Threading lock protecting all shared state.
@@ -111,8 +114,9 @@ class MetricsManager:
 
     def __init__(self):
         """Initialize empty accumulators and the thread lock."""
-        # Timer accumulators — values are cumulative milliseconds
-        self._timers: Dict[str, float] = {}
+        # Named float accumulators — additive (timer/add_value) or absolute
+        # (set_value), depending on the producer of each key.
+        self._values: Dict[str, float] = {}
 
         # Counter accumulators — values are cumulative integers
         self._counters: Dict[str, int] = {}
@@ -135,7 +139,7 @@ class MetricsManager:
         ensure a clean slate for the new task's metrics.
         """
         with self._lock:
-            self._timers.clear()
+            self._values.clear()
             self._counters.clear()
             self._events.clear()
 
@@ -168,29 +172,43 @@ class MetricsManager:
             # Compute elapsed and accumulate under the lock
             elapsed_ms = (time.perf_counter() - start) * 1000
             with self._lock:
-                self._timers[name] = self._timers.get(name, 0.0) + elapsed_ms
+                self._values[name] = self._values.get(name, 0.0) + elapsed_ms
 
-    def add_time(self, timers: Dict[str, float]):
+    def add_value(self, values: Dict[str, float]):
         """
-        Add milliseconds to one or more timers from a dict.
+        Add values to one or more accumulators from a dict.
 
         Accumulates all entries in a single lock acquisition — more
         efficient than calling ``timer()`` multiple times.  Used by:
 
-        - **Local-mode wrappers**: report ``preprocess``, ``gpu``,
-          ``postprocess``, ``queue_wait``, and ``latency`` after
-          manually timing each phase with ``perf_counter``.
+        - **Local-mode wrappers**: report ``gpu_preprocess``, ``gpu_compute``,
+          ``gpu_postprocess``, ``gpu_queue_wait``, and ``gpu_memory``
+          after manually timing each phase with ``perf_counter``.
         - **ModelClient**: relay server-reported perf counters from
           the model server's ``build_dap_result()`` response.
 
         Args:
-            timers: ``{name: ms, ...}`` — values to accumulate into
-                    the corresponding timer keys.
+            values: ``{name: amount, ...}`` — values to accumulate into
+                    the corresponding keys.
         """
         with self._lock:
-            # Walk the dict and accumulate each timer
-            for name, ms in timers.items():
-                self._timers[name] = self._timers.get(name, 0.0) + ms
+            for name, amount in values.items():
+                self._values[name] = self._values.get(name, 0.0) + amount
+
+    def set_value(self, name: str, value: float):
+        """
+        Set an accumulator to an absolute cumulative value (not additive).
+
+        Used by ``ProcessReporter`` for ``cpu_compute`` and ``cpu_memory``
+        which are tracked as running totals externally (from ``getrusage``
+        and RSS integration).  Each call replaces the previous value.
+
+        Args:
+            name: Accumulator key (e.g. ``'cpu_compute'``, ``'cpu_memory'``).
+            value: Absolute cumulative value to set.
+        """
+        with self._lock:
+            self._values[name] = value
 
     # ========================================================================
     # COUNTERS
@@ -232,25 +250,27 @@ class MetricsManager:
 
     def report(self) -> dict:
         """
-        Return a cumulative snapshot for the ``>MET*`` protocol.
+        Return a cumulative snapshot for the ``>USG*`` protocol.
 
         The parent process (``task_metrics.py``) replaces its previous
-        snapshot with each new report via ``merge_subprocess_metrics()``,
+        snapshot with each new report via ``merge_subprocess_usage()``,
         so values here must be running totals — not deltas.
 
-        The snapshot contains shallow copies of all three collections
-        so the caller can safely use/serialize them outside the lock.
+        Timers and counters are merged into a single flat dict.  Keys
+        match the ``metrics_conversions`` DB table (e.g. ``cpu_compute``,
+        ``gpu_memory``, ``requests``, ``pages``).  Events are included
+        separately for structured billing metadata.
 
         Returns:
-            ``{'timers': {name: ms, ...},
-              'counters': {name: int, ...},
-              'events': [dict, ...]}``
+            ``{'values': {name: amount, ...}, 'events': [dict, ...]}``
         """
         with self._lock:
-            # Shallow-copy each collection so the snapshot is independent
+            # Merge timers and counters into one flat dict
+            merged = dict(self._values)
+            for name, count in self._counters.items():
+                merged[name] = merged.get(name, 0.0) + float(count)
             return {
-                'timers': dict(self._timers),
-                'counters': dict(self._counters),
+                'values': merged,
                 'events': list(self._events),
             }
 

@@ -27,12 +27,10 @@
 # =============================================================================
 
 import time
+from dataclasses import dataclass
 from typing import Literal, Optional, TypedDict
 
 from pydantic import BaseModel, Field
-
-from rocketride.types.client import AppManifestEntry
-
 
 # =============================================================================
 # NESTED SHAPES
@@ -95,11 +93,6 @@ class AccountInfo(BaseModel):
     # None when the user has no org membership (e.g. freshly invited, not yet provisioned).
     organization: Optional[OrgInfo] = None
 
-    # Apps on the user's desktop — full manifest entries with appStatus + onDesktop.
-    # OSS: all apps with appStatus="free", onDesktop=True.
-    # SaaS: populated from app_users table, enriched with full manifest + billing info.
-    apps: list[AppManifestEntry] = []
-
     # Server capability tags — 'oss' or 'saas' depending on the account provider
     capabilities: list[str] = []
 
@@ -107,13 +100,42 @@ class AccountInfo(BaseModel):
     # Set manually in the database, never via API.
     sysPermissions: list[str] = []
 
-    # Credit wallet balance snapshot — dict of resource→balance pairs.
-    # Populated from the credit_wallets table for the user's primary org.
-    credits: dict = {}
-
     # True when the user is authenticated but not yet granted app access
     # (email did not match any allowed pattern in the user_grants table)
     waitlisted: bool = False
+
+    # Per-app subscription status: {appId -> AppStatus}. The lightweight
+    # source of truth for "is this app subscribed?" gating (e.g. the VS Code
+    # subscriptionGate). SaaS populates it at auth from the billing layer; OSS
+    # marks every app 'free'. Full billing detail (plan/price/seats/credits)
+    # is fetched separately via rrext_account_billing, not carried here.
+    # Flows to ConnectResult via to_connect_result() and is refreshed on every
+    # apaext_account push, so clients never need a separate fetch or cache.
+    subscriptions: dict[str, str] = {}
+
+    def to_pod_context(self) -> dict:
+        """
+        Return the slim subset of fields that pods consume via ``_ctx``.
+
+        Includes the identity fields backend pods read from ``_ctx``:
+        auth, userId, userToken, defaultTeam, organization, sysPermissions,
+        and waitlisted.  ``waitlisted`` must be forwarded so that
+        ``verify_auth`` rejects a waitlisted user in pod mode (otherwise it
+        deserializes to ``False`` and the gate is bypassed).  Profile fields,
+        apps, credits, and capabilities are excluded — pods never read them.
+
+        Returns:
+            dict: Lightweight identity context for inter-pod forwarding.
+        """
+        return {
+            'auth': self.auth,
+            'userId': self.userId,
+            'userToken': self.userToken,
+            'defaultTeam': self.defaultTeam,
+            'organization': self.organization,
+            'sysPermissions': list(self.sysPermissions),
+            'waitlisted': self.waitlisted,
+        }
 
     def to_connect_result(self) -> dict:
         """
@@ -129,6 +151,40 @@ class AccountInfo(BaseModel):
         # Use pydantic's model_dump with an explicit exclusion set so that the
         # raw authentication credential is never returned to the client.
         return self.model_dump(exclude={'auth'})
+
+
+# =============================================================================
+# REQUEST CONTEXT
+# Per-request identity passed through the handler chain.  In OSS standalone
+# mode ctx is built from the connection's _account_info.  In pod mode ctx
+# is deserialized from the _ctx field injected by the Orchestrator into the
+# forwarded request arguments.
+# =============================================================================
+
+
+@dataclass
+class RequestContext:
+    """
+    Per-request caller identity for DAP command handlers.
+
+    Every ``on_*`` handler receives a ``ctx`` parameter built by ``on_receive``
+    before dispatch.  Handlers use ``ctx.account_info`` for user identity and
+    ``ctx.conn_id`` for resource-scoping (file handles, profiler sessions).
+
+    Attributes:
+        account_info: The authenticated user's AccountInfo.  None only for
+                      pre-auth commands (``on_auth``).
+        conn_id:      Stable identifier for the originating client connection,
+                      e.g. ``"orch-1:4527"`` (pod mode) or ``"conn-5"`` (OSS).
+                      Used to scope and clean up per-connection resources.
+        source:       ``'local'`` for OSS standalone connections or
+                      ``'orchestrator'`` for commands forwarded by the
+                      Orchestrator via an internal pod connection.
+    """
+
+    account_info: Optional[AccountInfo] = None
+    conn_id: str = ''
+    source: str = 'local'
 
 
 # =============================================================================
@@ -196,6 +252,11 @@ def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> li
         Effective permission list, or empty list if the caller has no
         membership in the task's team.
     """
+    # sys.admin and internal credentials have full access to all tasks
+    sys_perms = getattr(account_info, 'sysPermissions', []) or []
+    if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+        return list(_FULL_TEAM_PERMISSIONS)
+
     org = account_info.organization
     if not org:
         return []
@@ -229,6 +290,13 @@ def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[st
     Raises:
         PermissionError: If ``team_id`` is not found in the user's org.
     """
+    # sys.admin and internal (pod service) credentials get full access
+    # regardless of team membership — mirrors resolve_task_permissions so the
+    # team-scoped and task-scoped permission surfaces agree for these callers.
+    sys_perms = getattr(account_info, 'sysPermissions', []) or []
+    if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+        return list(_FULL_TEAM_PERMISSIONS)
+
     org = account_info.organization
     if org:
         for team in org.get('teams', []):

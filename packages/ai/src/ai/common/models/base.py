@@ -446,7 +446,7 @@ class ModelClient(RocketRideClient):
         Used for inference and other commands (not model loading).
         If the response contains a ``perf`` dict (server-reported timing
         breakdown), it is automatically recorded into the metrics singleton
-        via ``metrics.add_time()``.
+        via ``metrics.add_value()``.
 
         Args:
             command: Command name
@@ -472,7 +472,7 @@ class ModelClient(RocketRideClient):
         if perf:
             from ai.web.metrics import metrics
 
-            metrics.add_time(perf)
+            metrics.add_value(perf)
 
         return body
 

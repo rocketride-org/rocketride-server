@@ -410,7 +410,7 @@ class DataConn(DAPConn):
             except Exception as e:
                 self.debug_message(f'Error in zombie pipe cleanup: {e}')
 
-    async def on_rrext_process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_process(self, request: Dict[str, Any], ctx=None) -> Dict[str, Any]:
         """
         Handle extended data process commands for data operations.
 
@@ -880,7 +880,7 @@ class DataConn(DAPConn):
     # CPROFILE COMMANDS
     # =========================================================================
 
-    async def on_rrext_cprofile_start(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_start(self, request: Dict[str, Any], ctx=None) -> Dict[str, Any]:
         """
         Start a cProfile profiling session on this engine subprocess.
 
@@ -896,7 +896,7 @@ class DataConn(DAPConn):
         result = profiler.start(f'data:{id(self)}', session)
         return self.build_response(request, body=result)
 
-    async def on_rrext_cprofile_stop(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_stop(self, request: Dict[str, Any], ctx=None) -> Dict[str, Any]:
         """
         Stop the active cProfile session on this engine subprocess.
 
@@ -911,7 +911,7 @@ class DataConn(DAPConn):
         result = profiler.stop(f'data:{id(self)}')
         return self.build_response(request, body=result)
 
-    async def on_rrext_cprofile_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_status(self, request: Dict[str, Any], ctx=None) -> Dict[str, Any]:
         """
         Get cProfile profiling status for this engine subprocess.
 
@@ -926,7 +926,7 @@ class DataConn(DAPConn):
         result = profiler.status()
         return self.build_response(request, body=result)
 
-    async def on_rrext_cprofile_report(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_report(self, request: Dict[str, Any], ctx=None) -> Dict[str, Any]:
         """
         Get the full cProfile report from the last completed session.
 
@@ -941,7 +941,7 @@ class DataConn(DAPConn):
         result = profiler.report()
         return self.build_response(request, body=result)
 
-    async def on_rrext_cprofile_report_tree(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_cprofile_report_tree(self, request: Dict[str, Any], ctx=None) -> Dict[str, Any]:
         """
         Get a structured call tree from the last completed profiling session.
 

@@ -9,7 +9,9 @@ resolution + start_task delegation + state tracking), ``on_attach``
 ``on_threads``.
 
 Tests use ``__new__`` to skip the multi-mixin __init__ and seed
-``_debug_token``, ``_debug_id``, ``_account_info``, ``_server``.
+``_debug_token``, ``_debug_id``, ``_account_info``, ``_server``. Each
+handler now receives a trailing ``ctx: RequestContext`` (see ``_ctx``);
+identity is read from ``ctx.account_info`` rather than ``self._account_info``.
 """
 
 from __future__ import annotations
@@ -19,7 +21,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ai.account.models import RequestContext
 from ai.modules.task.commands.cmd_debug import DebugCommands
+
+
+def _ctx(account_info=None, conn_id='conn-1', source='local'):
+    """Build a per-request RequestContext for handler calls."""
+    return RequestContext(account_info=account_info, conn_id=conn_id, source=source)
 
 
 def _make_conn(*, account_info=None, server=None, debug_token=None, debug_id=None):
@@ -65,7 +73,7 @@ def _account_info(*, organization=None, default_team='team-1'):
 async def test_on_initialize_returns_debug_capabilities():
     """on_initialize returns a fixed capabilities dict."""
     conn = _make_conn()
-    response = await DebugCommands.on_initialize(conn, {})
+    response = await DebugCommands.on_initialize(conn, {}, _ctx())
     caps = response['body']
     # Sample some of the documented capabilities — full equality would be brittle.
     assert caps['supportsConfigurationDoneRequest'] is True
@@ -84,9 +92,10 @@ async def test_on_launch_starts_task_with_resolved_org_and_stores_token():
     """on_launch resolves org_id from defaultTeam, calls start_task, and records _debug_*."""
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'tk_99'})
-    conn = _make_conn(account_info=_account_info(), server=server)
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server)
 
-    event = await DebugCommands.on_launch(conn, {'arguments': {}})
+    event = await DebugCommands.on_launch(conn, {'arguments': {}}, _ctx(account_info=account))
 
     server.start_task.assert_awaited_once()
     assert server.start_task.call_args.kwargs['org_id'] == 'org-1'
@@ -100,9 +109,10 @@ async def test_on_launch_starts_task_with_resolved_org_and_stores_token():
 @pytest.mark.asyncio
 async def test_on_launch_rejects_when_already_debugging():
     """A second on_launch on a connection with _debug_token raises RuntimeError."""
-    conn = _make_conn(account_info=_account_info(), debug_token='tk_existing')
+    account = _account_info()
+    conn = _make_conn(account_info=account, debug_token='tk_existing')
     with pytest.raises(RuntimeError, match='already active'):
-        await DebugCommands.on_launch(conn, {'arguments': {}})
+        await DebugCommands.on_launch(conn, {'arguments': {}}, _ctx(account_info=account))
 
 
 @pytest.mark.asyncio
@@ -111,7 +121,7 @@ async def test_on_launch_rejects_when_default_team_not_in_any_org():
     account = _account_info(organization={'id': 'org-X', 'teams': [{'id': 'team-other'}]})
     conn = _make_conn(account_info=account)
     with pytest.raises(PermissionError, match='does not belong to any organisation'):
-        await DebugCommands.on_launch(conn, {'arguments': {}})
+        await DebugCommands.on_launch(conn, {'arguments': {}}, _ctx(account_info=account))
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +141,7 @@ async def test_on_attach_rejects_when_already_debugging():
     """
     conn = _make_conn(debug_token='tk_existing')
     with pytest.raises((RuntimeError, UnboundLocalError)):
-        await DebugCommands.on_attach(conn, {'arguments': {}})
+        await DebugCommands.on_attach(conn, {'arguments': {}}, _ctx())
 
 
 @pytest.mark.asyncio
@@ -139,10 +149,11 @@ async def test_on_attach_rejects_when_debug_unavailable():
     """If is_debug_available is False, on_attach raises."""
     task = MagicMock()
     task.is_debug_available = MagicMock(return_value=False)
-    conn = _make_conn(account_info=_account_info())
+    account = _account_info()
+    conn = _make_conn(account_info=account)
     conn.get_task = MagicMock(return_value=task)
     with pytest.raises(Exception, match='Debugging is not available'):
-        await DebugCommands.on_attach(conn, {'arguments': {}})
+        await DebugCommands.on_attach(conn, {'arguments': {}}, _ctx(account_info=account))
 
 
 @pytest.mark.asyncio
@@ -152,12 +163,13 @@ async def test_on_attach_records_token_and_emits_initialized():
     task.is_debug_available = MagicMock(return_value=True)
     server = MagicMock()
     server.attach_task = AsyncMock(return_value={'components': []})
-    server.get_task_control = MagicMock(return_value=SimpleNamespace(id='task-77'))
-    conn = _make_conn(account_info=_account_info(), server=server)
+    server.get_task_control_by_token = MagicMock(return_value=SimpleNamespace(id='task-77'))
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server)
     conn.get_task = MagicMock(return_value=task)
     conn.get_task_token = MagicMock(return_value='tk_77')
 
-    event = await DebugCommands.on_attach(conn, {'arguments': {'token': 'tk_77'}})
+    event = await DebugCommands.on_attach(conn, {'arguments': {'token': 'tk_77'}}, _ctx(account_info=account))
 
     assert conn._debug_token == 'tk_77'
     assert conn._debug_id == 'task-77'
@@ -175,10 +187,11 @@ async def test_on_terminate_injects_debug_token_and_calls_stop_task():
     """on_terminate uses _debug_token when the request omits 'token'."""
     server = MagicMock()
     server.stop_task = AsyncMock()
-    conn = _make_conn(account_info=_account_info(), server=server, debug_token='tk_active')
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server, debug_token='tk_active')
     conn.get_task_token = MagicMock(return_value='tk_active')
 
-    response = await DebugCommands.on_terminate(conn, {'arguments': {}})
+    response = await DebugCommands.on_terminate(conn, {'arguments': {}}, _ctx(account_info=account))
     server.stop_task.assert_awaited_once_with('tk_active')
     assert response['type'] == 'response'
 
@@ -193,9 +206,10 @@ async def test_on_disconnect_clears_debug_state_in_finally():
     """on_disconnect always clears _debug_token + _debug_id, even on error."""
     server = MagicMock()
     server.detach_task = AsyncMock()
-    conn = _make_conn(account_info=_account_info(), server=server, debug_token='tk_x', debug_id='task-x')
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server, debug_token='tk_x', debug_id='task-x')
 
-    await DebugCommands.on_disconnect(conn, {})
+    await DebugCommands.on_disconnect(conn, {}, _ctx(account_info=account))
     assert conn._debug_token is None
     assert conn._debug_id is None
 
@@ -205,10 +219,11 @@ async def test_on_disconnect_still_clears_state_when_detach_raises():
     """Even if detach_task raises, the finally block clears the debug fields."""
     server = MagicMock()
     server.detach_task = AsyncMock(side_effect=RuntimeError('detach failed'))
-    conn = _make_conn(account_info=_account_info(), server=server, debug_token='tk_x', debug_id='task-x')
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server, debug_token='tk_x', debug_id='task-x')
 
     # Best-effort detach swallows the exception internally, so this should return ok.
-    await DebugCommands.on_disconnect(conn, {})
+    await DebugCommands.on_disconnect(conn, {}, _ctx(account_info=account))
     assert conn._debug_token is None
 
 
@@ -220,9 +235,10 @@ async def test_on_disconnect_still_clears_state_when_detach_raises():
 @pytest.mark.asyncio
 async def test_on_pause_injects_wildcard_thread_id():
     """on_pause overwrites request['arguments'] with threadId='*' before forwarding."""
-    conn = _make_conn(account_info=_account_info(), debug_token='tk_x')
+    account = _account_info()
+    conn = _make_conn(account_info=account, debug_token='tk_x')
     request = {}
-    await DebugCommands.on_pause(conn, request)
+    await DebugCommands.on_pause(conn, request, _ctx(account_info=account))
     assert request['arguments']['threadId'] == '*'
     assert request['arguments']['singleThread'] is False
     assert request['token'] == 'tk_x'  # debug_token was injected
@@ -232,9 +248,10 @@ async def test_on_pause_injects_wildcard_thread_id():
 @pytest.mark.asyncio
 async def test_on_continue_injects_wildcard_thread_id():
     """on_continue overwrites request['arguments'] with threadId='*'."""
-    conn = _make_conn(account_info=_account_info(), debug_token='tk_x')
+    account = _account_info()
+    conn = _make_conn(account_info=account, debug_token='tk_x')
     request = {}
-    await DebugCommands.on_continue(conn, request)
+    await DebugCommands.on_continue(conn, request, _ctx(account_info=account))
     assert request['arguments']['threadId'] == '*'
     assert request['arguments']['singleThread'] is False
     conn.request.assert_awaited_once()
@@ -250,9 +267,10 @@ async def test_on_configuration_done_skipped_when_debug_unavailable():
     """If server.is_debug_available() is False, the handler returns a plain success."""
     server = MagicMock()
     server.is_debug_available = MagicMock(return_value=False)
-    conn = _make_conn(account_info=_account_info(), server=server, debug_token='tk_x')
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server, debug_token='tk_x')
 
-    response = await DebugCommands.on_configurationDone(conn, {'arguments': {}})
+    response = await DebugCommands.on_configurationDone(conn, {'arguments': {}}, _ctx(account_info=account))
     assert response['type'] == 'response'
     conn.request.assert_not_called()
 
@@ -262,9 +280,10 @@ async def test_on_configuration_done_forwards_when_debug_available():
     """When debug IS available, the request is forwarded via self.request()."""
     server = MagicMock()
     server.is_debug_available = MagicMock(return_value=True)
-    conn = _make_conn(account_info=_account_info(), server=server, debug_token='tk_x')
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server, debug_token='tk_x')
 
-    await DebugCommands.on_configurationDone(conn, {'arguments': {}})
+    await DebugCommands.on_configurationDone(conn, {'arguments': {}}, _ctx(account_info=account))
     conn.request.assert_awaited_once()
 
 
@@ -278,9 +297,10 @@ async def test_on_threads_returns_empty_response_when_no_debug_available():
     """When server.is_debug_available() is False, on_threads returns a plain success."""
     server = MagicMock()
     server.is_debug_available = MagicMock(return_value=False)
-    conn = _make_conn(account_info=_account_info(), server=server, debug_token='tk_x')
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server, debug_token='tk_x')
 
-    response = await DebugCommands.on_threads(conn, {})
+    response = await DebugCommands.on_threads(conn, {}, _ctx(account_info=account))
     assert response['type'] == 'response'
     conn.request.assert_not_called()
 
@@ -290,9 +310,10 @@ async def test_on_threads_forwards_when_debug_available():
     """When debug IS available, on_threads forwards to the underlying request handler."""
     server = MagicMock()
     server.is_debug_available = MagicMock(return_value=True)
-    conn = _make_conn(account_info=_account_info(), server=server, debug_token='tk_x')
+    account = _account_info()
+    conn = _make_conn(account_info=account, server=server, debug_token='tk_x')
 
-    await DebugCommands.on_threads(conn, {})
+    await DebugCommands.on_threads(conn, {}, _ctx(account_info=account))
     conn.request.assert_awaited_once()
 
 

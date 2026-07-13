@@ -413,6 +413,12 @@ export class ConnectionManager extends EventEmitter {
 					return;
 				}
 
+				// Desktop apps update (separate from account identity)
+				if (message.event === 'apaext_desktop' && message.body) {
+					this.emit('shell:desktopUpdate', message.body);
+					return;
+				}
+
 				this.emit('shell:event', message);
 			},
 			onConnected: async () => {

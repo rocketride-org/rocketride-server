@@ -43,7 +43,7 @@ Basic Usage:
 
 import os
 from functools import cached_property
-from .core import DAPClient, RocketRideException, CONST_DEFAULT_WEB_CLOUD
+from .core import DAPClient, DAPException, RocketRideException, CONST_DEFAULT_WEB_CLOUD
 from .account import AccountApi
 from .billing import BillingApi
 from .database import DatabaseApi
@@ -241,6 +241,9 @@ class RocketRideClient(
         # Public mode — permanently unauthenticated, only rrext_public_* commands
         self._public = kwargs.get('public', False)
 
+        # App-level display name set by identify(), re-sent on reconnect
+        self._app_name: str = ''
+
         # Pop kwargs consumed by this constructor so they don't collide
         # with the explicit keyword arguments passed to super().__init__().
         module = kwargs.pop('module', client_name)
@@ -311,7 +314,7 @@ class RocketRideClient(
         if self.did_fail(response):
             if self._on_trace:
                 self._on_trace(self.TRACE_ERROR, response)
-            raise RuntimeError(response.get('message', f'{command} failed'))
+            raise DAPException(response)
 
         # Trace: success response
         if self._on_trace:
@@ -460,7 +463,7 @@ class RocketRideClient(
             response = await client.request(message, timeout=timeout)
 
             if client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Server info request failed'))
+                raise DAPException(response)
 
             return response.get('body', {})
         finally:

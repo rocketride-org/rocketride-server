@@ -131,14 +131,14 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, o
 			connections: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<ConnectionsTab connections={data.connections} />
+						<ConnectionsTab connections={data.connections ?? []} />
 					</div>
 				),
 			},
 			tasks: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<TasksTab tasks={data.tasks} />
+						<TasksTab tasks={data.tasks ?? []} />
 					</div>
 				),
 			},

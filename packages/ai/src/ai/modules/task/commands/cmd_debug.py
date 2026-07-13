@@ -50,8 +50,10 @@ command processing layer in a task execution and debugging infrastructure.
 The actual task execution and management is delegated to the TaskServer.
 """
 
-from typing import TYPE_CHECKING, Dict, Any, Optional
+from typing import TYPE_CHECKING, Optional
+from ai.account.models import RequestContext
 from ai.common.dap import DAPConn, TransportBase
+from rocketride.types.client import DAPRequest, DAPResponse
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -100,7 +102,7 @@ class DebugCommands(DAPConn):
         self._debug_token = None
         self._debug_id = None
 
-    async def on_initialize(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_initialize(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'initialize' command to establish debugging capabilities.
 
@@ -181,7 +183,7 @@ class DebugCommands(DAPConn):
             },
         )
 
-    async def on_launch(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_launch(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'launch' command to start a new task with debugging enabled.
 
@@ -204,7 +206,7 @@ class DebugCommands(DAPConn):
         """
         try:
             # Verify permission - don't have a task yet
-            self.verify_permission('task.debug')
+            self.verify_permission('task.debug', ctx)
 
             # Each debug session must have it's own unique connection
             if self._debug_token:
@@ -212,11 +214,11 @@ class DebugCommands(DAPConn):
 
             # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
             args = request.get('arguments') or {}
-            team_id = args.get('teamId') or self._account_info.defaultTeam
+            team_id = args.get('teamId') or ctx.account_info.defaultTeam
 
             # Resolve org_id from the user's single organization.
             org_id: Optional[str] = None
-            org = self._account_info.organization
+            org = ctx.account_info.organization
             if org:
                 for team in org.get('teams', []):
                     if team.get('id') == team_id:
@@ -224,7 +226,7 @@ class DebugCommands(DAPConn):
                         break
             if org_id is None:
                 raise PermissionError(
-                    f'Team {team_id!r} does not belong to any organisation for user {self._account_info.userId!r}'
+                    f'Team {team_id!r} does not belong to any organisation for user {ctx.account_info.userId!r}'
                 )
 
             # Create and start the new task, obtaining a unique token
@@ -232,8 +234,8 @@ class DebugCommands(DAPConn):
                 request,
                 self,
                 attach_debugger=True,
-                client_id=self._account_info.userId,
-                user_id=self._account_info.userId,
+                client_id=ctx.account_info.userId,
+                user_id=ctx.account_info.userId,
                 team_id=team_id,
                 org_id=org_id,
             )
@@ -253,7 +255,7 @@ class DebugCommands(DAPConn):
             self.debug_message(f'Failed to launch task: {str(e)}')
             raise
 
-    async def on_attach(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_attach(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'attach' command to connect to an existing task.
 
@@ -277,10 +279,10 @@ class DebugCommands(DAPConn):
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
 
-            token = self.get_task_token(request)
+            token = self.get_task_token(request, ctx)
 
             # Validate ownership and permissions via get_task
-            task = self.get_task(request, 'task.debug')
+            task = self.get_task(request, ctx, 'task.debug')
 
             # If debugging is available, attach to it
             if not task.is_debug_available():
@@ -291,7 +293,7 @@ class DebugCommands(DAPConn):
 
             # Save the token and resolve the task id for events
             self._debug_token = token
-            self._debug_id = self._server.get_task_control(token).id
+            self._debug_id = self._server.get_task_control_by_token(token).id
 
             # Confirm successful attachment with pipeline details
             await self.send_response(request, body={'pipeline': pipeline})
@@ -304,7 +306,7 @@ class DebugCommands(DAPConn):
             self.debug_message(f'Failed to attach to task "{token}": {str(e)}')
             raise
 
-    async def on_terminate(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_terminate(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'terminate' command to stop task execution and cleanup.
 
@@ -326,10 +328,10 @@ class DebugCommands(DAPConn):
             # the debug token if it was not specified
             request.setdefault('token', self._debug_token)
 
-            token = self.get_task_token(request)
+            token = self.get_task_token(request, ctx)
 
             # Validate ownership and permissions via get_task
-            self.get_task(request, 'task.control')
+            self.get_task(request, ctx, 'task.control')
 
             # Log the termination request
             self.debug_message('Terminating task and cleaning up resources')
@@ -356,7 +358,7 @@ class DebugCommands(DAPConn):
             self.debug_message(f'Failed to terminate task "{token}": {str(e)}')
             raise
 
-    async def on_disconnect(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_disconnect(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
 
         Handle DAP 'disconnect' command to end the debugging session.
@@ -382,7 +384,7 @@ class DebugCommands(DAPConn):
 
             # Best-effort detach — task may already be terminated
             try:
-                self.get_task(request, 'task.debug')
+                self.get_task(request, ctx, 'task.debug')
                 await self._server.detach_task(request, self)
             except Exception as e:
                 self.debug_message(f'Best-effort detach (task may be terminated): {e}')
@@ -403,7 +405,7 @@ class DebugCommands(DAPConn):
             self._debug_id = None
             self._debug_token = None
 
-    async def on_pause(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_pause(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'pause' command to suspend task execution.
 
@@ -442,7 +444,7 @@ class DebugCommands(DAPConn):
             self.debug_message(f'Failed to pause task: {str(e)}')
             raise
 
-    async def on_continue(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_continue(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP 'continue' command to resume task execution.
 
@@ -481,7 +483,7 @@ class DebugCommands(DAPConn):
             self.debug_message(f'Failed to continue execution: {str(e)}')
             raise
 
-    async def on_configurationDone(self, request: Dict[str, Any]) -> None:
+    async def on_configurationDone(self, request: DAPRequest, ctx: RequestContext) -> Optional[DAPResponse]:
         """
         Handle DAP 'configurationDone' command signaling that the client has
         finished sending all configuration (breakpoints, etc.) after launch.
@@ -507,7 +509,7 @@ class DebugCommands(DAPConn):
             request.setdefault('token', self._debug_token)
 
             # Extract authentication and task identification from the request
-            token = self.get_task_token(request, 'task.debug')
+            token = self.get_task_token(request, ctx, 'task.debug')
 
             # vscode sends this after launch even if debugging is not available
             if not self._server.is_debug_available(token=token):
@@ -523,7 +525,7 @@ class DebugCommands(DAPConn):
             self.debug_message(f'Failed configurationDone on task: {str(e)}')
             raise
 
-    async def on_threads(self, request: Dict[str, Any]) -> None:
+    async def on_threads(self, request: DAPRequest, ctx: RequestContext) -> Optional[DAPResponse]:
         """
         Handle DAP 'threads' command requesting the list of active threads.
 
@@ -548,7 +550,7 @@ class DebugCommands(DAPConn):
             request.setdefault('token', self._debug_token)
 
             # Extract authentication and task identification from the request
-            token = self.get_task_token(request, 'task.debug')
+            token = self.get_task_token(request, ctx, 'task.debug')
 
             # vscode sends this after launch even if debugging is not available
             if not self._server.is_debug_available(token=token):

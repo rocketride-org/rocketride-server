@@ -60,8 +60,9 @@ of concerns through specialized command handler classes.
 """
 
 import time
-from typing import TYPE_CHECKING, Dict, Any, Union, Optional
+from typing import TYPE_CHECKING, Dict, Any, Optional
 from rocketride import EVENT_TYPE
+from rocketride.types.client import DAPRequest, DAPResponse
 from ai.common.dap import DAPConn, TransportBase
 from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
 from .commands.cmd_task import TaskCommands
@@ -75,7 +76,7 @@ from .commands.cmd_app import AppCommands
 from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
 from .commands.cmd_store import StoreCommands
-from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
+from ai.account.models import AccountInfo, RequestContext
 from ai.common.account import AccountPipelineValidation
 
 # Only import for type checking to avoid circular import errors
@@ -124,11 +125,11 @@ class TaskConn(
     - Error handling and diagnostic logging across all command types
 
     Command Routing:
-    - DAP standard commands (initialize, terminate, etc.) → specialized handlers
-    - Task commands (launch, execute, attach) → TaskCommands mixin
-    - Data commands (ext_process) → DataCommands mixin
-    - Monitor commands (ext_monitor) → MonitorCommands mixin
-    - Generic task commands → delegated to task instances
+    - DAP standard commands (initialize, terminate, etc.) -> specialized handlers
+    - Task commands (launch, execute, attach) -> TaskCommands mixin
+    - Data commands (ext_process) -> DataCommands mixin
+    - Monitor commands (ext_monitor) -> MonitorCommands mixin
+    - Generic task commands -> delegated to task instances
 
     Inheritance Hierarchy:
     - TaskCommands: Task lifecycle and debugging operations
@@ -217,7 +218,8 @@ class TaskConn(
         self._messages_in: int = 0
         self._messages_out: int = 0
         self._last_activity: float = time.time()
-        self._client_info: Dict[str, str] = {}
+        self._client_info: Dict[str, str] = {}  # SDK identity (set at auth, immutable)
+        self._app_name: str = ''  # App-level identity (set by rrext_identify)
 
         # Brute-force guard: per-connection lifetime count of auth requests.
         # Enforced in on_auth against CONST_AUTH_MAX_ATTEMPTS_PER_CONN so a
@@ -243,35 +245,95 @@ class TaskConn(
         # Delegate to the parent transport send implementation
         await super().send(message)
 
-    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
+    def _track_message(self, message: Dict[str, Any]) -> None:
         """
-        Intercept DAP dispatch: allow auth and rrext_public_* commands
-        before authentication; reject everything else until authenticated.
+        Update connection-level inbound metrics for every received message.
 
-        The rrext_public_* prefix convention lets public commands (catalog
-        browsing, server probe) bypass auth without maintaining a whitelist.
+        Overrides the base no-op hook (called from DAPConn.on_receive before
+        dispatch) to count inbound messages and stamp last-activity time.
+
+        Args:
+            message: The parsed DAP message dict.
         """
-        if message is None:
-            message = {}
         self._messages_in += 1
         self._last_activity = time.time()
+
+    async def _pre_dispatch_gate(self, message: Dict[str, Any]) -> bool:
+        """
+        Enforce authentication before dispatching a request.
+
+        Only ``auth`` and ``rrext_public_*`` commands bypass authentication; the
+        rrext_public_* prefix convention lets public commands (catalog browsing,
+        server probe) through without maintaining a whitelist. Everything else is
+        rejected with an error and the connection is scheduled for disconnect.
+
+        Args:
+            message: The parsed DAP request message.
+
+        Returns:
+            True to proceed with dispatch, False if the request was rejected
+            (an error was sent and disconnect scheduled).
+        """
         cmd = message.get('command', '')
 
-        # auth and rrext_public_* commands are allowed before authentication
-        if message.get('type') == 'request' and (cmd == 'auth' or cmd.startswith('rrext_public_')):
-            await super().on_receive(message)
-            return
-
-        if not self._authenticated:
+        # Pre-auth gate: only auth and rrext_public_* bypass authentication
+        if not (cmd == 'auth' or cmd.startswith('rrext_public_')) and not self._authenticated:
             # Send an error and schedule disconnect
             err = self.build_error(message, 'Not authenticated')
             await self.send(err)
             self._transport.disconnect()
-            return
+            return False
 
-        await super().on_receive(message)
+        return True
 
-    async def on_auth(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_ctx(self, message: Dict[str, Any]) -> RequestContext:
+        """
+        Build the RequestContext from either the forwarded ``_ctx`` argument
+        (pod mode) or connection-level ``_account_info`` (OSS / direct mode).
+
+        In pod mode the ``_ctx`` key is popped from the request arguments so the
+        handler never sees it.
+
+        Args:
+            message: The parsed DAP request message.
+
+        Returns:
+            RequestContext: the per-request identity context.
+        """
+        # Extract _ctx from arguments if present (pod mode), otherwise build
+        # from connection-level state (OSS / direct mode).
+        args = message.get('arguments') or {}
+        raw_ctx = args.pop('_ctx', None)
+
+        # A forwarded _ctx replaces the caller's identity, so it is only honoured
+        # on a connection that itself authenticated as an internal pod service
+        # (the Orchestrator). An ordinary authenticated client could otherwise set
+        # arguments._ctx to run as a forged user/admin. The key is already popped
+        # above, so an untrusted forward simply falls through to the
+        # connection-derived context below.
+        conn_account = self._account_info
+        conn_is_internal = bool(conn_account and 'internal' in (getattr(conn_account, 'sysPermissions', None) or []))
+
+        if raw_ctx and conn_is_internal:
+            # Pod mode: orchestrator forwarded the caller's identity. Guard the
+            # account_info lookup — a malformed/pre-auth forward without it must
+            # not raise KeyError out of on_receive (which would silently drop the
+            # message); treat a missing account_info as unauthenticated instead.
+            raw_account = raw_ctx.get('account_info')
+            return RequestContext(
+                account_info=AccountInfo(**raw_account) if raw_account else None,
+                conn_id=raw_ctx.get('conn_id', str(self._connection_id)),
+                source=raw_ctx.get('source', 'orchestrator'),
+            )
+
+        # OSS / direct mode: use connection-level account info
+        return RequestContext(
+            account_info=self._account_info,
+            conn_id=str(self._connection_id),
+            source='local',
+        )
+
+    async def on_auth(self, request: DAPRequest, ctx: RequestContext) -> Optional[DAPResponse]:
         """
         Handle DAP auth command: validate credential and return ConnectResult on success.
         An empty credential deauthenticates the connection.
@@ -280,6 +342,10 @@ class TaskConn(
         auth attempt count exceeds the cap, further auth requests are rejected and
         the connection is scheduled for disconnect. Successful auth does not reset
         the counter: the cap is a per-connection lifetime limit.
+
+        Args:
+            request (Dict[str, Any]): The DAP auth request.
+            ctx (RequestContext): Per-request context (account_info is None pre-auth).
         """
         args = request.get('arguments') or {}
 
@@ -318,6 +384,7 @@ class TaskConn(
             self._transport.disconnect()
             return
 
+        # Store connection-level account info for future on_receive ctx building
         self._account_info = result
         self._authenticated = True
         self._server.release_unauthed_slot(self._client_ip)
@@ -328,7 +395,7 @@ class TaskConn(
         if args.get('clientVersion'):
             self._client_info['version'] = str(args['clientVersion'])
 
-        # Notify dashboard subscribers
+        # Notify dashboard subscribers — use result (freshly authenticated AccountInfo)
         await self._server.broadcast_server_event(
             EVENT_TYPE.DASHBOARD,
             {
@@ -339,23 +406,27 @@ class TaskConn(
                     'connectionId': self.get_connection_id(),
                     'clientName': self._client_info.get('name'),
                     'clientVersion': self._client_info.get('version'),
-                    'clientId': self._account_info.userId if self._account_info else None,
+                    'clientId': result.userId,
                 },
             },
-            user_id=self._account_info.userId,
+            user_id=result.userId,
         )
 
         # Apps are already populated in AccountInfo by the account service
         # (desktop apps with full manifest + subscription status).
         return self.build_response(request, body=result.to_connect_result())
 
-    async def on_deauth(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_deauth(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP deauth command: clear authentication state.
 
         Reverts the connection to unauthenticated mode so only
         ``rrext_public_*`` commands are accepted. The WebSocket stays
         open — callers can re-authenticate later via ``auth``.
+
+        Args:
+            request (Dict[str, Any]): The DAP deauth request.
+            ctx (RequestContext): Per-request context (connection-level).
         """
         # Nothing to do if not authenticated
         if not self._authenticated:
@@ -371,29 +442,8 @@ class TaskConn(
 
         return self.build_response(request, body={})
 
-    def has_permission(self, perm: Union[list, str]) -> bool:
-        """Check if the authenticated user has the given permission for their default team."""
-        if not self._account_info:
-            return False
-        try:
-            perms = resolve_team_permissions(self._account_info, self._account_info.defaultTeam)
-        except PermissionError:
-            return False
-        if isinstance(perm, str):
-            perm = [perm]
-        return any(p in perms for p in perm)
-
-    def verify_permission(self, perm: str) -> None:
-        """Raise PermissionError if the authenticated user lacks the given permission."""
-        if not self.has_permission(perm):
-            raise PermissionError(f'Permission {perm!r} denied')
-
-    def require_zitadel_auth(self) -> None:
-        """Verify the connection is authenticated and not waitlisted."""
-        if not self._authenticated or not self._account_info:
-            raise PermissionError('Not authenticated')
-        if self._account_info.waitlisted:
-            raise PermissionError('Account is waitlisted')
+    # has_permission, verify_permission, and verify_auth are
+    # inherited from DAPConn — available to all server-side connections.
 
     def verify_plans(self, account_info: AccountInfo, pipeline: Dict[str, Any]) -> bool:
         """
@@ -413,77 +463,60 @@ class TaskConn(
 
         return True
 
-    def get_task_token(self, request: Dict[str, Any], permissions: str = '') -> str:
+    def get_task_token(self, request: Dict[str, Any], ctx: RequestContext, permissions: str = '') -> str:
         """
-        Retrieve the task token associated with a command request and verify permissions if needed.
+        Retrieve the task token associated with a command request.
+
+        Extends the base ``DAPConn.get_task_token`` with ``pk_*`` public-key
+        resolution against local task controls (only available on EAAS where
+        tasks run in-process).
 
         Args:
-            request (Dict[str, Any]): The command request containing task token
-            token (str): The task token to look up.
+            request: The DAP command request.
+            ctx:     Per-request context carrying caller identity.
+            permissions: Optional permission string (checked by get_task).
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            The task token string.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            PermissionError: If not authenticated or access is denied.
         """
-        if not self._account_info:
+        account_info = ctx.account_info
+        if not account_info:
             raise PermissionError('Not authenticated')
-        # If we authenticated with a public key, we are locked to that task
-        if self._account_info.auth.startswith('pk_'):
-            control = self._server.get_task_control_by_public_key(self._account_info.auth)
+
+        # pk_* auth: resolve the public key to its task's token via local
+        # task controls (only available on EAAS, not on the orchestrator).
+        if account_info.auth.startswith('pk_'):
+            control = self._server.get_task_control_by_public_key(account_info.auth)
             return control.token
 
-        # If we authenticated with a task token, we are locked to that task
-        if self._account_info.auth.startswith('tk_'):
-            return self._account_info.auth
+        # Delegate tk_* and regular token extraction to the base class
+        return super().get_task_token(request, ctx, permissions)
 
-        # Extract token from arguments, falling back to request root
-        # for backward compatibility with older clients.
-        args = request.get('arguments') or {}
-        token = args.get('token') or request.get('token')
-
-        # Permission checks are deferred to get_task() / callers where the
-        # task's team is known, so we can resolve against the correct team.
-        return token
-
-    def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'Task':
+    def get_task(self, request: Dict[str, Any], ctx: RequestContext, permissions: str = '') -> 'Task':
         """
         Retrieve the task instance associated with the given request.
 
-        If a task token is specified in request.arguments:
-            - If the initial auth token is an apikey, no problem
-            - If the initial auth token is a task or public key token,
-            the token pass here must match (no cross task access)
-        If a task token is not specfied, we use the initial auth token
+        Extracts the token, looks up the task control, and verifies the
+        caller has access via ``verify_task_access()``.
 
         Args:
-            apikey (str): API key for authentication.
-            token (str): The task token to look up.
+            request: The DAP command request.
+            ctx:     Per-request context carrying caller identity.
+            permissions: Optional specific permission to check (e.g. 'task.monitor').
 
         Returns:
-            TASK: The task instance corresponding to the token.
+            Task: The task instance corresponding to the token.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            RuntimeError: If the task does not exist.
+            PermissionError: If access is denied.
         """
-        # Get the token
-        token = self.get_task_token(request, permissions)
-
-        # Get the task control and verify access for API key auth
-        control = self._server.get_task_control(token)
-
-        # pk_ and tk_ auth are already scoped to their task by get_task_token.
-        # For all other auth types, resolve permissions against the task's team.
-        # sys.admin bypasses all team permission checks.
-        if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            if 'sys.admin' not in (self._account_info.sysPermissions or []):
-                perms = resolve_task_permissions(self._account_info, control.teamId)
-                if not perms:
-                    raise PermissionError('Access denied: no permissions for this task')
-                if permissions and permissions not in perms:
-                    raise PermissionError(f'Permission {permissions!r} denied for this task')
-
+        token = self.get_task_token(request, ctx, permissions)
+        control = self._server.get_task_control_by_token(token)
+        self._server.verify_task_access(control, ctx, require=permissions)
         return control.task
 
     def get_connection_id(self) -> int:
@@ -498,15 +531,16 @@ class TaskConn(
         """
         return self._connection_id
 
-    async def request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def request(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Process DAP debugging commands.
 
         Args:
-            request: DAP command from debugging client
+            request (Dict[str, Any]): DAP command from debugging client.
+            ctx (RequestContext): Per-request context carrying caller identity.
 
         Returns:
-            DAP-compliant response from debugpy interface
+            Dict[str, Any]: DAP-compliant response from debugpy interface.
         """
         # Get the command - we may have already done this, but
         # we need to make sure...
@@ -517,7 +551,7 @@ class TaskConn(
             return self.build_error(request, f'Invalid command: {request_command}')
 
         # Get the task
-        task = self.get_task(request, 'task.debug')
+        task = self.get_task(request, ctx, 'task.debug')
 
         # Validate debug interface
         if task._debug_python is None:
@@ -535,7 +569,7 @@ class TaskConn(
         # And return the response
         return server_response
 
-    async def on_command(self, request: Dict[str, Any]) -> None:
+    async def on_command(self, request: DAPRequest, ctx: RequestContext) -> Optional[DAPResponse]:
         """
         Handle generic DAP commands by delegating to appropriate task instances.
 
@@ -552,6 +586,7 @@ class TaskConn(
                 - token: Unique identifier for the target task instance
                 - command: DAP command type (step, breakpoint, evaluate, etc.)
                 - arguments: Command-specific parameters and options
+            ctx (RequestContext): Per-request context carrying caller identity.
 
         Command Flow:
         1. Extract authentication credentials and task identification
@@ -586,25 +621,30 @@ class TaskConn(
         request.setdefault('token', self._debug_token)
 
         # Call it
-        return await self.request(request)
+        return await self.request(request, ctx)
 
-    async def on_rrext_identify(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Update the client display name for this connection.
+    async def on_rrext_identify(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
+        """Update the app-level display name for this connection.
 
-        Allows clients to refine their identity after auth — e.g. when an
-        app plugin loads and wants to show "Cloud Shell-UI — rocketride.pipeBuilder"
-        instead of the generic "Cloud Shell-UI".
+        Sets ``_app_name`` — a mutable label indicating which application or
+        plugin is currently active on this connection.  This is separate from
+        ``_client_info`` (SDK identity set at auth time, immutable).
+
+        Accepts ``appName`` (preferred) or ``clientName`` (legacy) in the
+        request arguments.
 
         Args:
-            request: DAP request with ``arguments.clientName`` (str).
+            request (Dict[str, Any]): DAP request with ``arguments.appName`` (str).
+            ctx (RequestContext): Per-request context carrying caller identity.
 
         Returns:
-            Acknowledgement with the new name.
+            Dict[str, Any]: Acknowledgement with the current app name.
         """
         args = request.get('arguments', {})
-        new_name = args.get('clientName')
+        # Accept appName (new) or clientName (legacy back-compat)
+        new_name = args.get('appName') or args.get('clientName')
         if new_name and isinstance(new_name, str):
-            self._client_info['name'] = new_name
+            self._app_name = new_name
             # Notify dashboard so the monitor UI updates in real time
             await self._server.broadcast_server_event(
                 EVENT_TYPE.DASHBOARD,
@@ -614,25 +654,23 @@ class TaskConn(
                         'action': 'connection_updated',
                         'timestamp': time.time(),
                         'connectionId': self.get_connection_id(),
-                        'clientName': new_name,
+                        'appName': new_name,
                     },
                 },
-                user_id=self._account_info.userId if self._account_info else None,
+                user_id=ctx.account_info.userId if ctx.account_info else None,
             )
-        return self.build_response(request, body={'clientName': self._client_info.get('name')})
+        return self.build_response(request, body={'appName': self._app_name})
 
-    async def on_rrext_ping(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_ping(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Handle DAP ping/ping.
 
         Args:
-            request (Dict[str, Any]): Ping request
+            request (Dict[str, Any]): Ping request.
+            ctx (RequestContext): Per-request context (unused, stateless).
 
         Returns:
             Dict[str, Any]: PONG!
-
-        Raises:
-            Exception: If task creation or execution startup fails
         """
         # Confirm successful task execution startup
         return self.build_response(request, body={'pong': True})

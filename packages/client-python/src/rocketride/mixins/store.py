@@ -411,6 +411,13 @@ class StoreMixin(DAPClient):
     @staticmethod
     def _validate_store_path(path: str) -> None:
         """Validate a store path before sending to the server."""
+        # Reject Windows drive-letter absolute paths (e.g. C:\... or C:/...); these
+        # don't start with a slash and ':' is a legal POSIX path char, so they'd
+        # otherwise slip past the per-segment checks below. Guarded here (not only
+        # in _validate_relative_path) so callers that validate directly — fs_open,
+        # fs_delete, fs_mkdir, fs_stat — are covered too.
+        if len(path) >= 2 and path[0].isalpha() and path[1] == ':':
+            raise ValueError(f'Path must be a relative path (got {path!r})')
         for segment in path.replace('\\', '/').split('/'):
             if segment == '..':
                 raise ValueError(f'Path traversal not allowed: {path}')
@@ -431,6 +438,7 @@ class StoreMixin(DAPClient):
             raise ValueError(f'{name} must be a non-empty string')
         if path.startswith('/') or path.startswith('\\'):
             raise ValueError(f'{name} must be a relative path (got {path!r})')
+        # Drive-letter absolute paths are rejected by _validate_store_path below.
         StoreMixin._validate_store_path(path)
 
     @staticmethod

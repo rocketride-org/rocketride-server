@@ -32,11 +32,20 @@
 export class DAPException extends Error {
 	public readonly dapResult: Record<string, unknown>;
 
+	/** Server-side source file where the error originated (if available). */
+	public readonly file: string | null;
+
+	/** Server-side line number where the error originated (if available). */
+	public readonly lineno: number | null;
+
 	constructor(dapResult: Record<string, unknown>) {
 		const errorMessage = String(dapResult.message || 'Unknown DAP error');
 		super(errorMessage);
 		this.name = 'DAPException';
 		this.dapResult = dapResult || {};
+		const trace = dapResult.trace as { file?: string; lineno?: number } | undefined;
+		this.file = trace?.file ?? null;
+		this.lineno = trace?.lineno ?? null;
 	}
 }
 

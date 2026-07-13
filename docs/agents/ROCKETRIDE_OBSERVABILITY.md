@@ -302,8 +302,7 @@ subscription time.
   // Resource metrics (per-process, normalized)
   metrics: {
     cpu_percent: number, cpu_memory_mb: number, gpu_memory_mb: number,
-    peak_cpu_percent: number, peak_cpu_memory_mb: number, peak_gpu_memory_mb: number,
-    avg_cpu_percent:  number, avg_cpu_memory_mb:  number, avg_gpu_memory_mb:  number
+    peak_cpu_percent: number, peak_cpu_memory_mb: number, peak_gpu_memory_mb: number
   },
 
   // Cumulative billing tokens (100 tokens = $1)

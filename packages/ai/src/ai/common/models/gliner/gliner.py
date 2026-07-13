@@ -444,7 +444,7 @@ class GLiNER:
         # Report all perf counters — same keys as model server response
         # No postprocess for GLiNER — inference returns final entities directly
         inference_sec = (t_pre + t_gpu) / 1000.0
-        metrics.add_time(
+        metrics.add_value(
             {
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,

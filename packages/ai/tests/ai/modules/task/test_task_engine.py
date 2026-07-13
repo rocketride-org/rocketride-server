@@ -62,6 +62,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t = Task.__new__(Task)
     t.id = 'task-test'
     t.token = 'tk_test'
+    t.project_id = 'proj-test'
     t.source = source
     t._task_name = task_name
     t._pipeline = pipeline if pipeline is not None else {}
@@ -644,12 +645,20 @@ async def test_forward_task_event_debugger_skipped_when_no_debugger_attached():
 
 @pytest.mark.asyncio
 async def test_forward_task_event_non_debugger_routes_to_server_broadcast():
-    """A non-DEBUGGER event is routed through the TaskServer broadcast API."""
+    """A non-DEBUGGER event is routed through the TaskServer broadcast API.
+
+    Before broadcasting, the non-DEBUGGER branch injects routing fields into the
+    event body so consumers can identify the task without a TASK_CONTROL lookup:
+    ``event_type`` (the EVENT_TYPE value) plus ``project_id`` and ``source``
+    defaulted from the Task. (The former ``project_id`` was previously read
+    directly off the event; it is now sourced from ``self.project_id``.)
+    """
     from rocketride import EVENT_TYPE
     from unittest.mock import AsyncMock
 
-    t = _task()
+    t = _task(source='src-id')
     t._debugger = None
+    t.project_id = 'proj-x'
     server = MagicMock()
     server.broadcast_task_event = AsyncMock()
     t._server = server
@@ -662,6 +671,10 @@ async def test_forward_task_event_non_debugger_routes_to_server_broadcast():
     args = server.broadcast_task_event.await_args
     assert args.kwargs['token'] == 'tk_x'
     assert args.kwargs['event'] == payload
+    # Routing fields injected into the body in place.
+    assert payload['body']['event_type'] == EVENT_TYPE.SUMMARY.value
+    assert payload['body']['project_id'] == 'proj-x'
+    assert payload['body']['source'] == 'src-id'
 
 
 @pytest.mark.asyncio

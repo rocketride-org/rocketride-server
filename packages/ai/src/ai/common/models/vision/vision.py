@@ -212,7 +212,7 @@ def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> L
     """
     Run loader pipeline for a single image (local facade helper).
 
-    Times each phase for billing — reports perf counters via metrics.add_time().
+    Times each phase for billing — reports perf counters via metrics.add_value().
     """
     # Preprocess phase — convert image to model input tensors
     t0 = time.perf_counter()
@@ -233,7 +233,7 @@ def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> L
     # (pending_request.py build_dap_result).
     # gpu_memory is in GB-sec (model_gb * inference_sec).
     inference_sec = (t_pre + t_gpu + t_post) / 1000.0
-    metrics.add_time(
+    metrics.add_value(
         {
             'gpu_preprocess': t_pre,
             'gpu_compute': t_gpu,

@@ -31,7 +31,7 @@
  */
 
 import type { RocketRideClient } from './client.js';
-import type { ConnectResult } from './types/client.js';
+import type { AppManifestEntry, ConnectResult } from './types/client.js';
 import type { OrgDetail, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, TeamMemberParams } from './types/account.js';
 
 // =============================================================================
@@ -98,6 +98,20 @@ export class AccountApi {
 	 */
 	async deleteAccount(): Promise<void> {
 		await this.client.call('rrext_account_me', { subcommand: 'delete' });
+	}
+
+	/**
+	 * Fetches the authenticated user's desktop apps with subscription status.
+	 *
+	 * Returns the same enriched app manifest entries that were formerly
+	 * embedded in the ConnectResult. Each entry includes `appStatus`,
+	 * `onDesktop`, `features`, and full manifest fields.
+	 *
+	 * @returns Array of AppManifestEntry objects for apps on the user's desktop.
+	 */
+	async getDesktop(): Promise<AppManifestEntry[]> {
+		const body = await this.client.call<{ apps: AppManifestEntry[] }>('rrext_account_me', { subcommand: 'desktop' });
+		return body.apps ?? [];
 	}
 
 	// =========================================================================

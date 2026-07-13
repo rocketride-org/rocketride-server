@@ -243,8 +243,13 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 							return (
 								<div key={sub.appId} style={{ ...SharedS.rowItem, borderBottom: i < subscriptions.length - 1 ? '1px solid var(--rr-border)' : 'none', alignItems: 'flex-start' }}>
 									<div style={SharedS.rowInfo}>
-										{/* App name + renewal info */}
-										<div style={SharedS.rowName}>{appMap[sub.appId]?.name ?? sub.appId}</div>
+										{/* App icon + name + renewal info */}
+										<div style={SharedS.rowName}>
+											{appMap[sub.appId]?.icon && (
+												<img src={appMap[sub.appId]!.icon} alt="" style={{ width: 16, height: 16, marginRight: 6, verticalAlign: 'text-bottom', borderRadius: 3 }} />
+											)}
+											{appMap[sub.appId]?.name ?? sub.appId}
+										</div>
 										{sub.currentPeriodEnd && <div style={S.meta}>{sub.cancelAtPeriodEnd ? `Cancels on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}` : `Renews on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}`}</div>}
 
 										{/* Subscription detail grid */}

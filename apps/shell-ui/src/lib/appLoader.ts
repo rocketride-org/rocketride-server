@@ -86,21 +86,15 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		{ force: true },
 	);
 
-	// Map server entries to runtime AppManifestEntry objects with lazy loaders
+	// Map server entries to runtime AppManifestEntry objects with lazy loaders.
+	// Spread the server entry first to preserve all fields (appStatus, onDesktop,
+	// features, etc.), then overlay with normalized fields + load().
 	return validApps.map((a) => ({
-		id:            a.id,
-		moduleId:      a.moduleId,
-		name:          a.name,
-		description:   a.description,
-		icon:          a.icon,
-		categories:    a.categories,
+		...a,
 		settings:      (a.settings ?? []) as AppSettingDefinition[],
-		authenticated: a.authenticated,
-		showHeader:    a.showHeader,
-		showStatusBar: a.showStatusBar,
-		public:        a.public,
-		load: () =>
-			(loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
-				.then((m) => m.default),
+		load: () => {
+			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
+				.then((m) => m.default);
+		},
 	}));
 }

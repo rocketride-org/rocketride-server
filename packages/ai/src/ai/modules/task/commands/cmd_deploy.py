@@ -30,12 +30,14 @@
 
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING
 
 from croniter import croniter
 
 from ai.account import DeploymentRecord
+from ai.account.models import RequestContext
 from ai.common.dap import DAPConn, TransportBase
+from rocketride.types.client import DAPRequest, DAPResponse
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -95,12 +97,12 @@ class DeployCommands(DAPConn):
 
     # ── rrext_deploy_add ─────────────────────────────────────────────────────
 
-    async def on_rrext_deploy_add(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_deploy_add(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Accept a pipeline definition, persist it as a deployment, and activate it."""
-        if not self._account_info.userToken:
+        if not ctx.account_info.userToken:
             raise ValueError('Cannot deploy: no user token available for scheduled runs')
 
-        self.verify_permission('task.control')
+        self.verify_permission('task.control', ctx)
 
         args = request.get('arguments') or {}
         pipeline = args.get('pipeline')
@@ -120,37 +122,37 @@ class DeployCommands(DAPConn):
             pipeline=pipeline,
             schedule=schedule,
             state='active',
-            userId=self._account_info.userId,
-            userToken=self._account_info.userToken,
+            userId=ctx.account_info.userId,
+            userToken=ctx.account_info.userToken,
             createdAt=time.time(),
             updatedAt=time.time(),
         )
-        await self._server.deployments.save(self._account_info.userId, record, mode='create')
+        await self._server.deployments.save(ctx.account_info.userId, record, mode='create')
         self._scheduler.schedule(record)
         return self.build_response(request, body=record.to_client_record())
 
     # ── rrext_deploy_remove ──────────────────────────────────────────────────
 
-    async def on_rrext_deploy_remove(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_deploy_remove(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Undeploy and remove a pipeline from the server."""
-        self.verify_permission('task.control')
+        self.verify_permission('task.control', ctx)
 
         args = request.get('arguments') or {}
         project_id = args.get('projectId')
         if not project_id:
             raise ValueError('projectId is required')
 
-        await self._server.deployments.delete(self._account_info.userId, project_id)
+        await self._server.deployments.delete(ctx.account_info.userId, project_id)
         self._scheduler.unschedule(project_id)
         return self.build_response(request, body={})
 
     # ── rrext_deploy_list ────────────────────────────────────────────────────
 
-    async def on_rrext_deploy_list(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_deploy_list(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Return all deployments for the caller with their status and schedule config."""
-        self.verify_permission('task.monitor')
+        self.verify_permission('task.monitor', ctx)
 
-        records = await self._server.deployments.list(self._account_info.userId)
+        records = await self._server.deployments.list(ctx.account_info.userId)
         return self.build_response(
             request,
             body={
@@ -160,33 +162,33 @@ class DeployCommands(DAPConn):
 
     # ── rrext_deploy_status ──────────────────────────────────────────────────
 
-    async def on_rrext_deploy_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_deploy_status(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Get detailed status of a specific deployment."""
-        self.verify_permission('task.monitor')
+        self.verify_permission('task.monitor', ctx)
 
         args = request.get('arguments') or {}
         project_id = args.get('projectId')
         if not project_id:
             raise ValueError('projectId is required')
 
-        record = await self._server.deployments.get(self._account_info.userId, project_id)
+        record = await self._server.deployments.get(ctx.account_info.userId, project_id)
         return self.build_response(request, body=record.to_client_record())
 
     # ── rrext_deploy_update ──────────────────────────────────────────────────
 
-    async def on_rrext_deploy_update(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_deploy_update(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Modify schedule or pipeline config for an existing deployment."""
-        if not self._account_info.userToken:
+        if not ctx.account_info.userToken:
             raise ValueError('Cannot deploy: no user token available for scheduled runs')
 
-        self.verify_permission('task.control')
+        self.verify_permission('task.control', ctx)
 
         args = request.get('arguments') or {}
         project_id = args.get('projectId')
         if not project_id:
             raise ValueError('projectId is required')
 
-        userId = self._account_info.userId
+        userId = ctx.account_info.userId
         record = await self._server.deployments.get(userId, project_id)
 
         if 'pipeline' in args:
@@ -199,8 +201,8 @@ class DeployCommands(DAPConn):
             _validate_schedule(args['schedule'])
             record.schedule = args['schedule']
 
-        record.userId = self._account_info.userId
-        record.userToken = self._account_info.userToken
+        record.userId = ctx.account_info.userId
+        record.userToken = ctx.account_info.userToken
         record.updatedAt = time.time()
 
         await self._server.deployments.save(userId, record)

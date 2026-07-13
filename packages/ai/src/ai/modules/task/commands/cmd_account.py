@@ -48,10 +48,12 @@ delegating to ``account.handle_account(conn, request)``:
                                          prices, get, checkout, portal, cancel)
 """
 
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING
 
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
+from ai.account.models import RequestContext
+from rocketride.types.client import DAPRequest, DAPResponse
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -69,7 +71,7 @@ class AccountCommands(DAPConn):
 
     The ``conn`` (``TaskConn`` instance) is passed through so SaaS handlers
     have full access to ``_account_info``, ``build_response()``,
-    ``require_zitadel_auth()``, and the rest of the DAP connection API.
+    ``verify_auth()``, and the rest of the DAP connection API.
     """
 
     def __init__(
@@ -84,48 +86,48 @@ class AccountCommands(DAPConn):
 
     # ── rrext_account_me ─────────────────────────────────────────────────────
 
-    async def on_rrext_account_me(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_account_me(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_account_me`` to the account handler."""
-        return await account.handle_account(self, request)
+        return await account.handle_account(self, request, ctx)
 
     # ── rrext_account_keys ───────────────────────────────────────────────────
 
-    async def on_rrext_account_keys(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_account_keys(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_account_keys`` to the account handler."""
-        return await account.handle_account(self, request)
+        return await account.handle_account(self, request, ctx)
 
     # ── rrext_account_org ────────────────────────────────────────────────────
 
-    async def on_rrext_account_org(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_account_org(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_account_org`` to the account handler."""
-        return await account.handle_account(self, request)
+        return await account.handle_account(self, request, ctx)
 
     # ── rrext_account_members ────────────────────────────────────────────────
 
-    async def on_rrext_account_members(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_account_members(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_account_members`` to the account handler."""
-        return await account.handle_account(self, request)
+        return await account.handle_account(self, request, ctx)
 
     # ── rrext_account_teams ──────────────────────────────────────────────────
 
-    async def on_rrext_account_teams(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_account_teams(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_account_teams`` to the account handler."""
-        return await account.handle_account(self, request)
+        return await account.handle_account(self, request, ctx)
 
     # ── rrext_account_billing ────────────────────────────────────────────────
 
-    async def on_rrext_account_billing(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_account_billing(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_account_billing`` to the account handler."""
-        return await account.handle_account(self, request)
+        return await account.handle_account(self, request, ctx)
 
     # ── rrext_saas ──────────────────────────────────────────────────────────
 
-    async def on_rrext_saas(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_saas(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_saas`` to the SaaS admin handler."""
-        return await account.handle_saas(self, request)
+        return await account.handle_saas(self, request, ctx)
 
     # ── rrext_billing_rates ─────────────────────────────────────────────────
 
-    async def on_rrext_billing_rates(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_billing_rates(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_billing_rates`` to the billing rates handler (deprecated)."""
-        return await account.handle_billing_rates(self, request)
+        return await account.handle_billing_rates(self, request, ctx)

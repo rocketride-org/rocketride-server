@@ -40,6 +40,8 @@ import { commonStyles } from 'shared/themes/styles';
 import { useWorkspace } from '../../workspace/WorkspaceContext';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ConnectionManager } from '../../connection/connection';
+import { useAppRegistry } from '../../hooks/AppRegistryContext';
+import { useSubscriptions } from '../../hooks/useSubscriptions';
 import type { AppSettingDefinition } from '../../workspace/types';
 
 // =============================================================================
@@ -394,9 +396,15 @@ const SettingsPage: React.FC = () => {
 	const [selectedNav, setSelectedNav] = useState<string | null>(null);
 
 	// ── Subscription status ─────────────────────────────────────────────
+	// The subscribed DECISION comes from the authoritative AccountInfo.subscriptions
+	// map (via useSubscriptions, reactive on apaext_account) — NOT from the desktop
+	// registry, since an app can be subscribed but off-desktop. The registry only
+	// supplies the app entry (name/entry) needed for the shell:subscribe checkout.
 	const info = client?.getAccountInfo();
-	const pipeBuilderApp = (info?.apps ?? []).find((a: any) => a.id === PIPE_BUILDER_APP_ID);
-	const isSubscribed = pipeBuilderApp?.appStatus === 'subscribed' || pipeBuilderApp?.appStatus === 'trialing';
+	const { isSubscribed: isSubscribedTo } = useSubscriptions();
+	const { apps: registryApps } = useAppRegistry();
+	const pipeBuilderApp = registryApps.find((a) => a.id === PIPE_BUILDER_APP_ID);
+	const isSubscribed = isSubscribedTo(PIPE_BUILDER_APP_ID);
 
 	/** Opens the checkout modal via the shell:subscribe event. */
 	const handleSubscribe = useCallback(() => {

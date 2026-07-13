@@ -30,6 +30,7 @@ import { useWorkspaceState } from './useWorkspaceState';
 import type { WorkspacePrefs, AppDescriptor, AppManifestEntry } from './types';
 import type { ShellConnectionEventMap } from 'shared';
 import { ConnectionManager } from '../connection/connection';
+import { useAppRegistry } from '../hooks/AppRegistryContext';
 
 // =============================================================================
 // SESSION PERSISTENCE HELPER
@@ -151,14 +152,15 @@ const WorkspaceContext = createContext<IWorkspaceContext | null>(null);
 export const WorkspaceProvider: React.FC<{
 	client: RocketRideClient | null;
 	isConnected: boolean;
-	apps: AppManifestEntry[];
 	workspaceDir?: string;
 	startupAppId?: string;
 	children: React.ReactNode;
 	defaultAppId?: string;
 	themeOptions?: { id: string; name: string }[];
 	onThemeChange?: (themeId: string) => void;
-}> = ({ client, isConnected, apps, workspaceDir, startupAppId, defaultAppId: defaultAppIdProp, themeOptions: themeOptionsProp, onThemeChange, children }) => {
+}> = ({ client, isConnected, workspaceDir, startupAppId, defaultAppId: defaultAppIdProp, themeOptions: themeOptionsProp, onThemeChange, children }) => {
+	// Read the registered apps list from AppRegistry (single source of truth)
+	const { apps, ensureApp } = useAppRegistry();
 	// Default app ID — use the prop from Shell (mode-aware), or fall back to hello.
 	const defaultAppId = defaultAppIdProp || 'rocketride.hello';
 
@@ -166,7 +168,7 @@ export const WorkspaceProvider: React.FC<{
 	const {
 		loaded, seeded, activeAppId, prefs, appState, settings,
 		switchApp, updatePrefs, updateAppState, updateSetting,
-	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
+	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId, apps);
 
 	// --- Lazy descriptor loading -----------------------------------------------
 
@@ -198,12 +200,12 @@ export const WorkspaceProvider: React.FC<{
 	 */
 	const loadDescriptor = useCallback(async (appId: string) => {
 		// Skip if already loaded
-		if (loadedAppsRef.current[appId]) { return; }
+		if (loadedAppsRef.current[appId]) return;
 		// Skip if a load is already in flight
-		if (loadingSetRef.current.has(appId)) { return; }
+		if (loadingSetRef.current.has(appId)) return;
 		// Skip if this app already failed — only retryApp re-attempts it (it clears
 		// failedSetRef first), so the auto-load effect can't silently re-arm the load.
-		if (failedSetRef.current.has(appId)) { return; }
+		if (failedSetRef.current.has(appId)) return;
 		// Find the manifest entry
 		const entry = apps.find((a) => a.id === appId);
 		if (!entry) return;
@@ -253,21 +255,36 @@ export const WorkspaceProvider: React.FC<{
 		loadDescriptor(appId);
 	}, [loadDescriptor]);
 
-	// Load the active app's descriptor once workspace state is ready
-	// (seeded is enough — don't wait for the full disk load)
+	// Load the active app's descriptor once workspace state is ready.
+	// Uses ensureApp to guarantee the app is registered before loading.
 	useEffect(() => {
-		if (loaded || seeded) loadDescriptor(activeAppId);
-	}, [loaded, seeded, activeAppId, loadDescriptor]);
+		if (loaded || seeded) {
+			(async () => {
+				const entry = await ensureApp(activeAppId);
+				if (entry) {
+					loadDescriptor(activeAppId);
+				} else {
+					switchApp(defaultAppId);
+					loadDescriptor(defaultAppId);
+				}
+			})();
+		}
+	}, [loaded, seeded, activeAppId, loadDescriptor, ensureApp, defaultAppId, switchApp]);
 
 	// --- shell:switchApp → programmatic app switch ----------------------------
 
 	useEffect(() => {
 		/** Allows non-React code to switch the active app without having
-		 *  access to WorkspaceContext dispatch. */
-		return ConnectionManager.getInstance().on('shell:switchApp', ({ appId }) => {
-			// Resolve $HOME to the platform default, and unknown appIds to the default
+		 *  access to WorkspaceContext dispatch. If the app is not yet
+		 *  registered as an MF remote, fetch it from the catalog, register
+		 *  it, and then switch to it. */
+		return ConnectionManager.getInstance().on('shell:switchApp', async ({ appId }) => {
 			const target = appId === '$HOME' ? defaultAppId : appId;
-			const resolved = apps.find((a) => a.id === target) ? target : defaultAppId;
+			let resolved = target;
+
+			// Ensure the app is registered (fetches from catalog if needed)
+			const entry = await ensureApp(target);
+			if (!entry) resolved = defaultAppId;
 			switchApp(resolved);
 			loadDescriptor(resolved);
 			persistActiveApp(resolved);

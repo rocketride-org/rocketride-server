@@ -40,6 +40,9 @@ const AccountWebview: React.FC = () => {
 	const [isConnected, setIsConnected] = useState(false);
 	const [profile, setProfile] = useState<ConnectResult | null>(null);
 	const [authUser, setAuthUser] = useState<ConnectResult | null>(null);
+	// App label list ({id, name, icon}) from the desktop manifest — resolves
+	// billing-row appId → display name/icon (replaces the removed ConnectResult.apps).
+	const [appLabels, setAppLabels] = useState<Array<{ id: string; name: string; icon?: string }>>([]);
 	const [keys, setKeys] = useState<ApiKeyRecord[]>([]);
 	const [org, setOrg] = useState<OrgDetail | null>(null);
 	const [members, setMembers] = useState<MemberRecord[]>([]);
@@ -107,6 +110,7 @@ const AccountWebview: React.FC = () => {
 				setMembers(message.members);
 				setTeams(message.teams);
 				setKeys(message.keys);
+				setAppLabels((message as any).appLabels ?? []);
 				setReady(true);
 				break;
 
@@ -450,7 +454,7 @@ const AccountWebview: React.FC = () => {
 				billingLoading={billingLoading}
 				billingError={billingError}
 				creditBalance={creditBalance}
-				apps={authUser?.apps ?? profile?.apps}
+				apps={appLabels}
 				onCancelSubscription={handleCancelSubscription}
 				onOpenPortal={handleOpenPortal}
 				onSubscribe={handleSubscribe}

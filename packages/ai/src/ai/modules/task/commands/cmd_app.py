@@ -42,10 +42,12 @@ delegating to ``account.handle_app(conn, request)``:
   - ``rrext_app_pricing``    — pricing tier management
 """
 
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING
 
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
+from ai.account.models import RequestContext
+from rocketride.types.client import DAPRequest, DAPResponse
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -63,7 +65,7 @@ class AppCommands(DAPConn):
 
     The ``conn`` (``TaskConn`` instance) is passed through so SaaS handlers
     have full access to ``_account_info``, ``build_response()``,
-    ``require_zitadel_auth()``, and the rest of the DAP connection API.
+    ``verify_auth()``, and the rest of the DAP connection API.
     """
 
     def __init__(
@@ -78,30 +80,30 @@ class AppCommands(DAPConn):
 
     # ── rrext_app_developer ──────────────────────────────────────────────────
 
-    async def on_rrext_app_developer(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_app_developer(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_app_developer`` to the app handler."""
-        return await account.handle_app(self, request)
+        return await account.handle_app(self, request, ctx)
 
     # ── rrext_app_submission ─────────────────────────────────────────────────
 
-    async def on_rrext_app_submission(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_app_submission(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_app_submission`` to the app handler."""
-        return await account.handle_app(self, request)
+        return await account.handle_app(self, request, ctx)
 
     # ── rrext_app_catalog ────────────────────────────────────────────────────
 
-    async def on_rrext_app_catalog(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_app_catalog(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_app_catalog`` to the app handler."""
-        return await account.handle_app(self, request)
+        return await account.handle_app(self, request, ctx)
 
     # ── rrext_app_admin ──────────────────────────────────────────────────────
 
-    async def on_rrext_app_admin(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_app_admin(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_app_admin`` to the app handler."""
-        return await account.handle_app(self, request)
+        return await account.handle_app(self, request, ctx)
 
     # ── rrext_app_pricing ────────────────────────────────────────────────────
 
-    async def on_rrext_app_pricing(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_app_pricing(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """Delegate ``rrext_app_pricing`` to the app handler."""
-        return await account.handle_app(self, request)
+        return await account.handle_app(self, request, ctx)

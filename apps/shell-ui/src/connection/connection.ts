@@ -249,6 +249,11 @@ export class ConnectionManager implements IConnectionManager {
 					this.emit('shell:accountUpdate', message.body as ConnectResult);
 					return;
 				}
+				// Desktop apps update (separate from account identity)
+				if (message.event === 'apaext_desktop' && message.body) {
+					this.emit('shell:desktopUpdate', message.body);
+					return;
+				}
 				// Broadcast all other server events
 				this.emit('shell:event', { event: message });
 			},

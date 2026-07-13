@@ -64,6 +64,20 @@ class Account(AccountBase):
     capabilities = ('oss',)
 
     # =========================================================================
+    # INIT
+    # =========================================================================
+
+    async def init_account(self, server, full_init: bool = True) -> None:
+        """
+        Cache the home app manifest entry from apps.json.
+
+        The probe returns this so the shell knows which app to render
+        as the landing page without fetching the full catalog.
+        """
+        apps = self._read_apps_json(public_only=False)
+        self._home_app = next((a for a in apps if a.get('id') == 'rocketride.hello'), {})
+
+    # =========================================================================
     # AUTH
     # =========================================================================
 
@@ -97,12 +111,17 @@ class Account(AccountBase):
             # Key is configured but the credential doesn't match — reject.
             return (401, 'Invalid API key')
 
+        # OSS has no billing — mark every catalog app 'free' (an active status)
+        # so the subscription gate never blocks. Keyed by app id.
+        oss_subscriptions = {a['id']: 'free' for a in self._read_apps_json(public_only=False) if a.get('id')}
+
         # Credential matched — synthesise a local AccountInfo that grants the
         # connecting developer full admin access to the single 'local' team.
         return AccountInfo(
             auth=credential,
             userToken=credential,
             userId='local',
+            subscriptions=oss_subscriptions,
             displayName='RocketRide Developer',
             givenName='',
             familyName='',
@@ -137,13 +156,6 @@ class Account(AccountBase):
                     }
                 ],
             },
-            # OSS: all apps are on the desktop and free — return full manifest
-            # entries so the shell can register MF remotes after auth
-            apps=[
-                {**a, 'appStatus': 'free', 'onDesktop': True}
-                for a in self._read_apps_json(public_only=False)
-                if a.get('id')
-            ],
             capabilities=self.capabilities,
         )
 
@@ -296,7 +308,7 @@ class Account(AccountBase):
     # HANDLE ACCOUNT — env-only support for OSS
     # =========================================================================
 
-    async def handle_account(self, conn, request):
+    async def handle_account(self, conn, request, ctx=None):
         """
         Handle ``rrext_account_me`` for env subcommands only.
 
@@ -343,6 +355,12 @@ class Account(AccountBase):
             if sub == 'env_keys':
                 keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_'))
                 return conn.build_response(request, body={'keys': keys})
+
+            if sub == 'desktop':
+                # OSS desktop mirrors the full catalog — every app is free and
+                # on the desktop (no billing/subscription concept in OSS).
+                apps = [{**a, 'appStatus': 'free', 'onDesktop': True} for a in self._read_apps_json(public_only=False)]
+                return conn.build_response(request, body={'apps': apps})
 
         raise NotImplementedError('Account management requires SaaS mode')
 

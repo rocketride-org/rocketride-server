@@ -1,515 +1,416 @@
 """
 Unit tests for ai.modules.task.task_metrics.TaskMetrics.
 
-TaskMetrics samples CPU / memory / GPU usage of a process tree at a regular
-interval and aggregates the data into a Pydantic TASK_STATUS object plus
-internal billing accumulators. The class is mostly pure arithmetic on top
-of psutil and (optional) pynvml; tests mock those two external surfaces.
+TaskMetrics is now billing-focused. It no longer samples CPU / memory / GPU
+via psutil / pynvml — that responsibility moved to the task engine, which
+pushes live metrics into ``_status.metrics`` from ``>MET*`` messages. This
+class instead:
+
+- ingests subprocess-reported cumulative usage snapshots via ``>USG*``
+  (``merge_subprocess_usage``),
+- converts those accumulators to tokens using conversion rates from the
+  ``metrics_conversions`` DB table (``account.get_billing_rates``), writing a
+  fresh ``TASK_TOKENS`` model onto ``_status.tokens`` (``_update_tokens``),
+- gates billing until ``set_service_up(True)`` and snapshots baselines so
+  startup costs are excluded,
+- reports cumulative tokens to the credit ledger via
+  ``account.apply_debit`` (``_report_to_billing_system`` /
+  ``check_billing_report``), advancing ``_last_report_time``,
+- audits the final frozen totals via ``account.audit`` on ``stop_monitoring``.
 
 Test strategy:
 
-- ``psutil`` is replaced with a ``MagicMock`` for the whole module via
-  monkeypatch. Construction is then safe and ``Process(pid)`` returns a
-  controllable mock with ``.cpu_percent`` / ``.memory_info`` / ``.children``
-  attributes set per test.
-- ``pynvml`` is registered in ``sys.modules`` so the ``import pynvml`` inside
-  ``_detect_gpu`` and ``_sample_gpu`` resolves to a fake.
-- ``TASK_STATUS`` is faked with a ``SimpleNamespace`` carrying nested
-  ``metrics`` and ``tokens`` namespaces — the only attributes TaskMetrics
-  actually reads or writes.
-- The background ``asyncio`` monitor loop is exercised via
-  ``start_monitoring`` / ``stop_monitoring`` in a single asyncio test so
-  background-task teardown is deterministic.
+- ``ai.account`` is faked in ``sys.modules`` so the source's in-method
+  ``from ai.account import account`` resolves to a controllable mock. Its
+  ``get_billing_rates`` returns fixed test rates; ``apply_debit`` and
+  ``audit`` are AsyncMocks so the ledger / audit sinks are observable without
+  a real backend.
+- ``TASK_STATUS`` is faked with a ``SimpleNamespace`` carrying a real
+  ``TASK_TOKENS`` (dynamic, ``extra='allow'``) ``tokens`` sub-object — the
+  only attribute TaskMetrics reads or writes for token accounting.
+- Async methods are exercised under ``@pytest.mark.asyncio``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from rocketride.types.task import TASK_TOKENS
 
 from ai.modules.task import task_metrics
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers / fixtures
 # ---------------------------------------------------------------------------
 
 
 def make_status():
-    """Build a TASK_STATUS-shaped namespace with metrics + tokens sub-objects."""
-    return SimpleNamespace(
-        metrics=SimpleNamespace(
-            cpu_percent=0.0,
-            cpu_memory_mb=0.0,
-            gpu_memory_mb=0.0,
-            peak_cpu_percent=0.0,
-            peak_cpu_memory_mb=0.0,
-            peak_gpu_memory_mb=0.0,
-            avg_cpu_percent=0.0,
-            avg_cpu_memory_mb=0.0,
-            avg_gpu_memory_mb=0.0,
-        ),
-        tokens=SimpleNamespace(
-            cpu_utilization=0.0,
-            cpu_memory=0.0,
-            gpu_memory=0.0,
-            gpu_inference=0.0,
-            custom={},
-            total=0.0,
-        ),
-    )
+    """Build a TASK_STATUS-shaped namespace with a real (dynamic) TASK_TOKENS.
 
-
-class _NoSuchProcess(Exception):
-    """Stand-in for psutil.NoSuchProcess used in exception-path tests."""
-
-
-class _AccessDenied(Exception):
-    """Stand-in for psutil.AccessDenied used in exception-path tests."""
-
-
-@pytest.fixture
-def fake_psutil(monkeypatch):
+    TaskMetrics only ever reads/writes ``_status.tokens``, replacing it
+    wholesale with a fresh ``TASK_TOKENS`` in ``_update_tokens`` /
+    ``start_monitoring`` and calling ``.model_dump()`` on it when reporting.
     """
-    Replace ai.modules.task.task_metrics.psutil with a controllable MagicMock.
-
-    Tests configure the returned ``fake.Process`` to yield a per-test process
-    object via ``fake.Process.return_value = <mock>``. ``NoSuchProcess`` and
-    ``AccessDenied`` exception classes are wired so the source code's
-    ``except (psutil.NoSuchProcess, psutil.AccessDenied)`` blocks behave
-    correctly under tests that raise them.
-
-    Args:
-        monkeypatch: pytest's monkeypatch fixture.
-
-    Returns:
-        MagicMock: the patched psutil module replacement.
-    """
-    fake = MagicMock()
-    fake.NoSuchProcess = _NoSuchProcess
-    fake.AccessDenied = _AccessDenied
-    fake.cpu_count = MagicMock(return_value=4)
-    monkeypatch.setattr(task_metrics, 'psutil', fake)
-    return fake
+    return SimpleNamespace(tokens=TASK_TOKENS())
 
 
-@pytest.fixture
-def no_gpu(monkeypatch):
-    """
-    Make ``import pynvml`` raise ImportError so GPU detection falls into the
-    no-GPU branch — the simplest setup for tests that do not care about GPU.
-
-    Args:
-        monkeypatch: pytest's monkeypatch fixture.
-    """
-    monkeypatch.setitem(sys.modules, 'pynvml', None)  # importing None raises
-
-
-# Default billing rates matching the DB seed defaults (all time units in ms).
+# Default billing rates keyed like the ``metrics_conversions`` DB table.
+# Each value is tokens-per-unit for the matching subprocess usage key.
 _TEST_BILLING_RATES = {
-    'cpu_compute': 0.001,  # tokens per ms
-    'cpu_memory': 0.05,  # tokens per GB-sec
-    'gpu_compute': 0.005,  # tokens per ms
-    'gpu_memory': 2.0,  # tokens per GB-sec
-    'gpu_preprocess': 0.0,
-    'gpu_postprocess': 0.0,
-    'gpu_queue_wait': 0.0,
-    'gpu_inference_count': 0.0,
+    'cpu_compute': 0.001,
+    'cpu_memory': 0.05,
+    'gpu_compute': 0.005,
+    'gpu_memory': 2.0,
+    'requests': 1.0,
+    'pages': 0.0,  # zero rate — must never produce a token line
 }
 
 
-@pytest.fixture(autouse=True)
-def mock_billing_rates(monkeypatch):
-    """Mock account.get_billing_rates() so _update_tokens() uses test rates."""
-    mock_account = MagicMock()
-    mock_account.get_billing_rates.return_value = _TEST_BILLING_RATES
-    monkeypatch.setitem(sys.modules, 'ai.account', MagicMock(account=mock_account))
+@pytest.fixture
+def mock_account(monkeypatch):
+    """Fake ``ai.account.account`` in ``sys.modules``.
 
-
-def _make_metrics(fake_psutil, pid=1234, sample_interval=1.0, callback=None):
-    """
-    Build a TaskMetrics with mocked psutil and a fresh TASK_STATUS namespace.
-
-    Args:
-        fake_psutil: the fake_psutil fixture's MagicMock (so the constructor
-            does not touch the real psutil module).
-        pid: the integer pid argument passed through to TaskMetrics.
-        sample_interval: pass-through to TaskMetrics.
-        callback: optional update callback.
+    The source imports ``from ai.account import account`` *inside* its
+    methods, so patching ``sys.modules['ai.account']`` with a module-like
+    MagicMock exposing an ``account`` attribute is sufficient to intercept
+    every billing call.
 
     Returns:
-        tuple[TaskMetrics, SimpleNamespace]: the constructed instance and the
-        backing status namespace (so tests can read updated fields).
+        MagicMock: the fake ``account`` object. ``get_billing_rates`` is a
+        plain mock returning ``_TEST_BILLING_RATES``; ``apply_debit`` and
+        ``audit`` are AsyncMocks recording every ledger / audit call.
     """
-    status = make_status()
-    tm = task_metrics.TaskMetrics(
-        pid=pid,
+    account = MagicMock()
+    account.get_billing_rates.return_value = dict(_TEST_BILLING_RATES)
+    account.apply_debit = AsyncMock(return_value=True)
+    account.audit = AsyncMock(return_value=None)
+    monkeypatch.setitem(sys.modules, 'ai.account', MagicMock(account=account))
+    return account
+
+
+def _make_metrics(status=None, **overrides):
+    """Construct a TaskMetrics with sensible billing identifiers.
+
+    Args:
+        status: optional pre-built status namespace; a fresh one is created
+            when omitted.
+        **overrides: constructor keyword overrides (e.g. ``org_id=''``).
+
+    Returns:
+        tuple[TaskMetrics, SimpleNamespace]: the instance and its status.
+    """
+    status = status or make_status()
+    kwargs = dict(
         task_status=status,
-        sample_interval=sample_interval,
-        on_update_callback=callback,
+        task_id='task-abc',
+        client_id='client-1',
+        user_id='user-1',
+        team_id='team-1',
+        org_id='org-1',
+        pipeline_name='my-pipeline',
+        source_name='my-source',
     )
+    kwargs.update(overrides)
+    tm = task_metrics.TaskMetrics(**kwargs)
     return tm, status
 
 
 # ---------------------------------------------------------------------------
-# __init__ — happy path and GPU detection branches
+# __init__ — construction and defaults
 # ---------------------------------------------------------------------------
 
 
-def test_init_defaults_use_sample_interval_constant(fake_psutil, no_gpu):
-    """When ``sample_interval=None``, the constant default is used."""
+def test_init_sets_billing_identifiers_and_defaults(mock_account):
+    """Constructor stores identifiers and starts billing-gated with empty usage."""
+    tm, status = _make_metrics()
+
+    assert tm.task_id == 'task-abc'
+    assert tm.client_id == 'client-1'
+    assert tm.user_id == 'user-1'
+    assert tm.team_id == 'team-1'
+    assert tm.org_id == 'org-1'
+    assert tm.pipeline_name == 'my-pipeline'
+    assert tm.source_name == 'my-source'
+
+    # Billing starts gated; usage / baselines empty until >USG* arrives.
+    assert tm._billing_gated is True
+    assert tm._subprocess_usage == {}
+    assert tm._baselines == {}
+
+    # Report interval seeded from the module constant.
+    assert tm._report_interval_seconds == task_metrics.CONST_BILLING_REPORT_INTERVAL
+    assert isinstance(tm._last_report_time, float)
+
+
+def test_init_generates_unique_billing_run_id(mock_account):
+    """Each instance gets its own billing_run_id for ledger idempotency."""
+    tm1, _ = _make_metrics()
+    tm2, _ = _make_metrics()
+    assert tm1.billing_run_id != tm2.billing_run_id
+    assert isinstance(tm1.billing_run_id, str) and tm1.billing_run_id
+
+
+def test_init_optional_identifiers_default_to_empty(mock_account):
+    """Missing user/team/org/pipeline/source default to empty strings, not None."""
     status = make_status()
-    tm = task_metrics.TaskMetrics(pid=1, task_status=status, sample_interval=None)
-    assert tm.sample_interval == task_metrics.CONST_METRICS_SAMPLE_INTERVAL
-
-
-def test_init_no_pynvml_disables_gpu_billing(fake_psutil, no_gpu):
-    """ImportError on pynvml is caught and GPU tracking is disabled cleanly."""
-    tm, _ = _make_metrics(fake_psutil)
-    assert tm._gpu_available is False
-    assert tm._pynvml_available is False
-    assert tm._gpu_count == 0
-
-
-def test_init_gpu_available_records_count_and_baseline(monkeypatch, fake_psutil):
-    """When pynvml reports GPUs, the count and per-GPU baseline are captured."""
-    pynvml = MagicMock()
-    pynvml.nvmlDeviceGetCount.return_value = 2
-    pynvml.nvmlSystemGetDriverVersion.return_value = '535.171.04'
-
-    handle_0, handle_1 = MagicMock(name='h0'), MagicMock(name='h1')
-    pynvml.nvmlDeviceGetHandleByIndex.side_effect = [handle_0, handle_1]
-
-    # Two GPUs with different baseline usage.
-    pynvml.nvmlDeviceGetMemoryInfo.side_effect = [
-        SimpleNamespace(used=1024 * 1024 * 200),  # 200 MB
-        SimpleNamespace(used=1024 * 1024 * 400),  # 400 MB
-    ]
-    monkeypatch.setitem(sys.modules, 'pynvml', pynvml)
-
-    tm, _ = _make_metrics(fake_psutil)
-    assert tm._gpu_count == 2
-    assert tm._gpu_available is True
-    assert tm._pynvml_available is True
-    assert tm._gpu_baseline_memory_mb == [200.0, 400.0]
-
-
-def test_init_gpu_nvml_init_failure_disables_gpu(monkeypatch, fake_psutil):
-    """If pynvml.nvmlInit() raises, GPU tracking is disabled (no crash)."""
-    pynvml = MagicMock()
-    pynvml.nvmlInit.side_effect = RuntimeError('NVML init failed')
-    monkeypatch.setitem(sys.modules, 'pynvml', pynvml)
-
-    tm, _ = _make_metrics(fake_psutil)
-    assert tm._gpu_available is False
-    assert tm._gpu_count == 0
+    tm = task_metrics.TaskMetrics(task_status=status)
+    assert tm.user_id == ''
+    assert tm.team_id == ''
+    assert tm.org_id == ''
+    assert tm.pipeline_name == ''
+    assert tm.source_name == ''
 
 
 # ---------------------------------------------------------------------------
-# _sample_cpu_memory
+# set_service_up — billing gate + baseline snapshot
 # ---------------------------------------------------------------------------
 
 
-def test_sample_cpu_memory_aggregates_parent_and_children(fake_psutil, no_gpu):
-    """CPU% and memory are summed across the main process and all children."""
-    proc = MagicMock(name='proc')
-    proc.cpu_percent.return_value = 80.0
-    proc.memory_info.return_value = SimpleNamespace(rss=100 * 1024 * 1024)  # 100 MB
+def test_set_service_up_true_snapshots_baselines_and_ungates(mock_account):
+    """Snapshots current usage as baselines and opens the billing gate on set_service_up(True)."""
+    tm, _ = _make_metrics()
+    tm._subprocess_usage = {'cpu_compute': 5000.0, 'gpu_memory': 3.0}
 
-    child_a = MagicMock(name='child_a')
-    child_a.cpu_percent.return_value = 40.0
-    child_a.memory_info.return_value = SimpleNamespace(rss=50 * 1024 * 1024)
+    tm.set_service_up(True)
 
-    child_b = MagicMock(name='child_b')
-    child_b.cpu_percent.return_value = 20.0
-    child_b.memory_info.return_value = SimpleNamespace(rss=10 * 1024 * 1024)
-
-    proc.children.return_value = [child_a, child_b]
-    fake_psutil.Process.return_value = proc
-
-    tm, status = _make_metrics(fake_psutil)
-    tm._sample_cpu_memory()
-
-    # Raw (unnormalised) total CPU = 80 + 40 + 20 = 140 — used for billing.
-    assert tm._cpu_percent_raw == pytest.approx(140.0)
-    # Normalised against 4 logical cpus from cpu_count.
-    assert status.metrics.cpu_percent == pytest.approx(35.0)
-    # Memory = 100 + 50 + 10 = 160 MB
-    assert status.metrics.cpu_memory_mb == pytest.approx(160.0)
+    assert tm._billing_gated is False
+    # Baselines are a copy of usage at the moment of serviceUp.
+    assert tm._baselines == {'cpu_compute': 5000.0, 'gpu_memory': 3.0}
+    assert tm._baselines is not tm._subprocess_usage
 
 
-def test_sample_cpu_memory_skips_dead_children(fake_psutil, no_gpu):
-    """A NoSuchProcess from a child is swallowed and the rest are still summed."""
-    proc = MagicMock()
-    proc.cpu_percent.return_value = 10.0
-    proc.memory_info.return_value = SimpleNamespace(rss=20 * 1024 * 1024)
-
-    alive = MagicMock()
-    alive.cpu_percent.return_value = 5.0
-    alive.memory_info.return_value = SimpleNamespace(rss=5 * 1024 * 1024)
-
-    dead = MagicMock()
-    dead.cpu_percent.side_effect = _NoSuchProcess('gone')
-
-    proc.children.return_value = [alive, dead]
-    fake_psutil.Process.return_value = proc
-
-    tm, status = _make_metrics(fake_psutil)
-    tm._sample_cpu_memory()
-
-    # Dead child contributed nothing; only parent + alive child.
-    assert tm._cpu_percent_raw == pytest.approx(15.0)
-    assert status.metrics.cpu_memory_mb == pytest.approx(25.0)
+def test_set_service_up_false_regates_billing(mock_account):
+    """serviceUp(False) closes the billing gate again."""
+    tm, _ = _make_metrics()
+    tm.set_service_up(True)
+    assert tm._billing_gated is False
+    tm.set_service_up(False)
+    assert tm._billing_gated is True
 
 
-def test_sample_cpu_memory_silently_handles_dead_parent(fake_psutil, no_gpu):
-    """A NoSuchProcess on the parent leaves status fields untouched."""
-    proc = MagicMock()
-    proc.cpu_percent.side_effect = _NoSuchProcess('gone')
-    fake_psutil.Process.return_value = proc
+def test_set_service_up_true_twice_does_not_reset_baselines(mock_account):
+    """Baselines are only captured on the gated->ungated transition."""
+    tm, _ = _make_metrics()
+    tm._subprocess_usage = {'cpu_compute': 100.0}
+    tm.set_service_up(True)
+    first_baselines = tm._baselines
 
-    tm, status = _make_metrics(fake_psutil)
-    # Pre-condition: both fields are zero from construction.
-    assert status.metrics.cpu_percent == 0.0
-    tm._sample_cpu_memory()  # must not raise
-    assert status.metrics.cpu_percent == 0.0
-    assert status.metrics.cpu_memory_mb == 0.0
+    # Usage grows, then serviceUp(True) is signalled again while already up.
+    tm._subprocess_usage = {'cpu_compute': 999.0}
+    tm.set_service_up(True)
+
+    # Baseline unchanged — the initial startup snapshot is preserved.
+    assert tm._baselines == first_baselines == {'cpu_compute': 100.0}
 
 
 # ---------------------------------------------------------------------------
-# _sample_gpu
+# merge_subprocess_usage / _update_tokens — >USG* ingest + rate conversion
 # ---------------------------------------------------------------------------
 
 
-def test_sample_gpu_no_pynvml_sets_zero(fake_psutil, no_gpu):
-    """Without pynvml, gpu_memory_mb is forced to 0.0 (billing disabled)."""
-    tm, status = _make_metrics(fake_psutil)
-    status.metrics.gpu_memory_mb = 999.0  # poison: must be cleared
-    tm._sample_gpu()
-    assert status.metrics.gpu_memory_mb == 0.0
+def test_merge_subprocess_usage_replaces_snapshot_wholesale(mock_account):
+    """Each >USG* payload replaces the previous absolute snapshot."""
+    tm, _ = _make_metrics()
+    tm.set_service_up(True)
+
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 10.0, 'requests': 2.0}})
+    assert tm._subprocess_usage == {'cpu_compute': 10.0, 'requests': 2.0}
+
+    # A later snapshot omitting requests fully replaces the prior dict.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 25.0}})
+    assert tm._subprocess_usage == {'cpu_compute': 25.0}
 
 
-def test_sample_gpu_uses_per_process_memory_when_available(monkeypatch, fake_psutil):
-    """Driver reports per-process usedGpuMemory; sum across our pid set."""
-    pynvml = MagicMock()
-    pynvml.nvmlDeviceGetCount.return_value = 1
-    handle = MagicMock()
-    pynvml.nvmlDeviceGetHandleByIndex.return_value = handle
-    pynvml.nvmlDeviceGetMemoryInfo.return_value = SimpleNamespace(used=0)
-    pynvml.nvmlSystemGetDriverVersion.return_value = '535.0'
-
-    # Our pid is 1234. Some processes belong to us, others don't.
-    our_proc = SimpleNamespace(pid=1234, usedGpuMemory=300 * 1024 * 1024)  # 300 MB
-    other = SimpleNamespace(pid=9999, usedGpuMemory=500 * 1024 * 1024)
-    pynvml.nvmlDeviceGetComputeRunningProcesses.return_value = [our_proc, other]
-
-    monkeypatch.setitem(sys.modules, 'pynvml', pynvml)
-
-    proc = MagicMock()
-    proc.children.return_value = []
-    fake_psutil.Process.return_value = proc
-
-    tm, status = _make_metrics(fake_psutil, pid=1234)
-    tm._sample_gpu()
-    assert status.metrics.gpu_memory_mb == pytest.approx(300.0)
+def test_merge_subprocess_usage_coerces_keys_and_values(mock_account):
+    """Keys become str and values become float on ingest."""
+    tm, _ = _make_metrics()
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 7}})
+    assert tm._subprocess_usage == {'cpu_compute': 7.0}
+    assert isinstance(next(iter(tm._subprocess_usage.values())), float)
 
 
-def test_sample_gpu_falls_back_when_driver_reports_none(monkeypatch, fake_psutil):
+def test_merge_subprocess_usage_invokes_update_callback(mock_account):
+    """The on_update_callback fires after each merge."""
+    callback = MagicMock()
+    tm, _ = _make_metrics(on_update_callback=callback)
+    tm.set_service_up(True)
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 1.0}})
+    callback.assert_called_once()
+
+
+def test_update_tokens_converts_usage_via_db_rates(mock_account):
+    """Tokens = billable_usage * DB rate, per key, on _status.tokens."""
+    tm, status = _make_metrics()
+    tm.set_service_up(True)
+    # First >USG* after service-up establishes a zero baseline (no startup
+    # usage accrued), so the real usage below bills in full.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 0.0, 'gpu_memory': 0.0, 'requests': 0.0, 'pages': 0.0}})
+
+    tm.merge_subprocess_usage(
+        {
+            'values': {
+                'cpu_compute': 5000.0,  # 5000 * 0.001 = 5.0
+                'gpu_memory': 3.0,  # 3 * 2.0 = 6.0
+                'requests': 4.0,  # 4 * 1.0 = 4.0
+                'pages': 100.0,  # rate 0.0 -> no token line
+            }
+        }
+    )
+
+    dump = status.tokens.model_dump()
+    assert dump.get('cpu_compute') == pytest.approx(5.0)
+    assert dump.get('gpu_memory') == pytest.approx(6.0)
+    assert dump.get('requests') == pytest.approx(4.0)
+    # Zero-rate keys never produce a token line.
+    assert 'pages' not in dump
+
+
+def test_baseline_deferred_to_first_usg_after_service_up(mock_account):
+    """When service-up fires before any >USG*, the first post-service-up
+    snapshot becomes the baseline (excluded); only later growth is billed.
     """
-    WDDM driver reports usedGpuMemory=None for every process. Fallback:
-    total GPU memory minus the baseline captured at init.
-    """
-    pynvml = MagicMock()
-    pynvml.nvmlDeviceGetCount.return_value = 1
-    handle = MagicMock()
-    pynvml.nvmlDeviceGetHandleByIndex.return_value = handle
-    # Baseline captured at __init__ time:
-    baseline = SimpleNamespace(used=200 * 1024 * 1024)  # 200 MB
-    # Current usage at sample time:
-    sample_now = SimpleNamespace(used=800 * 1024 * 1024)  # 800 MB total
-    pynvml.nvmlDeviceGetMemoryInfo.side_effect = [baseline, sample_now]
-    pynvml.nvmlSystemGetDriverVersion.return_value = '535.0'
+    tm, status = _make_metrics()
 
-    our_proc = SimpleNamespace(pid=1234, usedGpuMemory=None)
-    pynvml.nvmlDeviceGetComputeRunningProcesses.return_value = [our_proc]
+    # serviceUp with no usage yet -> baseline capture is deferred.
+    tm.set_service_up(True)
+    assert tm._baseline_pending is True
+    assert tm._baselines == {}
 
-    monkeypatch.setitem(sys.modules, 'pynvml', pynvml)
+    # First >USG* after service-up carries all of startup -> it becomes the
+    # baseline and nothing is billed for it.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 5000.0}})
+    assert tm._baseline_pending is False
+    assert tm._baselines == {'cpu_compute': 5000.0}
+    assert status.tokens.model_dump() == {}
 
-    proc = MagicMock()
-    proc.children.return_value = []
-    fake_psutil.Process.return_value = proc
-
-    tm, status = _make_metrics(fake_psutil, pid=1234)
-    tm._sample_gpu()
-    # 800 (current) - 200 (baseline) = 600 MB
-    assert status.metrics.gpu_memory_mb == pytest.approx(600.0)
+    # Subsequent growth bills against the baseline: (8000 - 5000) * 0.001 = 3.0.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 8000.0}})
+    assert status.tokens.model_dump().get('cpu_compute') == pytest.approx(3.0)
 
 
-def test_sample_gpu_swallows_sampling_errors(monkeypatch, fake_psutil):
-    """If pynvml raises mid-sample, the error is logged once and value reset to 0."""
-    pynvml = MagicMock()
-    pynvml.nvmlDeviceGetCount.return_value = 1
-    pynvml.nvmlDeviceGetHandleByIndex.side_effect = RuntimeError('nvml dead')
-    pynvml.nvmlDeviceGetMemoryInfo.return_value = SimpleNamespace(used=0)
-    pynvml.nvmlSystemGetDriverVersion.return_value = '535.0'
+def test_update_tokens_subtracts_baselines(mock_account):
+    """Startup usage captured as a baseline is excluded from billed tokens."""
+    tm, status = _make_metrics()
+    # Startup: 2000 units of cpu_compute accrued before serviceUp.
+    tm._subprocess_usage = {'cpu_compute': 2000.0}
+    tm.set_service_up(True)  # baseline = 2000
 
-    monkeypatch.setitem(sys.modules, 'pynvml', pynvml)
+    # After serviceUp, usage climbs to 5000. Billable = 5000 - 2000 = 3000.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 5000.0}})
 
-    proc = MagicMock()
-    proc.children.return_value = []
-    fake_psutil.Process.return_value = proc
-
-    tm, status = _make_metrics(fake_psutil, pid=1234)
-    status.metrics.gpu_memory_mb = 123.0  # poison
-    tm._sample_gpu()
-    # The per-GPU loop swallows the exception (continue), so total stays 0.0.
-    assert status.metrics.gpu_memory_mb == pytest.approx(0.0)
+    dump = status.tokens.model_dump()
+    assert dump.get('cpu_compute') == pytest.approx(3.0)  # 3000 * 0.001
 
 
-# ---------------------------------------------------------------------------
-# _accumulate_sample — arithmetic over time
-# ---------------------------------------------------------------------------
+def test_update_tokens_gated_produces_no_tokens(mock_account):
+    """While billing-gated (before serviceUp), no tokens are calculated."""
+    tm, status = _make_metrics()
+    # No set_service_up -> still gated.
+    tm.merge_subprocess_usage({'values': {'cpu_compute': 5000.0}})
+    assert status.tokens.model_dump() == {}
 
 
-def test_accumulate_sample_updates_internal_counters(fake_psutil, no_gpu):
-    """Internal cpu_seconds, memory_mb_seconds, duration_seconds increase as expected."""
-    tm, status = _make_metrics(fake_psutil)
-    tm.set_service_up(True)  # ungate billing accumulators
-    tm._cpu_percent_raw = 200.0  # raw across cores
-    status.metrics.cpu_memory_mb = 150.0
-    status.metrics.gpu_memory_mb = 0.0  # gpu not available anyway
-
-    tm._accumulate_sample(interval=2.0)
-
-    assert tm._sample_count == 1
-    assert tm._duration_seconds == pytest.approx(2.0)
-    # cpu_seconds = 200% * 2s / 100 = 4.0 vCPU-seconds
-    assert tm._cpu_seconds == pytest.approx(4.0)
-    # memory_mb_seconds = 150 * 2 = 300
-    assert tm._memory_mb_seconds == pytest.approx(300.0)
-
-
-def test_accumulate_sample_tracks_peaks(fake_psutil, no_gpu):
-    """Peak fields move only upward across samples."""
-    tm, status = _make_metrics(fake_psutil)
-
-    # First sample
-    tm._cpu_percent_raw = 100.0
-    status.metrics.cpu_percent = 25.0
-    status.metrics.cpu_memory_mb = 100.0
-    status.metrics.gpu_memory_mb = 0.0
-    tm._accumulate_sample(1.0)
-    assert status.metrics.peak_cpu_percent == 25.0
-    assert status.metrics.peak_cpu_memory_mb == 100.0
-
-    # Lower second sample — peaks must not regress.
-    tm._cpu_percent_raw = 50.0
-    status.metrics.cpu_percent = 12.0
-    status.metrics.cpu_memory_mb = 50.0
-    tm._accumulate_sample(1.0)
-    assert status.metrics.peak_cpu_percent == 25.0
-    assert status.metrics.peak_cpu_memory_mb == 100.0
-
-    # Higher third sample — peaks rise.
-    tm._cpu_percent_raw = 400.0
-    status.metrics.cpu_percent = 100.0
-    status.metrics.cpu_memory_mb = 250.0
-    tm._accumulate_sample(1.0)
-    assert status.metrics.peak_cpu_percent == 100.0
-    assert status.metrics.peak_cpu_memory_mb == 250.0
-
-
-def test_accumulate_sample_computes_averages(fake_psutil, no_gpu):
-    """avg_* fields equal accumulated total / duration."""
-    tm, status = _make_metrics(fake_psutil)
-    tm.set_service_up(True)  # ungate billing accumulators
-    tm._cpu_percent_raw = 200.0
-    status.metrics.cpu_memory_mb = 100.0
-    tm._accumulate_sample(2.0)
-    # avg_cpu_percent = cpu_seconds / duration * 100 = (4 / 2) * 100 = 200
-    assert status.metrics.avg_cpu_percent == pytest.approx(200.0)
-    # avg memory = 200 / 2 = 100
-    assert status.metrics.avg_cpu_memory_mb == pytest.approx(100.0)
+def test_update_tokens_ignores_unpriced_keys(mock_account):
+    """Usage keys with no matching DB rate produce no token line."""
+    tm, status = _make_metrics()
+    tm.set_service_up(True)
+    tm.merge_subprocess_usage({'values': {'unknown_metric': 500.0}})
+    assert 'unknown_metric' not in status.tokens.model_dump()
 
 
 # ---------------------------------------------------------------------------
-# _update_tokens — rate math
+# _report_to_billing_system — ledger writes + state advancement
 # ---------------------------------------------------------------------------
 
 
-def test_update_tokens_converts_resource_accumulators_via_db_rates(fake_psutil, no_gpu):
-    """Tokens = raw_value * DB rate; total = sum of components."""
-    tm, status = _make_metrics(fake_psutil)
-    tm.set_service_up(True)  # ungate billing accumulators
-    # Inject accumulators directly to bypass arithmetic noise.
-    # 100 CPU-seconds = 100_000 ms * 0.001 tokens/ms = 100 tokens
-    tm._cpu_seconds = 100.0
-    # 10240 MB-sec = 10 GB-sec * 0.05 tokens/GB-sec = 0.5 tokens
-    tm._memory_mb_seconds = 10240.0
-    # GPU memory comes from subprocess timer, not OS sampling
-    # Simulate 5 GB-sec of inference VRAM (stored as GB-sec, not ms)
-    tm._subprocess_timers['gpu_memory'] = 5.0
+@pytest.mark.asyncio
+async def test_report_to_billing_system_writes_ledger_rows(mock_account):
+    """Each positive token key produces one apply_debit UPSERT with a stable idem key."""
+    tm, status = _make_metrics()
+    status.tokens = TASK_TOKENS(cpu_compute=5.0, gpu_memory=6.0)
 
-    tm._update_tokens()
+    await tm._report_to_billing_system()
 
-    expected_cpu = round(100.0 * 1000.0 * _TEST_BILLING_RATES['cpu_compute'], 1)
-    expected_mem = round(10.0 * _TEST_BILLING_RATES['cpu_memory'], 1)
-    expected_gpu_mem = round(5.0 * _TEST_BILLING_RATES['gpu_memory'], 1)
-    assert status.tokens.cpu_utilization == expected_cpu
-    assert status.tokens.cpu_memory == expected_mem
-    assert status.tokens.gpu_memory == expected_gpu_mem
-    expected_total = round(expected_cpu + expected_mem + expected_gpu_mem, 1)
-    assert status.tokens.total == expected_total
+    assert mock_account.apply_debit.await_count == 2
+    idem_keys = {c.kwargs['idempotency_key'] for c in mock_account.apply_debit.await_args_list}
+    assert idem_keys == {
+        f'task:{tm.billing_run_id}:cpu_compute',
+        f'task:{tm.billing_run_id}:gpu_memory',
+    }
+    # Amounts are the cumulative per-key totals.
+    amounts = {c.kwargs['description']: c.kwargs['amount'] for c in mock_account.apply_debit.await_args_list}
+    assert amounts == {'cpu_compute': 5.0, 'gpu_memory': 6.0}
 
 
-# ---------------------------------------------------------------------------
-# _report_to_billing_system — delta computation + state advancement
-# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_report_to_billing_system_skips_when_no_org(mock_account):
+    """With no org, nothing is written to the ledger."""
+    tm, status = _make_metrics(org_id='')
+    status.tokens = TASK_TOKENS(cpu_compute=5.0)
+    await tm._report_to_billing_system()
+    mock_account.apply_debit.assert_not_awaited()
 
 
-def test_report_to_billing_system_advances_last_report_state(fake_psutil, no_gpu):
-    """After a report, the _last_report_* tracking matches the current accumulators."""
-    tm, status = _make_metrics(fake_psutil)
-    tm._cpu_seconds = 100.0
-    tm._memory_mb_seconds = 200.0
-    tm._gpu_memory_mb_seconds = 50.0
-    status.tokens.cpu_utilization = 10.0
-    status.tokens.cpu_memory = 20.0
-    status.tokens.gpu_memory = 5.0
-    status.tokens.total = 35.0
-
-    asyncio.run(tm._report_to_billing_system())
-
-    # State advanced — the next report's delta starts from these.
-    assert tm._last_report_cpu_seconds == 100.0
-    assert tm._last_report_memory_mb_seconds == 200.0
-    assert tm._last_report_gpu_memory_mb_seconds == 50.0
-    assert tm._last_report_tokens_cpu == 10.0
-    assert tm._last_report_tokens_memory == 20.0
-    assert tm._last_report_tokens_gpu == 5.0
+@pytest.mark.asyncio
+async def test_report_to_billing_system_skips_zero_total(mock_account):
+    """Zero cumulative tokens produce no ledger write."""
+    tm, status = _make_metrics()
+    status.tokens = TASK_TOKENS()  # empty -> total 0
+    await tm._report_to_billing_system()
+    mock_account.apply_debit.assert_not_awaited()
 
 
-def test_report_to_billing_system_handles_consecutive_reports(fake_psutil, no_gpu):
-    """Second report sees only the delta accrued since the first."""
-    tm, _ = _make_metrics(fake_psutil)
+@pytest.mark.asyncio
+async def test_report_to_billing_system_skips_zero_valued_keys(mock_account):
+    """Individual zero/negative token keys are not written even if total > 0."""
+    tm, status = _make_metrics()
+    status.tokens = TASK_TOKENS(cpu_compute=5.0, gpu_memory=0.0)
+    await tm._report_to_billing_system()
+    descriptions = {c.kwargs['description'] for c in mock_account.apply_debit.await_args_list}
+    assert descriptions == {'cpu_compute'}
 
-    async def run():
-        """Run two consecutive billing reports."""
-        # First period
-        tm._cpu_seconds = 100.0
-        await tm._report_to_billing_system()
-        assert tm._last_report_cpu_seconds == 100.0
 
-        # Second period — accumulators grew by 50
-        tm._cpu_seconds = 150.0
-        await tm._report_to_billing_system()
-        assert tm._last_report_cpu_seconds == 150.0
+@pytest.mark.asyncio
+async def test_check_billing_report_advances_last_report_time(mock_account):
+    """When the interval has elapsed, a report is sent and _last_report_time advances."""
+    tm, status = _make_metrics()
+    status.tokens = TASK_TOKENS(cpu_compute=5.0)
+    # Force the interval to appear elapsed.
+    tm._last_report_time = 0.0
 
-    asyncio.run(run())
+    await tm.check_billing_report()
+
+    mock_account.apply_debit.assert_awaited()
+    # _last_report_time moved forward to (roughly) now.
+    assert tm._last_report_time > 0.0
+
+
+@pytest.mark.asyncio
+async def test_check_billing_report_noop_before_interval(mock_account):
+    """No report is sent before the billing interval elapses."""
+    tm, status = _make_metrics()
+    status.tokens = TASK_TOKENS(cpu_compute=5.0)
+    import time as _time
+
+    tm._last_report_time = _time.time()  # just reported "now"
+    await tm.check_billing_report()
+    mock_account.apply_debit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_check_billing_report_noop_when_stopped(mock_account):
+    """A stopped instance is skipped by the centralized billing loop."""
+    tm, status = _make_metrics()
+    status.tokens = TASK_TOKENS(cpu_compute=5.0)
+    tm._last_report_time = 0.0
+    tm._stop_monitoring.set()
+    await tm.check_billing_report()
+    mock_account.apply_debit.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -517,51 +418,47 @@ def test_report_to_billing_system_handles_consecutive_reports(fake_psutil, no_gp
 # ---------------------------------------------------------------------------
 
 
-def test_start_monitoring_resets_state(fake_psutil, no_gpu):
-    """start_monitoring zeroes the per-session tracking before the loop runs."""
-    tm, status = _make_metrics(fake_psutil)
-    # Poison: simulate state left over from a prior session.
-    tm._last_report_cpu_seconds = 99.0
-    status.tokens.cpu_utilization = 99.0
-    status.tokens.total = 99.0
+def test_start_monitoring_resets_billing_state(mock_account):
+    """start_monitoring clears usage / baselines / tokens for a fresh session."""
+    tm, status = _make_metrics()
+    # Poison: leftover state from a prior session.
+    tm._subprocess_usage = {'cpu_compute': 99.0}
+    tm._baselines = {'cpu_compute': 5.0}
+    status.tokens = TASK_TOKENS(cpu_compute=99.0)
+    tm._stop_monitoring.set()
 
-    # asyncio.create_task needs a running loop, so run inside an event loop.
-    async def run():
-        """Run start + immediate stop on a live event loop."""
-        tm.start_monitoring()
-        # The monitoring task is scheduled but not yet executed.
-        await tm.stop_monitoring()
+    tm.start_monitoring()
 
-    asyncio.run(run())
-
-    assert tm._last_report_cpu_seconds == 0.0
-    assert status.tokens.cpu_utilization == 0.0
-    assert status.tokens.total == 0.0
+    assert tm._subprocess_usage == {}
+    assert tm._baselines == {}
+    assert status.tokens.model_dump() == {}
+    assert tm._stop_monitoring.is_set() is False
 
 
-def test_start_monitoring_is_idempotent(fake_psutil, no_gpu):
-    """Calling start_monitoring twice does not spawn a second task."""
-    tm, _ = _make_metrics(fake_psutil)
+@pytest.mark.asyncio
+async def test_stop_monitoring_reports_and_audits(mock_account):
+    """stop_monitoring marks inactive, sends a final report, and audits totals."""
+    tm, status = _make_metrics()
+    status.tokens = TASK_TOKENS(cpu_compute=5.0, gpu_memory=6.0)
 
-    async def run():
-        """Start twice, capture the task ref, then stop cleanly."""
-        tm.start_monitoring()
-        first = tm._monitoring_task
-        tm.start_monitoring()
-        second = tm._monitoring_task
-        await tm.stop_monitoring()
-        return first, second
+    await tm.stop_monitoring()
 
-    first, second = asyncio.run(run())
-    assert first is second
+    assert tm._stop_monitoring.is_set() is True
+    # Final billing report written.
+    mock_account.apply_debit.assert_awaited()
+    # Final usage audit written once with the frozen totals.
+    mock_account.audit.assert_awaited_once()
+    audit_kwargs = mock_account.audit.await_args.kwargs
+    assert audit_kwargs['org_id'] == 'org-1'
+    assert audit_kwargs['reason'] == 'task_usage'
+    assert audit_kwargs['response_data']['usage'] == {'cpu_compute': 5.0, 'gpu_memory': 6.0}
 
 
-def test_stop_monitoring_on_idle_is_a_noop(fake_psutil, no_gpu):
-    """Stopping when no task was ever started does not raise."""
-    tm, _ = _make_metrics(fake_psutil)
-
-    async def run():
-        """Stop without ever starting — must not raise."""
-        await tm.stop_monitoring()
-
-    asyncio.run(run())  # absence of exception is the assertion
+@pytest.mark.asyncio
+async def test_stop_monitoring_no_org_skips_audit(mock_account):
+    """With no org, stop_monitoring neither bills nor audits."""
+    tm, status = _make_metrics(org_id='')
+    status.tokens = TASK_TOKENS(cpu_compute=5.0)
+    await tm.stop_monitoring()
+    mock_account.apply_debit.assert_not_awaited()
+    mock_account.audit.assert_not_awaited()

@@ -53,7 +53,7 @@ Usage:
 from typing import Any, Dict
 
 
-class DAPException(Exception):
+class DAPException(RuntimeError):
     """
     Base exception class for Debug Adapter Protocol (DAP) errors.
 
@@ -99,6 +99,11 @@ class DAPException(Exception):
 
         # Store complete DAP result for detailed error analysis
         self.dap_result = dap_result or {}
+
+        # Extract server-side source location (if available)
+        trace = dap_result.get('trace') if dap_result else None
+        self.file: str | None = trace.get('file') if isinstance(trace, dict) else None
+        self.lineno: int | None = trace.get('lineno') if isinstance(trace, dict) else None
 
 
 class RocketRideException(DAPException):

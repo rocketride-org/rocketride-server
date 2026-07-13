@@ -89,6 +89,7 @@ __all__ = ['WebServer', 'AccountInfo']
 
 # ASCII art banner printed to stdout when the server starts (serve() only).
 logo = r"""
+
         _____            _        _   _____  _     _
        |  __ \          | |      | | |  __ \(_)   | |
        | |__) |___   ___| | _____| |_| |__) |_  __| | ___

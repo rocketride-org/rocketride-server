@@ -83,7 +83,7 @@ from ai.constants import (
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
-from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
+from ai.account.models import AccountInfo, RequestContext, resolve_task_permissions
 from ai.account.store import Store
 from ai.account.deployment_store import DeploymentStore
 from .task_conn import TaskConn
@@ -210,10 +210,15 @@ class TaskServer(DAPBase):
         self._connection_id = 0  # Monotonic connection identifier generator
         self._unauthed_by_ip: Dict[str, int] = {}  # Count of unauthenticated connections per client IP
 
+        # Publisher abstraction: LocalPublisher (default, OSS) broadcasts to in-process
+        # connections; RedisPublisher (SaaS) publishes to Redis pub/sub channels.
+        # Injected by saas/__init__.py via init_account() in SaaS mode.
+        self._publisher = None
+
         # Global port allocation tracking
         self._allocated_ports: List[int] = []
 
-        # Shared store instance (lazy-loaded via property)
+        # Shared store instance (eagerly created in __init__)
         self._store_instance: Optional[Store] = None
         self._deployments_instance: Optional[DeploymentStore] = None
 
@@ -223,6 +228,8 @@ class TaskServer(DAPBase):
             asyncio.create_task(self._cleanup_tasks()),
             # TTL monitoring
             asyncio.create_task(self._monitor_ttl()),
+            # Centralized metrics sampling — one loop for all tasks
+            asyncio.create_task(self._billing_report_loop()),
         ]
 
         # Store reference to parent server for statistics integration
@@ -232,6 +239,9 @@ class TaskServer(DAPBase):
         # Register authentication handler for our keys
         server.add_authenticator(self.authenticate)
 
+        # Create shared Store instance for task data and deployment management
+        self._store_instance = Store.create()
+
         # Initialize DAP base class with server identification
         super().__init__('SERVER', **kwargs)
 
@@ -240,15 +250,14 @@ class TaskServer(DAPBase):
         """
         Shared Store instance for all tasks and connections.
 
-        Lazy initialization ensures Store is only created when first accessed.
-        All TaskCommands and Task instances share this single Store instance
-        for consistent data access and reduced resource usage.
+        Created eagerly during __init__ so the storage backend is ready
+        before the first request arrives.  All TaskCommands and Task
+        instances share this single Store instance for consistent data
+        access and reduced resource usage.
 
         Returns:
             Store: The shared store instance
         """
-        if self._store_instance is None:
-            self._store_instance = Store.create()
         return self._store_instance
 
     @property
@@ -257,6 +266,45 @@ class TaskServer(DAPBase):
         if self._deployments_instance is None:
             self._deployments_instance = DeploymentStore(self.store._store)
         return self._deployments_instance
+
+    async def _billing_report_loop(self) -> None:
+        """
+        Periodic billing report loop for all active tasks.
+
+        CPU/memory/GPU sampling is now handled by each subprocess via
+        ``>MET*`` (live metrics) and ``>USG*`` (billing values).  This
+        loop only checks whether periodic billing reports are due.
+
+        Cadence: every 5 seconds (billing reports are every 15s).
+        """
+        while True:
+            try:
+                # Snapshot the task list to avoid mutation during iteration
+                controls = list(self._task_control.values())
+
+                for control in controls:
+                    task = getattr(control, 'task', None)
+                    if task is None:
+                        continue
+                    task_metrics = getattr(task, '_task_metrics', None)
+                    if task_metrics is None:
+                        continue
+
+                    try:
+                        await task_metrics.check_billing_report()
+                    except Exception as e:
+                        self.debug_message(f'Billing report error: {e}')
+
+                    # Yield between tasks
+                    await asyncio.sleep(0)
+
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                self.debug_message(f'Billing report loop error: {e}')
+
+            # Relaxed cadence — billing reports are every 15s
+            await asyncio.sleep(5.0)
 
     async def _cleanup_tasks(self) -> None:
         """
@@ -476,6 +524,10 @@ class TaskServer(DAPBase):
         if hasattr(conn, 'release_profiler'):
             conn.release_profiler()
 
+        # Stop this connection's outbound event drain task and drop its queue.
+        if hasattr(conn, 'stop_event_drain'):
+            conn.stop_event_drain()
+
         # Remove connection from active connections registry
         if connection_id in self._connections:
             del self._connections[connection_id]
@@ -528,7 +580,20 @@ class TaskServer(DAPBase):
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
 
     def _build_task_account_info(self, token: str, control: 'TASK_CONTROL', permissions: list) -> AccountInfo:
-        """Build a minimal AccountInfo for pk_*/tk_* task-scoped authentication."""
+        """
+        Build a minimal AccountInfo for task-scoped authentication.
+
+        For ``pk_*`` (public data pipe): only ``auth`` is set.  No userId,
+        userToken, or org context — the credential is scoped to data
+        operations and SSE monitoring only.  ``verify_auth()`` will reject
+        it from user-scoped handlers.
+
+        For ``tk_*`` (private task token): full task context with userId,
+        teamId, and org permissions so the caller can manage the task.
+        """
+        if token.startswith('pk_'):
+            return AccountInfo(auth=token)
+
         return AccountInfo(
             auth=token,
             userToken=token,
@@ -589,28 +654,22 @@ class TaskServer(DAPBase):
         self,
         project_id: str,
         source: str,
-        account_info: Optional[AccountInfo] = None,
-        require: Optional[str] = None,
     ) -> TASK_CONTROL:
         """
-        Retrieve task control structure by project_id + source.
+        Pure lookup: retrieve task control by project_id + source.
 
-        If account_info is provided:
-          - Checks task ownership (control.userId == account_info.userId)
-          - If require is specified, checks that permission against the task's team
+        No permission checks — callers must verify access using
+        ``verify_task_access()`` or ``get_task_by_project()``.
+
+        Args:
+            project_id: Pipeline project UUID.
+            source:     Source component ID.
 
         Raises:
-            RuntimeError: If task doesn't exist
-            PermissionError: If ownership or permission check fails
+            RuntimeError: If no matching task is running.
         """
         for control in self._task_control.values():
             if control.project_id == project_id and control.source == source:
-                if account_info is not None:
-                    perms = resolve_task_permissions(account_info, control.teamId)
-                    if not perms:
-                        raise PermissionError('Access denied: no permissions for this task')
-                    if require and require not in perms:
-                        raise PermissionError(f'Permission {require!r} denied for this task')
                 return control
 
         raise RuntimeError('Your pipeline is not running')
@@ -636,22 +695,19 @@ class TaskServer(DAPBase):
         # Couldn't find it
         raise RuntimeError('Your pipeline is not running')
 
-    def get_task_control(
-        self,
-        token: str,
-        account_info: Optional[AccountInfo] = None,
-        require: Optional[str] = None,
-    ) -> TASK_CONTROL:
+    def get_task_control_by_token(self, token: str) -> TASK_CONTROL:
         """
-        Retrieve task control structure by token.
+        Pure lookup: retrieve task control by token.
 
-        If account_info is provided and require is specified, checks that the
-        authenticated user has the required permission for the task's team.
+        No permission checks — callers must verify access using
+        ``verify_task_access()`` or ``get_task_by_token()``.
+
+        Args:
+            token: Task token string (tk_*).
 
         Raises:
-            ValueError: If token is not specified
-            RuntimeError: If task doesn't exist
-            PermissionError: If permission check fails
+            ValueError: If token is not specified.
+            RuntimeError: If no task with this token is running.
         """
         if not token:
             raise ValueError('Task token is required')
@@ -660,12 +716,58 @@ class TaskServer(DAPBase):
         if not control:
             raise RuntimeError('Your pipeline is not running')
 
-        if account_info is not None and require:
-            perms = resolve_team_permissions(account_info, control.teamId)
-            if require not in perms:
-                raise PermissionError(f'Permission {require!r} denied for this task')
-
         return control
+
+    def verify_task_access(
+        self,
+        control: TASK_CONTROL,
+        ctx: 'RequestContext',
+        require: str = '',
+    ) -> None:
+        """
+        Verify that a caller has access to a specific task.
+
+        Centralised permission check for all user-facing task access.
+        Handles internal credentials, sys.admin bypass, pk_/tk_ scoping,
+        and team-based permission resolution.
+
+        Args:
+            control: The task control to check access for.
+            ctx:     RequestContext with the caller's identity.
+            require: Optional specific permission string (e.g. 'task.monitor').
+
+        Raises:
+            PermissionError: If the caller does not have access.
+        """
+        account_info = ctx.account_info if ctx else None
+        if not account_info:
+            raise PermissionError('Not authenticated')
+
+        # tk_ auth is already scoped to its own private task token — but only to
+        # THAT task. A tk_ for another task must not authorize this control.
+        auth = getattr(account_info, 'auth', '')
+        if auth.startswith('tk_'):
+            if auth != control.token:
+                raise PermissionError('Access denied: scoped token does not match this task')
+            return
+
+        # pk_ auth is scoped to its own public task token and to public task
+        # access only (data pipes + SSE monitoring); it never grants control/
+        # debug/store permissions.
+        if auth.startswith('pk_'):
+            if auth != getattr(control, 'public_auth', ''):
+                raise PermissionError('Access denied: scoped token does not match this task')
+            if require and require not in {'task.data', 'task.monitor'}:
+                raise PermissionError(f'Permission {require!r} denied for this task')
+            return
+
+        # resolve_task_permissions handles sys.admin and internal
+        # credentials — they get full permissions automatically.
+        perms = resolve_task_permissions(account_info, control.teamId)
+        if not perms:
+            raise PermissionError('Access denied: no permissions for this task')
+        if require and require not in perms:
+            raise PermissionError(f'Permission {require!r} denied for this task')
 
     def get_task(self, token: str) -> Task:
         """
@@ -690,7 +792,7 @@ class TaskServer(DAPBase):
         task access patterns in command handlers and other components.
         """
         # Get authenticated task control structure
-        control = self.get_task_control(token)
+        control = self.get_task_control_by_token(token)
 
         # Extract and return the task instance
         return control.task
@@ -754,7 +856,7 @@ class TaskServer(DAPBase):
             except Exception as e:
                 self.debug_message(f'Failed to broadcast server event to connection: {e}')
 
-    async def push_account_update(self, user_id: str) -> None:
+    async def broadcast_account_update(self, user_id: str) -> None:
         """
         Rebuild AccountInfo from the DB for user_id and push an apaext_account
         event to every open connection belonging to that user.
@@ -762,7 +864,20 @@ class TaskServer(DAPBase):
         Called after any operation that mutates identity, org, or team membership.
         The connection's _account_info is updated in-place so subsequent permission
         checks use the fresh data.
+
+        In SaaS mode a RedisPublisher is injected as self._publisher; it
+        additionally publishes to the rr:evt:user:{user_id} channel so all
+        orchestrator pods deliver the update to their connected clients.
+
+        Args:
+            user_id (str): Internal user UUID whose account data changed.
         """
+        # Step 1: delegate to injected publisher so SaaS can push to Redis
+        if self._publisher is not None:
+            await self._publisher.broadcast_account_update(user_id)
+
+        # Step 2: update in-process connections (OSS default; no-op in SaaS
+        # because the EAAS has no direct client connections in that mode)
         from ai.account import account
 
         for conn in list(self._connections.values()):
@@ -775,46 +890,52 @@ class TaskServer(DAPBase):
                 conn._account_info = fresh
                 await conn.send_event('apaext_account', body=fresh.to_connect_result())
             except Exception as e:
-                self.debug_message(f'push_account_update failed for conn {conn.get_connection_id()}: {e}')
+                self.debug_message(f'broadcast_account_update failed for conn {conn.get_connection_id()}: {e}')
 
-    async def broadcast_task_event(self, event_type: EVENT_TYPE, token: str, event: Dict[str, Any]) -> None:
+    async def broadcast_task_event(
+        self,
+        event_type: EVENT_TYPE,
+        token: str,
+        event: Dict[str, Any],
+    ) -> None:
         """
-        Broadcast a task-scoped event to all connections that are subscribed to the given task.
+        Broadcast a task-scoped event to all connections subscribed to the given task.
 
         Iterates over every active connection and calls send_task_event on each one.
-        PermissionError is treated as a normal condition (e.g. a public-key connection that
-        does not hold task.monitor) and silently skipped. All other exceptions are logged
-        but do not abort the broadcast to remaining connections.
+        PermissionError is treated as a normal condition (e.g. a public-key connection
+        that does not hold task.monitor) and silently skipped. All other exceptions are
+        logged but do not abort the broadcast to remaining connections.
+
+        In the SaaS pod model, the orchestrator's shared connection is in
+        _connections and receives events via the on_event callback — no Redis
+        pub/sub needed for task events.
 
         Args:
-            event_type (EVENT_TYPE): Event type bitmask (e.g. SUMMARY, SSE) used by each
+            event_type: Event type bitmask (e.g. SUMMARY, SSE) used by each
                 connection's send_task_event to decide whether it should receive the event.
-            token (str): Unique task token identifying the originating task. Each connection
-                resolves this token to its subscription key independently.
-            event (Dict[str, Any]): Fully-formed DAP event payload to deliver.
-                Expected keys: 'event' (str) and 'body' (Any).
+            token: Unique task token identifying the originating task.
+            event: Fully-formed DAP event payload. project_id, source, and event_type
+                are injected into the body by _forward_task_event before this call.
         """
+        # Broadcast to in-process connections. In SaaS mode, the orchestrator's
+        # shared connection is one of these — events flow directly via on_event.
+
         # If the task has already been removed from the registry (e.g.
         # cleanup raced with pending broadcasts), skip silently instead of
-        # spamming "Your pipeline is not running" for every connection.
+        # spamming 'Your pipeline is not running' for every connection.
         if token not in self._task_control:
             return
 
-        # Snapshot to list() so a connection joining or dropping mid-broadcast
-        # does not raise RuntimeError on the next iteration; matches the
-        # pattern used by broadcast_server_event / push_account_update above.
+        # Enqueue to each connection's ordered outbound queue. Delivery is
+        # non-blocking: each connection's drain task applies the subscription
+        # filter (via send_task_event) and does the WebSocket write, so a slow
+        # consumer cannot head-of-line-block this loop, per-connection ordering
+        # is preserved, and events are never GC-dropped. (Was: an unretained
+        # asyncio.create_task per connection, which lost ordering — event N+1
+        # could beat N on the SSE stream — and could be garbage-collected before
+        # running, silently dropping the event.)
         for conn in list(self._connections.values()):
-            try:
-                await conn.send_task_event(event_type, token=token, event=event)
-
-            except PermissionError:
-                # This is a normal error - when the connection is typically
-                # using a public key
-                continue
-
-            except Exception as e:
-                # Log individual monitor failures but continue broadcasting
-                self.debug_message(f'Failed to broadcast event to connection: {e}')
+            conn.enqueue_task_event(event_type, token, event)
 
     def is_debug_available(self, token: str) -> bool:
         """
@@ -1278,7 +1399,7 @@ class TaskServer(DAPBase):
                 raise ValueError('Missing pipeline configuration in restart request')
 
             # Validate task existence and get control structure
-            control = self.get_task_control(token)
+            control = self.get_task_control_by_token(token)
 
             self.debug_message(f'Restart requested for task "{control.id}"')
 
@@ -1359,7 +1480,7 @@ class TaskServer(DAPBase):
         """
         try:
             # Attempt to locate and validate task ownership
-            control = self.get_task_control(token)
+            control = self.get_task_control_by_token(token)
 
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
@@ -1396,7 +1517,7 @@ class TaskServer(DAPBase):
         4. Return pipeline configuration for client setup
         """
         # Validate task existence and ownership
-        control = self.get_task_control(token)
+        control = self.get_task_control_by_token(token)
 
         # Set up passive event monitoring for this connection
         await conn.set_monitor(
@@ -1446,7 +1567,7 @@ class TaskServer(DAPBase):
 
         try:
             # Locate task with ownership validation
-            control = self.get_task_control(token)
+            control = self.get_task_control_by_token(token)
 
             # Detach connection from task's debugging interface
             await control.task.detach_task(conn)
@@ -1549,7 +1670,7 @@ class TaskServer(DAPBase):
         try:
             # Accept WebSocket connection and start message processing
             # This call blocks until the connection is terminated
-            await transport.accept(websocket=websocket)
+            await conn.accept(websocket)
 
         finally:
             # Ensure cleanup occurs regardless of how connection ends

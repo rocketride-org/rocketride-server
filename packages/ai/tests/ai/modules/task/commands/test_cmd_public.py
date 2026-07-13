@@ -4,7 +4,7 @@ Unit tests for ai.modules.task.commands.cmd_public.PublicCommands.
 PublicCommands routes ``rrext_public_*`` commands that bypass the auth
 gate. The probe handler is the replacement for the former
 ``auth { infoOnly: true }`` short-circuit and returns server metadata
-(version, capabilities, platform, public apps) without requiring a
+(version, capabilities, platform, home app) without requiring a
 prior auth handshake.
 
 Tests bypass the mixin's no-op ``__init__`` via ``__new__`` and seed
@@ -13,11 +13,11 @@ only the attributes the handler under test reads.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
+from ai.account.models import RequestContext
 from ai.modules.task.commands import cmd_public
 from ai.modules.task.commands.cmd_public import PublicCommands
 
@@ -25,6 +25,11 @@ from ai.modules.task.commands.cmd_public import PublicCommands
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _ctx(account_info=None, conn_id='conn-1', source='local'):
+    """Build a per-request RequestContext for handler calls."""
+    return RequestContext(account_info=account_info, conn_id=conn_id, source=source)
 
 
 def _make_conn(*, server=None):
@@ -56,29 +61,30 @@ def _make_conn(*, server=None):
 @pytest.mark.asyncio
 async def test_on_rrext_public_probe_returns_server_info_without_authenticating(monkeypatch):
     """
-    Probe returns version + capabilities + platform + public apps in a single
-    response. The handler does not consult ``_authenticated``, so the same
-    response is produced for authenticated and unauthenticated callers alike.
+    Probe returns version + capabilities + platform + home in a single
+    response. The handler reads metadata from the module-level ``account``
+    singleton and does not consult ``_authenticated``, so the same response
+    is produced for authenticated and unauthenticated callers alike.
+
+    Apps are no longer part of the probe — clients fetch them separately via
+    ``rrext_public_catalog`` / ``rrext_account_me`` — so the response carries
+    no ``apps`` key.
     """
     monkeypatch.setattr(cmd_public, 'getVersion', lambda: '9.9.9')
+    # Probe reads capabilities + home app off the module-level account singleton.
+    monkeypatch.setattr(cmd_public.account, 'capabilities', {'feature': True}, raising=False)
+    monkeypatch.setattr(cmd_public.account, '_home_app', {'id': 'app-home'}, raising=False)
 
-    account = SimpleNamespace(
-        capabilities={'feature': True},
-        get_public_apps=AsyncMock(return_value=[{'id': 'app-1'}]),
-    )
-    server = MagicMock()
-    server._server = SimpleNamespace(account=account)
-
-    conn = _make_conn(server=server)
-    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'})
+    conn = _make_conn()
+    result = await PublicCommands.on_rrext_public_probe(conn, {'command': 'rrext_public_probe'}, _ctx())
 
     assert result['type'] == 'response'
     body = result['body']
     assert body['version'] == '9.9.9'
     assert body['capabilities'] == {'feature': True}
     assert 'platform' in body  # sys.platform is OS-dependent; existence is enough
-    assert body['apps'] == [{'id': 'app-1'}]
-    account.get_public_apps.assert_awaited_once()
+    assert body['home'] == {'id': 'app-home'}
+    assert 'apps' not in body
 
 
 # ---------------------------------------------------------------------------

@@ -501,6 +501,10 @@ class TransportStdio(TransportBase):
                     data_str = line.decode('utf-8').strip()
                     await self._process_message(stream_name, data_str)
 
+                    # Yield to event loop between messages so pings and
+                    # other requests can be serviced during heavy stdio traffic
+                    await asyncio.sleep(0)
+
                 except UnicodeDecodeError:
                     self._debug_message(f'Unicode decode error on {stream_name}, skipping line')
                     continue
@@ -741,33 +745,35 @@ class TransportStdio(TransportBase):
                     }
                 )
 
-        # Parse metrics messages: '>MET*json_data'
+        # Parse live metrics messages: '>MET*json_data'
+        # Point-in-time resource snapshot from ProcessReporter (cpu_percent,
+        # cpu_memory_mb, gpu_memory_mb) — drives the live dashboard charts.
         elif message.startswith('>MET*'):
             try:
                 parts = message.split('*', 1)
                 if len(parts) >= 2:
                     _, json_str = parts
-                    metrics = json.loads(json_str)
-                    await self._transport_receive(
-                        {'type': 'event', 'event': 'apaevt_status_metrics', 'body': {'metrics': metrics}}
-                    )
+                    payload = json.loads(json_str)
+                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_metrics', 'body': payload})
                 else:
-                    await self._transport_receive(
-                        {
-                            'type': 'event',
-                            'event': 'output',
-                            'body': {'category': 'console', 'output': f'Incomplete MET message: {message}\n'},
-                        }
-                    )
+                    self._debug_message(f'Incomplete MET message: {message}')
             except (json.JSONDecodeError, IndexError) as e:
                 self._debug_message(f'Malformed MET message: {message}, error: {e}')
-                await self._transport_receive(
-                    {
-                        'type': 'event',
-                        'event': 'output',
-                        'body': {'category': 'console', 'output': f'Malformed MET message: {message}\n'},
-                    }
-                )
+
+        # Parse billing usage messages: '>USG*json_data'
+        # Cumulative billing values (cpu_compute, cpu_memory, gpu_compute,
+        # gpu_memory, counters) — drives token calculation on the parent.
+        elif message.startswith('>USG*'):
+            try:
+                parts = message.split('*', 1)
+                if len(parts) >= 2:
+                    _, json_str = parts
+                    payload = json.loads(json_str)
+                    await self._transport_receive({'type': 'event', 'event': 'apaevt_status_tokens', 'body': payload})
+                else:
+                    self._debug_message(f'Incomplete USG message: {message}')
+            except (json.JSONDecodeError, IndexError) as e:
+                self._debug_message(f'Malformed USG message: {message}, error: {e}')
 
         # Parse info messages: '>INF*json_data'
         elif message.startswith('>INF*'):

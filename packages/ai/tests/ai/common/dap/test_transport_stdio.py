@@ -270,7 +270,35 @@ async def test_met_message_parses_json_metrics():
     events, _ = await _drive('>MET*' + json.dumps(metrics))
     event = _single_event(events)
     assert event['event'] == 'apaevt_status_metrics'
-    assert event['body'] == {'metrics': metrics}
+    # Parser dispatches the parsed JSON directly as the body (flattened).
+    assert event['body'] == metrics
+
+
+# ---------------------------------------------------------------------------
+# >USG — cumulative billing usage JSON
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_usg_message_parses_billing_payload():
+    """USG yields apaevt_status_tokens with the parsed billing payload verbatim.
+
+    The billing path on the parent (task_metrics.merge_subprocess_usage) reads
+    this event's body, so the event name and body shape are pinned here.
+    """
+    payload = {'values': {'cpu_compute': 1234.0, 'requests': 3.0}, 'events': [{'pages': 10}]}
+    events, _ = await _drive('>USG*' + json.dumps(payload))
+    event = _single_event(events)
+    assert event['event'] == 'apaevt_status_tokens'
+    assert event['body'] == payload
+
+
+@pytest.mark.asyncio
+async def test_usg_message_bad_json_is_silently_dropped():
+    """Invalid JSON after the '*' is logged but emits no event (no disconnect)."""
+    events, disconnects = await _drive('>USG*{not-valid}')
+    assert events == []
+    assert disconnects == []
 
 
 # ---------------------------------------------------------------------------

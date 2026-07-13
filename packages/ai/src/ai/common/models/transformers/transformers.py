@@ -621,7 +621,7 @@ class PipelineLocal:
 
         # Report all perf counters — same keys as model server response
         inference_sec = (t_pre + t_gpu + t_post) / 1000.0
-        metrics.add_time(
+        metrics.add_value(
             {
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
@@ -754,7 +754,7 @@ class ModelLocal:
 
         # Report all perf counters — same keys as model server response
         inference_sec = (t_pre + t_gpu + t_post) / 1000.0
-        metrics.add_time(
+        metrics.add_value(
             {
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,

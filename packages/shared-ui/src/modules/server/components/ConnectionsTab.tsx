@@ -123,7 +123,7 @@ export const ConnectionDetailModal: React.FC<{
 			<div role="dialog" aria-modal="true" aria-labelledby={`connection-detail-title-${connection.id}`} style={styles.modalDialog} onClick={(e) => e.stopPropagation()}>
 				<div style={commonStyles.cardHeader}>
 					<span id={`connection-detail-title-${connection.id}`}>
-						#{connection.id} &mdash; {connection.clientInfo?.name || connection.clientId || `Conn #${connection.id}`}
+						#{connection.id} &mdash; {connection.appName || connection.clientInfo?.name || `Conn #${connection.id}`}
 					</span>
 					<button type="button" style={styles.detailClose} aria-label="Close details" onClick={onClose}>
 						&times;
@@ -142,9 +142,15 @@ export const ConnectionDetailModal: React.FC<{
 							{connection.apikey ? `${connection.apikey.slice(0, 4)}${'•'.repeat(8)}${connection.apikey.slice(-4)}` : '—'}
 						</span>
 					</div>
-					{connection.clientInfo.name && (
+					{connection.appName && (
 						<div style={styles.detailRow}>
-							<span style={commonStyles.textMuted}>Client</span>
+							<span style={commonStyles.textMuted}>Application</span>
+							<span>{connection.appName}</span>
+						</div>
+					)}
+					{connection.clientInfo?.name && (
+						<div style={styles.detailRow}>
+							<span style={commonStyles.textMuted}>Client SDK</span>
 							<span>
 								{connection.clientInfo.name} {connection.clientInfo.version ?? ''}
 							</span>
@@ -238,7 +244,7 @@ export const ConnectionsTab: React.FC<{ connections: DashboardConnection[] }> = 
 								}}
 							>
 								<td style={{ ...commonStyles.tableCell, ...styles.mono }}>#{conn.id}</td>
-								<td style={commonStyles.tableCell}>{conn.clientInfo?.name || conn.clientId || `Conn #${conn.id}`}</td>
+								<td style={commonStyles.tableCell}>{conn.appName || conn.clientInfo?.name || conn.clientId || `Conn #${conn.id}`}</td>
 								<td style={{ ...commonStyles.tableCell, ...styles.mono }}>{formatTime(conn.connectedAt)}</td>
 								<td style={{ ...commonStyles.tableCell, ...styles.mono }}>{conn.attachedTasks.length}</td>
 								<td style={{ ...commonStyles.tableCell, ...styles.mono }}>{conn.monitors.length}</td>

@@ -26,7 +26,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { RocketRideClient } from 'rocketride';
-import type { AppWorkspaceState, WorkspacePrefs } from './types';
+import type { AppManifestEntry, AppWorkspaceState, WorkspacePrefs } from './types';
 
 // =============================================================================
 // CONSTANTS
@@ -133,6 +133,7 @@ function settingsPath(dir: string) { return `${dir}/settings.json`; }
  * @param defaultAppId  - App to activate if no saved global state exists.
  * @param workspaceDir  - Directory for all persistence files (default ".workspace").
  * @param startupAppId  - Optional override for the active app on first load.
+ * @param apps          - Registered app manifest entries for display name lookup.
  * @returns State values and mutation callbacks consumed by WorkspaceContext.
  */
 export function useWorkspaceState(
@@ -141,6 +142,7 @@ export function useWorkspaceState(
 	defaultAppId: string,
 	workspaceDir: string = '.workspace',
 	startupAppId?: string,
+	appRegistry: AppManifestEntry[] = [],
 ) {
 	// `loaded` becomes true once the initial disk read (or no-op) has completed
 	const [loaded, setLoaded] = useState(false);
@@ -392,6 +394,21 @@ export function useWorkspaceState(
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [prefs.theme, prefs.sidePanelOpen, loaded]);
 
+	// --- Identify on initial load --------------------------------------------
+	// After page load (F5) or first connect, tell the server which app is active
+	// so the dashboard shows the app display name.
+	const identifiedRef = useRef(false);
+
+	useEffect(() => {
+		if (!loaded || !isConnected || !client || identifiedRef.current) return;
+		const appId = activeAppIdRef.current;
+		const entry = appRegistry.find((a) => a.id === appId);
+		// Wait for the registry to populate so we send the display name, not the raw ID
+		if (!entry) return;
+		identifiedRef.current = true;
+		client.identify(entry.name).catch(() => {});
+	}, [loaded, isConnected, client, appRegistry]);
+
 	// --- App switch ----------------------------------------------------------
 
 	/**
@@ -419,7 +436,8 @@ export function useWorkspaceState(
 			} catch (err) {
 				console.error('[Workspace] Failed to clear monitors on app switch:', err);
 			}
-			client.identify(`Cloud Shell-UI \u2014 ${newAppId}`).catch(() => {});
+			const name = appRegistry.find((a) => a.id === newAppId)?.name || newAppId;
+			client.identify(name).catch(() => {});
 		}
 
 		// 2. Load new app state if not already in memory

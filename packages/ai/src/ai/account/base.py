@@ -54,6 +54,10 @@ class AccountBase(ABC):
     # and copied into every AccountInfo returned by authenticate().
     capabilities: tuple[str, ...] = ()
 
+    # Home app manifest entry — cached at init, returned by the probe.
+    # OSS: rocketride.hello from apps.json.  SaaS: rocketride.home from DB.
+    _home_app: dict = {}
+
     # =========================================================================
     # ABSTRACT — must be implemented by both OSS and SaaS
     # =========================================================================
@@ -137,16 +141,22 @@ class AccountBase(ABC):
         """
         return {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
 
-    async def init_account(self, server) -> None:
+    async def init_account(self, server, full_init: bool = True) -> None:
         """
         Register HTTP routes onto the WebServer instance and run async startup work.
 
         OSS default is a no-op. The SaaS implementation calls
         ``register_routes(server)`` to wire Zitadel, Stripe, and
-        Marketplace endpoints, then creates the database schema.
+        Marketplace endpoints, then optionally creates the database schema,
+        seeds apps, and loads billing rates.
 
         Args:
-            server: ``WebServer`` instance (from ``ai.web``).
+            server:    ``WebServer`` instance (from ``ai.web``).
+            full_init: When True (default), perform full DB schema creation,
+                       app seeding, Stripe sync, and billing rate loading.
+                       When False, only register HTTP routes — used by the
+                       Orchestrator which needs the endpoints but not the
+                       DB setup (the Account pod handles that).
         """
         pass
 
@@ -322,7 +332,7 @@ class AccountBase(ABC):
     # DAP COMMAND DISPATCH — SaaS overrides all three
     # =========================================================================
 
-    async def handle_account(self, conn, request):
+    async def handle_account(self, conn, request, ctx):
         """
         Dispatch an ``rrext_account_*`` DAP command to the account handler.
 
@@ -330,13 +340,14 @@ class AccountBase(ABC):
         The SaaS implementation delegates to ``account_handler.handle()``.
 
         Args:
-            conn:    ``TaskConn`` instance — provides ``_account_info``,
-                     ``build_response()``, ``require_zitadel_auth()``, etc.
+            conn:    ``TaskConn`` instance — provides
+                     ``build_response()``, ``verify_auth()``, etc.
             request: Raw DAP request dict.
+            ctx:     ``RequestContext`` with ``account_info``, ``conn_id``, ``source``.
         """
         raise NotImplementedError('Account management requires SaaS mode')
 
-    async def handle_app(self, conn, request):
+    async def handle_app(self, conn, request, ctx):
         """
         Dispatch an ``rrext_app_*`` DAP command to the app/marketplace handler.
 
@@ -346,10 +357,11 @@ class AccountBase(ABC):
         Args:
             conn:    ``TaskConn`` instance.
             request: Raw DAP request dict.
+            ctx:     ``RequestContext`` with ``account_info``, ``conn_id``, ``source``.
         """
         raise NotImplementedError('App marketplace requires SaaS mode')
 
-    async def handle_public(self, conn, request):
+    async def handle_public(self, conn, request, ctx):
         """
         Dispatch an ``rrext_public_*`` DAP command.
 
@@ -365,6 +377,7 @@ class AccountBase(ABC):
         Args:
             conn:    ``TaskConn`` instance.
             request: Raw DAP request dict.
+            ctx:     ``RequestContext`` with ``account_info``, ``conn_id``, ``source``.
         """
         # Default OSS implementation: return public apps from static manifest
         args = request.get('arguments') or {}

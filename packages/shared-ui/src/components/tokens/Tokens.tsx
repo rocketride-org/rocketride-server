@@ -7,7 +7,8 @@
  * Tokens — Displays aggregated token consumption across all pipeline sources.
  *
  * Shows a total summary and per-source breakdown with progress bars.
- * When no data is available, shows an empty state prompt.
+ * Token keys are dynamic (from metrics_conversions DB) and displayed as
+ * human-readable labels (e.g. gpu_compute -> "GPU Compute").
  *
  * Plain React + inline styles using --rr-* theme tokens. No MUI.
  */
@@ -95,12 +96,8 @@ const styles: Record<string, CSSProperties> = {
 // TYPES
 // =============================================================================
 
-export interface TokenData {
-	cpu_utilization?: number;
-	cpu_memory?: number;
-	gpu_memory?: number;
-	total?: number;
-}
+/** Flat dict of metric_key -> token amount, keyed to metrics_conversions DB. */
+export type TokenData = Record<string, number>;
 
 interface TaskStatus {
 	tokens?: TokenData;
@@ -117,31 +114,72 @@ export interface TokensProps {
 	sources: SourceInfo[];
 }
 
+export interface SourceTokensContentProps {
+	tokens: TokenData | undefined;
+}
+
 // =============================================================================
 // HELPERS
 // =============================================================================
 
+/** Known acronyms to uppercase in display labels. */
+const ACRONYMS = new Set(['gpu', 'cpu']);
+
+/**
+ * Convert a metric key to a display label.
+ *
+ * Splits on underscores, capitalizes each word, and uppercases known
+ * acronyms (gpu -> GPU, cpu -> CPU).
+ *
+ * @example formatLabel('gpu_compute')   // "GPU Compute"
+ * @example formatLabel('cpu_memory')    // "CPU Memory"
+ * @example formatLabel('llamaparse_pages') // "Llamaparse Pages"
+ */
+function formatLabel(key: string): string {
+	return key
+		.split('_')
+		.map((word) => ACRONYMS.has(word) ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1))
+		.join(' ');
+}
+
+/**
+ * Sum token dicts across multiple sources.
+ *
+ * Merges all keys; values for the same key are summed.
+ */
 function sumTokens(entries: TokenData[]): TokenData {
-	const result: TokenData = { cpu_utilization: 0, cpu_memory: 0, gpu_memory: 0, total: 0 };
+	const result: TokenData = {};
 	for (const t of entries) {
-		if (t.cpu_utilization !== undefined) result.cpu_utilization! += t.cpu_utilization;
-		if (t.cpu_memory !== undefined) result.cpu_memory! += t.cpu_memory;
-		if (t.gpu_memory !== undefined) result.gpu_memory! += t.gpu_memory;
-		if (t.total !== undefined) result.total! += t.total;
+		for (const [key, value] of Object.entries(t)) {
+			result[key] = (result[key] || 0) + value;
+		}
 	}
 	return result;
 }
 
+/** Compute total tokens from a token dict. */
+function totalTokens(tokens: TokenData): number {
+	let sum = 0;
+	for (const v of Object.values(tokens)) sum += v;
+	return sum;
+}
+
+/** Format a token value for display. */
 function fmt(v: number | undefined): string {
-	return v !== undefined ? v.toFixed(1) : '—';
+	return v !== undefined ? v.toFixed(1) : '\u2014';
+}
+
+/** Get sorted entries from a token dict (consistent display order). */
+function tokenEntries(tokens: TokenData): Array<[string, number]> {
+	return Object.entries(tokens).sort(([a], [b]) => a.localeCompare(b));
 }
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-function TokenBar({ label, value, max }: { label: string; value: number | undefined; max: number }) {
-	if (value === undefined) return null;
+/** Single token bar with label, progress, and value. */
+function TokenBar({ label, value, max }: { label: string; value: number; max: number }) {
 	const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
 	return (
 		<div style={styles.barRow}>
@@ -158,16 +196,12 @@ function TokenBar({ label, value, max }: { label: string; value: number | undefi
 // SINGLE-SOURCE CONTENT
 // =============================================================================
 
-export interface SourceTokensContentProps {
-	tokens: TokenData | undefined;
-}
-
 /**
  * SourceTokensContent — Renders token cards + bars for a single source.
  * Used by SourceTokensPane in ProjectView (mirrors SourceStatusPane pattern).
  */
 export const SourceTokensContent: React.FC<SourceTokensContentProps> = ({ tokens }) => {
-	if (!tokens) {
+	if (!tokens || Object.keys(tokens).length === 0) {
 		return (
 			<div style={commonStyles.empty}>
 				<div style={{ marginBottom: 8, fontSize: 24, color: 'var(--rr-text-disabled)' }}>&#9677;</div>
@@ -177,32 +211,30 @@ export const SourceTokensContent: React.FC<SourceTokensContentProps> = ({ tokens
 		);
 	}
 
-	const maxTotal = tokens.total || 1;
+	const total = totalTokens(tokens);
+	const maxTotal = total || 1;
+	const entries = tokenEntries(tokens);
 
 	return (
 		<>
 			<div style={styles.summary}>
+				{/* Total card */}
 				<div style={styles.card}>
 					<div style={styles.cardLabel}>Total Tokens</div>
-					<div style={styles.cardValue}>{fmt(tokens.total)}</div>
+					<div style={styles.cardValue}>{fmt(total)}</div>
 				</div>
-				<div style={styles.card}>
-					<div style={styles.cardLabel}>CPU Usage</div>
-					<div style={styles.cardValue}>{fmt(tokens.cpu_utilization)}</div>
-				</div>
-				<div style={styles.card}>
-					<div style={styles.cardLabel}>CPU Memory</div>
-					<div style={styles.cardValue}>{fmt(tokens.cpu_memory)}</div>
-				</div>
-				<div style={styles.card}>
-					<div style={styles.cardLabel}>GPU Memory</div>
-					<div style={styles.cardValue}>{fmt(tokens.gpu_memory)}</div>
-				</div>
+				{/* Per-key cards */}
+				{entries.map(([key, value]) => (
+					<div key={key} style={styles.card}>
+						<div style={styles.cardLabel}>{formatLabel(key)}</div>
+						<div style={styles.cardValue}>{fmt(value)}</div>
+					</div>
+				))}
 			</div>
 			<div style={styles.bars}>
-				<TokenBar label="CPU Usage" value={tokens.cpu_utilization} max={maxTotal} />
-				<TokenBar label="CPU Memory" value={tokens.cpu_memory} max={maxTotal} />
-				<TokenBar label="GPU Memory" value={tokens.gpu_memory} max={maxTotal} />
+				{entries.map(([key, value]) => (
+					<TokenBar key={key} label={formatLabel(key)} value={value} max={maxTotal} />
+				))}
 			</div>
 		</>
 	);
@@ -215,17 +247,17 @@ export const SourceTokensContent: React.FC<SourceTokensContentProps> = ({ tokens
 export const Tokens: React.FC<TokensProps> = ({ statusMap, sources }) => {
 	// Collect all token entries from all sources
 	const { allTokens, aggregated, hasData } = useMemo(() => {
-		const entries: { name: string; tokens: TokenData }[] = [];
+		const collected: { name: string; tokens: TokenData }[] = [];
 		for (const src of sources) {
 			const ts = statusMap[src.id];
-			if (ts?.tokens) {
-				entries.push({ name: src.name, tokens: ts.tokens });
+			if (ts?.tokens && Object.keys(ts.tokens).length > 0) {
+				collected.push({ name: src.name, tokens: ts.tokens });
 			}
 		}
 		return {
-			allTokens: entries,
-			aggregated: sumTokens(entries.map((e) => e.tokens)),
-			hasData: entries.length > 0,
+			allTokens: collected,
+			aggregated: sumTokens(collected.map((e) => e.tokens)),
+			hasData: collected.length > 0,
 		};
 	}, [statusMap, sources]);
 
@@ -239,7 +271,9 @@ export const Tokens: React.FC<TokensProps> = ({ statusMap, sources }) => {
 		);
 	}
 
-	const maxTotal = aggregated.total || 1;
+	const total = totalTokens(aggregated);
+	const maxTotal = total || 1;
+	const entries = tokenEntries(aggregated);
 
 	return (
 		<>
@@ -247,20 +281,14 @@ export const Tokens: React.FC<TokensProps> = ({ statusMap, sources }) => {
 			<div style={styles.summary}>
 				<div style={styles.card}>
 					<div style={styles.cardLabel}>Total Tokens</div>
-					<div style={styles.cardValue}>{fmt(aggregated.total)}</div>
+					<div style={styles.cardValue}>{fmt(total)}</div>
 				</div>
-				<div style={styles.card}>
-					<div style={styles.cardLabel}>CPU Usage</div>
-					<div style={styles.cardValue}>{fmt(aggregated.cpu_utilization)}</div>
-				</div>
-				<div style={styles.card}>
-					<div style={styles.cardLabel}>CPU Memory</div>
-					<div style={styles.cardValue}>{fmt(aggregated.cpu_memory)}</div>
-				</div>
-				<div style={styles.card}>
-					<div style={styles.cardLabel}>GPU Memory</div>
-					<div style={styles.cardValue}>{fmt(aggregated.gpu_memory)}</div>
-				</div>
+				{entries.map(([key, value]) => (
+					<div key={key} style={styles.card}>
+						<div style={styles.cardLabel}>{formatLabel(key)}</div>
+						<div style={styles.cardValue}>{fmt(value)}</div>
+					</div>
+				))}
 			</div>
 
 			{/* Per-source breakdown */}
@@ -268,9 +296,9 @@ export const Tokens: React.FC<TokensProps> = ({ statusMap, sources }) => {
 				<div key={name} style={styles.sourceSection}>
 					{allTokens.length > 1 && <div style={styles.sourceName}>{name}</div>}
 					<div style={styles.bars}>
-						<TokenBar label="CPU Usage" value={tokens.cpu_utilization} max={maxTotal} />
-						<TokenBar label="CPU Memory" value={tokens.cpu_memory} max={maxTotal} />
-						<TokenBar label="GPU Memory" value={tokens.gpu_memory} max={maxTotal} />
+						{tokenEntries(tokens).map(([key, value]) => (
+							<TokenBar key={key} label={formatLabel(key)} value={value} max={maxTotal} />
+						))}
 					</div>
 				</div>
 			))}

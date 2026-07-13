@@ -41,11 +41,13 @@ and server probing.
 """
 
 import sys
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING
 
 from rocketlib import getVersion
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
+from ai.account.models import RequestContext
+from rocketride.types.client import DAPRequest, DAPResponse
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -77,12 +79,14 @@ class PublicCommands(DAPConn):
 
     # ── rrext_public_probe ──────────────────────────────────────────────────
 
-    async def on_rrext_public_probe(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_public_probe(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Return server metadata without requiring authentication.
 
-        Replaces the former ``auth { infoOnly: true }`` hack. Returns
-        version, capabilities, platform, and public apps list.
+        Lightweight capability discovery call — returns version, capabilities,
+        and platform only. Clients fetch apps separately via
+        ``rrext_public_catalog`` (store browsing) or ``rrext_account_me``
+        with ``subcommand='desktop'`` (user's desktop apps after auth).
 
         Args:
             request: Raw DAP request dict.
@@ -90,18 +94,17 @@ class PublicCommands(DAPConn):
         Returns:
             DAP response with server info in the body.
         """
-        acct = self._server._server.account
         info = {
             'version': getVersion(),
-            'capabilities': acct.capabilities,
+            'capabilities': account.capabilities,
             'platform': sys.platform,
-            'apps': await acct.get_public_apps(),
+            'home': account._home_app,
         }
         return self.build_response(request, body=info)
 
     # ── rrext_public_catalog ────────────────────────────────────────────────
 
-    async def on_rrext_public_catalog(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_public_catalog(self, request: DAPRequest, ctx: RequestContext) -> DAPResponse:
         """
         Browse the app catalog with pagination and filtering.
 
@@ -125,4 +128,4 @@ class PublicCommands(DAPConn):
         Returns:
             DAP response with ``{ apps, total, offset, limit }`` in the body.
         """
-        return await account.handle_public(self, request)
+        return await account.handle_public(self, request, ctx)
