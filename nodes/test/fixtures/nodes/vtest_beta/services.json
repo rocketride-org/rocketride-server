@@ -1,0 +1,21 @@
+{
+	"title": "VTest Beta (dependency-conflict fixture)",
+	"protocol": "vtest_beta://",
+	"classType": ["filter"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.vtest_beta",
+	"prefix": "VTestBeta",
+	"description": ["Test-only node. Pins tabulate==0.9.0 to create a deterministic, ai-independent dependency conflict with vtest_alpha. Never shipped."],
+	"lanes": {
+		"text": ["text"]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "VTest Beta",
+			"properties": []
+		}
+	]
+}

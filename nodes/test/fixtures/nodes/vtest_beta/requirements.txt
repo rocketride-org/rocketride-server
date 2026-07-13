@@ -1,0 +1,4 @@
+# Test-only. Deterministic dependency conflict with vtest_alpha (tabulate==0.8.10).
+# tabulate is a tiny pure-Python leaf NOT used by the SDK or engine runtime, so the
+# pin cannot collide with runtime deps — the conflict is isolated to venv scoping.
+tabulate==0.9.0
