@@ -81,15 +81,15 @@ class ModelServerOCR(OCRInstance):
         """Lazy-load the OCR engine from model server (or local fallback)."""
         if self._ocr is None:
             if self.engine == 'doctr':
-                from ai.common.models import DocTR
+                from ai.common.models.ocr import DocTR
 
                 self._ocr = DocTR()
             elif self.engine == 'easyocr':
-                from ai.common.models import EasyOCR
+                from ai.common.models.ocr import EasyOCR
 
                 self._ocr = EasyOCR(languages=self.languages)
             elif self.engine == 'surya':
-                from ai.common.models import Surya
+                from ai.common.models.ocr import Surya
 
                 self._ocr = Surya()
             else:

@@ -36,7 +36,7 @@ from PIL import Image
 
 from ai.common.reader import ReaderBase
 from ai.common.config import Config
-from ai.common.models import EasyOCR, DocTR, Surya, TrOCR
+from ai.common.models.ocr import EasyOCR, DocTR, Surya, TrOCR
 from rocketlib import debug
 
 

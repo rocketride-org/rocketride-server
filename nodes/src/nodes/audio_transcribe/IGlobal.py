@@ -28,7 +28,7 @@ from typing import Any, List
 import numpy as np
 from rocketlib import IGlobalBase, debug
 from ai.common.config import Config
-from ai.common.models import Whisper
+from ai.common.models.audio import Whisper
 
 
 class IGlobal(IGlobalBase):

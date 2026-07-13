@@ -27,7 +27,7 @@ from typing import Any, Dict
 
 from rocketlib import debug, expand
 from ai.common.config import Config
-from ai.common.models import GLiNER
+from ai.common.models.gliner import GLiNER
 from .Ruleparser import RuleParser
 from .anonymize import (
     anonymize as _anonymize,
