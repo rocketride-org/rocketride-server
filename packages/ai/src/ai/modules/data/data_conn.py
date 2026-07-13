@@ -208,7 +208,7 @@ class DataConn(DAPConn):
             return 'questions'
 
         # If this is json content and we have a json listener
-        elif mime_type.startswith('application/json') and 'json' in listeners:
+        elif mime_type.split(';', 1)[0].strip() == 'application/json' and 'json' in listeners:
             return 'json'
 
         # If this is text content and we have a text listener
