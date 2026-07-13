@@ -92,8 +92,23 @@ Error TestMain() noexcept {
     if (auto mode = plat::env("RR_CRASH_CHILD")) {
         plat::minidumpRegister();
         if (mode == "crash") {
+            // A null-pointer deref is intercepted by AddressSanitizer (it reports
+            // and _exit()s), so the child would exit rather than die by signal and
+            // WIFSIGNALED would fail. Under ASan use std::abort(): SIGABRT isn't
+            // intercepted and Crashpad still catches it. Plain deref otherwise.
+#if defined(__SANITIZE_ADDRESS__)
+            std::abort();
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+            std::abort();
+#else
             volatile int* p = nullptr;
             *p = 1;
+#endif
+#else
+            volatile int* p = nullptr;
+            *p = 1;
+#endif
         }
         ap::application::quickExit(0);
     }
