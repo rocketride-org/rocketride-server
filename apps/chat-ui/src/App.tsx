@@ -28,6 +28,7 @@ import { VSCodeProvider, VSCodeContextType } from './hooks/useVSCode';
 import { ChatContainer } from './components/ChatContainer';
 import { API_CONFIG, setAPIConfig } from './config/apiConfig';
 import { startClient } from './hooks/clientSingleton';
+import { safeSessionStorage } from './utils/safeStorage';
 
 const App: React.FC = () => {
 	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
@@ -99,7 +100,7 @@ const App: React.FC = () => {
 			window.history.replaceState({}, '', window.location.pathname);
 		} else if (!isVSCode) {
 			// Fall back to session storage (skip in VSCode webview - shared storage would mix auth across tabs)
-			token = sessionStorage.getItem('auth') || '';
+			token = safeSessionStorage.getItem('auth') || '';
 		}
 		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
@@ -126,7 +127,7 @@ const App: React.FC = () => {
 
 		// Save the token in session storage (skip in VSCode) and our state
 		if (!isVSCode) {
-			sessionStorage.setItem('auth', token);
+			safeSessionStorage.setItem('auth', token);
 		}
 		setAuthToken(token);
 
