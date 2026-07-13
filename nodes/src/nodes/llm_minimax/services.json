@@ -95,7 +95,10 @@
 				"modelTotalTokens": 204800, // sync_models.config.json
 				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"minimax-m2-1": {
 				"title": "MiniMax M2.1",
@@ -104,14 +107,17 @@
 				"modelTotalTokens": 204800, // sync_models.config.json
 				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"minimax-m2-1-highspeed": {
 				"title": "MiniMax M2.1 Highspeed",
 				"model": "MiniMax-M2.1-highspeed",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 65536, // manual
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
@@ -122,14 +128,17 @@
 				"modelTotalTokens": 204800, // sync_models.config.json
 				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"minimax-m2-5-highspeed": {
 				"title": "MiniMax M2.5 Highspeed",
 				"model": "MiniMax-M2.5-highspeed",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 65536, // manual
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
@@ -140,14 +149,17 @@
 				"modelTotalTokens": 204800, // sync_models.config.json
 				"modelOutputTokens": 65536, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"minimax-m2-7-highspeed": {
 				"title": "MiniMax M2.7 Highspeed",
 				"model": "MiniMax-M2.7-highspeed",
 				"modelSource": "provider",
-				"modelTotalTokens": 204800, // sync_models.config.json
-				"modelOutputTokens": 65536, // sync_models.config.json
+				"modelTotalTokens": 204800, // manual
+				"modelOutputTokens": 65536, // manual
 				"serverbase": "https://api.minimax.io/v1",
 				"apikey": ""
 			},
@@ -182,6 +194,36 @@
 				"modelTotalTokens": 1000000, // sync_models.config.json
 				"modelOutputTokens": 131072, // sync_models.config.json
 				"serverbase": "https://api.minimax.io/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"minimax-01": {
+				"title": "MiniMax: MiniMax-01",
+				"model": "minimax-01",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000192, // openrouter
+				"modelOutputTokens": 1000192, // openrouter
+				"apikey": ""
+			},
+			"minimax-m1": {
+				"title": "MiniMax: MiniMax M1",
+				"model": "minimax-m1",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1000000, // openrouter
+				"modelOutputTokens": 40000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"minimax-m2-her": {
+				"title": "MiniMax: MiniMax M2-her",
+				"model": "minimax-m2-her",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 65536, // openrouter
+				"modelOutputTokens": 2048, // openrouter
 				"apikey": ""
 			}
 		}
@@ -366,11 +408,50 @@
 					"properties": [
 						"minimax.minimax-m3"
 					]
+				},
+				{
+					"value": "minimax-01",
+					"properties": [
+						"minimax.minimax-01"
+					]
+				},
+				{
+					"value": "minimax-m1",
+					"properties": [
+						"minimax.minimax-m1"
+					]
+				},
+				{
+					"value": "minimax-m2-her",
+					"properties": [
+						"minimax.minimax-m2-her"
+					]
 				}
 			]
 		},
 		"minimax.minimax-m3": {
 			"object": "minimax-m3",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-01": {
+			"object": "minimax-01",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m1": {
+			"object": "minimax-m1",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"minimax.minimax-m2-her": {
+			"object": "minimax-m2-her",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
