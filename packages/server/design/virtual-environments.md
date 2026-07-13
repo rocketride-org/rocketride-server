@@ -211,12 +211,15 @@ env/handle, never argv.
   (`remote/base/IInstance.py`); large image/video relies on chunking. **Measure a representative
   image/video crossing against a target throughput ceiling as a v1 acceptance criterion**; raise the
   chunk ceiling for AV if it misses.
-- **Target architecture removes this for AV.** In the planned model, AV bytes are written to **cloud
-  storage** (`ai..account.store`) and **only AV metadata / a URL pointer crosses node boundaries** — so
-  the venv bridge carries **tiny metadata, not multi-MB buffers**, and a venv vision node fetches bytes
-  **directly from the store**, not across the bridge. The throughput ceiling above then applies **only
-  to any interim** where AV still crosses in-process/over the bridge. (The child's store fetch needs
-  account/store context — ties into secrets/`ROCKETRIDE_CLIENT_ID` propagation, §6.)
+- **Cloud-store direction shrinks the *payload*, not the *lane set*.** In the planned model AV bytes
+  live in **cloud storage** (`ai..account.store`); the bulk bytes are fetched from the store, not
+  streamed node-to-node. **But AV metadata still travels on the `writeVideo`/`writeAudio`/`writeImage`
+  lanes** — so the bridge must **still implement every AV lane** (§4.4 "all data lanes" is *not*
+  reducible), and those lanes still cross the venv boundary. What changes is the **payload size**: a
+  small metadata/URL frame instead of multi-MB buffers, which is what drops the throughput risk (the
+  ~1 MB chunking is a non-issue for small frames). The interim caveat still holds — before the store
+  migration, raw AV crosses these lanes and the throughput gate above applies. (The child's store fetch
+  needs account/store context — ties into secrets/`ROCKETRIDE_CLIENT_ID` propagation, §6.)
 - **Hardening (deferred to 2C):** OS-access-controlled local IPC so the kernel rejects other-user
   processes *before* any token check — **named pipe + user-SID ACL** (Windows), **Unix domain socket**
   `0700` + `SO_PEERCRED`/`LOCAL_PEERCRED` (Linux/macOS). Matters for **multi-tenant** hosts (Linux
@@ -345,10 +348,13 @@ variant — so the backstop is a narrow safety net, not the primary mechanism.
   transitively reaches the **entire model universe** and over-includes `rfdetr`, `rtmlib`, `gliner`, all
   OCR, `transformers` for an *audio* node. That reintroduces the very torch-conflict + bloat venvs exist
   to remove.
-- **Prerequisite for precise scoping (a repo change, not a walker change):** either nodes import `ai`
-  model submodules **by full path** (as `detect` already does), or the `ai.common.models` barrel
-  `__init__` is made **lazy (PEP 562 `__getattr__`)** so the walk follows only the used name. Until one
-  of these lands, per-env scoping over-includes for every barrel-importing node.
+- **Prerequisite for precise scoping — DONE (Option A applied).** Either nodes import `ai` model
+  submodules **by full path** (as `detect` already does), or the `ai.common.models` barrel `__init__` is
+  made **lazy (PEP 562)**. **Chose Option A** (the 4 barrel importers now use full-path imports —
+  `.gliner`/`.audio`/`.transformers`/`.ocr`); Option B was rejected because it does **not** help the AST
+  walk without a matching walker change (`ast.walk` still traverses the `TYPE_CHECKING` re-export block,
+  or under-includes if that block is removed). Measured effect: `audio_transcribe` **24 → 7** files,
+  `anonymize` **23 → 5**, zero cross-family leaks.
 - **Blast radius + generalization (whole node-tree sweeps, VERIFIED).** The barrel fix is **small and
   bounded: exactly 4 nodes** import via the barrel — `anonymize`, `audio_transcribe`,
   `embedding_transformer`, `ocr` — vs **9 already on full path** (`detect`, `ner`, `pose_estimation`,
@@ -584,17 +590,14 @@ elsewhere that carry `environment`.
 - 🟠 **Phase 2A blast radius = only pipelines where the scoped path is enabled** (`=1`, or auto with
   isolated groups). Under the default (unset, no venvs) **nothing changes** — §4.15 semantics. The
   radius becomes "every pipeline" only if/when a later release flips auto to scoped-by-default.
-- 🟠 **AST correctness is PROVEN; the residual is precision (2A prerequisite, §4.8 Prototype result).**
-  A throwaway static-AST walk over the three hardest nodes (`detect`/`audio_transcribe`/`anonymize`)
-  reached **every** ground-truth requirement file with **zero under-includes and zero dynamic imports**
-  — so a transitive walk (nested imports + correct relative-import resolution) is sound. The remaining
-  risk is **over-inclusion via the `ai.common.models` barrel `__init__`** (it statically re-exports every
-  submodule, so a barrel-importing node pulls the whole ML stack — reintroducing the torch conflict).
-  **2A prerequisite:** make the barrel lazy (PEP 562) or have nodes import submodules by full path (as
-  `detect` already does) — **sized: exactly 4 nodes** (`anonymize`, `audio_transcribe`,
-  `embedding_transformer`, `ocr`); 9 already safe. A whole-tree sweep (481 files) found only **1**
-  dynamic import (`preprocessor_code`, enumerable). Downgraded from 🔴 to 🟠 by the prototype; the
-  earlier "node-file-only AST under-includes" concern is subsumed by the transitive-walk requirement.
+- 🟢 **AST correctness PROVEN and precision prerequisite DONE (§4.8 Prototype result).**
+  `ast_deps.py` (implemented, 13 tests) resolves providers and does the transitive walk; over the three
+  hardest nodes it reached **every** ground-truth requirement file with **zero under-includes and zero
+  dynamic imports**. The over-inclusion residual (the `ai.common.models` barrel `__init__`) is **fixed
+  via Option A** — the 4 barrel importers (`anonymize`, `audio_transcribe`, `embedding_transformer`,
+  `ocr`) now import by full path; measured `audio_transcribe` **24→7** files, `anonymize` **23→5**, no
+  cross-family leaks. A whole-tree sweep (481 files) found only **1** dynamic import (`preprocessor_code`,
+  enumerable). Was 🔴 → 🟠 (prototype) → 🟢 (barrel fix applied).
 - **Scoping should be model-server-aware (footprint optimization, §4.8).** Under `--modelserver` a
   proxied node needs no `ai/**` heavy deps (facades take the `ModelClient` branch; `gpu_guard` blocks
   `import torch`); pruning them shrinks venvs and removes most conflicts. Prerequisite: node
@@ -602,14 +605,15 @@ elsewhere that carry `environment`.
   mode does **not** remove the *compile-time* conflict (that glob union is flag-independent), so venvs
   stay necessary.
 - 🟠 **Concurrent install race** — per-env lock (§4.10).
-- 🟠 **Large image/video crossings — being designed out by the cloud-store direction.** In the target
-  architecture AV bytes live in **cloud storage** (`ai..account.store`) and **only metadata / a URL
-  crosses node boundaries** → the venv bridge carries tiny pointers, not multi-MB buffers, and a venv
-  vision node **fetches from the store directly** (§4.5). So the throughput concern applies **only to any
-  interim** where AV still crosses over the bridge; there, a representative AV crossing must meet a
-  throughput target on the loopback WS bridge (2-hop hub multiplies buffer copies), with UI warning on a
-  heavy-lane boundary and shared-memory zero-copy as the v2 fallback. Store-fetch in the child needs
-  account context (secrets/`ROCKETRIDE_CLIENT_ID` propagation).
+- 🟠 **Large image/video crossings — payload shrinks with cloud store, but the AV lanes stay.** In the
+  target architecture AV bytes live in **cloud storage** (`ai..account.store`); bulk bytes are fetched
+  from the store rather than streamed node-to-node. **AV metadata still crosses on the
+  `writeVideo`/`writeAudio`/`writeImage` lanes**, so the bridge must still implement every AV lane
+  (§4.4 is *not* reducible) — what drops is the per-frame **payload size** (small metadata vs multi-MB
+  buffers), which is what removes the ~1 MB-chunk throughput risk. **Interim** (pre-store): raw AV
+  crosses these lanes and must meet a throughput target on the loopback WS bridge (2-hop hub multiplies
+  buffer copies), with UI warning on a heavy-lane boundary and shared-memory zero-copy as the v2
+  fallback. Store-fetch in the child needs account context (secrets/`ROCKETRIDE_CLIENT_ID` propagation).
 - **Cross-env cyclic deadlock** — v1: detect env-cycles at partition and reject.
 - **Secrets scoping (a win):** partition runs on the *resolved* pipeline, so each child sub-document
   carries only the secrets its own nodes reference (the `ocr` venv never sees the LLM key). Document how
