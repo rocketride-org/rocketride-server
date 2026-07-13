@@ -129,6 +129,11 @@ def resolve_token_uri(token_uri: object) -> str:
 # HTTP status codes worth retrying (rate-limit + transient server errors).
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 
+# Fallback access-token lifetime when the broker response omits expiry_date.
+# Matches Google's standard access-token lifetime; without it the credential
+# keeps a stale past expiry and google-auth refreshes on every API call.
+_DEFAULT_ACCESS_TOKEN_LIFETIME_S = 3600
+
 # Google's full-access Gmail scope — a superset of all granular Gmail scopes.
 _GMAIL_FULL_SCOPE = 'https://mail.google.com/'
 
@@ -155,6 +160,65 @@ def _decode_blob(value: str) -> str:
         except (binascii.Error, ValueError) as exc:
             raise ValueError(f'could not decode data-url credential: {exc}') from exc
     return value
+
+
+def _refresh_access_token_via_broker(broker_url: str, refresh_token: str):
+    """POST the refresh_token to the OAuth broker and return (access_token, expiry).
+
+    Every failure is surfaced as a google-auth ``RefreshError`` with a clear
+    reconnect message rather than leaking a raw transport error or silently
+    keeping a stale token:
+
+    - An HTTP error status means the broker was reached but rejected the
+      request — it must not be misreported as "broker unreachable" (an
+      ``HTTPError`` is a subclass of ``URLError``, so it is matched first).
+    - A connection failure or a socket timeout during ``read()`` (an
+      ``OSError``, not a ``URLError``) is reported as unreachable.
+    - A non-JSON or malformed body is reported as an invalid response.
+    - A 200 without ``access_token`` raises instead of keeping the stale token.
+    - A 200 without ``expiry_date`` falls back to a default lifetime instead of
+      leaving a stale past expiry that forces a refresh on every call.
+
+    Returns:
+        tuple[str, datetime.datetime]: the new access token and its expiry.
+    """
+    import datetime as _dt
+    import urllib.error as _uerr
+    import urllib.request as _req
+
+    import google.auth.exceptions as _gae
+
+    body = json.dumps({'refresh_token': refresh_token}).encode()
+    req = _req.Request(broker_url, data=body, headers={'Content-Type': 'application/json'}, method='POST')
+    try:
+        with _req.urlopen(req, timeout=10) as resp:
+            raw = resp.read()
+        data = json.loads(raw.decode())
+    except _uerr.HTTPError as exc:
+        raise _gae.RefreshError(
+            f'Gmail token refresh was rejected by the broker (HTTP {exc.code}). Please reconnect your Google account.'
+        ) from exc
+    except (_uerr.URLError, OSError) as exc:
+        raise _gae.RefreshError(
+            f'Gmail token refresh failed (broker unreachable: {exc}). Please reconnect your Google account.'
+        ) from exc
+    except ValueError as exc:
+        raise _gae.RefreshError(
+            'Gmail token refresh returned an invalid response from the broker. Please reconnect your Google account.'
+        ) from exc
+
+    access_token = data.get('access_token')
+    if not access_token:
+        raise _gae.RefreshError(
+            'Gmail token refresh returned no access token from the broker. Please reconnect your Google account.'
+        )
+
+    ms = data.get('expiry_date')
+    if ms:
+        expiry = _dt.datetime.utcfromtimestamp(ms / 1000)
+    else:
+        expiry = _dt.datetime.utcnow() + _dt.timedelta(seconds=_DEFAULT_ACCESS_TOKEN_LIFETIME_S)
+    return access_token, expiry
 
 
 def build_service(auth_type: str, cfg: dict, scopes: list[str]) -> Any:
@@ -223,34 +287,13 @@ def build_service(auth_type: str, cfg: dict, scopes: list[str]) -> Any:
 
             class _BrokerCredentials(Credentials):
                 def refresh(self, request: object) -> None:  # type: ignore[override]
-                    import urllib.error as _uerr
-                    import urllib.request as _req
-
                     import google.auth.exceptions as _gae
 
                     if not _broker_url or not self.refresh_token:
                         raise _gae.RefreshError(
                             'Gmail access token has expired. Please reconnect your Google account in the node settings.'
                         )
-                    body = json.dumps({'refresh_token': self.refresh_token}).encode()
-                    req = _req.Request(
-                        _broker_url,
-                        data=body,
-                        headers={'Content-Type': 'application/json'},
-                        method='POST',
-                    )
-                    try:
-                        with _req.urlopen(req, timeout=10) as resp:
-                            data = json.loads(resp.read().decode())
-                    except _uerr.URLError as exc:
-                        raise _gae.RefreshError(
-                            f'Gmail token refresh failed (broker unreachable: {exc}). '
-                            'Please reconnect your Google account.'
-                        ) from exc
-                    self.token = data.get('access_token') or self.token
-                    ms = data.get('expiry_date')
-                    if ms:
-                        self.expiry = _dt.datetime.utcfromtimestamp(ms / 1000)
+                    self.token, self.expiry = _refresh_access_token_via_broker(_broker_url, self.refresh_token)
 
             creds = _BrokerCredentials(
                 token=access_token,
