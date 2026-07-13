@@ -20,6 +20,7 @@ Focus areas:
 
 from __future__ import annotations
 
+import socket
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -54,6 +55,10 @@ def _make_server(*, config=None, web_server=None):
     ts._config = config if config is not None else {}
     ts._server = web_server or MagicMock()
     ts.debug_message = MagicMock()
+    # Stub the host bind-check so port-allocation *logic* tests are
+    # deterministic and never touch real OS ports. Tests that exercise the
+    # real bind behaviour override or bypass this.
+    ts._is_port_free = lambda port: True
     return ts
 
 
@@ -179,6 +184,53 @@ def test_assign_port_exhausts_after_10000():
     ts._allocated_ports = list(range(20000, 30000))
     with pytest.raises(RuntimeError, match='No available ports'):
         ts.assign_port()
+
+
+def test_assign_port_skips_os_busy_port():
+    """
+    A port free in `_allocated_ports` but busy on the host is skipped (#1558).
+
+    Simulates another engine/process already holding 20000: even though this
+    engine has never allocated it, the OS bind-check must reject it so the two
+    engines cannot hand out the same port and cross-connect their data planes.
+    """
+    ts = _make_server()
+    # 20000 is busy on the host, everything else is free.
+    ts._is_port_free = lambda port: port != 20000
+    assert ts.assign_port() == 20001
+    assert ts._allocated_ports == [20001]
+
+
+def test_is_port_free_detects_bound_port():
+    """The real bind-check reports a bound port as busy and a free one as free."""
+    # Bind a real socket to an ephemeral port and confirm the check sees it busy.
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
+        held.bind(('127.0.0.1', 0))
+        held.listen(1)
+        busy_port = held.getsockname()[1]
+        assert TaskServer._is_port_free(busy_port) is False
+
+    # Once released, the same port is reported free again.
+    assert TaskServer._is_port_free(busy_port) is True
+
+
+def test_assign_port_real_bind_skips_held_port():
+    """
+    End-to-end: assign_port (using the real bind-check) skips a port held by
+    another socket and returns the next free one (#1558).
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
+        held.bind(('127.0.0.1', 0))
+        held.listen(1)
+        busy_port = held.getsockname()[1]
+
+        ts = _make_server(config={'base_port': busy_port})
+        # Use the real host bind-check, not the deterministic stub.
+        del ts._is_port_free
+        assigned = ts.assign_port()
+
+    assert assigned != busy_port
+    assert assigned == busy_port + 1 or assigned > busy_port
 
 
 # ---------------------------------------------------------------------------

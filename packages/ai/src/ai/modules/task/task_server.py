@@ -67,6 +67,7 @@ Central orchestration server managing:
 
 import time
 import asyncio
+import socket
 import uuid
 from typing import List
 from fastapi import WebSocket
@@ -695,9 +696,44 @@ class TaskServer(DAPBase):
         # Extract and return the task instance
         return control.task
 
+    @staticmethod
+    def _is_port_free(port: int) -> bool:
+        """
+        Check whether a TCP port is actually free on the host.
+
+        The in-memory ``_allocated_ports`` list only knows about ports handed
+        out by *this* engine process. It cannot see ports held by another
+        engine (e.g. a second workspace, or an IDE engine alongside a CLI
+        engine) or any unrelated process. Two engines both defaulting to
+        ``base_port=20000`` would otherwise both hand out 20000/20001, and the
+        second engine's node host would silently dial the first engine's data
+        plane (see #1558).
+
+        Attempt a real bind on ``127.0.0.1:port`` to confirm availability.
+
+        Args:
+            port: TCP port number to probe.
+
+        Returns:
+            True if the port could be bound (free), False if it is in use.
+        """
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            try:
+                # No SO_REUSEADDR: we want the bind to fail if another
+                # process (or engine) is already holding this port.
+                sock.bind(('127.0.0.1', port))
+                return True
+            except OSError:
+                return False
+
     def assign_port(self) -> int:
         """
         Allocate available port from managed pool.
+
+        A candidate port must be free both in this engine's own
+        ``_allocated_ports`` list *and* on the host OS (verified with a real
+        bind), so two engines on the same machine never hand out the same
+        port and cross-connect their data planes (#1558).
 
         Returns:
             Available port number (base_port to base_port+9999 range)
@@ -706,11 +742,14 @@ class TaskServer(DAPBase):
             RuntimeError: If no ports available
         """
         base_port = self._config.get('base_port', 20000)
-        # Search for available port
+        # Search for a port free both in our pool and on the host
         for port in range(base_port, base_port + 10000):
-            if port not in self._allocated_ports:
-                self._allocated_ports.append(port)
-                return port
+            if port in self._allocated_ports:
+                continue
+            if not self._is_port_free(port):
+                continue
+            self._allocated_ports.append(port)
+            return port
 
         raise RuntimeError(f'No available ports in the range {base_port}-{base_port + 9999}')
 
