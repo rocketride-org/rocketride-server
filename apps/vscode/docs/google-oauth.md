@@ -16,10 +16,15 @@ browser and receives the resulting tokens through a deep link.
 2. The extension opens the system browser at the broker
    (`https://oauth2.rocketride.ai/google?...`), passing the node's service
    config, a `baseURL` return address, and an explicit `scope` parameter for
-   the node's selected access tier. The broker's default consent grants only
-   Drive and profile scopes — never Gmail — so the tier's Gmail scopes must
-   always be requested explicitly (see `GMAIL_TIER_SCOPES` in
-   `LoginWithGoogleButton.tsx`, mirroring `google_access.py`).
+   the node's selected access tier. Scopes are keyed by the node's provider
+   (see `SERVICE_TIER_SCOPES` in `LoginWithGoogleButton.tsx`, mirroring the
+   per-service `AccessSpec`s in `google_access.py`); an unknown provider or
+   tier sends no `scope` parameter. The broker grants identity
+   (`openid email profile`) plus exactly the requested scopes — least
+   privilege — validated against an allowlist (unknown scopes are rejected
+   with `400 invalid_scope`). Requests without a `scope` parameter fall back
+   to the broker's legacy default consent (identity + Drive), which never
+   includes Gmail.
 3. The user completes Google's consent screen. The broker exchanges the code
    using its own verified Google application; no client secret ever reaches
    the extension or the pipeline config.

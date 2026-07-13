@@ -589,6 +589,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 										googlePickerDeveloperKey,
 										googlePickerClientId,
 										nodeId: node.id,
+										provider: node.data.provider,
 										formDataErrors: node.data.formDataErrors,
 										envKeys,
 									}}

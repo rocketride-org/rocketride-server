@@ -86,22 +86,26 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		// a deep link via oauthReturnUrl that they intercept out-of-band.
 		url.searchParams.set('baseURL', oauthReturnUrl || window.location.href);
 
-		// Pass the selected tier's Gmail scopes explicitly — the broker's default
-		// consent grants only Drive + profile scopes, never Gmail, so every tier
-		// (including readonly/modify) must request its scopes here. Keys mirror
-		// google_access.py GMAIL.scopes; non-Gmail services whose access field
-		// uses different values (e.g. 'write') won't match any key here.
+		// Pass the selected tier's scopes explicitly, keyed by the node's
+		// provider — the broker grants identity plus exactly the requested
+		// scopes (least privilege), or its legacy default consent when no
+		// scope param is sent. Maps mirror the per-service AccessSpecs in
+		// core/google_access.py. An unknown provider or tier sends no scope
+		// param rather than guessing another service's scopes.
 		const _G = 'https://www.googleapis.com/auth';
-		const GMAIL_TIER_SCOPES: Record<string, string[]> = {
-			readonly: [`${_G}/gmail.readonly`],
-			modify: [`${_G}/gmail.modify`],
-			send: [`${_G}/gmail.modify`, `${_G}/gmail.send`],
-			settings: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`],
-			settings_sharing: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`, `${_G}/gmail.settings.sharing`],
-			full: ['https://mail.google.com/'],
+		const SERVICE_TIER_SCOPES: Record<string, Record<string, string[]>> = {
+			tool_gmail: {
+				readonly: [`${_G}/gmail.readonly`],
+				modify: [`${_G}/gmail.modify`],
+				send: [`${_G}/gmail.modify`, `${_G}/gmail.send`],
+				settings: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`],
+				settings_sharing: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`, `${_G}/gmail.settings.sharing`],
+				full: ['https://mail.google.com/'],
+			},
 		};
+		const provider = formContext?.provider as string | undefined;
 		const accessTier = (formValues.access ?? formValues.parameters?.access) as string | undefined;
-		const tierScopes = accessTier ? GMAIL_TIER_SCOPES[accessTier] : undefined;
+		const tierScopes = provider && accessTier ? SERVICE_TIER_SCOPES[provider]?.[accessTier] : undefined;
 		if (tierScopes?.length) {
 			url.searchParams.set('scope', tierScopes.join(' '));
 		}
