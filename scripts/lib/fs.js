@@ -234,6 +234,27 @@ async function copyFileEnsure(src, dest) {
 }
 
 /**
+ * Fill a buffer from a file handle, looping until it is full or EOF is hit.
+ *
+ * A single read() may return fewer bytes than requested even mid-file, so this
+ * keeps reading into the same buffer until the requested window is complete.
+ * That guarantees two files are compared on aligned byte boundaries.
+ *
+ * @param {import('fs/promises').FileHandle} fh - Open file handle
+ * @param {Buffer} buf - Destination buffer to fill
+ * @returns {Promise<number>} Bytes read into buf (0 once EOF is reached)
+ */
+async function readChunkFull(fh, buf) {
+    let offset = 0;
+    while (offset < buf.length) {
+        const { bytesRead } = await fh.read(buf, offset, buf.length - offset, null);
+        if (bytesRead === 0) break; // EOF
+        offset += bytesRead;
+    }
+    return offset;
+}
+
+/**
  * Byte-compare the contents of two files.
  *
  * Used by the incremental sync to decide whether a file actually changed.
@@ -243,14 +264,34 @@ async function copyFileEnsure(src, dest) {
  * content-hash string in an index.html) does not change the size and cannot
  * be detected by size or mtime alone.
  *
+ * The compare runs in bounded chunks and stops at the first mismatch, so it
+ * never allocates two whole-file buffers — a large same-size asset costs two
+ * fixed windows, not two full copies in memory.
+ *
  * @param {string} a - First file path
  * @param {string} b - Second file path
  * @returns {Promise<boolean>} True if both files have identical bytes
  */
 async function filesEqual(a, b) {
-    // Read as raw Buffers (no encoding) so the compare is byte-exact.
-    const [bufA, bufB] = await Promise.all([fsp.readFile(a), fsp.readFile(b)]);
-    return bufA.equals(bufB);
+    const CHUNK_SIZE = 64 * 1024;
+    const [fhA, fhB] = await Promise.all([fsp.open(a, 'r'), fsp.open(b, 'r')]);
+    try {
+        const bufA = Buffer.allocUnsafe(CHUNK_SIZE);
+        const bufB = Buffer.allocUnsafe(CHUNK_SIZE);
+        for (;;) {
+            const [readA, readB] = await Promise.all([
+                readChunkFull(fhA, bufA),
+                readChunkFull(fhB, bufB),
+            ]);
+            // Divergent lengths (or one file hitting EOF first) => not equal.
+            if (readA !== readB) return false;
+            // Both reached EOF with every prior window equal => identical.
+            if (readA === 0) return true;
+            if (!bufA.subarray(0, readA).equals(bufB.subarray(0, readB))) return false;
+        }
+    } finally {
+        await Promise.all([fhA.close(), fhB.close()]);
+    }
 }
 
 /**

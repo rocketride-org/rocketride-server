@@ -11,7 +11,7 @@ const SERVER_DIR = path.join(DIST_ROOT, 'server');
 
 /**
  * Incrementally sync source to destination directory (MIRROR or OVERLAY mode)
- * - Only copies files that are new or modified (based on mtime + size)
+ * - Only copies files that are new or modified (based on size + content)
  * - Removes files in dest that don't exist in source in MIRROR mode (default)
  * - Ignores files and directories by specified patterns (default: '\*\*\/\_\_pycache\_\_\/\*\*')
  * 
