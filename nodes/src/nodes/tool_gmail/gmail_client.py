@@ -90,6 +90,40 @@ def resolve_refresh_url(token_url: object) -> str | None:
 # HTTP status codes worth retrying (rate-limit + transient server errors).
 _RETRY_STATUSES = {429, 500, 502, 503, 504}
 
+# Structured error reasons that make a 403 a retryable rate-limit/quota error
+# rather than a hard auth/scope failure.
+_RATE_LIMIT_403_REASONS = frozenset({'userRateLimitExceeded', 'rateLimitExceeded', 'quotaExceeded'})
+
+
+def _is_rate_limit_403(exc: object) -> bool:
+    """True when a 403 is a retryable rate-limit/quota error, not an auth/scope 403.
+
+    Gmail reports the specific cause in the structured error body
+    (``error.status`` or ``error.errors[].reason``). Only rate-limit/quota
+    reasons are transient and worth retrying; scope/permission 403s must fail
+    fast. Any parse failure conservatively returns False (treat as non-retryable).
+    """
+    content = getattr(exc, 'content', None)
+    if not content:
+        return False
+    try:
+        if isinstance(content, (bytes, bytearray)):
+            content = content.decode('utf-8', 'replace')
+        body = json.loads(content)
+    except (ValueError, TypeError):
+        return False
+
+    error = body.get('error') if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return False
+    if error.get('status') in _RATE_LIMIT_403_REASONS:
+        return True
+    for item in error.get('errors') or []:
+        if isinstance(item, dict) and item.get('reason') in _RATE_LIMIT_403_REASONS:
+            return True
+    return False
+
+
 # Google's full-access Gmail scope — a superset of all granular Gmail scopes.
 _GMAIL_FULL_SCOPE = 'https://mail.google.com/'
 
@@ -242,7 +276,11 @@ def execute(request: Any) -> dict:
             return request.execute() or {}
         except Exception as exc:  # googleapiclient.errors.HttpError and transport errors
             status = getattr(getattr(exc, 'resp', None), 'status', None)
-            if status and int(status) in _RETRY_STATUSES and attempt < 3:
+            istatus = int(status) if status else None
+            # Retry transient statuses, plus 403s that the structured error body
+            # identifies as rate-limit/quota (not scope/permission) failures.
+            retryable = istatus in _RETRY_STATUSES or (istatus == 403 and _is_rate_limit_403(exc))
+            if retryable and attempt < 3:
                 _time.sleep(min(base_delay * (2**attempt), 60.0))
                 continue
             detail = getattr(exc, 'reason', None) or str(exc)

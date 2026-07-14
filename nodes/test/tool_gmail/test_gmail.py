@@ -242,6 +242,65 @@ def test_error_path_wraps_http_error():
 
 
 # ---------------------------------------------------------------------------
+# execute() retry: rate-limit 403s are retryable, scope 403s are not (#1560)
+# ---------------------------------------------------------------------------
+
+
+class _FakeHttpError(Exception):
+    """Stand-in for googleapiclient.errors.HttpError with a status + JSON body."""
+
+    def __init__(self, status, content=b''):
+        super().__init__(f'HTTP {status}')
+        self.resp = types.SimpleNamespace(status=status)
+        self.content = content
+        self.reason = 'Forbidden'
+
+
+def _rate_limit_body(reason):
+    return json.dumps({'error': {'errors': [{'reason': reason}], 'status': 'PERMISSION_DENIED'}}).encode()
+
+
+@pytest.mark.parametrize('reason', ['userRateLimitExceeded', 'rateLimitExceeded', 'quotaExceeded'])
+def test_is_rate_limit_403_detects_reasons(reason):
+    assert gmail_client._is_rate_limit_403(_FakeHttpError(403, _rate_limit_body(reason)))
+
+
+def test_is_rate_limit_403_ignores_scope_and_garbage():
+    assert not gmail_client._is_rate_limit_403(_FakeHttpError(403, _rate_limit_body('insufficientPermissions')))
+    assert not gmail_client._is_rate_limit_403(_FakeHttpError(403, b'<html>not json'))
+    assert not gmail_client._is_rate_limit_403(_FakeHttpError(403, b''))
+
+
+def test_execute_retries_rate_limit_403_then_succeeds(monkeypatch):
+    monkeypatch.setattr(gmail_client._time, 'sleep', lambda *a, **kw: None)
+    calls = {'n': 0}
+
+    class _R:
+        def execute(self):
+            calls['n'] += 1
+            if calls['n'] < 3:
+                raise _FakeHttpError(403, _rate_limit_body('rateLimitExceeded'))
+            return {'ok': True}
+
+    assert gmail_client.execute(_R()) == {'ok': True}
+    assert calls['n'] == 3
+
+
+def test_execute_does_not_retry_scope_403(monkeypatch):
+    monkeypatch.setattr(gmail_client._time, 'sleep', lambda *a, **kw: None)
+    calls = {'n': 0}
+
+    class _R:
+        def execute(self):
+            calls['n'] += 1
+            raise _FakeHttpError(403, _rate_limit_body('insufficientPermissions'))
+
+    with pytest.raises(ValueError, match='403'):
+        gmail_client.execute(_R())
+    assert calls['n'] == 1  # failed fast, no retry
+
+
+# ---------------------------------------------------------------------------
 # Write gating
 # ---------------------------------------------------------------------------
 
