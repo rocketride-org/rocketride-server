@@ -273,15 +273,24 @@ class _BrokerCredentials:  # real base class is google.oauth2.credentials.Creden
             raise _gae.RefreshError(
                 f'{self._product} token refresh returned no access token. Please reconnect your Google account.'
             )
-        self.token = token
+        # Validate the expiry BEFORE committing the token: a garbage
+        # expiry_date must surface as RefreshError, not leave the credentials
+        # half-updated (new token, stale expiry) via TypeError/OverflowError.
         ms = data.get('expiry_date')
+        expiry = None
         if ms:
-            self.expiry = _dt.datetime.fromtimestamp(ms / 1000, tz=_dt.timezone.utc).replace(tzinfo=None)
-        else:
-            # Without an expiry the old (past) value would mark the fresh
-            # token as still expired and re-POST to the broker on every
-            # call; None means "not expiring" to google-auth.
-            self.expiry = None
+            try:
+                expiry = _dt.datetime.fromtimestamp(ms / 1000, tz=_dt.timezone.utc).replace(tzinfo=None)
+            except (TypeError, ValueError, OverflowError, OSError) as exc:
+                raise _gae.RefreshError(
+                    f'{self._product} token refresh returned an invalid expiry_date ({ms!r}). '
+                    'Please reconnect your Google account.'
+                ) from exc
+        self.token = token
+        # A missing expiry must clear the old (past) value, or the fresh token
+        # would look expired and re-POST to the broker on every call; None
+        # means "not expiring" to google-auth.
+        self.expiry = expiry
 
 
 def _make_broker_credentials(svc: GoogleService, broker_url: 'str | None', **kwargs: Any):

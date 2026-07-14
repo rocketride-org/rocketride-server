@@ -256,3 +256,40 @@ def test_broker_refresh_read_timeout_raises_refresh_error(monkeypatch, service):
     creds = _broker_credentials(monkeypatch, service, lambda *_args, **_kwargs: _Response())
     with pytest.raises(RefreshError, match='connection error'):
         creds.refresh(None)
+
+
+def test_broker_refresh_invalid_expiry_raises_and_keeps_credentials_unchanged(service, monkeypatch):
+    pytest.importorskip('googleapiclient.discovery')
+    pytest.importorskip('google.oauth2.credentials')
+    from google.auth.exceptions import RefreshError
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b'{"access_token": "fresh", "expiry_date": "not-a-number"}'
+
+    monkeypatch.setattr('urllib.request.urlopen', lambda *a, **k: _Response())
+    monkeypatch.setattr('googleapiclient.discovery.build', lambda *a, **kw: kw['credentials'])
+    creds = google_client.build_service(
+        service,
+        'user',
+        {
+            'userToken': json.dumps(
+                {
+                    'access_token': 'stale',
+                    'refresh_token': 'refresh',
+                    'oauth_server_url': 'https://oauth.rocketride.ai/token',
+                }
+            )
+        },
+        ['https://www.googleapis.com/auth/spreadsheets'],
+    )
+    with pytest.raises(RefreshError, match='invalid expiry_date'):
+        creds.refresh(None)
+    # the half-update is the bug: neither token nor expiry may have changed
+    assert creds.token == 'stale'
