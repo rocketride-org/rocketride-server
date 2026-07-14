@@ -213,6 +213,14 @@ def test_refresh_url_env_override_adds_host(monkeypatch):
     assert gmail_client.resolve_refresh_url('https://oauth2.rocketride.ai/refresh')
 
 
+def test_refresh_url_env_override_accepts_schemeless_host(monkeypatch):
+    # A schemeless RR_OAUTH_BROKER_URL must still register its host (urlparse
+    # otherwise yields hostname=None and the host is silently dropped).
+    monkeypatch.setenv('RR_OAUTH_BROKER_URL', 'broker.internal.example')
+    url = 'https://broker.internal.example/refresh'
+    assert gmail_client.resolve_refresh_url(url) == url
+
+
 def test_token_uri_accepts_google_endpoints():
     for url in (
         'https://oauth2.googleapis.com/token',

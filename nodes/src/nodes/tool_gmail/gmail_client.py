@@ -73,7 +73,11 @@ def resolve_refresh_url(token_url: object) -> str | None:
     allowed = set(_BROKER_HOSTS)
     env_broker = os.environ.get('RR_OAUTH_BROKER_URL', '')
     if env_broker:
-        env_host = urlparse(env_broker).hostname
+        # A schemeless value (e.g. "broker.example.com") parses with
+        # hostname=None and would be silently dropped from the allowlist, so
+        # add a scheme before parsing when one is missing.
+        to_parse = env_broker if '://' in env_broker else f'https://{env_broker}'
+        env_host = urlparse(to_parse).hostname
         if env_host:
             allowed.add(env_host.lower())
 
