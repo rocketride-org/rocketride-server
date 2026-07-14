@@ -1,7 +1,7 @@
 # n8n Node Configuration UX Design
 
-**Date:** 2026-07-14  
-**Status:** Approved visual direction; implementation pending  
+**Date:** 2026-07-14
+**Status:** Approved visual direction; implementation pending
 **Target:** RocketRide `tool_n8n` node configuration panel
 
 ## Summary
