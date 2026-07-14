@@ -1,0 +1,47 @@
+{
+	"title": "Google Docs",
+	"protocol": "tool_docs://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_google_workspace.docs",
+	"prefix": "docs",
+	"icon": "docs.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Google Docs operations as agent tools.", "Read a document's text; create documents; append and replace text; insert images and tables; and run arbitrary batchUpdate requests (styling, named ranges, positioned inserts).", "Authenticates via a Google service account or user OAuth."],
+	"tile": ["Google Docs (${parameters.docs.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Google Docs",
+				"authType": "service",
+				"serviceKey": "",
+				"adminEmail": "",
+				"userToken": "",
+				"access": "write"
+			}
+		}
+	},
+	"fields": {
+		"docs.access": {
+			"type": "string",
+			"title": "Access level",
+			"description": "Docs scopes to request. readonly: read document text and metadata only. write: full read/write (create documents, append and replace text, insert images and tables, and run arbitrary batchUpdate requests).",
+			"default": "write",
+			"enum": [
+				["readonly", "Read-only"],
+				["write", "Read/write"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Google Docs",
+			"properties": ["type", "google.authType", "docs.access"]
+		}
+	]
+}
