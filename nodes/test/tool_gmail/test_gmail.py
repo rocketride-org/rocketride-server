@@ -253,6 +253,14 @@ def test_token_uri_rejects_non_string():
         gmail_client.resolve_token_uri({'url': 'https://oauth2.googleapis.com/token'})
 
 
+@pytest.mark.parametrize('bad', [0, False, [], {}])
+def test_token_uri_rejects_falsy_non_string(bad):
+    # Only None/'' fall back to the canonical endpoint; other falsy non-strings
+    # are tampering and must raise, not silently return the default.
+    with pytest.raises(ValueError):
+        gmail_client.resolve_token_uri(bad)
+
+
 # ---------------------------------------------------------------------------
 # _refresh_access_token_via_broker — broker refresh reliability (#1560)
 # ---------------------------------------------------------------------------
@@ -353,6 +361,28 @@ def test_broker_refresh_read_timeout_reports_unreachable(monkeypatch, refresh_er
 
 def test_broker_refresh_invalid_json_reports_invalid(monkeypatch, refresh_error):
     monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(body=b'<html>not json'))
+    with pytest.raises(refresh_error, match='invalid response'):
+        gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
+
+
+def test_broker_refresh_non_dict_body_reports_invalid(monkeypatch, refresh_error):
+    # Valid JSON that is not an object (list/number/null) must not crash with
+    # AttributeError — treat it as an invalid response.
+    monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(body=b'[1, 2, 3]'))
+    with pytest.raises(refresh_error, match='invalid response'):
+        gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
+
+
+def test_broker_refresh_non_string_access_token_raises(monkeypatch, refresh_error):
+    payload = json.dumps({'access_token': 123, 'expiry_date': 1_000_000}).encode()
+    monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(body=payload))
+    with pytest.raises(refresh_error, match='no access token'):
+        gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
+
+
+def test_broker_refresh_non_numeric_expiry_reports_invalid(monkeypatch, refresh_error):
+    payload = json.dumps({'access_token': 'AT', 'expiry_date': 'soon'}).encode()
+    monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(body=payload))
     with pytest.raises(refresh_error, match='invalid response'):
         gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
 

@@ -115,7 +115,9 @@ def resolve_token_uri(token_uri: object) -> str:
     the field. Raises ValueError for any other value so a tampered token fails
     loud instead of silently posting credentials elsewhere.
     """
-    if not token_uri:
+    # Only an absent value (None or empty string) falls back; other falsy
+    # non-strings (0, False, [], {}) are tampering and must fail loud.
+    if token_uri is None or token_uri == '':
         return _GOOGLE_TOKEN_URI
     if not isinstance(token_uri, str):
         raise ValueError('Gmail token token_uri must be a string')
@@ -211,17 +213,30 @@ def _refresh_access_token_via_broker(broker_url: str, refresh_token: str):
             'Gmail token refresh returned an invalid response from the broker. Please reconnect your Google account.'
         ) from exc
 
+    # Valid JSON that is not an object (null, a number, a list) would crash
+    # data.get(...) with AttributeError — treat it as an invalid response.
+    if not isinstance(data, dict):
+        raise _gae.RefreshError(
+            'Gmail token refresh returned an invalid response from the broker. Please reconnect your Google account.'
+        )
+
     access_token = data.get('access_token')
-    if not access_token:
+    if not isinstance(access_token, str) or not access_token:
         raise _gae.RefreshError(
             'Gmail token refresh returned no access token from the broker. Please reconnect your Google account.'
         )
 
     ms = data.get('expiry_date')
-    if ms:
-        expiry = _dt.datetime.utcfromtimestamp(ms / 1000)
-    else:
+    if ms is None:
         expiry = _dt.datetime.utcnow() + _dt.timedelta(seconds=_DEFAULT_ACCESS_TOKEN_LIFETIME_S)
+    elif isinstance(ms, bool) or not isinstance(ms, (int, float)):
+        # A non-numeric expiry_date would raise a raw TypeError during
+        # timestamp conversion — surface it as an invalid response instead.
+        raise _gae.RefreshError(
+            'Gmail token refresh returned an invalid response from the broker. Please reconnect your Google account.'
+        )
+    else:
+        expiry = _dt.datetime.utcfromtimestamp(ms / 1000)
     return access_token, expiry
 
 
