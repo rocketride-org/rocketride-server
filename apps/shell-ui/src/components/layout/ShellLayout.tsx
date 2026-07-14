@@ -440,6 +440,25 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 									<pre style={styles.appLoadErrorDetails}>{appLoadErrors[activeAppId]}</pre>
 								)}
 							</div>
+						) : (loaded || seeded) && appManifest.length > 0 && !activeManifest ? (
+							// The active app id is not in this server's manifest — e.g. a
+							// stale per-tab session id left by a different shell flavour on
+							// the same origin, or an app that was renamed/removed. Say so
+							// explicitly with an exit; never strand the user on the splash
+							// (loadDescriptor returns false silently for unknown ids).
+							<div style={styles.appLoadError}>
+								<div style={styles.appLoadErrorTitle}>App not found</div>
+								<div style={styles.appLoadErrorMessage} role="alert">
+									This server has no app with the id &quot;{activeAppId}&quot;. It may have been
+									renamed, removed, or belong to a different RocketRide deployment.
+								</div>
+								<div style={styles.appLoadErrorActions}>
+									{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
+									<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
+										Go to Home
+									</button>
+								</div>
+							</div>
 						) : appLoading || !activeApp ? (
 							// Same bobbing rocket as the boot LoadingScreen and home-ui's
 							// AuthTransitionPage (all phase-anchored) so the post-login
