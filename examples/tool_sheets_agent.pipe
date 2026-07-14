@@ -1,0 +1,101 @@
+{
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat"
+      }
+    },
+    {
+      "id": "agent_1",
+      "provider": "agent_rocketride",
+      "config": {
+        "instructions": [
+          "You are a Google Sheets assistant. Use the attached Google Sheets tools to read and write spreadsheets for the user.",
+          "Choose the right tool for the requested operation and available identifiers, such as a spreadsheet id, sheet id, or A1 range: spreadsheet_get (metadata + sheet ids), values_get / values_batch_get (read), values_update / values_append / values_clear (write cells), spreadsheet_create, sheet_add / sheet_delete / sheet_duplicate / sheet_copy_to (tabs), or batch_update (formatting/charts/structure). Call check_connection first if a call fails with a scope or permission error.",
+          "Report what the invoked tool returns and summarize the result, including operation-specific identifiers such as spreadsheet id, sheet id, or range when present; do not assume or invent an A1 range. If a call fails with an auth error, tell the user to complete Google sign-in in the node config or raise the access tier."
+        ],
+        "max_waves": 10,
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_1",
+      "provider": "llm_openai",
+      "config": {
+        "profile": "openai-4o",
+        "openai-4o": {
+          "apikey": "${ROCKETRIDE_OPENAI_KEY}"
+        },
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "memory_1",
+      "provider": "memory_internal",
+      "config": {
+        "type": "memory_internal"
+      },
+      "control": [
+        {
+          "classType": "memory",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "sheets_1",
+      "provider": "tool_sheets",
+      "config": {
+        "authType": "user",
+        "access": "write",
+        "serviceKey": "",
+        "adminEmail": "",
+        "userToken": "${ROCKETRIDE_GOOGLE_SHEETS_USER_TOKEN}",
+        "parameters": {}
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "response_1",
+      "provider": "response_answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_1"
+        }
+      ]
+    }
+  ],
+  "project_id": "7552efce-513f-4717-b3f9-e9ada1a80308",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}
