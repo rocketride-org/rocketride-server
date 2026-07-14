@@ -25,9 +25,9 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import { useShellConnection, useSidebarContent } from 'shell-ui';
-import { Explorer, BxDownload, BxDockLeft, useSidebarCollapsed } from 'shared';
+import { Explorer, BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shared';
 import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction, IVirtualFileSystem } from 'shared';
 import { getDocs } from './docs';
 import { getMediaInfo } from './mediaTypes';
@@ -72,23 +72,6 @@ const styles = {
 		flexDirection: 'column',
 		height: '100%',
 	} as CSSProperties,
-};
-
-// =============================================================================
-// COLLAPSED GATE
-// =============================================================================
-
-/**
- * Root gate for the registered sidebar node. The shell renders registered
- * sidebar content even while the sidebar is collapsed to its icon rail; this
- * free-form file-tree content has no icon-rail form (a future per-app design
- * task), so the gate reads the shell-provided collapsed flag and renders
- * nothing while collapsed — preserving the previous look.
- */
-const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) => {
-	// Collapsed flag provided by the shell around the sidebar slot.
-	const collapsed = useSidebarCollapsed();
-	return collapsed ? null : <>{children}</>;
 };
 
 // =============================================================================

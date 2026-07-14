@@ -416,6 +416,17 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	// Report modal
 	const [showReportModal, setShowReportModal] = useState(false);
 
+	// Escape closes the report modal (matching the shell modal pattern); the
+	// backdrop stays inert per the deliberate-dismissal policy.
+	useEffect(() => {
+		if (!showReportModal) return;
+		const onKeyDown = (e: KeyboardEvent): void => {
+			if (e.key === 'Escape') setShowReportModal(false);
+		};
+		document.addEventListener('keydown', onKeyDown);
+		return () => document.removeEventListener('keydown', onKeyDown);
+	}, [showReportModal]);
+
 	// Polling refs
 	const statusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const tasksIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);

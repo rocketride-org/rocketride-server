@@ -453,8 +453,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				{/* Load-failure modal — a switch-to-app failed while the current app
 				    stayed on screen; shown over it instead of a page takeover. */}
 				{loadFailure && (
-					<div style={styles.loadFailureBackdrop} onClick={dismissLoadFailure}>
-						<div style={styles.loadFailureDialog} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+					/* Backdrop is inert like every shell dialog (OverlayManager is the
+					   source of truth for the no-backdrop-dismiss rule); the footer
+					   Close button is the dismiss control. */
+					<div style={styles.loadFailureBackdrop}>
+						<div style={styles.loadFailureDialog} role="dialog" aria-modal="true">
 							<div style={styles.appLoadErrorTitle}>Could not load {loadFailure.name}</div>
 							{/* Plain-language explanation; raw error behind Show Details */}
 							<div style={styles.appLoadErrorMessage} role="alert">

@@ -91,19 +91,35 @@ function _emit(): void {
 	_listeners.forEach(fn => fn());
 }
 
-/** Fetch the latest dashboard snapshot. */
-async function _fetchDashboard(): Promise<void> {
+/** The one in-flight dashboard request, shared by poll / initial / refresh. */
+let _fetchPromise: Promise<void> | null = null;
+
+/**
+ * Fetch the latest dashboard snapshot.
+ *
+ * Deduplicated: the interval tick, the initial fetch, and manual refresh()
+ * all funnel through the same in-flight promise, so a slow server cannot
+ * accumulate overlapping requests (where an older response could land last
+ * and overwrite newer data).
+ */
+function _fetchDashboard(): Promise<void> {
+	if (_fetchPromise) return _fetchPromise;
 	const client = getClient();
-	if (!client || !client.isConnected()) return;
-	try {
-		const dashboard = await client.getDashboard();
-		if (dashboard?.overview) {
-			_data = dashboard;
-			_emit();
+	if (!client || !client.isConnected()) return Promise.resolve();
+	_fetchPromise = (async () => {
+		try {
+			const dashboard = await client.getDashboard();
+			if (dashboard?.overview) {
+				_data = dashboard;
+				_emit();
+			}
+		} catch (err) {
+			console.log('[useDashboardData] Dashboard fetch failed:', err);
+		} finally {
+			_fetchPromise = null;
 		}
-	} catch (err) {
-		console.log('[useDashboardData] Dashboard fetch failed:', err);
-	}
+	})();
+	return _fetchPromise;
 }
 
 /** Start polling and event subscription. */

@@ -632,7 +632,10 @@ function main() {
 		}
 		regenerateBarrels(prev);
 		generateConformance(prev);
-		log(`Regenerated index.ts + contract-check.generated.ts from v0..v${prev} (no new version).`);
+		// Also re-stamp apiver.ts so a freeze interrupted between conformance and
+		// the version stamp is fully repairable with a single --regen run.
+		writeApiVersion(prev);
+		log(`Regenerated index.ts + contract-check.generated.ts + apiver.ts from v0..v${prev} (no new version).`);
 		return;
 	}
 
@@ -646,7 +649,12 @@ function main() {
 		// live surface has that the newest frozen version does not). A cosmetic or
 		// floor-compatible change is not flagged — it needs no freeze.
 		if (prev < 0) {
-			log('No frozen version exists yet — nothing to check.');
+			// A missing baseline in CI is a FAILURE, not a pass: an emptied
+			// versions/ directory would otherwise sail through --check (and the
+			// regen tamper-diff, which also no-ops with nothing to regenerate).
+			console.error('[shell:freeze --check] No frozen version exists. The shell contract baseline is missing — restore packages/shell-api/versions/ or run `./builder shell:freeze`.');
+			cleanup();
+			process.exit(1);
 		} else if (!hasActionableChange(prev, candidateBody)) {
 			log(`Up to date with v${prev} (no actionable change).`);
 		} else {
@@ -671,9 +679,17 @@ function main() {
 	}
 
 	writeVersion(next, candidateBody);
-	regenerateBarrels(next);
-	generateConformance(next);
-	writeApiVersion(next);
+	try {
+		regenerateBarrels(next);
+		generateConformance(next);
+		writeApiVersion(next);
+	} catch (err) {
+		// Roll the snapshot back so a rerun regenerates EVERYTHING. Leaving the
+		// version file behind would make the rerun see "no actionable change"
+		// and skip the (stale) barrels / conformance / apiver forever.
+		fs.rmSync(path.join(VERSIONS_DIR, `v${next}.d.ts`), { force: true });
+		throw err;
+	}
 	cleanup();
 
 	// Summary.

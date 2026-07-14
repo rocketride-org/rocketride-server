@@ -2147,10 +2147,6 @@ declare class RocketRideClient extends DAPClient {
      * Backward-compatible wrapper around ``logout()`` + ``detach()``.
      */
     disconnect(): Promise<void>;
-    /**
-     * Update the environment variables used for pipeline substitution.
-     *
-     * The env dictionary is used by {@link use} and {@link validate} to replace
     // ============================================================================
     // PING METHODS
     // ============================================================================

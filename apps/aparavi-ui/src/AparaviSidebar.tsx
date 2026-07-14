@@ -25,9 +25,9 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import { useShellConnection, useSidebarContent, BxPlus } from 'shell-ui';
-import { Explorer, SidebarMenu, useSidebarCollapsed } from 'shared';
+import { Explorer, SidebarMenu, SidebarCollapsedGate } from 'shared';
 import type { ExplorerEntry, ExplorerConfig, IVirtualFileSystem, ViewMenu } from 'shared';
 import { getDocs } from './docs';
 import { listChatDir, saveChat, deleteChat, renameChat } from './chatStore';
@@ -90,23 +90,6 @@ const NOOP_VFS: IVirtualFileSystem = {
  */
 const NEW_CHAT_MENU: ViewMenu = {
 	entries: [{ id: 'new', label: 'New Chat', icon: <BxPlus size={16} /> }],
-};
-
-// =============================================================================
-// COLLAPSED GATE
-// =============================================================================
-
-/**
- * Root gate for the registered sidebar node. The shell renders registered
- * sidebar content even while the sidebar is collapsed to its icon rail; this
- * free-form chat-Explorer content has no icon-rail form (a future per-app
- * design task), so the gate reads the shell-provided collapsed flag and
- * renders nothing while collapsed — preserving the previous look.
- */
-const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) => {
-	// Collapsed flag provided by the shell around the sidebar slot.
-	const collapsed = useSidebarCollapsed();
-	return collapsed ? null : <>{children}</>;
 };
 
 // =============================================================================

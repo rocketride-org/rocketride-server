@@ -192,10 +192,12 @@ export const WorkspaceProvider: React.FC<{
 	const [appLoading, setAppLoading] = useState(false);
 	// Ref mirror of loadedApps so loadDescriptor's closure never stales
 	const loadedAppsRef = useRef<Record<string, AppDescriptor>>({});
-	// Tracks which appIds currently have an in-flight load
-	const loadingSetRef = useRef<Set<string>>(new Set());
+	// In-flight descriptor loads by appId. A Map (not a Set) so concurrent
+	// callers can AWAIT the existing load instead of treating "in flight" as
+	// "ready" — shell:switchApp must not switch before the descriptor lands.
+	const loadingMapRef = useRef<Map<string, Promise<boolean>>>(new Map());
 	// Tracks appIds whose load has FAILED so the auto-load effect won't silently
-	// re-attempt them (only retryApp clears this). Directly mutated, like loadingSetRef.
+	// re-attempt them (only retryApp clears this). Directly mutated, like loadingMapRef.
 	const failedSetRef = useRef<Set<string>>(new Set());
 	// Per-app descriptor load-failure messages, keyed by appId (surfaced to the UI
 	// so a failed remote shows an error + Retry instead of an indefinite "Loading…")
@@ -224,8 +226,10 @@ export const WorkspaceProvider: React.FC<{
 	const loadDescriptor = useCallback(async (appId: string): Promise<boolean> => {
 		// Skip if already loaded
 		if (loadedAppsRef.current[appId]) { return true; }
-		// Skip if a load is already in flight
-		if (loadingSetRef.current.has(appId)) { return true; }
+		// A load is already in flight: await ITS outcome rather than reporting
+		// ready — otherwise shell:switchApp switches before the descriptor lands.
+		const inFlight = loadingMapRef.current.get(appId);
+		if (inFlight) { return inFlight; }
 		// Skip if this app already failed — only retryApp re-attempts it (it clears
 		// failedSetRef first), so the auto-load effect can't silently re-arm the load.
 		if (failedSetRef.current.has(appId)) { return false; }
@@ -245,10 +249,14 @@ export const WorkspaceProvider: React.FC<{
 		}
 
 		// Mark as in-flight and raise loading flag
-		loadingSetRef.current.add(appId);
 		setAppLoading(true);
 		// A fresh (re)attempt clears any stale error recorded for this app
 		setAppLoadErrors((prev) => { if (!prev[appId]) return prev; const next = { ...prev }; delete next[appId]; return next; });
+		// The load body runs as its own promise so concurrent callers can await
+		// it via the map. The leading microtask yield guarantees the map entry
+		// below is registered before any of the body (or its finally) executes.
+		const load = (async (): Promise<boolean> => {
+		await Promise.resolve();
 		try {
 			// Load with timeout to avoid indefinite hangs on unreachable remotes
 			const APP_LOAD_TIMEOUT = 15000;
@@ -275,9 +283,12 @@ export const WorkspaceProvider: React.FC<{
 			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
 			return false;
 		} finally {
-			loadingSetRef.current.delete(appId);
-			if (loadingSetRef.current.size === 0) setAppLoading(false);
+			loadingMapRef.current.delete(appId);
+			if (loadingMapRef.current.size === 0) setAppLoading(false);
 		}
+		})();
+		loadingMapRef.current.set(appId, load);
+		return load;
 	}, [apps]);
 
 	/**

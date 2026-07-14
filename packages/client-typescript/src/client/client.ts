@@ -888,10 +888,6 @@ export class RocketRideClient extends DAPClient {
 		await this.detach();
 	}
 
-	/**
-	 * Update the environment variables used for pipeline substitution.
-	 *
-	 * The env dictionary is used by {@link use} and {@link validate} to replace
 	// ============================================================================
 	// PING METHODS
 	// ============================================================================

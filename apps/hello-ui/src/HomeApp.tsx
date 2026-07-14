@@ -615,8 +615,9 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	// advances every QUOTE_INTERVAL_S seconds (see currentQuoteIndex).
 	const [quoteIndex, setQuoteIndex] = React.useState(currentQuoteIndex);
 	React.useEffect(() => {
-		// Re-derive once a second; setState bails out while the 10s bucket
-		// is unchanged, so this re-renders only when the quote advances.
+		// Re-derive once a second; setState bails out while the 30s bucket
+		// (QUOTE_INTERVAL_S) is unchanged, so this re-renders only when the
+		// quote advances.
 		const id = setInterval(() => setQuoteIndex(currentQuoteIndex()), 1000);
 		return () => clearInterval(id);
 	}, []);

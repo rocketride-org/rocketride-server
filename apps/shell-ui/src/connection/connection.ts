@@ -115,12 +115,35 @@ type WildcardHandler = (event: string, payload: unknown) => void;
  * @returns True when `body` carries the ConnectResult identity fields.
  */
 function isConnectResult(body: unknown): body is ConnectResult {
+	// Presence alone is not enough — { userId: undefined } must not pass, so
+	// both identity fields are checked to actually be strings.
 	return (
 		typeof body === 'object' &&
 		body !== null &&
-		'userId' in body &&
-		'userToken' in body
+		typeof (body as Record<string, unknown>).userId === 'string' &&
+		typeof (body as Record<string, unknown>).userToken === 'string'
 	);
+}
+
+/**
+ * Normalizes caller-supplied env metadata to the string map the SDK expects.
+ *
+ * `InitOptions.env` is the frozen `Record<string, unknown>` shape, while
+ * `RocketRideClientConfig.env` copies values verbatim as strings — so strings
+ * pass through, primitives (number / boolean) are stringified, and anything
+ * else (objects, functions, null, undefined) is dropped rather than cast.
+ *
+ * @param env - Raw env metadata from InitOptions, or undefined.
+ * @returns A string-valued env map, or undefined when none was given.
+ */
+function normalizeEnv(env: Record<string, unknown> | undefined): Record<string, string> | undefined {
+	if (!env) return undefined;
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env)) {
+		if (typeof value === 'string') out[key] = value;
+		else if (typeof value === 'number' || typeof value === 'boolean') out[key] = String(value);
+	}
+	return out;
 }
 
 // =============================================================================
@@ -263,9 +286,9 @@ export class ConnectionManager implements IConnectionManager {
 			uri: this.serverUri,
 			clientName: options?.clientName || DEFAULT_CLIENT_NAME,
 			persist: true,
-			// Env values are strings in practice; the caller-facing option type is
-			// the looser Record<string, unknown>.
-			env: options?.env as Record<string, string> | undefined,
+			// The caller-facing option type is the frozen Record<string, unknown>;
+			// normalize to the string map the SDK copies verbatim instead of casting.
+			env: normalizeEnv(options?.env),
 
 			// Fired for every push event received from the server over WebSocket
 			onEvent: async (message) => {
