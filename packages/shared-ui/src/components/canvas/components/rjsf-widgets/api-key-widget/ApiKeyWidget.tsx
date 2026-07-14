@@ -128,7 +128,7 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				name={id}
 				required={required}
 				type={'text'}
-				label={<FieldLabelWithInfo label={label} description={description} fieldTitle={label} />}
+				label={label ? <FieldLabelWithInfo label={label} description={description} fieldTitle={label} /> : label}
 				inputRef={inputRef}
 				size="small"
 				value={tempValue}

@@ -53,9 +53,15 @@ interface FieldLabelWithInfoProps {
  * never receives or exposes field values.
  */
 export default function FieldLabelWithInfo({ label, description, fieldTitle, id }: FieldLabelWithInfoProps) {
-	// No description means the field renders its ordinary label with no icon.
+	// No description means the field renders its ordinary label with no icon, but
+	// keep the same id-bearing inline wrapper so consumers relying on the id
+	// (e.g., RJSF descriptionId) still find their target element.
 	if (!description) {
-		return <>{label}</>;
+		return (
+			<Box component="span" id={id} sx={{ display: 'inline-flex', alignItems: 'center' }}>
+				{label}
+			</Box>
+		);
 	}
 
 	const accessibleName = fieldTitle ? `More information about ${fieldTitle}` : 'More information';
@@ -73,7 +79,7 @@ export default function FieldLabelWithInfo({ label, description, fieldTitle, id 
 		<Box component="span" id={id} sx={{ display: 'inline-flex', alignItems: 'center' }}>
 			{label}
 			<Tooltip title={description} placement="right">
-				<Box component="span" role="img" tabIndex={0} aria-label={accessibleName} onMouseDown={suppressLabelActivation} onClick={suppressLabelActivation} sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'default' }}>
+				<Box component="span" role="img" tabIndex={0} aria-label={accessibleName} onMouseDown={suppressLabelActivation} onClick={suppressLabelActivation} sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'default', pointerEvents: 'auto' }}>
 					<InfoIcon sx={{ ml: 0.5, color: 'text.secondary', fontSize: 16 }} />
 				</Box>
 			</Tooltip>

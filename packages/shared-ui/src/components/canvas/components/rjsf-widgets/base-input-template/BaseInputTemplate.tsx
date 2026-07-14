@@ -136,6 +136,12 @@ export default function BaseInputTemplate<
 	// Prefer description from uiSchema options, falling back to the JSON Schema description
 	const description = options.description ?? schema.description;
 
+	// Resolve the label once so we can preserve an absent/hidden result: MUI's
+	// notch/hide-label behavior relies on `label` being nullish, so only wrap it in
+	// FieldLabelWithInfo when a label is actually present.
+	const resolvedLabel = labelValue(label || undefined, hideLabel, undefined);
+	const displayLabel = resolvedLabel == null ? resolvedLabel : <FieldLabelWithInfo label={resolvedLabel} description={description} fieldTitle={label} />;
+
 	const inputProps = getInputProps<T, S, F>(schema, type, options);
 
 	// Separate numeric constraints (step/min/max) into MUI's nested inputProps; keep the rest at the top level
@@ -185,7 +191,7 @@ export default function BaseInputTemplate<
 				fullWidth={true}
 				size="small"
 				placeholder={placeholder}
-				label={<FieldLabelWithInfo label={labelValue(label || undefined, hideLabel, undefined)} description={description} fieldTitle={label} />}
+				label={displayLabel}
 				autoFocus={autofocus}
 				required={required}
 				disabled={disabled || readonly}
