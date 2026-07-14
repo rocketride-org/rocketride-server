@@ -594,6 +594,20 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const cm = ConnectionManager.getInstance();
 	const { appManifest, prefs, setTheme } = useWorkspace();
 
+	// The unauthenticated home owns its look (mirrors saas home-ui's
+	// applyThemeMode ownership): re-assert the anonymous default — the
+	// rr:home:theme mode if the visitor ever toggled, else the brand light
+	// theme — so signing out doesn't leave the previous user's workspace
+	// theme painted on the logged-out screen. Authenticated visits are left
+	// alone: the workspace restores the account's own theme.
+	React.useEffect(() => {
+		if (identity) return;
+		let mode: string | null = null;
+		try { mode = localStorage.getItem('rr:home:theme'); } catch { /* storage unavailable */ }
+		const target = mode === 'dark' ? 'rocketride' : 'rocketride-light';
+		if (prefs.theme !== target) setTheme(target);
+	}, [identity, prefs.theme, setTheme]);
+
 	// Filter out this app from the list — don't show ourselves
 	const apps = useMemo(
 		() => appManifest
