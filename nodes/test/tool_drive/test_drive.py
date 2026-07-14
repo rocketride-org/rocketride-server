@@ -614,7 +614,7 @@ def test_share_gated_ops_pass_with_flag_on():
     inst.permission_create({'fileId': 'f1', 'type': 'anyone', 'role': 'reader'})
     kw = inst.IGlobal.service.call_for('create')
     assert kw['body'] == {'type': 'anyone', 'role': 'reader'}
-    assert kw['sendNotificationEmail'] is False  # anyone: no notification
+    assert 'sendNotificationEmail' not in kw  # anyone/domain: Drive rejects the param; omitted entirely
 
 
 def test_share_user_grant_always_sends_notification():
@@ -823,3 +823,17 @@ def test_token_scope_report_covered_missing_absent_and_malformed():
     assert covered is False and missing == required
     with pytest.raises(ValueError):
         drive_client.token_scope_report({'userToken': '{bad'}, required)
+
+
+def test_resolve_account_domain_non_dict_token_degrades_to_unknown():
+    cfg = {'userToken': '["not", "an", "object"]'}
+    assert drive_client.resolve_account_domain('user', cfg) is None
+
+
+def test_decode_content_tolerates_wrapped_base64():
+    import base64 as _b64
+
+    wrapped = _b64.b64encode(b'rocketride wrapped payload').decode()
+    wrapped = wrapped[:10] + '\n' + wrapped[10:14] + ' ' + wrapped[14:]
+    out = drive_iinstance.IInstance._decode_content({'c': wrapped}, 'c', 'file_create')
+    assert out == b'rocketride wrapped payload'

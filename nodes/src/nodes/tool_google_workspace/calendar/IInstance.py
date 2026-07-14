@@ -472,7 +472,7 @@ class IInstance(GoogleToolInstanceBase):
             'start': self._require_obj(args, 'start', 'event_create'),
             'end': self._require_obj(args, 'end', 'event_create'),
         }
-        self._apply_optional_event_fields(args, body, 'event_create')
+        self._apply_optional_event_fields(args, body, 'event_create', clearable=False)
         send_updates = self._enum_arg(args, 'sendUpdates', _SEND_UPDATES, _DEFAULT_SEND_UPDATES)
         data = execute(self._svc().events().insert(calendarId=cal_id, body=body, sendUpdates=send_updates))
         return clean_event(data)
@@ -529,7 +529,7 @@ class IInstance(GoogleToolInstanceBase):
         end = self._opt_obj(args, 'end', 'event_update')
         if end is not None:
             body['end'] = end
-        self._apply_optional_event_fields(args, body, 'event_update')
+        self._apply_optional_event_fields(args, body, 'event_update', clearable=True)
         if not body:
             raise ValueError('event_update: provide at least one field to change')
         send_updates = self._enum_arg(args, 'sendUpdates', _SEND_UPDATES, _DEFAULT_SEND_UPDATES)
@@ -538,9 +538,13 @@ class IInstance(GoogleToolInstanceBase):
         )
         return clean_event(data)
 
-    def _apply_optional_event_fields(self, args: dict, body: dict, op: str) -> None:
-        """Attach the shared optional event fields (description/location/attendees/recurrence) to a body."""
-        string_reader = self._opt_clearable_str if op == 'event_update' else self._opt_str
+    def _apply_optional_event_fields(self, args: dict, body: dict, op: str, *, clearable: bool) -> None:
+        """Attach the shared optional event fields (description/location/attendees/recurrence) to a body.
+
+        ``clearable``: update ops accept empty strings to clear a field; create
+        ops reject them (explicit intent, not inferred from the op label).
+        """
+        string_reader = self._opt_clearable_str if clearable else self._opt_str
         description = string_reader(args, 'description', op)
         if description is not None:
             body['description'] = description

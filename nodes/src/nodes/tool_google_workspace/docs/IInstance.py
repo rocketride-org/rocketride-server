@@ -156,9 +156,11 @@ class IInstance(GoogleToolInstanceBase):
             try:
                 execute(self._svc().documents().batchUpdate(documentId=doc_id, body={'requests': requests}))
                 created = execute(self._svc().documents().get(documentId=doc_id, fields=_DOCUMENT_FIELDS))
-            except Exception as exc:
-                # The document already exists; surface its id instead of raising so a
-                # retrying agent seeds THIS document rather than creating an orphan copy.
+            except ValueError as exc:
+                # execute() normalizes API failures to ValueError; programming errors
+                # still propagate. The document already exists; surface its id instead
+                # of raising so a retrying agent seeds THIS document rather than
+                # creating an orphan copy.
                 out = clean_document(created)
                 out['warning'] = (
                     f'document {doc_id} was created, but seeding or read-back failed: {exc}. '

@@ -94,7 +94,7 @@ enabled on the Google Cloud project backing the credential.
 
 An agent finds a free slot, then books it and invites a guest:
 
-```
+```text
 freebusy_query  { "timeMin": "2026-07-11T09:00:00Z", "timeMax": "2026-07-11T17:00:00Z",
                   "calendarIds": ["primary"] }
 event_create    { "summary": "Design sync", "start": {"dateTime": "2026-07-11T14:00:00Z"},

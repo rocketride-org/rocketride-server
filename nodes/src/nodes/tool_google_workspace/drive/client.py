@@ -89,6 +89,10 @@ def resolve_account_domain(auth_type: str, cfg: dict) -> str | None:
             info = json.loads(_decode_blob(token))
         except Exception:
             return None
+        if not isinstance(info, dict):
+            # Valid JSON that isn't an object (array/string/number) must degrade
+            # to UNKNOWN, not crash Drive initialization with AttributeError.
+            return None
         hd = info.get('hd')
         if isinstance(hd, str) and hd.strip():
             return hd.strip().lower()

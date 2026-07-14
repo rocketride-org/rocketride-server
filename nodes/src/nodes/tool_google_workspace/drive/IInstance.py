@@ -122,7 +122,9 @@ class IInstance(GoogleToolInstanceBase):
             return None
         if not isinstance(raw, str):
             raise ValueError(f'{op}: "{key}" must be a base64-encoded string')
-        s = raw.strip()
+        # Wrapped base64 (embedded newlines/spaces) would corrupt the padding
+        # calculation; normalize all whitespace away first.
+        s = ''.join(raw.split())
         try:
             return base64.b64decode(s + '=' * ((-len(s)) % 4))
         except Exception as exc:
@@ -872,9 +874,8 @@ class IInstance(GoogleToolInstanceBase):
             # Documented default true, always sent explicitly.
             send = args.get('sendNotificationEmail')
             params['sendNotificationEmail'] = send if isinstance(send, bool) else True
-        else:
-            # Google requires no notification for anyone/domain grants.
-            params['sendNotificationEmail'] = False
+        # anyone/domain grants: Drive only accepts sendNotificationEmail for
+        # user/group; the key is omitted entirely for other types.
         data = execute(self._svc().permissions().create(**params))
         return clean_permission(data)
 
