@@ -260,8 +260,6 @@ def test_token_uri_rejects_non_string():
 import datetime as _dt  # noqa: E402
 import urllib.error as _uerr  # noqa: E402
 
-import google.auth.exceptions as _gae  # noqa: E402
-
 
 class _FakeResp:
     """Minimal urlopen() response context manager for tests."""
@@ -291,7 +289,20 @@ def _make_urlopen(*, raises=None, body=b'', read_raises=None):
     return _open
 
 
-def test_broker_refresh_success_uses_broker_expiry(monkeypatch):
+@pytest.fixture
+def refresh_error(monkeypatch):
+    """Prepend the mock Google SDK so the broker helper's ``import
+    google.auth.exceptions`` resolves (the real SDK is absent in the node test
+    env), and hand the test the RefreshError type it raises.
+    """
+    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    import google.auth.exceptions as _gae
+
+    return _gae.RefreshError
+
+
+def test_broker_refresh_success_uses_broker_expiry(monkeypatch, refresh_error):
     payload = json.dumps({'access_token': 'AT', 'expiry_date': 1_000_000}).encode()
     monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(body=payload))
     tok, exp = gmail_client._refresh_access_token_via_broker('https://oauth2.rocketride.ai/refresh', 'RT')
@@ -299,7 +310,7 @@ def test_broker_refresh_success_uses_broker_expiry(monkeypatch):
     assert exp == _dt.datetime.utcfromtimestamp(1000)
 
 
-def test_broker_refresh_defaults_expiry_when_missing(monkeypatch):
+def test_broker_refresh_defaults_expiry_when_missing(monkeypatch, refresh_error):
     # A 200 without expiry_date must not leave a stale past expiry (which would
     # force a refresh on every API call); fall back to a sane future lifetime.
     payload = json.dumps({'access_token': 'AT'}).encode()
@@ -310,39 +321,39 @@ def test_broker_refresh_defaults_expiry_when_missing(monkeypatch):
     assert exp > before
 
 
-def test_broker_refresh_missing_access_token_raises(monkeypatch):
+def test_broker_refresh_missing_access_token_raises(monkeypatch, refresh_error):
     # A 200 without access_token must fail loud, not silently keep the stale token.
     payload = json.dumps({'expiry_date': 1_000_000}).encode()
     monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(body=payload))
-    with pytest.raises(_gae.RefreshError, match='no access token'):
+    with pytest.raises(refresh_error, match='no access token'):
         gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
 
 
-def test_broker_refresh_http_error_reports_rejected(monkeypatch):
+def test_broker_refresh_http_error_reports_rejected(monkeypatch, refresh_error):
     # HTTPError is a subclass of URLError: the broker was reached but rejected
     # the request, so it must not be misreported as "unreachable".
     err = _uerr.HTTPError('https://broker/refresh', 500, 'boom', {}, None)
     monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(raises=err))
-    with pytest.raises(_gae.RefreshError, match='rejected by the broker'):
+    with pytest.raises(refresh_error, match='rejected by the broker'):
         gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
 
 
-def test_broker_refresh_urlerror_reports_unreachable(monkeypatch):
+def test_broker_refresh_urlerror_reports_unreachable(monkeypatch, refresh_error):
     monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(raises=_uerr.URLError('down')))
-    with pytest.raises(_gae.RefreshError, match='unreachable'):
+    with pytest.raises(refresh_error, match='unreachable'):
         gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
 
 
-def test_broker_refresh_read_timeout_reports_unreachable(monkeypatch):
+def test_broker_refresh_read_timeout_reports_unreachable(monkeypatch, refresh_error):
     # A timeout during resp.read() raises OSError (TimeoutError), not URLError.
     monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(read_raises=TimeoutError('read timed out')))
-    with pytest.raises(_gae.RefreshError, match='unreachable'):
+    with pytest.raises(refresh_error, match='unreachable'):
         gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
 
 
-def test_broker_refresh_invalid_json_reports_invalid(monkeypatch):
+def test_broker_refresh_invalid_json_reports_invalid(monkeypatch, refresh_error):
     monkeypatch.setattr('urllib.request.urlopen', _make_urlopen(body=b'<html>not json'))
-    with pytest.raises(_gae.RefreshError, match='invalid response'):
+    with pytest.raises(refresh_error, match='invalid response'):
         gmail_client._refresh_access_token_via_broker('https://broker/refresh', 'RT')
 
 
