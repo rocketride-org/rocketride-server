@@ -274,23 +274,32 @@ async function readChunkFull(fh, buf) {
  */
 async function filesEqual(a, b) {
     const CHUNK_SIZE = 64 * 1024;
-    const [fhA, fhB] = await Promise.all([fsp.open(a, 'r'), fsp.open(b, 'r')]);
+    // Open sequentially with nested try/finally. Opening both under Promise.all
+    // would leak the first handle if the second open rejected (Promise.all
+    // rejects at once, orphaning the resolved handle) — a slow FD leak that can
+    // build to EMFILE across a large sync.
+    const fhA = await fsp.open(a, 'r');
     try {
-        const bufA = Buffer.allocUnsafe(CHUNK_SIZE);
-        const bufB = Buffer.allocUnsafe(CHUNK_SIZE);
-        for (;;) {
-            const [readA, readB] = await Promise.all([
-                readChunkFull(fhA, bufA),
-                readChunkFull(fhB, bufB),
-            ]);
-            // Divergent lengths (or one file hitting EOF first) => not equal.
-            if (readA !== readB) return false;
-            // Both reached EOF with every prior window equal => identical.
-            if (readA === 0) return true;
-            if (!bufA.subarray(0, readA).equals(bufB.subarray(0, readB))) return false;
+        const fhB = await fsp.open(b, 'r');
+        try {
+            const bufA = Buffer.allocUnsafe(CHUNK_SIZE);
+            const bufB = Buffer.allocUnsafe(CHUNK_SIZE);
+            for (;;) {
+                const [readA, readB] = await Promise.all([
+                    readChunkFull(fhA, bufA),
+                    readChunkFull(fhB, bufB),
+                ]);
+                // Divergent lengths (or one file hitting EOF first) => not equal.
+                if (readA !== readB) return false;
+                // Both reached EOF with every prior window equal => identical.
+                if (readA === 0) return true;
+                if (!bufA.subarray(0, readA).equals(bufB.subarray(0, readB))) return false;
+            }
+        } finally {
+            await fhB.close();
         }
     } finally {
-        await Promise.all([fhA.close(), fhB.close()]);
+        await fhA.close();
     }
 }
 
