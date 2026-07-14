@@ -507,8 +507,9 @@ export class ConnectionManager implements IConnectionManager {
 						this.clearToken();
 					}
 				}
-				// No usable token — restart auth only for session-locked apps.
-				if (sessionAppId) { await this.startOAuth(); return null; }
+				// No usable token — render unauthenticated and let the shell's
+				// auth gate decide (see the session-locked branch below for why
+				// bootstrap never starts a login flow itself).
 				return null;
 			}
 
@@ -524,14 +525,22 @@ export class ConnectionManager implements IConnectionManager {
 					const result = await this.client.login(token);
 					return await this.finishConnect(result, sessionAppId, config);
 				} catch {
-					// Token expired or invalid — clear and restart OAuth
+					// Token expired or invalid — clear it and fall through to the
+					// unauthenticated render below.
 					this.clearToken();
-					await this.startOAuth();
-					return null;
 				}
 			}
-			// No token — redirect to OAuth
-			await this.startOAuth();
+			// Unauthenticated session-locked visit: bootstrap deliberately does
+			// NOT start a login flow. The shell's auth gate (ShellLayout) emits
+			// shell:loginRequest only when the app EXISTS in the manifest and
+			// requires auth, and the Shell handler dispatches edition-aware
+			// (saas -> Zitadel OAuth, OSS -> the in-shell API-key screen).
+			// Starting OAuth here bounced anonymous visitors to Zitadel even
+			// for app ids this server does not have (which now render the
+			// App-not-found panel instead) and even on OSS, which has no
+			// Zitadel at all. NOTE: if pre-auth manifest filtering by
+			// permission ever lands, hidden-but-real apps will need a probe
+			// signal here to still reach the login flow.
 			return null;
 		}
 
