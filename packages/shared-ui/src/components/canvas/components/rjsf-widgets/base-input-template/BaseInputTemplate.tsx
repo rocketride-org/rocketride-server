@@ -27,6 +27,7 @@ import { ariaDescribedByIds, BaseInputTemplateProps, examplesId, getInputProps, 
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
 import EnvVarSuggestions from '../env-var-suggestions/EnvVarSuggestions';
+import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
 
 // =============================================================================
 // Helpers
@@ -132,6 +133,9 @@ export default function BaseInputTemplate<
 		}
 	}, [value]);
 
+	// Prefer description from uiSchema options, falling back to the JSON Schema description
+	const description = options.description ?? schema.description;
+
 	const inputProps = getInputProps<T, S, F>(schema, type, options);
 
 	// Separate numeric constraints (step/min/max) into MUI's nested inputProps; keep the rest at the top level
@@ -181,7 +185,7 @@ export default function BaseInputTemplate<
 				fullWidth={true}
 				size="small"
 				placeholder={placeholder}
-				label={labelValue(label || undefined, hideLabel, undefined)}
+				label={<FieldLabelWithInfo label={labelValue(label || undefined, hideLabel, undefined)} description={description} fieldTitle={label} />}
 				autoFocus={autofocus}
 				required={required}
 				disabled={disabled || readonly}

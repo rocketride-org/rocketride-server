@@ -29,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
 import EnvVarSuggestions from '../env-var-suggestions/EnvVarSuggestions';
+import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
 
 // =============================================================================
 // Helpers
@@ -66,8 +67,11 @@ const getMaskedValue = (val: string): string => {
  * becomes editable for entering a new key. This prevents accidental modification
  * of existing keys while still allowing replacement.
  */
-const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, formContext }) => {
+const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, formContext, schema, options }) => {
 	const { t } = useTranslation();
+
+	// Prefer description from uiSchema options, falling back to the JSON Schema description
+	const description = options.description ?? schema.description;
 
 	// If a value already exists, start in masked (read-only) mode to prevent accidental edits
 	const [maskApiKey, setMaskApiKey] = useState(!!value);
@@ -124,7 +128,7 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				name={id}
 				required={required}
 				type={'text'}
-				label={label}
+				label={<FieldLabelWithInfo label={label} description={description} fieldTitle={label} />}
 				inputRef={inputRef}
 				size="small"
 				value={tempValue}

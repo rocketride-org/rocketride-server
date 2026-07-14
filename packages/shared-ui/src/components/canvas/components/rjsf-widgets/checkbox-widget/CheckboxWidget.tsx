@@ -22,12 +22,11 @@
 // =============================================================================
 
 import { FocusEvent } from 'react';
-import Box from '@mui/material/Box';
 import Checkbox from '@mui/material/Checkbox';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import InfoIcon from '@mui/icons-material/Info';
-import Tooltip from '@mui/material/Tooltip';
 import { ariaDescribedByIds, descriptionId, labelValue, schemaRequiresTrueValue, FormContextType, RJSFSchema, StrictRJSFSchema, WidgetProps } from '@rjsf/utils';
+
+import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
 
 // =============================================================================
 // Component
@@ -59,16 +58,7 @@ export default function CheckboxWidget<
 	const description = options.description ?? schema.description;
 
 	// Render the label with an inline info tooltip icon when a description is available
-	const renderLabel = () => (
-		<Box sx={{ display: 'flex', alignItems: 'center' }} id={descriptionId<T>(id)}>
-			{labelValue(label, hideLabel, false)}
-			{description && (
-				<Tooltip title={description} placement="right">
-					<InfoIcon sx={{ ml: 0.5, color: 'rgba(0, 0, 0, 0.54)', fontSize: 16 }} />
-				</Tooltip>
-			)}
-		</Box>
-	);
+	const renderLabel = () => <FieldLabelWithInfo label={labelValue(label, hideLabel, false)} description={description} fieldTitle={label} id={descriptionId<T>(id)} />;
 
 	return <FormControlLabel control={<Checkbox size="small" id={id} name={id} checked={typeof value === 'undefined' ? false : Boolean(value)} required={required} disabled={disabled || readonly} autoFocus={autofocus} onChange={_onChange} onBlur={_onBlur} onFocus={_onFocus} aria-describedby={ariaDescribedByIds<T>(id)} />} label={renderLabel()} sx={{ mr: 0 }} />;
 }

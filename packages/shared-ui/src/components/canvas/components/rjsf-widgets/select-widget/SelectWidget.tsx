@@ -26,6 +26,8 @@ import MenuItem from '@mui/material/MenuItem';
 import TextField, { TextFieldProps } from '@mui/material/TextField';
 import { ariaDescribedByIds, enumOptionsIndexForValue, enumOptionsValueForIndex, labelValue, FormContextType, RJSFSchema, StrictRJSFSchema, WidgetProps } from '@rjsf/utils';
 
+import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -71,6 +73,9 @@ export default function SelectWidget<
 }: WidgetProps<T, S, F>) {
 	const { enumOptions, enumDisabled, emptyValue: optEmptyVal } = options;
 
+	// Prefer description from uiSchema options, falling back to the JSON Schema description
+	const description = options.description ?? schema.description;
+
 	// Default to single-select if multiple is not explicitly set
 	multiple = typeof multiple === 'undefined' ? false : !!multiple;
 
@@ -109,7 +114,7 @@ export default function SelectWidget<
 					minHeight: '1.4375em',
 				},
 			}}
-			label={labelValue(label || undefined, hideLabel, undefined)}
+			label={<FieldLabelWithInfo label={labelValue(label || undefined, hideLabel, undefined)} description={description} fieldTitle={label} />}
 			value={!isEmpty && typeof selectedIndexes !== 'undefined' ? selectedIndexes : emptyValue}
 			required={required}
 			disabled={disabled || readonly}
