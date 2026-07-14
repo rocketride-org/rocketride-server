@@ -1,61 +1,112 @@
-name: Lock node deps (constraints)
+name: Lock node deps (universal constraints)
 
-# PROTOTYPE / discussion artifact for the "ship a CI-built constraints lockfile"
-# proposal (engine issue: pin node deps once in CI instead of re-solving at
-# depends() time on every machine).
+# Ships a committed, CI-built universal constraints lockfile for the canvas nodes
+# (task #109). Today depends() -> ensure_constraints() runs `uv pip compile` over
+# all ~79 nodes/src/nodes/**/requirements.txt at install time, PER MACHINE, into a
+# transient <cache>/constraints.txt that is never committed -> it drifts between
+# runs/platforms (the Windows cryptography _rust.pyd flap was exactly that).
 #
-# Today: depends() -> ensure_constraints() runs `uv pip compile` over all
-#   ~93 nodes/src/nodes/**/requirements.txt into <cache>/constraints.txt at
-#   install time, PER MACHINE, and the result is never committed. So it can
-#   drift between runs/platforms (the Windows cryptography _rust.pyd flap was
-#   exactly that).
+# This job compiles that same set ONCE with `--universal` (one lockfile valid for
+# Linux + macOS + Windows) and keeps `nodes/src/nodes/constraints.lock` committed:
+#   * push to develop / weekly / manual -> regenerate + auto-commit the lock.
+#   * pull_request touching a requirements.txt -> compile only, so a cross-node
+#     version conflict fails HERE (at CI) instead of bricking a user's first run.
 #
-# This job runs that same compile ONCE, with `--universal` so the result is
-# valid across Linux + Windows + macOS, and publishes the lockfile. Two things
-# to look at when this runs:
-#   1. The resolved lockfile itself (the artifact) — the "versions we know work".
-#   2. Whether the cross-node solve SUCCEEDS. A hard conflict (e.g. two nodes
-#      pinning incompatible versions of a shared lib) fails HERE, at CI time,
-#      instead of bricking a user's first run.
-#
-# Consumption side (engine follow-up, intentionally NOT in this prototype):
-#   the build + depends() would install with `-c <committed constraints.lock>`
-#   and skip the per-machine recompute; the production version of this job
-#   commits the lockfile (PR/auto-commit) rather than only uploading it.
+# Engine consumption side (depends() installing with `-c constraints.lock` and
+# skipping the per-machine recompute) is a separate, guarded follow-up PR.
 
 on:
   workflow_dispatch: {}
+  schedule:
+    - cron: '0 6 * * 1'          # weekly, Monday 06:00 UTC — catch upstream drift
+  push:
+    branches: [develop]
+    paths:
+      - 'nodes/src/nodes/**/requirements.txt'
+      - '.github/workflows/lock-node-deps.yml'
+  pull_request:
+    paths:
+      - 'nodes/src/nodes/**/requirements.txt'
 
 permissions:
-  contents: read
+  contents: read                 # the commit path authenticates with the App token
+
+concurrency:
+  group: lock-node-deps-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LOCKFILE: nodes/src/nodes/constraints.lock
 
 jobs:
   lock:
-    name: Compile universal constraints
+    name: Compile universal node constraints
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - name: Generate a GitHub App token (only used to push the regenerated lock)
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          permission-contents: write
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
 
-      - name: Compile universal lockfile from all node requirements
+      - name: Install uv (pinned for reproducible compiles)
+        uses: astral-sh/setup-uv@f94ec6bedd8674c4426838e6b50417d36b6ab231 # v5.4.1
+        with:
+          version: "0.5.29"
+
+      - name: Compile the universal lockfile from all node requirements
         run: |
           set -euo pipefail
           mapfile -t REQS < <(find nodes/src/nodes -name requirements.txt | sort)
           echo "Resolving ${#REQS[@]} node requirements into one universal lockfile..."
-          printf '  %s\n' "${REQS[@]}"
-          # --universal: one lockfile valid for all platforms (covers the
-          #   Windows-vs-Linux wheel split that bit us with cryptography).
-          # --no-header: keep the diff stable across runs.
+          # --universal: one lockfile valid across Linux/macOS/Windows (the wheel
+          #   split that bit us with cryptography). --python 3.12 = the engine's
+          #   embedded Python. --index-strategy matches the runtime depends() solve.
+          # NB: no blanket --only-binary — a few transitive deps are sdist-only
+          #   (e.g. docopt); forcing wheels would fail the solve. Harden later with
+          #   an allow-list once those are enumerated.
           uv pip compile --universal --no-header \
-            --output-file nodes/src/nodes/constraints.lock \
+            --python 3.12 \
+            --index-strategy unsafe-best-match \
+            --output-file "${LOCKFILE}" \
             "${REQS[@]}"
-          echo "::group::resolved constraints.lock (first 60 lines)"
-          head -60 nodes/src/nodes/constraints.lock
-          echo "::endgroup::"
-          echo "Total pinned packages: $(grep -cE '^[a-zA-Z0-9].*==' nodes/src/nodes/constraints.lock)"
+          echo "Pinned packages: $(grep -cE '^[a-zA-Z0-9].*==' "${LOCKFILE}")"
+
+      - name: Report / enforce
+        id: check
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "${LOCKFILE}"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Lockfile already up to date."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Lockfile changed."
+            git --no-pager diff --stat -- "${LOCKFILE}"
+          fi
+
+      - name: Commit the regenerated lockfile (develop / weekly / manual)
+        if: ${{ steps.check.outputs.changed == 'true' && github.event_name != 'pull_request' }}
+        run: |
+          set -euo pipefail
+          git config user.name  'rocketride-release-bot'
+          git config user.email 'release-bot@rocketride.ai'
+          git add "${LOCKFILE}"
+          git commit -m "chore(deps): refresh universal node constraints lockfile [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Note drift on PRs (non-blocking)
+        if: ${{ steps.check.outputs.changed == 'true' && github.event_name == 'pull_request' }}
+        run: |
+          echo "::notice::a node requirements.txt changed the resolved lockfile — it will be regenerated + committed automatically when this merges to develop."
 
       - name: Job summary
         if: always()
@@ -63,11 +114,11 @@ jobs:
           {
             echo "## Node dependency lockfile"
             echo "- Inputs: \`$(find nodes/src/nodes -name requirements.txt | wc -l)\` node requirements.txt"
-            if [ -f nodes/src/nodes/constraints.lock ]; then
-              echo "- Resolved: \`$(grep -cE '^[a-zA-Z0-9].*==' nodes/src/nodes/constraints.lock)\` pinned packages (universal)"
+            if [ -f "${LOCKFILE}" ]; then
+              echo "- Resolved: \`$(grep -cE '^[a-zA-Z0-9].*==' "${LOCKFILE}")\` pinned packages (universal)"
               echo "- :white_check_mark: cross-node solve succeeded"
             else
-              echo "- :x: solve failed — a cross-node version conflict surfaced (see the step log). This is the conflict that would otherwise brick a user's first \`depends()\`."
+              echo "- :x: solve FAILED — a cross-node version conflict surfaced (see the log). This is the conflict that would otherwise brick a user's first \`depends()\`."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -76,5 +127,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: node-constraints-lock
-          path: nodes/src/nodes/constraints.lock
+          path: ${{ env.LOCKFILE }}
           if-no-files-found: error
