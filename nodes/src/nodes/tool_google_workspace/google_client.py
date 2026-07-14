@@ -208,6 +208,93 @@ def token_scope_report(svc: GoogleService, cfg: dict, required: list[str]) -> tu
     return granted, False, [s for s in required if s not in granted]
 
 
+class _BrokerCredentials:  # real base class is google.oauth2.credentials.Credentials
+    """User credentials whose refresh goes through the RocketRide OAuth broker.
+
+    Broker-issued tokens carry no client_id/client_secret (those belong to the
+    broker's Google app), so google-auth's own refresh cannot work; refresh()
+    POSTs the refresh_token to the validated broker URL instead. Defined at
+    module scope (mixed into the real Credentials class in build_service) so
+    the refresh logic is unit-testable independently of credential building.
+    """
+
+    _broker_url: 'str | None' = None
+    _product: str = ''
+
+    def refresh(self, request: object) -> None:  # type: ignore[override]
+        import datetime as _dt
+        import urllib.error as _uerr
+        import urllib.request as _req
+
+        import google.auth.exceptions as _gae
+
+        if not self._broker_url or not self.refresh_token:
+            raise _gae.RefreshError(
+                f'{self._product} access token has expired. Please reconnect your Google account in the node settings.'
+            )
+        body = json.dumps({'refresh_token': self.refresh_token}).encode()
+        req = _req.Request(
+            self._broker_url,
+            data=body,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        try:
+            with _req.urlopen(req, timeout=10) as resp:
+                raw = resp.read().decode()
+            data = json.loads(raw)
+        except _uerr.HTTPError as exc:
+            # HTTPError subclasses URLError: catch it first so a broker
+            # rejection (401/500/...) is not misreported as unreachable.
+            raise _gae.RefreshError(
+                f'{self._product} token refresh was rejected by the broker (HTTP {exc.code}). '
+                'Please reconnect your Google account.'
+            ) from exc
+        except _uerr.URLError as exc:
+            raise _gae.RefreshError(
+                f'{self._product} token refresh failed (broker unreachable: {exc}). '
+                'Please reconnect your Google account.'
+            ) from exc
+        except OSError as exc:
+            # e.g. a socket timeout raised from resp.read(); URLError is
+            # a subclass of OSError so this branch must follow it.
+            raise _gae.RefreshError(
+                f'{self._product} token refresh failed (connection error during broker request: {exc}). '
+                'Please reconnect your Google account.'
+            ) from exc
+        except (ValueError, json.JSONDecodeError) as exc:
+            raise _gae.RefreshError(
+                f'{self._product} token refresh returned a malformed response. Please reconnect your Google account.'
+            ) from exc
+        token = data.get('access_token') if isinstance(data, dict) else None
+        if not token:
+            # A 200 without an access token is a broker contract violation;
+            # keeping the stale token would just fail again downstream.
+            raise _gae.RefreshError(
+                f'{self._product} token refresh returned no access token. Please reconnect your Google account.'
+            )
+        self.token = token
+        ms = data.get('expiry_date')
+        if ms:
+            self.expiry = _dt.datetime.fromtimestamp(ms / 1000, tz=_dt.timezone.utc).replace(tzinfo=None)
+        else:
+            # Without an expiry the old (past) value would mark the fresh
+            # token as still expired and re-POST to the broker on every
+            # call; None means "not expiring" to google-auth.
+            self.expiry = None
+
+
+def _make_broker_credentials(svc: GoogleService, broker_url: 'str | None', **kwargs: Any):
+    """Build a Credentials subclass instance whose refresh() uses the broker."""
+    from google.oauth2.credentials import Credentials
+
+    cls = type('BrokerCredentials', (_BrokerCredentials, Credentials), {})
+    creds = cls(**kwargs)
+    creds._broker_url = broker_url
+    creds._product = svc.product
+    return creds
+
+
 def build_service(svc: GoogleService, auth_type: str, cfg: dict, scopes: list[str]) -> Any:
     """Build a discovery service for ``svc`` from node config, scoped to ``scopes``.
 
@@ -266,76 +353,11 @@ def build_service(svc: GoogleService, auth_type: str, cfg: dict, scopes: list[st
                     'Please reconnect your Google account in the node settings.'
                 )
             # Broker-issued token: client_id/client_secret belong to the broker's Google app
-            # and are never embedded in the token. Override refresh() so that any refresh
-            # attempt (proactive or after a 401) goes to the broker instead of Google directly.
-            _broker_url = oauth_server_url
-            _product = svc.product
-
-            class _BrokerCredentials(Credentials):
-                def refresh(self, request: object) -> None:  # type: ignore[override]
-                    import urllib.error as _uerr
-                    import urllib.request as _req
-
-                    import google.auth.exceptions as _gae
-
-                    if not _broker_url or not self.refresh_token:
-                        raise _gae.RefreshError(
-                            f'{_product} access token has expired. '
-                            'Please reconnect your Google account in the node settings.'
-                        )
-                    body = json.dumps({'refresh_token': self.refresh_token}).encode()
-                    req = _req.Request(
-                        _broker_url,
-                        data=body,
-                        headers={'Content-Type': 'application/json'},
-                        method='POST',
-                    )
-                    try:
-                        with _req.urlopen(req, timeout=10) as resp:
-                            raw = resp.read().decode()
-                        data = json.loads(raw)
-                    except _uerr.HTTPError as exc:
-                        # HTTPError subclasses URLError: catch it first so a broker
-                        # rejection (401/500/...) is not misreported as unreachable.
-                        raise _gae.RefreshError(
-                            f'{_product} token refresh was rejected by the broker (HTTP {exc.code}). '
-                            'Please reconnect your Google account.'
-                        ) from exc
-                    except _uerr.URLError as exc:
-                        raise _gae.RefreshError(
-                            f'{_product} token refresh failed (broker unreachable: {exc}). '
-                            'Please reconnect your Google account.'
-                        ) from exc
-                    except OSError as exc:
-                        # e.g. a socket timeout raised from resp.read(); URLError is
-                        # a subclass of OSError so this branch must follow it.
-                        raise _gae.RefreshError(
-                            f'{_product} token refresh failed (connection error during broker request: {exc}). '
-                            'Please reconnect your Google account.'
-                        ) from exc
-                    except (ValueError, json.JSONDecodeError) as exc:
-                        raise _gae.RefreshError(
-                            f'{_product} token refresh returned a malformed response. '
-                            'Please reconnect your Google account.'
-                        ) from exc
-                    token = data.get('access_token') if isinstance(data, dict) else None
-                    if not token:
-                        # A 200 without an access token is a broker contract violation;
-                        # keeping the stale token would just fail again downstream.
-                        raise _gae.RefreshError(
-                            f'{_product} token refresh returned no access token. Please reconnect your Google account.'
-                        )
-                    self.token = token
-                    ms = data.get('expiry_date')
-                    if ms:
-                        self.expiry = _dt.datetime.fromtimestamp(ms / 1000, tz=_dt.timezone.utc).replace(tzinfo=None)
-                    else:
-                        # Without an expiry the old (past) value would mark the fresh
-                        # token as still expired and re-POST to the broker on every
-                        # call; None means "not expiring" to google-auth.
-                        self.expiry = None
-
-            creds = _BrokerCredentials(
+            # and are never embedded in the token. refresh() goes to the broker instead
+            # of Google directly (see _BrokerCredentials at module scope).
+            creds = _make_broker_credentials(
+                svc,
+                oauth_server_url,
                 token=access_token,
                 refresh_token=refresh_token,
                 token_uri=token_uri,
