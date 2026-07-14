@@ -888,6 +888,23 @@ export class RocketRideClient extends DAPClient {
 		await this.detach();
 	}
 
+	/**
+	 * Update the environment variables used for pipeline substitution.
+	 *
+	 * Replaces the client's env dictionary (seeded from `config.env` or, in
+	 * Node, from `process.env`) with a copy of the given map. {@link use} and
+	 * {@link validate} read it to build the `ROCKETRIDE_*` substitution env
+	 * sent with the pipeline; `attach()` also consults `ROCKETRIDE_APIKEY`
+	 * from it when no explicit credential is supplied. Mirrors the Python
+	 * SDK's `set_env`.
+	 *
+	 * @param env - The new environment map; copied, so later caller-side
+	 *   mutations have no effect.
+	 */
+	setEnv(env: Record<string, string>): void {
+		this._env = { ...env };
+	}
+
 	// ============================================================================
 	// PING METHODS
 	// ============================================================================
