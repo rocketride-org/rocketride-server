@@ -514,15 +514,12 @@ export function DataTable<Row>({
 									</td>
 								</tr>
 							) : error && rows.length === 0 ? (
-								/* Failed query with nothing to show: full-width error row (live
-								   region so the failure is announced, not just tinted). */
+								/* Failed query with nothing to show: full-width error row. The
+								   live region is an inner span — role="alert" on the td itself
+								   would strip its implicit table-cell semantics. */
 								<tr>
-									<td
-										style={{ ...styles.messageCell, color: 'var(--rr-color-error)' }}
-										colSpan={colCount}
-										role="alert"
-									>
-										Failed to load: {error}
+									<td style={{ ...styles.messageCell, color: 'var(--rr-color-error)' }} colSpan={colCount}>
+										<span role="alert">Failed to load: {error}</span>
 									</td>
 								</tr>
 							) : (

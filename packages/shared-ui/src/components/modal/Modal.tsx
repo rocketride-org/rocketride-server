@@ -45,18 +45,62 @@ export const FOCUSABLE_SELECTOR =
 	'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Stack of currently-open Modal layers (identity tokens), topmost last. Escape
- * and the Tab focus-trap act only on the top layer, so stacked dialogs (or a
- * dialog over a DetailPanel) dismiss one at a time rather than all at once.
+ * Stack of currently-open overlay layers (identity tokens), topmost last.
+ * Shared by every keyboard-owning overlay — Modal AND DetailPanel — via the
+ * acquire/release/isTop helpers below: Escape and the Tab focus-trap act only
+ * on the top layer, so stacked overlays (a dialog over a dialog, or a dialog
+ * over a DetailPanel drawer) dismiss one at a time instead of all at once,
+ * and two focus traps never fight over document.activeElement.
  */
 const openLayers: object[] = [];
 
 /**
  * The page's body overflow value from BEFORE the first layer opened. Restored
  * only when the LAST layer closes: per-layer save/restore would let a lower
- * dialog closing out of order re-enable page scroll behind a still-open one.
+ * overlay closing out of order re-enable page scroll behind a still-open one.
  */
 let originalBodyOverflow: string | null = null;
+
+/**
+ * Joins the shared overlay stack as the new topmost layer and locks page
+ * scroll (the pre-lock overflow is captured by the first layer only).
+ *
+ * @returns The layer's identity token, for {@link isTopOverlayLayer} and
+ *   {@link releaseOverlayLayer}.
+ */
+export function acquireOverlayLayer(): object {
+	if (openLayers.length === 0) originalBodyOverflow = document.body.style.overflow;
+	const layer = {};
+	openLayers.push(layer);
+	document.body.style.overflow = 'hidden';
+	return layer;
+}
+
+/**
+ * Whether `layer` is currently the topmost open overlay — the only layer that
+ * may react to Escape / Tab.
+ *
+ * @param layer - The token returned by {@link acquireOverlayLayer}.
+ * @returns True while the layer is top-of-stack.
+ */
+export function isTopOverlayLayer(layer: object): boolean {
+	return openLayers[openLayers.length - 1] === layer;
+}
+
+/**
+ * Removes a layer from the stack (indexOf, not pop, so out-of-order unmounts
+ * are safe) and restores page scroll when the LAST layer is gone.
+ *
+ * @param layer - The token returned by {@link acquireOverlayLayer}.
+ */
+export function releaseOverlayLayer(layer: object): void {
+	const i = openLayers.indexOf(layer);
+	if (i >= 0) openLayers.splice(i, 1);
+	if (openLayers.length === 0 && originalBodyOverflow !== null) {
+		document.body.style.overflow = originalBodyOverflow;
+		originalBodyOverflow = null;
+	}
+}
 
 // =============================================================================
 // FOCUS TRAP
@@ -187,15 +231,10 @@ export function Modal({
 	// lock page scroll, move focus in, and wire Escape + Tab. Cleanup reverses
 	// every side effect and restores the prior focus.
 	useEffect(() => {
-		// 1. Identity token marking this dialog's spot in the layer stack. The
-		//    pre-lock overflow is captured once, by the FIRST layer only.
-		if (openLayers.length === 0) originalBodyOverflow = document.body.style.overflow;
-		const layer = {};
-		openLayers.push(layer);
+		// 1. Join the shared overlay stack (locks page scroll on first layer).
+		const layer = acquireOverlayLayer();
 		// 2. Remember what to restore focus to when the dialog closes.
 		const previouslyFocused = document.activeElement;
-		// 3. Lock page scroll behind the dialog.
-		document.body.style.overflow = 'hidden';
 		// 4. Move focus into the dialog unless a child already claimed it (e.g. a
 		//    ConfirmDialog focusing its confirm button in its own, later, effect).
 		const dialog = dialogRef.current;
@@ -205,9 +244,9 @@ export function Modal({
 		}
 		/** Escape (close) + Tab (focus trap), for the TOPMOST layer only. */
 		const onKeyDown = (e: KeyboardEvent): void => {
-			// Only the top-of-stack dialog reacts, so a stacked dialog doesn't
+			// Only the top-of-stack overlay reacts, so a stacked dialog doesn't
 			// collapse every layer on a single keypress.
-			if (openLayers[openLayers.length - 1] !== layer) return;
+			if (!isTopOverlayLayer(layer)) return;
 			if (e.key === 'Escape' && closeOnEscapeRef.current) {
 				e.preventDefault();
 				e.stopPropagation();
@@ -219,15 +258,8 @@ export function Modal({
 		document.addEventListener('keydown', onKeyDown);
 		return () => {
 			document.removeEventListener('keydown', onKeyDown);
-			// Pop this layer (indexOf, not pop, so out-of-order unmounts are safe).
-			const i = openLayers.indexOf(layer);
-			if (i >= 0) openLayers.splice(i, 1);
-			// Restore page scroll only when the LAST layer is gone — a lower layer
-			// closing must not unlock scroll behind a still-open higher one.
-			if (openLayers.length === 0 && originalBodyOverflow !== null) {
-				document.body.style.overflow = originalBodyOverflow;
-				originalBodyOverflow = null;
-			}
+			// Leave the stack (restores page scroll when the last layer closes).
+			releaseOverlayLayer(layer);
 			if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
 		};
 		// Mount-once: the refs above carry the latest onClose / closeOnEscape.

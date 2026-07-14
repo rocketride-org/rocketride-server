@@ -315,10 +315,18 @@ export const WorkspaceProvider: React.FC<{
 
 	// --- shell:switchApp → programmatic app switch ----------------------------
 
+	// Monotonic switch-request counter: an in-flight load-before-switch bails
+	// out after its await when a newer request has superseded it, so rapid
+	// switches settle on the last CLICKED app, not the last load to resolve.
+	const switchSeqRef = useRef(0);
+
 	useEffect(() => {
 		/** Allows non-React code to switch the active app without having
 		 *  access to WorkspaceContext dispatch. */
 		return ConnectionManager.getInstance().on('shell:switchApp', async ({ appId }) => {
+			// Claim a sequence number FIRST: even an instant (already-loaded)
+			// switch must invalidate any older in-flight load-before-switch.
+			const mySeq = ++switchSeqRef.current;
 			// Resolve $HOME to the platform default, and unknown appIds to the default
 			const target = appId === '$HOME' ? defaultAppId : appId;
 			const resolved = apps.find((a) => a.id === target) ? target : defaultAppId;
@@ -340,6 +348,11 @@ export const WorkspaceProvider: React.FC<{
 			cm.emit('shell:statusMessage', { message: `Loading ${entry?.name ?? resolved}…` });
 			const ok = await loadDescriptor(resolved);
 			cm.emit('shell:statusMessage', { message: null });
+
+			// A newer switchApp superseded this one while we awaited the load —
+			// last CLICK wins, not last-to-resolve; and a stale failure must not
+			// pop its modal over an app the user has already moved on to.
+			if (mySeq !== switchSeqRef.current) return;
 
 			if (ok) {
 				switchApp(resolved);

@@ -103,7 +103,10 @@ import { PopupRow } from 'shared/components/PopupRow';
 import AccountPage from './views/account/AccountPage';
 import SettingsPage from './views/settings/SettingsPage';
 
-// Icons
+// Icons — a DELIBERATE subset of ./icons/BoxIcon: only the glyphs shell chrome
+// itself renders are part of the frozen contract. Apps needing other icons take
+// them from 'shared' (the full set), which is not contract-bound; every name
+// added here is frozen forever, so the surface grows only on demonstrated need.
 import {
 	BxPlus,
 	BxEditAlt,
@@ -132,6 +135,11 @@ import {
 // These have no corresponding runtime value in `shellApi`, so they are named
 // in the frozen bundle via explicit type re-exports. The prop/return types of
 // the value symbols above are captured structurally through `ShellApiShape`.
+//
+// Known gaps queued for the NEXT freeze (adding a name here is an actionable
+// contract change, so they ride the already-planned v3 re-freeze rather than
+// minting a version alone): BottomPanelProps, IUsePollingOptions. Until then
+// both are reachable structurally via the BottomPanel / usePolling values.
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types

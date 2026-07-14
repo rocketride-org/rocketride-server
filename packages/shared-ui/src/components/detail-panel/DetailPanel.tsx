@@ -26,7 +26,7 @@
 import React, { CSSProperties, ReactNode, useEffect, useRef, useState } from 'react';
 import { ViewMenuEntry } from '../../types/viewMenu';
 import { ViewMenuBadge } from '../page-view-control/ViewMenuBadge';
-import { CLOSE_GLYPH, trapFocus } from '../modal/Modal';
+import { CLOSE_GLYPH, trapFocus, acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from '../modal/Modal';
 
 // =============================================================================
 // CONSTANTS
@@ -218,9 +218,10 @@ export function DetailPanel({
 		}
 		// Remember what to restore focus to when the drawer closes.
 		previouslyFocusedRef.current = document.activeElement;
-		// Prevent the page behind the drawer from scrolling.
-		const previousOverflow = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
+		// Join the SHARED overlay stack (same registry Modal uses): locks page
+		// scroll, and lets a Modal stacked over this drawer become the topmost
+		// layer so keyboard handling never double-fires across layers.
+		const layer = acquireOverlayLayer();
 		// Trigger the slide-in on the next frame so the transition actually runs.
 		const enterRaf = requestAnimationFrame(() => setEntered(true));
 		// Move focus into the panel (the close button).
@@ -228,6 +229,10 @@ export function DetailPanel({
 		// Escape closes the drawer; Tab is trapped inside it — aria-modal alone
 		// does not stop keyboard focus from wandering into the page behind.
 		const onKeyDown = (event: KeyboardEvent): void => {
+			// Only the topmost overlay reacts: with a dialog open over this
+			// drawer, Escape must close the dialog alone, and only ONE focus
+			// trap may steer document.activeElement.
+			if (!isTopOverlayLayer(layer)) return;
 			if (event.key === 'Escape') {
 				onCloseRef.current();
 			} else if (event.key === 'Tab' && panelRef.current) {
@@ -239,7 +244,8 @@ export function DetailPanel({
 			cancelAnimationFrame(enterRaf);
 			cancelAnimationFrame(focusRaf);
 			document.removeEventListener('keydown', onKeyDown);
-			document.body.style.overflow = previousOverflow;
+			// Leave the stack (restores page scroll when the last layer closes).
+			releaseOverlayLayer(layer);
 			// Reset so a subsequent open animates from off-screen again.
 			setEntered(false);
 			// Return focus to whatever held it before the drawer opened.

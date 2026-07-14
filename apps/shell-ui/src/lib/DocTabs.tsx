@@ -400,7 +400,7 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
  */
 interface SplitButtonProps {
 	/** Ref to the button element for positioning. */
-	btnRef: React.RefObject<HTMLButtonElement | null>;
+	btnRef: React.RefObject<HTMLButtonElement>;
 	/** Whether the dropdown menu is currently open. */
 	open: boolean;
 	/** Toggle the dropdown open/closed. */
@@ -435,9 +435,7 @@ const SplitButton: React.FC<SplitButtonProps> = ({ btnRef, open, onToggle, onClo
 
 	return (
 		<button
-			// React 18 typings expect a non-nullable RefObject here; useRef(null)
-			// infers RefObject<HTMLButtonElement | null>.
-			ref={btnRef as React.RefObject<HTMLButtonElement>}
+			ref={btnRef}
 			style={styles.toolbarBtn}
 			onClick={onToggle}
 			onBlur={handleBlur}

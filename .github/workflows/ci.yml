@@ -253,6 +253,9 @@ jobs:
   shell-contract:
     name: Shell API contract
     needs: [changes]
+    # Least privilege: this job only checks out code and runs local scripts.
+    permissions:
+      contents: read
     if: >-
       always() &&
       github.event_name != 'schedule' &&
