@@ -20,7 +20,33 @@ _NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
+# Self-sufficient bootstrap: importing the nodes package pulls engine runtime
+# modules (depends/rocketlib); stub them if absent so this file never depends
+# on a sibling test having run first, then drop what we added.
+from unittest.mock import MagicMock
+
+_added = []
+for _name in ('depends', 'rocketlib', 'ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
+    if _name not in sys.modules:
+        _stub = MagicMock()
+        if _name == 'depends':
+            _stub.depends = lambda *a, **k: None
+        if _name == 'rocketlib':
+            _stub.IInstanceBase = object
+            _stub.IGlobalBase = object
+            _stub.tool_function = lambda **kw: lambda f: f
+        sys.modules[_name] = _stub
+        _added.append(_name)
+
+_fresh_nodes = 'nodes' not in sys.modules
 from nodes.tool_google_workspace import google_client
+
+for _name in _added:
+    sys.modules.pop(_name, None)
+if _fresh_nodes:
+    for _name in [k for k in list(sys.modules) if k == 'nodes' or k.startswith('nodes.')]:
+        sys.modules.pop(_name, None)
+# Keep a direct reference; tests only touch google_client's pure functions.
 
 
 @pytest.fixture
