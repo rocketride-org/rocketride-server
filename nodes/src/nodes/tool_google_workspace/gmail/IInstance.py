@@ -40,12 +40,14 @@ from __future__ import annotations
 
 import base64
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import tool_function
 
 from ai.common.utils import normalize_tool_input, require_str
 from nodes.core.google_access import GoogleAccessError
 
-from .gmail_client import (
+from ..IInstance import GoogleToolInstanceBase
+from .client import (
+    SERVICE,
     MAX_BATCH,
     USER_ID,
     build_html_message,
@@ -74,20 +76,13 @@ _GMAIL_SETTINGS_SCOPE = 'https://www.googleapis.com/auth/gmail.settings.basic'
 _GMAIL_SETTINGS_SHARING_SCOPE = 'https://www.googleapis.com/auth/gmail.settings.sharing'
 
 
-class IInstance(IInstanceBase):
+class IInstance(GoogleToolInstanceBase):
     IGlobal: IGlobal
+    SERVICE = SERVICE
 
     # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
-
-    def _svc(self):
-        """Return the shared Gmail service handle."""
-        return self.IGlobal.service
-
-    def _access(self):
-        """Return the node's access descriptor (tier, scopes, flags)."""
-        return self.IGlobal.access
 
     def _require_send(self, op: str) -> None:
         """Raise GoogleAccessError unless the granted scopes include the send or full scope."""
@@ -163,52 +158,7 @@ class IInstance(IInstanceBase):
     )
     def check_connection(self, args: dict) -> dict:
         """Check Gmail connection status and whether granted OAuth scopes cover the configured access tier. Read-only."""
-        glb = self.IGlobal
-        access = glb.access
-        granted_scopes: set[str] = set()
-        scope_available = False
-        auth_type = 'unknown'
-
-        try:
-            from ai.common.config import Config
-
-            cfg = Config.getNodeConfig(glb.glb.logicalType, glb.glb.connConfig)
-            auth_type = (cfg.get('authType') or 'service').strip()
-            if auth_type == 'user':
-                token_str = str(cfg.get('userToken') or '').strip()
-                if token_str:
-                    from .gmail_client import _decode_blob
-                    import json as _json
-
-                    info = _json.loads(_decode_blob(token_str))
-                    raw = (info.get('scope') or '').split()
-                    granted_scopes = {s for s in raw if s}
-                    scope_available = True
-        except Exception:
-            pass
-
-        if _GMAIL_FULL_SCOPE in granted_scopes:
-            missing: list[str] = []
-        elif scope_available:
-            missing = [s for s in access.scopes if s not in granted_scopes]
-        else:
-            missing = []  # service account — scopes come from key, not token
-
-        ok = not missing
-        return {
-            'auth_type': auth_type,
-            'configured_tier': access.tier,
-            'required_scopes': access.scopes,
-            'granted_scopes': sorted(granted_scopes) if granted_scopes else ['(service account or scope field absent)'],
-            'missing_scopes': missing,
-            'connection_ok': ok,
-            'action': (
-                'Disconnect and reconnect your Google account with the current access tier '
-                'selected. After reconnecting, call check_connection again to confirm.'
-            )
-            if not ok
-            else None,
-        }
+        return self._check_connection_impl()
 
     # =======================================================================
     # MESSAGES — read

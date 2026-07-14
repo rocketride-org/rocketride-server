@@ -23,237 +23,43 @@
 # SOFTWARE.
 # =============================================================================
 
-"""
-Gmail API v1 client helpers.
-
-Credential construction (service account or user OAuth), the discovery-built
-service, MIME assembly for sends, and response cleaners that turn raw Gmail
-JSON into compact, agent-friendly shapes. All tool methods in IInstance call
-through here.
-"""
+"""Gmail-specific service bindings, MIME builders, and response cleaners."""
 
 from __future__ import annotations
 
 import base64
-import binascii
-import json
-import os
-import time as _time
+import functools
 from email.message import EmailMessage
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any
-from urllib.parse import urlparse
+
+from .. import google_client
+
+SERVICE = google_client.GoogleService(
+    product='Gmail',
+    api='gmail',
+    version='v1',
+    superset_scopes=frozenset({'https://mail.google.com/'}),
+)
+
+resolve_refresh_url = functools.partial(google_client.resolve_refresh_url, SERVICE)
+resolve_token_uri = functools.partial(google_client.resolve_token_uri, SERVICE)
+token_scope_report = functools.partial(google_client.token_scope_report, SERVICE)
+build_service = functools.partial(google_client.build_service, SERVICE)
+execute = functools.partial(google_client.execute, SERVICE)
+_decode_blob = google_client._decode_blob
+_scopes_satisfied = functools.partial(google_client._scopes_satisfied, SERVICE)
+_is_rate_limit_403 = google_client._is_rate_limit_403
 
 # Gmail's per-call ceiling for batchModify / batchDelete is 1000 ids.
 MAX_BATCH = 1000
-
-# Hosts the token-refresh POST may target. The token payload is untrusted (it
-# rides in saved pipes and broker responses); a token-supplied refresh URL is
-# honored only if it is https and its host is one of these, so a tampered token
-# can never redirect the refresh_token to an attacker host. RR_OAUTH_BROKER_URL
-# lets self-hosted deployments add their own broker host.
-_BROKER_HOSTS = frozenset({'oauth2.rocketride.ai', 'oauth.rocketride.ai'})
-
-
-def resolve_refresh_url(token_url: object) -> str | None:
-    """Validate a token-supplied refresh URL against the trusted broker hosts.
-
-    Returns the URL when it is https and its host is a known broker host
-    (built-in or the RR_OAUTH_BROKER_URL host). Returns None when the token
-    carries no URL. Raises ValueError for any other value so a tampered token
-    fails loud instead of silently posting credentials elsewhere.
-    """
-    if not token_url:
-        return None
-    if not isinstance(token_url, str):
-        raise ValueError('Gmail token oauth_server_url must be a string')
-
-    allowed = set(_BROKER_HOSTS)
-    env_broker = os.environ.get('RR_OAUTH_BROKER_URL', '')
-    if env_broker:
-        env_host = urlparse(env_broker).hostname
-        if env_host:
-            allowed.add(env_host.lower())
-
-    parsed = urlparse(token_url)
-    if parsed.scheme != 'https' or not parsed.hostname or parsed.hostname.lower() not in allowed:
-        raise ValueError(
-            f'Gmail token refresh URL {token_url!r} is not a trusted OAuth broker '
-            '(expected https and one of: ' + ', '.join(sorted(allowed)) + '). '
-            'Reconnect your Google account, or set RR_OAUTH_BROKER_URL for a self-hosted broker.'
-        )
-    return token_url
-
-
-# HTTP status codes worth retrying (rate-limit + transient server errors).
-_RETRY_STATUSES = {429, 500, 502, 503, 504}
-
-# Google's full-access Gmail scope — a superset of all granular Gmail scopes.
-_GMAIL_FULL_SCOPE = 'https://mail.google.com/'
 
 # Gmail uses the special id 'me' to mean the authorized mailbox.
 USER_ID = 'me'
 
 # Headers worth surfacing from a message payload (lower-cased for matching).
 _KEEP_HEADERS = ('from', 'to', 'cc', 'bcc', 'subject', 'date', 'message-id', 'in-reply-to', 'references')
-
-
-# ---------------------------------------------------------------------------
-# Credentials & service
-# ---------------------------------------------------------------------------
-
-
-def _decode_blob(value: str) -> str:
-    """Return text from a raw string or a base64 ``data:`` URL (serviceKey/userToken fields)."""
-    if not value:
-        raise ValueError('missing credential value')
-    if value.startswith('data:'):
-        _, _, payload = value.partition(',')
-        try:
-            return base64.b64decode(payload).decode('utf-8')
-        except (binascii.Error, ValueError) as exc:
-            raise ValueError(f'could not decode data-url credential: {exc}') from exc
-    return value
-
-
-def build_service(auth_type: str, cfg: dict, scopes: list[str]) -> Any:
-    """Build a Gmail v1 service from node config, scoped to ``scopes``.
-
-    ``auth_type`` selects service-account (serviceKey + optional adminEmail for
-    domain-wide delegation) or user OAuth (userToken JSON).
-    """
-    from googleapiclient.discovery import build
-
-    if auth_type == 'user':
-        import datetime as _dt
-
-        from google.oauth2.credentials import Credentials
-
-        info = json.loads(_decode_blob(cfg.get('userToken') or ''))
-        access_token = info.get('access_token') or info.get('token') or ''
-        refresh_token = info.get('refresh_token')
-        client_id = info.get('client_id')
-        client_secret = info.get('client_secret')
-        token_uri = info.get('token_uri', 'https://oauth2.googleapis.com/token')
-        # Untrusted input: reject any refresh URL not pointing at a known broker.
-        oauth_server_url = resolve_refresh_url(info.get('oauth_server_url'))
-        expiry_date_ms = info.get('expiry_date')
-
-        expiry: '_dt.datetime | None' = None
-        if expiry_date_ms:
-            expiry = _dt.datetime.utcfromtimestamp(expiry_date_ms / 1000)
-
-        granted_scopes = set((info.get('scope') or '').split())
-        if granted_scopes and _GMAIL_FULL_SCOPE not in granted_scopes:
-            missing = [s for s in scopes if s not in granted_scopes]
-            if missing:
-                raise ValueError(
-                    'Gmail: your Google account authorization is missing required scopes '
-                    'for the selected access tier. Please disconnect and reconnect your '
-                    f'Google account. Missing: {", ".join(missing)}'
-                )
-
-        if client_id and client_secret:
-            # Standard Google OAuth2 credentials: the library handles refresh automatically.
-            creds = Credentials(
-                token=access_token,
-                refresh_token=refresh_token,
-                token_uri=token_uri,
-                client_id=client_id,
-                client_secret=client_secret,
-                scopes=scopes,
-            )
-            if expiry is not None:
-                creds.expiry = expiry
-        else:
-            # Fail fast: if the token is already expired and there is no refresh path
-            # (no broker URL and no client credentials), the first API call would fail
-            # with a cryptic RefreshError. Surface a clear message now.
-            if expiry is not None and expiry < _dt.datetime.utcnow() and not oauth_server_url:
-                raise ValueError(
-                    'Gmail access token has expired. Please reconnect your Google account in the node settings.'
-                )
-            # Broker-issued token: client_id/client_secret belong to the broker's Google app
-            # and are never embedded in the token. Override refresh() so that any refresh
-            # attempt (proactive or after a 401) goes to the broker instead of Google directly.
-            _broker_url = oauth_server_url
-
-            class _BrokerCredentials(Credentials):
-                def refresh(self, request: object) -> None:  # type: ignore[override]
-                    import urllib.error as _uerr
-                    import urllib.request as _req
-
-                    import google.auth.exceptions as _gae
-
-                    if not _broker_url or not self.refresh_token:
-                        raise _gae.RefreshError(
-                            'Gmail access token has expired. Please reconnect your Google account in the node settings.'
-                        )
-                    body = json.dumps({'refresh_token': self.refresh_token}).encode()
-                    req = _req.Request(
-                        _broker_url,
-                        data=body,
-                        headers={'Content-Type': 'application/json'},
-                        method='POST',
-                    )
-                    try:
-                        with _req.urlopen(req, timeout=10) as resp:
-                            data = json.loads(resp.read().decode())
-                    except _uerr.URLError as exc:
-                        raise _gae.RefreshError(
-                            f'Gmail token refresh failed (broker unreachable: {exc}). '
-                            'Please reconnect your Google account.'
-                        ) from exc
-                    self.token = data.get('access_token') or self.token
-                    ms = data.get('expiry_date')
-                    if ms:
-                        self.expiry = _dt.datetime.utcfromtimestamp(ms / 1000)
-
-            creds = _BrokerCredentials(
-                token=access_token,
-                refresh_token=refresh_token,
-                token_uri=token_uri,
-                client_id=None,
-                client_secret=None,
-                scopes=scopes,
-            )
-            if expiry is not None:
-                creds.expiry = expiry
-    else:
-        from google.oauth2 import service_account
-
-        info = json.loads(_decode_blob(cfg.get('serviceKey') or ''))
-        creds = service_account.Credentials.from_service_account_info(info, scopes=scopes)
-        admin_email = (cfg.get('adminEmail') or '').strip()
-        if admin_email:
-            # Domain-wide delegation: act as the named user.
-            creds = creds.with_subject(admin_email)
-
-    return build('gmail', 'v1', credentials=creds, cache_discovery=False)
-
-
-def execute(request: Any) -> dict:
-    """Run a Gmail API request with exponential-backoff retry on 429/5xx."""
-    base_delay = 1.0
-    for attempt in range(4):
-        try:
-            return request.execute() or {}
-        except Exception as exc:  # googleapiclient.errors.HttpError and transport errors
-            status = getattr(getattr(exc, 'resp', None), 'status', None)
-            if status and int(status) in _RETRY_STATUSES and attempt < 3:
-                _time.sleep(min(base_delay * (2**attempt), 60.0))
-                continue
-            detail = getattr(exc, 'reason', None) or str(exc)
-            if status and int(status) == 403:
-                raise ValueError(
-                    f'Gmail API 403: {detail}. If this is a scope error, disconnect '
-                    'and reconnect your Google account with the required access tier.'
-                ) from exc
-            prefix = f'Gmail API {status}: ' if status else 'Gmail request failed: '
-            raise ValueError(f'{prefix}{detail}') from exc
-    raise RuntimeError('execute: retry loop exhausted unexpectedly')  # unreachable
 
 
 # ---------------------------------------------------------------------------

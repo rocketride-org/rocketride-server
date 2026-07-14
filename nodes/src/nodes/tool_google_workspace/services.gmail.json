@@ -5,7 +5,7 @@
 	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.tool_gmail",
+	"path": "nodes.tool_google_workspace.gmail",
 	"prefix": "gmail",
 	"icon": "gmail.svg",
 	"documentation": "https://docs.rocketride.org",

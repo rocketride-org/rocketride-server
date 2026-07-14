@@ -100,8 +100,8 @@ for _name, _stub in _build_import_stubs().items():
         sys.modules[_name] = _stub
         _added.append(_name)
 
-IInstance = importlib.import_module('nodes.tool_gmail.IInstance')
-gmail_client = importlib.import_module('nodes.tool_gmail.gmail_client')
+IInstance = importlib.import_module('nodes.tool_google_workspace.gmail.IInstance')
+gmail_client = importlib.import_module('nodes.tool_google_workspace.gmail.client')
 ga = importlib.import_module('nodes.core.google_access')
 
 for _name in _added:

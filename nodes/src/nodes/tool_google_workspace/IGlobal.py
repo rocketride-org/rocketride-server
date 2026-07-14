@@ -24,10 +24,14 @@
 # =============================================================================
 
 """
-Gmail tool node — global (shared) state.
+Shared global lifecycle for the Google Workspace tool services.
 
-Resolves the access tier + gate flags via the shared GMAIL spec, then builds a
-Gmail v1 service (service-account or user OAuth) scoped to the granted scopes.
+Each service subpackage (gmail/, sheets/, docs/, calendar/, drive/) subclasses
+:class:`GoogleToolGlobalBase`, sets ``SERVICE`` (its :class:`GoogleService`
+profile) and ``SPEC_NAME`` (its AccessSpec in ``nodes.core.google_access``),
+and inherits the whole beginGlobal / validateConfig / endGlobal lifecycle.
+Service-specific post-build state (e.g. drive's account-domain resolution)
+hooks in via :meth:`_after_begin`.
 """
 
 from __future__ import annotations
@@ -38,12 +42,26 @@ from typing import Any
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
+from .google_client import GoogleService, build_service, token_scope_report
 
-class IGlobal(IGlobalBase):
-    """Global state for tool_gmail: resolved access + built Gmail service."""
+
+class GoogleToolGlobalBase(IGlobalBase):
+    """Resolved access + built discovery service for one Workspace service."""
+
+    SERVICE: GoogleService  # set by each service subclass
+    SPEC_NAME: str = ''  # AccessSpec attribute name in nodes.core.google_access
 
     service: Any = None
     access: Any = None
+
+    def _spec(self):
+        """Resolve this service's AccessSpec (deferred: engine-path import)."""
+        from nodes.core import google_access
+
+        return getattr(google_access, self.SPEC_NAME)
+
+    def _after_begin(self, cfg: dict) -> None:
+        """Hook for service-specific post-build state (default: none)."""
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -51,51 +69,47 @@ class IGlobal(IGlobalBase):
 
         from depends import depends  # type: ignore
 
+        # The shared requirements.txt lives at the tool_google_workspace/ level.
         depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
-        from nodes.core.google_access import GMAIL, resolve_google_access
-
-        from .gmail_client import build_service
+        from nodes.core.google_access import resolve_google_access
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-        # Pass the full config: gate flags like allowHardDelete live beside
-        # 'access' and must reach _resolve_flags or they silently stay False.
-        self.access = resolve_google_access(cfg, GMAIL)
+        # Pass the full config: gate flags (allowDelete, allowPublicSharing,
+        # allowHardDelete) live beside 'access' and must reach _resolve_flags.
+        self.access = resolve_google_access(cfg, self._spec())
         auth_type = (cfg.get('authType') or 'service').strip()
-        self.service = build_service(auth_type, cfg, self.access.scopes)
+        self.service = build_service(self.SERVICE, auth_type, cfg, self.access.scopes)
+        self._after_begin(cfg)
 
     def validateConfig(self) -> None:
+        product = self.SERVICE.product
         try:
-            from nodes.core.google_access import GMAIL, resolve_google_access
+            from nodes.core.google_access import resolve_google_access
 
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             # Surfaces tier/flag misconfig (unknown tier, non-bool flag) as a warning.
-            resolve_google_access(cfg, GMAIL)
+            resolved = resolve_google_access(cfg, self._spec())
             auth_type = (cfg.get('authType') or 'service').strip()
             if auth_type == 'user':
                 token_str = str(cfg.get('userToken') or '').strip()
                 if not token_str:
-                    warning('Gmail: sign in with Google to provide an access token')
+                    warning(f'{product}: sign in with Google to provide an access token')
                 else:
                     try:
-                        from .gmail_client import _decode_blob
-                        import json as _json
-
-                        token_info = _json.loads(_decode_blob(token_str))
-                        granted = set((token_info.get('scope') or '').split())
-                        resolved = resolve_google_access(cfg, GMAIL)
-                        _full = 'https://mail.google.com/'
-                        missing = [] if _full in granted else [s for s in resolved.scopes if s not in granted]
-                        if missing and granted:
+                        _granted, covered, missing = token_scope_report(self.SERVICE, cfg, resolved.scopes)
+                        if not covered:
                             warning(
-                                'Gmail: your Google account authorization is missing scopes '
+                                f'{product}: your Google account authorization is missing scopes '
                                 'for the selected access tier. Please disconnect and reconnect '
                                 f'your Google account. Missing: {", ".join(missing)}'
                             )
-                    except Exception:
-                        pass  # scope check must not block config validation
+                    except Exception as exc:
+                        # A corrupt token must warn at config time, not surface later
+                        # as a cryptic run-time failure.
+                        warning(f'{product}: invalid user token data ({exc})')
             elif not str(cfg.get('serviceKey') or '').strip():
-                warning('Gmail: a service account key file is required')
+                warning(f'{product}: a service account key file is required')
         except Exception as e:
             warning(str(e))
 
