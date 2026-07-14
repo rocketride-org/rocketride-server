@@ -78,7 +78,7 @@ export default function FieldLabelWithInfo({ label, description, fieldTitle, id 
 	return (
 		<Box component="span" id={id} sx={{ display: 'inline-flex', alignItems: 'center' }}>
 			{label}
-			<Tooltip title={description} placement="right">
+			<Tooltip title={description} placement="right" describeChild>
 				<Box component="span" role="img" tabIndex={0} aria-label={accessibleName} onMouseDown={suppressLabelActivation} onClick={suppressLabelActivation} sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'default', pointerEvents: 'auto' }}>
 					<InfoIcon sx={{ ml: 0.5, color: 'text.secondary', fontSize: 16 }} />
 				</Box>
