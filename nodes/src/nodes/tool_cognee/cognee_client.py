@@ -130,8 +130,8 @@ def remember(
     except requests.RequestException as exc:
         raise _as_request_error(exc, 'remember') from None
 
-    payload = _json_of(response)
-    if not isinstance(payload, dict):
+    payload = _required_json(response, 'remember')
+    if not isinstance(payload, dict) or not isinstance(payload.get('status'), str) or not payload['status']:
         raise CogneeRequestError('cognee: remember returned an invalid response')
     return payload
 
@@ -147,14 +147,18 @@ def recall(
     include_references: bool,
     timeout: float,
 ) -> list[dict[str, Any]]:
-    """Recall ranked memory results with references using one POST attempt."""
+    """Recall ranked memory results with mandatory references using one POST attempt.
+
+    ``include_references`` remains in the helper signature for adapter compatibility,
+    but the wire contract always enables it so callers cannot disable provenance.
+    """
     url = f'{base_url}{_RECALL_PATH}'
     payload = {
         'query': query,
         'datasets': [dataset],
         'searchType': search_type,
         'topK': top_k,
-        'include_references': bool(include_references),
+        'include_references': True,
     }
     try:
         response = requests.post(
@@ -166,7 +170,11 @@ def recall(
         response.raise_for_status()
     except requests.RequestException as exc:
         raise _as_request_error(exc, 'recall') from None
-    return _shape_results(_json_of(response))
+
+    results = _required_json(response, 'recall')
+    if not isinstance(results, list) or not all(isinstance(result, dict) for result in results):
+        raise CogneeRequestError('cognee: recall returned an invalid response')
+    return results
 
 
 def list_datasets(base_url: str, api_key: str, *, timeout: float) -> list[dict[str, Any]]:
@@ -392,6 +400,16 @@ def _json_of(resp: requests.Response) -> Any:
         return resp.json()
     except ValueError:
         return {}
+
+
+def _required_json(resp: requests.Response, op: str) -> Any:
+    """Parse a required JSON body without exposing response content on failure."""
+    if not resp.content:
+        raise CogneeRequestError(f'cognee: {op} returned an invalid response')
+    try:
+        return resp.json()
+    except ValueError:
+        raise CogneeRequestError(f'cognee: {op} returned an invalid response') from None
 
 
 def _shape_run(resp: Any, dataset: str) -> Dict[str, Any]:

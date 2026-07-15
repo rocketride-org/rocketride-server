@@ -268,14 +268,25 @@ def test_add_error_never_leaks_key(monkeypatch):
 class _FakeResponse:
     """Minimal ``requests.Response`` stand-in: status_code, json(), raise_for_status()."""
 
-    def __init__(self, status_code=200, payload=None, *, content=b'{}', headers=None):
+    def __init__(
+        self,
+        status_code=200,
+        payload=None,
+        *,
+        content=b'{}',
+        headers=None,
+        json_error=None,
+    ):
         self.status_code = status_code
         self._payload = {} if payload is None else payload
         self.content = content
         self.headers = {} if headers is None else headers
+        self._json_error = json_error
 
     def json(self):
         """Return the canned JSON payload."""
+        if self._json_error is not None:
+            raise self._json_error
         return self._payload
 
     def raise_for_status(self):
@@ -512,6 +523,130 @@ def test_recall_posts_include_references_and_is_single_attempt(monkeypatch):
             'timeout': 23,
         }
     ]
+
+
+def test_recall_always_requests_references_when_caller_passes_false(monkeypatch):
+    """The wire contract keeps references enabled even when a caller attempts to disable them."""
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append({'url': url, **kwargs})
+        return _FakeResponse(payload=[{'text': 'Ada', 'references': []}])
+
+    monkeypatch.setattr(client.requests, 'post', fake_post)
+
+    client.recall(
+        'https://cognee.example',
+        'sentinel-secret',
+        query='Who wrote the first algorithm?',
+        dataset='demo',
+        search_type='GRAPH_COMPLETION_DECOMPOSITION',
+        top_k=8,
+        include_references=False,
+        timeout=23,
+    )
+
+    assert calls[0]['json']['include_references'] is True
+
+
+@pytest.mark.parametrize(
+    ('content', 'payload', 'json_error'),
+    [
+        (b'', None, None),
+        (b'sentinel-secret invalid JSON', None, ValueError('sentinel-secret invalid JSON')),
+        (b'{"unexpected":"sentinel-secret"}', {'unexpected': 'sentinel-secret'}, None),
+    ],
+    ids=['empty-body', 'invalid-json', 'wrong-shape'],
+)
+def test_remember_rejects_invalid_successful_response(
+    monkeypatch,
+    content,
+    payload,
+    json_error,
+):
+    """A 2xx remember response must contain valid JSON in the expected run-result shape."""
+
+    def fake_post(*_args, **_kwargs):
+        return _FakeResponse(content=content, payload=payload, json_error=json_error)
+
+    monkeypatch.setattr(client.requests, 'post', fake_post)
+
+    with pytest.raises(client.CogneeRequestError) as error:
+        client.remember(
+            'https://cognee.example',
+            'sentinel-secret',
+            text='memory',
+            dataset='demo',
+            run_in_background=False,
+            timeout=7,
+        )
+
+    assert str(error.value) == 'cognee: remember returned an invalid response'
+    assert 'sentinel-secret' not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    ('content', 'payload', 'json_error'),
+    [
+        (b'', None, None),
+        (b'sentinel-secret invalid JSON', None, ValueError('sentinel-secret invalid JSON')),
+        (b'{"unexpected":"sentinel-secret"}', {'unexpected': 'sentinel-secret'}, None),
+    ],
+    ids=['empty-body', 'invalid-json', 'wrong-shape'],
+)
+def test_recall_rejects_invalid_successful_response(
+    monkeypatch,
+    content,
+    payload,
+    json_error,
+):
+    """A 2xx recall response must contain valid JSON as a list of result objects."""
+
+    def fake_post(*_args, **_kwargs):
+        return _FakeResponse(content=content, payload=payload, json_error=json_error)
+
+    monkeypatch.setattr(client.requests, 'post', fake_post)
+
+    with pytest.raises(client.CogneeRequestError) as error:
+        client.recall(
+            'https://cognee.example',
+            'sentinel-secret',
+            query='Who wrote the first algorithm?',
+            dataset='demo',
+            search_type='GRAPH_COMPLETION_DECOMPOSITION',
+            top_k=8,
+            include_references=True,
+            timeout=23,
+        )
+
+    assert str(error.value) == 'cognee: recall returned an invalid response'
+    assert 'sentinel-secret' not in str(error.value)
+
+
+def test_recall_timeout_is_one_attempt_and_redacted(monkeypatch):
+    """A recall timeout is never retried and never exposes transport text or the API key."""
+    calls = []
+
+    def timeout(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise requests.exceptions.Timeout('sentinel-secret timed out')
+
+    monkeypatch.setattr(client.requests, 'post', timeout)
+
+    with pytest.raises(client.CogneeRequestError) as error:
+        client.recall(
+            'https://cognee.example',
+            'sentinel-secret',
+            query='Who wrote the first algorithm?',
+            dataset='demo',
+            search_type='GRAPH_COMPLETION_DECOMPOSITION',
+            top_k=8,
+            include_references=True,
+            timeout=23,
+        )
+
+    assert len(calls) == 1
+    assert 'sentinel-secret' not in str(error.value)
 
 
 def test_list_datasets_gets_api_v1_datasets_collection(monkeypatch):
