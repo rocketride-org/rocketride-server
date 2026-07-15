@@ -67,7 +67,7 @@ def _conditional_properties(field):
 
 
 def test_services_schema_only_shows_relevant_n8n_fields():
-    service = json.loads(_SERVICES_PATH.read_text())
+    service = json.loads(_SERVICES_PATH.read_text(encoding='utf-8'))
     fields = service['fields']
 
     assert fields['tool_n8n.apiKey']['optional'] is True
