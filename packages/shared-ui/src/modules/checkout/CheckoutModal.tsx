@@ -445,6 +445,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	appDescription,
 	stripePublishableKey,
 	preselectedPlan,
+	preselectedPromo,
 	onFetchPlans,
 	onCreateCheckout,
 	onConfirmPending,
@@ -473,7 +474,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 	// ── Promo code state ─────────────────────────────────────────────────
 	const promoEnabled = Boolean(onValidatePromoCode);
 	const [promoInput, setPromoInput] = useState('');
-	const [appliedPromo, setAppliedPromo] = useState<PromoValidation | null>(null);
+	const [appliedPromo, setAppliedPromo] = useState<PromoValidation | null>(preselectedPromo ?? null);
 	const [promoBusy, setPromoBusy] = useState(false);
 	const [promoError, setPromoError] = useState<string | null>(null);
 	// Set after a grant/hackathon code redeems — renders the success block
