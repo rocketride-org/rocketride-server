@@ -67,7 +67,7 @@ waiting for pipeline processing. URL verification is authenticated before its
 challenge is returned and is never emitted. Healthy and duplicate deliveries
 receive an empty `200` response. Invalid signatures receive `401`, malformed
 authenticated JSON receives `400`, and unavailable or saturated intake receives
-`503`; Slack can retry the latter.
+`503`; request bodies larger than 1 MiB receive `413`. Slack can retry `503` responses.
 
 After successful enqueue, the node does not provide a durable retry for
 downstream pipe-emission failures: it records the failure and does not requeue
@@ -76,8 +76,10 @@ the delivery.
 The queue and deduplication cache are process-local and not durable. On an
 orderly shutdown, intake stops and the node waits up to five seconds for queued
 and in-flight work, then allows up to five seconds for the consumer to exit
-before cancelling it. An abrupt process termination can lose accepted queued
-work, and a restart clears deduplication state.
+before cancelling it. After that cancellation window, shutdown still waits for
+an already-running downstream pipe write before pipe teardown. An abrupt
+process termination can lose accepted queued work, and a restart clears
+deduplication state.
 
 Only the five approved callback shapes are emitted. Socket Mode, OAuth app
 installation or provisioning, subscription discovery or management, and

@@ -27,12 +27,16 @@ from .slack_events import resolve_signing_secret
 
 
 class IGlobal(IGlobalBase):
+    """Manage Slack signing-secret configuration for the endpoint lifecycle."""
+
     def validateConfig(self) -> None:
+        """Warn when no Slack signing secret is configured."""
         config = self.IEndpoint.endpoint.serviceConfig.get('parameters', {})
         if not resolve_signing_secret(config):
             warning('Slack signing secret is missing.')
 
     def beginGlobal(self) -> None:
+        """Resolve and assign the signing secret before source execution."""
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
         config = self.IEndpoint.endpoint.serviceConfig.get('parameters', {})
@@ -42,5 +46,6 @@ class IGlobal(IGlobalBase):
             warning('Slack signing secret is missing.')
 
     def endGlobal(self) -> None:
+        """Clear the signing secret after source execution ends."""
         self.signing_secret = ''
         self.IEndpoint._signing_secret = ''

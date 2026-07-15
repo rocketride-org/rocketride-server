@@ -29,6 +29,9 @@ class FakeRequest:
     async def body(self):
         return self._body
 
+    async def stream(self):
+        yield self._body
+
 
 class FakePipe:
     def __init__(self, *, fail_at=None):
@@ -129,6 +132,50 @@ async def test_rejects_invalid_signature_before_json_or_queue(monkeypatch):
 
     assert response.status_code == 401
     assert endpoint._queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_request_handler_preserves_exact_under_limit_raw_body_for_signature(monkeypatch):
+    endpoint = _endpoint()
+    module = _module()
+    body = b'{"type":"url_verification","challenge":"\xc3\xa9"}'
+    timestamp = int(time.time())
+    request = FakeRequest(
+        body,
+        headers={
+            'X-Slack-Request-Timestamp': str(timestamp),
+            'X-Slack-Signature': _signature(body, timestamp),
+        },
+    )
+    verified = []
+    monkeypatch.setattr(
+        module,
+        'verify_slack_signature',
+        lambda secret, timestamp, signature, raw: verified.append(raw) or True,
+    )
+
+    response = await endpoint._request_handler(request)
+
+    assert response.status_code == 200
+    assert verified == [body]
+
+
+@pytest.mark.asyncio
+async def test_request_handler_rejects_body_over_hard_limit_without_signature_check(monkeypatch):
+    endpoint = _endpoint()
+    module = _module()
+    chunks = [b'a' * module.MAX_SLACK_REQUEST_BODY_BYTES, b'b']
+
+    class ChunkedRequest(FakeRequest):
+        async def stream(self):
+            for chunk in chunks:
+                yield chunk
+
+    monkeypatch.setattr(module, 'verify_slack_signature', lambda *args: pytest.fail('signature checked'))
+
+    response = await endpoint._request_handler(ChunkedRequest(b'', headers={}))
+
+    assert response.status_code == 413
 
 
 @pytest.mark.asyncio
@@ -384,6 +431,70 @@ async def test_shutdown_cancels_consumer_after_bounded_drain_timeout(monkeypatch
     assert owned.cancelled()
     assert endpoint._signing_secret == ''
     assert monitor == [('usr', '')]
+
+
+@pytest.mark.asyncio
+async def test_shutdown_records_delivery_failure_after_cancelling_consumer(monkeypatch):
+    endpoint = _endpoint()
+    endpoint._queue = asyncio.Queue()
+    endpoint._accepting = True
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = threading.Event()
+    failed = []
+
+    def emit(_routed):
+        loop.call_soon_threadsafe(started.set)
+        release.wait()
+        raise RuntimeError('delivery failed')
+
+    async def timeout(awaitable, *, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    endpoint._emit_event = emit
+    monkeypatch.setattr(_module().asyncio, 'wait_for', timeout)
+    monkeypatch.setattr(_module(), 'monitorFailed', failed.append)
+    endpoint._consumer_task = asyncio.create_task(endpoint._consume_queue())
+    endpoint._queue.put_nowait(RoutedEvent('app_mention', 'text', 'blocked', _event()))
+    await started.wait()
+
+    shutdown = asyncio.create_task(endpoint._shutdown())
+    await asyncio.sleep(0)
+    release.set()
+    await shutdown
+
+    assert failed == [0]
+    assert endpoint._delivery_task is None
+
+
+@pytest.mark.asyncio
+async def test_shutdown_waits_for_delivery_thread_after_drain_timeout(monkeypatch):
+    endpoint = _endpoint()
+    endpoint.endpoint = types.SimpleNamespace(serviceConfig={'parameters': {}})
+    loop = asyncio.get_running_loop()
+    started = asyncio.Event()
+    release = threading.Event()
+
+    def emit(_routed):
+        loop.call_soon_threadsafe(started.set)
+        release.wait()
+
+    endpoint._emit_event = emit
+    await endpoint._startup()
+    endpoint._queue.put_nowait(RoutedEvent('app_mention', 'text', 'blocked', _event()))
+    await started.wait()
+
+    async def timeout(awaitable, *, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    monkeypatch.setattr(_module().asyncio, 'wait_for', timeout)
+    shutdown = asyncio.create_task(endpoint._shutdown())
+    await asyncio.sleep(0)
+    assert not shutdown.done()
+    release.set()
+    await shutdown
 
 
 def test_execution_lifecycle_binds_only_the_public_slack_events_post_route(monkeypatch):

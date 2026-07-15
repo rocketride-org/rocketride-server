@@ -7,8 +7,7 @@
         "parameters": {
           "dedupTtlSeconds": 600,
           "queueCapacity": 1000,
-          "signingSecret": "",
-          "google": {}
+          "signingSecret": ""
         },
         "type": "slack",
         "hideForm": true,

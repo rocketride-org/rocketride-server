@@ -25,4 +25,6 @@ from rocketlib import IInstanceBase
 
 
 class IInstance(IInstanceBase):
+    """Represent a Slack Events node instance."""
+
     pass

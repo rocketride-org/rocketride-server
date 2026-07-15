@@ -94,6 +94,12 @@ def test_routes_reaction_as_exact_json():
             'event': {'type': 'message', 'channel_type': 'channel'},
         },
         {'type': 'event_callback', 'event_id': 'Ev5', 'event': {'type': 'reaction_removed'}},
+        {'type': 'event_callback', 'event_id': 'Ev6', 'event': {'type': [], 'text': 'x'}},
+        {
+            'type': 'event_callback',
+            'event_id': 'Ev7',
+            'event': {'type': 'message', 'channel_type': {}, 'text': 'x'},
+        },
     ],
 )
 def test_ignores_unapproved_or_incomplete_events(envelope):

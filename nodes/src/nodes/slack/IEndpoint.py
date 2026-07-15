@@ -44,17 +44,30 @@ from rocketlib import (
 
 from .slack_events import TtlDedupCache, classify_event, verify_slack_signature
 
+MAX_SLACK_REQUEST_BODY_BYTES = 1024 * 1024
+
 
 class IEndpoint(IEndpointBase):
+    """Receive verified Slack Events API callbacks and route them to output lanes."""
+
     target: IEndpointBase | None = None
     _signing_secret: str = ''
     _queue: asyncio.Queue | None = None
     _dedup: TtlDedupCache | None = None
     _consumer_task: asyncio.Task | None = None
+    _delivery_task: asyncio.Task | None = None
     _accepting: bool = False
 
     async def _request_handler(self, request: Request):
-        raw_body = await request.body()
+        """Read, authenticate, and enqueue one Slack callback request."""
+        body_chunks = []
+        body_size = 0
+        async for chunk in request.stream():
+            body_size += len(chunk)
+            if body_size > MAX_SLACK_REQUEST_BODY_BYTES:
+                return PlainTextResponse('', status_code=413)
+            body_chunks.append(chunk)
+        raw_body = b''.join(body_chunks)
         timestamp = request.headers.get('X-Slack-Request-Timestamp', '')
         signature = request.headers.get('X-Slack-Signature', '')
         if not verify_slack_signature(self._signing_secret, timestamp, signature, raw_body):
@@ -82,6 +95,7 @@ class IEndpoint(IEndpointBase):
         return PlainTextResponse('')
 
     def _emit_event(self, routed) -> None:
+        """Write one routed event to its target pipe."""
         envelope = routed.envelope
         event_id = envelope['event_id']
         team_id = envelope.get('team_id', '')
@@ -112,27 +126,35 @@ class IEndpoint(IEndpointBase):
             self.target.putPipe(pipe)
 
     async def _consume_queue(self) -> None:
+        """Deliver queued Slack events to the target pipe."""
         while True:
             routed = await self._queue.get()
             try:
                 if routed is None:
                     return
                 try:
-                    await asyncio.to_thread(self._emit_event, routed)
+                    self._delivery_task = asyncio.create_task(asyncio.to_thread(self._emit_event, routed))
+                    await asyncio.shield(self._delivery_task)
                 except Exception:
                     monitorFailed(0)
+                finally:
+                    if self._delivery_task.done():
+                        self._delivery_task = None
             finally:
                 self._queue.task_done()
 
     def _queue_capacity(self) -> int:
+        """Return the configured bounded event queue capacity."""
         parameters = getattr(self.endpoint, 'serviceConfig', {}).get('parameters', {})
         return min(10000, max(1, int(parameters.get('queueCapacity', 1000))))
 
     def _dedup_ttl(self) -> int:
+        """Return the configured event deduplication TTL."""
         parameters = getattr(self.endpoint, 'serviceConfig', {}).get('parameters', {})
         return min(3600, max(300, int(parameters.get('dedupTtlSeconds', TtlDedupCache.TTL_SECONDS))))
 
     async def _startup(self) -> None:
+        """Initialize the callback queue and start its delivery worker."""
         self._accepting = True
         self._queue = asyncio.Queue(maxsize=self._queue_capacity())
         self._dedup = TtlDedupCache(ttl_seconds=self._dedup_ttl())
@@ -140,6 +162,7 @@ class IEndpoint(IEndpointBase):
         monitorStatus('Slack Events ready - waiting for events')
 
     async def _shutdown(self) -> None:
+        """Stop intake, drain queued work, and finish active delivery safely."""
         self._accepting = False
         if self._queue is not None and self._consumer_task is not None:
             try:
@@ -152,11 +175,19 @@ class IEndpoint(IEndpointBase):
                     await self._consumer_task
                 except asyncio.CancelledError:
                     pass
+            if self._delivery_task is not None:
+                try:
+                    await asyncio.shield(self._delivery_task)
+                except Exception:
+                    monitorFailed(0)
+                finally:
+                    self._delivery_task = None
             self._consumer_task = None
         self._signing_secret = ''
         monitorOther('usr', '')
 
     def _run(self) -> None:
+        """Start the WebServer hosting the public Slack events endpoint."""
         parser = argparse.ArgumentParser(add_help=False)
         parser.add_argument('--data_host', type=str, default='localhost')
         parser.add_argument('--data_port', type=int, default=5567)
@@ -171,6 +202,7 @@ class IEndpoint(IEndpointBase):
         self._server.run()
 
     def scanObjects(self, _path: str, _scan_callback: Callable[[dict[str, Any]], None]):
+        """Start source execution when this endpoint is not in configuration mode."""
         self.target = self.endpoint.target
         if self.endpoint.openMode != OPEN_MODE.CONFIG:
             self._run()
