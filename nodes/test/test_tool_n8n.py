@@ -70,6 +70,7 @@ def test_services_schema_only_shows_relevant_n8n_fields():
     service = json.loads(_SERVICES_PATH.read_text(encoding='utf-8'))
     fields = service['fields']
 
+    assert service['shape'][0]['ui']['ui:options']['compactDescriptions'] is True
     assert fields['tool_n8n.apiKey']['optional'] is True
     assert _conditional_properties(fields['tool_n8n.mode']) == {
         'sync': ['tool_n8n.syncTimeout'],

@@ -585,6 +585,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 									formData={formValues}
 									formContext={{
 										formValues,
+										compactDescriptions: _uiSchema?.['ui:options']?.compactDescriptions === true,
 										hideFor: formValues.parameters?.authType,
 										googlePickerDeveloperKey,
 										googlePickerClientId,

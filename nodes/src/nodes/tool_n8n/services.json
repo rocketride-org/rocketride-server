@@ -223,7 +223,12 @@
 		{
 			"section": "Pipe",
 			"title": "n8n",
-			"properties": ["type", "tool_n8n.baseUrl", "tool_n8n.apiKey", "tool_n8n.workflow", "tool_n8n.payloadMode", "tool_n8n.mode", "tool_n8n.webhookAuth", "tool_n8n.verifyTls", "tool_n8n.readOnly"]
+			"properties": ["type", "tool_n8n.baseUrl", "tool_n8n.apiKey", "tool_n8n.workflow", "tool_n8n.payloadMode", "tool_n8n.mode", "tool_n8n.webhookAuth", "tool_n8n.verifyTls", "tool_n8n.readOnly"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
 		}
 	]
 }

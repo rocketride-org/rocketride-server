@@ -102,7 +102,7 @@ export default function BaseInputTemplate<
 			setControlledValue(newValue);
 			onChange(newValue === '' ? options.emptyValue : newValue);
 		},
-		[autocomplete, controlledValue, onChange, options.emptyValue],
+		[autocomplete, controlledValue, onChange, options.emptyValue]
 	);
 
 	const handleKeyDown = useCallback(
@@ -123,7 +123,7 @@ export default function BaseInputTemplate<
 				autocomplete.handleDismiss();
 			}
 		},
-		[autocomplete, onEnvVarSelect],
+		[autocomplete, onEnvVarSelect]
 	);
 
 	// Sync controlled value when the form re-renders with a new prop value (e.g., reset or external update)
@@ -135,12 +135,13 @@ export default function BaseInputTemplate<
 
 	// Prefer description from uiSchema options, falling back to the JSON Schema description
 	const description = options.description ?? schema.description;
+	const compactDescriptions = formContext?.compactDescriptions === true;
 
 	// Resolve the label once so we can preserve an absent/hidden result: MUI's
 	// notch/hide-label behavior relies on `label` being nullish, so only wrap it in
 	// FieldLabelWithInfo when a label is actually present.
 	const resolvedLabel = labelValue(label || undefined, hideLabel, undefined);
-	const displayLabel = resolvedLabel == null ? resolvedLabel : <FieldLabelWithInfo label={resolvedLabel} description={description} fieldTitle={label} />;
+	const displayLabel = resolvedLabel == null || !compactDescriptions ? resolvedLabel : <FieldLabelWithInfo label={resolvedLabel} description={description} fieldTitle={label} />;
 
 	const inputProps = getInputProps<T, S, F>(schema, type, options);
 
@@ -205,16 +206,20 @@ export default function BaseInputTemplate<
 				inputRef={inputRef}
 				InputLabelProps={DisplayInputLabelProps}
 				{...(textFieldProps as TextFieldProps)}
-				slotProps={{
-					...(textFieldProps as TextFieldProps).slotProps,
-					// Pass the plain resolved label (not the rich `displayLabel`) to the outlined
-					// input so its aria-hidden NotchedOutline legend never wraps the tabbable info
-					// tooltip trigger, which would otherwise create a phantom keyboard focus stop.
-					input: {
-						...(textFieldProps as TextFieldProps).slotProps?.input,
-						label: resolvedLabel ?? undefined,
-					},
-				}}
+				{...(compactDescriptions
+					? {
+							slotProps: {
+								...(textFieldProps as TextFieldProps).slotProps,
+								// Pass the plain resolved label (not the rich `displayLabel`) to the outlined
+								// input so its aria-hidden NotchedOutline legend never wraps the tabbable info
+								// tooltip trigger, which would otherwise create a phantom keyboard focus stop.
+								input: {
+									...(textFieldProps as TextFieldProps).slotProps?.input,
+									label: resolvedLabel ?? undefined,
+								},
+							},
+						}
+					: {})}
 				sx={{
 					...sx,
 					'& input[type="number"]::-webkit-outer-spin-button, & input[type="number"]::-webkit-inner-spin-button': {
@@ -235,9 +240,7 @@ export default function BaseInputTemplate<
 					})}
 				</datalist>
 			)}
-			{envKeys.length > 0 && (
-				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />
-			)}
+			{envKeys.length > 0 && <EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />}
 		</>
 	);
 }

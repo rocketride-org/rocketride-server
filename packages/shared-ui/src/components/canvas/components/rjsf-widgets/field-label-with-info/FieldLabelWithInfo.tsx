@@ -21,7 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-import { MouseEvent, ReactNode } from 'react';
+import { KeyboardEvent, ReactNode, SyntheticEvent } from 'react';
 import Box from '@mui/material/Box';
 import InfoIcon from '@mui/icons-material/Info';
 import Tooltip from '@mui/material/Tooltip';
@@ -67,10 +67,11 @@ export default function FieldLabelWithInfo({ label, description, fieldTitle, id 
 	const accessibleName = fieldTitle ? `More information about ${fieldTitle}` : 'More information';
 
 	// Keep the icon pointer-interactive even when nested inside a MUI InputLabel or
-	// FormControlLabel: clicking the icon must not toggle a checkbox or focus/steal
-	// focus from the associated input. Suppressing both mousedown and click cancels
-	// the label's default activation without affecting the tooltip.
-	const suppressLabelActivation = (event: MouseEvent) => {
+	// FormControlLabel: activating the icon must not toggle a checkbox or steal focus.
+	// Suppressing mouse and keyboard activation cancels the label's default behavior
+	// without affecting the tooltip.
+	const suppressLabelActivation = (event: SyntheticEvent) => {
+		if (event.type === 'keydown' && (event as KeyboardEvent).key !== 'Enter' && (event as KeyboardEvent).key !== ' ') return;
 		event.preventDefault();
 		event.stopPropagation();
 	};
@@ -79,9 +80,9 @@ export default function FieldLabelWithInfo({ label, description, fieldTitle, id 
 		<Box component="span" id={id} sx={{ display: 'inline-flex', alignItems: 'center' }}>
 			{label}
 			<Tooltip title={description} placement="right" describeChild>
-				<Box component="span" role="img" tabIndex={0} aria-label={accessibleName} onMouseDown={suppressLabelActivation} onClick={suppressLabelActivation} sx={{ display: 'inline-flex', alignItems: 'center', cursor: 'default', pointerEvents: 'auto' }}>
+				<span role="button" tabIndex={0} aria-label={accessibleName} onMouseDown={suppressLabelActivation} onClick={suppressLabelActivation} onKeyDown={suppressLabelActivation} style={{ display: 'inline-flex', alignItems: 'center', cursor: 'default', pointerEvents: 'auto' }}>
 					<InfoIcon sx={{ ml: 0.5, color: 'text.secondary', fontSize: 16 }} />
-				</Box>
+				</span>
 			</Tooltip>
 		</Box>
 	);
