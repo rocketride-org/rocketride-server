@@ -26,7 +26,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-_NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
+_NODES_SRC = Path(__file__).resolve().parents[3] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 

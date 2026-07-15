@@ -26,7 +26,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-_NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
+_NODES_SRC = Path(__file__).resolve().parents[3] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
@@ -62,6 +62,45 @@ def _build_import_stubs():
     ai_common_utils = MagicMock()
     ai_common_utils.normalize_tool_input = lambda args, **kw: args if isinstance(args, dict) else {}
     ai_common_utils.require_str = _require_str
+
+    def _stub_int_arg(args, key, *, default, lo, hi, tool_name=''):
+        value = args.get(key)
+        if value is None:
+            value = default
+        if isinstance(value, bool) or not isinstance(value, int):
+            prefix = f'{tool_name}: ' if tool_name else ''
+            raise ValueError(f'{prefix}"{key}" must be an integer')
+        return max(lo, min(value, hi))
+
+    ai_common_utils.int_arg = _stub_int_arg
+
+    def _stub_optional_str(args, key, *, default=None, tool_name=''):
+        if key not in args or args[key] is None:
+            return default
+        val = args[key]
+        if not isinstance(val, str):
+            prefix = f'{tool_name}: ' if tool_name else ''
+            raise ValueError(f'{prefix}"{key}" must be a string')
+        return val
+
+    ai_common_utils.optional_str = _stub_optional_str
+
+    def _stub_require_str_list(args, key, *, tool_name=''):
+        prefix = f'{tool_name}: ' if tool_name else ''
+        value = args.get(key)
+        if not isinstance(value, list) or not value:
+            raise ValueError(f'{prefix}"{key}" must be a non-empty list')
+        if not all(isinstance(i, str) and i.strip() for i in value):
+            raise ValueError(f'{prefix}"{key}" must contain only non-empty strings')
+        return value
+
+    def _stub_optional_str_list(args, key, *, default=None, tool_name=''):
+        if key not in args or args[key] is None:
+            return default
+        return _stub_require_str_list(args, key, tool_name=tool_name)
+
+    ai_common_utils.require_str_list = _stub_require_str_list
+    ai_common_utils.optional_str_list = _stub_optional_str_list
 
     return {
         'rocketlib': rocketlib,

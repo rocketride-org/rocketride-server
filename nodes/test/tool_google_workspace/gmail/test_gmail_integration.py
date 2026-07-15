@@ -41,7 +41,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-_NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
+_NODES_SRC = Path(__file__).resolve().parents[3] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
@@ -83,6 +83,17 @@ def _build_import_stubs():
     ai_common_utils = MagicMock()
     ai_common_utils.normalize_tool_input = lambda args, **kw: args if isinstance(args, dict) else {}
     ai_common_utils.require_str = _require_str
+
+    def _stub_int_arg(args, key, *, default, lo, hi, tool_name=''):
+        value = args.get(key)
+        if value is None:
+            value = default
+        if isinstance(value, bool) or not isinstance(value, int):
+            prefix = f'{tool_name}: ' if tool_name else ''
+            raise ValueError(f'{prefix}"{key}" must be an integer')
+        return max(lo, min(value, hi))
+
+    ai_common_utils.int_arg = _stub_int_arg
 
     return {
         'rocketlib': rocketlib,

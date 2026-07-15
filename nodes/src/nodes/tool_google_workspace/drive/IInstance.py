@@ -46,7 +46,7 @@ import base64
 
 from rocketlib import tool_function
 
-from ai.common.utils import normalize_tool_input, optional_str, require_str
+from ai.common.utils import int_arg, normalize_tool_input, optional_str, optional_str_list, require_str
 
 from .client import (
     SERVICE,
@@ -89,30 +89,6 @@ class IInstance(GoogleToolInstanceBase):
     def _account_domain(self) -> str | None:
         """Return the resolved account domain (or None/UNKNOWN)."""
         return getattr(self.IGlobal, 'account_domain', None)
-
-    @staticmethod
-    def _int_arg(args: dict, key: str, default: int, lo: int, hi: int) -> int:
-        """Read an integer arg, defaulting only on None and clamping to [lo, hi].
-
-        ``args.get(key) or default`` silently turns an explicit 0 into the
-        default, bypassing the clamp; a bool must never be coerced to an int.
-        """
-        value = args.get(key)
-        if value is None:
-            value = default
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError(f'{key} must be an integer')
-        return max(lo, min(value, hi))
-
-    @staticmethod
-    def _opt_str_list(args: dict, key: str, op: str) -> list[str] | None:
-        """Validate an optional non-empty list of id strings (e.g. parents)."""
-        value = args.get(key)
-        if value is None:
-            return None
-        if not isinstance(value, list) or not value or not all(isinstance(i, str) and i.strip() for i in value):
-            raise ValueError(f'{op}: "{key}" must be a non-empty list of id strings')
-        return value
 
     @staticmethod
     def _decode_content(args: dict, key: str, op: str) -> bytes | None:
@@ -225,7 +201,7 @@ class IInstance(GoogleToolInstanceBase):
         """List Drive files (optionally filtered by a query). Read-only."""
         args = normalize_tool_input(args, tool_name='tool_drive')
         params: dict = {
-            'pageSize': self._int_arg(args, 'pageSize', 25, 1, 100),
+            'pageSize': int_arg(args, 'pageSize', default=25, lo=1, hi=100),
             'supportsAllDrives': True,
             'includeItemsFromAllDrives': True,
             'fields': f'nextPageToken, files({_FILE_FIELDS})',
@@ -390,7 +366,7 @@ class IInstance(GoogleToolInstanceBase):
         """List accessible shared drives. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_drive')
         params: dict = {
-            'pageSize': self._int_arg(args, 'pageSize', 25, 1, 100),
+            'pageSize': int_arg(args, 'pageSize', default=25, lo=1, hi=100),
             'fields': 'nextPageToken, drives(id,name)',
         }
         page_token = optional_str(args, 'pageToken', tool_name='drives_list')
@@ -494,7 +470,7 @@ class IInstance(GoogleToolInstanceBase):
         self._access().require_write('file_create')
         name = require_str(args, 'name', tool_name='file_create')
         body: dict = {'name': name}
-        parents = self._opt_str_list(args, 'parents', 'file_create')
+        parents = optional_str_list(args, 'parents', tool_name='file_create')
         if parents:
             body['parents'] = parents
         mime = optional_str(args, 'mimeType', tool_name='file_create')
@@ -586,7 +562,7 @@ class IInstance(GoogleToolInstanceBase):
         description = optional_str(args, 'description', tool_name='file_copy')
         if description and description.strip():
             body['description'] = description
-        parents = self._opt_str_list(args, 'parents', 'file_copy')
+        parents = optional_str_list(args, 'parents', tool_name='file_copy')
         if parents:
             body['parents'] = parents
         data = execute(self._files().copy(fileId=fid, body=body, supportsAllDrives=True, fields=_FILE_FIELDS))
@@ -621,10 +597,10 @@ class IInstance(GoogleToolInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_drive')
         self._access().require_write('file_move')
         fid = require_str(args, 'fileId', tool_name='file_move')
-        add_parents = self._opt_str_list(args, 'addParents', 'file_move')
+        add_parents = optional_str_list(args, 'addParents', tool_name='file_move')
         if not add_parents:
             raise ValueError('file_move: "addParents" must be a non-empty list of destination folder id(s)')
-        remove_parents = self._opt_str_list(args, 'removeParents', 'file_move')
+        remove_parents = optional_str_list(args, 'removeParents', tool_name='file_move')
         if remove_parents is None:
             current = execute(self._files().get(fileId=fid, supportsAllDrives=True, fields='parents'))
             remove_parents = current.get('parents') or []
@@ -707,7 +683,7 @@ class IInstance(GoogleToolInstanceBase):
         description = optional_str(args, 'description', tool_name='folder_create')
         if description and description.strip():
             body['description'] = description
-        parents = self._opt_str_list(args, 'parents', 'folder_create')
+        parents = optional_str_list(args, 'parents', tool_name='folder_create')
         if parents:
             body['parents'] = parents
         data = execute(self._files().create(body=body, supportsAllDrives=True, fields=_FILE_FIELDS))

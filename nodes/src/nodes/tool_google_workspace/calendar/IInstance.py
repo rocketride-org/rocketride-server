@@ -42,7 +42,14 @@ from __future__ import annotations
 
 from rocketlib import tool_function
 
-from ai.common.utils import normalize_tool_input, require_str
+from ai.common.utils import (
+    int_arg,
+    normalize_tool_input,
+    optional_str,
+    optional_str_list,
+    require_str,
+    require_str_list,
+)
 
 from ..IInstance import GoogleToolInstanceBase
 from .client import (
@@ -100,30 +107,6 @@ class IInstance(GoogleToolInstanceBase):
         return value.strip()
 
     @staticmethod
-    def _clamp_results(args: dict) -> int:
-        """Read maxResults, defaulting only on None and clamping to [1, 250]; reject bools.
-
-        `args.get(key) or default` would silently turn an explicit 0 into the
-        default, bypassing the clamp; a bool must never be coerced to 1.
-        """
-        value = args.get('maxResults')
-        if value is None:
-            value = _DEFAULT_MAX_RESULTS
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise ValueError('"maxResults" must be an integer')
-        return max(1, min(value, _MAX_RESULTS_CAP))
-
-    @staticmethod
-    def _opt_str(args: dict, key: str, op: str) -> str | None:
-        """Read an optional non-empty string arg; reject present non-strings."""
-        value = args.get(key)
-        if value is None:
-            return None
-        if not isinstance(value, str) or not value.strip():
-            raise ValueError(f'{op}: "{key}" must be a non-empty string')
-        return value
-
-    @staticmethod
     def _opt_clearable_str(args: dict, key: str, op: str) -> str | None:
         """Read an optional string that may be empty to clear an existing field."""
         value = args.get(key)
@@ -159,28 +142,6 @@ class IInstance(GoogleToolInstanceBase):
             return None
         if not isinstance(value, list) or not all(isinstance(a, dict) for a in value):
             raise ValueError(f'{op}: "attendees" must be a list of attendee objects, e.g. [{{"email": "a@b.com"}}]')
-        return value
-
-    @staticmethod
-    def _opt_str_list(args: dict, key: str, op: str) -> list[str] | None:
-        """Validate an optional non-empty list of non-empty strings (e.g. RRULE recurrence lines)."""
-        value = args.get(key)
-        if value is None:
-            return None
-        if not isinstance(value, list) or not value:
-            raise ValueError(f'{op}: "{key}" must be a non-empty list')
-        if not all(isinstance(i, str) and i.strip() for i in value):
-            raise ValueError(f'{op}: "{key}" must contain only non-empty strings')
-        return value
-
-    @staticmethod
-    def _str_list(args: dict, key: str, op: str) -> list[str]:
-        """Validate a required non-empty list of non-empty strings (e.g. calendar ids)."""
-        value = args.get(key)
-        if not isinstance(value, list) or not value:
-            raise ValueError(f'{op}: "{key}" must be a non-empty list')
-        if not all(isinstance(i, str) and i.strip() for i in value):
-            raise ValueError(f'{op}: "{key}" must contain only non-empty strings')
         return value
 
     # =======================================================================
@@ -245,9 +206,12 @@ class IInstance(GoogleToolInstanceBase):
     def event_list(self, args: dict) -> dict:
         """List events on a calendar, with optional incremental sync via syncToken. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_calendar')
-        params: dict = {'calendarId': self._calendar_id(args), 'maxResults': self._clamp_results(args)}
+        params: dict = {
+            'calendarId': self._calendar_id(args),
+            'maxResults': int_arg(args, 'maxResults', default=_DEFAULT_MAX_RESULTS, lo=1, hi=_MAX_RESULTS_CAP),
+        }
         for key in ('timeMin', 'timeMax', 'q', 'pageToken', 'syncToken'):
-            val = self._opt_str(args, key, 'event_list')
+            val = optional_str(args, key, tool_name='event_list')
             if val is not None:
                 params[key] = val
         if 'syncToken' in params and any(key in params for key in ('timeMin', 'timeMax', 'q')):
@@ -309,8 +273,12 @@ class IInstance(GoogleToolInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_calendar')
         cal_id = self._calendar_id(args)
         event_id = require_str(args, 'eventId', tool_name='event_instances')
-        params: dict = {'calendarId': cal_id, 'eventId': event_id, 'maxResults': self._clamp_results(args)}
-        page_token = self._opt_str(args, 'pageToken', 'event_instances')
+        params: dict = {
+            'calendarId': cal_id,
+            'eventId': event_id,
+            'maxResults': int_arg(args, 'maxResults', default=_DEFAULT_MAX_RESULTS, lo=1, hi=_MAX_RESULTS_CAP),
+        }
+        page_token = optional_str(args, 'pageToken', tool_name='event_instances')
         if page_token is not None:
             params['pageToken'] = page_token
         data = execute(self._svc().events().instances(**params))
@@ -340,7 +308,7 @@ class IInstance(GoogleToolInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_calendar')
         time_min = require_str(args, 'timeMin', tool_name='freebusy_query')
         time_max = require_str(args, 'timeMax', tool_name='freebusy_query')
-        ids = self._str_list(args, 'calendarIds', 'freebusy_query')
+        ids = require_str_list(args, 'calendarIds', tool_name='freebusy_query')
         body = {'timeMin': time_min, 'timeMax': time_max, 'items': [{'id': c} for c in ids]}
         data = execute(self._svc().freebusy().query(body=body))
         return clean_freebusy(data)
@@ -370,9 +338,11 @@ class IInstance(GoogleToolInstanceBase):
     def calendar_list(self, args: dict) -> dict:
         """List the calendars on the user's calendar list. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_calendar')
-        params: dict = {'maxResults': self._clamp_results(args)}
+        params: dict = {
+            'maxResults': int_arg(args, 'maxResults', default=_DEFAULT_MAX_RESULTS, lo=1, hi=_MAX_RESULTS_CAP)
+        }
         for key in ('pageToken', 'syncToken'):
-            val = self._opt_str(args, key, 'calendar_list')
+            val = optional_str(args, key, tool_name='calendar_list')
             if val is not None:
                 params[key] = val
         data = execute(self._svc().calendarList().list(**params))
@@ -413,7 +383,7 @@ class IInstance(GoogleToolInstanceBase):
         """List a calendar's ACL rules. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_calendar')
         params: dict = {'calendarId': self._calendar_id(args)}
-        page_token = self._opt_str(args, 'pageToken', 'acl_list')
+        page_token = optional_str(args, 'pageToken', tool_name='acl_list')
         if page_token is not None:
             params['pageToken'] = page_token
         data = execute(self._svc().acl().list(**params))
@@ -520,7 +490,7 @@ class IInstance(GoogleToolInstanceBase):
         cal_id = self._calendar_id(args)
         event_id = require_str(args, 'eventId', tool_name='event_update')
         body: dict = {}
-        summary = self._opt_str(args, 'summary', 'event_update')
+        summary = optional_str(args, 'summary', tool_name='event_update')
         if summary is not None:
             body['summary'] = summary
         start = self._opt_obj(args, 'start', 'event_update')
@@ -544,7 +514,11 @@ class IInstance(GoogleToolInstanceBase):
         ``clearable``: update ops accept empty strings to clear a field; create
         ops reject them (explicit intent, not inferred from the op label).
         """
-        string_reader = self._opt_clearable_str if clearable else self._opt_str
+
+        def _strict_reader(a: dict, key: str, o: str):
+            return optional_str(a, key, tool_name=o)
+
+        string_reader = self._opt_clearable_str if clearable else _strict_reader
         description = string_reader(args, 'description', op)
         if description is not None:
             body['description'] = description
@@ -554,7 +528,7 @@ class IInstance(GoogleToolInstanceBase):
         attendees = self._opt_attendees(args, op)
         if attendees is not None:
             body['attendees'] = attendees
-        recurrence = self._opt_str_list(args, 'recurrence', op)
+        recurrence = optional_str_list(args, 'recurrence', tool_name=op)
         if recurrence is not None:
             body['recurrence'] = recurrence
 
@@ -652,10 +626,10 @@ class IInstance(GoogleToolInstanceBase):
         self._access().require_write('calendar_create')
         summary = require_str(args, 'summary', tool_name='calendar_create')
         body: dict = {'summary': summary}
-        time_zone = self._opt_str(args, 'timeZone', 'calendar_create')
+        time_zone = optional_str(args, 'timeZone', tool_name='calendar_create')
         if time_zone is not None:
             body['timeZone'] = time_zone
-        description = self._opt_str(args, 'description', 'calendar_create')
+        description = optional_str(args, 'description', tool_name='calendar_create')
         if description is not None:
             body['description'] = description
         data = execute(self._svc().calendars().insert(body=body))
@@ -684,7 +658,7 @@ class IInstance(GoogleToolInstanceBase):
         cal_id = self._calendar_id(args)
         body: dict = {}
         for key in ('summary', 'timeZone'):
-            val = self._opt_str(args, key, 'calendar_update')
+            val = optional_str(args, key, tool_name='calendar_update')
             if val is not None:
                 body[key] = val
         # description may be an empty string to clear the existing value.
@@ -749,7 +723,7 @@ class IInstance(GoogleToolInstanceBase):
                 f'acl_insert (scopeType={scope_type!r} exposes the calendar beyond individual grantees)',
             )
         scope: dict = {'type': scope_type}
-        scope_value = self._opt_str(args, 'scopeValue', 'acl_insert')
+        scope_value = optional_str(args, 'scopeValue', tool_name='acl_insert')
         if scope_type != 'default' and scope_value is None:
             raise ValueError(f'acl_insert: "scopeValue" is required for scopeType {scope_type!r}')
         if scope_value is not None:

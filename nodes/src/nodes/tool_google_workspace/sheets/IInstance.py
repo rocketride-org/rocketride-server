@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from rocketlib import tool_function
 
-from ai.common.utils import normalize_tool_input, optional_int, require_int, require_str
+from ai.common.utils import normalize_tool_input, optional_int, require_int, require_str, require_str_list
 
 from ..IInstance import GoogleToolInstanceBase
 from .client import (
@@ -71,16 +71,6 @@ class IInstance(GoogleToolInstanceBase):
     # -----------------------------------------------------------------------
     # Helpers
     # -----------------------------------------------------------------------
-
-    @staticmethod
-    def _str_list(args: dict, key: str, op: str) -> list[str]:
-        """Validate a non-empty list of non-empty strings (e.g. A1 ranges)."""
-        items = args.get(key)
-        if not isinstance(items, list) or not items:
-            raise ValueError(f'{op}: "{key}" must be a non-empty list')
-        if not all(isinstance(i, str) and i.strip() for i in items):
-            raise ValueError(f'{op}: "{key}" must contain only non-empty strings')
-        return items
 
     @staticmethod
     def _values_arg(args: dict, key: str, op: str) -> list:
@@ -178,7 +168,7 @@ class IInstance(GoogleToolInstanceBase):
         """Read cell values from multiple A1 ranges in one call. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_sheets')
         sid = require_str(args, 'spreadsheetId', tool_name='values_batch_get')
-        ranges = self._str_list(args, 'ranges', 'values_batch_get')
+        ranges = require_str_list(args, 'ranges', tool_name='values_batch_get')
         params = {'spreadsheetId': sid, 'ranges': ranges}
         major = self._enum_arg(args, 'majorDimension', _MAJOR_DIMENSIONS, None)
         if major:
@@ -389,7 +379,7 @@ class IInstance(GoogleToolInstanceBase):
         title = require_str(args, 'title', tool_name='spreadsheet_create')
         body: dict = {'properties': {'title': title}}
         if args.get('sheetTitles') is not None:
-            titles = self._str_list(args, 'sheetTitles', 'spreadsheet_create')
+            titles = require_str_list(args, 'sheetTitles', tool_name='spreadsheet_create')
             body['sheets'] = [{'properties': {'title': t}} for t in titles]
         data = execute(self._svc().spreadsheets().create(body=body))
         return clean_spreadsheet(data)

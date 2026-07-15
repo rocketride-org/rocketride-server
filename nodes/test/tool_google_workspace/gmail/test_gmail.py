@@ -26,7 +26,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-_NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
+_NODES_SRC = Path(__file__).resolve().parents[3] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
@@ -54,6 +54,17 @@ def _build_import_stubs():
     ai_common_utils = MagicMock()
     ai_common_utils.normalize_tool_input = lambda args, **kw: args if isinstance(args, dict) else {}
     ai_common_utils.require_str = _require_str
+
+    def _stub_int_arg(args, key, *, default, lo, hi, tool_name=''):
+        value = args.get(key)
+        if value is None:
+            value = default
+        if isinstance(value, bool) or not isinstance(value, int):
+            prefix = f'{tool_name}: ' if tool_name else ''
+            raise ValueError(f'{prefix}"{key}" must be an integer')
+        return max(lo, min(value, hi))
+
+    ai_common_utils.int_arg = _stub_int_arg
 
     return {
         'rocketlib': rocketlib,
@@ -170,6 +181,21 @@ def test_message_list_max_results_absent_uses_default():
     inst = make_inst(results={'list': {'messages': []}})
     inst.message_list({})
     assert inst.IGlobal.service.call_for('list')['maxResults'] == 25
+
+
+def test_message_list_max_results_bool_rejected_not_coerced():
+    # Regression (#1570 review): the old private _int_arg did int(True) == 1;
+    # the shared int_arg must reject bools instead of silently coercing.
+    inst = make_inst(results={'list': {'messages': []}})
+    with pytest.raises(ValueError, match='"maxResults" must be an integer'):
+        inst.message_list({'maxResults': True})
+
+
+def test_message_list_max_results_float_rejected_not_truncated():
+    # 3.9 used to silently truncate to 3 via int(); it must raise now.
+    inst = make_inst(results={'list': {'messages': []}})
+    with pytest.raises(ValueError, match='"maxResults" must be an integer'):
+        inst.message_list({'maxResults': 3.9})
 
 
 # ---------------------------------------------------------------------------
@@ -393,7 +419,7 @@ def test_services_json_declares_access_and_gmail_flags():
 
 
 def test_mock_sdk_builds_service_and_lists(monkeypatch):
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.service_account')
@@ -405,7 +431,7 @@ def test_mock_sdk_builds_service_and_lists(monkeypatch):
 
 
 def test_mock_sdk_user_auth_builds_service(monkeypatch):
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
@@ -417,7 +443,7 @@ def test_mock_sdk_user_auth_builds_service(monkeypatch):
 
 def test_expired_token_no_refresh_path_raises(monkeypatch):
     """Expired token with no oauth_server_url and no client creds → clear ValueError."""
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
@@ -437,7 +463,7 @@ def test_expired_token_no_refresh_path_raises(monkeypatch):
 
 def test_valid_token_sets_expiry_on_credentials(monkeypatch):
     """A fresh token with expiry_date sets creds.expiry so the library won't auto-refresh."""
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
@@ -452,7 +478,7 @@ def test_valid_token_sets_expiry_on_credentials(monkeypatch):
 
 def test_build_service_raises_on_scope_mismatch(monkeypatch):
     """Token with only gmail.modify scope should raise immediately when settings scopes are required."""
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
@@ -474,7 +500,7 @@ def test_build_service_raises_on_scope_mismatch(monkeypatch):
 
 def test_build_service_full_scope_token_not_blocked(monkeypatch):
     """https://mail.google.com/ (full scope) must not trigger the scope-mismatch check."""
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
@@ -491,7 +517,7 @@ def test_build_service_full_scope_token_not_blocked(monkeypatch):
 
 def test_build_service_no_scope_field_does_not_raise(monkeypatch):
     """Token without a scope field should not trigger the scope check (broker may omit it)."""
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
@@ -563,7 +589,7 @@ def _patch_config(monkeypatch, inst):
 
 def test_check_connection_missing_scope(monkeypatch):
     """check_connection reports missing scopes and provides an action."""
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     inst = _inst_with_token(
         'settings', {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.modify'}
@@ -577,7 +603,7 @@ def test_check_connection_missing_scope(monkeypatch):
 
 def test_check_connection_ok_with_full_scope(monkeypatch):
     """check_connection reports OK when the token carries https://mail.google.com/ (full scope)."""
-    mocks = Path(__file__).resolve().parents[1] / 'mocks'
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
     monkeypatch.syspath_prepend(str(mocks))
     inst = _inst_with_token('settings', {'access_token': 'tok', 'scope': 'https://mail.google.com/'})
     _patch_config(monkeypatch, inst)

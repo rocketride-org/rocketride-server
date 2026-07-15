@@ -42,7 +42,7 @@ import base64
 
 from rocketlib import tool_function
 
-from ai.common.utils import normalize_tool_input, require_str
+from ai.common.utils import int_arg, normalize_tool_input, require_str
 from nodes.core.google_access import GoogleAccessError
 
 from ..IInstance import GoogleToolInstanceBase
@@ -120,18 +120,6 @@ class IInstance(GoogleToolInstanceBase):
             )
 
     @staticmethod
-    def _int_arg(args: dict, key: str, default: int, lo: int, hi: int) -> int:
-        """Read an integer arg, defaulting only on None and clamping to [lo, hi].
-
-        `args.get(key) or default` silently turns an explicit 0 into the
-        default, bypassing the clamp (the antipattern flagged on #1228/#1445).
-        """
-        value = args.get(key)
-        if value is None:
-            value = default
-        return max(lo, min(int(value), hi))
-
-    @staticmethod
     def _id_list(args: dict, key: str, op: str) -> list[str]:
         """Validate a non-empty list of id strings, capped at MAX_BATCH."""
         ids = args.get(key)
@@ -188,7 +176,7 @@ class IInstance(GoogleToolInstanceBase):
             'userId': USER_ID,
             'q': args.get('query'),
             'labelIds': args.get('labelIds'),
-            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
+            'maxResults': int_arg(args, 'maxResults', default=25, lo=1, hi=500),
             'pageToken': args.get('pageToken'),
             'includeSpamTrash': bool(args.get('includeSpamTrash', False)),
         }
@@ -375,7 +363,7 @@ class IInstance(GoogleToolInstanceBase):
             'userId': USER_ID,
             'q': args.get('query'),
             'labelIds': args.get('labelIds'),
-            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
+            'maxResults': int_arg(args, 'maxResults', default=25, lo=1, hi=500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().threads().list(**{k: v for k, v in params.items() if v is not None}))
@@ -494,7 +482,7 @@ class IInstance(GoogleToolInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_gmail')
         params = {
             'userId': USER_ID,
-            'maxResults': self._int_arg(args, 'maxResults', 25, 1, 500),
+            'maxResults': int_arg(args, 'maxResults', default=25, lo=1, hi=500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().drafts().list(**{k: v for k, v in params.items() if v is not None}))
@@ -872,7 +860,7 @@ class IInstance(GoogleToolInstanceBase):
             'startHistoryId': start,
             'historyTypes': args.get('historyTypes'),
             'labelId': args.get('labelId'),
-            'maxResults': self._int_arg(args, 'maxResults', 100, 1, 500),
+            'maxResults': int_arg(args, 'maxResults', default=100, lo=1, hi=500),
             'pageToken': args.get('pageToken'),
         }
         data = execute(self._svc().users().history().list(**{k: v for k, v in params.items() if v is not None}))
