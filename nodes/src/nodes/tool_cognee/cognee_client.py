@@ -17,15 +17,14 @@ which conflicts with the engine's provider nodes — the same reason ``tool_mem0
 talks to Mem0 over REST rather than importing ``mem0ai``. Only ``requests`` and
 ``tenacity`` (already engine deps) are used here.
 
-Endpoints (verified against cognee/api/client.py + the datasets/delete routers):
-  add     POST   /api/v1/add                  multipart/form-data (file upload)
-  cognify POST   /api/v1/cognify              JSON, synchronous by default
-  search  POST   /api/v1/search               JSON
-  reset   GET    /api/v1/datasets             then DELETE /api/v1/datasets/{id}
+Modern memory endpoints are ``remember``, ``recall``, dataset status, and graph
+visualization. The legacy add/cognify/search/reset helpers remain temporarily so
+the public tool adapter can migrate independently.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -33,10 +32,19 @@ from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_expo
 
 from ai.common.utils import post_with_retry
 
+_REMEMBER_PATH = '/api/v1/remember'
+_RECALL_PATH = '/api/v1/recall'
+_DATASETS_PATH = '/api/v1/datasets/'
+_STATUS_PATH = '/api/v1/datasets/status'
+_VISUALIZE_PATH = '/api/v1/visualize'
+
 _ADD_PATH = '/api/v1/add'
 _COGNIFY_PATH = '/api/v1/cognify'
 _SEARCH_PATH = '/api/v1/search'
-_DATASETS_PATH = '/api/v1/datasets'
+
+
+class CogneeRequestError(RuntimeError):
+    """A redacted Cognee HTTP or response error safe to surface to an agent."""
 
 
 def _headers(api_key: str) -> Dict[str, str]:
@@ -62,7 +70,14 @@ def _is_retryable(exc: BaseException) -> bool:
     return False
 
 
-def _request_with_retry(method: str, url: str, *, headers: Dict[str, str], timeout: float) -> requests.Response:
+def _request_with_retry(
+    method: str,
+    url: str,
+    *,
+    headers: Dict[str, str],
+    timeout: float,
+    params: Optional[Dict[str, str]] = None,
+) -> requests.Response:
     """GET/DELETE with the same 429 / 5xx / timeout retry policy as ``post_with_retry``.
 
     The shared ``post_with_retry`` helper is POST-only, so this node-local twin
@@ -72,7 +87,10 @@ def _request_with_retry(method: str, url: str, *, headers: Dict[str, str], timeo
     """
 
     def _attempt() -> requests.Response:
-        resp = requests.request(method, url, headers=headers, timeout=timeout)
+        request_kwargs: Dict[str, Any] = {'headers': headers, 'timeout': timeout}
+        if params is not None:
+            request_kwargs['params'] = params
+        resp = requests.request(method, url, **request_kwargs)
         resp.raise_for_status()
         return resp
 
@@ -82,6 +100,151 @@ def _request_with_retry(method: str, url: str, *, headers: Dict[str, str], timeo
         retry=retry_if_exception(_is_retryable),
         reraise=True,
     )(_attempt)
+
+
+def remember(
+    base_url: str,
+    api_key: str,
+    *,
+    text: str,
+    dataset: str,
+    run_in_background: bool,
+    timeout: float,
+) -> dict[str, Any]:
+    """Ingest text and build its knowledge graph with one non-retried request."""
+    url = f'{base_url}{_REMEMBER_PATH}'
+    files = [('data', ('memory.md', text.encode('utf-8'), 'text/markdown'))]
+    form = {
+        'datasetName': dataset,
+        'run_in_background': json.dumps(bool(run_in_background)),
+    }
+    try:
+        response = requests.post(
+            url,
+            headers=_headers(api_key),
+            files=files,
+            data=form,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise _as_request_error(exc, 'remember') from None
+
+    payload = _json_of(response)
+    if not isinstance(payload, dict):
+        raise CogneeRequestError('cognee: remember returned an invalid response')
+    return payload
+
+
+def recall(
+    base_url: str,
+    api_key: str,
+    *,
+    query: str,
+    dataset: str,
+    search_type: str,
+    top_k: int,
+    include_references: bool,
+    timeout: float,
+) -> list[dict[str, Any]]:
+    """Recall ranked memory results with references using one POST attempt."""
+    url = f'{base_url}{_RECALL_PATH}'
+    payload = {
+        'query': query,
+        'datasets': [dataset],
+        'searchType': search_type,
+        'topK': top_k,
+        'include_references': bool(include_references),
+    }
+    try:
+        response = requests.post(
+            url,
+            headers=_headers(api_key),
+            json=payload,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise _as_request_error(exc, 'recall') from None
+    return _shape_results(_json_of(response))
+
+
+def list_datasets(base_url: str, api_key: str, *, timeout: float) -> list[dict[str, Any]]:
+    """List datasets visible to the authenticated Cognee user."""
+    try:
+        response = _request_with_retry(
+            'GET',
+            f'{base_url}{_DATASETS_PATH}',
+            headers=_headers(api_key),
+            timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        raise _as_request_error(exc, 'list datasets') from None
+
+    payload = _json_of(response)
+    rows = payload.get('datasets') if isinstance(payload, dict) else payload
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise CogneeRequestError('cognee: list datasets returned an invalid response')
+    return rows
+
+
+def get_dataset_status(
+    base_url: str,
+    api_key: str,
+    *,
+    dataset_id: str,
+    timeout: float,
+) -> str:
+    """Return a stable pending/running/completed/failed status for cognify."""
+    try:
+        response = _request_with_retry(
+            'GET',
+            f'{base_url}{_STATUS_PATH}',
+            headers=_headers(api_key),
+            timeout=timeout,
+            params={'dataset': dataset_id, 'pipeline': 'cognify_pipeline'},
+        )
+    except requests.RequestException as exc:
+        raise _as_request_error(exc, 'dataset status') from None
+
+    payload = _json_of(response)
+    remote_status = payload.get(dataset_id) if isinstance(payload, dict) else None
+    if isinstance(remote_status, dict):
+        remote_status = remote_status.get('cognify_pipeline')
+    normalized = {
+        'DATASET_PROCESSING_INITIATED': 'pending',
+        'DATASET_PROCESSING_STARTED': 'running',
+        'DATASET_PROCESSING_COMPLETED': 'completed',
+        'DATASET_PROCESSING_ERRORED': 'failed',
+    }.get(str(remote_status).upper())
+    if normalized is None:
+        raise CogneeRequestError('cognee: dataset status returned an invalid response')
+    return normalized
+
+
+def get_visualization_html(
+    base_url: str,
+    api_key: str,
+    *,
+    dataset_id: str,
+    timeout: float,
+) -> tuple[bytes, str]:
+    """Fetch a nonempty interactive knowledge-graph HTML artifact."""
+    try:
+        response = _request_with_retry(
+            'GET',
+            f'{base_url}{_VISUALIZE_PATH}',
+            headers=_headers(api_key),
+            timeout=timeout,
+            params={'dataset_id': dataset_id},
+        )
+    except requests.RequestException as exc:
+        raise _as_request_error(exc, 'visualization') from None
+
+    html = response.content
+    if not html or not html.strip():
+        raise CogneeRequestError('cognee: visualization returned empty HTML')
+    return html, response.headers.get('Content-Type', 'text/html')
 
 
 def add(
@@ -177,7 +340,7 @@ def reset(
     ``not_found`` rather than an error: there is nothing to reset.
     """
     headers = _headers(api_key)
-    list_url = f'{base_url}{_DATASETS_PATH}'
+    list_url = f'{base_url}{_DATASETS_PATH.rstrip("/")}'
     try:
         resp = _request_with_retry('GET', list_url, headers=headers, timeout=timeout)
     except requests.RequestException as exc:
@@ -187,7 +350,7 @@ def reset(
     if not dataset_id:
         return {'dataset': dataset, 'status': 'not_found', 'deleted': False}
 
-    delete_url = f'{base_url}{_DATASETS_PATH}/{dataset_id}'
+    delete_url = f'{base_url}{_DATASETS_PATH}{dataset_id}'
     try:
         _request_with_retry('DELETE', delete_url, headers=headers, timeout=timeout)
     except requests.exceptions.HTTPError as exc:
@@ -269,8 +432,15 @@ def _shape_results(resp: Any) -> List[Any]:
     return out
 
 
+def _as_request_error(exc: requests.RequestException, op: str) -> CogneeRequestError:
+    """Convert a requests exception into an agent-safe error with no vendor detail."""
+    status: Optional[int] = getattr(getattr(exc, 'response', None), 'status_code', None)
+    if status == 402:
+        return CogneeRequestError(f'cognee: {op} request failed (HTTP 402): token budget exhausted')
+    detail = f' (HTTP {status})' if status else ''
+    return CogneeRequestError(f'cognee: {op} request failed{detail}: {type(exc).__name__}')
+
+
 def _as_runtime_error(exc: requests.RequestException, op: str) -> RuntimeError:
     """Convert a requests exception into a redacted RuntimeError (never leaks the key)."""
-    status: Optional[int] = getattr(getattr(exc, 'response', None), 'status_code', None)
-    detail = f' (HTTP {status})' if status else ''
-    return RuntimeError(f'cognee: {op} request failed{detail}: {type(exc).__name__}')
+    return _as_request_error(exc, op)

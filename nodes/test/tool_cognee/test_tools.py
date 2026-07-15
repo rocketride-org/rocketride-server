@@ -24,6 +24,7 @@ Covers:
 
 from __future__ import annotations
 
+import importlib
 import sys
 import types
 from pathlib import Path
@@ -267,10 +268,11 @@ def test_add_error_never_leaks_key(monkeypatch):
 class _FakeResponse:
     """Minimal ``requests.Response`` stand-in: status_code, json(), raise_for_status()."""
 
-    def __init__(self, status_code=200, payload=None):
+    def __init__(self, status_code=200, payload=None, *, content=b'{}', headers=None):
         self.status_code = status_code
         self._payload = {} if payload is None else payload
-        self.content = b'{}'
+        self.content = content
+        self.headers = {} if headers is None else headers
 
     def json(self):
         """Return the canned JSON payload."""
@@ -400,6 +402,282 @@ def _http_error(status):
     err = requests.exceptions.HTTPError(f'{status} error')
     err.response = _FakeResponse(status) if status is not None else None
     return err
+
+
+# ---------------------------------------------------------------------------
+# Modern memory client
+# ---------------------------------------------------------------------------
+
+
+def test_remember_posts_one_multipart_file_to_api_v1_remember(monkeypatch):
+    """Remember uploads exactly one UTF-8 markdown file with JSON-compatible form fields."""
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append({'url': url, **kwargs})
+        return _FakeResponse(
+            payload={
+                'status': 'DATASET_PROCESSING_STARTED',
+                'dataset_name': 'demo',
+                'dataset_id': 'dataset-uuid',
+                'pipeline_run_id': 'run-uuid',
+            }
+        )
+
+    monkeypatch.setattr(client.requests, 'post', fake_post)
+
+    result = client.remember(
+        'https://cognee.example',
+        'sentinel-secret',
+        text='Ada wrote the first algorithm. ✓',
+        dataset='demo',
+        run_in_background=True,
+        timeout=19,
+    )
+
+    assert result['pipeline_run_id'] == 'run-uuid'
+    assert calls == [
+        {
+            'url': 'https://cognee.example/api/v1/remember',
+            'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
+            'files': [
+                (
+                    'data',
+                    ('memory.md', 'Ada wrote the first algorithm. ✓'.encode(), 'text/markdown'),
+                )
+            ],
+            'data': {'datasetName': 'demo', 'run_in_background': 'true'},
+            'timeout': 19,
+        }
+    ]
+
+
+def test_remember_is_single_attempt_on_timeout(monkeypatch):
+    """A non-idempotent remember timeout is surfaced after one POST without leaking secrets."""
+    calls = []
+
+    def timeout(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise requests.exceptions.Timeout('sentinel-secret timed out')
+
+    monkeypatch.setattr(client.requests, 'post', timeout)
+
+    with pytest.raises(client.CogneeRequestError) as error:
+        client.remember(
+            'https://cognee.example',
+            'sentinel-secret',
+            text='memory',
+            dataset='demo',
+            run_in_background=False,
+            timeout=7,
+        )
+
+    assert len(calls) == 1
+    assert 'sentinel-secret' not in str(error.value)
+
+
+def test_recall_posts_include_references_and_is_single_attempt(monkeypatch):
+    """Recall uses the modern JSON contract and does not retry its completion-generating POST."""
+    calls = []
+
+    def fake_post(url, **kwargs):
+        calls.append({'url': url, **kwargs})
+        return _FakeResponse(payload=[{'text': 'Ada', 'references': [{'id': 'source-1'}]}])
+
+    monkeypatch.setattr(client.requests, 'post', fake_post)
+
+    result = client.recall(
+        'https://cognee.example',
+        'sentinel-secret',
+        query='Who wrote the first algorithm?',
+        dataset='demo',
+        search_type='GRAPH_COMPLETION_DECOMPOSITION',
+        top_k=8,
+        include_references=True,
+        timeout=23,
+    )
+
+    assert result == [{'text': 'Ada', 'references': [{'id': 'source-1'}]}]
+    assert calls == [
+        {
+            'url': 'https://cognee.example/api/v1/recall',
+            'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
+            'json': {
+                'query': 'Who wrote the first algorithm?',
+                'datasets': ['demo'],
+                'searchType': 'GRAPH_COMPLETION_DECOMPOSITION',
+                'topK': 8,
+                'include_references': True,
+            },
+            'timeout': 23,
+        }
+    ]
+
+
+def test_list_datasets_gets_api_v1_datasets_collection(monkeypatch):
+    """Dataset discovery calls the trailing-slash collection URL and returns its list."""
+    calls = []
+    rows = [
+        {
+            'id': 'dataset-uuid',
+            'name': 'demo',
+            'createdAt': '2026-07-14T00:00:00Z',
+            'updatedAt': '2026-07-14T00:00:00Z',
+            'ownerId': 'owner-uuid',
+        }
+    ]
+
+    def fake_request(method, url, *, headers, timeout, **kwargs):
+        calls.append({'method': method, 'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
+        return _FakeResponse(payload=rows)
+
+    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+
+    assert client.list_datasets('https://cognee.example', 'sentinel-secret', timeout=11) == rows
+    assert calls == [
+        {
+            'method': 'GET',
+            'url': 'https://cognee.example/api/v1/datasets/',
+            'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
+            'timeout': 11,
+        }
+    ]
+
+
+def test_status_sends_dataset_uuid_and_cognify_pipeline(monkeypatch):
+    """Pipeline status addresses the dataset by UUID and explicitly selects cognify."""
+    calls = []
+
+    def fake_request(method, url, *, headers, timeout, **kwargs):
+        calls.append({'method': method, 'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
+        return _FakeResponse(payload={'dataset-uuid': 'DATASET_PROCESSING_STARTED'})
+
+    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+
+    status = client.get_dataset_status(
+        'https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=13
+    )
+
+    assert status == 'running'
+    assert calls == [
+        {
+            'method': 'GET',
+            'url': 'https://cognee.example/api/v1/datasets/status',
+            'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
+            'timeout': 13,
+            'params': {'dataset': 'dataset-uuid', 'pipeline': 'cognify_pipeline'},
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ('remote_status', 'normalized'),
+    [
+        ('DATASET_PROCESSING_INITIATED', 'pending'),
+        ('DATASET_PROCESSING_STARTED', 'running'),
+        ('DATASET_PROCESSING_COMPLETED', 'completed'),
+        ('DATASET_PROCESSING_ERRORED', 'failed'),
+    ],
+)
+def test_status_normalizes_initiated_started_completed_errored(monkeypatch, remote_status, normalized):
+    """Cognee pipeline enum values become a stable four-state status vocabulary."""
+
+    def fake_request(*_args, **_kwargs):
+        return _FakeResponse(payload={'dataset-uuid': remote_status})
+
+    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+
+    assert (
+        client.get_dataset_status('https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=5)
+        == normalized
+    )
+
+
+def test_visualization_requires_nonempty_html(monkeypatch):
+    """Visualization returns nonempty HTML bytes plus media type and rejects an empty body."""
+    responses = [
+        _FakeResponse(content=b'<html>graph</html>', headers={'Content-Type': 'text/html; charset=utf-8'}),
+        _FakeResponse(content=b'', headers={'Content-Type': 'text/html'}),
+    ]
+    calls = []
+
+    def fake_request(method, url, *, headers, timeout, **kwargs):
+        calls.append({'method': method, 'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
+        return responses.pop(0)
+
+    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+
+    html, media_type = client.get_visualization_html(
+        'https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=17
+    )
+    assert html == b'<html>graph</html>'
+    assert media_type == 'text/html; charset=utf-8'
+
+    with pytest.raises(client.CogneeRequestError, match='empty HTML'):
+        client.get_visualization_html(
+            'https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=17
+        )
+
+    assert calls[0] == {
+        'method': 'GET',
+        'url': 'https://cognee.example/api/v1/visualize',
+        'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
+        'timeout': 17,
+        'params': {'dataset_id': 'dataset-uuid'},
+    }
+
+
+def test_http_errors_are_redacted_and_402_is_distinct(monkeypatch):
+    """Client errors never echo vendor details or keys, and 402 explains exhausted budget."""
+    responses = [_FakeResponse(status_code=400), _FakeResponse(status_code=402)]
+
+    def fake_request(*_args, **_kwargs):
+        response = responses.pop(0)
+        response._payload = {'error': 'sentinel-secret vendor detail'}
+        return response
+
+    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+
+    with pytest.raises(client.CogneeRequestError) as server_error:
+        client.list_datasets('https://cognee.example', 'sentinel-secret', timeout=5)
+    with pytest.raises(client.CogneeRequestError) as budget_error:
+        client.list_datasets('https://cognee.example', 'sentinel-secret', timeout=5)
+
+    assert 'sentinel-secret' not in str(server_error.value)
+    assert 'token budget exhausted' not in str(server_error.value).lower()
+    assert 'sentinel-secret' not in str(budget_error.value)
+    assert 'token budget exhausted' in str(budget_error.value).lower()
+
+
+def test_artifact_writer_contains_sanitizes_and_atomically_replaces(tmp_path, monkeypatch):
+    """Artifact paths stay contained, names are safe, and replacement uses a sibling temp file."""
+    artifact_store = importlib.import_module('tool_cognee.artifact_store')
+    expected = (tmp_path / 'Team-Alpha-graph.html').resolve()
+    expected.write_bytes(b'old graph')
+    real_replace = artifact_store.os.replace
+    replacements = []
+
+    def recording_replace(source, destination):
+        replacements.append((Path(source).resolve(), Path(destination).resolve()))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(artifact_store.os, 'replace', recording_replace)
+
+    written = artifact_store.write_html_artifact(
+        tmp_path,
+        dataset='../../Team / Alpha?*',
+        html=b'<html>new graph</html>',
+    )
+
+    assert written == expected
+    assert written.parent == tmp_path.resolve()
+    assert written.read_bytes() == b'<html>new graph</html>'
+    assert (written.stat().st_mode & 0o777) == 0o600
+    assert len(replacements) == 1
+    source, destination = replacements[0]
+    assert source.parent == destination.parent == tmp_path.resolve()
+    assert source != destination == written
+    assert not source.exists()
 
 
 @pytest.mark.parametrize(
