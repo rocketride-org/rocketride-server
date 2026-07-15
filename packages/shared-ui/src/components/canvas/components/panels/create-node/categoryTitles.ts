@@ -9,6 +9,7 @@ export const CATEGORY_TITLES: Record<string, string> = {
 	embedding: 'Embedding',
 	llm: 'LLM',
 	database: 'Database',
+	graph: 'Graph',
 	filter: 'Filter',
 	image: 'Image',
 	preprocessor: 'Preprocessor',

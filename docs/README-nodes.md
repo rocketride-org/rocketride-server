@@ -152,6 +152,12 @@ channel; they have no data lanes and **bind to an agent** (see
 | `db_clickhouse` | questions → answers, table, text   | ClickHouse (NL-to-SQL)                       |
 | `db_neo4j`      | questions → answers, table, text   | Neo4j graph database                         |
 
+### Graph Databases
+
+| Service          | Data flow (in → out)             | Description                                         |
+| ---------------- | -------------------------------- | --------------------------------------------------- |
+| `graph_falkordb` | questions → answers, table, text | FalkorDB graph database (NL-to-Cypher, multi-graph) |
+
 ### Document Processing
 
 | Service                  | Data flow (in → out)   | Description                                  |
