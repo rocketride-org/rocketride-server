@@ -1,0 +1,9 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noUnusedLocals": false,
+		"noUnusedParameters": false,
+		"noUncheckedSideEffectImports": false
+	},
+	"files": ["../../packages/shared-ui/src/types/global.d.ts"]
+}

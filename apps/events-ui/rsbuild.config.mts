@@ -25,11 +25,16 @@ export default defineConfig(() => {
 				},
 				dts: false,
 				runtime: false,
+				// loaded-first: use the host's already-loaded shared instances instead of
+				// version-first's boot-time download of EVERY registered remoteEntry.js
+				// just to compare shared versions (everything here is singleton + co-deployed).
+				shareStrategy: 'loaded-first',
 				shared: {
 					react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					'shell-ui': { singleton: true, requiredVersion: false, import: false },
 					'shared':   { singleton: true, requiredVersion: false, import: false },
+					'rocketride': { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],

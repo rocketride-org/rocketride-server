@@ -17,8 +17,10 @@
 import React, { useState, useCallback, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
-import { Explorer } from '../explorer';
+import { SidebarMenu } from '../../components/sidebar-menu/SidebarMenu';
+import { Explorer, NOOP_VFS } from '../explorer';
 import type { ISidebarViewProps } from './types';
+import type { ViewMenu } from '../../types/viewMenu';
 import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from '../explorer';
 
 // =============================================================================
@@ -38,24 +40,6 @@ const S = {
 	navSection: {
 		padding: '8px 6px 12px',
 		flexShrink: 0,
-	} as CSSProperties,
-	navBtn: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-		padding: '3px 8px',
-		cursor: 'pointer',
-		borderRadius: 5,
-		fontSize: 13,
-		color: 'var(--rr-text-primary)',
-		border: 'none',
-		background: 'none',
-		width: '100%',
-		textAlign: 'left' as const,
-	} as CSSProperties,
-	navBtnDisabled: {
-		opacity: 0.45,
-		cursor: 'default',
 	} as CSSProperties,
 	row: {
 		display: 'flex',
@@ -122,12 +106,23 @@ const PIPELINE_CONFIG: ExplorerConfig = {
  * The Explorer component handles all file tree rendering internally.
  */
 export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath }) => {
-	const [hoveredNav, setHoveredNav] = useState<string | null>(null);
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
 
 	const isConnected = connection.state === 'connected';
 	const hasUnknown = (unknownTasks?.length ?? 0) > 0;
+
+	// --- Static top-nav menu (New pipeline / Monitor) ------------------------
+
+	// The fixed nav actions rendered above the Explorer as a stock SidebarMenu.
+	// Monitor is disabled while disconnected; there is no persistent selection,
+	// so activeId is empty. Icons match the shell nav sizing (16px).
+	const navMenu: ViewMenu = {
+		entries: [
+			{ id: 'new', label: 'New pipeline', icon: <BxPlus size={16} /> },
+			{ id: 'monitor', label: 'Monitor', icon: <BxDesktop size={16} />, disabled: !isConnected },
+		],
+	};
 
 	// --- Map pipeline entries → Explorer entries -----------------------------
 
@@ -153,7 +148,6 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 
 	// --- Nav hover helpers ---------------------------------------------------
 
-	const navHoverBg = (id: string): CSSProperties => (hoveredNav === id ? { background: HOVER_BG } : {});
 	const hoverBg = (id: string): CSSProperties => (hoveredRow === id ? { background: HOVER_BG } : {});
 
 	// --- Render --------------------------------------------------------------
@@ -165,16 +159,17 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 				{/* Host-injected nav (e.g. rocket-ui's Home button). Bare render so an
 				    omitted slot adds zero DOM/spacing — VS Code passes nothing. */}
 				{headerSlot}
-				<button style={{ ...S.navBtn, ...navHoverBg('new') }} onMouseEnter={() => setHoveredNav('new')} onMouseLeave={() => setHoveredNav(null)} onClick={() => onNavigate('new')}>
-					<BxPlus size={16} /> New pipeline
-				</button>
-				<button style={{ ...S.navBtn, ...navHoverBg('monitor'), ...(isConnected ? {} : S.navBtnDisabled) }} onMouseEnter={() => setHoveredNav('monitor')} onMouseLeave={() => setHoveredNav(null)} onClick={() => isConnected && onNavigate('monitor')} disabled={!isConnected}>
-					<BxDesktop size={16} /> Monitor
-				</button>
+				{/* Fixed nav actions as a stock SidebarMenu. No persistent selection
+				    (activeId=''); the id-narrowing guard keeps onNavigate's union
+				    contract without a cast. SidebarMenu reads the collapsed flag
+				    from context, so no explicit collapsed prop is wired here. */}
+				<SidebarMenu menu={navMenu} activeId="" onSelect={(id) => { if (id === 'new' || id === 'monitor') onNavigate(id); }} />
 			</div>
 
 			{/* ── Explorer (file tree) ────────────────────────────────── */}
-			<Explorer vfs={null as any} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
+			{/* vfs must be passed (frozen shell-contract shape) but is unused —
+			    the typed no-op replaces the old `null as any` cast. */}
+			<Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
 
 			{/* ── Unknown tasks (Other) ───────────────────────────────── */}
 			{hasUnknown && (
@@ -203,7 +198,7 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 												onSourceAction('stop', '', ut.sourceId, ut.projectId);
 											}}
 										>
-											<BxStop size={14} />
+											<BxStop size={16} />
 										</button>
 									)}
 								</div>

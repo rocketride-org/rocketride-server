@@ -76,29 +76,36 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 			);
 		}
 
-		// Default to 'user' auth type for personal Google OAuth (as opposed to service account)
-		const authType = formValues.parameters?.authType || 'user';
-		url.searchParams.set('type', authType);
+		// "Login with Google" is personal OAuth by definition; service accounts
+		// use an uploaded key, never this flow. The broker echoes the type back
+		// in `state`, which switches the node's authType to 'user' on success.
+		url.searchParams.set('type', 'user');
 
 		// Tell the broker where to return tokens. Web hosts redirect back to the
 		// current page; hosts that can't receive a web redirect (VS Code) supply
 		// a deep link via oauthReturnUrl that they intercept out-of-band.
 		url.searchParams.set('baseURL', oauthReturnUrl || window.location.href);
 
-		// For Gmail tiers beyond the broker's default (modify), pass the required
-		// scopes explicitly so the broker requests the right Google consent. Keys
-		// mirror google_access.py GMAIL.scopes. readonly/modify are omitted because
-		// the broker handles them by default; non-Gmail services whose access field
-		// uses different values (e.g. 'write') won't match any key here.
+		// Pass the selected tier's scopes explicitly, keyed by the node's
+		// provider — the broker grants identity plus exactly the requested
+		// scopes (least privilege), or its legacy default consent when no
+		// scope param is sent. Maps mirror the per-service AccessSpecs in
+		// core/google_access.py. An unknown provider or tier sends no scope
+		// param rather than guessing another service's scopes.
 		const _G = 'https://www.googleapis.com/auth';
-		const GMAIL_EXTENDED_SCOPES: Record<string, string[]> = {
-			send: [`${_G}/gmail.modify`, `${_G}/gmail.send`],
-			settings: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`],
-			settings_sharing: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`, `${_G}/gmail.settings.sharing`],
-			full: ['https://mail.google.com/'],
+		const SERVICE_TIER_SCOPES: Record<string, Record<string, string[]>> = {
+			tool_gmail: {
+				readonly: [`${_G}/gmail.readonly`],
+				modify: [`${_G}/gmail.modify`],
+				send: [`${_G}/gmail.modify`, `${_G}/gmail.send`],
+				settings: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`],
+				settings_sharing: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`, `${_G}/gmail.settings.sharing`],
+				full: ['https://mail.google.com/'],
+			},
 		};
-		const accessTier = formValues.parameters?.access as string | undefined;
-		const tierScopes = accessTier ? GMAIL_EXTENDED_SCOPES[accessTier] : undefined;
+		const provider = formContext?.provider as string | undefined;
+		const accessTier = (formValues.access ?? formValues.parameters?.access) as string | undefined;
+		const tierScopes = provider && accessTier ? SERVICE_TIER_SCOPES[provider]?.[accessTier] : undefined;
 		if (tierScopes?.length) {
 			url.searchParams.set('scope', tierScopes.join(' '));
 		}
@@ -119,8 +126,9 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		return 'primary';
 	}, [formContext?.formDataErrors]);
 
-	// Check if user is already authenticated by looking for a userToken in either nested or flat location
-	const authenticated = formValues?.parameters?.google?.userToken?.length || formValues?.parameters?.userToken?.length;
+	// Check if user is already authenticated. Flat node schemas (tool_gmail)
+	// keep userToken at the config root; the parameters.* locations are legacy.
+	const authenticated = formValues?.userToken?.length || formValues?.parameters?.google?.userToken?.length || formValues?.parameters?.userToken?.length;
 
 	// i18n is not initialized in every host (e.g. the VS Code webview). When a key
 	// doesn't resolve, t() returns the key itself — fall back to a literal so the
@@ -136,8 +144,8 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 	// marker so GoogleDrivePickerWidget can detect when a fresh token is available after OAuth.
 	// This effect does NOT open the picker - it only signals token availability.
 	useEffect(() => {
-		// Look for the user token in both possible locations (nested under google or flat)
-		const savedUserToken = formValues.parameters?.google?.userToken || formValues.parameters?.userToken;
+		// Look for the user token in all possible locations (config root first, then legacy nested)
+		const savedUserToken = formValues.userToken || formValues.parameters?.google?.userToken || formValues.parameters?.userToken;
 		const pickerWindow = window as typeof window & { __googlePickerLastToken?: string };
 
 		if (!savedUserToken) {

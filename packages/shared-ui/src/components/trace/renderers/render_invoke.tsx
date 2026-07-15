@@ -315,9 +315,9 @@ const render_IInvokeCrew: InvokeRenderer = (payload, _data, _operation) => {
 							const a = agent as Record<string, unknown>;
 							return (
 								<div key={i} style={{ marginBottom: 8, borderLeft: '3px solid var(--rr-chart-purple)', paddingLeft: 8 }}>
-									{a.role && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--rr-text-primary)' }}>{String(a.role)}</div>}
-									{a.task_description && <div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>{String(a.task_description)}</div>}
-									{a.goal && (
+									{!!a.role && <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--rr-text-primary)' }}>{String(a.role)}</div>}
+									{!!a.task_description && <div style={{ fontSize: 10, color: 'var(--rr-text-secondary)', marginTop: 2 }}>{String(a.task_description)}</div>}
+									{!!a.goal && (
 										<div style={RS.kvRow}>
 											<span style={RS.kvKey}>Goal</span>
 											<span style={RS.kvVal}>{String(a.goal)}</span>

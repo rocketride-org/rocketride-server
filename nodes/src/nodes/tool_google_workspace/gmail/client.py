@@ -49,7 +49,6 @@ token_scope_report = functools.partial(google_client.token_scope_report, SERVICE
 build_service = functools.partial(google_client.build_service, SERVICE)
 execute = functools.partial(google_client.execute, SERVICE)
 _decode_blob = google_client._decode_blob
-_scopes_satisfied = functools.partial(google_client._scopes_satisfied, SERVICE)
 _is_rate_limit_403 = google_client._is_rate_limit_403
 
 # Gmail's per-call ceiling for batchModify / batchDelete is 1000 ids.

@@ -19,9 +19,12 @@ interface Props {
 	/** Blob URL pointing to the image data. */
 	content: string;
 	uri: string;
+	/** Failure message when the blob could not be loaded (empty content otherwise). */
+	error?: string;
 }
 
-export const ImageViewer: React.FC<Props> = ({ content, uri }) => {
+export const ImageViewer: React.FC<Props> = ({ content, uri, error }) => {
+	if (error) return <div style={viewerStyles.message}>{error}</div>;
 	if (!content) return <div style={viewerStyles.message}>Loading image...</div>;
 	return (
 		<div style={viewerStyles.mediaContainer}>

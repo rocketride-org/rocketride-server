@@ -148,6 +148,8 @@ export function useChatMessages({ welcomeMessage, initialMessages }: UseChatMess
 						id: nextId(),
 						text: err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.',
 						sender: 'bot',
+						// Flag so MessageBubble renders this failure as an in-thread error Banner.
+						isError: true,
 						timestamp: ts(),
 					},
 				]);

@@ -182,11 +182,20 @@ def _decode_blob(value: str) -> str:
     return value
 
 
-def _scopes_satisfied(svc: GoogleService, granted: set[str], required: list[str]) -> bool:
-    """True if the granted scopes cover the required ones (superset-aware)."""
+def _missing_scopes(svc: GoogleService, granted: set[str], required: list[str]) -> list[str]:
+    """Required scopes not covered by the granted set (superset-aware).
+
+    Two layers of implication: the service's own superset scopes (e.g. the
+    full-mailbox or full-drive scope covers every tier), then the shared
+    ``google_access.missing_scopes`` rules (gmail.modify covers
+    gmail.readonly, a writable scope covers its ``.readonly`` counterpart —
+    the #1548 upgrade, applied here so all five services get it).
+    """
     if granted & svc.superset_scopes:
-        return True
-    return all(s in granted for s in required)
+        return []
+    from nodes.core.google_access import missing_scopes
+
+    return missing_scopes(granted, required)
 
 
 def token_scope_report(svc: GoogleService, cfg: dict, required: list[str]) -> tuple[set[str], bool, list[str]]:
@@ -203,9 +212,10 @@ def token_scope_report(svc: GoogleService, cfg: dict, required: list[str]) -> tu
         return set(), True, []
     info = json.loads(_decode_blob(token_str))
     granted = {s for s in (info.get('scope') or '').split() if s}
-    if not granted or _scopes_satisfied(svc, granted, required):
+    if not granted:
         return granted, True, []
-    return granted, False, [s for s in required if s not in granted]
+    missing = _missing_scopes(svc, granted, required)
+    return granted, not missing, missing
 
 
 class _BrokerCredentials:  # real base class is google.oauth2.credentials.Credentials

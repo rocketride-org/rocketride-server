@@ -18,8 +18,13 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { applyTheme } from 'shared/themes';
 import type { ThemeTokens } from 'shared/themes/tokens';
-import { ProjectView, parseServerEvent, CheckoutModal } from 'shared';
-import type { TaskStatus, TraceEvent, ViewState, CheckoutPlan, PlanAction } from 'shared';
+// Project module is imported via subpath (not the 'shared' barrel): the
+// barrel is the shell's MF share and must stay canvas-free; this webview
+// bundles the project module directly.
+import { ProjectView, parseServerEvent } from 'shared/modules/project';
+import type { TaskStatus, TraceEvent, ViewState } from 'shared/modules/project';
+import { CheckoutModal } from 'shared';
+import type { CheckoutPlan, PlanAction } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 import type { ProjectHostToWebview, ProjectWebviewToHost } from '../types';
 

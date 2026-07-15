@@ -192,7 +192,7 @@ export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed, isCo
 					))}
 				</div>
 			</div>
-			<CompletionsChart dataPoints={dataPoints} timeRange={timeRange} onTimeRangeChange={setTimeRange} currentElapsed={currentElapsed} onStatsCalculated={setChartStats} />
+			<CompletionsChart dataPoints={dataPoints} timeRange={timeRange} currentElapsed={currentElapsed} onStatsCalculated={setChartStats} />
 			<StatusFooter stats={chartStats} />
 		</section>
 	);

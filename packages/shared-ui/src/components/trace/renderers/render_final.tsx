@@ -52,18 +52,18 @@ const LANE_RENDERERS: Array<{
 		check: isAnswer,
 		render: renderAnswer,
 		// For string items: detect JSON by checking first/last chars and pass expectJson so format_answer renders it correctly.
-		wrap: (k, v) => {
+		wrap: (_k, v) => {
 			const isJsonStr = typeof v === 'string' && v.trimStart().startsWith('{') && v.trimEnd().endsWith('}');
 			return { answers: { answer: v, ...(isJsonStr ? { expectJson: true } : {}) } };
 		},
 	},
-	{ type: 'questions', check: isQuestion, render: renderQuestion, wrap: (k, v) => ({ questions: v }) },
-	{ type: 'documents', check: isDocument, render: renderDocument, wrap: (k, v) => ({ documents: v }) },
-	{ type: 'image', check: isImage, render: renderImage, wrap: (k, v) => v },
-	{ type: 'text', check: isText, render: renderText, wrap: (k, v) => ({ text: v }) },
-	{ type: 'audio', check: isAudio, render: renderAudio, wrap: (k, v) => ({ audio: v }) },
-	{ type: 'video', check: isVideo, render: renderVideo, wrap: (k, v) => ({ video: v }) },
-	{ type: 'table', check: isTable, render: renderTable, wrap: (k, v) => ({ text: v }) },
+	{ type: 'questions', check: isQuestion, render: renderQuestion, wrap: (_k, v) => ({ questions: v }) },
+	{ type: 'documents', check: isDocument, render: renderDocument, wrap: (_k, v) => ({ documents: v }) },
+	{ type: 'image', check: isImage, render: renderImage, wrap: (_k, v) => v },
+	{ type: 'text', check: isText, render: renderText, wrap: (_k, v) => ({ text: v }) },
+	{ type: 'audio', check: isAudio, render: renderAudio, wrap: (_k, v) => ({ audio: v }) },
+	{ type: 'video', check: isVideo, render: renderVideo, wrap: (_k, v) => ({ video: v }) },
+	{ type: 'table', check: isTable, render: renderTable, wrap: (_k, v) => ({ text: v }) },
 ];
 
 function renderSection(key: string, type: string, value: unknown, isLast: boolean): ReactElement {

@@ -156,14 +156,14 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 				<span>
 					Rate: <span style={styles.statValue}>{eventsPerSec}/s</span>
 				</span>
-				<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+				<span style={styles.statusItem}>
 					<span
 						style={config.active ? commonStyles.indicatorSuccess : commonStyles.indicatorMuted}
 					/>
 					{config.active ? 'Monitoring' : 'Stopped'}
 				</span>
 				{!client && (
-					<span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+					<span style={styles.statusItem}>
 						<span style={commonStyles.indicatorError} />
 						Not connected
 					</span>

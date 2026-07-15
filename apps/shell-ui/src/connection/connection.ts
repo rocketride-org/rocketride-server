@@ -103,6 +103,49 @@ type Handler<T = unknown> = (payload: T) => void;
 /** Handler type for wildcard listeners (debug panel). */
 type WildcardHandler = (event: string, payload: unknown) => void;
 
+/**
+ * Runtime type guard narrowing an untyped DAP event body to a ConnectResult.
+ *
+ * The `apaext_account` push event carries a full ConnectResult payload, but
+ * the transport types every event body as an untyped record. Confirming the
+ * identifying fields (`userId`, `userToken`) are present lets us emit the
+ * typed `shell:accountUpdate` event without an unsafe cast.
+ *
+ * @param body - The raw event body from a DAP message, or undefined.
+ * @returns True when `body` carries the ConnectResult identity fields.
+ */
+function isConnectResult(body: unknown): body is ConnectResult {
+	// Presence alone is not enough — { userId: undefined } must not pass, so
+	// both identity fields are checked to actually be strings.
+	return (
+		typeof body === 'object' &&
+		body !== null &&
+		typeof (body as Record<string, unknown>).userId === 'string' &&
+		typeof (body as Record<string, unknown>).userToken === 'string'
+	);
+}
+
+/**
+ * Normalizes caller-supplied env metadata to the string map the SDK expects.
+ *
+ * `InitOptions.env` is the frozen `Record<string, unknown>` shape, while
+ * `RocketRideClientConfig.env` copies values verbatim as strings — so strings
+ * pass through, primitives (number / boolean) are stringified, and anything
+ * else (objects, functions, null, undefined) is dropped rather than cast.
+ *
+ * @param env - Raw env metadata from InitOptions, or undefined.
+ * @returns A string-valued env map, or undefined when none was given.
+ */
+function normalizeEnv(env: Record<string, unknown> | undefined): Record<string, string> | undefined {
+	if (!env) return undefined;
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env)) {
+		if (typeof value === 'string') out[key] = value;
+		else if (typeof value === 'number' || typeof value === 'boolean') out[key] = String(value);
+	}
+	return out;
+}
+
 // =============================================================================
 // CONNECTION MANAGER CLASS
 // =============================================================================
@@ -144,11 +187,15 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Returns the singleton ConnectionManager instance. */
 	public static getInstance(): ConnectionManager {
-		const g = globalThis as unknown as Record<symbol, ConnectionManager | undefined>;
-		if (!g[ConnectionManager.GLOBAL_KEY]) {
-			g[ConnectionManager.GLOBAL_KEY] = new ConnectionManager();
+		// Read/write the instance under a registry symbol on globalThis. Reflect
+		// accepts symbol keys and returns `any`, so we avoid an unsafe cast of
+		// globalThis (which has no symbol index signature) just to index it.
+		let instance: ConnectionManager | undefined = Reflect.get(globalThis, ConnectionManager.GLOBAL_KEY);
+		if (!instance) {
+			instance = new ConnectionManager();
+			Reflect.set(globalThis, ConnectionManager.GLOBAL_KEY, instance);
 		}
-		return g[ConnectionManager.GLOBAL_KEY]!;
+		return instance;
 	}
 
 	private constructor() {}
@@ -239,14 +286,17 @@ export class ConnectionManager implements IConnectionManager {
 			uri: this.serverUri,
 			clientName: options?.clientName || DEFAULT_CLIENT_NAME,
 			persist: true,
-			env: options?.env,
+			// The caller-facing option type is the frozen Record<string, unknown>;
+			// normalize to the string map the SDK copies verbatim instead of casting.
+			env: normalizeEnv(options?.env),
 
 			// Fired for every push event received from the server over WebSocket
 			onEvent: async (message) => {
 				// Transform apaext_account into shell:accountUpdate to avoid
-				// duplicate handling downstream
-				if (message.event === 'apaext_account' && message.body) {
-					this.emit('shell:accountUpdate', message.body as ConnectResult);
+				// duplicate handling downstream. The guard narrows the untyped
+				// push body to a ConnectResult without a cast.
+				if (message.event === 'apaext_account' && isConnectResult(message.body)) {
+					this.emit('shell:accountUpdate', message.body);
 					return;
 				}
 				// Broadcast all other server events
@@ -457,8 +507,9 @@ export class ConnectionManager implements IConnectionManager {
 						this.clearToken();
 					}
 				}
-				// No usable token — restart auth only for session-locked apps.
-				if (sessionAppId) { await this.startOAuth(); return null; }
+				// No usable token — render unauthenticated and let the shell's
+				// auth gate decide (see the session-locked branch below for why
+				// bootstrap never starts a login flow itself).
 				return null;
 			}
 
@@ -474,14 +525,22 @@ export class ConnectionManager implements IConnectionManager {
 					const result = await this.client.login(token);
 					return await this.finishConnect(result, sessionAppId, config);
 				} catch {
-					// Token expired or invalid — clear and restart OAuth
+					// Token expired or invalid — clear it and fall through to the
+					// unauthenticated render below.
 					this.clearToken();
-					await this.startOAuth();
-					return null;
 				}
 			}
-			// No token — redirect to OAuth
-			await this.startOAuth();
+			// Unauthenticated session-locked visit: bootstrap deliberately does
+			// NOT start a login flow. The shell's auth gate (ShellLayout) emits
+			// shell:loginRequest only when the app EXISTS in the manifest and
+			// requires auth, and the Shell handler dispatches edition-aware
+			// (saas -> Zitadel OAuth, OSS -> the in-shell API-key screen).
+			// Starting OAuth here bounced anonymous visitors to Zitadel even
+			// for app ids this server does not have (which now render the
+			// App-not-found panel instead) and even on OSS, which has no
+			// Zitadel at all. NOTE: if pre-auth manifest filtering by
+			// permission ever lands, hidden-but-real apps will need a probe
+			// signal here to still reach the login flow.
 			return null;
 		}
 

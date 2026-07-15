@@ -1,7 +1,7 @@
 {
 	"title": "FalkorDB",
 	"protocol": "tool_falkordb://",
-	"classType": ["store", "tool"],
+	"classType": ["database", "tool"],
 	"capabilities": ["invoke", "experimental"],
 	"register": "filter",
 	"node": "python",

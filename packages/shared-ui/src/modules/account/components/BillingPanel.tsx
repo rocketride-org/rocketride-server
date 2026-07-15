@@ -7,17 +7,16 @@
  * BillingPanel — the Billing tab within AccountView.
  *
  * Renders compute credit balance with purchasable packs, followed by
- * per-app subscription rows in a standard card layout. The cancel
- * confirmation dialog and portal error handling are owned by AccountView
- * via callback props.
- *
- * Uses the same card/header/rowList pattern as MembersPanel and TeamsPanel
- * for visual consistency across account tabs.
+ * per-app subscription rows inside a stock Card, then the admin billing
+ * dashboard. The cancel confirmation dialog and portal error handling are
+ * owned by AccountView via callback props.
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles } from '../../../themes/styles';
+import { Card } from '../../../components/card/Card';
+import { Button } from '../../../components/button/Button';
+import { EmptyState } from '../../../components/empty-state/EmptyState';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../../billing/types';
 import { CreditsPanel } from '../../billing/components/CreditsPanel';
 import { BillingDashboard } from '../../billing/components/BillingDashboard';
@@ -31,7 +30,33 @@ import { S as SharedS, Badge } from './shared';
 // STYLES
 // =============================================================================
 
-const S = {
+const styles = {
+	/** Vertical stack of the panel's cards (standard 16px rhythm). */
+	stack: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 16,
+	} as CSSProperties,
+
+	/** Error banner text above the cards. */
+	error: {
+		color: 'var(--rr-color-error)',
+		fontSize: 13,
+		margin: 0,
+	} as CSSProperties,
+
+	/** Loading placeholder row inside the subscriptions card. */
+	loadingRow: {
+		padding: '20px 18px',
+		color: 'var(--rr-text-disabled)',
+		fontSize: 12,
+	} as CSSProperties,
+
+	/** Padded wrapper around the stock EmptyState (edge-to-edge card body). */
+	emptyWrap: {
+		padding: 16,
+	} as CSSProperties,
+
 	/** Renewal / cancellation date line. */
 	meta: {
 		fontSize: 12,
@@ -59,6 +84,42 @@ const S = {
 		color: 'var(--rr-text-primary)',
 		textAlign: 'right' as const,
 	} as CSSProperties,
+
+	/** Credit grant summary block beneath the detail grid. */
+	grants: {
+		marginTop: 8,
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		lineHeight: 1.6,
+	} as CSSProperties,
+
+	/** Bold heading line within the grant summary. */
+	grantHeading: {
+		fontWeight: 600,
+		marginTop: 4,
+	} as CSSProperties,
+
+	/** Indented grant line item. */
+	grantItem: {
+		paddingLeft: 12,
+	} as CSSProperties,
+
+	/** "Ends at period end" annotation on a canceled subscription. */
+	endsNote: {
+		fontSize: 11,
+		color: 'var(--rr-text-disabled)',
+	} as CSSProperties,
+
+	/**
+	 * Subscription row — divider between rows, none after the last.
+	 *
+	 * @param isLast - Whether this is the final subscription row.
+	 */
+	subRow: (isLast: boolean): CSSProperties => ({
+		...SharedS.rowItem,
+		borderBottom: isLast ? 'none' : '1px solid var(--rr-border)',
+		alignItems: 'flex-start',
+	}),
 };
 
 // =============================================================================
@@ -187,7 +248,7 @@ export interface BillingPanelProps {
 /**
  * The Billing tab panel.
  *
- * Renders compute credits and subscription rows using the standard card
+ * Renders compute credits and subscription rows using the stock Card
  * pattern. The cancel confirmation dialog is owned by AccountView.
  */
 export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, apps, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, memberNames, teamNames, onUpgradeSubscription }) => {
@@ -204,36 +265,40 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 		return map;
 	}, [apps]);
 	return (
-		<section>
+		<section style={styles.stack}>
 			{/* Error banner */}
-			{error && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+			{error && <p style={styles.error}>{error}</p>}
 
 			{/* Credits panel (shown when connected) */}
 			{isConnected && <CreditsPanel balance={creditBalance} packs={[]} onBuy={async () => {}} onAddCapacity={isSubscribed ? handleAddCapacity : undefined} />}
 
 			{/* Subscriptions card */}
-			<div style={{ ...commonStyles.card, marginTop: 16, marginBottom: 14 }}>
-				<div style={commonStyles.cardHeader}>
-					<span style={commonStyles.labelUppercase}>
-						{subscriptions.length} subscription{subscriptions.length !== 1 ? 's' : ''}
-					</span>
-					{isOrgAdmin && (
-						<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onOpenPortal}>
-							Manage Payment Methods →
-						</button>
-					)}
-				</div>
+			<Card
+				header={`${subscriptions.length} subscription${subscriptions.length !== 1 ? 's' : ''}`}
+				headerActions={
+					isOrgAdmin ? (
+						<Button variant="secondary" small onClick={onOpenPortal}>
+							Manage Payment Methods {'→'}
+						</Button>
+					) : undefined
+				}
+				noBodyPadding
+			>
 				<div style={SharedS.rowList}>
 					{loading ? (
-						<div style={{ padding: '20px 18px', color: 'var(--rr-text-disabled)', fontSize: 12 }}>Loading subscriptions…</div>
+						<div style={styles.loadingRow}>Loading subscriptions…</div>
 					) : subscriptions.length === 0 ? (
-						<div style={{ padding: '20px 18px' }}>
-							<p style={{ color: 'var(--rr-text-disabled)', fontSize: 12, margin: '0 0 12px 0' }}>No active subscriptions.</p>
-							{onSubscribe && (
-								<button style={commonStyles.buttonPrimary as CSSProperties} onClick={onSubscribe}>
-									Subscribe to Pipe Builder
-								</button>
-							)}
+						<div style={styles.emptyWrap}>
+							<EmptyState
+								title="No active subscriptions"
+								action={
+									onSubscribe ? (
+										<Button variant="primary" onClick={onSubscribe}>
+											Subscribe to Pipe Builder
+										</Button>
+									) : undefined
+								}
+							/>
 						</div>
 					) : (
 						subscriptions.map((sub, i) => {
@@ -241,44 +306,44 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 							const isCancelable = ['active', 'trialing', 'past_due'].includes(sub.status) && !sub.cancelAtPeriodEnd;
 
 							return (
-								<div key={sub.appId} style={{ ...SharedS.rowItem, borderBottom: i < subscriptions.length - 1 ? '1px solid var(--rr-border)' : 'none', alignItems: 'flex-start' }}>
+								<div key={sub.appId} style={styles.subRow(i === subscriptions.length - 1)}>
 									<div style={SharedS.rowInfo}>
 										{/* App name + renewal info */}
 										<div style={SharedS.rowName}>{appMap[sub.appId]?.name ?? sub.appId}</div>
-										{sub.currentPeriodEnd && <div style={S.meta}>{sub.cancelAtPeriodEnd ? `Cancels on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}` : `Renews on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}`}</div>}
+										{sub.currentPeriodEnd && <div style={styles.meta}>{sub.cancelAtPeriodEnd ? `Cancels on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}` : `Renews on ${new Date(sub.currentPeriodEnd).toLocaleDateString()}`}</div>}
 
 										{/* Subscription detail grid */}
-										<div style={S.detailGrid}>
+										<div style={styles.detailGrid}>
 											{sub.planNickname && (
 												<>
-													<span style={S.detailLabel}>Plan</span>
-													<span style={S.detailValue}>{sub.planNickname}</span>
+													<span style={styles.detailLabel}>Plan</span>
+													<span style={styles.detailValue}>{sub.planNickname}</span>
 												</>
 											)}
 											{sub.unitAmount != null && sub.billingInterval && (
 												<>
-													<span style={S.detailLabel}>Price</span>
-													<span style={S.detailValue}>
+													<span style={styles.detailLabel}>Price</span>
+													<span style={styles.detailValue}>
 														{formatUsd(sub.unitAmount)} / {sub.billingInterval}
 													</span>
 												</>
 											)}
 											{sub.billingInterval && (
 												<>
-													<span style={S.detailLabel}>Billing Cycle</span>
-													<span style={S.detailValue}>{formatInterval(sub.billingInterval)}</span>
+													<span style={styles.detailLabel}>Billing Cycle</span>
+													<span style={styles.detailValue}>{formatInterval(sub.billingInterval)}</span>
 												</>
 											)}
 											{sub.currentPeriodStart && (
 												<>
-													<span style={S.detailLabel}>Period Start</span>
-													<span style={S.detailValue}>{new Date(sub.currentPeriodStart).toLocaleDateString()}</span>
+													<span style={styles.detailLabel}>Period Start</span>
+													<span style={styles.detailValue}>{new Date(sub.currentPeriodStart).toLocaleDateString()}</span>
 												</>
 											)}
 											{sub.currentPeriodEnd && (
 												<>
-													<span style={S.detailLabel}>Period End</span>
-													<span style={S.detailValue}>{new Date(sub.currentPeriodEnd).toLocaleDateString()}</span>
+													<span style={styles.detailLabel}>Period End</span>
+													<span style={styles.detailValue}>{new Date(sub.currentPeriodEnd).toLocaleDateString()}</span>
 												</>
 											)}
 										</div>
@@ -294,20 +359,20 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 													.filter(({ diff }) => diff > 0)
 												: [];
 											return (
-												<div style={{ marginTop: 8, fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.6 }}>
+												<div style={styles.grants}>
 													{bonuses.length > 0 && (
 														<>
-															<div style={{ fontWeight: 600, marginTop: 4 }}>As a Welcome gift</div>
+															<div style={styles.grantHeading}>As a Welcome gift</div>
 															{bonuses.map(({ res, diff }) => (
-																<div key={`bonus-${res}`} style={{ paddingLeft: 12 }}>{formatGrant(res, diff, sub.creditLabels)} bonus</div>
+																<div key={`bonus-${res}`} style={styles.grantItem}>{formatGrant(res, diff, sub.creditLabels)} bonus</div>
 															))}
 														</>
 													)}
 													{recurring && (
 														<>
-															<div style={{ fontWeight: 600, marginTop: 4 }}>Monthly</div>
+															<div style={styles.grantHeading}>Monthly</div>
 															{Object.entries(recurring).map(([res, amt]) => (
-																<div key={`rec-${res}`} style={{ paddingLeft: 12 }}>{formatGrant(res, amt, sub.creditLabels)}</div>
+																<div key={`rec-${res}`} style={styles.grantItem}>{formatGrant(res, amt, sub.creditLabels)}</div>
 															))}
 														</>
 													)}
@@ -320,23 +385,23 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 									<div style={SharedS.rowActions}>
 										<Badge variant={sv.variant}>{sv.label}</Badge>
 										{isCancelable && isOrgAdmin && onUpgradeSubscription && (
-											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => setUpgradeTarget(sub)}>
+											<Button variant="ghost" small onClick={() => setUpgradeTarget(sub)}>
 												Change Plan
-											</button>
+											</Button>
 										)}
 										{isCancelable && isOrgAdmin && (
-											<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onCancelSubscription(sub.appId)}>
+											<Button variant="ghost" small onClick={() => onCancelSubscription(sub.appId)}>
 												Cancel
-											</button>
+											</Button>
 										)}
-										{sub.cancelAtPeriodEnd && <span style={{ fontSize: 11, color: 'var(--rr-text-disabled)' }}>Ends at period end</span>}
+										{sub.cancelAtPeriodEnd && <span style={styles.endsNote}>Ends at period end</span>}
 									</div>
 								</div>
 							);
 						})
 					)}
 				</div>
-			</div>
+			</Card>
 
 			{/* Admin billing dashboard */}
 			{isOrgAdmin && isConnected && (

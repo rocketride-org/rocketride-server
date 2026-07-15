@@ -311,6 +311,9 @@ export const getComponentFromNode = (node: INode, edges?: Edge[]): IProjectCompo
 		config: data.config ?? {},
 		ui: {
 			position: { x: node.position.x, y: node.position.y },
+			// Persist the node's measured dimensions; fall back to the default
+			// node size when ReactFlow has not measured the node yet.
+			measured: node.measured ?? { width: 150, height: 36 },
 			nodeType: (node.type as INodeType) ?? INodeType.Default,
 			formDataValid: data.formDataValid !== false,
 			parentId: node.parentId,

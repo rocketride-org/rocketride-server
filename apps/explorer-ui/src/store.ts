@@ -38,6 +38,54 @@ import type { RocketRideClient } from 'rocketride';
 import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
 import { getMediaInfo } from './mediaTypes';
 
+// =============================================================================
+// LOAD ERROR SENTINEL
+// =============================================================================
+//
+// When a blob-mode read fails (e.g. RR_SIGNING_KEY unset -> fsGetUrl throws,
+// or the presigned fetch returns non-2xx) we cannot produce a blob: URL.
+// Rather than returning null — which is indistinguishable from "still loading"
+// once it reaches the viewer — read() returns this typed sentinel carrying the
+// failure message.  FilePane detects it (via isFileLoadError) and hands the
+// message to the viewer, which renders an error instead of hanging on
+// "Loading...".  The sentinel is truthy, so it also stops the FilePane revert
+// effect from re-firing (that effect only reverts while content is empty).
+// =============================================================================
+
+/** Sentinel value stored as a document's content when a blob load failed. */
+export interface FileLoadError {
+	/** Discriminant tag identifying this as a load-error sentinel. */
+	readonly kind: 'file-load-error';
+	/** Human-readable failure message surfaced to the viewer. */
+	readonly message: string;
+}
+
+/**
+ * Builds a FileLoadError sentinel from an unknown thrown value.
+ *
+ * @param err - The value caught while reading (Error or otherwise).
+ * @returns A FileLoadError carrying the extracted message.
+ */
+function makeFileLoadError(err: unknown): FileLoadError {
+	return { kind: 'file-load-error', message: err instanceof Error ? err.message : String(err) };
+}
+
+/**
+ * Type guard: true when a document's content is a FileLoadError sentinel.
+ *
+ * @param value - The document content to test.
+ * @returns True if the value is a load-error sentinel.
+ */
+export function isFileLoadError(value: unknown): value is FileLoadError {
+	// Narrow structurally without a cast: object -> has 'kind' -> tag matches.
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		'kind' in value &&
+		value.kind === 'file-load-error'
+	);
+}
+
 /**
  * Creates an IVirtualFileSystem backed by the RocketRide server store.
  *
@@ -76,11 +124,15 @@ export function createStoreVfs(client: RocketRideClient): IVirtualFileSystem {
 				const data = await response.arrayBuffer();
 				const blob = new Blob([data], { type: mime });
 				return URL.createObjectURL(blob);
-			} catch {
-				// Return null (not '') to signal "load failed" vs "empty content".
-				// revertDocument() bails on null, so the FilePane revert effect
-				// won't re-fire forever on a failing blob load.
-				return null;
+			} catch (err) {
+				// Blob loads surface a typed error sentinel (not null/'') so the
+				// failure is distinguishable from "still loading" and carries a
+				// message the viewer can render.  The sentinel is truthy, so the
+				// FilePane revert effect (which only reverts while content is
+				// empty) stops re-firing once it lands.  Inline/link failures keep
+				// returning null — their viewers are unchanged by this fix.
+				const { contentMode } = getMediaInfo(path);
+				return contentMode === 'blob' ? makeFileLoadError(err) : null;
 			}
 		},
 

@@ -42,7 +42,7 @@ import type { Documents, SplitOrientation } from './Documents';
 const DND_MIME = 'application/x-rr-editor';
 
 const styles = {
-	bar: (isActiveGroup: boolean, isDragOver: boolean): CSSProperties => ({
+	bar: (_isActiveGroup: boolean, isDragOver: boolean): CSSProperties => ({
 		display: 'flex',
 		height: 36,
 		flexShrink: 0,
@@ -400,7 +400,7 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
  */
 interface SplitButtonProps {
 	/** Ref to the button element for positioning. */
-	btnRef: React.RefObject<HTMLButtonElement | null>;
+	btnRef: React.RefObject<HTMLButtonElement>;
 	/** Whether the dropdown menu is currently open. */
 	open: boolean;
 	/** Toggle the dropdown open/closed. */

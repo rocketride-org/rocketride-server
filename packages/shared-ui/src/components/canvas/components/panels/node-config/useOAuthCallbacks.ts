@@ -28,9 +28,14 @@ export function useOAuthCallbacks() {
 	 * `tokens`/`state` strings produced by the OAuth broker — shared by the
 	 * URL-param path (web) and the host-message path (VS Code).
 	 *
+	 * Tokens are written to the form-data ROOT (`authType`, `userToken`): node
+	 * configs are flat — the engine reads cfg.get('authType')/cfg.get('userToken')
+	 * at the top level and the generated RJSF schema names dotted services.json
+	 * field ids by their last component, so root is the only location both see.
+	 *
 	 * @param formData The node's current form data.
 	 * @param tokensParam JSON string of `{access_token, refresh_token, ...}`.
-	 * @param stateParam JSON string of `{service, type, ...}` (may be empty).
+	 * @param stateParam JSON string of `{type, node_id, ...}` (may be empty).
 	 * @return The enriched form data, or the input unchanged when no tokens.
 	 */
 	const applyGoogleTokens = useCallback(
@@ -38,14 +43,12 @@ export function useOAuthCallbacks() {
 			if (!tokensParam) return formData;
 
 			let parsedState: Record<string, unknown> = {};
-			let service: Record<string, unknown> = {};
 			let tokens: Record<string, unknown> = {};
 			let authType = '';
 
 			try {
 				if (stateParam) {
 					parsedState = JSON.parse(stateParam);
-					service = JSON.parse((parsedState?.service as string) ?? '{}');
 					authType = (parsedState?.type as string) || '';
 				}
 				tokens = JSON.parse(tokensParam);
@@ -55,9 +58,6 @@ export function useOAuthCallbacks() {
 				// token object full of undefined fields.
 				return formData;
 			}
-
-			const existingParams = (formData.parameters as Record<string, unknown>) || {};
-			const serviceParams = (service.parameters as Record<string, unknown>) || {};
 
 			const oAuthServerUrl = tokens.oauth_server_url || `${oauth2RootUrl || ''}/refresh`;
 
@@ -71,21 +71,12 @@ export function useOAuthCallbacks() {
 			};
 			const userTokenJson = JSON.stringify(fullTokenObject);
 
+			// A fresh user token with no/malformed state must still switch the
+			// node to user auth — 'service' would make the engine ignore it.
 			return {
 				...formData,
-				parameters: {
-					...existingParams,
-					...serviceParams,
-					userToken: userTokenJson,
-					...(authType && { authType }),
-					google: {
-						...((existingParams.google as Record<string, unknown>) || {}),
-						...((serviceParams.google as Record<string, unknown>) || {}),
-						userToken: userTokenJson,
-						accessToken: tokens.access_token,
-						tokenExpiry: tokens.expiry_date,
-					},
-				},
+				userToken: userTokenJson,
+				authType: authType || 'user',
 			};
 		},
 		[oauth2RootUrl]

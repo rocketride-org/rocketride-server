@@ -25,9 +25,9 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ShellSidebarProps } from 'shell-ui';
-import { useShellConnection } from 'shell-ui';
-import { Explorer, BxDownload, BxDockLeft } from 'shared';
+import type { CSSProperties } from 'react';
+import { useShellConnection, useSidebarContent } from 'shell-ui';
+import { Explorer, BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shared';
 import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction, IVirtualFileSystem } from 'shared';
 import { getDocs } from './docs';
 import { getMediaInfo } from './mediaTypes';
@@ -45,6 +45,35 @@ const EXPLORER_CONFIG: ExplorerConfig = {
 	allowFolders: true,
 };
 
+/**
+ * No-op VFS for the file Explorer.
+ *
+ * The Explorer sidebar performs all file operations through the onFileManage /
+ * onMove / onUpload callbacks (which call the RocketRide client directly), so
+ * this stub satisfies the Explorer contract without exposing raw VFS access.
+ */
+const NOOP_VFS: IVirtualFileSystem = {
+	list: async () => [],
+	read: async () => null,
+	write: async () => {},
+	rename: async () => {},
+	delete: async () => {},
+	mkdir: async () => {},
+};
+
+// =============================================================================
+// STYLES
+// =============================================================================
+
+const styles = {
+	/** Sidebar content wrapper — fills the shell frame's scrolling slot. */
+	sidebar: {
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+	} as CSSProperties,
+};
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -52,11 +81,15 @@ const EXPLORER_CONFIG: ExplorerConfig = {
 /**
  * Sidebar for the File Explorer app.
  *
- * Uses the shared Explorer component for the file tree with built-in
- * rename, delete, create file, and create folder support.  Files are
- * opened in the Documents tab system on click.
+ * Registration-only component (models-ui / rocket-ui pattern): it builds the
+ * file-tree Explorer node and publishes it into the shell sidebar's scrolling
+ * slot via useSidebarContent(), so it composes with the shell's fixed
+ * header/footer. Renders null itself; mounted by ExplorerApp (not the legacy
+ * components.Sidebar slot). The registered node's root SidebarCollapsedGate
+ * hides this free-form content while the sidebar is collapsed. Files open in
+ * the Documents tab system on click.
  */
-const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
+const ExplorerSidebar: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
 	const [entries, setEntries] = useState<ExplorerEntry[]>([]);
 
@@ -281,28 +314,15 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 		{ id: 'download', label: 'Download', icon: <BxDownload size={16} />, onSelect: handleDownload },
 	], [buildOpenWithChildren, handleDownload]);
 
-	// --- Collapsed mode -------------------------------------------------------
+	// --- Register sidebar content ---------------------------------------------
 
-	if (collapsed) {
-		return null;
-	}
-
-	// --- Expanded mode --------------------------------------------------------
-
-	// Use a no-op VFS for the Explorer — we handle all operations via callbacks
-	const noopVfs: IVirtualFileSystem = {
-		list: async () => [],
-		read: async () => null,
-		write: async () => {},
-		rename: async () => {},
-		delete: async () => {},
-		mkdir: async () => {},
-	};
-
-	return (
-		<div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+	// Build the file-tree node and publish it to the shell sidebar's scrolling
+	// slot. The shell frame owns the collapse behaviour and hides free-form
+	// content while collapsed, so no collapsed icon rail is drawn here.
+	const content = (
+		<div style={styles.sidebar}>
 			<Explorer
-				vfs={noopVfs}
+				vfs={NOOP_VFS}
 				config={EXPLORER_CONFIG}
 				entries={entries}
 				isConnected={isConnected}
@@ -316,6 +336,13 @@ const ExplorerSidebar: React.FC<ShellSidebarProps> = ({ collapsed }) => {
 			/>
 		</div>
 	);
+
+	// Publish to the shell sidebar slot (behind the collapse gate); withdrawn
+	// automatically on unmount.
+	useSidebarContent(<SidebarCollapsedGate>{content}</SidebarCollapsedGate>);
+
+	// Registration-only component — nothing rendered inline.
+	return null;
 };
 
 // =============================================================================

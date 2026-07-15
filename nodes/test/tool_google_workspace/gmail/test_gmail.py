@@ -613,6 +613,60 @@ def test_check_connection_ok_with_full_scope(monkeypatch):
     assert result['authType'] == 'user'
 
 
+def test_check_connection_readonly_satisfied_by_modify(monkeypatch):
+    """A token granted gmail.modify covers the readonly tier (scope implication)."""
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    inst = _inst_with_token(
+        'readonly', {'access_token': 'tok', 'scope': 'https://www.googleapis.com/auth/gmail.modify'}
+    )
+    _patch_config(monkeypatch, inst)
+    result = inst.check_connection({})
+    assert result['connection_ok']
+    # The shared _check_connection_impl omits missingScopes when nothing is missing.
+    assert result.get('missingScopes', []) == []
+
+
+# ---------------------------------------------------------------------------
+# missing_scopes helper (google_access)
+# ---------------------------------------------------------------------------
+
+
+_SCOPE_G = 'https://www.googleapis.com/auth'
+
+
+def test_missing_scopes_drive_only_grant_fails_modify():
+    """The broker's default grant (drive + profile) does not cover the modify tier."""
+    granted = {f'{_SCOPE_G}/drive', f'{_SCOPE_G}/userinfo.email', f'{_SCOPE_G}/userinfo.profile', 'openid'}
+    assert ga.missing_scopes(granted, ga.GMAIL.scopes['modify']) == [f'{_SCOPE_G}/gmail.modify']
+
+
+def test_missing_scopes_modify_satisfies_readonly():
+    assert ga.missing_scopes({f'{_SCOPE_G}/gmail.modify'}, ga.GMAIL.scopes['readonly']) == []
+
+
+def test_missing_scopes_full_mailbox_satisfies_all_gmail_tiers():
+    granted = {'https://mail.google.com/'}
+    for tier_scopes in ga.GMAIL.scopes.values():
+        assert ga.missing_scopes(granted, tier_scopes) == []
+
+
+def test_missing_scopes_empty_grant_is_fail_open():
+    """Older tokens without a scope field must not be reported as missing scopes."""
+    assert ga.missing_scopes(set(), ga.GMAIL.scopes['send']) == []
+
+
+def test_missing_scopes_readonly_implied_by_writable_counterpart():
+    """Generic implication: a .readonly requirement is covered by its writable scope."""
+    assert ga.missing_scopes({f'{_SCOPE_G}/drive'}, ga.DRIVE.scopes['readonly']) == []
+
+
+def test_missing_scopes_exact_match_still_required_for_extended():
+    granted = {f'{_SCOPE_G}/gmail.modify'}
+    missing = ga.missing_scopes(granted, ga.GMAIL.scopes['send'])
+    assert missing == [f'{_SCOPE_G}/gmail.send']
+
+
 def test_thread_trash_and_untrash():
     inst = make_inst(results={'trash': {'id': 't1', 'messages': []}, 'untrash': {'id': 't1', 'messages': []}})
     assert inst.thread_trash({'id': 't1'})['id'] == 't1'

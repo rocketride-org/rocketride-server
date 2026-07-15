@@ -286,6 +286,14 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		}
 		if (targetNodeId && targetNodeId !== node.id) return;
 
+		// updateNode silently no-ops on a locked graph — surface it and keep
+		// the tokens pending; unlocking re-runs this effect and applies them.
+		if (isLocked) {
+			setValidationError('The canvas is locked — unlock it to apply the Google sign-in tokens.');
+			return;
+		}
+		setValidationError(null);
+
 		const enrichedConfig = applyGoogleTokens(node.data.config ?? {}, tokens, state);
 		persistTokensFromFormData(enrichedConfig, persistedAuthTokens);
 		setFormValues(enrichedConfig);
@@ -293,7 +301,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 		clearPendingOAuthTokens?.();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [pendingOAuthTokens, node.id]);
+	}, [pendingOAuthTokens, node.id, isLocked]);
 
 	// --- RJSF change handler ------------------------------------------------
 	const onChange = useCallback(
@@ -338,7 +346,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 					return error;
 				});
 		},
-		[formValues],
+		[formValues]
 	);
 
 	// --- Save: details only (no schema) ------------------------------------
@@ -581,6 +589,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 										googlePickerDeveloperKey,
 										googlePickerClientId,
 										nodeId: node.id,
+										provider: node.data.provider,
 										formDataErrors: node.data.formDataErrors,
 										envKeys,
 									}}

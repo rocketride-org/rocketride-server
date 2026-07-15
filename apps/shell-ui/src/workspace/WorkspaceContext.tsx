@@ -30,6 +30,9 @@ import { useWorkspaceState } from './useWorkspaceState';
 import type { WorkspacePrefs, AppDescriptor, AppManifestEntry } from './types';
 import type { ShellConnectionEventMap } from 'shared';
 import { ConnectionManager } from '../connection/connection';
+import { HOME_APP_ID, HELLO_APP_ID } from '../constants';
+import { resetRemote } from '../lib/appLoader';
+import { SHELL_API_VERSION } from '../apiver';
 
 // =============================================================================
 // SESSION PERSISTENCE HELPER
@@ -44,7 +47,9 @@ import { ConnectionManager } from '../connection/connection';
  */
 function persistActiveApp(appId: string): void {
 	try {
-		if (appId === 'rocketride.home') {
+		// Both home apps count as "home": rocketride.home (SaaS) and
+		// rocketride.hello (OSS) — returning to either clears the session lock.
+		if (appId === HOME_APP_ID || appId === HELLO_APP_ID) {
 			sessionStorage.removeItem('rr:appId');
 		} else {
 			sessionStorage.setItem('rr:appId', appId);
@@ -103,8 +108,19 @@ export interface IWorkspaceContext {
 	loadApp: (appId: string) => void;
 	/** Per-app descriptor load-failure messages, keyed by appId. Absent ⇒ no error. */
 	appLoadErrors: Record<string, string>;
-	/** Clears the recorded load error for an app and re-attempts its descriptor load. */
-	retryApp: (appId: string) => void;
+	/**
+	 * Clears the recorded load error for an app and re-attempts its descriptor
+	 * load. Resolves true when the re-attempt succeeded.
+	 */
+	retryApp: (appId: string) => Promise<boolean>;
+	/**
+	 * Set when a switch-to-app failed to load while another app stayed on
+	 * screen — surfaced by the shell as a modal over the current app.
+	 * Null when no failure is pending.
+	 */
+	loadFailure: { appId: string; name: string } | null;
+	/** Dismisses the pending load-failure modal. */
+	dismissLoadFailure: () => void;
 	/** Persisted settings — keyed by setting key (e.g. 'ROCKETRIDE_OPENAI_KEY'). */
 	settings: Record<string, string>;
 	/** Persist a single setting value. */
@@ -176,14 +192,23 @@ export const WorkspaceProvider: React.FC<{
 	const [appLoading, setAppLoading] = useState(false);
 	// Ref mirror of loadedApps so loadDescriptor's closure never stales
 	const loadedAppsRef = useRef<Record<string, AppDescriptor>>({});
-	// Tracks which appIds currently have an in-flight load
-	const loadingSetRef = useRef<Set<string>>(new Set());
+	// In-flight descriptor loads by appId. A Map (not a Set) so concurrent
+	// callers can AWAIT the existing load instead of treating "in flight" as
+	// "ready" — shell:switchApp must not switch before the descriptor lands.
+	const loadingMapRef = useRef<Map<string, Promise<boolean>>>(new Map());
 	// Tracks appIds whose load has FAILED so the auto-load effect won't silently
-	// re-attempt them (only retryApp clears this). Directly mutated, like loadingSetRef.
+	// re-attempt them (only retryApp clears this). Directly mutated, like loadingMapRef.
 	const failedSetRef = useRef<Set<string>>(new Set());
 	// Per-app descriptor load-failure messages, keyed by appId (surfaced to the UI
 	// so a failed remote shows an error + Retry instead of an indefinite "Loading…")
 	const [appLoadErrors, setAppLoadErrors] = useState<Record<string, string>>({});
+
+	// A failed switch-to-app while another app stayed on screen — rendered by
+	// ShellLayout as a modal over the current app rather than a page takeover.
+	const [loadFailure, setLoadFailure] = useState<{ appId: string; name: string } | null>(null);
+
+	/** Dismisses the pending load-failure modal. */
+	const dismissLoadFailure = useCallback(() => setLoadFailure(null), []);
 
 	// Keep the ref mirror up to date
 	useEffect(() => { loadedAppsRef.current = loadedApps; }, [loadedApps]);
@@ -195,24 +220,43 @@ export const WorkspaceProvider: React.FC<{
 	 * to true for the duration and clears it once all in-flight loads complete.
 	 *
 	 * @param appId - The app whose descriptor should be loaded.
+	 * @returns True when the descriptor is (or already was) loaded or in
+	 *          flight; false when the app is unavailable (failed / unknown).
 	 */
-	const loadDescriptor = useCallback(async (appId: string) => {
+	const loadDescriptor = useCallback(async (appId: string): Promise<boolean> => {
 		// Skip if already loaded
-		if (loadedAppsRef.current[appId]) { return; }
-		// Skip if a load is already in flight
-		if (loadingSetRef.current.has(appId)) { return; }
+		if (loadedAppsRef.current[appId]) { return true; }
+		// A load is already in flight: await ITS outcome rather than reporting
+		// ready — otherwise shell:switchApp switches before the descriptor lands.
+		const inFlight = loadingMapRef.current.get(appId);
+		if (inFlight) { return inFlight; }
 		// Skip if this app already failed — only retryApp re-attempts it (it clears
 		// failedSetRef first), so the auto-load effect can't silently re-arm the load.
-		if (failedSetRef.current.has(appId)) { return; }
+		if (failedSetRef.current.has(appId)) { return false; }
 		// Find the manifest entry
 		const entry = apps.find((a) => a.id === appId);
-		if (!entry) return;
+		if (!entry) return false;
+
+		// Forward-compat gate: an app stamped with a NEWER shell-api version
+		// than this shell provides would load, then hit undefined API members
+		// at runtime. Fail fast with a clear message instead. (shellApiVersion
+		// is stamped into apps.json by the app registration step; absent on
+		// older manifests, which pass the gate.)
+		if (typeof entry.shellApiVersion === 'number' && entry.shellApiVersion > SHELL_API_VERSION) {
+			failedSetRef.current.add(appId);
+			setAppLoadErrors((prev) => ({ ...prev, [appId]: `${entry.name} requires shell API v${entry.shellApiVersion}, but this platform provides v${SHELL_API_VERSION}. Update the platform to run this app.` }));
+			return false;
+		}
 
 		// Mark as in-flight and raise loading flag
-		loadingSetRef.current.add(appId);
 		setAppLoading(true);
 		// A fresh (re)attempt clears any stale error recorded for this app
 		setAppLoadErrors((prev) => { if (!prev[appId]) return prev; const next = { ...prev }; delete next[appId]; return next; });
+		// The load body runs as its own promise so concurrent callers can await
+		// it via the map. The leading microtask yield guarantees the map entry
+		// below is registered before any of the body (or its finally) executes.
+		const load = (async (): Promise<boolean> => {
+		await Promise.resolve();
 		try {
 			// Load with timeout to avoid indefinite hangs on unreachable remotes
 			const APP_LOAD_TIMEOUT = 15000;
@@ -228,18 +272,23 @@ export const WorkspaceProvider: React.FC<{
 				console.error(`[WorkspaceContext] Invalid AppDescriptor for "${appId}": missing components.App`);
 				failedSetRef.current.add(appId);
 				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (components.App) — the bundle may be stale or only partially deployed.` }));
-				return;
+				return false;
 			}
 
 			setLoadedApps((prev) => ({ ...prev, [appId]: descriptor }));
+			return true;
 		} catch (e) {
 			console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}":`, e);
 			failedSetRef.current.add(appId);
 			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
+			return false;
 		} finally {
-			loadingSetRef.current.delete(appId);
-			if (loadingSetRef.current.size === 0) setAppLoading(false);
+			loadingMapRef.current.delete(appId);
+			if (loadingMapRef.current.size === 0) setAppLoading(false);
 		}
+		})();
+		loadingMapRef.current.set(appId, load);
+		return load;
 	}, [apps]);
 
 	/**
@@ -248,10 +297,15 @@ export const WorkspaceProvider: React.FC<{
 	 * silently re-trying a down app, so an explicit retry must clear it first);
 	 * loadDescriptor itself clears the displayed error when the attempt starts.
 	 */
-	const retryApp = useCallback((appId: string) => {
+	const retryApp = useCallback((appId: string): Promise<boolean> => {
 		failedSetRef.current.delete(appId);
-		loadDescriptor(appId);
-	}, [loadDescriptor]);
+		// Tear down the half-initialized MF container first so the retry does a
+		// REAL fresh fetch — re-loading the cached failed container only throws
+		// TDZ errors ("Cannot access 'x' before initialization").
+		const entry = apps.find((a) => a.id === appId);
+		if (entry?.moduleId) resetRemote(entry.moduleId);
+		return loadDescriptor(appId);
+	}, [apps, loadDescriptor]);
 
 	// Load the active app's descriptor once workspace state is ready
 	// (seeded is enough — don't wait for the full disk load)
@@ -261,17 +315,53 @@ export const WorkspaceProvider: React.FC<{
 
 	// --- shell:switchApp → programmatic app switch ----------------------------
 
+	// Monotonic switch-request counter: an in-flight load-before-switch bails
+	// out after its await when a newer request has superseded it, so rapid
+	// switches settle on the last CLICKED app, not the last load to resolve.
+	const switchSeqRef = useRef(0);
+
 	useEffect(() => {
 		/** Allows non-React code to switch the active app without having
 		 *  access to WorkspaceContext dispatch. */
-		return ConnectionManager.getInstance().on('shell:switchApp', ({ appId }) => {
+		return ConnectionManager.getInstance().on('shell:switchApp', async ({ appId }) => {
+			// Claim a sequence number FIRST: even an instant (already-loaded)
+			// switch must invalidate any older in-flight load-before-switch.
+			const mySeq = ++switchSeqRef.current;
 			// Resolve $HOME to the platform default, and unknown appIds to the default
 			const target = appId === '$HOME' ? defaultAppId : appId;
 			const resolved = apps.find((a) => a.id === target) ? target : defaultAppId;
-			switchApp(resolved);
-			loadDescriptor(resolved);
-			persistActiveApp(resolved);
-			pushAppHistory(resolved);
+			const entry = apps.find((a) => a.id === resolved);
+
+			// Already loaded → instant switch, exactly as before.
+			if (loadedAppsRef.current[resolved]) {
+				switchApp(resolved);
+				persistActiveApp(resolved);
+				pushAppHistory(resolved);
+				return;
+			}
+
+			// Load-before-switch: the CURRENT app stays on screen (and interactive)
+			// while the target loads, so a broken target never tears down a working
+			// one. The status bar shows progress. On failure we still navigate, so
+			// the friendly error view (with its Show Details debugging panel) shows.
+			const cm = ConnectionManager.getInstance();
+			cm.emit('shell:statusMessage', { message: `Loading ${entry?.name ?? resolved}…` });
+			const ok = await loadDescriptor(resolved);
+			cm.emit('shell:statusMessage', { message: null });
+
+			// A newer switchApp superseded this one while we awaited the load —
+			// last CLICK wins, not last-to-resolve; and a stale failure must not
+			// pop its modal over an app the user has already moved on to.
+			if (mySeq !== switchSeqRef.current) return;
+
+			if (ok) {
+				switchApp(resolved);
+				persistActiveApp(resolved);
+				pushAppHistory(resolved);
+			} else {
+				// Stay on the current app; surface the failure as a modal over it.
+				setLoadFailure({ appId: resolved, name: entry?.name ?? resolved });
+			}
 		});
 	}, [switchApp, loadDescriptor, apps, defaultAppId]);
 
@@ -351,6 +441,7 @@ export const WorkspaceProvider: React.FC<{
 			loadedApps,
 			loadApp: loadDescriptor,
 			appLoadErrors, retryApp,
+			loadFailure, dismissLoadFailure,
 			settings, updateSetting,
 			updatePrefs, themeOptions, setTheme, dispatch, emit, on,
 		}}>

@@ -127,7 +127,7 @@ export function getPasswordFields(uiSchema: UiSchema = {}): Set<string> {
 export function getFieldsLike(schema: RJSFSchema | UiSchema = {}, fields: string[]): Set<string> {
 	const secured = new Set<string>();
 
-	traverseObject(schema, (node, key) => {
+	traverseObject(schema, (_node, key) => {
 		// Check each substring against the current field name (case-insensitive)
 		for (const part of fields) {
 			if (key?.toLowerCase().includes(part)) secured.add(key);

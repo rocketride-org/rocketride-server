@@ -15,6 +15,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo, useRef, type CSSProperties } from 'react';
 import { loadStripe } from '@stripe/stripe-js';
+import type { PaymentWalletsOption } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { commonStyles } from '../../themes/styles';
 import { PlanPicker, planAmount } from './PlanPicker';
@@ -417,7 +418,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 			</div>
 
 			<form onSubmit={handleSubmit}>
-				<PaymentElement options={{ wallets: { link: 'never' } }} />
+				{/* Stripe accepts `link: 'never'` at runtime, but stripe-js@5's PaymentWalletsOption type omits it. */}
+				<PaymentElement options={{ wallets: { link: 'never' } as unknown as PaymentWalletsOption }} />
 				<button type="submit" disabled={!stripe || submitting} style={S.submitBtn(!stripe || submitting)}>
 					{submitting ? 'Processing\u2026' : `Subscribe \u2014 ${payLabel}`}
 				</button>
@@ -630,10 +632,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
 	// ── Render ───────────────────────────────────────────────────────────
 	return (
-		<div
-			style={{ ...commonStyles.modalOverlay, fontFamily: 'var(--rr-font-family)' }}
-			onClick={(e) => e.target === e.currentTarget && onClose()}
-		>
+		/* Backdrop is inert: dismissal is deliberate-only (close button) per the
+		   2026-07-08 design decision — clicking outside must NOT close. */
+		<div style={{ ...commonStyles.modalOverlay, fontFamily: 'var(--rr-font-family)' }}>
 			<div style={S.modal}>
 				<button style={S.closeBtn} onClick={onClose} aria-label="Close">&times;</button>
 

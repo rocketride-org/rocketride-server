@@ -117,6 +117,27 @@ chat -> LlamaIndex agent -> response
 
 **Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`
 
+---
+
+### slack-agent.pipe
+
+**Slack-connected agent** that can post messages, list channels, and read channel history.
+
+```text
+chat -> agent (RocketRide Wave) -> response
+                 |
+          +------+------+
+          |      |      |
+         LLM  Memory  Slack (tool)
+```
+
+- The agent acts on your Slack workspace via the `slack.*` tools: `message_post` (channel or thread), `channels_list`, `channel_history`, and `check_connection`
+- Ask it to announce a result in a channel, or to summarize recent discussion before answering
+- The bot must be invited to any channel it should post to or read (`/invite @your-bot`); see the [tool_slack README](../nodes/src/nodes/tool_slack/README.md) for the app setup and required scopes
+- For zero-scope, post-only setups, set the node's `webhookUrl` (Slack incoming webhook) instead of `token`
+
+**Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_SLACK_TOKEN` (a bot token with `chat:write`, `channels:read`, `channels:history`)
+
 ## Getting Started
 
 1. Copy a template to your project directory

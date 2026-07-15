@@ -34,6 +34,11 @@ import { handleMissingEnvVars } from '../shared/util/envVarCheck';
 const PREFS_KEY = 'rocketride.prefs';
 const LAYOUTS_KEY = 'rocketride.layouts';
 
+// How long undelivered OAuth tokens are kept for redelivery after a webview
+// reload. Long enough to cover a slow consent flow, short enough that stale
+// tokens don't linger.
+const OAUTH_REDELIVERY_TTL_MS = 5 * 60 * 1000;
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -50,6 +55,8 @@ interface EditorState {
 	isDisposed: boolean;
 	isReady: boolean;
 	cachedStatuses: Record<string, TaskStatus>;
+	/** One-shot: save the document after the next contentChanged, so OAuth tokens reach disk without a manual save. */
+	saveAfterOAuthApply?: boolean;
 }
 
 // =============================================================================
@@ -62,6 +69,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	private connectionManager = ConnectionManager.getInstance();
 	private logger = getLogger();
 	private savesForRun: Set<string> = new Set();
+	// OAuth tokens that arrived while no live webview existed for their
+	// document (e.g. the editor was recycled during the browser round-trip),
+	// keyed by document URI. Redelivered after the next view:ready.
+	private undeliveredOAuthTokens: Map<string, { tokens: string; state: string; expiresAt: number }> = new Map();
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.registerCommands();
@@ -302,6 +313,61 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	}
 
 	// =========================================================================
+	// OAUTH TOKEN DELIVERY
+	// =========================================================================
+
+	/**
+	 * The live editor state for a document, if any. The custom editor is
+	 * registered with supportsMultipleEditorsPerDocument: false, so at most
+	 * one live webview exists per document.
+	 */
+	private findLiveEditorState(docKey: string): EditorState | undefined {
+		for (const editorState of this.editorStates.values()) {
+			if (!editorState.isDisposed && editorState.isReady && editorState.document.uri.toString() === docKey) {
+				return editorState;
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * Deliver broker OAuth tokens to the live webview for the document that
+	 * started the login. The webview instance that armed the waiter may have
+	 * been disposed during the browser round-trip, so the target is resolved
+	 * at delivery time; with no live target the tokens are stashed and
+	 * redelivered after the next view:ready.
+	 */
+	private deliverOAuthTokens(docKey: string, tokens: string, state: string): void {
+		const stash = () => {
+			this.undeliveredOAuthTokens.set(docKey, { tokens, state, expiresAt: Date.now() + OAUTH_REDELIVERY_TTL_MS });
+		};
+
+		const editorState = this.findLiveEditorState(docKey);
+		if (!editorState) {
+			this.logger.info('[ProjectProvider] OAuth tokens arrived with no live editor; holding for redelivery');
+			stash();
+			return;
+		}
+
+		// Arm the one-shot save before posting: the token apply surfaces as the
+		// next project:contentChanged, which must reach disk without Ctrl+S.
+		editorState.saveAfterOAuthApply = true;
+		editorState.webviewPanel.webview.postMessage({ type: 'project:oauthTokens', tokens, state }).then(
+			(posted) => {
+				if (!posted) {
+					editorState.saveAfterOAuthApply = false;
+					stash();
+				}
+			},
+			(err: unknown) => {
+				editorState.saveAfterOAuthApply = false;
+				stash();
+				this.logger.error(`[ProjectProvider] Failed to deliver OAuth tokens: ${err}`);
+			}
+		);
+	}
+
+	// =========================================================================
 	// RESOLVE CUSTOM TEXT EDITOR
 	// =========================================================================
 
@@ -382,6 +448,18 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					});
 					webview.postMessage({ type: 'project:dirtyState', isDirty: document.isDirty, isNew: document.isUntitled });
 
+					// Redeliver OAuth tokens that arrived while this document had no
+					// live webview. Safe ordering: the webview clears its pending
+					// tokens in the project:load handler above, so this arrives after.
+					const oauthKey = document.uri.toString();
+					const undelivered = this.undeliveredOAuthTokens.get(oauthKey);
+					if (undelivered) {
+						this.undeliveredOAuthTokens.delete(oauthKey);
+						if (undelivered.expiresAt > Date.now()) {
+							this.deliverOAuthTokens(oauthKey, undelivered.tokens, undelivered.state);
+						}
+					}
+
 					// Kick off background services refresh
 					this.connectionManager.refreshServices().catch((err) => {
 						this.logger.error(`Background services refresh failed: ${err}`);
@@ -400,7 +478,15 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'project:contentChanged': {
 					if (data.project) {
 						const content = typeof data.project === 'string' ? data.project : JSON.stringify(data.project);
-						this.applyDocumentEdit(document, content);
+						const { applied } = await this.applyDocumentEdit(document, content);
+						// One-shot save after an OAuth token apply: tokens must reach
+						// the .pipe on disk without requiring a manual save.
+						if (editorState.saveAfterOAuthApply) {
+							editorState.saveAfterOAuthApply = false;
+							if (applied || document.isDirty) {
+								await document.save();
+							}
+						}
 					}
 					break;
 				}
@@ -503,10 +589,13 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							break;
 						}
 						// Key the waiter by the node that started the login so the
-						// deep-link return routes to the right editor.
+						// deep-link return routes to the right editor. The callback
+						// resolves the live webview at delivery time — this webview
+						// instance may be disposed during the browser round-trip.
 						const nodeId = parsedUrl.searchParams.get('node_id') || (data.url as string);
+						const docKey = document.uri.toString();
 						const unregister = CloudAuthProvider.getInstance().setPendingGoogleOAuth(nodeId, (tokens, state) => {
-							webview.postMessage({ type: 'project:oauthTokens', tokens, state });
+							this.deliverOAuthTokens(docKey, tokens, state);
 						});
 						// Pass the raw string: Uri.parse re-encodes the query and un-escapes
 						// %3B/%3A, and Zitadel's Go parser rejects raw semicolons in queries

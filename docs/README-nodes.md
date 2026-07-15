@@ -116,6 +116,7 @@ channel; they have no data lanes and **bind to an agent** (see
 | `tool_mcp_client`   | Connects to an external (or Butterbase) MCP server's tools       |
 | `tool_chartjs`      | Generates Chart.js v4 chart configs from data via the LLM        |
 | `tool_bland_ai`     | Places and manages AI phone calls via Bland AI                   |
+| `tool_slack`        | Slack workspace operations: post messages, list channels, read history |
 | `tool_xtrace_memory`| Long-term shared agent memory, backed by xTrace Memory Manager   |
 | `tool_mem0`         | Long-term shared agent memory, backed by the hosted Mem0 Platform |
 

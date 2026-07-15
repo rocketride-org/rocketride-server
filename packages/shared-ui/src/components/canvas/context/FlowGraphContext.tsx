@@ -762,7 +762,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			if (pipe?.schema && Object.keys(formData).length === 0) {
 				formData = resolveDefaultFormData(id, pipe.schema);
-				const validation = validateFormData(pipe.schema, formData);
+				const validation = validateFormData(pipe.schema, formData as Record<string, unknown>);
 				formDataValid = validation.errors.length === 0;
 			}
 
