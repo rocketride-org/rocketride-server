@@ -133,7 +133,11 @@
 					"properties": ["tool_n8n.webhookUser", "tool_n8n.webhookPassword"]
 				},
 				{
-					"value": ["bearer", "jwt"],
+					"value": "bearer",
+					"properties": ["tool_n8n.webhookToken"]
+				},
+				{
+					"value": "jwt",
 					"properties": ["tool_n8n.webhookToken"]
 				}
 			],

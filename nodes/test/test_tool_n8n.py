@@ -82,6 +82,9 @@ def test_services_schema_only_shows_relevant_n8n_fields():
         'bearer': ['tool_n8n.webhookToken'],
         'jwt': ['tool_n8n.webhookToken'],
     }
+    assert all(
+        not isinstance(conditional['value'], list) for conditional in fields['tool_n8n.webhookAuth']['conditional']
+    )
 
     conditional_fields = {
         'tool_n8n.syncTimeout',
