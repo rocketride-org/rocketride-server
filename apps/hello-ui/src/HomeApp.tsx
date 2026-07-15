@@ -33,16 +33,159 @@
 // =============================================================================
 
 import React, { useMemo, type CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
-import { useWorkspace, ConnectionManager } from 'shell-ui';
-import type { AppManifestEntry } from 'shell-ui';
+import { getShellApi } from 'shell-ui';
+import type { ShellAppProps, AppManifestEntry } from 'shell-ui';
 import GitHubStars from './GitHubStars';
+
+// =============================================================================
+// SHELL CONTRACT ACCESSOR
+// =============================================================================
+//
+// Runtime shell access (hooks, client, connection manager) flows through the
+// single curated contract accessor rather than named value imports from
+// shell-ui. Types continue to come from shell-ui's type surface (the same
+// contract types the frozen shell-api snapshot conforms to).
+const { useWorkspace, ConnectionManager } = getShellApi();
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
 const DISCORD_URL = 'https://discord.gg/rocketride';
+
+/** Honor the OS "reduce motion" setting for card hover transitions. */
+const REDUCE_MOTION =
+	typeof window !== 'undefined' &&
+	window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Category ids whose display label is not a simple capitalisation. */
+const CATEGORY_LABELS: Record<string, string> = {
+	ai: 'AI',
+};
+
+/**
+ * Format a manifest category id for display (mirrors home-ui's formatter so
+ * OSS and SaaS desktops label categories identically).
+ *
+ * @param cat - Raw category id from the app manifest (e.g. "tools").
+ * @returns Display label (e.g. "Tools").
+ */
+const formatCategory = (cat: string): string =>
+	CATEGORY_LABELS[cat.toLowerCase()] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
+
+// =============================================================================
+// MOVIE QUOTES — rotating tagline on the signed-in desktop
+// =============================================================================
+
+/** Classic movie quotes cycled in the desktop tagline. */
+const QUOTES: { text: string; source: string }[] = [
+	{ text: 'Frankly, my dear, I don\'t give a damn.', source: 'Gone with the Wind (1939)' },
+	{ text: 'I\'m gonna make him an offer he can\'t refuse.', source: 'The Godfather (1972)' },
+	{ text: 'May the Force be with you.', source: 'Star Wars (1977)' },
+	{ text: 'Here\'s looking at you, kid.', source: 'Casablanca (1942)' },
+	{ text: 'I\'ll be back.', source: 'The Terminator (1984)' },
+	{ text: 'Toto, I\'ve a feeling we\'re not in Kansas anymore.', source: 'The Wizard of Oz (1939)' },
+	{ text: 'You talking to me?', source: 'Taxi Driver (1976)' },
+	{ text: 'E.T. phone home.', source: 'E.T. the Extra-Terrestrial (1982)' },
+	{ text: 'Go ahead, make my day.', source: 'Sudden Impact (1983)' },
+	{ text: 'Houston, we have a problem.', source: 'Apollo 13 (1995)' },
+	{ text: 'Show me the money!', source: 'Jerry Maguire (1996)' },
+	{ text: 'You can\'t handle the truth!', source: 'A Few Good Men (1992)' },
+	{ text: 'I see dead people.', source: 'The Sixth Sense (1999)' },
+	{ text: 'Here\'s Johnny!', source: 'The Shining (1980)' },
+	{ text: 'My precious.', source: 'The Lord of the Rings: The Two Towers (2002)' },
+	{ text: 'Life is like a box of chocolates. You never know what you\'re gonna get.', source: 'Forrest Gump (1994)' },
+	{ text: 'I feel the need — the need for speed!', source: 'Top Gun (1986)' },
+	{ text: 'Nobody puts Baby in a corner.', source: 'Dirty Dancing (1987)' },
+	{ text: 'You\'re gonna need a bigger boat.', source: 'Jaws (1975)' },
+	{ text: 'Say hello to my little friend!', source: 'Scarface (1983)' },
+	{ text: 'Bond. James Bond.', source: 'Dr. No (1962)' },
+	{ text: 'There\'s no place like home.', source: 'The Wizard of Oz (1939)' },
+	{ text: 'I am your father.', source: 'The Empire Strikes Back (1980)' },
+	{ text: 'Why so serious?', source: 'The Dark Knight (2008)' },
+	{ text: 'To infinity and beyond!', source: 'Toy Story (1995)' },
+	{ text: 'Keep your friends close, but your enemies closer.', source: 'The Godfather Part II (1974)' },
+	{ text: 'First rule in government spending: why build one when you can have two at twice the price?', source: 'Contact (1997)' },
+	{ text: 'You shall not pass!', source: 'The Lord of the Rings: The Fellowship of the Ring (2001)' },
+	{ text: 'Hasta la vista, baby.', source: 'Terminator 2: Judgment Day (1991)' },
+	{ text: 'I\'m the king of the world!', source: 'Titanic (1997)' },
+];
+
+/** Seconds each quote stays on screen before the rotation advances. */
+const QUOTE_INTERVAL_S = 30;
+
+/**
+ * Index of the quote to show right now, derived from the wall clock:
+ * every QUOTE_INTERVAL_S-second bucket maps to the next quote, so the
+ * rotation is deterministic and identical across clients/tabs.
+ *
+ * @returns Index into {@link QUOTES}.
+ */
+const currentQuoteIndex = (): number =>
+	Math.floor(Date.now() / (QUOTE_INTERVAL_S * 1000)) % QUOTES.length;
+
+// =============================================================================
+// GREETING — time-aware welcome, mirrored from home-ui's utils/greeting.ts
+// =============================================================================
+
+type TimeBucket = 'morning' | 'afternoon' | 'evening' | 'night';
+
+/** Map a 0–23 hour to a part-of-day bucket. */
+const getTimeBucket = (hour: number): TimeBucket => {
+	if (hour >= 5 && hour < 12) return 'morning';
+	if (hour >= 12 && hour < 17) return 'afternoon';
+	if (hour >= 17 && hour < 22) return 'evening';
+	return 'night';
+};
+
+// Greeting pools — nameless (the OSS identity is always "RocketRide", so a
+// personalised greeting reads oddly). Each bucket is concatenated with the
+// always-available `any` pool before a random pick, so a fraction of
+// greetings are time-neutral (and launch-flavored) at any hour.
+const GREETINGS: Record<TimeBucket | 'any', readonly string[]> = {
+	morning: [
+		'Good morning.',
+		'Morning — fresh start.',
+		'Rise and shine.',
+		'A perfect morning for a launch.',
+	],
+	afternoon: [
+		'Good afternoon.',
+		"Hope the day's treating you well.",
+		'Cruising through the afternoon.',
+	],
+	evening: [
+		'Good evening.',
+		'Winding down?',
+		'Quiet evening for a flight?',
+	],
+	night: [
+		'Burning the midnight oil?',
+		'Still up?',
+		'Late one tonight?',
+	],
+	any: [
+		'Welcome back.',
+		'Good to see you.',
+		'Ready when you are.',
+		"Let's get to it.",
+		'Wanna take a ride?',
+		'All systems go.',
+		'Ready for liftoff?',
+	],
+};
+
+/**
+ * Build a greeting for the desktop page. Picks at random from the current
+ * time-of-day pool combined with the time-neutral pool, so it stays fresh on
+ * reload while still skewing to the local hour (mirrors home-ui's greeting).
+ *
+ * @returns Greeting sentence.
+ */
+const getGreeting = (): string => {
+	const pool = [...GREETINGS[getTimeBucket(new Date().getHours())], ...GREETINGS.any];
+	return pool[Math.floor(Math.random() * pool.length)];
+};
 
 // =============================================================================
 // STYLES
@@ -94,60 +237,140 @@ const styles = {
 		minHeight: 'calc(100% - 68px)',
 	} as CSSProperties,
 
-	/** Quote tagline above the title. */
-	tagline: {
-		margin: '0 auto',
-		maxWidth: 480,
-		fontSize: 13,
-		fontStyle: 'italic',
-		color: 'var(--rr-text-secondary)',
-		textAlign: 'center' as const,
-		lineHeight: 1.5,
+	/** Header row — 3 columns (greeting 40% / spacer 20% / quote 40%). */
+	headerRow: {
+		display: 'flex',
+		width: '100%',
+		maxWidth: 1080,
+		alignItems: 'flex-start',
 	} as CSSProperties,
 
-	/** Page title. */
-	title: {
-		margin: 0,
-		fontSize: 32,
+	/** Header column 1 (40%) — greeting + subtitle, flush left. */
+	headerLeft: {
+		flex: '0 0 40%',
+		minWidth: 0,
+		textAlign: 'left' as const,
+	} as CSSProperties,
+
+	/** Header column 2 (20%) — blank spacer. */
+	headerSpacer: {
+		flex: '0 0 20%',
+	} as CSSProperties,
+
+	/** Header column 3 (40%) — movie quote, flush right. */
+	headerRight: {
+		flex: '0 0 40%',
+		minWidth: 0,
+		textAlign: 'right' as const,
+	} as CSSProperties,
+
+	/** Greeting headline (matches home-ui's desktop greeting). */
+	greetingTitle: {
+		margin: '0 0 6px',
+		fontSize: 28,
 		fontWeight: 800,
 		color: 'var(--rr-text-primary)',
 		letterSpacing: -0.5,
-		textAlign: 'center' as const,
 	} as CSSProperties,
 
-	/** App grid — centered flex wrap. */
+	/** Subtitle under the greeting. */
+	greetingSub: {
+		margin: 0,
+		fontSize: 14,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** Quote text — bold, standing out from body text. */
+	quoteText: {
+		margin: 0,
+		fontSize: 14,
+		fontWeight: 700,
+		color: 'var(--rr-text-secondary)',
+		lineHeight: 1.5,
+	} as CSSProperties,
+
+	/** Movie attribution — small italic, underneath the quote. */
+	quoteSource: {
+		margin: '4px 0 0',
+		fontSize: 12,
+		fontStyle: 'italic' as const,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** App grid — responsive columns, up to 3 per row (matches home-ui). */
 	grid: {
-		display: 'flex',
-		flexWrap: 'wrap' as const,
-		justifyContent: 'center',
-		gap: 20,
-		maxWidth: 900,
+		display: 'grid',
+		gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+		gap: 24,
+		width: '100%',
+		maxWidth: 1080,
 	} as CSSProperties,
 
-	/** Individual app card. */
+	/** Individual app card — whole card is the launch target (matches home-ui). */
 	card: {
 		display: 'flex',
 		flexDirection: 'column' as const,
-		gap: 12,
-		padding: 24,
+		gap: 14,
+		padding: 20,
 		borderRadius: 12,
+		boxSizing: 'border-box' as const,
 		border: '1px solid var(--rr-border)',
 		backgroundColor: 'var(--rr-bg-paper)',
-		width: 280,
-		transition: 'border-color 0.15s, box-shadow 0.15s',
+		cursor: 'pointer',
+		// transform is ALWAYS present ('none' at rest) and hover swaps the WHOLE
+		// border shorthand — every hover key exists in both states. React cannot
+		// reliably diff a shorthand (border) against its longhand (borderColor)
+		// across renders, which left stale border-color on unhovered cards.
+		transform: 'none',
+		transition: REDUCE_MOTION
+			? 'none'
+			: 'transform 0.12s ease, background-color 0.12s ease, border-color 0.12s ease',
 	} as CSSProperties,
 
-	/** Card hover effect. */
+	/** Card hover effect — bg/border shift + slight lift (unless reduced motion).
+	    Overrides only keys that exist in `card` (see note there). */
 	cardHover: {
-		border: '1px solid var(--rr-brand)',
-		boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+		backgroundColor: 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))',
+		border: '1px solid var(--rr-border-hover)',
+		...(REDUCE_MOTION ? {} : { transform: 'translateY(-2px)' }),
 	} as CSSProperties,
 
-	/** Colored accent bar at the top of each card. */
-	cardAccent: {
-		height: 4,
-		borderRadius: 2,
-		marginBottom: 4,
+	/** Top row of the card — icon chip + name/category. */
+	cardHeader: {
+		display: 'flex',
+		flexDirection: 'row' as const,
+		alignItems: 'center',
+		gap: 14,
+	} as CSSProperties,
+
+	/** 52px icon chip — app icon image, or first-letter monogram fallback. */
+	iconChip: {
+		width: 52,
+		height: 52,
+		flexShrink: 0,
+		borderRadius: 12,
+		overflow: 'hidden',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		color: 'var(--rr-brand)',
+		fontSize: 22,
+		fontWeight: 800,
+	} as CSSProperties,
+
+	/** App icon image inside the chip. */
+	iconImg: {
+		width: '100%',
+		height: '100%',
+		objectFit: 'cover' as const,
+	} as CSSProperties,
+
+	/** Name + category column — ellipsizes next to the fixed-width chip. */
+	nameWrap: {
+		flex: 1,
+		minWidth: 0,
 	} as CSSProperties,
 
 	/** App name in the card. */
@@ -156,29 +379,31 @@ const styles = {
 		fontSize: 16,
 		fontWeight: 700,
 		color: 'var(--rr-text-primary)',
+		whiteSpace: 'nowrap' as const,
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
 	} as CSSProperties,
 
-	/** App description in the card. */
-	appDesc: {
-		margin: 0,
+	/** Category sublabel under the app name. */
+	appCategory: {
 		fontSize: 13,
 		color: 'var(--rr-text-secondary)',
-		lineHeight: 1.5,
-		flex: 1,
+		marginTop: 2,
+		whiteSpace: 'nowrap' as const,
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
 	} as CSSProperties,
 
-	/** Launch button in the card. */
-	launchBtn: {
-		marginTop: 'auto',
-		padding: '8px 16px',
-		borderRadius: 6,
-		border: 'none',
-		backgroundColor: 'var(--rr-brand)',
-		color: '#fff',
-		fontSize: 13,
-		fontWeight: 600,
-		cursor: 'pointer',
-		transition: 'opacity 0.15s',
+	/** App description — full width below the header row, clamped to 2 lines. */
+	appDesc: {
+		margin: 0,
+		fontSize: 14,
+		lineHeight: 1.45,
+		color: 'var(--rr-text-secondary)',
+		display: '-webkit-box',
+		WebkitLineClamp: 2,
+		WebkitBoxOrient: 'vertical' as const,
+		overflow: 'hidden',
 	} as CSSProperties,
 
 	/** Sign In / Sign Out button. */
@@ -221,29 +446,139 @@ const styles = {
 		cursor: 'pointer',
 	} as CSSProperties,
 
-	/** Theme selector dropdown. */
-	themeSelect: {
-		padding: '7px 10px',
-		borderRadius: 6,
+	/** Sliding sun/moon theme toggle track (same control as home-ui). */
+	themeToggle: {
+		position: 'relative' as const,
+		boxSizing: 'border-box' as const,
+		width: 52,
+		height: 28,
+		borderRadius: 14,
 		border: '1px solid var(--rr-border)',
-		backgroundColor: 'transparent',
-		color: 'var(--rr-text-secondary)',
-		fontSize: 13,
-		fontFamily: 'var(--rr-font-family)',
+		background: 'var(--rr-bg-surface-alt)',
 		cursor: 'pointer',
-		outline: 'none',
+		padding: 0,
+		flexShrink: 0,
+		transition: 'background 0.3s ease',
+	} as CSSProperties,
+
+	/** White knob that slides between the moon (left) / sun (right) positions. */
+	themeKnob: {
+		position: 'absolute' as const,
+		top: 3,
+		left: 3,
+		width: 22,
+		height: 22,
+		borderRadius: '50%',
+		backgroundColor: '#ffffff',
+		boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+		transition: 'transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1)',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		color: '#475569', // slate-600 — icon on the always-white knob
 	} as CSSProperties,
 };
 
-/** Accent colors cycled across app cards. */
-const CARD_COLORS = [
-	'var(--rr-brand)',
-	'var(--rr-color-success)',
-	'var(--rr-color-warning)',
-	'#e06cf0',
-	'#4fc3f7',
-	'#ff7043',
-];
+// =============================================================================
+// THEME TOGGLE
+// =============================================================================
+
+/**
+ * Sliding sun/moon theme toggle — the same control home-ui uses. Binary:
+ * dark ('rocketride') <-> light ('rocketride-light'). Also persists the mode
+ * to rr:home:theme, which the shell reads for its boot-time default theme.
+ *
+ * @param props.theme - The currently active theme id.
+ * @param props.onSetTheme - Applies a theme id (useWorkspace().setTheme).
+ */
+const ThemeToggle: React.FC<{ theme: string; onSetTheme: (id: string) => void }> = ({ theme, onSetTheme }) => {
+	// Any theme other than the light variants counts as dark for the toggle.
+	const isDark = theme !== 'rocketride-light' && theme !== 'light';
+
+	/** Flip between the light/dark brand themes and persist the mode. */
+	const toggle = () => {
+		const mode = isDark ? 'light' : 'dark';
+		onSetTheme(mode === 'dark' ? 'rocketride' : 'rocketride-light');
+		try { localStorage.setItem('rr:home:theme', mode); } catch { /* storage unavailable */ }
+	};
+
+	return (
+		<button
+			type="button"
+			role="switch"
+			aria-checked={!isDark}
+			aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+			onClick={toggle}
+			style={styles.themeToggle}
+		>
+			{/* Knob slides right in light mode (same geometry as home-ui: 24px travel) */}
+			<span style={{ ...styles.themeKnob, transform: `translateX(${isDark ? 0 : 24}px)` }}>
+				{isDark ? (
+					// Moon icon
+					<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+					</svg>
+				) : (
+					// Sun icon
+					<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+						<circle cx="12" cy="12" r="4" />
+						<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+					</svg>
+				)}
+			</span>
+		</button>
+	);
+};
+
+// =============================================================================
+// APP CARD
+// =============================================================================
+
+/**
+ * Single desktop app card — mirrors home-ui's DesktopAppCard pattern: hover
+ * state lives locally in each card (not in the parent grid), the arrangement
+ * proven stable on the SaaS desktop. The whole card is the launch target.
+ *
+ * @param props.app - Manifest entry to render.
+ * @param props.onLaunch - Invoked with the app when the card is activated.
+ */
+const AppCard: React.FC<{ app: AppManifestEntry; onLaunch: (app: AppManifestEntry) => void }> = ({ app, onLaunch }) => {
+	// Local hover state — per-card, like home-ui's DesktopAppCard
+	const [hover, setHover] = React.useState(false);
+
+	// First manifest category, formatted for display (may be absent)
+	const category = app.categories?.[0] ? formatCategory(app.categories[0]) : null;
+
+	return (
+		<div
+			role="button"
+			tabIndex={0}
+			style={{ ...styles.card, ...(hover ? styles.cardHover : {}) }}
+			onClick={() => onLaunch(app)}
+			onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLaunch(app); } }}
+			onMouseEnter={() => setHover(true)}
+			onMouseLeave={() => setHover(false)}
+		>
+			{/* Top row — icon chip + name/category */}
+			<div style={styles.cardHeader}>
+				<div style={styles.iconChip}>
+					{app.icon
+						? <img src={app.icon} alt="" loading="lazy" decoding="async" style={styles.iconImg} />
+						: app.name[0]}
+				</div>
+				<div style={styles.nameWrap}>
+					<h2 style={styles.appName}>{app.name}</h2>
+					{category && <div style={styles.appCategory}>{category}</div>}
+				</div>
+			</div>
+
+			{/* Description — full width below the header row */}
+			<p style={styles.appDesc}>
+				{app.description || 'No description'}
+			</p>
+		</div>
+	);
+};
 
 // =============================================================================
 // COMPONENT
@@ -257,7 +592,21 @@ const CARD_COLORS = [
  */
 const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const cm = ConnectionManager.getInstance();
-	const { appManifest, prefs, themeOptions, setTheme } = useWorkspace();
+	const { appManifest, prefs, setTheme } = useWorkspace();
+
+	// The unauthenticated home owns its look (mirrors saas home-ui's
+	// applyThemeMode ownership): re-assert the anonymous default — the
+	// rr:home:theme mode if the visitor ever toggled, else the brand light
+	// theme — so signing out doesn't leave the previous user's workspace
+	// theme painted on the logged-out screen. Authenticated visits are left
+	// alone: the workspace restores the account's own theme.
+	React.useEffect(() => {
+		if (identity) return;
+		let mode: string | null = null;
+		try { mode = localStorage.getItem('rr:home:theme'); } catch { /* storage unavailable */ }
+		const target = mode === 'dark' ? 'rocketride' : 'rocketride-light';
+		if (prefs.theme !== target) setTheme(target);
+	}, [identity, prefs.theme, setTheme]);
 
 	// Filter out this app from the list — don't show ourselves
 	const apps = useMemo(
@@ -272,14 +621,21 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 		cm.emit('shell:switchApp', { appId: app.id });
 	};
 
-	// Hover state for cards
-	const [hoveredId, setHoveredId] = React.useState<string | null>(null);
+	// Greeting \u2014 time-aware, picked once per mount so it stays stable
+	// through re-renders (mirrors home-ui's desktop).
+	const greeting = useMemo(() => getGreeting(), []);
 
-	// Greeting text
-	const greeting = identity ? 'Wanna take a ride?' : 'Welcome to RocketRide';
-	const tagline = identity
-		? '\u201CFirst rule in government spending: why build one when you can build two at twice the price. Only, this one can be kept secret.\u201D'
-		: null;
+	// Rotating movie quote \u2014 index derives from the user's clock so it
+	// advances every QUOTE_INTERVAL_S seconds (see currentQuoteIndex).
+	const [quoteIndex, setQuoteIndex] = React.useState(currentQuoteIndex);
+	React.useEffect(() => {
+		// Re-derive once a second; setState bails out while the 30s bucket
+		// (QUOTE_INTERVAL_S) is unchanged, so this re-renders only when the
+		// quote advances.
+		const id = setInterval(() => setQuoteIndex(currentQuoteIndex()), 1000);
+		return () => clearInterval(id);
+	}, []);
+	const quote = identity ? QUOTES[quoteIndex] : null;
 
 	return (
 		<div style={styles.container}>
@@ -305,18 +661,8 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 					Discord
 				</a>
 
-				{/* Theme picker */}
-				{themeOptions.length > 0 && (
-					<select
-						style={styles.themeSelect}
-						value={prefs.theme}
-						onChange={(e) => setTheme(e.target.value)}
-					>
-						{themeOptions.map((t) => (
-							<option key={t.id} value={t.id}>{t.name}</option>
-						))}
-					</select>
-				)}
+				{/* Theme toggle — sliding sun/moon pill, same control as home-ui */}
+				<ThemeToggle theme={prefs.theme} onSetTheme={setTheme} />
 
 				{/* Auth button */}
 				{identity ? (
@@ -338,41 +684,29 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 
 			{/* Content */}
 			<div style={styles.centre}>
-				{tagline && <p style={styles.tagline}>{tagline}</p>}
-				<h1 style={styles.title}>{greeting}</h1>
+				{/* Header row — greeting (40%) / blank spacer (20%) / movie quote (40%) */}
+				<div style={styles.headerRow}>
+					<div style={styles.headerLeft}>
+						<h1 style={styles.greetingTitle}>{identity ? greeting : 'Welcome to RocketRide'}</h1>
+						<p style={styles.greetingSub}>Select an application to launch.</p>
+					</div>
+					<div style={styles.headerSpacer} />
+					<div style={styles.headerRight}>
+						{quote && (
+							<>
+								{/* Quote slightly bolder; attribution italic underneath */}
+								<p style={styles.quoteText}>{'“'}{quote.text}{'”'}</p>
+								<p style={styles.quoteSource}>— {quote.source}</p>
+							</>
+						)}
+					</div>
+				</div>
 
 				{apps.length > 0 ? (
 					<div style={styles.grid}>
-						{apps.map((app, i) => {
-							const isHovered = hoveredId === app.id;
-							const accentColor = CARD_COLORS[i % CARD_COLORS.length];
-							return (
-								<div
-									key={app.id}
-									style={{ ...styles.card, ...(isHovered ? styles.cardHover : {}), cursor: 'pointer' }}
-									onClick={() => handleLaunch(app)}
-									onMouseEnter={() => setHoveredId(app.id)}
-									onMouseLeave={() => setHoveredId(null)}
-								>
-									{/* Colored accent bar */}
-									<div style={{ ...styles.cardAccent, backgroundColor: accentColor }} />
-
-									<h2 style={styles.appName}>{app.name}</h2>
-									<p style={styles.appDesc}>
-										{app.description || 'No description'}
-									</p>
-									<button
-										style={styles.launchBtn}
-										onClick={(e) => {
-											e.stopPropagation();
-											handleLaunch(app);
-										}}
-									>
-										Launch
-									</button>
-								</div>
-							);
-						})}
+						{apps.map((app) => (
+							<AppCard key={app.id} app={app} onLaunch={handleLaunch} />
+						))}
 					</div>
 				) : (
 					<p style={styles.subtitle}>

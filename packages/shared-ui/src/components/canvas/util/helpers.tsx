@@ -169,6 +169,7 @@ export const buildInventory = (forms: Record<string, IService> = {}) => {
 		embedding: {},
 		llm: {},
 		database: {},
+		graph: {},
 		filter: {},
 		image: {},
 		preprocessor: {},
@@ -240,6 +241,8 @@ export const sanitizeAndParseHtmlToReact = (text?: string): string | ReactNode =
 						</a>
 					);
 				}
+				// Non-anchor nodes are left untouched by returning undefined.
+				return undefined;
 			},
 		};
 

@@ -18,9 +18,11 @@ const styles = {
 interface Props {
 	/** Blob URL pointing to the .docx data. */
 	content: string;
+	/** Upstream failure message when the blob could not be loaded (empty content otherwise). */
+	loadError?: string;
 }
 
-export const DocxViewer: React.FC<Props> = ({ content }) => {
+export const DocxViewer: React.FC<Props> = ({ content, loadError }) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +51,8 @@ export const DocxViewer: React.FC<Props> = ({ content }) => {
 		return () => { cancelled = true; };
 	}, [content]);
 
+	// Upstream load failure wins over any local render error and over "Loading...".
+	if (loadError) return <div style={viewerStyles.message}>{loadError}</div>;
 	if (error) return <div style={viewerStyles.message}>{error}</div>;
 	if (!content) return <div style={viewerStyles.message}>Loading document...</div>;
 	return <div ref={containerRef} style={styles.container} />;

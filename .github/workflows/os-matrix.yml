@@ -1,0 +1,83 @@
+name: OS Matrix — compile + test
+
+# Verifies the engine compiles and its unit tests pass across the Linux distros
+# we support. This is deliberately NOT a per-PR check — it builds vcpkg deps
+# from source per distro, so it is slow. It runs on-demand (Actions ▸ Run
+# workflow) and on a monthly schedule. `fail-fast: false` so every distro
+# reports its own pass/fail even when one breaks — the whole point is to see
+# *which* OS regressed.
+#
+# Toolchain install is delegated to scripts/compiler-unix.sh (the project's
+# single cross-distro apt|dnf source of truth), so this matrix inherits new
+# build deps automatically.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 1 * *' # 06:00 UTC on the 1st of each month
+
+permissions:
+  contents: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  # Build every vcpkg dependency from source on each distro (no binary cache) —
+  # that is the actual cross-OS compile test. A read-only nuget cache can be
+  # layered in later to speed up the triplet-matching legs.
+  VCPKG_BINARY_SOURCES: clear
+
+jobs:
+  os-matrix:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ubuntu:22.04
+          - ubuntu:24.04
+          - ubuntu:26.04
+          - fedora:latest
+          - almalinux:9 # RHEL-compatible; may need EPEL / RHEL-column tuning in compiler-unix.sh — a break here is informative
+    steps:
+      # Minimal base images ship without git; actions/checkout needs it for a
+      # real clone (submodules), so bootstrap it (+ curl/ca-certificates) first.
+      - name: Bootstrap git
+        shell: bash
+        run: |
+          if command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
+          elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y git ca-certificates curl
+          fi
+
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      - name: Install build prerequisites (cross-distro)
+        shell: bash
+        run: bash scripts/compiler-unix.sh --autoinstall
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Build engine (vcpkg from source)
+        shell: bash
+        run: |
+          chmod +x ./builder || true
+          ./builder build --verbose --autoinstall
+
+      - name: Unit tests
+        shell: bash
+        run: ./builder test --verbose --sequential

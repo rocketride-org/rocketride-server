@@ -18,8 +18,10 @@
 import React, { useState, useMemo, CSSProperties } from 'react';
 import type { DashboardResponse, ActivityEvent } from './types';
 import { OverviewTab, ConnectionsTab, TasksTab, ActivityTab } from './components';
-import { TabPanel } from '../../components/tab-panel/TabPanel';
-import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
+import { TabPanelContent } from '../../components/tab-panel/TabPanelContent';
+import { PageViewControl } from '../../components/page-view-control/PageViewControl';
+import type { ITabPanelPanel } from '../../components/tab-panel/TabPanelContent';
+import type { ViewMenu } from '../../types/viewMenu';
 import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
@@ -71,6 +73,15 @@ const styles = {
 		cursor: 'default',
 		letterSpacing: '0.05em',
 	} as CSSProperties,
+	// Fills the space below the top PageViewControl strip; TabPanelContent's
+	// 100%-height wrapper resolves against this definite flex box.
+	pageBody: {
+		display: 'flex',
+		flexDirection: 'column',
+		flex: 1,
+		minWidth: 0,
+		minHeight: 0,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -97,13 +108,16 @@ type TabId = 'overview' | 'connections' | 'tasks' | 'activity';
 const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, onRefresh }) => {
 	const [activeTab, setActiveTab] = useState<TabId>('overview');
 
-	const tabs: ITabPanelTab[] = useMemo(
-		() => [
-			{ id: 'overview', label: 'Overview' },
-			{ id: 'connections', label: 'Connections', badge: data ? String(data.overview.totalConnections) : undefined },
-			{ id: 'tasks', label: 'Tasks', badge: data ? String(data.overview.activeTasks) : undefined },
-			{ id: 'activity', label: 'Activity', badge: events.length > 0 ? String(events.length) : undefined },
-		],
+	// ViewMenu declaration — rendered by this view's own PageViewControl strip.
+	const viewMenu = useMemo<ViewMenu>(
+		() => ({
+			entries: [
+				{ id: 'overview', label: 'Overview' },
+				{ id: 'connections', label: 'Connections', ...(data ? { count: data.overview.totalConnections } : {}) },
+				{ id: 'tasks', label: 'Tasks', ...(data ? { count: data.overview.activeTasks } : {}) },
+				{ id: 'activity', label: 'Activity', ...(events.length > 0 ? { count: events.length } : {}) },
+			],
+		}),
 		[data, events.length]
 	);
 
@@ -154,7 +168,12 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, o
 
 	return (
 		<div style={styles.root}>
-			<TabPanel tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as TabId)} panels={panels} />
+			{/* Page strip — the view renders its own tabs at the very top. */}
+			<PageViewControl menu={viewMenu} activeId={activeTab} onSelect={(id) => setActiveTab(id as TabId)} />
+			{/* Page bodies fill the space below the strip. */}
+			<div style={styles.pageBody}>
+				<TabPanelContent panels={panels} activeId={activeTab} />
+			</div>
 			{!isConnected && (
 				<div style={styles.disconnectOverlay}>
 					<button type="button" style={styles.disconnectButton} disabled>

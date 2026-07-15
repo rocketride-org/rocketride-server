@@ -4,9 +4,9 @@ A RocketRide preprocessor node ("General Text") that splits incoming text into c
 
 ## What it does
 
-Splits text into chunks using **LangChain text splitters** (`langchain_text_splitters`). Choose a profile tuned for the content type: general prose, markdown, LaTeX, sentence-based NLP, or any custom splitter class the library exports. No LLM is required.
+Splits text into chunks using **LangChain text splitters** (`langchain_text_splitters`). Choose a profile tuned for the content type: general prose, markdown, LaTeX, or sentence-based NLP. No LLM is required.
 
-The splitter class is loaded dynamically by name from `langchain_text_splitters`, so the `custom` profile can target any class that library exports. Constructor kwargs are filtered against the target class signature, preventing "unexpected keyword argument" errors across splitters. Chunk overlap is fixed at `0`.
+Each profile pins its own splitter class, and the `custom` profile is const-locked to `RecursiveCharacterTextSplitter` (a general-purpose splitter, the same class as `default`). Constructor kwargs are filtered against the target class signature, preventing "unexpected keyword argument" errors across splitters. Chunk overlap is fixed at `0`.
 
 Incoming text is accumulated per file and split once when the file closes. Each incoming table is split immediately as its own unit. Every chunk is emitted as a document with a sequential `chunkId` (reset per file); tables additionally carry a `tableId`.
 
@@ -63,7 +63,9 @@ These keys are read from the node config but are not exposed in the UI shape:
 | `latex`             | `LatexTextSplitter`              | Scientific and academic documents (separators kept in chunks)          |
 | `nltk`              | `NLTKTextSplitter`               | Sentence-based splitting                                               |
 | `spacy`             | `SpacyTextSplitter`              | NLP-based sentence splitting (English, German, French, Spanish models) |
-| `custom`            | `RecursiveCharacterTextSplitter` | User-defined splitter class from `langchain_text_splitters`            |
+| `custom`            | `RecursiveCharacterTextSplitter` | General-purpose prose (const-locked to `RecursiveCharacterTextSplitter`, same class as `default`) |
+
+> **Each profile locks its splitter class.** The splitter cannot be selected independently of the profile. To use `MarkdownTextSplitter`, choose the `markdown` profile (not `default`); likewise `latex`, `character`, `nltk`, `spacy`, and `custom` each pin their own class. Editing a profile's `splitter` field to a different class name fails schema validation with `... must be equal to constant`. The fix is to switch the **Text splitter** profile, not to change the splitter field.
 
 ### NLTK
 
@@ -75,7 +77,7 @@ Dependencies (`spacy`) are installed lazily the first time this profile is used.
 
 ### Custom
 
-Set `splitter` to the class name of any splitter exported by `langchain_text_splitters`. An unknown class name raises `Splitter '<name>' not found in LangChain` at startup. Only kwargs accepted by the chosen class's constructor are forwarded; unrecognized kwargs are silently dropped.
+The `custom` profile's `splitter` field is const-locked to `RecursiveCharacterTextSplitter`; it cannot be pointed at another class through the UI (editing it to a different class name fails schema validation). It behaves like `default`, and only kwargs accepted by the splitter's constructor are forwarded; unrecognized kwargs are silently dropped.
 
 ---
 
@@ -101,18 +103,18 @@ This guarantees no emitted chunk exceeds the model's context budget even without
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `langchain.splitter.character.separator` | `string` | **Split separator** | `"\"\\n\""` |
-| `langchain.splitter.character.splitter` | `string` |  | const: `"CharacterTextSplitter"` |
-| `langchain.splitter.custom.splitter` | `string` | **Splitter class name** | const: `"RecursiveCharacterTextSplitter"` |
-| `langchain.splitter.default.splitter` | `string` |  | const: `"RecursiveCharacterTextSplitter"` |
-| `langchain.splitter.latex.splitter` | `string` |  | const: `"LatexTextSplitter"` |
-| `langchain.splitter.markdown.splitter` | `string` |  | const: `"MarkdownTextSplitter"` |
+| `langchain.splitter.character.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to CharacterTextSplitter by the 'Character Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"CharacterTextSplitter"` |
+| `langchain.splitter.custom.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to RecursiveCharacterTextSplitter by the 'Custom' text-splitter profile and cannot be changed here; the custom profile currently behaves like default. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"RecursiveCharacterTextSplitter"` |
+| `langchain.splitter.default.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to RecursiveCharacterTextSplitter by the 'Default' text-splitter profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile (for example Markdown for MarkdownTextSplitter). Editing this to another class fails validation with 'must be equal to constant'. | const: `"RecursiveCharacterTextSplitter"` |
+| `langchain.splitter.latex.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to LatexTextSplitter by the 'Latex Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"LatexTextSplitter"` |
+| `langchain.splitter.markdown.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to MarkdownTextSplitter by the 'Markdown Text Splitter' profile and cannot be changed here. To use MarkdownTextSplitter, select 'Markdown Text Splitter' in the 'Text splitter' selector above rather than editing this field. Editing this to another class fails validation with 'must be equal to constant'. | const: `"MarkdownTextSplitter"` |
 | `langchain.splitter.mode` | `string` | **Split by** | `"strlen"` |
-| `langchain.splitter.nltk.splitter` | `string` |  | const: `"NLTKTextSplitter"` |
-| `langchain.splitter.profile` | `string` | **Text splitter** | `"default"` |
+| `langchain.splitter.nltk.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to NLTKTextSplitter by the 'NLTK Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"NLTKTextSplitter"` |
+| `langchain.splitter.profile` | `string` | **Text splitter**<br/>Selects the splitter profile. Each profile locks one LangChain splitter class and shows only that splitter's options, so the splitter class is not chosen independently of the profile. Pick the profile that matches your content: Markdown for .md, Latex for LaTeX, Character/NLTK/Spacy as needed. Editing a profile's splitter field to a different class fails schema validation with a 'must be equal to constant' error; change this selector instead. | `"default"` |
 | `langchain.splitter.recursive.separators` | `string` | **Split separators** | `"'\\n\\n', '\\n', ' ', ''"` |
-| `langchain.splitter.recursive.splitter` | `string` |  | const: `"RecursiveCharacterTextSplitter"` |
+| `langchain.splitter.recursive.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to RecursiveCharacterTextSplitter by the 'Recursive Character Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"RecursiveCharacterTextSplitter"` |
 | `langchain.splitter.spacy.model` | `string` | **Model** | `"en_core_web_sm"` |
-| `langchain.splitter.spacy.splitter` | `string` |  | const: `"SpacyTextSplitter"` |
+| `langchain.splitter.spacy.splitter` | `string` | **Splitter class (set by profile)**<br/>Fixed to SpacyTextSplitter by the 'Spacy Text Splitter' profile and cannot be changed here. To use a different splitter, change the 'Text splitter' selector above to the matching profile. Editing this to another class fails validation with 'must be equal to constant'. | const: `"SpacyTextSplitter"` |
 | `langchain.splitter.strlen` | `number` | **String length** | `512` |
 | `langchain.splitter.tokens` | `number` | **Number of tokens** | `512` |
 

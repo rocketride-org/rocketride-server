@@ -24,7 +24,7 @@ Each variant takes the internal `_source` input and emits to its declared output
 
 | Variant  | Lane in | Lanes out                                            |
 | -------- | ------- | ---------------------------------------------------- |
-| Webhook  | -       | `tags`, `text`, `audio`, `video`, `image`, `questions` |
+| Webhook  | -       | `tags`, `text`, `json`, `audio`, `video`, `image`, `questions` |
 | Chat     | -       | `questions`                                          |
 | Dropper  | -       | `tags`                                               |
 

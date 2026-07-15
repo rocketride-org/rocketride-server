@@ -25,7 +25,7 @@ from typing import List
 import os
 import base64
 
-from rocketlib import IInstanceBase
+from rocketlib import IInstanceBase, IJson
 from ai.common.schema import Doc, Question, Answer
 from rocketlib import AVI_ACTION, Entry
 
@@ -156,6 +156,17 @@ class IInstance(IInstanceBase):
 
         # Add the table
         self.instance.currentObject.response[key].append(table)
+
+    def writeJson(self, data: IJson):
+        # Get the key to write to (official lane name is "json")
+        key = self._getkey('json')
+
+        # If it isn't there, create it
+        if key not in self.instance.currentObject.response:
+            self.instance.currentObject.response[key] = []
+
+        # Add the json
+        self.instance.currentObject.response[key].append(IJson.toDict(data))
 
     def writeDocuments(self, documents: List[Doc]):
         # Get the key to write to

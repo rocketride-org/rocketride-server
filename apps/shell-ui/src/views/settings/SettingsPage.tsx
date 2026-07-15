@@ -401,6 +401,8 @@ const SettingsPage: React.FC = () => {
 	/** Opens the checkout modal via the shell:subscribe event. */
 	const handleSubscribe = useCallback(() => {
 		if (!pipeBuilderApp) return;
+		// The SDK AppManifestEntry structurally satisfies the minimal
+		// ShellAppEntry contract, so it is passed directly.
 		ConnectionManager.getInstance().emit('shell:subscribe', { app: pipeBuilderApp });
 	}, [pipeBuilderApp]);
 

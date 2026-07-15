@@ -335,7 +335,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 				setTickerIndex((i) => (i + 1) % announcements.length);
 				setTickerFade(true);
 			}, 300);
-		}, 7000);
+		}, 15000);
 		return () => clearInterval(interval);
 	}, [announcements.length]);
 

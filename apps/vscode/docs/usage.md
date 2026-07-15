@@ -57,6 +57,14 @@ The **Parameters** tab (next to **Design**) holds run-time settings for the open
 
 - **Trace level**: how much execution-trace data the engine emits — `full`, `summary` (default), `metadata`, or `none`. Higher levels populate the **Flow** and **Trace** tabs, but `full` inlines entire payloads (including images), which can noticeably slow runs that process large images. The selected level is saved per pipeline and applied on the next run.
 
+## Pipeline Settings (Idle Timeout)
+
+The settings (cog) button in the canvas toolbar opens the **Pipeline Settings** dialog:
+
+- **Idle timeout**: how long the engine keeps the pipeline alive without activity before stopping it. Pick a preset, enter a custom number of minutes, or choose **No timeout**. **Default** uses the server default (15 min). The chosen value applies to the next run.
+
+Internally, the editor webview passes the timeout to the extension host as an optional `ttl` field (in seconds; `0` = no timeout, omitted = server default) on the `status:pipelineAction` message when the action is `run` or `restart`.
+
 ## Monitoring Execution
 
 The **Status** page shows:

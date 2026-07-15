@@ -214,7 +214,7 @@ export default function Canvas(): ReactElement {
 		[setPreference]
 	);
 
-	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, initialViewport } = useFlowProject();
+	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, onOpenSettings, initialViewport } = useFlowProject();
 	const { fitView, zoomIn, zoomOut, setViewport } = useReactFlow();
 
 	// Keep a ref so the restore handler always sees the latest viewport value
@@ -416,6 +416,14 @@ export default function Canvas(): ReactElement {
 				<ToolbarButton title="Export" onClick={onExport}>
 					<BxIcon d={BX_EXPORT} size={16} />
 				</ToolbarButton>
+			)}
+			{onOpenSettings && !isLocked && (
+				<>
+					<ToolbarDivider />
+					<ToolbarButton title="Pipeline settings" onClick={onOpenSettings}>
+						<Settings size={18} />
+					</ToolbarButton>
+				</>
 			)}
 		</>
 	);

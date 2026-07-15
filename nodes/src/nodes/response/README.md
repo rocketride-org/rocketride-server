@@ -12,6 +12,7 @@ Data handling per lane:
 
 - **text** - chunks are accumulated (joined with blank lines) and appended as one string per object.
 - **table**, **documents**, **questions** - appended as-is; documents and questions are serialized to plain dicts.
+- **json** - appended as-is (one entry per write).
 - **answers** - appended as parsed JSON when the answer is JSON, otherwise as plain text.
 - **image** - streamed chunks are buffered via AVI_ACTION signals (BEGIN / WRITE / END), then the complete image is base64-encoded and appended as `{"mime_type": ..., "image": ...}`.
 - **audio**, **video** - the raw bytes are not returned; only tracking metadata is appended: `{"url", "aviAction", "mimeType", "size"}`.
@@ -22,15 +23,16 @@ The node has no Python dependencies of its own (`requirements.txt` is empty); it
 
 ## Service variants
 
-The same implementation is registered as nine services. The generic **HTTP Results** service (`response://`) accepts all eight lane types and lets you map each lane to its own result key. Eight single-lane variants accept exactly one lane each and expose a single `laneName` field:
+The same implementation is registered as ten services. The generic **HTTP Results** service (`response://`) accepts all nine lane types and lets you map each lane to its own result key. Nine single-lane variants accept exactly one lane each and expose a single `laneName` field:
 
 | Service title    | Protocol                  | Lane        | Default result key |
 |------------------|---------------------------|-------------|--------------------|
-| HTTP Results     | `response://`             | all eight   | the lane type name |
+| HTTP Results     | `response://`             | all nine    | the lane type name |
 | Return Answers   | `response_answers://`     | `answers`   | `answers`          |
 | Return Audio     | `response_audio://`       | `audio`     | `audio`            |
 | Return Documents | `response_documents://`   | `documents` | `documents`        |
 | Return Image     | `response_image://`       | `image`     | `image`            |
+| Return JSON      | `response_json://`        | `json`      | `json`             |
 | Return Questions | `response_questions://`   | `questions` | `questions`        |
 | Return Table     | `response_table://`       | `table`     | `table`            |
 | Return Text      | `response_text://`        | `text`      | `text`             |
@@ -50,6 +52,7 @@ All lanes are inputs; the node produces no output lanes.
 |-------------|----------|-------------|
 | `text`      | -        | Captured under the configured key |
 | `table`     | -        | Captured under the configured key |
+| `json`      | -        | Captured under the configured key |
 | `documents` | -        | Captured under the configured key |
 | `questions` | -        | Captured under the configured key |
 | `answers`   | -        | Captured under the configured key |
@@ -131,6 +134,12 @@ Each configured result key holds an array: one element per result produced for t
 | `laneId` | `string` | **Lane name** |  |
 | `laneName` | `string` | **Result key** |  |
 | `lanes` | `array` | **Lanes**<br/>Each lane maps pipeline data to a custom JSON key in the response. Select the data type (text, documents, answers, etc.) for Lane Name, and enter a custom JSON key name (1-32 characters) for Result Key. |  |
+
+### Return JSON (`services.json.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `laneName` | `string` | **Identifier key within result** | `"json"` |
 
 ### Return Questions (`services.questions.json`)
 

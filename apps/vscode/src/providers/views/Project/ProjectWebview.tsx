@@ -18,8 +18,13 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 
 import { applyTheme } from 'shared/themes';
 import type { ThemeTokens } from 'shared/themes/tokens';
-import { ProjectView, parseServerEvent, CheckoutModal } from 'shared';
-import type { TaskStatus, TraceEvent, ViewState, CheckoutPlan, PlanAction } from 'shared';
+// Project module is imported via subpath (not the 'shared' barrel): the
+// barrel is the shell's MF share and must stay canvas-free; this webview
+// bundles the project module directly.
+import { ProjectView, parseServerEvent } from 'shared/modules/project';
+import type { TaskStatus, TraceEvent, ViewState } from 'shared/modules/project';
+import { CheckoutModal } from 'shared';
+import type { CheckoutPlan, PlanAction } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 import type { ProjectHostToWebview, ProjectWebviewToHost } from '../types';
 
@@ -248,8 +253,8 @@ const ProjectWebview: React.FC = () => {
 	);
 
 	const handlePipelineAction = useCallback(
-		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			sendMessage({ type: 'status:pipelineAction', action, source, pipelineTraceLevel: viewState?.pipelineTraceLevel ?? 'summary' });
+		(action: 'run' | 'stop' | 'restart', source?: string, options?: { ttl?: number }) => {
+			sendMessage({ type: 'status:pipelineAction', action, source, ttl: options?.ttl, pipelineTraceLevel: viewState?.pipelineTraceLevel ?? 'summary' });
 		},
 		[sendMessage, viewState]
 	);

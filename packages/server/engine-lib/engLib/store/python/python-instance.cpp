@@ -107,6 +107,7 @@ IPythonInstanceBase::IPythonInstanceBase(const FactoryArgs &args) noexcept
         bindMethod(PythonMethod::WriteText, "writeText");
         bindMethod(PythonMethod::WriteTable, "writeTable");
         bindMethod(PythonMethod::WriteWords, "writeWords");
+        bindMethod(PythonMethod::WriteJson, "writeJson");
         bindMethod(PythonMethod::WriteAudio, "writeAudio");
         bindMethod(PythonMethod::WriteVideo, "writeVideo");
         bindMethod(PythonMethod::WriteImage, "writeImage");

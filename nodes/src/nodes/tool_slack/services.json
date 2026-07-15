@@ -1,0 +1,66 @@
+{
+	"title": "Slack",
+	"protocol": "tool_slack://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_slack",
+	"prefix": "slack",
+	"icon": "slack.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Slack workspace operations as agent tools.", "Post messages to channels or threads, list public channels, read channel history,", "and verify the connection. Authenticates with a bot token, or an incoming-webhook", "URL for zero-scope post-only setups."],
+	"tile": ["Slack${parameters.slack.webhookUrl ? ' (webhook)' : ''}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Slack",
+				"token": "",
+				"webhookUrl": ""
+			}
+		}
+	},
+	"fields": {
+		"slack.token": {
+			"type": "string",
+			"title": "Bot User OAuth Token",
+			"description": "Slack bot token (starts with xoxb-) from your app's OAuth & Permissions page. Needs chat:write to post, channels:read to list channels, and channels:history to read history. Leave empty when using a webhook URL.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"slack.webhookUrl": {
+			"type": "string",
+			"title": "Incoming Webhook URL",
+			"description": "Slack incoming-webhook URL for zero-scope setups. Enables ONLY message_post, and messages always go to the channel the webhook was created for. Configure either this or a bot token, not both.",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Slack smoke test (node builds with a token)",
+				"text": "test message"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Slack",
+			"properties": ["type", "slack.token", "slack.webhookUrl"]
+		}
+	]
+}

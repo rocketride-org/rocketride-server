@@ -15,9 +15,13 @@
  * pane per source (sorted A→Z by name).
  */
 
-import React, { useState, useCallback, useRef, useMemo, CSSProperties } from 'react';
+import React, { useState, useCallback, useRef, useMemo, CSSProperties, ReactNode } from 'react';
 
-import { TabPanel } from '../../components/tab-panel/TabPanel';
+import { TabPanelContent } from '../../components/tab-panel/TabPanelContent';
+import { ContentHeader } from '../../components/content-header/ContentHeader';
+import { Button } from '../../components/button/Button';
+import { PageViewControl } from '../../components/page-view-control/PageViewControl';
+import type { ViewMenu } from '../../types/viewMenu';
 import { useTraceState } from './hooks/useTraceState';
 import { useElapsedTimer } from './hooks/useElapsedTimer';
 import Canvas from '../../components/canvas';
@@ -31,6 +35,7 @@ import { commonStyles } from '../../themes/styles';
 import { OAUTH_ROOT_URL } from '../../config/oauth';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
+import TtlSettingsDialog from './TtlSettingsDialog';
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, TraceLevel } from './types';
 
@@ -48,6 +53,14 @@ import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, Trac
 export interface IProjectViewProps {
 	/** The pipeline project object. */
 	project: any | null;
+	/**
+	 * Document display name for the page header (shell hosts only). When
+	 * provided, the non-canvas sub-views render a stock {@link ContentHeader}
+	 * titled with this name (matching the document's DocTab). VS Code omits it:
+	 * its editor tab + breadcrumb already name the document, so the Archetype B
+	 * page header is a shell-ui-only element and no header renders without it.
+	 */
+	documentTitle?: string;
 	/** Available node service definitions (keyed by provider). */
 	servicesJson: Record<string, any>;
 	/** Whether the host is connected to the RocketRide server. */
@@ -70,8 +83,8 @@ export interface IProjectViewProps {
 	onContentChanged?: (project: any) => void;
 	/** Called to validate a pipeline. Host returns validation result as a Promise. */
 	onValidate?: (pipeline: any) => Promise<any>;
-	/** Called for pipeline run/stop/restart actions. */
-	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
+	/** Called for pipeline run/stop/restart actions. `options.ttl` carries the idle-timeout (seconds) for run/restart when the user set one. */
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string, options?: { ttl?: number }) => void;
 	/** Called when view state changes (mode, flowViewMode, viewport). */
 	onViewStateChange?: (viewState: ViewState) => void;
 	/** Called when user preferences change (e.g. panel widths, toggles). */
@@ -176,6 +189,15 @@ const styles = {
 		backgroundColor: 'var(--rr-color-warning)',
 		color: 'var(--rr-fg-button)',
 	} as CSSProperties,
+	// Fills the space below the top PageViewControl strip; TabPanelContent's
+	// 100%-height wrapper resolves against this definite flex box.
+	pageBody: {
+		display: 'flex',
+		flexDirection: 'column',
+		flex: 1,
+		minWidth: 0,
+		minHeight: 0,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -188,10 +210,32 @@ interface SourceInfo {
 }
 
 // =============================================================================
+// DOCUMENT HEADER
+// =============================================================================
+
+/** Non-canvas sub-views that render the document {@link ContentHeader}. */
+type DocSubView = 'parameters' | 'status' | 'tokens' | 'flow' | 'trace' | 'errors';
+
+/**
+ * Per-sub-view header subtitles — "{Sub-view} — {short descriptor}", matching
+ * the approved mockup's wording style. Only the Parameters line is specified by
+ * the mockup; the rest use neutral, factual descriptors pending design sign-off
+ * (see OPEN STYLE QUESTIONS in the task report).
+ */
+const DOC_SUBVIEW_SUBTITLES: Record<DocSubView, string> = {
+	parameters: 'Parameters — runtime configuration for this pipeline.',
+	status: 'Status — execution status for each source.',
+	tokens: 'Tokens — token usage for each source.',
+	flow: 'Flow — data flow through the pipeline.',
+	trace: 'Trace — execution trace log.',
+	errors: 'Errors — errors and warnings from the last run.',
+};
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, traceEvents = [], onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, onTraceClear, isReadonly = false, envKeys, onMissingEnvVars }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -252,6 +296,29 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 		});
 	}, []);
 
+	// --- Idle-timeout (TTL) settings ------------------------------------------
+	// Persisted per-pipeline in prefs (`pipelineTtl` map keyed by project_id),
+	// riding the host's existing prefs persistence. undefined = server default.
+
+	const [ttlDialogOpen, setTtlDialogOpen] = useState(false);
+	const ttlProjectId: string = project?.project_id ?? '';
+	const ttlByProject = (prefs?.pipelineTtl as Record<string, number> | undefined) ?? {};
+	const projectTtl: number | undefined = ttlProjectId ? ttlByProject[ttlProjectId] : undefined;
+
+	const openTtlSettings = useCallback(() => setTtlDialogOpen(true), []);
+	const handleTtlConfirm = useCallback((ttl: number | undefined) => {
+		setTtlDialogOpen(false);
+		if (!ttlProjectId) return;
+		setPrefs((prev) => {
+			const map = { ...((prev?.pipelineTtl as Record<string, number> | undefined) ?? {}) };
+			if (ttl === undefined) delete map[ttlProjectId];
+			else map[ttlProjectId] = ttl;
+			const next = { ...prev, pipelineTtl: map };
+			onPrefsChangeRef.current?.(next);
+			return next;
+		});
+	}, [ttlProjectId]);
+
 	const { rows: traceRows, clearTrace } = useTraceState(traceEvents);
 
 	// --- Validate callback for Canvas ----------------------------------------
@@ -297,9 +364,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 					return;
 				}
 			}
-			onPipelineAction?.('run', source);
+			onPipelineAction?.('run', source, projectTtl !== undefined ? { ttl: projectTtl } : undefined);
 		},
-		[onPipelineAction, onMissingEnvVars, envKeys]
+		[onPipelineAction, onMissingEnvVars, envKeys, projectTtl]
 	);
 
 	const handleStopPipeline = useCallback(
@@ -336,30 +403,32 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 	const totalErrors = Object.values(statusMap).reduce((sum, ts) => sum + (ts.errors?.length ?? 0), 0);
 	const totalWarnings = Object.values(statusMap).reduce((sum, ts) => sum + (ts.warnings?.length ?? 0), 0);
 
-	// --- Tab definitions -----------------------------------------------------
+	// --- ViewMenu declaration (rendered by this view's own PageViewControl) ---
+	// The Errors entry carries an error-severity count when there are any
+	// errors/warnings (hidden at zero). Tokens has no count yet (no data).
+	const totalIssues = totalErrors + totalWarnings;
+	const viewMenu = useMemo<ViewMenu>(
+		() => ({
+			entries: [
+				{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' },
+				{ id: 'parameters', label: 'Parameters' },
+				{ id: 'status', label: 'Status' },
+				{ id: 'tokens', label: 'Tokens' },
+				{ id: 'flow', label: 'Flow' },
+				{ id: 'trace', label: 'Trace' },
+				{ id: 'errors', label: 'Errors', ...(totalIssues > 0 ? { count: totalIssues, severity: 'error' as const } : {}) },
+			],
+		}),
+		[isReadonly, totalIssues]
+	);
 
-	const allTabs = [
-		{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' },
-		{ id: 'parameters', label: 'Parameters' },
-		{ id: 'status', label: 'Status' },
-		{ id: 'tokens', label: 'Tokens' },
-		{ id: 'flow', label: 'Flow' },
-		{ id: 'trace', label: 'Trace' },
-		{
-			id: 'errors',
-			label: 'Errors',
-			badge: totalErrors + totalWarnings > 0 ? String(totalErrors + totalWarnings) : undefined,
-		},
-	];
-	const tabs = allTabs;
-
-	// --- Panels (only the active panel is mounted) ----------------------------
+	// --- Panels (all mounted; inactive panels hidden) --------------------------
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			onPipelineAction?.(action, source);
+			onPipelineAction?.(action, source, action !== 'stop' && projectTtl !== undefined ? { ttl: projectTtl } : undefined);
 		},
-		[onPipelineAction]
+		[onPipelineAction, projectTtl]
 	);
 
 	// --- Viewport change -----------------------------------------------------
@@ -371,32 +440,58 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 		updateViewState({ viewport });
 	}, [updateViewState]);
 
+	// --- Document header (shell hosts only) ----------------------------------
+	// Save is the one document-level action whose handler exists in ProjectView's
+	// props (onSave), so it is wired here. Run is per-source in this component's
+	// protocol (onPipelineAction requires a `source`, plus env-var validation and
+	// subscription gating that are applied per-source in the canvas / Status pane)
+	// and has no clean document-level handler, so it is intentionally deferred —
+	// see the task report for exactly what threading a header Run would need.
+	const headerActions: ReactNode = onSave && !isReadonly ? (
+		<Button variant="ghost" small onClick={handleSave}>
+			Save
+		</Button>
+	) : undefined;
+
+	/**
+	 * Wraps a non-canvas sub-view's body in the standard page grammar: an
+	 * optional {@link ContentHeader} (rendered only when the host supplies a
+	 * `documentTitle`; VS Code omits it) above the 24px-gutter tab-content body.
+	 *
+	 * @param subView - The sub-view whose header subtitle to show.
+	 * @param inner   - The panel's body content.
+	 * @returns The composed panel node.
+	 */
+	const renderDocPanel = (subView: DocSubView, inner: ReactNode): ReactNode => (
+		<>
+			{/* Page header repeats the document name; canvas (Design) has none. */}
+			{documentTitle && <ContentHeader title={documentTitle} subtitle={DOC_SUBVIEW_SUBTITLES[subView]} actions={headerActions} />}
+			<div style={commonStyles.tabContent}>{inner}</div>
+		</>
+	);
+
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
+			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} onOpenSettings={isReadonly ? undefined : openTtlSettings} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
 		},
 		parameters: {
-			content: (
-				<div style={commonStyles.tabContent}>
-					<ParametersPane value={viewState.pipelineTraceLevel ?? 'summary'} onChange={(level) => updateViewState({ pipelineTraceLevel: level })} disabled={isReadonly} />
-				</div>
-			),
+			content: renderDocPanel('parameters', <ParametersPane value={viewState.pipelineTraceLevel ?? 'summary'} onChange={(level) => updateViewState({ pipelineTraceLevel: level })} disabled={isReadonly} />),
 		},
 		status: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
+			content: renderDocPanel('status', sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>),
 		},
 		tokens: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
+			content: renderDocPanel('tokens', sources.length > 0 ? sources.map((src) => <SourceTokensPane key={src.id} source={src} taskStatus={statusMap[src.id]} />) : <div style={commonStyles.empty}>No source components found</div>),
 		},
 		flow: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
+			content: renderDocPanel('flow', sources.length > 0 ? sources.map((src) => <SourceFlowPane key={src.id} source={src} taskStatus={statusMap[src.id]} viewMode={viewState.flowViewMode ?? 'pipeline'} onViewModeChange={(vm) => updateViewState({ flowViewMode: vm })} />) : <div style={commonStyles.empty}>No source components found</div>),
 		},
 		trace: {
-			content: <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} componentNames={componentNames} onClear={handleTraceClear} />) : <div style={commonStyles.empty}>No source components found</div>}</div>,
+			content: renderDocPanel('trace', sources.length > 0 ? sources.map((src) => <SourceTracePane key={src.id} source={src} rows={traceRows.filter((r) => r.source === src.id)} componentNames={componentNames} onClear={handleTraceClear} />) : <div style={commonStyles.empty}>No source components found</div>),
 		},
 		errors: {
-			content: (
-				<div style={commonStyles.tabContent}>
+			content: renderDocPanel('errors', (
+				<>
 					{Object.entries(statusMap).map(([source, ts]) => {
 						const errs = ts.errors?.length ?? 0;
 						const warns = ts.warnings?.length ?? 0;
@@ -427,8 +522,8 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 						);
 					})}
 					{totalErrors === 0 && totalWarnings === 0 && <div style={commonStyles.empty}>No errors or warnings</div>}
-				</div>
-			),
+				</>
+			)),
 		},
 	};
 
@@ -436,7 +531,15 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, servicesJson, isCon
 
 	return (
 		<div style={styles.container}>
-			<TabPanel tabs={tabs} activeTab={viewState.mode} onTabChange={handleModeChange} panels={panels} />
+			{/* Page strip — the view renders its own tabs at the very top, above
+			    any ContentHeader (the title lives inside each page, below it). */}
+			<PageViewControl menu={viewMenu} activeId={viewState.mode} onSelect={handleModeChange} />
+			{/* Page bodies fill the space below the strip. */}
+			<div style={styles.pageBody}>
+				<TabPanelContent panels={panels} activeId={viewState.mode} />
+			</div>
+			{/* Pipeline TTL settings (RR-309) — modal overlays the page body */}
+			{ttlDialogOpen && <TtlSettingsDialog ttlSeconds={projectTtl} onConfirm={handleTtlConfirm} onCancel={() => setTtlDialogOpen(false)} />}
 			{!isConnected && (
 				<div style={styles.disconnectOverlay}>
 					<button type="button" style={styles.disconnectButton} disabled>

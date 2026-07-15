@@ -65,17 +65,6 @@ const S = {
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 
-	/** Close button. */
-	close: {
-		background: 'none',
-		border: 'none',
-		fontSize: 20,
-		cursor: 'pointer',
-		color: 'var(--rr-text-secondary)',
-		padding: '4px 8px',
-		font: 'inherit',
-	} as CSSProperties,
-
 	/** Current plan info banner. */
 	currentPlan: {
 		display: 'flex',
@@ -164,6 +153,18 @@ export interface UpgradeModalProps {
  * selects a new plan and clicks Confirm to trigger the server-side
  * Stripe subscription modification with proration.
  */
+/**
+ * Whether a plan may appear in the upgrade picker: not a top-up pack, not a
+ * hidden promo-base plan, not action-only, and not deactivated. Applied to
+ * both the picker grid and preselected plans so a hidden plan can never be
+ * reached via `preselectedPriceId`.
+ */
+const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
+	p.metadata?.kind !== 'topup' &&
+	p.metadata?.kind !== 'promo_base' &&
+	!p.metadata?.action &&
+	p.isActive !== false;
+
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	plans,
 	currentPriceId,
@@ -174,16 +175,16 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 }) => {
 	const [selectedPlan, setSelectedPlan] = useState<CheckoutPlan | null>(
 		() => (preselectedPriceId && preselectedPriceId !== currentPriceId
-			? plans.find((p) => p.stripePriceId === preselectedPriceId) ?? null
+			? plans.find((p) => p.stripePriceId === preselectedPriceId && isVisibleSubscriptionPlan(p)) ?? null
 			: null),
 	);
 	const [upgrading, setUpgrading] = useState(false);
 	const [success, setSuccess] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	// Filter out top-up packs and action-only plans, keep subscription plans
+	// Filter out top-up packs, hidden promo-base plans, and action-only plans
 	const subscriptionPlans = useMemo(
-		() => plans.filter((p) => p.metadata?.kind !== 'topup' && !p.metadata?.action && p.isActive !== false),
+		() => plans.filter(isVisibleSubscriptionPlan),
 		[plans],
 	);
 
@@ -246,12 +247,16 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	};
 
 	return (
-		<div style={S.overlay} onClick={onClose}>
-			<div style={S.dialog} onClick={(e) => e.stopPropagation()}>
-				{/* Header */}
+		/* Backdrop is inert: dismissal is deliberate-only (footer Cancel, or the
+		   auto-close after a successful plan change) per the 2026-07-08 design
+		   decision — clicking outside must NOT close, and there is no corner ✕. */
+		<div style={S.overlay}>
+			<div style={S.dialog}>
+				{/* Header — no top-right ✕: this dialog dismisses via footer Cancel and
+				    auto-closes after a successful change (refined popup policy
+				    2026-07-08: no redundant ✕ when an explicit close or auto-dismiss exists). */}
 				<div style={S.header}>
 					<div style={S.title}>Change Plan</div>
-					<button style={S.close} onClick={onClose}>&#10005;</button>
 				</div>
 
 				{success ? (

@@ -191,7 +191,7 @@ export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, cu
 
 /**
  * StatusActions — Run/Stop button for the tab bar actions slot.
- * Renders in the TabPanel bar, not inside the panel content.
+ * Renders in the host's tab-bar actions area, not inside the panel content.
  */
 export const StatusActions: React.FC<StatusActionsProps> = ({ taskStatus, onPipelineAction, isSubscribed }) => {
 	const state = taskStatus?.state ?? ITaskState.NONE;

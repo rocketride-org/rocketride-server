@@ -142,24 +142,11 @@ export default function ArrayFieldItemTemplate<
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	F extends FormContextType = any,
 >({
-	/* eslint-disable @typescript-eslint/no-unused-vars */
 	id,
 	children,
 	disabled,
-	hasToolbar,
-	hasCopy,
-	hasMoveDown,
-	hasMoveUp,
-	hasRemove,
 	index,
-	onCopyIndexClick,
 	onDropIndexClick,
-	onReorderClick,
-	readonly,
-	uiSchema,
-	registry,
-	isLast,
-	/* eslint-enable */
 }: ArrayFieldTemplateItemType<T, S, F> & {
 	id: UniqueIdentifier;
 	isLast?: boolean;

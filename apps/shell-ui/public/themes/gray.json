@@ -1,5 +1,5 @@
 {
-	"--rr-brand": "#f7901f",
+	"--rr-brand": "#0e639c",
 	"--rr-palette-mode": "dark",
 	"--rr-bg-default": "#3a3a3a",
 	"--rr-bg-paper": "#424242",
@@ -33,9 +33,9 @@
 	"--rr-border-focus": "#6ca0cc",
 	"--rr-border-input": "#6a6a6a",
 	"--rr-border-paper": "none",
-	"--rr-accent": "#f7901f",
-	"--rr-accent-faded": "rgba(247, 144, 31, 0.5)",
-	"--rr-bg-button": "#f7901f",
+	"--rr-accent": "#0e639c",
+	"--rr-accent-faded": "rgba(14, 99, 156, 0.5)",
+	"--rr-bg-button": "#0e639c",
 	"--rr-fg-button": "#ffffff",
 	"--rr-btn-sm-height": "16px",
 	"--rr-btn-sm-padding": "0 6px",
@@ -43,7 +43,7 @@
 	"--rr-btn-sm-radius": "3px",
 	"--rr-bg-input": "#505050",
 	"--rr-bg-list-hover": "rgba(255, 255, 255, 0.06)",
-	"--rr-bg-list-active": "#5a7a9a",
+	"--rr-bg-list-active": "#0e639c",
 	"--rr-fg-list-active": "#ffffff",
 	"--rr-bg-scrollbar-thumb": "rgba(200, 200, 200, 0.3)",
 	"--rr-shadow-idle": "0 0 0 1px #5a5a5a",
@@ -68,5 +68,11 @@
 	"--rr-font-size-subtitle": "0.875rem",
 	"--rr-font-weight-h5": "400",
 	"--rr-font-weight-button": "600",
-	"--rr-annotation-bg-default": "#5c5a2e"
+	"--rr-annotation-bg-default": "#5c5a2e",
+	"--rr-chart-blue": "#748ffc",
+	"--rr-chart-green": "#69db7c",
+	"--rr-chart-yellow": "#ffd43b",
+	"--rr-chart-purple": "#b197fc",
+	"--rr-chart-orange": "#ffa94d",
+	"--rr-chart-red": "#ff8787"
 }

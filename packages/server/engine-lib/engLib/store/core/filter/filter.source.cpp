@@ -201,6 +201,16 @@ Error IServiceFilterInstance::sendWords(ServicePipe &target,
     return pDown->sendWords(target, textWords);
 }
 
+Error IServiceFilterInstance::sendJson(ServicePipe &target,
+                                       const json::Value &jsonData) noexcept {
+    // Check the mode
+    if (this->endpoint->config.endpointMode != ENDPOINT_MODE::SOURCE)
+        return APERR(Ec::InvalidParam, "This function requires source mode");
+
+    // Send it along
+    return pDown->sendJson(target, jsonData);
+}
+
 Error IServiceFilterInstance::sendAudio(
     ServicePipe &target, const AVI_ACTION action, Text &mimeType,
     const pybind11::bytes &streamData) noexcept {

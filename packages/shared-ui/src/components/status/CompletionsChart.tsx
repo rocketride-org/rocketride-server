@@ -50,7 +50,6 @@ const styles: Record<string, CSSProperties> = {
 interface CompletionsChartProps {
 	dataPoints: StatusDataPoint[];
 	timeRange: TimeRange;
-	onTimeRangeChange: (range: TimeRange) => void;
 	currentElapsed: number;
 	onStatsCalculated: (stats: ChartStats) => void;
 }
@@ -147,7 +146,7 @@ const generateLabels = (range: TimeRange, pointCount: number): string[] => {
  * Displays real-time processing rate graph with time range filters.
  * Uses Chart.js LineController for rendering.
  */
-export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, timeRange, onTimeRangeChange, currentElapsed, onStatsCalculated }) => {
+export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, timeRange, currentElapsed, onStatsCalculated }) => {
 	const chartRef = useRef<HTMLCanvasElement>(null);
 	const chartInstanceRef = useRef<Chart | null>(null);
 	const filteredDataRef = useRef<StatusDataPoint[]>([]);

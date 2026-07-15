@@ -322,6 +322,27 @@ Error Binder::writeWords(const WordVector &textWords) noexcept {
 }
 
 /**
+ * @brief Writes JSON data to all bound service filter instances.
+ *
+ * @param jsonData A JSON value to write.
+ * @return Error Returns an error code if any instance fails, otherwise success.
+ */
+Error Binder::writeJson(const json::Value &jsonData) noexcept {
+    auto call = localfcn(auto pInstance)->Error {
+        return pInstance->writeJson(jsonData);
+    };
+
+    auto serializeTrace = [&](PIPELINE_TRACE_LEVEL level, json::Value &out) {
+        if (level >= PIPELINE_TRACE_LEVEL::SUMMARY)
+            out["size"] = (int)jsonData.size();
+        if (level >= PIPELINE_TRACE_LEVEL::FULL)
+            out["json"] = jsonData;
+    };
+
+    return callMethods(this, "json", call, serializeTrace);
+}
+
+/**
  * @brief Writes audio data to all bound service filter instances.
  *
  * @param action The action to perform on the audio.

@@ -42,6 +42,8 @@ from .types.billing import (
     BillingDetail,
     CreditBalance,
     CreditPack,
+    PromoRedemption,
+    PromoValidation,
     TransactionsResult,
     UsageRollup,
 )
@@ -108,6 +110,7 @@ class BillingApi:
         org_id: str,
         app_id: str,
         price_id: str,
+        promotion_code: str | None = None,
     ) -> dict:
         """
         Create a Stripe subscription and return the Stripe Elements client_secret.
@@ -115,20 +118,84 @@ class BillingApi:
         The returned ``clientSecret`` is passed to ``stripe.confirmPayment()`` to
         complete the checkout without a browser redirect to Stripe.
 
+        ``clientSecret`` is None when the first invoice is $0 (e.g. a 100%-off
+        promotion code) — the subscription is already active and no payment
+        step is needed.
+
         Args:
             org_id: Organisation UUID to subscribe.
             app_id: App being subscribed (e.g. "brandi").
             price_id: Stripe price_* identifier for the plan.
+            promotion_code: Optional promo code to apply (validated server-side).
 
         Returns:
-            Dict with ``clientSecret`` for Stripe Elements and ``subscriptionId``.
+            Dict with ``clientSecret`` (or None), ``subscriptionId``, and ``status``.
+        """
+        kwargs: dict = {
+            'subcommand': 'subscribe',
+            'orgId': org_id,
+            'appId': app_id,
+            'priceId': price_id,
+        }
+        if promotion_code:
+            kwargs['promotionCode'] = promotion_code
+        return await self._client.call('rrext_account_billing', **kwargs)
+
+    async def validate_promo_code(
+        self,
+        org_id: str,
+        code: str,
+        price_id: str | None = None,
+    ) -> PromoValidation:
+        """
+        Resolve a promo code without side effects.
+
+        An unknown or expired code returns ``{'valid': False, 'reason': ...}``
+        — it never raises. Pass ``price_id`` to also get the discounted
+        first-invoice amount for the selected plan.
+
+        Args:
+            org_id: Organisation UUID (context only — validation is global).
+            code: Customer-facing code string (case-insensitive).
+            price_id: Optional plan to compute ``discountedAmountCents`` against.
+
+        Returns:
+            Promo validation result.
+        """
+        kwargs: dict = {
+            'subcommand': 'promo_validate',
+            'orgId': org_id,
+            'code': code,
+        }
+        if price_id:
+            kwargs['priceId'] = price_id
+        return await self._client.call('rrext_account_billing', **kwargs)
+
+    async def redeem_promo_code(self, org_id: str, code: str) -> PromoRedemption:
+        """
+        Redeem a credit-grant (hackathon) code for the caller's org.
+
+        Creates a $0 subscription for the app named in the code's metadata
+        (no payment method required) and grants the metadata-defined credits
+        immediately. If the org is already subscribed to the app, only the
+        credits are granted (``mode: 'credits_only'``). Discount-only codes
+        are rejected — those are applied during checkout instead.
+
+        Any authenticated org member may redeem; the server derives the org
+        from the caller's own membership.
+
+        Args:
+            org_id: Organisation UUID (context only — server uses the caller's org).
+            code: Customer-facing code string (case-insensitive).
+
+        Returns:
+            Redemption result with mode and granted credits.
         """
         return await self._client.call(
             'rrext_account_billing',
-            subcommand='subscribe',
+            subcommand='promo_redeem',
             orgId=org_id,
-            appId=app_id,
-            priceId=price_id,
+            code=code,
         )
 
     async def create_portal_session(self, org_id: str, return_url: str) -> dict:

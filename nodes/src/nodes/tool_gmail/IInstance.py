@@ -187,10 +187,12 @@ class IInstance(IInstanceBase):
         except Exception:
             pass
 
-        if _GMAIL_FULL_SCOPE in granted_scopes:
-            missing: list[str] = []
-        elif scope_available:
-            missing = [s for s in access.scopes if s not in granted_scopes]
+        if scope_available:
+            from nodes.core.google_access import missing_scopes
+
+            # Superset-aware: full mailbox covers everything, gmail.modify
+            # covers gmail.readonly. Empty scope field is fail-open.
+            missing = missing_scopes(granted_scopes, access.scopes)
         else:
             missing = []  # service account — scopes come from key, not token
 

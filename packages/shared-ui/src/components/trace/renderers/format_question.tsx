@@ -2,7 +2,7 @@
 // Shared question rendering — used by render_question and render_invoke (LLM Ask)
 // =============================================================================
 
-import React, { ReactElement } from 'react';
+import { ReactElement } from 'react';
 import { RS } from './styles';
 import { CollapsibleSection } from './utils';
 

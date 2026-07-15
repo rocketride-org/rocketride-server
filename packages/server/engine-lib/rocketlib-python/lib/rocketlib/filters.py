@@ -24,7 +24,7 @@
 
 from __future__ import annotations  # Enables forward references
 from typing import TYPE_CHECKING, Dict, Any, List, TypedDict, Callable, Protocol
-from .types import OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke
+from .types import OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
 
 if TYPE_CHECKING:
@@ -393,6 +393,10 @@ class IServiceFilterInstance(Protocol):
         """Send a table structure."""
         pass
 
+    def sendJson(self, data: IJson) -> None:
+        """Send a JSON object."""
+        pass
+
     def sendAudio(self, action: int, mimeType: str, buffer: bytes) -> None:
         """Send an audio buffer with the given action and MIME type."""
         pass
@@ -515,6 +519,10 @@ class IServiceFilterInstance(Protocol):
 
     def writeTable(self, table: str) -> None:
         """Send a table structure."""
+        pass
+
+    def writeJson(self, data: IJson) -> None:
+        """Send a JSON object."""
         pass
 
     def writeAudio(self, action: int, mimeType: str, buffer: bytes) -> None:
@@ -951,6 +959,10 @@ class IInstanceBase:
 
     def writeTable(self, table: str) -> None:
         """Send a table structure."""
+        pass
+
+    def writeJson(self, data: IJson) -> None:
+        """Send a JSON object."""
         pass
 
     def writeAudio(self, action: int, mimeType: str, buffer: bytes) -> None:

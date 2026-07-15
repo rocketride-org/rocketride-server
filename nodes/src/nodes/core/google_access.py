@@ -128,6 +128,36 @@ _G = 'https://www.googleapis.com/auth'
 # permanently delete (messages.delete); gmail.modify only trashes.
 _GMAIL_FULL = 'https://mail.google.com/'
 
+
+def _scope_satisfied(required: str, granted: set[str]) -> bool:
+    """True when a granted scope covers the required one, including supersets."""
+    if required in granted:
+        return True
+    # The full mailbox scope supersets every Gmail scope
+    if required.startswith(f'{_G}/gmail.') and _GMAIL_FULL in granted:
+        return True
+    # gmail.readonly is implied by gmail.modify (read + organize)
+    if required == f'{_G}/gmail.readonly' and f'{_G}/gmail.modify' in granted:
+        return True
+    # A '.readonly' scope is implied by its writable counterpart (drive,
+    # spreadsheets, documents, calendar, presentations, contacts)
+    if required.endswith('.readonly') and required[: -len('.readonly')] in granted:
+        return True
+    return False
+
+
+def missing_scopes(granted: set[str], required: list[str]) -> list[str]:
+    """
+    Required scopes not satisfied by the granted set.
+
+    Fail-open when the grant is unknown (empty set): older tokens may lack a
+    scope field, and the absence of evidence must not block validation.
+    """
+    if not granted:
+        return []
+    return [s for s in required if not _scope_satisfied(s, granted)]
+
+
 GMAIL = AccessSpec(
     scopes={
         'readonly': [f'{_G}/gmail.readonly'],

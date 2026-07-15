@@ -244,6 +244,21 @@ void IServiceFilterInstance::cb_sendTable(const std::u16string &text) noexcept(
     }
 }
 
+void IServiceFilterInstance::cb_sendJson(
+    python::IJson json) noexcept(false) {
+    // Check to make sure source mode
+    if (this->endpoint->config.endpointMode != ENDPOINT_MODE::SOURCE)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in source mode to use sendJson");
+
+    // Unlock python and sent it along
+    _block() {
+        engine::python::UnlockPython unlock;
+
+        if (auto ccode = sendJson(*m_pTarget, *json.getJsonValue())) throw ccode;
+    }
+}
+
 void IServiceFilterInstance::cb_sendAudio(
     const AVI_ACTION action, Text &mimeType,
     const pybind11::bytes &streamData) noexcept(false) {

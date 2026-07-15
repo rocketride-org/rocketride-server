@@ -80,6 +80,21 @@ export interface IVirtualFileSystem {
 	mkdir(path: string): Promise<void>;
 }
 
+/**
+ * A no-op {@link IVirtualFileSystem} for hosts that drive the Explorer purely
+ * through `entries` + callbacks. The Explorer never calls the VFS anymore, but
+ * the frozen shell contract keeps the `vfs` prop required — pass this instead
+ * of a hand-rolled stub or an `as any` cast.
+ */
+export const NOOP_VFS: IVirtualFileSystem = {
+	list: async () => [],
+	read: async () => undefined,
+	write: async () => undefined,
+	rename: async () => undefined,
+	delete: async () => undefined,
+	mkdir: async () => undefined,
+};
+
 // =============================================================================
 // EXPLORER ENTRY TYPES
 // =============================================================================
@@ -200,7 +215,13 @@ export interface ExplorerFileAction {
  * Props for the Explorer component.
  */
 export interface IExplorerProps {
-	/** Virtual file system provider for all file operations. */
+	/**
+	 * Unused — the Explorer no longer performs file operations itself (hosts
+	 * provide `entries` and handle actions via callbacks). It stays REQUIRED
+	 * because the frozen shell contract (shell-api v1 `DocExplorerProps`) pins
+	 * it that way — loosening it fails `shell:check`. Pass {@link NOOP_VFS};
+	 * the prop drops out with the next contract version bump.
+	 */
 	vfs: IVirtualFileSystem;
 
 	/** Component configuration (title, extensions, display names). */

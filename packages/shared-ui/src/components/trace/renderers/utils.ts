@@ -221,7 +221,7 @@ export function DiffView({ before, after }: { before: unknown; after: unknown })
 		return React.createElement('div', { style: RS.muted }, 'No changes');
 	}
 
-	const items = entries.map((e, i) => {
+	const items: ReactElement[] = entries.map((e, i) => {
 		let detail: string;
 		if (e.op === 'add') {
 			detail = `= ${truncateValue(e.value)}`;

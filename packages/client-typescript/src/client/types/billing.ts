@@ -231,6 +231,77 @@ export interface UsageRollup {
 }
 
 /**
+ * Result of resolving a promo code via `promo_validate`.
+ *
+ * `valid: false` carries a human-readable `reason`. A grant/hackathon code
+ * is recognisable by `appId` + `creditsGranted`; a discount-only code has
+ * neither and applies to whichever plan is selected at checkout.
+ */
+export interface PromoValidation {
+	/** Whether the code resolved to an active Stripe promotion code. */
+	valid: boolean;
+
+	/** Human-readable failure reason when `valid` is false. */
+	reason?: string;
+
+	/** Canonical code string as stored in Stripe. */
+	code?: string;
+
+	/** Stripe promo_* identifier (informational — never sent back). */
+	promotionCodeId?: string;
+
+	/** Human-readable description, e.g. "25% off for 3 months". */
+	description?: string;
+
+	/** Percentage discount (e.g. 25 or 100), if percent-based. */
+	percentOff?: number | null;
+
+	/** Fixed discount in cents, if amount-based. */
+	amountOffCents?: number | null;
+
+	/** ISO currency for `amountOffCents`. */
+	currency?: string | null;
+
+	/** Coupon duration: 'once' | 'repeating' | 'forever'. */
+	duration?: string | null;
+
+	/** Months the discount repeats for (duration === 'repeating'). */
+	durationInMonths?: number | null;
+
+	/** Credits granted on redemption ({resource: amount}) — grant codes only. */
+	creditsGranted?: Record<string, number> | null;
+
+	/** Target app for a grant code (e.g. "rocketride.pipeBuilder"). */
+	appId?: string | null;
+
+	/** List price in cents of the plan passed as priceId (if any). */
+	amountCents?: number;
+
+	/** First-invoice price in cents after the discount (if priceId given). */
+	discountedAmountCents?: number;
+}
+
+/**
+ * Result of redeeming a credit-grant code via `promo_redeem`.
+ */
+export interface PromoRedemption {
+	/** True when the redemption succeeded. */
+	redeemed: boolean;
+
+	/** 'subscribed' = new $0 subscription created; 'credits_only' = org was already subscribed. */
+	mode: 'subscribed' | 'credits_only';
+
+	/** App the code targets. */
+	appId: string;
+
+	/** Subscription status after redemption (e.g. 'active'). */
+	status?: string;
+
+	/** Credits granted ({resource: amount}). */
+	credits: Record<string, number>;
+}
+
+/**
  * Per-pack pricing row for the credit top-up modal.
  * Mirrors the output of the Terraform `credit_packs` map so operators
  * can add/edit packs without a frontend deploy.

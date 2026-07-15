@@ -28,6 +28,7 @@ import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 import { pluginBasicSsl } from '@rsbuild/plugin-basic-ssl';
+import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -100,6 +101,13 @@ export default defineConfig(({ command }) => {
 			// Standard React JSX transform + Fast Refresh support.
 			pluginReact(),
 
+			// TypeScript type checking (fork-ts-checker) — fails production builds
+			// on any type error. Uses ./tsconfig.json, whose program covers all
+			// shell-ui sources AND the shared-ui sources pulled in via the
+			// 'shared' path alias (shared-ui is consumed as workspace TS source),
+			// so latent type errors in either package break the build here.
+			pluginTypeCheck(),
+
 			// SVGR + auto-currentcolor svgo plugin for node icons (used by canvas).
 			pluginRocketrideIcons(),
 
@@ -113,6 +121,10 @@ export default defineConfig(({ command }) => {
 				// at runtime from the server manifest JSON.
 				remotes: {},
 
+				// loaded-first: use the host's already-loaded shared instances instead of
+				// version-first's boot-time download of EVERY registered remoteEntry.js
+				// just to compare shared versions (everything here is singleton + co-deployed).
+				shareStrategy: 'loaded-first',
 				shared: {
 					// eager: true puts react/react-dom in the synchronous initial chunk so they
 					// are fully initialized before the async bootstrap boundary runs. Without this,
@@ -125,11 +137,9 @@ export default defineConfig(({ command }) => {
 					// (requiredVersion: false) because it is always co-deployed.
 					// MF shared resolution bypasses rsbuild aliases — explicit import
 					// paths are required so MF can find the modules at build time.
-					'shell-ui': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
-					'shared':   { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts') },
-					// shaders bundles Three.js internally — do NOT add 'three' to shared or
-				// the host exposes a copy that shaders never imports, wasting ~1-2MB.
-				'shaders':  { singleton: true, version: '1.0.0', requiredVersion: false, eager: true },
+					'shell-ui':   { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
+					'shared':     { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts') },
+					'rocketride': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
 				},
 
 				// Skip TypeScript declaration file generation for MF exposed modules —
@@ -191,6 +201,10 @@ export default defineConfig(({ command }) => {
 
 				// Zitadel OAuth2 client ID registered for this SPA.
 				'process.env.RR_ZITADEL_CLIENT_ID': e('RR_ZITADEL_CLIENT_ID'),
+
+				// OAuth broker root URL — read at module load by shared-ui/config/oauth.ts;
+				// shell-ui bundles shared-ui from source so it must define this (like rslib/vscode).
+				'process.env.REACT_APP_OAUTH_ROOT_URL': e('REACT_APP_OAUTH_ROOT_URL'),
 			},
 		},
 		dev: {

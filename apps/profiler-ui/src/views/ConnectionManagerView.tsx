@@ -21,414 +21,89 @@
 // SOFTWARE.
 
 // =============================================================================
-// CONNECTION MANAGER VIEW — Landing page with connection tiles
+// CONNECTION MANAGER VIEW — profiler-ui's Archetype-C config
 // =============================================================================
 //
-// Displays a grid of saved connection tiles. Each tile shows the server name
-// and host:port. Click to open in a new tab, hover for edit/delete buttons.
-// A "+" button opens an inline form to add a new connection.
+// Thin wrapper over the shared ConnectionManagerView. The shared component owns
+// the whole page shell (ContentHeader, responsive ConnectionCard grid, dashed
+// add tile, and the add/edit Modal); this file only supplies the profiler-server
+// connection model, its form fields, and what create / open / delete do.
+//
+// Clicking a card opens a profiler tab for that server. Cards show the neutral
+// "Disconnected" state (the landing does not track which servers currently have
+// an open profiling tab).
 // =============================================================================
 
-import React, { useState, useCallback } from 'react';
-import type { CSSProperties } from 'react';
-import { commonStyles } from 'shared/themes/styles';
-import { BxPlus, BxEditAlt, BxTrash, BxDesktop } from 'shell-ui';
+import React from 'react';
+import { ConnectionManagerView } from 'shared';
+import type { IConnectionFormField } from 'shared';
 import { useSavedConnections, addConnection, updateConnection, deleteConnection } from '../connections';
 import type { SavedConnection } from '../connections';
 import { getDocs } from '../docs';
 
 // =============================================================================
-// TYPES
+// CONSTANTS
 // =============================================================================
 
-/** Form state for the add/edit dialog. */
-interface FormState {
-	/** 'add' for new connection, or the connection id for editing. */
-	mode: 'add' | string;
-	/** Connection display name. */
-	name: string;
-	/** Server hostname or IP. */
-	host: string;
-	/** Server port. */
-	port: string;
-}
-
-// =============================================================================
-// STYLES
-// =============================================================================
-
-const styles = {
-	container: {
-		...commonStyles.columnFill,
-		display: 'flex',
-		flexDirection: 'column',
-		alignItems: 'center',
-		padding: '48px 32px',
-		overflow: 'auto',
-	} as CSSProperties,
-
-	header: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 16,
-		marginBottom: 32,
-	} as CSSProperties,
-
-	title: {
-		fontSize: 20,
-		fontWeight: 600,
-		color: 'var(--rr-text-primary)',
-		margin: 0,
-	} as CSSProperties,
-
-	addButton: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 6,
-		padding: '6px 14px',
-		borderRadius: 6,
-		border: '1px solid var(--rr-brand)',
-		background: 'transparent',
-		color: 'var(--rr-brand)',
-		fontSize: 13,
-		cursor: 'pointer',
-		fontFamily: 'var(--rr-font-family)',
-	} as CSSProperties,
-
-	grid: {
-		display: 'grid',
-		gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-		gap: 16,
-		width: '100%',
-		maxWidth: 960,
-	} as CSSProperties,
-
-	tile: {
-		position: 'relative',
-		display: 'flex',
-		flexDirection: 'column',
-		gap: 8,
-		padding: 20,
-		borderRadius: 8,
-		border: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-paper)',
-		cursor: 'pointer',
-		transition: 'border-color 0.15s, box-shadow 0.15s',
-	} as CSSProperties,
-
-	tileHover: {
-		borderColor: 'var(--rr-brand)',
-		boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-	} as CSSProperties,
-
-	tileIcon: {
-		color: 'var(--rr-brand)',
-		marginBottom: 4,
-	} as CSSProperties,
-
-	tileName: {
-		fontSize: 15,
-		fontWeight: 600,
-		color: 'var(--rr-text-primary)',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
-	} as CSSProperties,
-
-	tileAddress: {
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
-		fontFamily: 'var(--rr-font-family-mono)',
-	} as CSSProperties,
-
-	tileActions: {
-		position: 'absolute',
-		top: 8,
-		right: 8,
-		display: 'flex',
-		gap: 4,
-	} as CSSProperties,
-
-	iconButton: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		width: 28,
-		height: 28,
-		borderRadius: 4,
-		border: 'none',
-		background: 'transparent',
-		color: 'var(--rr-text-secondary)',
-		cursor: 'pointer',
-		padding: 0,
-	} as CSSProperties,
-
-	formOverlay: {
-		position: 'fixed',
-		inset: 0,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		background: 'rgba(0,0,0,0.4)',
-		zIndex: 1000,
-	} as CSSProperties,
-
-	formDialog: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: 16,
-		padding: 24,
-		borderRadius: 8,
-		border: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-paper)',
-		minWidth: 340,
-		boxShadow: '0 8px 32px rgba(0,0,0,0.24)',
-	} as CSSProperties,
-
-	formTitle: {
-		fontSize: 16,
-		fontWeight: 600,
-		color: 'var(--rr-text-primary)',
-		margin: 0,
-	} as CSSProperties,
-
-	formField: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: 4,
-	} as CSSProperties,
-
-	formLabel: {
-		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
-		fontWeight: 500,
-	} as CSSProperties,
-
-	formInput: {
-		padding: '8px 10px',
-		borderRadius: 4,
-		border: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-input)',
-		color: 'var(--rr-text-primary)',
-		fontSize: 13,
-		fontFamily: 'var(--rr-font-family)',
-		outline: 'none',
-	} as CSSProperties,
-
-	formButtons: {
-		display: 'flex',
-		justifyContent: 'flex-end',
-		gap: 8,
-		marginTop: 8,
-	} as CSSProperties,
-
-	buttonPrimary: {
-		padding: '7px 16px',
-		borderRadius: 6,
-		border: 'none',
-		background: 'var(--rr-brand)',
-		color: '#fff',
-		fontSize: 13,
-		cursor: 'pointer',
-		fontFamily: 'var(--rr-font-family)',
-	} as CSSProperties,
-
-	buttonSecondary: {
-		padding: '7px 16px',
-		borderRadius: 6,
-		border: '1px solid var(--rr-border)',
-		background: 'transparent',
-		color: 'var(--rr-text-primary)',
-		fontSize: 13,
-		cursor: 'pointer',
-		fontFamily: 'var(--rr-font-family)',
-	} as CSSProperties,
-
-	empty: {
-		color: 'var(--rr-text-secondary)',
-		fontSize: 14,
-		textAlign: 'center',
-		padding: 32,
-	} as CSSProperties,
-};
+/** Add/edit form fields for a profiler-server connection (rendered in order). */
+const FIELDS: IConnectionFormField[] = [
+	{ key: 'name', label: 'Name', placeholder: 'e.g. Local Dev Server', required: true, autoFocus: true },
+	{ key: 'host', label: 'Host', placeholder: 'localhost' },
+	{ key: 'port', label: 'Port', placeholder: '5565' },
+];
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
 /**
- * Connection manager landing page for the Profiler app.
+ * Connection manager landing page for the Profiler app (Archetype C).
  *
- * Displays saved connections as clickable tiles in a responsive grid.
- * Click a tile to open a profiler tab for that server.
- * Provides add/edit/delete functionality with an inline modal form.
+ * Delegates the page shell to the shared {@link ConnectionManagerView}; this
+ * wrapper supplies only the app-specific data model and behaviour.
  */
-const ConnectionManagerView: React.FC = () => {
+const ProfilerConnectionManagerView: React.FC = () => {
 	const connections = useSavedConnections();
-	const [form, setForm] = useState<FormState | null>(null);
-	const [hoveredId, setHoveredId] = useState<string | null>(null);
-
-	// =========================================================================
-	// HANDLERS
-	// =========================================================================
-
-	/** Open a connection in a new document tab. */
-	const handleConnect = useCallback((conn: SavedConnection) => {
-		getDocs()?.openStaticDocument(`conn:${conn.id}`, conn.name, { host: conn.host, port: conn.port });
-	}, []);
-
-	/** Open the add form with default values. */
-	const handleAdd = useCallback(() => {
-		setForm({ mode: 'add', name: '', host: 'localhost', port: '5565' });
-	}, []);
-
-	/** Open the edit form for an existing connection. */
-	const handleEdit = useCallback((e: React.MouseEvent, conn: SavedConnection) => {
-		e.stopPropagation();
-		setForm({ mode: conn.id, name: conn.name, host: conn.host, port: conn.port });
-	}, []);
-
-	/** Delete a connection with confirmation. */
-	const handleDelete = useCallback((e: React.MouseEvent, conn: SavedConnection) => {
-		e.stopPropagation();
-		if (confirm(`Delete connection "${conn.name}"?`)) {
-			deleteConnection(conn.id);
-		}
-	}, []);
-
-	/** Save the form (add or update). */
-	const handleSave = useCallback(() => {
-		if (!form || !form.name.trim()) return;
-
-		if (form.mode === 'add') {
-			// Add new connection and immediately open it in a tab
-			const id = addConnection({ name: form.name.trim(), host: form.host.trim(), port: form.port.trim() });
-			getDocs()?.openStaticDocument(`conn:${id}`, form.name.trim(), { host: form.host.trim(), port: form.port.trim() });
-		} else {
-			// Update existing connection
-			updateConnection(form.mode, { name: form.name.trim(), host: form.host.trim(), port: form.port.trim() });
-		}
-		setForm(null);
-	}, [form]);
-
-	/** Close the form without saving. */
-	const handleCancel = useCallback(() => {
-		setForm(null);
-	}, []);
-
-	/** Handle Enter/Escape keys in form inputs. */
-	const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-		if (e.key === 'Enter') handleSave();
-		if (e.key === 'Escape') handleCancel();
-	}, [handleSave, handleCancel]);
-
-	// =========================================================================
-	// RENDER
-	// =========================================================================
 
 	return (
-		<div style={styles.container}>
-			{/* Header with title and add button */}
-			<div style={styles.header}>
-				<h1 style={styles.title}>Profiler Connections</h1>
-				<button style={styles.addButton} onClick={handleAdd}>
-					<BxPlus size={16} /> New Connection
-				</button>
-			</div>
-
-			{/* Connection tile grid */}
-			{connections.length === 0 ? (
-				<div style={styles.empty}>
-					No saved connections. Click "New Connection" to add one.
-				</div>
-			) : (
-				<div style={styles.grid}>
-					{connections.map((conn) => {
-						const isHovered = hoveredId === conn.id;
-						return (
-							<div
-								key={conn.id}
-								style={{ ...styles.tile, ...(isHovered ? styles.tileHover : {}) }}
-								onClick={() => handleConnect(conn)}
-								onMouseEnter={() => setHoveredId(conn.id)}
-								onMouseLeave={() => setHoveredId(null)}
-							>
-								<div style={styles.tileIcon}>
-									<BxDesktop size={28} />
-								</div>
-								<div style={styles.tileName}>{conn.name}</div>
-								<div style={styles.tileAddress}>{conn.host}:{conn.port}</div>
-
-								{/* Edit / Delete buttons visible on hover */}
-								{isHovered && (
-									<div style={styles.tileActions}>
-										<button style={styles.iconButton} onClick={(e) => handleEdit(e, conn)} title="Edit">
-											<BxEditAlt size={16} />
-										</button>
-										<button style={styles.iconButton} onClick={(e) => handleDelete(e, conn)} title="Delete">
-											<BxTrash size={16} />
-										</button>
-									</div>
-								)}
-							</div>
-						);
-					})}
-				</div>
-			)}
-
-			{/* Add / Edit form modal */}
-			{form && (
-				<div style={styles.formOverlay} onClick={handleCancel}>
-					<div style={styles.formDialog} onClick={(e) => e.stopPropagation()}>
-						<h2 style={styles.formTitle}>
-							{form.mode === 'add' ? 'New Connection' : 'Edit Connection'}
-						</h2>
-
-						<div style={styles.formField}>
-							<label style={styles.formLabel}>Name</label>
-							<input
-								style={styles.formInput}
-								value={form.name}
-								onChange={(e) => setForm({ ...form, name: e.target.value })}
-								onKeyDown={handleKeyDown}
-								placeholder="e.g. Local Dev Server"
-								autoFocus
-							/>
-						</div>
-
-						<div style={styles.formField}>
-							<label style={styles.formLabel}>Host</label>
-							<input
-								style={styles.formInput}
-								value={form.host}
-								onChange={(e) => setForm({ ...form, host: e.target.value })}
-								onKeyDown={handleKeyDown}
-								placeholder="localhost"
-							/>
-						</div>
-
-						<div style={styles.formField}>
-							<label style={styles.formLabel}>Port</label>
-							<input
-								style={styles.formInput}
-								value={form.port}
-								onChange={(e) => setForm({ ...form, port: e.target.value })}
-								onKeyDown={handleKeyDown}
-								placeholder="5565"
-							/>
-						</div>
-
-						<div style={styles.formButtons}>
-							<button style={styles.buttonSecondary} onClick={handleCancel}>Cancel</button>
-							<button style={styles.buttonPrimary} onClick={handleSave}>
-								{form.mode === 'add' ? 'Connect' : 'Save'}
-							</button>
-						</div>
-					</div>
-				</div>
-			)}
-		</div>
+		<ConnectionManagerView<SavedConnection>
+			title="Profiler Connections"
+			subtitle="Attach to a server to profile its process and pipeline engines."
+			emptyDescription="Attach to a server to profile its process and pipeline engines."
+			connections={connections}
+			card={(conn) => ({
+				name: conn.name,
+				address: `${conn.host}:${conn.port}`,
+				status: 'muted',
+				statusLabel: 'Disconnected',
+			})}
+			fields={FIELDS}
+			newValues={{ name: '', host: 'localhost', port: '5565' }}
+			editValues={(conn) => ({ name: conn.name, host: conn.host, port: conn.port })}
+			onCreate={(values) => {
+				// Add the connection and immediately open it in a profiler tab.
+				const name = values.name.trim();
+				const host = values.host.trim();
+				const port = values.port.trim();
+				const id = addConnection({ name, host, port });
+				getDocs()?.openStaticDocument(`conn:${id}`, name, { host, port });
+			}}
+			onUpdate={(conn, values) => {
+				updateConnection(conn.id, {
+					name: values.name.trim(),
+					host: values.host.trim(),
+					port: values.port.trim(),
+				});
+			}}
+			onOpen={(conn) => {
+				getDocs()?.openStaticDocument(`conn:${conn.id}`, conn.name, { host: conn.host, port: conn.port });
+			}}
+			onDelete={(conn) => {
+				// The app owns the confirmation prompt (shared view just calls onDelete).
+				if (confirm(`Delete connection "${conn.name}"?`)) deleteConnection(conn.id);
+			}}
+		/>
 	);
 };
 
-export default ConnectionManagerView;
+export default ProfilerConnectionManagerView;

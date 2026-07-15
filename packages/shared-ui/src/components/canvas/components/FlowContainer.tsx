@@ -148,6 +148,9 @@ export interface IFlowContainerProps {
 	onSave?: () => void;
 	onExport?: () => void;
 
+	/** Called when the user opens pipeline settings (e.g. idle timeout) from the canvas toolbar. */
+	onOpenSettings?: () => void;
+
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
 
@@ -165,11 +168,11 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, getPreference, setPreference, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, getPreference, setPreference, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, onOpenSettings, envKeys, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
-			<div style={{ position: 'relative', width: '100%', height: '100%' }} key={`${project.project_id ?? 'new'}-${project.name}`}>
+			<div style={{ position: 'relative', width: '100%', height: '100%' }} key={`${project.project_id ?? 'new'}-${(project as { name?: string }).name}`}>
 				<FlowProvider
 					project={project}
 					projectId={project.project_id ?? ''}
@@ -207,6 +210,7 @@ export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, 
 					isNew={isNew}
 					onSave={onSave}
 					onExport={onExport}
+					onOpenSettings={onOpenSettings}
 					envKeys={envKeys}
 				>
 					{children}

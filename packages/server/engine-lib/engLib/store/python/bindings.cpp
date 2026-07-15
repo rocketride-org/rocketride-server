@@ -900,6 +900,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(sendTagEndObject, &IServiceFilterInstance::cb_sendTagEndObject)
         .PYBIND(sendText, &IServiceFilterInstance::cb_sendText)
         .PYBIND(sendTable, &IServiceFilterInstance::cb_sendTable)
+        .PYBIND(sendJson, &IServiceFilterInstance::cb_sendJson)
         .PYBIND(sendAudio, &IServiceFilterInstance::cb_sendAudio,
                 py::arg("action"), py::arg("mimeType"),
                 py::arg("streamData") = py::bytes())
@@ -943,6 +944,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(writeTag, &IServiceFilterInstance::cb_writeTag)
         .PYBIND(writeText, &IServiceFilterInstance::cb_writeText)
         .PYBIND(writeTable, &IServiceFilterInstance::cb_writeTable)
+        .PYBIND(writeJson, &IServiceFilterInstance::cb_writeJson)
         .PYBIND(writeAudio, &IServiceFilterInstance::cb_writeAudio,
                 py::arg("action"), py::arg("mimeType"),
                 py::arg("streamData") = py::bytes())
@@ -1176,6 +1178,9 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(__delitem__, &IJson::delitem)
         .PYBIND(__getitem__, &IJson::getitem)
         .PYBIND(__setitem__, &IJson::setitem);
+
+    py::implicitly_convertible<py::dict, IJson>();
+    py::implicitly_convertible<py::list, IJson>();
 
     //-------------------------------------------------------------
     /// @details
