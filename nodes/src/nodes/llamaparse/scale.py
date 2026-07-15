@@ -143,6 +143,18 @@ _TRAILING_OF_RE = re.compile(r'\bof\s*$', re.IGNORECASE)
 # "of U.S. dollars" yields "dollars", while "of USD" stays intact.
 _OF_CLAUSE_RE = re.compile(r'^\s*of\s+(?:u\.?\s*s\.?\s+)?([a-z]+)', re.IGNORECASE)
 
+# Verb sitting immediately before the "in" lead-in marks the scale word as prose,
+# not a caption: "valued in billions", "grew to ... reaching in ...". A caption
+# ("Dollars in millions", "Amounts are in thousands") never leads with these, so
+# vetoing them costs no real captions while killing a class of false welds.
+_PROSE_LEADIN_WORD_RE = re.compile(
+    r'\b(?:valued|worth|grew|grown|rose|risen|fell|fallen|reaching|reached|'
+    r'totaling|totalling|generating|generated|earning|earned|spending|spent|'
+    r'costing|saving|saved|raising|raised|investing|invested|losing|lost|'
+    r'measured|priced|estimated)\s+in\s*$',
+    re.IGNORECASE,
+)
+
 # A page or section boundary between a caption and a table puts the caption out
 # of scope: a form feed, a horizontal rule, or an explicit "Page N" marker.
 _PAGE_BREAK_RE = re.compile(
@@ -158,9 +170,13 @@ _PAGE_BREAK_RE = re.compile(
 _NUMERIC_CELL_RE = re.compile(r'^[(\-+]?\s*[$€£₹¥]?\s*[\d,]+(?:\.\d+)?\s*%?\)?$')
 
 # Markers this module injects; used for idempotence and for the metadata signal.
+# Plain text only: these lines are welded into the parsed text that flows down
+# the pipeline (application output), where a non-ASCII glyph can raise a
+# UnicodeEncodeError on a cp1252 console.
 _SCALE_MARKER_PREFIX = '> Scale:'
+_WARNING_MARKER_PREFIX = '> [scale?]'
 _WARNING_MARKER = (
-    '> ⚠️ Scale not detected for this table. Figures may be in '
+    f'{_WARNING_MARKER_PREFIX} Scale not detected for this table. Figures may be in '
     'thousands, millions, or billions. Verify against the source.'
 )
 
@@ -234,6 +250,11 @@ def detect_scale_declarations(text: str) -> List[ScaleDeclaration]:
 
     declarations: List[ScaleDeclaration] = []
     for m in _SCALE_WORD_RE.finditer(text):
+        if _on_marker_line(text, m.start()):
+            # A scale word inside a marker we injected ("> Scale: ... in millions",
+            # "> [scale?] ... in thousands, millions, or billions") is not a source
+            # caption; skipping it keeps re-annotation idempotent.
+            continue
         word = m.group(1).lower()
         unit, factor = _SCALE_UNITS[word]
         left = text[max(0, m.start() - _CONTEXT_CHARS) : m.start()]
@@ -245,6 +266,9 @@ def detect_scale_declarations(text: str) -> List[ScaleDeclaration]:
             continue
         if _TRAILING_OF_RE.search(left):
             # "hundreds of thousands", "tens of millions" -> prose.
+            continue
+        if _PROSE_LEADIN_WORD_RE.search(left):
+            # "valued in billions", "reached ... in millions" -> prose, not a caption.
             continue
 
         has_in = bool(_LEADIN_RE.search(left))
@@ -351,13 +375,33 @@ def _nearest_in_scope(declarations: List[ScaleDeclaration], text: str, table_sta
     return best
 
 
+def _on_marker_line(text: str, pos: int) -> bool:
+    """True when ``pos`` falls on a line that is one of our injected markers."""
+    line_start = text.rfind('\n', 0, pos) + 1
+    stripped = text[line_start:].lstrip()
+    return stripped.startswith(_SCALE_MARKER_PREFIX) or stripped.startswith(_WARNING_MARKER_PREFIX)
+
+
 def _already_annotated(prev_line: str) -> bool:
     stripped = prev_line.strip()
-    return stripped.startswith(_SCALE_MARKER_PREFIX) or stripped == _WARNING_MARKER
+    return stripped.startswith(_SCALE_MARKER_PREFIX) or stripped.startswith(_WARNING_MARKER_PREFIX)
+
+
+def _table_has_currency(table_text: str) -> bool:
+    """True when a table carries a currency signal of its own (symbol or code).
+
+    Lets a numeric, uncaptioned table still be flagged in an otherwise
+    non-financial document, without warning on plain numeric tables (inventory
+    counts, sports standings, server metrics) that carry no financial signal.
+    """
+    if any(sym in table_text for sym in _SYMBOL_TO_CODE):
+        return True
+    lowered = table_text.lower()
+    return any(re.search(r'\b' + re.escape(w) + r'\b', lowered) for w in _CURRENCY_WORDS)
 
 
 def _scale_marker(decl: ScaleDeclaration) -> str:
-    marker = f'{_SCALE_MARKER_PREFIX} amounts in {decl.unit} (×{decl.factor:,})'
+    marker = f'{_SCALE_MARKER_PREFIX} amounts in {decl.unit} (x{decl.factor:,})'
     if decl.currency:
         marker += f' [{decl.currency}]'
     return marker
@@ -370,9 +414,21 @@ def annotate_scale(
     """Weld scale markers to tables and flag numeric tables missing a scale.
 
     Returns the annotated text plus a list of per-table warning records
-    ``{'table_index', 'status', ...}`` where ``status`` is ``scale_detected``,
-    ``scale_missing``, or ``not_financial``. Idempotent: a table already
-    carrying one of our markers is left untouched.
+    ``{'table_index', 'status', ...}`` where ``status`` is one of:
+
+    - ``scale_detected``: a caption was in scope; its marker was welded above.
+    - ``scale_missing``: a numeric table with a financial signal but no caption
+      in scope; a missing-scale warning was welded above.
+    - ``not_financial``: no marker welded, either because the table is not
+      numeric or it carries no financial signal (so a warning would be noise).
+    - ``already_annotated``: the table already carried one of our markers and was
+      left untouched.
+
+    A marker is welded only above a *numeric* table, so a caption sitting over a
+    prose/roster table is never mis-attached. The missing-scale warning is gated
+    on a financial signal (a caption elsewhere in the document, or a currency
+    marking in the table itself) so ordinary numeric tables are not annotated.
+    Idempotent: re-running does not double-inject.
     """
     if not text or not text.strip():
         return text, []
@@ -385,6 +441,7 @@ def annotate_scale(
     if not blocks:
         return text, []
 
+    doc_has_declaration = bool(declarations)
     warnings: List[dict] = []
     insertions: dict = {}
     for idx, (start, _end, block) in enumerate(blocks):
@@ -393,8 +450,10 @@ def annotate_scale(
             warnings.append({'table_index': idx, 'status': 'already_annotated'})
             continue
 
+        block_text = '\n'.join(block)
+        is_numeric = _table_looks_numeric(block_text)
         decl = _nearest_in_scope(declarations, text, offsets[start])
-        if decl is not None:
+        if decl is not None and is_numeric:
             insertions[start] = _scale_marker(decl)
             warnings.append(
                 {
@@ -405,7 +464,7 @@ def annotate_scale(
                     'currency': decl.currency,
                 }
             )
-        elif _table_looks_numeric('\n'.join(block)):
+        elif is_numeric and (doc_has_declaration or _table_has_currency(block_text)):
             insertions[start] = _WARNING_MARKER
             warnings.append({'table_index': idx, 'status': 'scale_missing', 'factor': None})
         else:

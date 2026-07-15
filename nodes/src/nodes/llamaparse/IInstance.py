@@ -27,6 +27,7 @@ from typing import List, Optional
 from rocketlib import IInstanceBase, Entry, debug
 from ai.common.schema import Doc
 from .IGlobal import IGlobal
+from .scale import extract_markdown_tables
 
 
 class IInstance(IInstanceBase):
@@ -378,8 +379,6 @@ class IInstance(IInstanceBase):
             # Simple table detection - look for markdown table patterns.
             # Shared with the scale-header preservation logic so there is a
             # single table heuristic (see scale.extract_markdown_tables).
-            from .scale import extract_markdown_tables
-
             tables = extract_markdown_tables(text)
 
             debug(f'LlamaParse Instance: Found {len(tables)} potential tables')

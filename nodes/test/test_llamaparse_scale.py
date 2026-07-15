@@ -98,12 +98,20 @@ def test_currency_is_extracted():
 # Annotation.
 # ---------------------------------------------------------------------------
 TABLE = '| Item | 2024 | 2023 |\n| --- | --- | --- |\n| Revenue | 1,234 | 1,100 |\n| Net income | 456 | 400 |'
+# Same table but the figures carry a currency symbol, i.e. a financial signal in
+# the table itself even with no caption in scope.
+CURRENCY_TABLE = (
+    '| Item | 2024 | 2023 |\n| --- | --- | --- |\n| Revenue | $1,234 | $1,100 |\n| Net income | $456 | $400 |'
+)
 
 
 def test_marker_welded_above_table_with_scale_in_scope():
     text = f'Consolidated Statements of Operations\n(In millions)\n\n{TABLE}'
     out, warnings = annotate_scale(text)
-    assert '> Scale: amounts in millions (×1,000,000)' in out
+    assert '> Scale: amounts in millions (x1,000,000)' in out
+    # Marker is ASCII only: it is welded into the pipeline text lane, which may be
+    # written to a cp1252 console. A non-ASCII glyph there raises UnicodeEncodeError.
+    out.encode('cp1252')
     # Marker sits on the line directly above the first table row.
     lines = out.split('\n')
     table_start = next(i for i, ln in enumerate(lines) if ln.startswith('| Item'))
@@ -111,11 +119,32 @@ def test_marker_welded_above_table_with_scale_in_scope():
     assert any(w['status'] == 'scale_detected' and w['factor'] == 1_000_000 for w in warnings)
 
 
-def test_warning_injected_for_numeric_table_without_scale():
-    text = f'Some financial figures follow.\n\n{TABLE}'
+def test_warning_injected_for_currency_table_without_scale():
+    # A numeric table with a currency signal but no caption in scope: warn.
+    text = f'Some financial figures follow.\n\n{CURRENCY_TABLE}'
     out, warnings = annotate_scale(text)
     assert 'Scale not detected for this table' in out
     assert any(w['status'] == 'scale_missing' for w in warnings)
+
+
+def test_warning_injected_when_document_has_a_caption_elsewhere():
+    # A caption out of scope still marks the document financial, so an
+    # uncaptioned numeric table downstream is warned even without a currency mark.
+    text = f'(In millions)\n\n---\n\nUnrelated section\n\n{TABLE}'
+    out, warnings = annotate_scale(text)
+    assert 'Scale not detected for this table' in out
+    assert any(w['status'] == 'scale_missing' for w in warnings)
+
+
+def test_no_warning_for_numeric_non_financial_table():
+    # Server metrics: numeric, but no currency and no caption anywhere. Injecting
+    # a scale warning here would be misleading hedging in an ordinary document.
+    table = '| Endpoint | p50 ms | p99 ms | rps |\n| --- | --- | --- | --- |\n| /login | 12 | 88 | 240 |\n| /search | 34 | 210 | 90 |'
+    text = f'Service latency report\n\n{table}'
+    out, warnings = annotate_scale(text)
+    assert 'Scale not detected' not in out
+    assert '> Scale:' not in out
+    assert any(w['status'] == 'not_financial' for w in warnings)
 
 
 def test_non_numeric_table_gets_no_warning():
@@ -125,6 +154,37 @@ def test_non_numeric_table_gets_no_warning():
     assert 'Scale not detected' not in out
     assert '> Scale:' not in out
     assert any(w['status'] == 'not_financial' for w in warnings)
+
+
+def test_prose_scale_word_does_not_weld_marker():
+    # "valued in billions" is prose, not a caption; it must not weld a scale onto
+    # a following table -- the exact wrong-scale error this feature prevents.
+    text = f'The market opportunity, valued in billions, keeps growing.\n\n{CURRENCY_TABLE}'
+    out, warnings = annotate_scale(text)
+    assert '> Scale: amounts in billions' not in out
+    assert not any(w['status'] == 'scale_detected' for w in warnings)
+
+
+def test_caption_over_non_numeric_table_is_not_welded():
+    # A real caption in scope but the table is a roster, not figures: no weld.
+    table = '| Name | Role |\n| --- | --- |\n| Ada | Engineer |\n| Grace | Admiral |'
+    text = f'(In millions)\n\n{table}'
+    out, warnings = annotate_scale(text)
+    assert '> Scale:' not in out
+    assert any(w['status'] == 'not_financial' for w in warnings)
+
+
+def test_injected_markers_are_not_detected_as_captions():
+    # Both markers contain scale words ("in millions", "thousands, millions, or
+    # billions"). Neither may be read back as a source caption, or a re-annotation
+    # pass could weld a scale derived from our own marker.
+    scale_marker = '> Scale: amounts in millions (x1,000,000)'
+    warning_marker = (
+        '> [scale?] Scale not detected for this table. Figures may be in '
+        'thousands, millions, or billions. Verify against the source.'
+    )
+    assert detect_scale_declarations(scale_marker) == []
+    assert detect_scale_declarations(warning_marker) == []
 
 
 def test_scale_out_of_scope_when_page_break_between():
