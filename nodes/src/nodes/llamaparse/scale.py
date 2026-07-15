@@ -107,6 +107,11 @@ _CURRENCY_WORDS = {
     'pesos',
 }
 
+_CURRENCY_WORDS_RE = re.compile(
+    r'\b(?:' + '|'.join(re.escape(w) for w in sorted(_CURRENCY_WORDS)) + r')\b',
+    re.IGNORECASE,
+)
+
 _SYMBOL_TO_CODE = {'$': 'USD', '€': 'EUR', '£': 'GBP', '₹': 'INR', '¥': 'JPY'}
 
 _WORD_TO_CODE = {
@@ -396,8 +401,7 @@ def _table_has_currency(table_text: str) -> bool:
     """
     if any(sym in table_text for sym in _SYMBOL_TO_CODE):
         return True
-    lowered = table_text.lower()
-    return any(re.search(r'\b' + re.escape(w) + r'\b', lowered) for w in _CURRENCY_WORDS)
+    return _CURRENCY_WORDS_RE.search(table_text) is not None
 
 
 def _scale_marker(decl: ScaleDeclaration) -> str:
