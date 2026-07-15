@@ -141,6 +141,10 @@ export default function SelectWidget<
 				input: {
 					...(textFieldProps as TextFieldProps).slotProps?.input,
 					title: selectedOptionLabel ?? undefined,
+					// Pass the plain resolved label (not the rich `displayLabel`) to the outlined
+					// input so its aria-hidden NotchedOutline legend never wraps the tabbable info
+					// tooltip trigger, which would otherwise create a phantom keyboard focus stop.
+					label: resolvedLabel ?? undefined,
 				},
 			}}
 			SelectProps={{

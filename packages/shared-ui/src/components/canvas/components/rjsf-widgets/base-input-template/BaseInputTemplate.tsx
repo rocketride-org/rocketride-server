@@ -205,6 +205,16 @@ export default function BaseInputTemplate<
 				inputRef={inputRef}
 				InputLabelProps={DisplayInputLabelProps}
 				{...(textFieldProps as TextFieldProps)}
+				slotProps={{
+					...(textFieldProps as TextFieldProps).slotProps,
+					// Pass the plain resolved label (not the rich `displayLabel`) to the outlined
+					// input so its aria-hidden NotchedOutline legend never wraps the tabbable info
+					// tooltip trigger, which would otherwise create a phantom keyboard focus stop.
+					input: {
+						...(textFieldProps as TextFieldProps).slotProps?.input,
+						label: resolvedLabel ?? undefined,
+					},
+				}}
 				sx={{
 					...sx,
 					'& input[type="number"]::-webkit-outer-spin-button, & input[type="number"]::-webkit-inner-spin-button': {

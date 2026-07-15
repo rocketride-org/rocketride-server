@@ -94,7 +94,7 @@ python3 -m pytest -q nodes/test/test_tool_n8n.py -k services_schema_only
   - Add `"optional": true` to `tool_n8n.apiKey`.
   - Add `mode.conditional` branches for `sync` and `async`.
   - Rename timeout labels to `Response timeout (seconds)` and `Execution timeout (seconds)`.
-  - Add `webhookAuth.conditional` branches for `none`, `header`, `basic`, and the shared `["bearer", "jwt"]` token branch.
+  - Add scalar `webhookAuth.conditional` branches for `none`, `header`, `basic`, `bearer`, and `jwt`; both token modes reference the same token field.
   - Rename conditional credential labels to `Header name`, `Header value`, `Username`, `Password`, and `Token`.
   - Remove `"optional": true` from conditional credential fields so the active branch requires them.
   - Remove timeout and credential child fields from top-level `shape[0].properties`.

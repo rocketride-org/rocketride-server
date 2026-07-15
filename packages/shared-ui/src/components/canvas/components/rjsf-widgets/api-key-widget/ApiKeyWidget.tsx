@@ -150,6 +150,11 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				helperText={rawErrors}
 				slotProps={{
 					input: {
+						// Pass the plain label (not the rich FieldLabelWithInfo node) to the
+						// outlined input so its aria-hidden NotchedOutline legend never wraps the
+						// tabbable info tooltip trigger, which would otherwise create a phantom
+						// keyboard focus stop.
+						label: label || undefined,
 						readOnly: maskApiKey || readonly,
 						endAdornment: maskApiKey && !readonly && (
 							<InputAdornment position="end">
