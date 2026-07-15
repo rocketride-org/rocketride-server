@@ -3,37 +3,25 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""
-Cognee node instance.
-
-Exposes cognee as agent tools backed by its REST API. The typical flow is
-``add`` (ingest content) then ``cognify`` (build the knowledge graph) then
-``search`` (ask questions over it); ``reset`` clears a dataset. This class is a
-thin adapter over ``cognee_client`` — input normalization and validation here,
-HTTP there. Tool methods raise (``ValueError`` for bad input, ``RuntimeError``
-for API failures) rather than returning error dicts.
-"""
+"""Thin RocketRide tool adapters for Cognee persistent semantic memory."""
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Dict
 
 from rocketlib import IInstanceBase, tool_function
 
 from ai.common.utils import normalize_tool_input
 
-from . import cognee_client
-from .IGlobal import IGlobal, SEARCH_TYPES, MAX_TOP_K
+from . import artifact_store, cognee_client
+from .IGlobal import IGlobal, MAX_TOP_K, SEARCH_TYPES
 
 
 class IInstance(IInstanceBase):
-    """Node instance exposing cognee as agent tools."""
+    """Expose Cognee's modern memory workflow as four agent tools."""
 
     IGlobal: IGlobal
-
-    # ------------------------------------------------------------------
-    # Tools
-    # ------------------------------------------------------------------
 
     @tool_function(
         input_schema={
@@ -42,92 +30,47 @@ class IInstance(IInstanceBase):
             'properties': {
                 'text': {
                     'type': 'string',
-                    'description': 'The content to remember. Raw text, or a URL / public repo URL for cognee to fetch and ingest.',
+                    'description': 'Plain text to store and process as persistent semantic memory.',
                 },
                 'dataset': {
                     'type': 'string',
-                    'description': 'Dataset to add this content to. Defaults to the node config value.',
+                    'description': 'Dataset to remember this text in. Defaults to node configuration.',
                 },
                 'run_in_background': {
                     'type': 'boolean',
-                    'description': 'When true, queue ingestion and return immediately. Default false (wait for it to be stored).',
+                    'description': 'Queue processing and return immediately when true. Defaults to false.',
                 },
             },
         },
         output_schema={
             'type': 'object',
             'properties': {
-                'dataset': {'type': 'string'},
                 'status': {'type': 'string'},
+                'dataset_name': {'type': 'string'},
+                'dataset_id': {'type': 'string'},
                 'pipeline_run_id': {'type': 'string'},
             },
         },
         description=(
-            'Ingest content into cognee memory. This only stores the raw content — call cognify '
-            'afterwards to build the knowledge graph before it can be searched. Returns the dataset '
-            'and a pipeline run id.'
+            'Store plain text in persistent Cognee memory and build its semantic knowledge graph in '
+            'one operation. Use pipeline_status after a background call, then recall to retrieve '
+            'grounded memory. The graph captures semantic relationships; it is not an AST, import '
+            'graph, or call graph, and this tool does not ingest repository URLs.'
         ),
     )
-    def add(self, args: Any) -> Dict[str, Any]:
-        """Ingest content into a cognee dataset."""
-        args = normalize_tool_input(args, tool_name='add')
+    def remember(self, args: Any) -> Dict[str, Any]:
+        args = normalize_tool_input(args, tool_name='remember')
         cfg = self.IGlobal
+        text = _required_string(args, 'text', tool_name='remember')
+        dataset = _dataset(args, cfg.dataset, tool_name='remember')
+        run_in_background = args.get('run_in_background', False)
+        if not isinstance(run_in_background, bool):
+            raise ValueError('cognee.remember: "run_in_background" must be a boolean')
 
-        text = str(args.get('text') or '').strip()
-        if not text:
-            raise ValueError('cognee.add: "text" is required and must be a non-empty string')
-
-        dataset = str(args.get('dataset') or cfg.dataset).strip() or cfg.dataset
-        run_in_background = bool(args.get('run_in_background', False))
-
-        return cognee_client.add(
+        return cognee_client.remember(
             cfg.base_url,
             cfg.api_key,
             text=text,
-            dataset=dataset,
-            run_in_background=run_in_background,
-            timeout=cfg.request_timeout,
-        )
-
-    @tool_function(
-        input_schema={
-            'type': 'object',
-            'properties': {
-                'dataset': {
-                    'type': 'string',
-                    'description': 'Dataset to build the graph for. Defaults to the node config value.',
-                },
-                'run_in_background': {
-                    'type': 'boolean',
-                    'description': 'When true, start the build and return immediately with a run id. Default false (wait for completion).',
-                },
-            },
-        },
-        output_schema={
-            'type': 'object',
-            'properties': {
-                'dataset': {'type': 'string'},
-                'status': {'type': 'string'},
-                'pipeline_run_id': {'type': 'string'},
-            },
-        },
-        description=(
-            'Build the knowledge graph and embeddings from content already added to a dataset. Run '
-            'this after add and before search. Synchronous by default and can take a while on large '
-            'datasets; set run_in_background to return immediately with a run id.'
-        ),
-    )
-    def cognify(self, args: Any) -> Dict[str, Any]:
-        """Build the cognee knowledge graph for a dataset."""
-        args = normalize_tool_input(args, tool_name='cognify')
-        cfg = self.IGlobal
-
-        dataset = str(args.get('dataset') or cfg.dataset).strip() or cfg.dataset
-        run_in_background = bool(args.get('run_in_background', False))
-
-        return cognee_client.cognify(
-            cfg.base_url,
-            cfg.api_key,
             dataset=dataset,
             run_in_background=run_in_background,
             timeout=cfg.request_timeout,
@@ -140,19 +83,19 @@ class IInstance(IInstanceBase):
             'properties': {
                 'query': {
                     'type': 'string',
-                    'description': 'Natural-language question to answer from cognee memory.',
-                },
-                'search_type': {
-                    'type': 'string',
-                    'description': 'How to retrieve: GRAPH_COMPLETION (graph answer, default), RAG_COMPLETION, CHUNKS, SUMMARIES, TEMPORAL, or FEELING_LUCKY. Defaults to the node config value.',
+                    'description': 'Natural-language question to answer from persistent memory.',
                 },
                 'dataset': {
                     'type': 'string',
-                    'description': 'Dataset to search. Defaults to the node config value.',
+                    'description': 'Dataset to recall from. Defaults to node configuration.',
+                },
+                'search_type': {
+                    'type': 'string',
+                    'description': 'Cognee retrieval strategy. Defaults to graph completion decomposition.',
                 },
                 'top_k': {
                     'type': 'integer',
-                    'description': 'Maximum number of results to retrieve. Defaults to the node config value.',
+                    'description': 'Maximum results to retrieve, from 1 through 100.',
                 },
             },
         },
@@ -164,38 +107,37 @@ class IInstance(IInstanceBase):
             },
         },
         description=(
-            'Search cognee memory and return relevant results. Requires content to have been added '
-            'and cognified first. Returns a list of results (a graph/RAG answer for completion '
-            'search types, or raw passages for CHUNKS/SUMMARIES) and their count.'
+            'Recall grounded results from persistent Cognee memory with source references always '
+            'enabled. Use after remember has completed. Graph retrieval follows semantic '
+            'relationships; it does not inspect an AST, import graph, or call graph.'
         ),
     )
-    def search(self, args: Any) -> Dict[str, Any]:
-        """Query cognee memory and return relevant results."""
-        args = normalize_tool_input(args, tool_name='search')
+    def recall(self, args: Any) -> Dict[str, Any]:
+        args = normalize_tool_input(args, tool_name='recall')
         cfg = self.IGlobal
+        query = _required_string(args, 'query', tool_name='recall')
+        dataset = _dataset(args, cfg.dataset, tool_name='recall')
 
-        query = str(args.get('query') or '').strip()
-        if not query:
-            raise ValueError('cognee.search: "query" is required and must be a non-empty string')
-
-        search_type = str(args.get('search_type') or cfg.search_type).strip().upper()
+        search_type = args.get('search_type', cfg.search_type)
+        if not isinstance(search_type, str) or not search_type.strip():
+            raise ValueError('cognee.recall: "search_type" must be a non-empty string')
+        search_type = search_type.strip().upper()
         if search_type not in SEARCH_TYPES:
-            search_type = cfg.search_type
+            raise ValueError(f'cognee.recall: unsupported search_type "{search_type}"')
 
-        dataset = str(args.get('dataset') or cfg.dataset).strip() or cfg.dataset
+        top_k = args.get('top_k', cfg.top_k)
+        if isinstance(top_k, bool) or not isinstance(top_k, int):
+            raise ValueError('cognee.recall: "top_k" must be an integer')
+        top_k = max(1, min(MAX_TOP_K, top_k))
 
-        raw_top_k = args.get('top_k', cfg.top_k)
-        if isinstance(raw_top_k, bool) or not isinstance(raw_top_k, int):
-            raw_top_k = cfg.top_k
-        top_k = max(1, min(MAX_TOP_K, raw_top_k))
-
-        results = cognee_client.search(
+        results = cognee_client.recall(
             cfg.base_url,
             cfg.api_key,
             query=query,
-            search_type=search_type,
             dataset=dataset,
+            search_type=search_type,
             top_k=top_k,
+            include_references=True,
             timeout=cfg.request_timeout,
         )
         return {'results': results, 'count': len(results)}
@@ -206,7 +148,7 @@ class IInstance(IInstanceBase):
             'properties': {
                 'dataset': {
                     'type': 'string',
-                    'description': 'Dataset to clear. Defaults to the node config value.',
+                    'description': 'Dataset whose remember pipeline should be checked.',
                 },
             },
         },
@@ -214,26 +156,109 @@ class IInstance(IInstanceBase):
             'type': 'object',
             'properties': {
                 'dataset': {'type': 'string'},
-                'status': {'type': 'string', 'description': 'reset | not_found'},
-                'deleted': {'type': 'boolean'},
+                'dataset_id': {'type': 'string'},
+                'status': {
+                    'type': 'string',
+                    'enum': ['pending', 'running', 'completed', 'failed'],
+                },
             },
         },
         description=(
-            'Permanently clear a cognee dataset: deletes its knowledge graph, ingested data, and the '
-            'dataset record. Use to start a dataset over. This cannot be undone. Reports not_found if '
-            'the dataset does not exist (nothing to clear).'
+            'Check whether background Cognee memory processing is pending, running, completed, or '
+            'failed before calling recall or export_visualization. The resulting graph is semantic, '
+            'not an AST, import graph, or call graph.'
         ),
     )
-    def reset(self, args: Any) -> Dict[str, Any]:
-        """Clear a cognee dataset."""
-        args = normalize_tool_input(args, tool_name='reset')
+    def pipeline_status(self, args: Any) -> Dict[str, Any]:
+        args = normalize_tool_input(args, tool_name='pipeline_status')
         cfg = self.IGlobal
-
-        dataset = str(args.get('dataset') or cfg.dataset).strip() or cfg.dataset
-
-        return cognee_client.reset(
+        dataset = _dataset(args, cfg.dataset, tool_name='pipeline_status')
+        dataset_id = self._resolve_dataset_id(dataset)
+        status = cognee_client.get_dataset_status(
             cfg.base_url,
             cfg.api_key,
-            dataset=dataset,
+            dataset_id=dataset_id,
             timeout=cfg.request_timeout,
         )
+        return {'dataset': dataset, 'dataset_id': dataset_id, 'status': status}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'dataset': {
+                    'type': 'string',
+                    'description': 'Dataset whose semantic graph should be exported.',
+                },
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'dataset': {'type': 'string'},
+                'dataset_id': {'type': 'string'},
+                'path': {'type': 'string'},
+                'sha256': {'type': 'string'},
+                'bytes': {'type': 'integer'},
+                'media_type': {'type': 'string'},
+            },
+        },
+        description=(
+            'Export a completed Cognee semantic knowledge graph to a private local HTML artifact. '
+            'Returns only its absolute path, SHA-256 hash, byte count, and media type, never the HTML '
+            'payload. This visualizes semantic relationships, not an AST, import graph, or call graph.'
+        ),
+    )
+    def export_visualization(self, args: Any) -> Dict[str, Any]:
+        args = normalize_tool_input(args, tool_name='export_visualization')
+        cfg = self.IGlobal
+        dataset = _dataset(args, cfg.dataset, tool_name='export_visualization')
+        dataset_id = self._resolve_dataset_id(dataset)
+        html, media_type = cognee_client.get_visualization_html(
+            cfg.base_url,
+            cfg.api_key,
+            dataset_id=dataset_id,
+            timeout=cfg.request_timeout,
+        )
+        path = artifact_store.write_html_artifact(cfg.artifact_dir, dataset=dataset, html=html)
+        return {
+            'dataset': dataset,
+            'dataset_id': dataset_id,
+            'path': str(path),
+            'sha256': hashlib.sha256(html).hexdigest(),
+            'bytes': len(html),
+            'media_type': media_type,
+        }
+
+    def _resolve_dataset_id(self, dataset: str) -> str:
+        """Resolve an exact dataset name to the UUID required by status/visualization."""
+        cfg = self.IGlobal
+        datasets = cognee_client.list_datasets(
+            cfg.base_url,
+            cfg.api_key,
+            timeout=cfg.request_timeout,
+        )
+        for row in datasets:
+            if str(row.get('name') or '') == dataset:
+                dataset_id = str(row.get('id') or '').strip()
+                if dataset_id:
+                    return dataset_id
+        raise ValueError(f'cognee: dataset "{dataset}" was not found')
+
+
+def _required_string(args: Dict[str, Any], field: str, *, tool_name: str) -> str:
+    """Return a required trimmed string or raise a tool-scoped input error."""
+    value = args.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f'cognee.{tool_name}: "{field}" is required and must be a non-empty string')
+    return value.strip()
+
+
+def _dataset(args: Dict[str, Any], default: str, *, tool_name: str) -> str:
+    """Resolve a dataset while rejecting an explicitly blank override."""
+    if 'dataset' not in args:
+        return default
+    value = args['dataset']
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f'cognee.{tool_name}: "dataset" must be a non-empty string')
+    return value.strip()

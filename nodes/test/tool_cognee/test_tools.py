@@ -18,13 +18,20 @@ Covers:
 * ``cognee_client.reset`` network-level behavior — the GET/DELETE dataset
   lifecycle via a stubbed ``requests.request``, including the 404-as-not_found
   delete-race handling and key redaction on transport/HTTP failures.
-* ``add`` / ``cognify`` / ``search`` / ``reset`` — input validation, dataset
-  and default fallbacks, per-call overrides, delegation args, raise-on-error.
+* The exact modern public surface — ``remember``, ``recall``,
+  ``pipeline_status``, and ``export_visualization`` — plus lifecycle/config
+  validation and delegation without live Cognee calls.
 """
 
 from __future__ import annotations
 
+import ast
 import importlib
+import hashlib
+import inspect
+import json
+import re
+import textwrap
 import sys
 import types
 from pathlib import Path
@@ -147,6 +154,8 @@ from tool_cognee import IInstance as IInstanceMod  # noqa: E402
 from tool_cognee.IInstance import IInstance  # noqa: E402
 from tool_cognee.IGlobal import IGlobal  # noqa: E402
 
+IGlobalMod = importlib.import_module('tool_cognee.IGlobal')
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -165,7 +174,8 @@ def _make_global(**overrides):
     glb.base_url = 'http://localhost:8000'
     glb.api_key = 'ck_test'
     glb.dataset = 'main'
-    glb.search_type = 'GRAPH_COMPLETION'
+    glb.artifact_dir = '/tmp/rocketride/cognee'
+    glb.search_type = 'GRAPH_COMPLETION_DECOMPOSITION'
     glb.top_k = 15
     glb.request_timeout = 120
     for k, v in overrides.items():
@@ -178,25 +188,6 @@ def _instance(glb):
     inst = IInstance()
     inst.IGlobal = glb
     return inst
-
-
-@pytest.fixture
-def captured(monkeypatch):
-    """Patch the cognee_client helpers, recording call kwargs and returning canned data."""
-    state = {'calls': [], 'add': {'status': 'ok'}, 'cognify': {'status': 'ok'}, 'search': [], 'reset': {}}
-
-    def _record(name, canned_key):
-        def fake(base_url, api_key, **kwargs):
-            state['calls'].append({'name': name, 'base_url': base_url, 'api_key': api_key, 'kwargs': kwargs})
-            return state[canned_key]
-
-        return fake
-
-    monkeypatch.setattr(client, 'add', _record('add', 'add'))
-    monkeypatch.setattr(client, 'cognify', _record('cognify', 'cognify'))
-    monkeypatch.setattr(client, 'search', _record('search', 'search'))
-    monkeypatch.setattr(client, 'reset', _record('reset', 'reset'))
-    return state
 
 
 # ---------------------------------------------------------------------------
@@ -838,152 +829,322 @@ def test_is_retryable_classification(exc, expected):
 
 
 # ---------------------------------------------------------------------------
-# add
+# Public tool surface
 # ---------------------------------------------------------------------------
 
 
-def test_add_delegates_with_defaults(captured):
-    """Add validates text and delegates with the configured dataset + timeout."""
+_PUBLIC_TOOLS = {'remember', 'recall', 'pipeline_status', 'export_visualization'}
+
+
+def _decorated_tools():
+    """Return the public methods decorated as RocketRide tools."""
+    return {
+        name: member
+        for name, member in vars(IInstance).items()
+        if callable(member) and hasattr(member, '__tool_meta__')
+    }
+
+
+def test_inventory_is_exactly_four_modern_memory_tools():
+    """The LLM sees only the four approved modern Cognee operations."""
+    assert set(_decorated_tools()) == _PUBLIC_TOOLS
+
+
+def test_legacy_public_tools_and_descriptions_are_absent():
+    """No legacy, destructive, or generic repository-ingestion surface remains public."""
+    for legacy in ('add', 'cognify', 'search', 'reset'):
+        assert not hasattr(IInstance, legacy)
+
+    public_copy = '\n'.join(
+        [
+            (_NODE_DIR / 'IInstance.py').read_text(),
+            (_NODE_DIR / 'services.json').read_text(),
+            (_NODE_DIR / 'README.md').read_text(),
+        ]
+    ).lower()
+    for legacy_call in ('cognee.add', 'cognee.cognify', 'cognee.search', 'cognee.reset'):
+        assert re.search(rf'{re.escape(legacy_call)}\b(?!_)', public_copy) is None
+    remember_properties = IInstance.remember.__tool_meta__['input_schema']['properties']
+    assert set(remember_properties) == {'text', 'dataset', 'run_in_background'}
+    assert 'url' not in remember_properties['text']['description'].lower()
+    assert 'repo' not in remember_properties['text']['description'].lower()
+
+
+def test_inventory_methods_normalize_first_with_their_exact_tool_name():
+    """Each tool's first executable statement normalizes using its public name."""
+    for name, method in _decorated_tools().items():
+        tree = compile(textwrap.dedent(inspect.getsource(method)), '<tool>', 'exec', ast.PyCF_ONLY_AST)
+        function = tree.body[0]
+        first = function.body[0]
+        assert isinstance(first, ast.Assign)
+        call = first.value
+        assert isinstance(call, ast.Call)
+        assert getattr(call.func, 'id', None) == 'normalize_tool_input'
+        tool_name = next(keyword.value for keyword in call.keywords if keyword.arg == 'tool_name')
+        assert tool_name.value == name
+
+
+@pytest.fixture
+def modern_calls(monkeypatch):
+    """Capture modern client delegation without making HTTP calls."""
+    state = {'calls': [], 'remember': {'status': 'started'}, 'recall': []}
+
+    def record(name):
+        def fake(base_url, api_key, **kwargs):
+            state['calls'].append({'name': name, 'base_url': base_url, 'api_key': api_key, 'kwargs': kwargs})
+            return state[name]
+
+        return fake
+
+    monkeypatch.setattr(client, 'remember', record('remember'))
+    monkeypatch.setattr(client, 'recall', record('recall'))
+    return state
+
+
+def test_remember_delegates_plain_text_only(modern_calls):
+    """Remember accepts plain text and delegates to the one-step memory endpoint."""
     inst = _instance(_make_global())
-    out = inst.add({'text': 'Ada wrote the first algorithm.'})
-    assert out == {'status': 'ok'}
-    call = captured['calls'][-1]
-    assert call['name'] == 'add'
-    assert call['base_url'] == 'http://localhost:8000' and call['api_key'] == 'ck_test'
-    assert call['kwargs']['text'] == 'Ada wrote the first algorithm.'
-    assert call['kwargs']['dataset'] == 'main'
-    assert call['kwargs']['run_in_background'] is False
-    assert call['kwargs']['timeout'] == 120
+    result = inst.remember({'text': 'Ada wrote the first algorithm.', 'run_in_background': True})
+    assert result == {'status': 'started'}
+    assert modern_calls['calls'] == [
+        {
+            'name': 'remember',
+            'base_url': 'http://localhost:8000',
+            'api_key': 'ck_test',
+            'kwargs': {
+                'text': 'Ada wrote the first algorithm.',
+                'dataset': 'main',
+                'run_in_background': True,
+                'timeout': 120,
+            },
+        }
+    ]
 
 
-def test_add_dataset_and_background_override(captured):
-    """Per-call dataset and run_in_background override the config."""
+def test_recall_defaults_to_decomposition_with_references(modern_calls):
+    """Recall uses graph decomposition by default and always asks for provenance."""
+    modern_calls['recall'] = [{'text': 'Ada', 'references': [{'id': 'source-1'}]}]
     inst = _instance(_make_global())
-    inst.add({'text': 'x', 'dataset': 'docs', 'run_in_background': True})
-    kw = captured['calls'][-1]['kwargs']
-    assert kw['dataset'] == 'docs' and kw['run_in_background'] is True
+    result = inst.recall({'query': 'Who wrote the first algorithm?'})
+    assert result == {'results': modern_calls['recall'], 'count': 1}
+    assert modern_calls['calls'][-1]['kwargs'] == {
+        'query': 'Who wrote the first algorithm?',
+        'dataset': 'main',
+        'search_type': 'GRAPH_COMPLETION_DECOMPOSITION',
+        'top_k': 15,
+        'include_references': True,
+        'timeout': 120,
+    }
 
 
-def test_add_requires_text(captured):
-    """Add raises ValueError (no client call) when text is missing/blank."""
-    inst = _instance(_make_global())
-    with pytest.raises(ValueError):
-        inst.add({'text': '   '})
-    with pytest.raises(ValueError):
-        inst.add({})
-    assert captured['calls'] == []
+@pytest.mark.parametrize(
+    ('tool_name', 'args'),
+    [
+        ('remember', {'text': 'memory', 'dataset': '  '}),
+        ('recall', {'query': 'question', 'dataset': '  '}),
+        ('pipeline_status', {'dataset': '  '}),
+        ('export_visualization', {'dataset': '  '}),
+    ],
+)
+def test_blank_dataset_is_rejected(tool_name, args):
+    """An explicitly blank dataset is invalid rather than silently changing scope."""
+    with pytest.raises(ValueError, match='dataset'):
+        getattr(_instance(_make_global()), tool_name)(args)
 
 
-# ---------------------------------------------------------------------------
-# cognify
-# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ('tool_name', 'args', 'field'),
+    [
+        ('remember', {'text': '  '}, 'text'),
+        ('recall', {'query': '  '}, 'query'),
+    ],
+)
+def test_blank_text_or_query_is_rejected(tool_name, args, field):
+    """Remember and recall reject missing semantic input before delegation."""
+    with pytest.raises(ValueError, match=field):
+        getattr(_instance(_make_global()), tool_name)(args)
 
 
-def test_cognify_delegates_default_dataset(captured):
-    """Cognify delegates with the configured dataset and synchronous default."""
-    inst = _instance(_make_global())
-    out = inst.cognify({})
-    assert out == {'status': 'ok'}
-    kw = captured['calls'][-1]['kwargs']
-    assert kw['dataset'] == 'main' and kw['run_in_background'] is False
+def test_recall_rejects_json_boolean_top_k():
+    """JSON true is not accepted as integer one for recall result limits."""
+    with pytest.raises(ValueError, match='top_k'):
+        _instance(_make_global()).recall({'query': 'question', 'top_k': True})
 
 
-def test_cognify_dataset_override(captured):
-    """Cognify honors a per-call dataset override."""
-    inst = _instance(_make_global())
-    inst.cognify({'dataset': 'docs', 'run_in_background': True})
-    kw = captured['calls'][-1]['kwargs']
-    assert kw['dataset'] == 'docs' and kw['run_in_background'] is True
+def test_pipeline_status_resolves_dataset_name_to_uuid(monkeypatch):
+    """Status lists datasets, resolves the exact name, then addresses the UUID."""
+    calls = []
+
+    def list_datasets(base_url, api_key, *, timeout):
+        calls.append(('list', base_url, api_key, timeout))
+        return [{'id': 'dataset-uuid', 'name': 'main'}]
+
+    def get_status(base_url, api_key, *, dataset_id, timeout):
+        calls.append(('status', base_url, api_key, dataset_id, timeout))
+        return 'running'
+
+    monkeypatch.setattr(client, 'list_datasets', list_datasets)
+    monkeypatch.setattr(client, 'get_dataset_status', get_status)
+
+    result = _instance(_make_global()).pipeline_status({})
+    assert result == {'dataset': 'main', 'dataset_id': 'dataset-uuid', 'status': 'running'}
+    assert calls == [
+        ('list', 'http://localhost:8000', 'ck_test', 120),
+        ('status', 'http://localhost:8000', 'ck_test', 'dataset-uuid', 120),
+    ]
 
 
-# ---------------------------------------------------------------------------
-# search
-# ---------------------------------------------------------------------------
+def test_export_visualization_returns_path_hash_and_bytes_never_html(tmp_path, monkeypatch):
+    """Visualization HTML is stored privately; the tool returns metadata, never raw HTML."""
+    html = b'<html><body>semantic graph</body></html>'
+    monkeypatch.setattr(
+        client,
+        'list_datasets',
+        lambda *_args, **_kwargs: [{'id': 'dataset-uuid', 'name': 'main'}],
+    )
+    monkeypatch.setattr(
+        client,
+        'get_visualization_html',
+        lambda *_args, **_kwargs: (html, 'text/html; charset=utf-8'),
+    )
+
+    result = _instance(_make_global(artifact_dir=str(tmp_path))).export_visualization({})
+    expected_path = (tmp_path / 'main-graph.html').resolve()
+    assert result == {
+        'dataset': 'main',
+        'dataset_id': 'dataset-uuid',
+        'path': str(expected_path),
+        'sha256': hashlib.sha256(html).hexdigest(),
+        'bytes': len(html),
+        'media_type': 'text/html; charset=utf-8',
+    }
+    assert 'html' not in result
+    assert expected_path.read_bytes() == html
 
 
-def test_search_delegates_and_shapes_count(captured):
-    """Search builds the query and returns results + count from the client list."""
-    captured['search'] = [{'text': 'answer one'}, {'text': 'answer two'}]
-    inst = _instance(_make_global())
-    out = inst.search({'query': 'who wrote it?'})
-    assert out['count'] == 2 and out['results'][0]['text'] == 'answer one'
-    kw = captured['calls'][-1]['kwargs']
-    assert kw['query'] == 'who wrote it?'
-    assert kw['search_type'] == 'GRAPH_COMPLETION'
-    assert kw['dataset'] == 'main'
-    assert kw['top_k'] == 15
-
-
-def test_search_requires_query(captured):
-    """Search raises ValueError (no client call) on an empty query."""
-    inst = _instance(_make_global())
-    with pytest.raises(ValueError):
-        inst.search({'query': '  '})
-    assert captured['calls'] == []
-
-
-def test_search_invalid_type_falls_back_to_config(captured):
-    """An unknown search_type falls back to the configured default."""
-    captured['search'] = []
-    inst = _instance(_make_global(search_type='RAG_COMPLETION'))
-    inst.search({'query': 'q', 'search_type': 'NONSENSE'})
-    assert captured['calls'][-1]['kwargs']['search_type'] == 'RAG_COMPLETION'
-
-
-def test_search_valid_type_override_is_uppercased(captured):
-    """A valid per-call search_type is accepted (case-insensitively)."""
-    captured['search'] = []
-    inst = _instance(_make_global())
-    inst.search({'query': 'q', 'search_type': 'chunks'})
-    assert captured['calls'][-1]['kwargs']['search_type'] == 'CHUNKS'
-
-
-def test_search_top_k_guards_bool_and_clamps(captured):
-    """top_k rejects booleans (JSON true) and clamps to 1..100."""
-    captured['search'] = []
-    inst = _instance(_make_global())
-    inst.search({'query': 'q', 'top_k': True})  # bool must not become 1
-    assert captured['calls'][-1]['kwargs']['top_k'] == 15
-    inst.search({'query': 'q', 'top_k': 999})
-    assert captured['calls'][-1]['kwargs']['top_k'] == 100
-    inst.search({'query': 'q', 'top_k': 0})
-    assert captured['calls'][-1]['kwargs']['top_k'] == 1
-
-
-# ---------------------------------------------------------------------------
-# reset
-# ---------------------------------------------------------------------------
-
-
-def test_reset_delegates_default_dataset(captured):
-    """Reset delegates with the configured dataset."""
-    captured['reset'] = {'dataset': 'main', 'status': 'reset', 'deleted': True}
-    inst = _instance(_make_global())
-    out = inst.reset({})
-    assert out['deleted'] is True
-    assert captured['calls'][-1]['kwargs']['dataset'] == 'main'
-
-
-def test_reset_dataset_override(captured):
-    """Reset honors a per-call dataset override."""
-    captured['reset'] = {'dataset': 'docs', 'status': 'not_found', 'deleted': False}
-    inst = _instance(_make_global())
-    inst.reset({'dataset': 'docs'})
-    assert captured['calls'][-1]['kwargs']['dataset'] == 'docs'
-
-
-# ---------------------------------------------------------------------------
-# error propagation
-# ---------------------------------------------------------------------------
+def test_pipeline_status_rejects_unknown_dataset(monkeypatch):
+    """A missing dataset is a clear input error and never triggers a status request."""
+    monkeypatch.setattr(client, 'list_datasets', lambda *_args, **_kwargs: [])
+    with pytest.raises(ValueError, match='not found'):
+        _instance(_make_global()).pipeline_status({'dataset': 'missing'})
 
 
 def test_tool_propagates_client_runtimeerror(monkeypatch):
-    """A client RuntimeError propagates out of the tool (never swallowed into a dict)."""
+    """A client RuntimeError propagates out of the tool and is never returned as a dict."""
 
-    def boom(*a, **k):
-        raise RuntimeError('cognee: search request failed (HTTP 500): HTTPError')
+    def boom(*_args, **_kwargs):
+        raise RuntimeError('cognee: recall request failed (HTTP 500)')
 
-    monkeypatch.setattr(client, 'search', boom)
-    inst = _instance(_make_global())
+    monkeypatch.setattr(client, 'recall', boom)
     with pytest.raises(RuntimeError):
-        inst.search({'query': 'q'})
+        _instance(_make_global()).recall({'query': 'question'})
+
+
+# ---------------------------------------------------------------------------
+# Global lifecycle and service schema
+# ---------------------------------------------------------------------------
+
+
+def _configured_global(open_mode='run'):
+    """Create an IGlobal with the minimal engine attributes used by lifecycle methods."""
+    glb = IGlobal()
+    glb.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode=open_mode))
+    glb.glb = types.SimpleNamespace(logicalType='tool_cognee', connConfig={})
+    return glb
+
+
+def test_global_config_mode_skips_setup(monkeypatch):
+    """Canvas configuration mode does not load config or initialize runtime state."""
+    monkeypatch.setattr(
+        IGlobalMod.Config,
+        'getNodeConfig',
+        lambda *_args, **_kwargs: pytest.fail('CONFIG mode must skip setup'),
+    )
+    _configured_global(open_mode=IGlobalMod.OPEN_MODE.CONFIG).beginGlobal()
+
+
+def test_global_loads_exact_runtime_configuration(monkeypatch, tmp_path):
+    """Runtime setup loads all seven values, including an absolute artifact directory."""
+    artifact_dir = tmp_path / 'graphs'
+    config = {
+        'base_url': 'https://cognee.example/',
+        'api_key': '',
+        'dataset': 'demo',
+        'artifact_dir': str(artifact_dir),
+        'search_type': 'GRAPH_COMPLETION_DECOMPOSITION',
+        'top_k': 7,
+        'request_timeout': 45,
+    }
+    monkeypatch.setenv('COGNEE_API_KEY', 'env-key')
+    monkeypatch.setattr(IGlobalMod.Config, 'getNodeConfig', lambda *_args: config)
+
+    glb = _configured_global()
+    glb.beginGlobal()
+
+    assert glb.base_url == 'https://cognee.example'
+    assert glb.api_key == 'env-key'
+    assert glb.dataset == 'demo'
+    assert glb.artifact_dir == str(artifact_dir.resolve())
+    assert glb.search_type == 'GRAPH_COMPLETION_DECOMPOSITION'
+    assert glb.top_k == 7
+    assert glb.request_timeout == 45
+
+
+def test_global_rejects_relative_artifact_directory(monkeypatch):
+    """Artifact storage must be explicitly absolute to avoid cwd-dependent writes."""
+    monkeypatch.setattr(
+        IGlobalMod.Config,
+        'getNodeConfig',
+        lambda *_args: {'base_url': 'https://cognee.example', 'artifact_dir': 'relative/path'},
+    )
+    with pytest.raises(ValueError, match='artifact_dir'):
+        _configured_global().beginGlobal()
+
+
+def test_global_validate_config_warns_instead_of_raising(monkeypatch):
+    """Invalid editor-time configuration emits warnings and stays nonfatal."""
+    warnings = []
+    monkeypatch.setattr(
+        IGlobalMod.Config,
+        'getNodeConfig',
+        lambda *_args: {'base_url': '', 'artifact_dir': 'relative/path'},
+    )
+    monkeypatch.setattr(IGlobalMod, 'warning', warnings.append)
+    _configured_global().validateConfig()
+    assert any('base_url' in message for message in warnings)
+    assert any('artifact_dir' in message for message in warnings)
+
+
+def test_global_end_clears_api_key():
+    """Pipe teardown removes the credential from process memory."""
+    glb = _configured_global()
+    glb.api_key = 'sentinel-secret'
+    glb.endGlobal()
+    assert glb.api_key == ''
+
+
+def _load_services():
+    """Parse services.json after dropping its full-line JSONC comments."""
+    text = '\n'.join(
+        line for line in (_NODE_DIR / 'services.json').read_text().splitlines() if not line.lstrip().startswith('//')
+    )
+    return json.loads(text)
+
+
+def test_global_services_keep_tool_contract_and_exact_seven_fields():
+    """The schema remains an invoke-only tool with no lanes and seven config values."""
+    services = _load_services()
+    assert services['classType'] == ['tool']
+    assert services['capabilities'] == ['invoke']
+    assert services['lanes'] == {}
+    assert set(services['fields']) == {
+        'cognee.base_url',
+        'cognee.api_key',
+        'cognee.dataset',
+        'cognee.artifact_dir',
+        'cognee.search_type',
+        'cognee.top_k',
+        'cognee.request_timeout',
+    }
+    assert services['fields']['cognee.api_key']['secure'] is True
+    assert services['fields']['cognee.api_key']['ui']['ui:widget'] == 'ApiKeyWidget'
