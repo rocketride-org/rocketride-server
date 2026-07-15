@@ -69,11 +69,14 @@ jobs:
               python3 python3-pip
           fi
           # Pre-provide the Python build backends compiler-unix.sh refuses to
-          # auto-install. --break-system-packages for PEP-668 (24.04+/Fedora
-          # mark the system env externally-managed); the fallback covers the
-          # older pip on 22.04 that lacks that flag.
-          python3 -m pip install --break-system-packages --upgrade build wheel \
-            || python3 -m pip install --upgrade build wheel
+          # auto-install. No --upgrade: on 24.04+ `wheel` is distro-managed and
+          # pip can't uninstall it (no RECORD) — upgrading aborts the whole
+          # bootstrap; a plain install just skips the already-satisfied wheel.
+          # --break-system-packages for PEP-668 (24.04+/Fedora mark the env
+          # externally-managed); the fallback covers 22.04's older pip that
+          # lacks that flag (and isn't externally-managed anyway).
+          python3 -m pip install --break-system-packages build wheel \
+            || python3 -m pip install build wheel
 
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
