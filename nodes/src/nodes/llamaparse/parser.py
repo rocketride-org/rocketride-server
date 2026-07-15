@@ -280,6 +280,39 @@ class Parser(ReaderBase):
 
                 debug(f'parsing_metadata: {parsing_metadata}, structured_data: {structured_data}')
 
+                # Preserve financial scale headers. A caption like "(in millions)"
+                # sets the magnitude of every figure in the table below it; if a
+                # downstream chunker or LLM step separates the two, the figures
+                # read as raw units and are silently 1e3/1e6/1e9 off. Weld a
+                # normalized marker to each table and flag numeric tables that
+                # have no scale in scope. Never let this break parsing: on any
+                # failure, fall back to the untouched text_content.
+                detected_scales: list = []
+                scale_warnings: list = []
+                try:
+                    from .scale import annotate_scale, detect_scale_declarations
+
+                    declarations = detect_scale_declarations(text_content)
+                    text_content, scale_warnings = annotate_scale(text_content, declarations)
+                    detected_scales = [
+                        {
+                            'phrase': d.phrase,
+                            'unit': d.unit,
+                            'factor': d.factor,
+                            'currency': d.currency,
+                        }
+                        for d in declarations
+                    ]
+                    debug(
+                        f'Scale headers: {len(detected_scales)} declaration(s), '
+                        f'{len(scale_warnings)} table annotation(s)'
+                    )
+                except Exception as e:
+                    debug(f'Scale-header annotation skipped: {str(e)}')
+
+                parsing_metadata['detected_scales'] = detected_scales
+                parsing_metadata['scale_warnings'] = scale_warnings
+
                 # Return text, structured data, page count, and metadata
                 return {
                     'text': text_content,

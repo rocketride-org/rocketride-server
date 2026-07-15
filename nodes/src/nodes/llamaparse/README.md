@@ -14,6 +14,27 @@ A single shared parser instance is guarded by a lock, so documents are parsed on
 
 ---
 
+## Scale-header preservation
+
+Financial statements declare their magnitude in a caption above the table ("(In millions)", "$ in thousands", "amounts in millions of USD"). If that caption is separated from its table by downstream chunking or an LLM step, every figure reads as raw units and is silently 1,000x, 1,000,000x, or 1,000,000,000x off. Nothing downstream catches it, because a wrong-by-1e6 number looks exactly like a right one.
+
+To keep that loss visible, the parser post-processes the extracted Markdown:
+
+- **Detects scale captions** the parser already emitted ("(in millions)", "in thousands, except per share amounts", "(₹ in crore)", ...) and normalizes each to a unit, a numeric factor, and an optional currency. Prose uses of the same words ("millions of users", "billions served", "hundreds of thousands of dollars") are not treated as captions.
+- **Welds a marker to the table.** When a caption is in scope for a table (same page/section, no page break between them), a normalized line is injected directly above the table, for example `> Scale: amounts in millions (×1,000,000)`. A later chunker or LLM cannot separate the scale from its figures.
+- **Flags a missing scale.** When a table looks numeric and no caption is in scope, a warning line is injected above it: `> ⚠️ Scale not detected for this table. Figures may be in thousands, millions, or billions. Verify against the source.` The warning errs toward caution: a visible warning is far cheaper than a silent 1e6 error.
+
+The results are also surfaced structurally in `parsing_metadata`:
+
+- `detected_scales`: list of `{phrase, unit, factor, currency}` for each caption found.
+- `scale_warnings`: per-table `{table_index, status, ...}` where `status` is `scale_detected`, `scale_missing`, or `not_financial`.
+
+Annotation is idempotent (re-running does not double-inject) and never blocks parsing: any failure falls back to the untouched text.
+
+**Out of scope.** Recovering a caption that LlamaParse dropped from the source entirely is not handled here. That needs an independent source-text extraction and belongs to the audit-grade **`datalab_parse`** node. This node makes an *emitted-but-separable* scale un-loseable and flags its *absence*; it does not re-parse the source.
+
+---
+
 ## Configuration
 
 ### Lanes
