@@ -23,18 +23,42 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { EVENTS } from '../src/client/analytics/events';
+import { initReport, report } from '../src/client/analytics';
 
-const EVENT_NAME_RE = /^[a-z0-9_]+:[a-z0-9_]+$/;
-
-describe('event taxonomy', () => {
-	it('has no duplicate event names', () => {
-		const values = Object.values(EVENTS);
-		expect(new Set(values).size).toBe(values.length);
+describe('rocketride/analytics report core', () => {
+	it('stamps the app id from initReport on every event', () => {
+		const seen: Array<[string, Record<string, unknown> | undefined]> = [];
+		initReport('test-app', (event, props) => seen.push([event, props]));
+		report('nav:click', { target: 'pricing' });
+		expect(seen).toEqual([['nav:click', { app: 'test-app', target: 'pricing' }]]);
 	});
 
-	it('names every event object:action', () => {
-		const offenders = Object.values(EVENTS).filter((v) => v !== '$pageview' && !EVENT_NAME_RE.test(v));
-		expect(offenders).toEqual([]);
+	it('accepts any string event name (loose, no central taxonomy)', () => {
+		const seen: string[] = [];
+		initReport('test-app', (event) => seen.push(event));
+		report('made:up_on_the_spot');
+		expect(seen).toEqual(['made:up_on_the_spot']);
+	});
+
+	it('caller props cannot overwrite the app stamp', () => {
+		const seen: Array<Record<string, unknown> | undefined> = [];
+		initReport('test-app', (_event, props) => seen.push(props));
+		report('store:app_view', { app: 'spoofed', app_id: 'some.catalog.app' });
+		expect(seen).toEqual([{ app: 'test-app', app_id: 'some.catalog.app' }]);
+	});
+
+	it('drops non-string and empty event names', () => {
+		const seen: string[] = [];
+		initReport('test-app', (event) => seen.push(event));
+		report('');
+		report(42 as unknown as string);
+		expect(seen).toEqual([]);
+	});
+
+	it('never throws, even when the sink does', () => {
+		initReport('test-app', () => {
+			throw new Error('sink exploded');
+		});
+		expect(() => report('nav:click')).not.toThrow();
 	});
 });

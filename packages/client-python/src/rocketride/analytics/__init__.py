@@ -21,39 +21,44 @@
 # SOFTWARE.
 
 """
-rocketride.analytics — the RocketRide event taxonomy (Python SDK).
+rocketride.analytics — the one shared event-report function (bare bones).
 
-Names and shapes only: the canonical event names, their source union, and the
-enums their properties draw from. Zero runtime, no side effects.
-
-The capture-time primitives that accompanied this taxonomy (anonymous id
-generation, the opt-out predicate, the standard-props builder) were removed
-until a consumer exists that actually emits events. Reintroduce them alongside
-that consumer rather than ahead of it.
-
-    from rocketride.analytics import EVENTS, EventName
+Every app calls ``report(event, props)`` with any string event + free-form props —
+event names are NOT constrained to a central list; each app owns its own taxonomy.
+The emitting app's id and the transport are injected once per app via
+``init_report(app, sink)`` (the product / VS Code side wires ``client.report()``).
+Every reported event carries ``app`` so downstream can tell which app emitted it.
+Nothing else lives here.
 """
 
 from __future__ import annotations
 
-from .events import (
-    EVENT_PROPS,
-    EVENTS,
-    KNOWN_EVENT_SOURCES,
-    ChatErrorKind,
-    EventName,
-    EventSource,
-    StripeInterval,
-    SubscribeSurface,
-)
+from typing import Callable, Optional
 
-__all__ = [
-    'EVENT_PROPS',
-    'EVENTS',
-    'KNOWN_EVENT_SOURCES',
-    'ChatErrorKind',
-    'EventName',
-    'EventSource',
-    'StripeInterval',
-    'SubscribeSurface',
-]
+ReportSink = Callable[[str, Optional[dict]], None]
+
+_sink: ReportSink = lambda event, props=None: None  # noqa: E731
+_app = ''
+
+__all__ = ['ReportSink', 'init_report', 'report']
+
+
+def init_report(app: str, sink: ReportSink) -> None:
+    """Wire the emitting app id + transport once, at app init (e.g. client.report)."""
+    global _sink, _app
+    _app = app
+    _sink = sink
+
+
+def report(event: str, props: dict | None = None) -> None:
+    """The shared loose event report — any non-empty string event, free-form props.
+
+    Stamps ``app`` (from ``init_report``) on every event. Never raises.
+    """
+    if not isinstance(event, str) or not event:
+        return  # string-ish enforcement, nothing stricter
+    try:
+        # Stamp last so caller props can never overwrite the emitting-app id.
+        _sink(event, {**(props or {}), 'app': _app})
+    except Exception:  # noqa: BLE001 — telemetry must never break the app
+        pass

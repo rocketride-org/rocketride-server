@@ -20,40 +20,43 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""
-Tests for the RocketRide event taxonomy (:mod:`rocketride.analytics.events`).
+"""Tests for the bare-bones report core (:mod:`rocketride.analytics`)."""
 
-The taxonomy is names and shapes only, so these tests guard the two things that
-can actually regress: a duplicate event name silently shadowing another, and an
-``EVENTS`` member that never made it into the ``EventName`` union.
-"""
-
-import re
-
-from rocketride.analytics import EVENTS, EventName
-
-_EVENT_NAME_RE = re.compile(r'^[a-z0-9_]+:[a-z0-9_]+$')
+from rocketride.analytics import init_report, report
 
 
-def _event_values() -> list[str]:
-    return [v for k, v in vars(EVENTS).items() if not k.startswith('_')]
+def test_stamps_app_id_on_every_event():
+    seen = []
+    init_report('test-app', lambda event, props: seen.append((event, props)))
+    report('pipeline:run', {'node_count': 4})
+    assert seen == [('pipeline:run', {'app': 'test-app', 'node_count': 4})]
 
 
-def test_event_names_are_unique():
-    values = _event_values()
-    assert len(values) == len(set(values)), 'duplicate event name in EVENTS'
+def test_accepts_any_string_event_name():
+    seen = []
+    init_report('test-app', lambda event, props: seen.append(event))
+    report('made:up_on_the_spot')
+    assert seen == ['made:up_on_the_spot']
 
 
-def test_every_events_member_is_in_the_event_name_union():
-    # Catches adding a constant to EVENTS without widening EventName.
-    assert set(_event_values()) <= set(EventName.__args__)
+def test_caller_props_cannot_overwrite_app_stamp():
+    seen = []
+    init_report('test-app', lambda event, props: seen.append(props))
+    report('store:app_view', {'app': 'spoofed', 'app_id': 'some.catalog.app'})
+    assert seen == [{'app': 'test-app', 'app_id': 'some.catalog.app'}]
 
 
-def test_every_event_name_union_member_has_an_events_constant():
-    # Catches the reverse: widening EventName without a named constant.
-    assert set(EventName.__args__) <= set(_event_values())
+def test_drops_non_string_and_empty_event_names():
+    seen = []
+    init_report('test-app', lambda event, props: seen.append(event))
+    report('')
+    report(42)  # type: ignore[arg-type]
+    assert seen == []
 
 
-def test_event_names_follow_the_object_action_convention():
-    offenders = [v for v in _event_values() if v != '$pageview' and not _EVENT_NAME_RE.match(v)]
-    assert offenders == [], f'event names must be object:action — got {offenders}'
+def test_never_raises_even_when_sink_does():
+    def exploding_sink(event, props):
+        raise RuntimeError('sink exploded')
+
+    init_report('test-app', exploding_sink)
+    report('pipeline:run')  # must not raise

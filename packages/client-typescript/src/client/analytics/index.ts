@@ -21,16 +21,39 @@
 // SOFTWARE.
 
 // =============================================================================
-// rocketride/analytics — public entry point (barrel)
+// rocketride/analytics — the one shared event-report function
 // =============================================================================
 //
-// Re-exports the shared PostHog event taxonomy — the single source of truth for
-// event names and property shapes, used by the marketing site (posthog-js) and,
-// in future, the product/VS Code side (client.report()).
-//
-// Capture-time primitives (standard-props builder, opt-out predicate, anonymous
-// id) are intentionally NOT part of this module yet: they ship alongside the
-// first consumer that actually emits events, not ahead of it.
+// Bare bones. Every app calls `report(event, props)` with any string event and a
+// free-form props bag — event names are NOT constrained to a central list; each
+// app owns its own taxonomy. The transport and the emitting app's id are
+// injected once per app via `initReport(app, sink)` — home-ui wires
+// `posthog.capture`, the product/VS Code side wires `client.report()`. Every
+// reported event carries `app` so downstream can tell which app emitted it.
+// Nothing else lives here.
 // =============================================================================
 
-export * from './events';
+export type ReportSink = (event: string, props?: Record<string, unknown>) => void;
+
+let _sink: ReportSink = () => {};
+let _app = '';
+
+/** Wire the emitting app id + transport once, at app init (e.g. `initReport('home-ui', posthog.capture)`). */
+export function initReport(app: string, sink: ReportSink): void {
+	_app = app;
+	_sink = sink;
+}
+
+/**
+ * The shared loose event report — any non-empty string event, free-form props.
+ * Stamps `app` (from initReport) on every event. Never throws.
+ */
+export function report(event: string, props?: Record<string, unknown>): void {
+	if (typeof event !== 'string' || !event) return; // string-ish enforcement, nothing stricter
+	try {
+		// Stamp last so caller props can never overwrite the emitting-app id.
+		_sink(event, { ...props, app: _app });
+	} catch {
+		// Telemetry must never break the app.
+	}
+}
