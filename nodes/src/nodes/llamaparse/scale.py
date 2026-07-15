@@ -366,7 +366,6 @@ def _scale_marker(decl: ScaleDeclaration) -> str:
 def annotate_scale(
     text: str,
     declarations: Optional[List[ScaleDeclaration]] = None,
-    table_spans: Optional[List[Tuple[int, int]]] = None,
 ) -> Tuple[str, List[dict]]:
     """Weld scale markers to tables and flag numeric tables missing a scale.
 
