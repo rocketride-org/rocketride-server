@@ -132,6 +132,16 @@ export type { DataTableColumn, IDataTableProps } from './components/data-table/D
 export { createArrayDataSource, createQueryDataSource } from './components/data-table/dataSource';
 export type { DataQuery, DataPage, DataSource } from './components/data-table/dataSource';
 
+// --- DataGrid (style guide section 6.1) ---------------------------------------
+export { DataGrid } from './components/data-grid/DataGrid';
+export type { IDataGridProps, IDataGridHandle, IDataGridPage, IDataGridPageRequest } from './components/data-grid/DataGrid';
+export { createActionsColumn, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch } from './components/data-grid/defaults';
+export type { IGridAction, IActionsColumnConfig, CellBadgeVariant, CellButtonKind } from './components/data-grid/defaults';
+export { createWorkspaceGridPersistence } from './components/data-grid/persistence';
+export type { IDataGridPersistence, DataGridLayout } from './components/data-grid/persistence';
+export { useDebouncedValue } from './hooks/useDebouncedValue';
+export type { ColumnDefinition, CellComponent, RowComponent, Options as TabulatorOptions } from 'tabulator-tables';
+
 // --- Stock composition components (style guide sections 5-6) ------------------
 export { ContentHeader } from './components/content-header/ContentHeader';
 export type { IContentHeaderProps } from './components/content-header/ContentHeader';

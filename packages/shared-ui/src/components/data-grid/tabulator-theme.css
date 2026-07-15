@@ -1,0 +1,405 @@
+/* =============================================================================
+   MIT License
+   Copyright (c) 2026 Aparavi Software AG
+   =============================================================================
+
+   DataGrid token theme — overrides Tabulator's `tabulator_simple` base so the
+   grid renders in the platform design system. Every colour / font value below
+   references an existing --rr-* token (annotated with its source component),
+   so light and dark themes track automatically. No raw hex anywhere.
+
+   Also defines the in-cell primitive classes (.rr-cell-*) used by the DOM
+   formatters in defaults.ts. These replicate the VALUES of StatusBadge,
+   Button (small variants), and commonStyles from the same tokens — a
+   deliberate mirror, since Tabulator formatters build DOM outside React.
+   ========================================================================== */
+
+/* ── Container ─────────────────────────────────────────────────────────────
+   Plain block, no outer border — drops into a Card (noBodyPadding) exactly
+   like the old DataTable's styles.container. */
+.rr-grid .tabulator {
+	background: transparent;
+	border: none;
+	font-family: var(--rr-font-family); /* platform font (commonStyles) */
+	font-size: 13px;                    /* old bodyCell font size */
+}
+
+/* Clickable rows advertise themselves (DataGrid adds the modifier class). */
+.rr-grid--clickable .tabulator-row {
+	cursor: pointer;
+}
+
+/* ── Header ────────────────────────────────────────────────────────────────
+   Old headerCell spec: 11px/700, 0.08em tracking, uppercase,
+   --rr-text-secondary, 9px 12px padding, --rr-border separator. */
+.rr-grid .tabulator .tabulator-header {
+	background: transparent;
+	border-bottom: 1px solid var(--rr-border); /* header separator (tableHeader) */
+}
+.rr-grid .tabulator .tabulator-header .tabulator-col {
+	background: transparent;
+	border-right: none;
+}
+.rr-grid .tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+	padding: 9px 12px;
+}
+.rr-grid .tabulator .tabulator-header .tabulator-col .tabulator-col-title {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--rr-text-secondary); /* header text (old headerCell) */
+	white-space: nowrap;
+}
+/* Sort arrows: neutral edges from --rr-border, active direction in brand
+   (old sortArrow used --rr-brand). */
+.rr-grid .tabulator .tabulator-col .tabulator-col-sorter {
+	color: var(--rr-border);
+}
+.rr-grid .tabulator .tabulator-col.tabulator-sortable[aria-sort='ascending'] .tabulator-col-sorter .tabulator-arrow {
+	border-bottom-color: var(--rr-brand); /* active asc arrow (old sortArrow) */
+}
+.rr-grid .tabulator .tabulator-col.tabulator-sortable[aria-sort='descending'] .tabulator-col-sorter .tabulator-arrow {
+	border-top-color: var(--rr-brand); /* active desc arrow (old sortArrow) */
+}
+.rr-grid .tabulator .tabulator-col.tabulator-sortable .tabulator-col-sorter .tabulator-arrow {
+	border-bottom-color: var(--rr-border);
+	border-top-color: var(--rr-border);
+}
+/* Column resize handle: invisible until hovered, then a brand hairline. */
+.rr-grid .tabulator .tabulator-col-resize-handle:hover {
+	background: color-mix(in srgb, var(--rr-brand) 45%, transparent);
+}
+/* Column being dragged to a new position. */
+.rr-grid .tabulator .tabulator-col.tabulator-moving {
+	background: var(--rr-bg-surface-alt); /* drag ghost (commonStyles surface) */
+	border: 1px solid var(--rr-border);
+}
+
+/* ── Rows and cells ────────────────────────────────────────────────────────
+   Old bodyCell spec: 13px, 10px 12px padding, 30%-opacity border-bottom
+   (commonStyles.tableCell), hover --rr-bg-list-hover. */
+.rr-grid .tabulator .tabulator-tableholder .tabulator-table {
+	background: transparent;
+	color: var(--rr-text-primary); /* cell text (tableCell) */
+}
+.rr-grid .tabulator .tabulator-row {
+	background: transparent;
+	border-bottom: 1px solid color-mix(in srgb, var(--rr-border) 30%, transparent); /* row separator (tableCell) */
+	min-height: 0;
+}
+.rr-grid .tabulator .tabulator-row:hover {
+	background: var(--rr-bg-list-hover); /* row hover (listRow) */
+}
+.rr-grid .tabulator .tabulator-row .tabulator-cell {
+	padding: 10px 12px;
+	border-right: none;
+	font-size: 13px;
+	vertical-align: middle;
+}
+
+/* ── Footer (count + page-size + pager) ────────────────────────────────────
+   Old footer spec: 12.5px --rr-text-secondary, --rr-border top separator;
+   pgBtn: 26px, radius 6, --rr-bg-default; active page solid --rr-brand with
+   --rr-fg-button text at 700. */
+.rr-grid .tabulator .tabulator-footer {
+	background: transparent;
+	border-top: 1px solid var(--rr-border); /* footer separator (old footer) */
+	color: var(--rr-text-secondary);
+	font-size: 12.5px;
+	padding: 4px 8px;
+}
+.rr-grid .tabulator .tabulator-footer .tabulator-footer-contents {
+	padding: 6px 8px;
+}
+.rr-grid .tabulator .tabulator-footer .tabulator-page-counter {
+	color: var(--rr-text-secondary); /* count text (old count) */
+	font-size: 12.5px;
+}
+.rr-grid .tabulator .tabulator-footer .tabulator-paginator {
+	color: var(--rr-text-secondary);
+}
+.rr-grid .tabulator .tabulator-footer .tabulator-page-size {
+	height: 26px;
+	padding: 0 6px;
+	font-family: inherit;
+	font-size: 12.5px;
+	color: var(--rr-text-secondary);    /* select text (old pageSizeSelect) */
+	background: var(--rr-bg-default);   /* select fill (old pageSizeSelect) */
+	border: 1px solid var(--rr-border);
+	border-radius: 6px;
+	cursor: pointer;
+}
+.rr-grid .tabulator .tabulator-footer .tabulator-page {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 26px;
+	height: 26px;
+	padding: 0 8px;
+	margin: 0 2px;
+	border: 1px solid var(--rr-border);
+	border-radius: 6px;
+	font-size: 12px;
+	background: var(--rr-bg-default);   /* page button fill (old pgBtn) */
+	color: var(--rr-text-primary);
+	cursor: pointer;
+}
+.rr-grid .tabulator .tabulator-footer .tabulator-page.active {
+	background: var(--rr-brand);        /* current page (old pgBtn on) */
+	border-color: var(--rr-brand);
+	color: var(--rr-fg-button);
+	font-weight: 700;
+}
+.rr-grid .tabulator .tabulator-footer .tabulator-page:disabled {
+	opacity: 0.5;
+	pointer-events: none;
+}
+/* Footer contract: hidden entirely when the set fits one page (decision
+   2026-07-08 "DataTable footer only when multi-page"); DataGrid toggles the
+   modifier from getPageMax(). */
+.rr-grid--single-page .tabulator .tabulator-footer {
+	display: none;
+}
+
+/* ── Placeholder (empty state) ─────────────────────────────────────────────
+   Styled like the stock EmptyState card: dashed --rr-border-hover border,
+   radius 10, --rr-bg-surface-alt fill, 15px/700 title + 13px secondary text. */
+.rr-grid .tabulator .tabulator-placeholder {
+	background: transparent;
+}
+.rr-grid .tabulator .tabulator-placeholder .tabulator-placeholder-contents {
+	margin: 16px;
+	padding: 48px 24px;
+	border: 1px dashed var(--rr-border-hover); /* EmptyState container */
+	border-radius: 10px;
+	background: var(--rr-bg-surface-alt);      /* EmptyState container */
+	color: var(--rr-text-secondary);
+	font-size: 13px;
+	white-space: normal;
+}
+.rr-grid .rr-grid-empty-title {
+	display: block;
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--rr-text-primary); /* EmptyState title */
+	margin-bottom: 6px;
+	text-align: center;
+}
+.rr-grid .rr-grid-empty-desc {
+	display: block;
+	font-size: 13px;
+	color: var(--rr-text-secondary); /* EmptyState description */
+	max-width: 380px;
+	margin: 0 auto;
+	text-align: center;
+}
+
+/* ── Loading / error overlays ──────────────────────────────────────────────
+   Data-loader alert: translucent paper veil, 13px message; error text in
+   --rr-color-error (mirrors the old stale-error banner colour). */
+.rr-grid .tabulator .tabulator-alert {
+	background: color-mix(in srgb, var(--rr-bg-paper) 60%, transparent); /* veil (bg-paper) */
+}
+.rr-grid .tabulator .tabulator-alert .tabulator-alert-msg {
+	border-radius: 8px;
+	border: 1px solid var(--rr-border);
+	background: var(--rr-bg-paper);
+	font-size: 13px;
+	font-weight: 500;
+	padding: 10px 16px;
+}
+.rr-grid .tabulator .tabulator-alert .tabulator-alert-msg.tabulator-alert-state-msg {
+	color: var(--rr-text-secondary); /* "Loading" message */
+}
+.rr-grid .tabulator .tabulator-alert .tabulator-alert-msg.tabulator-alert-state-error {
+	color: var(--rr-color-error); /* load-failure message (old staleErrorBanner) */
+	border-color: color-mix(in srgb, var(--rr-color-error) 40%, transparent);
+}
+
+/* ── Header menu (column show/hide + reset) ────────────────────────────────
+   Themed to the platform popup-menu look: paper surface, --rr-border edge,
+   list-hover rows. The menu is appended to <body>, outside .rr-grid, so
+   these rules key off Tabulator's own class only. */
+.tabulator-menu.tabulator-popup-container {
+	background: var(--rr-bg-paper);      /* popup surface (popupMenu) */
+	border: 1px solid var(--rr-border);
+	border-radius: 8px;
+	box-shadow: 0 8px 24px var(--rr-shadow-widget); /* popup shadow (popupMenu) */
+	font-family: var(--rr-font-family);
+	font-size: 12.5px;
+	color: var(--rr-text-primary);
+	padding: 4px;
+}
+.tabulator-menu .tabulator-menu-item {
+	padding: 6px 10px;
+	border-radius: 6px;
+}
+.tabulator-menu .tabulator-menu-item:not(.tabulator-menu-item-disabled):hover {
+	background: var(--rr-bg-list-hover); /* row hover (menuRow) */
+}
+.tabulator-menu .tabulator-menu-separator {
+	border-top: 1px solid var(--rr-border);
+	margin: 4px 2px;
+}
+/* Column-toggle row: 14px check box + label. */
+.tabulator-menu .rr-menu-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+.tabulator-menu .rr-menu-check {
+	display: inline-block;
+	width: 13px;
+	height: 13px;
+	border: 1px solid var(--rr-border-hover);
+	border-radius: 3px;
+	background: var(--rr-bg-default);
+	flex-shrink: 0;
+}
+.tabulator-menu .rr-menu-check--on {
+	background: var(--rr-brand);        /* checked fill (checkbox brand) */
+	border-color: var(--rr-brand);
+	box-shadow: inset 0 0 0 2px var(--rr-bg-paper); /* inner tick well */
+}
+
+/* =============================================================================
+   IN-CELL PRIMITIVES — value clones of StatusBadge / Button / commonStyles.
+   Source-of-truth components noted per block; both read the same tokens.
+   ========================================================================== */
+
+/* StatusBadge clone: 22px pill, 11.5px/600, 7px state dot via ::before. */
+.rr-cell-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 22px;
+	padding: 0 10px;
+	border-radius: 20px;
+	font-size: 11.5px;
+	font-weight: 600;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+.rr-cell-badge::before {
+	content: '';
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: currentColor; /* dot follows the variant text colour */
+	flex-shrink: 0;
+}
+.rr-cell-badge--success {
+	color: var(--rr-color-success);                                          /* StatusBadge success text */
+	border-color: color-mix(in srgb, var(--rr-color-success) 40%, transparent);
+	background: color-mix(in srgb, var(--rr-color-success) 7%, transparent);
+}
+.rr-cell-badge--info {
+	color: var(--rr-color-info);                                             /* StatusBadge info text */
+	border-color: color-mix(in srgb, var(--rr-color-info) 40%, transparent);
+	background: color-mix(in srgb, var(--rr-color-info) 6%, transparent);
+}
+.rr-cell-badge--warning {
+	color: var(--rr-color-warning);                                          /* StatusBadge warning text */
+	border-color: color-mix(in srgb, var(--rr-color-warning) 55%, transparent);
+	background: color-mix(in srgb, var(--rr-color-warning) 10%, transparent);
+}
+.rr-cell-badge--error {
+	color: var(--rr-color-error);                                            /* StatusBadge error text */
+	border-color: color-mix(in srgb, var(--rr-color-error) 40%, transparent);
+	background: color-mix(in srgb, var(--rr-color-error) 6%, transparent);
+}
+.rr-cell-badge--muted {
+	color: var(--rr-text-secondary);   /* StatusBadge muted text */
+	border-color: var(--rr-border);
+	background: var(--rr-bg-surface-alt);
+}
+/* Muted dot uses the disabled tone like StatusDot's muted variant. */
+.rr-cell-badge--muted::before {
+	background: var(--rr-text-disabled);
+}
+
+/* Small Button clone (buttonSmall modifier: 3px 9px, 11px). */
+.rr-cell-btn {
+	display: inline-flex;
+	align-items: center;
+	padding: 3px 9px;
+	font-size: 11px;
+	line-height: 1.4;
+	font-weight: 500;
+	font-family: inherit;
+	border-radius: 6px;
+	border: 1px solid var(--rr-border);
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+.rr-cell-btn:hover {
+	opacity: 0.85;
+}
+.rr-cell-btn--ghost {
+	background: transparent;           /* ghost row action */
+	color: var(--rr-text-primary);
+}
+.rr-cell-btn--secondary {
+	background: var(--rr-bg-paper);    /* buttonSecondarySmall fill */
+	color: var(--rr-text-secondary);
+}
+.rr-cell-btn--danger {
+	background: var(--rr-color-error); /* buttonDangerSmall fill */
+	border-color: var(--rr-color-error);
+	color: var(--rr-fg-button);
+}
+
+/* Actions cell wrapper: right-aligned button row. */
+.rr-cell-actions {
+	display: inline-flex;
+	gap: 6px;
+	justify-content: flex-end;
+}
+
+/* Monospace value (commonStyles.fontMono at table scale). */
+.rr-cell-mono {
+	font-family: var(--rr-font-mono, 'Ubuntu Mono', monospace); /* fontMono */
+	font-size: 12px;
+}
+
+/* De-emphasised value (dates, secondary columns). */
+.rr-cell-muted {
+	font-size: 12px;
+	color: var(--rr-text-secondary); /* secondary text token */
+}
+
+/* 32px initials avatar (UsersView avatar cell); background set inline from
+   a --rr-chart-* token by the formatter. */
+.rr-cell-avatar {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--rr-fg-button); /* on-colour text token */
+}
+
+/* Trend arrows (models list): tiny mono glyphs in state colours. */
+.rr-cell-trend-up {
+	font-size: 10px;
+	color: var(--rr-color-success); /* improving metric */
+}
+.rr-cell-trend-down {
+	font-size: 10px;
+	color: var(--rr-color-error);   /* degrading metric */
+}
+
+/* Truncating cell content with hover tooltip left to Tabulator (tooltip
+   module); this class just constrains the box. */
+.rr-cell-truncate {
+	display: inline-block;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: bottom;
+}
