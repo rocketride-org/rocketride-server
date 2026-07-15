@@ -1,8 +1,8 @@
 diff --git a/Release/include/cpprest/astreambuf.h b/Release/include/cpprest/astreambuf.h
-index 1dcb285..010fd32 100644
+index 1dcb285..c5e126b 100644
 --- a/Release/include/cpprest/astreambuf.h
 +++ b/Release/include/cpprest/astreambuf.h
-@@ -22,6 +22,65 @@
+@@ -22,6 +22,66 @@
  #include <math.h>
  #include <memory>
  
@@ -15,6 +15,7 @@ index 1dcb285..010fd32 100644
 +// provide the extension, so the guard avoids a redefinition there. The <string>
 +// include precedes the guard so _LIBCPP_VERSION is defined when it is evaluated.
 +#include <cstdint>
++#include <cstdio>
 +#include <cstring>
 +#include <string>
 +#if defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 160000
