@@ -15,11 +15,12 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
+import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { DataGrid } from '../../../components/data-grid/DataGrid';
 import { avatarEl, buttonEl, matchesSearch } from '../../../components/data-grid/defaults';
+import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import { InputField } from '../../../components/input-field/InputField';
 import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import type { ConnectResult, OrgDetail, MemberRecord } from '../types';
@@ -360,8 +361,8 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 	};
 
 	// Column definitions; cells keep the existing avatar / badge renderings.
-	const columns = useMemo<ColumnDefinition[]>(() => {
-		const cols: ColumnDefinition[] = [
+	const columns = useMemo<GridColumnDefinition[]>(() => {
+		const cols: GridColumnDefinition[] = [
 			{
 				title: 'Member',
 				field: 'displayName',
@@ -395,7 +396,9 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 				width: 150,
 				hozAlign: 'right',
 				headerSort: false,
-				headerMenu: false,
+				// Popup-exempt actions column (no header popup, no toggle-list
+				// entry); the marker is stripped before reaching Tabulator.
+				rrNoPopup: true,
 				resizable: false,
 				formatter: (cell: CellComponent) => {
 					const row = cell.getRow().getData() as MemberRow;
@@ -431,9 +434,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 					if (!target) return;
 					actionRef.current((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as MemberRow);
 				},
-				// `headerMenu: false` (menu-exempt column) predates the @types union
-				// (see createActionsColumn in defaults.ts) — hence the two-step cast.
-			} as unknown as ColumnDefinition);
+			});
 		}
 		return cols;
 	}, [isOrgAdmin, profile?.userId, resendingUserId, resentUserId]);

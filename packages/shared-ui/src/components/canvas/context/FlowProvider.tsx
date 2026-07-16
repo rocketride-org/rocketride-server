@@ -41,7 +41,7 @@
 
 import { ReactElement, ReactNode } from 'react';
 
-import { IProject, IValidateResponse, ITaskStatus } from '../types';
+import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from '../types';
 
 import { FlowPreferencesProvider } from './FlowPreferencesContext';
 import { FlowProjectProvider } from './FlowProjectContext';
@@ -84,7 +84,7 @@ export interface IFlowProviderProps {
 	inventoryConnectorTitleMap?: Record<string, string>;
 
 	// --- Host callbacks ----------------------------------------------------
-	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
+	handleValidatePipeline?: (pipeline: IValidatePipelinePayload) => Promise<IValidateResponse>;
 	onContentChanged?: (project: IProject) => void;
 	onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
 	onUndo?: () => void;

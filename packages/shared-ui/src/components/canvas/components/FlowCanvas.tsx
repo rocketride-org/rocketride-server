@@ -480,7 +480,7 @@ export default function Canvas(): ReactElement {
 			{showCreatePanel && <CreateNodePanel onClose={() => setShowCreatePanel(false)} />}
 
 			{/* Node config panel — slides in from the right */}
-			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode as unknown as import('../types').INode} onClose={() => setEditingNodeId(undefined)} />}
+			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode} onClose={() => setEditingNodeId(undefined)} />}
 			{/* Configuration reminder after template instantiation */}
 			{configSnackbar !== null && (
 				<div

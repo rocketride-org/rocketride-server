@@ -224,8 +224,11 @@ export function DetailPanel({
 		const layer = acquireOverlayLayer();
 		// Trigger the slide-in on the next frame so the transition actually runs.
 		const enterRaf = requestAnimationFrame(() => setEntered(true));
-		// Move focus into the panel (the close button).
-		const focusRaf = requestAnimationFrame(() => closeButtonRef.current?.focus());
+		// Move focus into the panel (the close button). preventScroll: focus()
+		// otherwise scrolls the focused element into view in every scrollable
+		// ancestor — the drawer is position:fixed so this is belt-and-braces
+		// here, but it keeps both focus sites symmetric (see the restore below).
+		const focusRaf = requestAnimationFrame(() => closeButtonRef.current?.focus({ preventScroll: true }));
 		// Escape closes the drawer; Tab is trapped inside it — aria-modal alone
 		// does not stop keyboard focus from wandering into the page behind.
 		const onKeyDown = (event: KeyboardEvent): void => {
@@ -249,9 +252,14 @@ export function DetailPanel({
 			// Reset so a subsequent open animates from off-screen again.
 			setEntered(false);
 			// Return focus to whatever held it before the drawer opened.
+			// preventScroll is REQUIRED here: opening from a DataGrid row click
+			// leaves Tabulator's `.tabulator-tableholder` (which carries
+			// tabindex="0") as the previously-focused element, and a plain
+			// focus() scrolls that tall rows region into view in every
+			// scrollable ancestor — jumping the page on close.
 			const previous = previouslyFocusedRef.current;
 			if (previous instanceof HTMLElement) {
-				previous.focus();
+				previous.focus({ preventScroll: true });
 			}
 		};
 	}, [open]);

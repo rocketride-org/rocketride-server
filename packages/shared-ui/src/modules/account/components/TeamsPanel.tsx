@@ -15,11 +15,12 @@
 
 import React, { useMemo, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
+import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { DataGrid } from '../../../components/data-grid/DataGrid';
 import { avatarEl, buttonEl, createActionsColumn } from '../../../components/data-grid/defaults';
+import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import type { ConnectResult, TeamRecord, TeamDetail, TeamMemberRecord } from '../types';
 import { PERM_DISPLAY, initials, avatarColor } from './shared';
 
@@ -301,8 +302,8 @@ const TeamDetailView: React.FC<TeamDetailViewProps> = ({ teamDetail, profile, on
 	};
 
 	// Column definitions; cells keep the existing avatar / pill renderings.
-	const columns = useMemo<ColumnDefinition[]>(() => {
-		const cols: ColumnDefinition[] = [
+	const columns = useMemo<GridColumnDefinition[]>(() => {
+		const cols: GridColumnDefinition[] = [
 			{
 				title: 'Member',
 				field: 'displayName',
@@ -337,7 +338,9 @@ const TeamDetailView: React.FC<TeamDetailViewProps> = ({ teamDetail, profile, on
 				width: 170,
 				hozAlign: 'right',
 				headerSort: false,
-				headerMenu: false,
+				// Popup-exempt actions column (no header popup, no toggle-list
+				// entry); the marker is stripped before reaching Tabulator.
+				rrNoPopup: true,
 				resizable: false,
 				// Formatter: Edit Perms always; Remove unless last-admin self row.
 				formatter: (cell: CellComponent) => {
@@ -357,9 +360,7 @@ const TeamDetailView: React.FC<TeamDetailViewProps> = ({ teamDetail, profile, on
 					if (!target) return;
 					actionRef.current((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as TeamMemberRow);
 				},
-				// `headerMenu: false` (menu-exempt column) predates the @types union
-				// (see createActionsColumn in defaults.ts) — hence the two-step cast.
-			} as unknown as ColumnDefinition);
+			});
 		}
 		return cols;
 	}, [isTeamAdmin, adminCount, profile?.userId]);
@@ -424,7 +425,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 	};
 
 	// Column definitions; the team cell keeps its color-chip rendering.
-	const columns = useMemo<ColumnDefinition[]>(
+	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
 				title: 'Team',

@@ -40,7 +40,7 @@ import { useMemo, useState, useEffect } from 'react';
 
 import FlowContainer from './components/FlowContainer';
 import FlowCanvas from './components/FlowCanvas';
-import { IProject, IValidateResponse, ITaskStatus } from './types';
+import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from './types';
 import { getMuiTheme } from '../../themes/getMuiTheme';
 import { buildInventory } from './util/helpers';
 import { IServiceCatalog } from './types';
@@ -72,8 +72,8 @@ export interface IFlowProps {
 	/** Total number of pipes in the pipeline. */
 	totalPipes?: number;
 
-	/** Validates the pipeline server-side. */
-	handleValidatePipeline: (pipeline: IProject) => Promise<IValidateResponse>;
+	/** Validates a full pipeline or a single component server-side. */
+	handleValidatePipeline: (pipeline: IValidatePipelinePayload) => Promise<IValidateResponse>;
 
 	/** OAuth broker return URL for hosts that intercept a deep link (e.g. VS Code). */
 	oauthReturnUrl?: string;

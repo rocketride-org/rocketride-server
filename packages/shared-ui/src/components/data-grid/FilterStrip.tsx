@@ -55,8 +55,12 @@ export interface IGridFilterDef {
 export interface IFilterStripProps {
 	/** The filter controls to render, in order. */
 	defs: IGridFilterDef[];
-	/** Current committed values keyed by def key. */
-	values: Record<string, string>;
+	/**
+	 * Current committed values keyed by def key. The record is shared with
+	 * the header-popup filters, so values may be arrays ('values' checklists)
+	 * — the strip's controls are string-valued and render arrays as ''.
+	 */
+	values: Record<string, string | string[]>;
 	/** Display labels for typeahead selections keyed by def key. */
 	labels: Record<string, string>;
 	/**
@@ -239,6 +243,16 @@ const TypeaheadControl: React.FC<{
 // =============================================================================
 
 /**
+ * Coerce a shared filter value to the strip's string domain — array values
+ * belong to header-popup 'values' checklists and render as '' here.
+ *
+ * @param value - Raw value from the shared filter record.
+ * @returns The string form ('' for arrays / missing keys).
+ */
+const asString = (value: string | string[] | undefined): string =>
+	typeof value === 'string' ? value : '';
+
+/**
  * Render the labelled filter controls row. See the module doc for behavior.
  *
  * @param props - {@link IFilterStripProps}.
@@ -255,7 +269,7 @@ export const FilterStrip: React.FC<IFilterStripProps> = ({ defs, values, labels,
 					<input
 						style={{ ...commonStyles.inputField, height: 30, width: def.width ?? 180 }}
 						placeholder={def.placeholder}
-						value={values[def.key] ?? ''}
+						value={asString(values[def.key])}
 						onChange={(e) => onChange(def.key, e.target.value)}
 					/>
 				)}
@@ -264,7 +278,7 @@ export const FilterStrip: React.FC<IFilterStripProps> = ({ defs, values, labels,
 				{def.type === 'select' && (
 					<select
 						style={{ ...styles.select, ...(def.width ? { width: def.width } : {}) }}
-						value={values[def.key] ?? ''}
+						value={asString(values[def.key])}
 						onChange={(e) => onChange(def.key, e.target.value)}
 					>
 						{(def.options ?? []).map((opt) => (
@@ -278,7 +292,7 @@ export const FilterStrip: React.FC<IFilterStripProps> = ({ defs, values, labels,
 					<input
 						type="date"
 						style={{ ...styles.date, ...(def.width ? { width: def.width } : {}) }}
-						value={values[def.key] ?? ''}
+						value={asString(values[def.key])}
 						onChange={(e) => onChange(def.key, e.target.value)}
 					/>
 				)}

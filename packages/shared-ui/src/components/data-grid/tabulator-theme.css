@@ -51,20 +51,31 @@
 	color: var(--rr-text-secondary); /* header text (old headerCell) */
 	white-space: nowrap;
 }
-/* Sort arrows: neutral edges from --rr-border, active direction in brand
-   (old sortArrow used --rr-brand). */
-.rr-grid.tabulator .tabulator-col .tabulator-col-sorter {
-	color: var(--rr-border);
+/* Sort arrows: rendered ONLY on actively sorted columns (decision
+   2026-07-15). Tabulator stamps aria-sort on the .tabulator-col element
+   ("ascending" / "descending" on the sorted column, "none" otherwise —
+   tabulator_esm.mjs Sort.setColumnHeader / clearColumnHeaders), and the
+   base theme forces
+   the sorter box visible with a FIVE-class display:flex rule
+   (.tabulator .tabulator-header .tabulator-col .tabulator-col-content
+   .tabulator-col-sorter), so the hide/restore pair below repeats that full
+   chain under .rr-grid to out-specify it — a shorter selector loses the
+   cascade and leaves gray idle arrows visible. Headers stay fully clickable:
+   the sorter is just an indicator; the click target is the header itself. */
+.rr-grid.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-sorter {
+	display: none;
 }
-.rr-grid.tabulator .tabulator-col.tabulator-sortable[aria-sort='ascending'] .tabulator-col-sorter .tabulator-arrow {
+.rr-grid.tabulator .tabulator-header .tabulator-col[aria-sort='ascending'] .tabulator-col-content .tabulator-col-sorter,
+.rr-grid.tabulator .tabulator-header .tabulator-col[aria-sort='descending'] .tabulator-col-content .tabulator-col-sorter {
+	display: flex; /* restore the base theme's flex sorter box */
+}
+/* Active direction renders in brand (old sortArrow used --rr-brand); the
+   full base-theme chain again, to out-specify the base #666 shorthand. */
+.rr-grid.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort='ascending'] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
 	border-bottom-color: var(--rr-brand); /* active asc arrow (old sortArrow) */
 }
-.rr-grid.tabulator .tabulator-col.tabulator-sortable[aria-sort='descending'] .tabulator-col-sorter .tabulator-arrow {
+.rr-grid.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort='descending'] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
 	border-top-color: var(--rr-brand); /* active desc arrow (old sortArrow) */
-}
-.rr-grid.tabulator .tabulator-col.tabulator-sortable .tabulator-col-sorter .tabulator-arrow {
-	border-bottom-color: var(--rr-border);
-	border-top-color: var(--rr-border);
 }
 /* Column resize handle: invisible until hovered, then a brand hairline. */
 .rr-grid.tabulator .tabulator-col-resize-handle:hover {
@@ -111,9 +122,11 @@
 	background: transparent;
 }
 
-/* ── Header menu button (column show/hide + reset) ─────────────────────────
-   The per-column popup affordance stays invisible until the header is
-   hovered, then reads as a quiet secondary control. */
+/* ── Header popup button (filter + column show/hide + reset) ───────────────
+   The per-column popup affordance (Tabulator renders the same
+   .tabulator-header-popup-button for headerMenu and headerPopup) stays
+   invisible until the header is hovered, then reads as a quiet secondary
+   control. */
 .rr-grid.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-header-popup-button {
 	padding: 0 5px;
 	color: var(--rr-text-secondary); /* quiet affordance (secondary text) */
@@ -160,6 +173,12 @@
 	border: 1px solid var(--rr-border);
 	border-radius: 6px;
 	cursor: pointer;
+	/* The select's drop-down OPTION LIST is native browser chrome (same
+	   situation as the header popup's date-input calendar panel — see the
+	   popup container rule): color-scheme is the only reachable lever,
+	   flipping the list surface to the active theme instead of a stark white
+	   panel on dark themes. */
+	color-scheme: var(--rr-palette-mode, light dark); /* native option list (theme mode token) */
 }
 .rr-grid.tabulator .tabulator-footer .tabulator-page {
 	display: inline-flex;
@@ -195,7 +214,15 @@
 
 /* ── Placeholder (empty state) ─────────────────────────────────────────────
    Styled like the stock EmptyState card: dashed --rr-border-hover border,
-   radius 10, --rr-bg-surface-alt fill, 15px/700 title + 13px secondary text. */
+   radius 10, --rr-bg-surface-alt fill, 15px/700 title + 13px secondary text.
+
+   DOM note (verified in tabulator_esm.mjs 6.5.2 initializePlaceholder):
+   Tabulator wraps only STRING placeholders in a .tabulator-placeholder-
+   contents element — a custom HTMLElement placeholder (ours) is appended to
+   .tabulator-placeholder as-is, so DataGrid.buildPlaceholder stamps the
+   class onto its own wrapper; the same single element shows in EVERY empty
+   render (initial empty AND filtered-to-zero both go through the row
+   manager's one _showPlaceholder path). */
 .rr-grid.tabulator .tabulator-placeholder {
 	background: transparent;
 }
@@ -207,9 +234,15 @@
 	background: var(--rr-bg-surface-alt);      /* EmptyState container */
 	color: var(--rr-text-secondary);
 	font-size: 13px;
+	font-weight: 400; /* neutralize the base theme's bold contents rule */
 	white-space: normal;
 }
-.rr-grid.tabulator .rr-grid-empty-title {
+/* Title / description spans: the base theme forces every placeholder span
+   to #000 with a 3-class + element selector (.tabulator .tabulator-
+   tableholder .tabulator-placeholder span), so both rules below repeat the
+   placeholder class AND the span type to out-specify it — a bare class
+   chain loses and the text goes black (invisible in dark themes). */
+.rr-grid.tabulator .tabulator-placeholder span.rr-grid-empty-title {
 	display: block;
 	font-size: 15px;
 	font-weight: 700;
@@ -217,7 +250,7 @@
 	margin-bottom: 6px;
 	text-align: center;
 }
-.rr-grid.tabulator .rr-grid-empty-desc {
+.rr-grid.tabulator .tabulator-placeholder span.rr-grid-empty-desc {
 	display: block;
 	font-size: 13px;
 	color: var(--rr-text-secondary); /* EmptyState description */
@@ -248,19 +281,42 @@
 	border-color: color-mix(in srgb, var(--rr-color-error) 40%, transparent);
 }
 
-/* ── Header menu (column show/hide + reset) ────────────────────────────────
+/* ── Header menu / popup surface ───────────────────────────────────────────
    Themed to the platform popup-menu look: paper surface, --rr-border edge,
-   list-hover rows. The menu is appended to <body>, outside .rr-grid, so
-   these rules key off Tabulator's own class only. */
-.tabulator-menu.tabulator-popup-container {
+   list-hover rows. Both containers are appended to <body>, outside .rr-grid,
+   so these rules key off Tabulator's own classes only. Menus render as
+   .tabulator-menu.tabulator-popup-container; headerPopup panels render as
+   .tabulator-popup.tabulator-popup-container — same surface treatment. */
+.tabulator-menu.tabulator-popup-container,
+.tabulator-popup.tabulator-popup-container {
 	background: var(--rr-bg-paper);      /* popup surface (popupMenu) */
 	border: 1px solid var(--rr-border);
 	border-radius: 8px;
-	box-shadow: 0 8px 24px var(--rr-shadow-widget); /* popup shadow (popupMenu) */
+	box-shadow: 0 4px 12px var(--rr-shadow-widget); /* popup shadow (popupMenu, exact value) */
 	font-family: var(--rr-font-family);
 	font-size: 12.5px;
 	color: var(--rr-text-primary);
 	padding: 4px;
+	/* Native-widget chrome inside the popup — the calendar PANEL opened by
+	   the date filter input (and the values-checklist scrollbar and number
+	   spinners) is browser-rendered and unreachable by CSS selectors.
+	   Chromium honours exactly two inherited levers, so both are set once
+	   here and inherit to every control in the panel. (The time bound is a
+	   plain TEXT input by design — Chromium's time-picker drop-down ignores
+	   accent-color entirely, so it was replaced with a tokenized text box in
+	   defaults.buildDateFilterControls; only the calendar panel remains.)
+	   - color-scheme flips the native panel surface / text to the active
+	     theme. --rr-palette-mode is the platform's CSS-visible light/dark
+	     signal ("light" | "dark", set on :root by applyTheme from every
+	     theme JSON and defaulted in rocketride-default.css) — the same token
+	     buildMuiTheme keys palette.mode on. The `light dark` fallback covers
+	     documents where the token is absent (e.g. the VS Code webview theme
+	     sheet, which computes mode at runtime instead): the browser then
+	     picks by OS preference — best available without the token.
+	   - accent-color brands the panel's selection highlights (today ring,
+	     selected date cell) in place of the UA default blue. */
+	color-scheme: var(--rr-palette-mode, light dark); /* native panel surface (theme mode token) */
+	accent-color: var(--rr-brand);                    /* native panel highlights (brand) */
 }
 .tabulator-menu .tabulator-menu-item {
 	padding: 6px 10px;
@@ -273,13 +329,11 @@
 	border-top: 1px solid var(--rr-border);
 	margin: 4px 2px;
 }
-/* Column-toggle row: 14px check box + label. */
-.tabulator-menu .rr-menu-toggle {
-	display: inline-flex;
-	align-items: center;
-	gap: 8px;
-}
-.tabulator-menu .rr-menu-check {
+/* Check box of the column-toggle / checklist rows: 13px square, brand fill
+   when on (kept in both container scopes — a caller-provided headerMenu can
+   reuse it). Vertical centring comes from the flex .rr-grid-hp-item row. */
+.tabulator-menu .rr-menu-check,
+.tabulator-popup .rr-menu-check {
 	display: inline-block;
 	width: 13px;
 	height: 13px;
@@ -288,10 +342,211 @@
 	background: var(--rr-bg-default);
 	flex-shrink: 0;
 }
-.tabulator-menu .rr-menu-check--on {
+.tabulator-menu .rr-menu-check--on,
+.tabulator-popup .rr-menu-check--on {
 	background: var(--rr-brand);        /* checked fill (checkbox brand) */
 	border-color: var(--rr-brand);
 	box-shadow: inset 0 0 0 2px var(--rr-bg-paper); /* inner tick well */
+}
+
+/* ── Header popup panel (filter + columns + reset sections) ────────────────
+   The combined per-column panel built by defaults.buildHeaderPopup. The
+   returned panel IS the .tabulator-popup.tabulator-popup-container element
+   (Tabulator's loadPopup stamps both classes onto it), so the surface rule
+   above already paints it; the override below re-shapes the box — a fixed
+   comfortable width and vertical-only padding (sections own the horizontal
+   inset, letting dividers span edge to edge). The container classes are
+   repeated to out-specify the two-class surface rule. */
+.tabulator-popup.tabulator-popup-container.rr-grid-hp {
+	width: 248px;    /* consistent panel width (240-260 spec) */
+	padding: 4px 0;  /* vertical only — sections carry the 12px sides */
+	box-sizing: border-box;
+}
+/* One section (Filter / Columns / Reset): comfortable inner padding. */
+.rr-grid-hp-section {
+	padding: 6px 12px 8px; /* section inset (10-12px spec; 12px sides) */
+}
+/* Section label: matches the filter-strip label spec (10.5px uppercase). */
+.rr-grid-hp-label {
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: 0.6px;
+	text-transform: uppercase;
+	color: var(--rr-text-secondary); /* section label (filter-strip label) */
+	padding: 2px 0 6px;              /* breathing room before the controls */
+}
+/* Filter inputs: full-width 30px controls mirroring commonStyles.inputField
+   (the section's side padding aligns them with the rows below). */
+.rr-grid-hp-input {
+	display: block;
+	width: 100%;
+	height: 30px;
+	margin: 0 0 6px;
+	padding: 0 10px;
+	font-size: 13px;
+	font-family: inherit;
+	border: 1px solid var(--rr-border-input); /* input edge (inputField) */
+	border-radius: 5px;
+	background: var(--rr-bg-input);           /* input fill (inputField) */
+	color: var(--rr-text-primary);            /* input text (inputField) */
+	outline: none;
+	box-sizing: border-box;
+}
+/* Placeholder text ("Contains...", the time box's "HH:MM" format hint):
+   disabled-text token, matching InputField's placeholder treatment. */
+.rr-grid-hp-input::placeholder {
+	color: var(--rr-text-disabled); /* placeholder (InputField placeholder) */
+}
+/* Invalid pending text (the time box's unparsable 24-hour input): a quiet
+   error-token edge only — Apply degrades the bound to date-only rather than
+   blocking, so the flag advises instead of alarms. */
+.rr-grid-hp-input--invalid {
+	border-color: var(--rr-color-error); /* invalid edge (error token) */
+}
+/* Calendar indicator glyph on the date inputs (the only native picker left —
+   the time bound is a plain text box). The glyph is a UA-rendered image: its
+   base colour comes from the inherited color-scheme (dark scheme renders it
+   near-white, light near-black — always legible), and no filter chain can
+   retarget it to an arbitrary token, so the secondary-text "quiet control"
+   weight is approximated with opacity instead, matching the header popup
+   button's rest/hover treatment. */
+.rr-grid-hp-input::-webkit-calendar-picker-indicator {
+	opacity: 0.7;              /* rest weight (header popup button hover value) */
+	cursor: pointer;           /* opens the native panel — advertise the click */
+	transition: opacity 0.12s; /* fade timing (header popup button) */
+}
+.rr-grid-hp-input::-webkit-calendar-picker-indicator:hover {
+	opacity: 1;                /* full strength on hover (header popup button) */
+}
+/* Number spinners (Min / Max inputs): surface and arrows already flip with
+   the inherited color-scheme and fit the 30px control at their default
+   size; they only need to read as the clickable steppers they are. */
+.rr-grid-hp-input::-webkit-inner-spin-button {
+	cursor: pointer; /* steppers are clickable (same affordance as above) */
+}
+/* Clickable row (column toggles, checklist values, Reset layout): 28px flex
+   row with the check box vertically centred — menuRow's 13px text and
+   list-hover feedback at a fixed comfortable height. */
+.rr-grid-hp-item {
+	display: flex;
+	align-items: center;          /* centres the .rr-menu-check box */
+	gap: 8px;                     /* box-to-label gap (menuRow gap) */
+	height: 28px;
+	padding: 0 8px;
+	border-radius: 6px;
+	font-size: 13px;              /* row text (menuRow) */
+	color: var(--rr-text-primary);
+	cursor: pointer;
+	user-select: none;            /* rapid toggling must not select text */
+}
+.rr-grid-hp-item:hover {
+	background: var(--rr-bg-list-hover); /* row hover (menuRow) */
+}
+/* Row label: long column titles / values truncate with an ellipsis. */
+.rr-grid-hp-item-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* Scroll cap shared by the values checklist and the columns toggle list —
+   exactly eight 28px rows before scrolling, so huge sets stay usable. */
+.rr-grid-hp-list {
+	max-height: 224px; /* 8 x 28px .rr-grid-hp-item rows */
+	overflow-y: auto;
+}
+/* Loading / empty checklist placeholder row — same rhythm as a real row. */
+.rr-grid-hp-empty {
+	display: flex;
+	align-items: center;
+	height: 28px;                    /* matches .rr-grid-hp-item */
+	padding: 0 8px;
+	font-size: 12px;
+	color: var(--rr-text-secondary); /* placeholder text (secondary) */
+}
+/* Range-bound caption (Start / End / Min / Max) above each bound input —
+   quieter than the section label (no uppercase). */
+.rr-grid-hp-sublabel {
+	font-size: 11px;
+	color: var(--rr-text-secondary); /* bound caption (secondary text) */
+	padding: 2px 0 3px;
+}
+/* One date bound's date + optional-time input pair, on a single compact
+   flex row (date filter section). */
+.rr-grid-hp-range-row {
+	display: flex;
+	gap: 6px;
+	margin: 0 0 6px;
+}
+/* Inputs inside the pair drop the standalone input's block margins/width
+   and share the row: the date flexes into the remainder, the time stays a
+   fixed compact box. */
+.rr-grid-hp-range-row .rr-grid-hp-input {
+	margin: 0;
+	width: auto;
+	min-width: 0;
+}
+.rr-grid-hp-range-row .rr-grid-hp-input--date {
+	flex: 1 1 auto;
+}
+/* The time bound's plain-text box ("HH:MM"): compact fixed width — narrower
+   than the old native time input, which needed room for its picker chrome. */
+.rr-grid-hp-range-row .rr-grid-hp-input--time {
+	flex: 0 0 auto;
+	width: 76px;
+	padding: 0 8px;
+}
+/* Filter footer: right-aligned Clear / Apply pair closing the section. */
+.rr-grid-hp-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding-top: 6px;
+}
+/* Footer button base: buttonSecondarySmall values (quiet outline). */
+.rr-grid-hp-btn {
+	padding: 3px 10px;
+	font-size: 11px;                     /* small button text (buttonSmall) */
+	line-height: 1.4;
+	font-weight: 500;
+	font-family: inherit;
+	border-radius: 6px;
+	border: 1px solid var(--rr-border);  /* outline (buttonSecondarySmall) */
+	background: var(--rr-bg-paper);      /* fill (buttonSecondarySmall) */
+	color: var(--rr-text-secondary);     /* text (buttonSecondarySmall) */
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+.rr-grid-hp-btn:hover {
+	opacity: 0.85;
+}
+/* Primary Apply: buttonPrimarySmall values; the border stays (in brand) so
+   both footer buttons share identical box metrics. */
+.rr-grid-hp-btn--primary {
+	background: var(--rr-brand);         /* fill (buttonPrimarySmall) */
+	border-color: var(--rr-brand);
+	color: var(--rr-fg-button);          /* on-brand text (buttonPrimarySmall) */
+}
+/* Section divider — a real full-width rule between Filter / Columns / Reset
+   (the panel has no horizontal padding, so it spans edge to edge). */
+.rr-grid-hp-divider {
+	border-top: 1px solid var(--rr-border);
+	margin: 4px 0;
+}
+
+/* ── Active-filter indicator ───────────────────────────────────────────────
+   DataGrid toggles .rr-col-filtered on a column's header element whenever
+   that field has a committed (non-empty) filter; the dot marks it. */
+.rr-grid.tabulator .tabulator-col.rr-col-filtered .tabulator-col-title::after {
+	content: '';
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	margin-left: 6px;
+	border-radius: 50%;
+	background: var(--rr-brand);   /* active-filter dot (brand) */
+	vertical-align: middle;
 }
 
 /* =============================================================================

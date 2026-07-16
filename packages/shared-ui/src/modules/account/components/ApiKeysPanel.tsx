@@ -14,11 +14,12 @@
  */
 
 import React, { useMemo, useRef } from 'react';
-import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
+import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { DataGrid } from '../../../components/data-grid/DataGrid';
 import { buttonEl } from '../../../components/data-grid/defaults';
+import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import type { ApiKeyRecord } from '../types';
 import { relativeTime } from './shared';
 
@@ -197,7 +198,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 	};
 
 	// Column definitions; cell renderings keep the existing badge treatments.
-	const columns = useMemo<ColumnDefinition[]>(
+	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{ title: 'Name', field: 'name', headerSort: true },
 			{
@@ -247,7 +248,9 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 				width: 120,
 				hozAlign: 'right',
 				headerSort: false,
-				headerMenu: false,
+				// Popup-exempt actions column (no header popup, no toggle-list
+				// entry); the marker is stripped before reaching Tabulator.
+				rrNoPopup: true,
 				resizable: false,
 				formatter: (cell: CellComponent) => {
 					const row = cell.getRow().getData() as KeyRow;
@@ -263,9 +266,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 					if (!target) return;
 					actionRef.current((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as KeyRow);
 				},
-				// `headerMenu: false` (menu-exempt column) predates the @types union
-				// (see createActionsColumn in defaults.ts) — hence the two-step cast.
-			} as unknown as ColumnDefinition,
+			},
 		],
 		[]
 	);

@@ -5,7 +5,8 @@
 
 /**
  * DataGrid helpers — DOM cell factories, the actions column builder, the
- * per-column header menu, and the local-search predicate.
+ * per-column header popup (filter + column show/hide + reset layout), and the
+ * local-search predicate.
  *
  * Tabulator formatters build DOM outside React, so in-cell primitives are
  * plain elements styled by the token CSS classes in `tabulator-theme.css`
@@ -14,11 +15,56 @@
  * themes stay in sync automatically.
  */
 
-import type { CellComponent, ColumnDefinition, MenuObject, MenuSeparator, ColumnComponent } from 'tabulator-tables';
+import type { CellComponent, ColumnDefinition, ColumnComponent } from 'tabulator-tables';
+import type { Tabulator } from './modules';
 
 // =============================================================================
 // TYPES
 // =============================================================================
+
+/**
+ * Declared value type of a grid column — drives which filter control the
+ * column's header popup renders (the DataGrid resolves the control from this
+ * type; there is no per-view override map):
+ *
+ * - `'string'`  — free text; text "contains" input.
+ * - `'number'`  — numeric scalar; Min / Max bound inputs writing the
+ *                 `${field}__gte` / `${field}__lte` filter keys (the server
+ *                 coerces numeric bounds).
+ * - `'boolean'` — true/false flag; static two-entry Yes/No checklist.
+ * - `'date'`    — ISO date / datetime; Start / End range inputs (each a date
+ *                 plus an optional time) writing the `${field}__gte` /
+ *                 `${field}__lte` filter keys — a bound with a time commits
+ *                 as `${date}T${time}`; a date-only end bound is made
+ *                 end-of-day inclusive server-side.
+ * - `'enum'`    — low-cardinality discrete codes; distinct-value checklist
+ *                 (fetchDistinct on remote grids, derived from the loaded
+ *                 rows on local ones).
+ * - `'strings'` — JSON string-array column (e.g. sysPermissions); text input
+ *                 (server-side: contains ANY matching element).
+ * - `'json'`    — structured payload blob (e.g. requestData); text input
+ *                 over the serialized text (server coercion handles it).
+ *
+ * An undeclared type (including auto-derived columns) defaults to the text
+ * "contains" input, exactly like `'string'`.
+ */
+export type GridColumnRRType = 'string' | 'number' | 'boolean' | 'date' | 'enum' | 'strings' | 'json';
+
+/**
+ * ColumnDefinition plus DataGrid extensions. `rrNoPopup` exempts a column
+ * from the header popup (filter + show/hide + reset) AND from the toggle
+ * list — actions and icon columns. `rrType` declares the column's value type
+ * ({@link GridColumnRRType}), which selects the header-popup filter control.
+ * Both markers are stripped before the definitions reach Tabulator
+ * ({@link normalizeColumns}), so exempt columns simply never receive the
+ * `headerPopup` option and Tabulator never sees an unknown option.
+ */
+export type GridColumnDefinition = ColumnDefinition & {
+	/** Exempt this column from the header popup and its toggle list. */
+	rrNoPopup?: boolean;
+	/** Declared value type — selects the header-popup filter control. */
+	rrType?: GridColumnRRType;
+};
 
 /** Semantic variants for {@link badgeEl} — mirrors StatusBadge's variants. */
 export type CellBadgeVariant = 'success' | 'info' | 'warning' | 'error' | 'muted';
@@ -148,19 +194,120 @@ export function matchesSearch(row: Record<string, unknown>, term: string): boole
 }
 
 // =============================================================================
+// EXPORT (CSV / JSON download of grid rows)
+// =============================================================================
+
+/** One exported column: the row field to read and the header title to show. */
+export interface IExportColumn {
+	/** Row field the values are read from. */
+	field: string;
+	/** Human column title (becomes the CSV header cell). */
+	title: string;
+}
+
+/**
+ * Serialize one raw row value to export text: null/undefined become '',
+ * arrays join their serialized items with '; ', objects JSON.stringify, and
+ * primitives pass through String().
+ *
+ * @param value - The raw row value.
+ * @returns The serialized text.
+ */
+function exportCellText(value: unknown): string {
+	if (value === null || value === undefined) return '';
+	if (Array.isArray(value)) return value.map((item) => exportCellText(item)).join('; ');
+	if (typeof value === 'object') return JSON.stringify(value);
+	return String(value);
+}
+
+/**
+ * RFC-4180 escape one CSV field: a value containing a comma, quote, or line
+ * break is wrapped in quotes with embedded quotes doubled; anything else
+ * passes through untouched.
+ *
+ * @param text - The serialized field text.
+ * @returns The escaped CSV field.
+ */
+function csvEscape(text: string): string {
+	return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+/**
+ * Trigger a browser download of a text payload via a Blob object URL and a
+ * transient anchor click (no navigation, no dialogs).
+ *
+ * @param content - File content.
+ * @param mime - MIME type of the download.
+ * @param filename - Suggested file name (with extension).
+ */
+function downloadTextFile(content: string, mime: string, filename: string): void {
+	// Step 1: wrap the payload in an object URL.
+	const blob = new Blob([content], { type: mime });
+	const url = URL.createObjectURL(blob);
+	// Step 2: click a transient anchor pointing at it.
+	const anchor = document.createElement('a');
+	anchor.href = url;
+	anchor.download = filename;
+	document.body.appendChild(anchor);
+	anchor.click();
+	// Step 3: remove the anchor and release the URL.
+	document.body.removeChild(anchor);
+	URL.revokeObjectURL(url);
+}
+
+/**
+ * Download rows as an RFC-4180 CSV file: a header row of the column titles,
+ * then one line per row with each column's raw value serialized by
+ * {@link exportCellText} and escaped by {@link csvEscape}. Lines join with
+ * CRLF per the RFC.
+ *
+ * @param rows - The rows to export.
+ * @param columns - Visible columns in display order (field + title).
+ * @param filename - Download file name (with extension).
+ */
+export function exportRowsAsCsv(rows: Record<string, unknown>[], columns: IExportColumn[], filename: string): void {
+	const lines: string[] = [];
+	// Header row: the column titles.
+	lines.push(columns.map((col) => csvEscape(col.title)).join(','));
+	// Data rows: serialized + escaped values in column order.
+	for (const row of rows) {
+		lines.push(columns.map((col) => csvEscape(exportCellText(row[col.field]))).join(','));
+	}
+	downloadTextFile(lines.join('\r\n'), 'text/csv;charset=utf-8', filename);
+}
+
+/**
+ * Download rows as a JSON file: an array of objects restricted to the
+ * exported columns' fields, with values passed through raw (untouched).
+ *
+ * @param rows - The rows to export.
+ * @param columns - Visible columns in display order (their fields project).
+ * @param filename - Download file name (with extension).
+ */
+export function exportRowsAsJson(rows: Record<string, unknown>[], columns: IExportColumn[], filename: string): void {
+	// Project each row onto the visible fields only.
+	const projected = rows.map((row) => {
+		const entry: Record<string, unknown> = {};
+		for (const col of columns) entry[col.field] = row[col.field];
+		return entry;
+	});
+	downloadTextFile(JSON.stringify(projected, null, '\t'), 'application/json', filename);
+}
+
+// =============================================================================
 // ACTIONS COLUMN
 // =============================================================================
 
 /**
  * Build the trailing Actions column — right-aligned small buttons, exempt from
- * sorting / moving / the header menu, and excluded from row-click handling
+ * sorting / moving / the header popup, and excluded from row-click handling
  * (the DataGrid's rowClick guard skips clicks inside `[data-rr-actions]`).
  *
  * @typeParam Row - Row shape of the grid.
  * @param config - Actions and click router.
- * @returns A Tabulator column definition to append to the columns array.
+ * @returns A DataGrid column definition to append to the columns array.
  */
-export function createActionsColumn<Row>(config: IActionsColumnConfig<Row>): ColumnDefinition {
+export function createActionsColumn<Row>(config: IActionsColumnConfig<Row>): GridColumnDefinition {
 	const { actions, onAction, width = 120 } = config;
 	return {
 		title: 'Actions',
@@ -168,8 +315,11 @@ export function createActionsColumn<Row>(config: IActionsColumnConfig<Row>): Col
 		width,
 		hozAlign: 'right',
 		headerSort: false,
-		headerMenu: false,
 		resizable: false,
+		// Popup exemption marker — actions columns never get the header popup
+		// and never appear in its show/hide toggle list. Stripped by
+		// normalizeColumns before the definition reaches Tabulator.
+		rrNoPopup: true,
 		// Formatter: one small button per action, wrapped so the rowClick guard
 		// can recognise the whole cell as an actions region.
 		formatter: (cell: CellComponent) => {
@@ -190,10 +340,7 @@ export function createActionsColumn<Row>(config: IActionsColumnConfig<Row>): Col
 			if (!target) return;
 			onAction((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as Row);
 		},
-		// `headerMenu: false` (menu-exempt column) predates the @types union, so
-		// the object doesn't structurally match ColumnDefinition yet at runtime
-		// Tabulator accepts it — hence the two-step cast.
-	} as unknown as ColumnDefinition;
+	};
 }
 
 // =============================================================================
@@ -215,15 +362,17 @@ export function titleFromKey(key: string): string {
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?/;
 
 /**
- * Type-heuristic formatter for an auto-derived column, keyed off the value
- * actually in the cell (auto columns have no declared type):
+ * Type-heuristic formatter, keyed off the value actually in the cell:
  * boolean -> yes/no badge, ISO datetime string -> muted local date-time,
- * array -> badge list, object -> truncated JSON, null -> ''.
+ * array -> badge list, object -> truncated JSON, null -> ''. Used by every
+ * auto-derived column (which has no declared type), and exported for views
+ * to reuse on declared hidden columns whose rare reveal does not warrant a
+ * bespoke formatter.
  *
  * @param cell - The Tabulator cell.
  * @returns The formatted cell content.
  */
-function autoFormatter(cell: CellComponent): HTMLElement | string {
+export function autoFormatter(cell: CellComponent): HTMLElement | string {
 	const value = cell.getValue();
 	if (value === null || value === undefined || value === '') return '';
 	if (typeof value === 'boolean') {
@@ -287,81 +436,794 @@ export function buildAutoColumns(
 		if (knownFields.has(key) || key.startsWith('__')) continue;
 		const saved = persistedByField.get(key);
 		const value = sampleRow[key];
-		defs.push({
+		const def: ColumnDefinition = {
 			title: titleFromKey(key),
 			field: key,
 			visible: saved?.visible ?? false,
 			...(saved?.width ? { width: saved.width } : {}),
 			// Numbers read best right-aligned; everything else left.
-			...(typeof value === 'number' ? { hozAlign: 'right' } : {}),
+			...(typeof value === 'number' ? { hozAlign: 'right' as const } : {}),
 			headerSort: true,
 			formatter: autoFormatter,
-		} as ColumnDefinition);
+		};
+		defs.push(def);
 	}
 	return defs;
 }
 
 // =============================================================================
-// HEADER MENU (column show/hide + reset layout)
+// HEADER POPUP (filter + column show/hide + reset layout)
 // =============================================================================
 
 /**
- * Key under which the DataGrid stashes its reset-layout callback on the
- * Tabulator instance, so the menu (built outside React) can reach it.
+ * Filter control of one column's header popup, resolved by the DataGrid from
+ * the column's declared {@link GridColumnRRType}: 'text' (contains input),
+ * 'values' (distinct-value checklist), 'boolean' (static Yes/No checklist),
+ * 'date' (Start / End range inputs), 'number' (Min / Max range inputs), or
+ * 'none' (no filter section).
  */
-export const RESET_LAYOUT_KEY = '__rrResetLayout';
+export type HeaderFilterMode = 'text' | 'values' | 'boolean' | 'date' | 'number' | 'none';
 
 /**
- * Build the per-column header menu: a show/hide toggle for every titled
- * column, plus a "Reset layout" item when the grid persists its layout.
+ * The DataGrid state bridge the header popup reaches through the
+ * {@link IGridInstanceState.__rrHeaderFilter} table-instance stash. All values
+ * flow through the grid's normal debounced filter pipeline — the popup never
+ * touches Tabulator filtering directly.
  *
- * Passed as `columnDefaults.headerMenu`; Tabulator invokes it on open so the
- * checked states are always current. Columns opt out with `headerMenu: false`
- * in their own definition (actions / icon columns).
- *
- * @returns The menu items for the opened column's table.
+ * The write half (setValue / setRange) is a SINGLE-KEY programmatic API and
+ * stays that way; the popup's filter section batches its pending edits
+ * locally and commits them through exactly one of these calls when the user
+ * hits Apply (see {@link IPendingFilterControls}).
  */
-export function buildHeaderMenu(this: unknown, _e: MouseEvent | TouchEvent, column: ColumnComponent): (MenuObject<ColumnComponent> | MenuSeparator)[] {
-	const table = column.getTable();
-	const items: (MenuObject<ColumnComponent> | MenuSeparator)[] = [];
+export interface IHeaderFilterBridge {
+	/** Resolve the filter mode of a field (rrType + fallbacks applied). */
+	mode(field: string): HeaderFilterMode;
+	/** Current raw filter value of a field ('' when off). */
+	getValue(field: string): string | string[];
+	/**
+	 * Record a filter edit. A string means server-side "contains"; an array
+	 * means server-side IN. '' and [] both mean "filter off" (the DataGrid's
+	 * compaction step drops them before they reach fetchers).
+	 */
+	setValue(field: string, value: string | string[]): void;
+	/**
+	 * Current range bounds of a range-typed ('date' / 'number') column, read
+	 * from the column's `${field}__gte` / `${field}__lte` filter keys ('' when
+	 * a bound is off). Keyed off the BASE field — the popup never touches the
+	 * suffixed keys.
+	 */
+	getRange(field: string): { start: string; end: string };
+	/**
+	 * Record a range edit for a range-typed ('date' / 'number') column. Each
+	 * PROVIDED bound writes its suffixed filter key (`start` → `${field}__gte`,
+	 * `end` → `${field}__lte`) in ONE state update; an omitted bound is left
+	 * untouched and '' clears one. Both bounds ride the same debounced
+	 * pipeline as {@link IHeaderFilterBridge.setValue}.
+	 */
+	setRange(field: string, range: { start?: string; end?: string }): void;
+	/** Distinct values of a field for the 'values' checklist. */
+	getDistinct(field: string): Promise<(string | number | boolean)[]>;
+	/**
+	 * True when the field's declared column carries the `rrNoPopup` marker
+	 * (actions / icon columns). The marker is stripped before definitions
+	 * reach Tabulator, so the popup must ask the DataGrid — which retains the
+	 * pre-normalized defs — instead of `table.getColumnDefinitions()`.
+	 */
+	isPopupExempt(field: string): boolean;
+}
 
-	// One toggle row per titled, menu-participating column (columns that opt
-	// out with `headerMenu: false` — actions / icon columns — are excluded).
-	// Hiding the last visible column would leave an unusable grid, so that
-	// final toggle is a no-op.
-	const titled = table.getColumns().filter((col) => {
-		const def = col.getDefinition() as unknown as Record<string, unknown>;
-		return (def.title ?? '') !== '' && def.headerMenu !== false;
+/**
+ * DataGrid-private state stashed on the Tabulator instance at build time, so
+ * the header popup (built outside React) can reach the grid's callbacks.
+ */
+export interface IGridInstanceState extends Tabulator {
+	/** Reset-layout callback; present only when the grid persists its layout. */
+	__rrResetLayout?: () => void;
+	/** Header-popup filter bridge ({@link IHeaderFilterBridge}). */
+	__rrHeaderFilter?: IHeaderFilterBridge;
+}
+
+/**
+ * Prepare caller-declared column definitions for Tabulator: strip the
+ * DataGrid-private markers (`rrNoPopup`, `rrType`), and wire the header
+ * popup (builder + icon) onto every non-exempt column. This is the single
+ * place popup wiring happens — exempt columns simply never receive the
+ * `headerPopup` option, so no `false` sentinel is needed anywhere.
+ *
+ * @param columns - Caller-declared column definitions (pre-normalized).
+ * @returns Tabulator-ready definitions without DataGrid-private markers.
+ */
+export function normalizeColumns(columns: GridColumnDefinition[]): ColumnDefinition[] {
+	return columns.map((def) => {
+		// Step 1: strip the markers so Tabulator never sees unknown options
+		// (the DataGrid retains the PRE-normalized defs for its own lookups).
+		const rest: GridColumnDefinition = { ...def };
+		delete rest.rrNoPopup;
+		delete rest.rrType;
+		// Step 2: exempt columns get no popup at all (no affordance rendered).
+		if (def.rrNoPopup) return rest;
+		// Step 3: an explicit caller-provided headerPopup wins untouched.
+		if (rest.headerPopup !== undefined) return rest;
+		// Step 4: default wiring — the combined popup and Tabulator's own
+		// vertical-ellipsis glyph (set explicitly for clarity; the theme's
+		// hover-reveal keys off the .tabulator-header-popup-button class).
+		return { ...rest, headerPopup: buildHeaderPopup, headerPopupIcon: '&#8942;' };
+	});
+}
+
+/**
+ * Build a section label ("FILTER", "COLUMNS") for the header popup.
+ *
+ * @param text - Label text (rendered uppercase by the theme CSS).
+ * @returns The label element.
+ */
+function popupLabelEl(text: string): HTMLElement {
+	const el = document.createElement('div');
+	el.className = 'rr-grid-hp-label';
+	el.textContent = text;
+	return el;
+}
+
+/**
+ * Build a section divider for the header popup (between the Filter, Columns
+ * and Reset sections).
+ *
+ * @returns The divider element.
+ */
+function popupDividerEl(): HTMLElement {
+	const el = document.createElement('div');
+	el.className = 'rr-grid-hp-divider';
+	return el;
+}
+
+/**
+ * Build one checkbox row (shared by the values checklist and the column
+ * toggles) — a 28px clickable flex row with a `.rr-menu-check` box and an
+ * ellipsis-truncating label.
+ *
+ * @param text - Row label.
+ * @param on - Initial checked state.
+ * @param onToggle - Click handler; receives the box element to restyle.
+ * @returns The row element.
+ */
+function checkRowEl(text: string, on: boolean, onToggle: (box: HTMLElement) => void): HTMLElement {
+	const row = document.createElement('div');
+	row.className = 'rr-grid-hp-item';
+	const box = document.createElement('span');
+	box.className = on ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check';
+	const label = document.createElement('span');
+	label.className = 'rr-grid-hp-item-label';
+	label.textContent = text;
+	row.appendChild(box);
+	row.appendChild(label);
+	row.addEventListener('click', () => onToggle(box));
+	return row;
+}
+
+/**
+ * Close the currently open header popup programmatically (the Apply verb
+ * and the panel's Escape handler both end here).
+ *
+ * Mechanism (verified in tabulator_esm.mjs 6.5.2): Tabulator hands the
+ * headerPopup builder no popup instance, so `Popup.hide()` is unreachable
+ * directly — but `Popup.hideOnBlur()` binds `hide()` as `click` / `mousedown`
+ * listeners on `document.body`, and clicks INSIDE the panel never reach them
+ * (`loadPopup` and `Popup.show` stop their propagation). Dispatching a
+ * synthetic click on `document.body` therefore runs the exact outside-click
+ * code path: the blur listeners unbind, the panel detaches, and Tabulator
+ * fires its external `popupClosed` event. (The blur listeners bind ~100ms
+ * after open; nothing human can reach Apply inside that window.)
+ */
+function closeHeaderPopup(): void {
+	document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
+/**
+ * Pending-state contract of one filter control block inside the header
+ * popup's FILTER section. Edits accumulate locally in the popup DOM and
+ * never touch the bridge while the user works; the section footer drives
+ * the two verbs — "Clear" resets every control to its empty state (still
+ * pending, nothing committed), and "Apply" commits the whole pending state
+ * through the bridge in ONE update before the popup closes. Closing any
+ * other way (outside click / Escape) throws the popup DOM away — and the
+ * pending edits with it.
+ */
+interface IPendingFilterControls {
+	/** Reset every pending control to its empty state (no commit). */
+	clear(): void;
+	/** Commit the pending state through the bridge in one update. */
+	apply(): void;
+}
+
+/**
+ * Build the 'text' filter controls — an input prefilled with the committed
+ * value. Typing stays local (pending); Apply commits the single value
+ * through {@link IHeaderFilterBridge.setValue} ('' turns the filter off).
+ *
+ * @param section - The filter section the controls append into.
+ * @param bridge - The grid's filter bridge.
+ * @param field - The opened column's field.
+ * @param onRendered - Popup render hook (used to focus the input on open).
+ * @returns The pending-state verbs for the section footer.
+ */
+function buildTextFilterControls(
+	section: HTMLElement,
+	bridge: IHeaderFilterBridge,
+	field: string,
+	onRendered: (callback: () => void) => void,
+): IPendingFilterControls {
+	// Step 1: input prefilled from current state (arrays never appear in
+	// 'text' mode, but coerce defensively in case the mode was switched).
+	const input = document.createElement('input');
+	input.type = 'text';
+	input.className = 'rr-grid-hp-input';
+	input.placeholder = 'Contains...';
+	const current = bridge.getValue(field);
+	input.value = typeof current === 'string' ? current : '';
+	section.appendChild(input);
+
+	// Step 2: focus once the popup is in the DOM so typing starts immediately.
+	onRendered(() => input.focus());
+
+	// Pending contract: no input listener — Apply reads the value once.
+	return {
+		clear: () => {
+			input.value = '';
+		},
+		apply: () => bridge.setValue(field, input.value),
+	};
+}
+
+/** One row of a checklist filter: the committed wire value and its label. */
+interface IChecklistEntry {
+	/** Wire value committed into the filter array (always a string). */
+	value: string;
+	/** Row label rendered next to the checkbox. */
+	label: string;
+}
+
+/**
+ * Static entries of the 'boolean' checklist — the wire values are the
+ * stringified booleans (the server coerces them back), labelled Yes / No.
+ */
+const BOOLEAN_ENTRIES: IChecklistEntry[] = [
+	{ value: 'true', label: 'Yes' },
+	{ value: 'false', label: 'No' },
+];
+
+/**
+ * Build a checklist's filter controls. Serves both checklist modes: 'values'
+ * loads the column's distinct values asynchronously; 'boolean' passes the
+ * static Yes/No pair. Ticks toggle PENDING state only — nothing commits
+ * until the footer's Apply, so a "Clear, then tick the few I want" flow is
+ * never interrupted by a mid-flight commit.
+ *
+ * Commit semantics (decided; Excel-adjacent): the meaningful state is a
+ * PROPER SUBSET of values checked, committed as an array (server-side IN).
+ * A full set admits every row and an empty set is useless as a server
+ * filter, so both collapse to OFF ('').
+ *
+ * @param section - The filter section the controls append into.
+ * @param bridge - The grid's filter bridge.
+ * @param field - The opened column's field.
+ * @param loadEntries - Async provider of the checklist rows (value + label).
+ * @returns The pending-state verbs for the section footer.
+ */
+function buildChecklistFilterControls(
+	section: HTMLElement,
+	bridge: IHeaderFilterBridge,
+	field: string,
+	loadEntries: () => Promise<IChecklistEntry[]>,
+): IPendingFilterControls {
+	// ── Pending checklist state ─────────────────────────────────────────────
+	// Wire values are strings; entry values arrive pre-stringified.
+	const current = bridge.getValue(field);
+	const activeArray = Array.isArray(current) && current.length > 0 ? current.map(String) : null;
+	let allValues: string[] = [];
+	let checked = new Set<string>();
+	let loaded = false;
+	const boxes = new Map<string, HTMLElement>();
+
+	/** Restyle every checkbox from the pending `checked` set. */
+	const syncBoxes = (): void => {
+		for (const [value, box] of boxes) {
+			box.className = checked.has(value) ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check';
+		}
+	};
+
+	// ── Checklist (async) ───────────────────────────────────────────────────
+	// A 'Loading...' row shows until the distinct lookup resolves.
+	const list = document.createElement('div');
+	list.className = 'rr-grid-hp-list';
+	const loading = document.createElement('div');
+	loading.className = 'rr-grid-hp-empty';
+	loading.textContent = 'Loading...';
+	list.appendChild(loading);
+	section.appendChild(list);
+
+	loadEntries()
+		.then((entries) => {
+			// Step 1: dedupe by wire value, remembering each value's label.
+			const seen = new Set<string>();
+			const labels = new Map<string, string>();
+			allValues = [];
+			for (const entry of entries) {
+				if (seen.has(entry.value)) continue;
+				seen.add(entry.value);
+				labels.set(entry.value, entry.label);
+				allValues.push(entry.value);
+			}
+			loaded = true;
+			// Step 2: initial check-set — filter OFF means everything admitted
+			// (all checked); an active array checks its (still-known) members.
+			checked = activeArray
+				? new Set(activeArray.filter((value) => seen.has(value)))
+				: new Set(allValues);
+			// Step 3: render one toggle row per value.
+			list.textContent = '';
+			if (allValues.length === 0) {
+				const empty = document.createElement('div');
+				empty.className = 'rr-grid-hp-empty';
+				empty.textContent = 'No values';
+				list.appendChild(empty);
+				return;
+			}
+			for (const value of allValues) {
+				const row = checkRowEl(labels.get(value) ?? value, checked.has(value), () => {
+					// Toggle membership and restyle — PENDING only, no commit.
+					if (checked.has(value)) checked.delete(value);
+					else checked.add(value);
+					syncBoxes();
+				});
+				boxes.set(value, row.querySelector('.rr-menu-check') as HTMLElement);
+				list.appendChild(row);
+			}
+		})
+		.catch(() => {
+			// Lookup failure: keep the popup usable, just report the miss.
+			loading.textContent = 'Failed to load values';
+		});
+
+	return {
+		// Clear unchecks everything — the staging point of the "Clear, then
+		// tick a few, then Apply" flow (an applied empty set is OFF anyway).
+		clear: () => {
+			checked.clear();
+			syncBoxes();
+		},
+		// Full set and empty set both collapse to OFF; a proper subset
+		// commits as the IN array. Before the async entries resolve there is
+		// no meaningful pending state — Apply then leaves the committed
+		// filter untouched (the popup still closes).
+		apply: () => {
+			if (!loaded) return;
+			if (checked.size === 0 || checked.size === allValues.length) {
+				bridge.setValue(field, '');
+			} else {
+				bridge.setValue(field, Array.from(checked));
+			}
+		},
+	};
+}
+
+/** The two inputs of one date bound (read by Clear / Apply). */
+interface IDateBoundInputs {
+	/** The bound's date input (date part of the committed value). */
+	dateInput: HTMLInputElement;
+	/** The bound's optional time TEXT input ('' means date-only). */
+	timeInput: HTMLInputElement;
+}
+
+/** Matches 24-hour time text: H:MM / HH:MM with an optional :SS tail. */
+const TIME_24H_RE = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
+
+/**
+ * Parse pending time text ({@link buildDateFilterControls}'s plain-text time
+ * box) into its normalized wire form. Accepts 24-hour `H:MM` / `HH:MM`
+ * (optionally `HH:MM:SS`) with surrounding whitespace tolerated; the only
+ * normalization needed is padding a 1-digit hour (minutes / seconds are
+ * regex-forced to 2 digits already).
+ *
+ * @param text - Raw time input text.
+ * @returns The normalized time (`HH:MM` or `HH:MM:SS`), '' for empty /
+ *          whitespace-only text (a date-only bound), or null when the text
+ *          is not a valid 24-hour time.
+ */
+function normalizeTimeText(text: string): string | null {
+	// Step 1: empty text is the valid "no time" state, not an error.
+	const trimmed = text.trim();
+	if (trimmed === '') return '';
+	// Step 2: shape check, then range-check each clock component.
+	const match = TIME_24H_RE.exec(trimmed);
+	if (!match) return null;
+	const [, hours, minutes, seconds] = match;
+	if (Number(hours) > 23 || Number(minutes) > 59 || (seconds !== undefined && Number(seconds) > 59)) return null;
+	// Step 3: reassemble with the hour padded to 2 digits.
+	const paddedHours = hours.padStart(2, '0');
+	return seconds !== undefined ? `${paddedHours}:${minutes}:${seconds}` : `${paddedHours}:${minutes}`;
+}
+
+/**
+ * Build the 'date' filter controls — Start / End bounds, each a native date
+ * input with an OPTIONAL plain-text time box beside it (empty by default).
+ * The time box is deliberately NOT `<input type="time">`: Chromium's time
+ * picker drop-down is native chrome that ignores `accent-color` and cannot
+ * be themed, so the control is a fully tokenized text input instead. It
+ * accepts 24-hour `H:MM` / `HH:MM` (optionally `HH:MM:SS`), normalizes on
+ * blur (pads 1-digit hours via {@link normalizeTimeText}), and flags invalid
+ * text with the `.rr-grid-hp-input--invalid` error border. (The date input
+ * stays native — its calendar panel DOES follow color-scheme/accent-color.)
+ *
+ * Edits stay pending; Apply serializes both bounds and commits them through
+ * the bridge's range API in ONE update (`${field}__gte` / `${field}__lte`;
+ * the header's active-filter dot is range-aware — either bound marks the
+ * column active). Bound shapes:
+ *
+ *  - date + time  → `${date}T${time}` (falls through to the server's ISO
+ *                   datetime parse, so the bound is time-precise)
+ *  - date only    → the date-only string (the server widens a date-only end
+ *                   bound to end-of-day inclusive)
+ *  - no date      → '' (bound off) — a time without a date is meaningless,
+ *                   so a dangling time serializes as OFF too
+ *  - invalid time → the date-only string — one bad time box degrades ONLY
+ *                   its own bound to date-only instead of blocking the whole
+ *                   Apply, so the other bound (and this bound's date part)
+ *                   still commit and the popup's close-on-Apply flow is
+ *                   never wedged on a half-typed value
+ *
+ * @param section - The filter section the controls append into.
+ * @param bridge - The grid's filter bridge.
+ * @param field - The opened column's BASE field (suffixing happens inside
+ *                the bridge's range API).
+ * @returns The pending-state verbs for the section footer.
+ */
+function buildDateFilterControls(
+	section: HTMLElement,
+	bridge: IHeaderFilterBridge,
+	field: string,
+): IPendingFilterControls {
+	// Start / End input pairs prefilled from the committed range.
+	const current = bridge.getRange(field);
+
+	/**
+	 * Append one captioned date + optional-time input pair. The time box's
+	 * listeners are cosmetic only (blur-normalize + invalid flag) — the pair
+	 * stays pure pending state read by Clear / Apply.
+	 *
+	 * @param label - Bound caption ('Start' / 'End').
+	 * @param value - Committed bound: '' (off), date-only, or `date`T`time`.
+	 * @returns The pair's inputs.
+	 */
+	const boundInputs = (label: string, value: string): IDateBoundInputs => {
+		// Compact caption above the pair.
+		const caption = document.createElement('div');
+		caption.className = 'rr-grid-hp-sublabel';
+		caption.textContent = label;
+		section.appendChild(caption);
+		// Split a committed bound into its date and optional time parts.
+		const [datePart, timePart = ''] = value.split('T');
+		// The pair rides one flex row: date takes the remainder, time compact.
+		const row = document.createElement('div');
+		row.className = 'rr-grid-hp-range-row';
+		const dateInput = document.createElement('input');
+		dateInput.type = 'date';
+		dateInput.className = 'rr-grid-hp-input rr-grid-hp-input--date';
+		dateInput.value = datePart;
+		// Plain-text time box (not type="time" — see the builder JSDoc): the
+		// browser must not fight the tokens, so autofill/spellcheck are off.
+		const timeInput = document.createElement('input');
+		timeInput.type = 'text';
+		timeInput.className = 'rr-grid-hp-input rr-grid-hp-input--time';
+		timeInput.placeholder = 'HH:MM';
+		timeInput.autocomplete = 'off';
+		timeInput.spellcheck = false;
+		timeInput.value = timePart;
+		// Blur normalizes valid text in place (pads 1-digit hours) and flags
+		// invalid text with the error border; Enter-to-Apply never blurs, so
+		// Apply re-parses the raw text itself and does not depend on this.
+		timeInput.addEventListener('blur', () => {
+			const normalized = normalizeTimeText(timeInput.value);
+			timeInput.classList.toggle('rr-grid-hp-input--invalid', normalized === null);
+			if (normalized !== null) timeInput.value = normalized;
+		});
+		// Typing clears the flag immediately so the error never nags mid-edit.
+		timeInput.addEventListener('input', () => timeInput.classList.remove('rr-grid-hp-input--invalid'));
+		row.appendChild(dateInput);
+		row.appendChild(timeInput);
+		section.appendChild(row);
+		return { dateInput, timeInput };
+	};
+	const start = boundInputs('Start', current.start);
+	const end = boundInputs('End', current.end);
+
+	/**
+	 * Serialize one pending bound to its wire shape (see the builder JSDoc).
+	 * The time text is re-parsed here rather than trusted from the blur
+	 * handler (Enter-to-Apply commits without ever blurring the box); both
+	 * the empty ('') and invalid (null) parse results are falsy, so either
+	 * one degrades this bound to date-only instead of blocking the Apply.
+	 *
+	 * @param pair - The bound's date + time inputs.
+	 * @returns '' (off), the date-only string, or `${date}T${normalized}`.
+	 */
+	const boundText = (pair: IDateBoundInputs): string => {
+		if (!pair.dateInput.value) return '';
+		const time = normalizeTimeText(pair.timeInput.value);
+		return time ? `${pair.dateInput.value}T${time}` : pair.dateInput.value;
+	};
+
+	/** Reset one bound pair to its empty state (values + invalid flag). */
+	const clearBound = (pair: IDateBoundInputs): void => {
+		pair.dateInput.value = '';
+		pair.timeInput.value = '';
+		pair.timeInput.classList.remove('rr-grid-hp-input--invalid');
+	};
+
+	return {
+		clear: () => {
+			clearBound(start);
+			clearBound(end);
+		},
+		// One range write commits both bounds together ('' turns one off).
+		apply: () => bridge.setRange(field, { start: boundText(start), end: boundText(end) }),
+	};
+}
+
+/**
+ * Build the 'number' filter controls — Min / Max numeric inputs writing the
+ * same `${field}__gte` / `${field}__lte` range keys as the date section (the
+ * server coerces numeric bounds). Edits stay pending; Apply commits both
+ * bounds through the bridge's range API in ONE update, and the header's
+ * range-aware active dot lights while either bound is set.
+ *
+ * @param section - The filter section the controls append into.
+ * @param bridge - The grid's filter bridge.
+ * @param field - The opened column's BASE field (suffixing happens inside
+ *                the bridge's range API).
+ * @returns The pending-state verbs for the section footer.
+ */
+function buildNumberFilterControls(
+	section: HTMLElement,
+	bridge: IHeaderFilterBridge,
+	field: string,
+): IPendingFilterControls {
+	// Min / Max inputs prefilled from the committed bounds (numeric bounds
+	// ride the same suffixed keys as date bounds, so getRange serves both).
+	const current = bridge.getRange(field);
+
+	/**
+	 * Append one captioned numeric bound input (caption style shared with
+	 * the date section's Start / End sublabels).
+	 *
+	 * @param label - Bound caption ('Min' / 'Max').
+	 * @param value - Committed bound ('' when off).
+	 * @returns The bound's input.
+	 */
+	const boundInput = (label: string, value: string): HTMLInputElement => {
+		const caption = document.createElement('div');
+		caption.className = 'rr-grid-hp-sublabel';
+		caption.textContent = label;
+		section.appendChild(caption);
+		const input = document.createElement('input');
+		input.type = 'number';
+		input.className = 'rr-grid-hp-input';
+		input.value = value;
+		section.appendChild(input);
+		return input;
+	};
+	const min = boundInput('Min', current.start);
+	const max = boundInput('Max', current.end);
+
+	return {
+		clear: () => {
+			min.value = '';
+			max.value = '';
+		},
+		// One range write commits both bounds ('' turns one off). A number
+		// input's value is already '' while its text is not a valid number,
+		// so only real numbers ever reach the wire.
+		apply: () => bridge.setRange(field, { start: min.value.trim(), end: max.value.trim() }),
+	};
+}
+
+/**
+ * Build the FILTER section of the header popup: the section label, the
+ * mode-specific PENDING controls, and the Clear / Apply footer row.
+ *
+ * Edits accumulate locally ({@link IPendingFilterControls}) and commit only
+ * on Apply — one bridge call for the whole column (setValue for text /
+ * checklist modes, setRange for both bounds of a date / number range). The
+ * bridge updates the header's active-filter dot synchronously, then the
+ * popup closes through {@link closeHeaderPopup}. Enter in any of the
+ * section's inputs is an Apply shortcut; Clear only resets the pending
+ * controls (applying the cleared state is what turns the filter off).
+ *
+ * @param bridge - The grid's filter bridge.
+ * @param field - The opened column's field.
+ * @param mode - The resolved (non-'none') filter mode.
+ * @param onRendered - Popup render hook (focuses the 'text' input on open).
+ * @returns The section element.
+ */
+function buildFilterSection(
+	bridge: IHeaderFilterBridge,
+	field: string,
+	mode: Exclude<HeaderFilterMode, 'none'>,
+	onRendered: (callback: () => void) => void,
+): HTMLElement {
+	const section = document.createElement('div');
+	section.className = 'rr-grid-hp-section';
+	section.appendChild(popupLabelEl('Filter'));
+
+	// Step 1: the mode-specific pending controls append themselves into the
+	// section and hand back the Clear / Apply verbs for the footer.
+	let controls: IPendingFilterControls;
+	switch (mode) {
+		case 'values':
+			// Distinct values, stringified into checklist entries (dedupe
+			// happens inside the controls builder).
+			controls = buildChecklistFilterControls(section, bridge, field, () =>
+				bridge.getDistinct(field).then((values) => values.map((value) => ({ value: String(value), label: String(value) }))),
+			);
+			break;
+		case 'boolean':
+			// Static two-entry checklist — no enumeration source needed.
+			controls = buildChecklistFilterControls(section, bridge, field, () => Promise.resolve(BOOLEAN_ENTRIES));
+			break;
+		case 'date':
+			controls = buildDateFilterControls(section, bridge, field);
+			break;
+		case 'number':
+			controls = buildNumberFilterControls(section, bridge, field);
+			break;
+		default:
+			controls = buildTextFilterControls(section, bridge, field, onRendered);
+			break;
+	}
+
+	/** The Apply verb: commit the pending state, then close the popup. */
+	const applyAndClose = (): void => {
+		controls.apply();
+		closeHeaderPopup();
+	};
+
+	// Step 2: the footer row — quiet Clear on the left of a primary Apply.
+	const actions = document.createElement('div');
+	actions.className = 'rr-grid-hp-actions';
+	const clearBtn = document.createElement('button');
+	clearBtn.type = 'button';
+	clearBtn.className = 'rr-grid-hp-btn';
+	clearBtn.textContent = 'Clear';
+	clearBtn.addEventListener('click', () => controls.clear());
+	const applyBtn = document.createElement('button');
+	applyBtn.type = 'button';
+	applyBtn.className = 'rr-grid-hp-btn rr-grid-hp-btn--primary';
+	applyBtn.textContent = 'Apply';
+	applyBtn.addEventListener('click', applyAndClose);
+	actions.appendChild(clearBtn);
+	actions.appendChild(applyBtn);
+	section.appendChild(actions);
+
+	// Step 3: Enter in any of the section's INPUTS applies immediately. The
+	// shortcut deliberately skips other targets so a keyboard-focused footer
+	// button keeps its native Enter activation (e.g. Enter on Clear clears).
+	section.addEventListener('keydown', (event) => {
+		if (event.key !== 'Enter') return;
+		if (!(event.target instanceof HTMLInputElement)) return;
+		event.preventDefault();
+		applyAndClose();
+	});
+
+	return section;
+}
+
+/**
+ * Build the per-column header popup: an Excel-style combined panel with
+ * (1) a filter section for the opened column — the control follows the
+ * column's declared type via {@link IHeaderFilterBridge.mode}: 'text' input,
+ * 'values' / 'boolean' checklist, 'date' Start/End range, or 'number'
+ * Min/Max range — edited as PENDING state and committed by the section's
+ * Apply button ({@link buildFilterSection}) — (2) a show/hide toggle for
+ * every titled column (live, not pending), and (3) a "Reset layout" row when
+ * the grid persists its layout.
+ *
+ * Wired per column by {@link normalizeColumns}; Tabulator invokes it on open
+ * so the states are always current. Columns opt out with `rrNoPopup: true` in
+ * their declared {@link GridColumnDefinition} (actions / icon columns) — those
+ * never receive this builder and never appear in the toggle list.
+ *
+ * @param _e - The opening click (unused; Tabulator positions the popup).
+ * @param column - The opened column.
+ * @param onRendered - Registers a callback run once the popup is in the DOM.
+ * @returns The popup panel element.
+ */
+export function buildHeaderPopup(
+	this: unknown,
+	_e: MouseEvent | TouchEvent,
+	column: ColumnComponent,
+	onRendered: (callback: () => void) => void,
+): HTMLElement {
+	// DataGrid-private state stashed on the instance at build time.
+	const state = column.getTable() as IGridInstanceState;
+	const panel = document.createElement('div');
+	panel.className = 'rr-grid-hp';
+
+	// Escape closes the popup (pending filter edits die with the DOM).
+	// Tabulator's own Escape path is inert in 6.5.2 — its _escapeCheck
+	// compares e.key (the STRING 'Escape') against the number 27 — so the
+	// panel wires a document-level listener of its own. Outside-click closes
+	// bypass this handler entirely; the listener self-removes on the first
+	// keydown after the panel has left the DOM.
+	const onKeyDown = (event: KeyboardEvent): void => {
+		if (!panel.isConnected) {
+			document.removeEventListener('keydown', onKeyDown);
+			return;
+		}
+		if (event.key === 'Escape') {
+			document.removeEventListener('keydown', onKeyDown);
+			closeHeaderPopup();
+		}
+	};
+	document.addEventListener('keydown', onKeyDown);
+
+	// ── Section 1: filter (mode resolved from the column's declared type) ──
+	// Pending-state controls + Clear / Apply footer; see buildFilterSection.
+	const bridge = state.__rrHeaderFilter;
+	const field = column.getField();
+	const mode: HeaderFilterMode = bridge && field ? bridge.mode(field) : 'none';
+	if (bridge && field && mode !== 'none') {
+		panel.appendChild(buildFilterSection(bridge, field, mode, onRendered));
+		panel.appendChild(popupDividerEl());
+	}
+
+	// ── Section 2: column show/hide toggles ────────────────────────────────
+	// One toggle row per titled, popup-participating column, inside a
+	// scroll-capped list so wide grids stay usable. Toggles apply LIVE (only
+	// the filter section is pending). `rrNoPopup` columns (actions / icon)
+	// are excluded — the marker lives on the PRE-normalized defs the DataGrid
+	// retains, so membership is resolved through the bridge rather than
+	// Tabulator's stripped definitions. Hiding the last visible column would
+	// leave an unusable grid, so that final toggle is a no-op.
+	const columnsSection = document.createElement('div');
+	columnsSection.className = 'rr-grid-hp-section';
+	columnsSection.appendChild(popupLabelEl('Columns'));
+	const columnList = document.createElement('div');
+	columnList.className = 'rr-grid-hp-list';
+	const titled = state.getColumns().filter((col) => {
+		const colField = col.getField();
+		if (bridge && colField && bridge.isPopupExempt(colField)) return false;
+		return (col.getDefinition().title ?? '') !== '';
 	});
 	for (const col of titled) {
-		items.push({
-			label: () => {
-				const label = document.createElement('span');
-				label.className = 'rr-menu-toggle';
-				const box = document.createElement('span');
-				box.className = col.isVisible() ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check';
-				label.appendChild(box);
-				label.appendChild(document.createTextNode(String(col.getDefinition().title)));
-				return label;
-			},
-			action: () => {
-				const visibleCount = titled.filter((c) => c.isVisible()).length;
-				if (col.isVisible() && visibleCount <= 1) return;
-				col.toggle();
-			},
+		const row = checkRowEl(String(col.getDefinition().title), col.isVisible(), (box) => {
+			// Last-visible guard, then toggle and restyle in place (the popup
+			// stays open, so the box must track the new state itself).
+			const visibleCount = titled.filter((c) => c.isVisible()).length;
+			if (col.isVisible() && visibleCount <= 1) return;
+			col.toggle();
+			box.className = col.isVisible() ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check';
 		});
+		columnList.appendChild(row);
+	}
+	columnsSection.appendChild(columnList);
+	panel.appendChild(columnsSection);
+
+	// ── Section 3: reset layout ────────────────────────────────────────────
+	// Only meaningful when the grid was built with persistence; the DataGrid
+	// stashes its reset callback on the instance in that case. Rendered as a
+	// proper menu row in its own section, behind a real divider.
+	const reset = state.__rrResetLayout;
+	if (reset) {
+		panel.appendChild(popupDividerEl());
+		const resetSection = document.createElement('div');
+		resetSection.className = 'rr-grid-hp-section';
+		const item = document.createElement('div');
+		item.className = 'rr-grid-hp-item';
+		item.textContent = 'Reset layout';
+		// The reset rebuilds the table, which auto-hides this popup.
+		item.addEventListener('click', () => reset());
+		resetSection.appendChild(item);
+		panel.appendChild(resetSection);
 	}
 
-	// Reset layout — only meaningful when the grid was built with persistence;
-	// the DataGrid stashes its reset callback on the instance in that case.
-	const reset = (table as unknown as Record<string, unknown>)[RESET_LAYOUT_KEY];
-	if (typeof reset === 'function') {
-		items.push({ separator: true });
-		items.push({
-			label: 'Reset layout',
-			action: () => (reset as () => void)(),
-		});
-	}
-
-	return items;
+	return panel;
 }

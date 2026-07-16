@@ -41,7 +41,7 @@
 
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
 
-import { IProject, IToolchainState, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../types';
+import { IProject, IToolchainState, IValidatePipelinePayload, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../types';
 
 // =============================================================================
 // Context shape
@@ -101,8 +101,8 @@ export interface IFlowProjectContext {
 
 	// --- Host callbacks ----------------------------------------------------
 
-	/** Validates the pipeline and returns per-component errors/warnings. */
-	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
+	/** Validates a full pipeline or a single component and returns errors/warnings. */
+	handleValidatePipeline?: (pipeline: IValidatePipelinePayload) => Promise<IValidateResponse>;
 
 	/** Notifies the host that the project content has changed (for dirty tracking). */
 	onContentChanged?: (project: IProject) => void;
@@ -219,7 +219,7 @@ export interface IFlowProjectProviderProps {
 	inventoryConnectorTitleMap?: Record<string, string>;
 
 	// --- Host callbacks ----------------------------------------------------
-	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
+	handleValidatePipeline?: (pipeline: IValidatePipelinePayload) => Promise<IValidateResponse>;
 	onContentChanged?: (project: IProject) => void;
 	onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void;
 	onUndo?: () => void;

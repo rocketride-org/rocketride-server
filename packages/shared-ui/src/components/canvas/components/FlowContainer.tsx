@@ -35,7 +35,7 @@
 import { ReactElement, ReactNode } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 
-import { IProject, IValidateResponse, ITaskStatus } from '../types';
+import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from '../types';
 
 import { FlowProvider } from '../context/FlowProvider';
 
@@ -74,8 +74,8 @@ export interface IFlowContainerProps {
 	/** Map of connector provider to display title. */
 	inventoryConnectorTitleMap?: Record<string, string>;
 
-	/** Validates the pipeline. */
-	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
+	/** Validates a full pipeline or a single component. */
+	handleValidatePipeline?: (pipeline: IValidatePipelinePayload) => Promise<IValidateResponse>;
 
 	/** Called when pipeline content changes (dirty tracking). */
 	onContentChanged?: (project: IProject) => void;

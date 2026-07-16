@@ -49,9 +49,10 @@ import ThemedForm, { translate } from '../../rjsf-widgets/theme';
 import { getSecuredFormData, removeRequired, setUiSchemaProperty } from '../../../util/rjsf';
 
 import { useFlowGraph } from '../../../context/FlowGraphContext';
+import type { FlowNode } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
-import { INode, IService, IServiceCatalog, IProject, PIPELINE_SCHEMA_VERSION } from '../../../types';
+import { IService, IServiceCatalog, IValidatePipelinePayload, PIPELINE_SCHEMA_VERSION } from '../../../types';
 import { getComponentFromNode } from '../../../util/graph';
 
 import { IAuthTokensRef, persistTokensFromFormData, mergeAuthTokensIntoFormData, persistOAuthTokensAndSave } from './authTokenHelpers';
@@ -170,8 +171,8 @@ const styles = {
 // =============================================================================
 
 interface INodeConfigPanelProps {
-	/** The node being edited. */
-	node: INode;
+	/** The live ReactFlow node being edited. */
+	node: FlowNode;
 	/** Close the panel. */
 	onClose: () => void;
 }
@@ -390,13 +391,14 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 					name: name || undefined,
 				});
 
-				// Server-side validation
+				// Server-side validation — a single-component payload (the
+				// validate endpoint accepts it alongside a full pipeline).
 				if (handleValidatePipeline && updatedNode) {
-					const component = getComponentFromNode(updatedNode as INode);
-					const payload = {
+					const component = getComponentFromNode(updatedNode);
+					const payload: IValidatePipelinePayload = {
 						version: PIPELINE_SCHEMA_VERSION,
 						component,
-					} as unknown as IProject;
+					};
 
 					const resp = await handleValidatePipeline(payload);
 
