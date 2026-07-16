@@ -81,11 +81,18 @@ function(rocketride_set_common_target_options target)
                 find_program(ROCKETRIDE_DUMP_SYMS dump_syms)
                 if(ROCKETRIDE_DUMP_SYMS)
                     set(TARGET_SYMBOLS_DIR ${TARGET_FILE_DIR}/symbols)
-                    # Binary only: dump_syms follows .gnu_debuglink for one .sym with the
-                    # real debug-id (adding the .debug arg emits a spurious zero-id module).
+                    if(ROCKETRIDE_PLAT_MAC)
+                        # No .gnu_debuglink on mac: feed dump_syms the DWARF inside the
+                        # dSYM bundle, or the .sym carries public symbols and no lines.
+                        set(DUMP_SYMS_INPUT ${TARGET_DEBUG_FILE}/Contents/Resources/DWARF/${TARGET_NAME})
+                    else()
+                        # Binary only: dump_syms follows .gnu_debuglink for one .sym with the
+                        # real debug-id (adding the .debug arg emits a spurious zero-id module).
+                        set(DUMP_SYMS_INPUT ${TARGET_FILE})
+                    endif()
                     add_custom_command(TARGET ${target} POST_BUILD
                         COMMAND ${CMAKE_COMMAND} -E make_directory ${TARGET_SYMBOLS_DIR}
-                        COMMAND sh -c "\"$0\" \"$1\" --store \"$2\" >/dev/null" ${ROCKETRIDE_DUMP_SYMS} ${TARGET_FILE} ${TARGET_SYMBOLS_DIR}
+                        COMMAND sh -c "\"$0\" --inlines \"$1\" --store \"$2\" >/dev/null" ${ROCKETRIDE_DUMP_SYMS} ${DUMP_SYMS_INPUT} ${TARGET_SYMBOLS_DIR}
                         COMMENT "Dumping symbols from ${TARGET_NAME} to ${TARGET_SYMBOLS_DIR}"
                         VERBATIM
                     )
