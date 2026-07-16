@@ -2,7 +2,7 @@ diff --git a/Release/include/cpprest/astreambuf.h b/Release/include/cpprest/astr
 index 1dcb285..c5e126b 100644
 --- a/Release/include/cpprest/astreambuf.h
 +++ b/Release/include/cpprest/astreambuf.h
-@@ -22,6 +22,66 @@
+@@ -22,6 +22,69 @@
  #include <math.h>
  #include <memory>
  
@@ -30,7 +30,10 @@ index 1dcb285..c5e126b 100644
 +    using pos_type = streampos;
 +    using state_type = mbstate_t;
 +
-+    static constexpr void assign(char_type& a, const char_type& b) noexcept { a = b; }
++    // Not constexpr: a constexpr function returning void is ill-formed pre-C++14,
++    // and macOS builds cpprestsdk as -std=gnu++11. CharTraits does not require
++    // assign to be constexpr (libc++ only makes it so since C++17), so we omit it.
++    static void assign(char_type& a, const char_type& b) noexcept { a = b; }
 +    static constexpr bool eq(char_type a, char_type b) noexcept { return a == b; }
 +    static constexpr bool lt(char_type a, char_type b) noexcept { return a < b; }
 +    static int compare(const char_type* a, const char_type* b, size_t n) { return n == 0 ? 0 : memcmp(a, b, n); }
