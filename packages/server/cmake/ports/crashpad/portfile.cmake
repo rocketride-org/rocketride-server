@@ -133,6 +133,10 @@ elseif(VCPKG_TARGET_IS_LINUX)
 elseif(VCPKG_TARGET_IS_OSX)
     string(APPEND OPTIONS " target_os=\"mac\"")
 
+    # mini_chromium's gn alink shells out to bare `libtool -static` (no gn arg for it),
+    # which picks up Homebrew's GNU libtool if present. Keep Apple's toolchain first.
+    set(ENV{PATH} "/usr/bin:$ENV{PATH}")
+
 elseif(VCPKG_TARGET_IS_WINDOWS AND NOT VCPKG_TARGET_IS_MINGW)
     string(APPEND OPTIONS " target_os=\"win\"")
 
