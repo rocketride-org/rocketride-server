@@ -197,6 +197,111 @@ export function createActionsColumn<Row>(config: IActionsColumnConfig<Row>): Col
 }
 
 // =============================================================================
+// AUTO-COLUMNS (the rows ARE the shape — derive addable columns from row keys)
+// =============================================================================
+
+/**
+ * Turn a camelCase row key into a human column title.
+ *
+ * @param key - Row key (e.g. 'phoneNumberVerified').
+ * @returns Title-cased label (e.g. 'Phone Number Verified').
+ */
+export function titleFromKey(key: string): string {
+	const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Matches ISO 8601 date / datetime strings (the wire format for datetimes). */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?/;
+
+/**
+ * Type-heuristic formatter for an auto-derived column, keyed off the value
+ * actually in the cell (auto columns have no declared type):
+ * boolean -> yes/no badge, ISO datetime string -> muted local date-time,
+ * array -> badge list, object -> truncated JSON, null -> ''.
+ *
+ * @param cell - The Tabulator cell.
+ * @returns The formatted cell content.
+ */
+function autoFormatter(cell: CellComponent): HTMLElement | string {
+	const value = cell.getValue();
+	if (value === null || value === undefined || value === '') return '';
+	if (typeof value === 'boolean') {
+		return badgeEl(value ? 'success' : 'muted', value ? 'Yes' : 'No');
+	}
+	if (typeof value === 'string' && ISO_DATE_RE.test(value)) {
+		return mutedEl(value.substring(0, 19).replace('T', ' '));
+	}
+	if (Array.isArray(value)) {
+		if (value.length === 0) return mutedEl('--');
+		const wrap = document.createElement('span');
+		wrap.className = 'rr-cell-badges';
+		for (const item of value) wrap.appendChild(badgeEl('info', String(item)));
+		return wrap;
+	}
+	if (typeof value === 'object') {
+		const el = document.createElement('span');
+		el.className = 'rr-cell-mono rr-cell-truncate';
+		el.style.maxWidth = '260px';
+		const text = JSON.stringify(value);
+		el.textContent = text;
+		el.title = text.length > 500 ? `${text.slice(0, 500)}...` : text;
+		return el;
+	}
+	return String(value);
+}
+
+/** Persisted layout entry shape for one column (Tabulator columns blob). */
+interface IPersistedColumn {
+	field?: string;
+	width?: number;
+	visible?: boolean;
+}
+
+/**
+ * Build hidden, addable column definitions for row keys the view did not
+ * declare. Called by DataGrid when `autoColumns` is set, using the first
+ * received row as the shape sample. Previously persisted visibility/width
+ * for an auto column (the user showed it before a reload) is re-applied so
+ * layout choices survive even though auto columns are created after the
+ * persisted layout was restored.
+ *
+ * @param sampleRow - One row from the loaded data (the shape sample).
+ * @param knownFields - Fields already covered by declared columns.
+ * @param persisted - The persisted Tabulator columns blob, if any.
+ * @returns Column definitions for the undeclared keys (visible: false unless
+ *          the persisted layout says otherwise).
+ */
+export function buildAutoColumns(
+	sampleRow: Record<string, unknown>,
+	knownFields: Set<string>,
+	persisted?: IPersistedColumn[],
+): ColumnDefinition[] {
+	const persistedByField = new Map<string, IPersistedColumn>();
+	for (const entry of persisted ?? []) {
+		if (entry.field) persistedByField.set(entry.field, entry);
+	}
+
+	const defs: ColumnDefinition[] = [];
+	for (const key of Object.keys(sampleRow)) {
+		if (knownFields.has(key) || key.startsWith('__')) continue;
+		const saved = persistedByField.get(key);
+		const value = sampleRow[key];
+		defs.push({
+			title: titleFromKey(key),
+			field: key,
+			visible: saved?.visible ?? false,
+			...(saved?.width ? { width: saved.width } : {}),
+			// Numbers read best right-aligned; everything else left.
+			...(typeof value === 'number' ? { hozAlign: 'right' } : {}),
+			headerSort: true,
+			formatter: autoFormatter,
+		} as ColumnDefinition);
+	}
+	return defs;
+}
+
+// =============================================================================
 // HEADER MENU (column show/hide + reset layout)
 // =============================================================================
 

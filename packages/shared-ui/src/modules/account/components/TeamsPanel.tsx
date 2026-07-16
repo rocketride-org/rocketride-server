@@ -8,32 +8,75 @@
  *
  * Renders either a flat list of all teams (when `activeTeamId` is null) or a
  * drill-down detail view for a single team (when a team has been selected).
- * Both views are stock Cards with stock DataTable bodies: the list view shows
+ * Both views are stock Cards with stock DataGrid bodies: the list view shows
  * team name and member count with Delete / Manage actions; the detail view
  * lists members with permission pills and Edit Perms / Remove actions.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import type { CSSProperties } from 'react';
+import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
-import { DataTable } from '../../../components/data-table/DataTable';
-import type { DataTableColumn } from '../../../components/data-table/DataTable';
-import { createArrayDataSource } from '../../../components/data-table/dataSource';
+import { DataGrid } from '../../../components/data-grid/DataGrid';
+import { avatarEl, buttonEl, createActionsColumn } from '../../../components/data-grid/defaults';
 import type { ConnectResult, TeamRecord, TeamDetail, TeamMemberRecord } from '../types';
-import { S, PermPill, Avatar, avatarColor } from './shared';
+import { PERM_DISPLAY, initials, avatarColor } from './shared';
 
 // =============================================================================
 // STYLES
 // =============================================================================
 
 const styles = {
-	/** Horizontal cluster inside a table cell (avatar + text). */
+	/** Horizontal cluster inside a grid cell (avatar + text) — DOM style for formatters. */
 	cellCluster: {
 		display: 'flex',
 		alignItems: 'center',
-		gap: 10,
-	} as CSSProperties,
+		gap: '10px',
+	} as Partial<CSSStyleDeclaration>,
+
+	/** 28px member avatar overrides applied over the stock 32px avatarEl. */
+	avatarSmall: {
+		width: '28px',
+		height: '28px',
+		fontSize: '10.6px',
+		fontWeight: '700',
+	} as Partial<CSSStyleDeclaration>,
+
+	/** 32px team chip in the list-view Team cell (DOM clone of teamChip(name, 32)). */
+	teamChipCell: {
+		width: '32px',
+		height: '32px',
+		borderRadius: '7px',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		fontSize: '13px',
+		fontWeight: '700',
+		color: 'var(--rr-fg-button)',
+		flexShrink: '0',
+	} as Partial<CSSStyleDeclaration>,
+
+	/** Wrapping flex row for permission pills (DOM clone of the shared S.perms). */
+	permsWrap: {
+		display: 'flex',
+		flexWrap: 'wrap',
+		gap: '3px',
+		marginTop: '4px',
+	} as Partial<CSSStyleDeclaration>,
+
+	/** Permission pill shape (commonStyles.badge values + PermPill overrides); accent colors set per pill. */
+	permPill: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: '4px',
+		padding: '1px 6px',
+		fontSize: '11px',
+		fontWeight: '600',
+		borderRadius: '3px',
+		letterSpacing: '0.3px',
+		background: 'var(--rr-bg-surface-alt)',
+	} as Partial<CSSStyleDeclaration>,
 
 	/** Detail-view header cluster: back button + team avatar + label. */
 	detailHeader: {
@@ -61,20 +104,83 @@ const styles = {
 		color: 'var(--rr-fg-button)',
 		flexShrink: 0,
 	}),
-
-	/** Buttons inside a row-actions cell, spaced like the DataTable spec. */
-	rowButtons: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: 5,
-	} as CSSProperties,
 };
+
+// =============================================================================
+// CELL BUILDERS
+// =============================================================================
+
+/**
+ * Builds a person cell — 28px initials avatar beside the display name (DOM
+ * clone of the old Avatar + cluster cell render).
+ *
+ * @param displayName - Member display name (initials + color seed).
+ * @param email - Fallback seed when the name is empty.
+ * @returns The cluster element.
+ */
+function personCellEl(displayName: string, email: string): HTMLElement {
+	// Cluster wrapper: avatar + name in a horizontal flex row.
+	const wrap = document.createElement('div');
+	Object.assign(wrap.style, styles.cellCluster);
+	// Stock avatar resized to the panel's 28px spec.
+	const avatar = avatarEl(initials(displayName, email), avatarColor(displayName || email));
+	Object.assign(avatar.style, styles.avatarSmall);
+	wrap.appendChild(avatar);
+	// Display-name label.
+	const name = document.createElement('span');
+	name.textContent = displayName;
+	wrap.appendChild(name);
+	return wrap;
+}
+
+/**
+ * Builds a team cell — 32px deterministic-color chip with the team's initial
+ * beside the team name (DOM clone of the old teamChip + cluster cell render).
+ *
+ * @param name - Team display name (chip color seed and initial).
+ * @returns The cluster element.
+ */
+function teamCellEl(name: string): HTMLElement {
+	// Cluster wrapper: chip + name in a horizontal flex row.
+	const wrap = document.createElement('div');
+	Object.assign(wrap.style, styles.cellCluster);
+	// Rounded-square chip seeded by the team name.
+	const chip = document.createElement('div');
+	Object.assign(chip.style, styles.teamChipCell);
+	chip.style.background = avatarColor(name);
+	chip.textContent = name[0] ?? '';
+	wrap.appendChild(chip);
+	// Team-name label.
+	const label = document.createElement('span');
+	label.textContent = name;
+	wrap.appendChild(label);
+	return wrap;
+}
+
+/**
+ * Builds a permission pill (DOM clone of the shared PermPill): admin and
+ * wildcard permissions use the brand accent, capability flags use info.
+ *
+ * @param perm - The permission key string to display.
+ * @returns The pill element.
+ */
+function permPillEl(perm: string): HTMLElement {
+	const el = document.createElement('span');
+	Object.assign(el.style, styles.permPill);
+	// Distinguish elevated permissions (admin/*) from standard capability flags.
+	const isAdmin = perm === 'team.admin' || perm === 'org.admin' || perm === '*';
+	const accent = isAdmin ? 'var(--rr-brand)' : 'var(--rr-color-info)';
+	el.style.color = accent;
+	el.style.border = `1px solid ${accent}`;
+	el.textContent = PERM_DISPLAY[perm] ?? perm;
+	return el;
+}
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** Flattened row shape fed to the teams list DataTable. */
+/** Flattened row shape fed to the teams list DataGrid. */
 interface TeamRow extends Record<string, unknown> {
 	/** Team id — used to resolve callbacks. */
 	id: string;
@@ -84,7 +190,7 @@ interface TeamRow extends Record<string, unknown> {
 	members: number;
 }
 
-/** Flattened row shape fed to the team-detail members DataTable. */
+/** Flattened row shape fed to the team-detail members DataGrid. */
 interface TeamMemberRow extends Record<string, unknown> {
 	/** Member user id — used to resolve callbacks. */
 	userId: string;
@@ -154,7 +260,7 @@ interface TeamDetailViewProps {
 
 /**
  * Drill-down view for a single team: a Card whose header carries a back
- * button, the team chip, and the member count, and whose body is a DataTable
+ * button, the team chip, and the member count, and whose body is a DataGrid
  * of the team's members with permission pills and admin actions.
  */
 const TeamDetailView: React.FC<TeamDetailViewProps> = ({ teamDetail, profile, onBack, onAddMember, onEditPerms, onRemoveMember, isTeamAdmin }) => {
@@ -170,41 +276,8 @@ const TeamDetailView: React.FC<TeamDetailViewProps> = ({ teamDetail, profile, on
 		[teamDetail.members]
 	);
 
-	// Client-side data source over the member rows.
-	const source = useMemo(() => createArrayDataSource<TeamMemberRow>(rows), [rows]);
-
 	// Count team admins so the last admin cannot remove themselves.
 	const adminCount = useMemo(() => teamDetail.members.filter((m) => m.permissions.includes('team.admin')).length, [teamDetail.members]);
-
-	// Column definitions; cells keep the existing avatar / pill renderings.
-	const columns = useMemo<DataTableColumn<TeamMemberRow>[]>(
-		() => [
-			{
-				key: 'displayName',
-				label: 'Member',
-				sortable: true,
-				render: (row) => (
-					<div style={styles.cellCluster}>
-						<Avatar name={row.displayName} email={row.email} size={28} />
-						<span>{row.displayName}</span>
-					</div>
-				),
-			},
-			{ key: 'email', label: 'Email', sortable: true },
-			{
-				key: 'permissions',
-				label: 'Permissions',
-				render: (row) => (
-					<div style={S.perms}>
-						{row.permissions.map((p) => (
-							<PermPill key={p} perm={p} />
-						))}
-					</div>
-				),
-			},
-		],
-		[]
-	);
 
 	/**
 	 * Resolves a table row back to its team-member record and opens the Edit
@@ -216,6 +289,80 @@ const TeamDetailView: React.FC<TeamDetailViewProps> = ({ teamDetail, profile, on
 		const record = teamDetail.members.find((m) => m.userId === row.userId);
 		if (record) onEditPerms(record);
 	};
+
+	// Live action router — the actions column's cellClick is baked into the
+	// memoized column definition, so it dispatches through this ref to always
+	// reach the latest prop closures.
+	const actionRef = useRef<(action: string, row: TeamMemberRow) => void>(() => undefined);
+	actionRef.current = (action, row) => {
+		// Route the clicked button's action key to the matching handler.
+		if (action === 'edit') handleEditPerms(row);
+		else if (action === 'remove') onRemoveMember(row.userId, row.displayName);
+	};
+
+	// Column definitions; cells keep the existing avatar / pill renderings.
+	const columns = useMemo<ColumnDefinition[]>(() => {
+		const cols: ColumnDefinition[] = [
+			{
+				title: 'Member',
+				field: 'displayName',
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as TeamMemberRow;
+					return personCellEl(row.displayName, row.email);
+				},
+			},
+			{ title: 'Email', field: 'email', headerSort: true },
+			{
+				title: 'Permissions',
+				field: 'permissions',
+				headerSort: false,
+				// One pill per permission key, in a wrapping flex row.
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as TeamMemberRow;
+					const wrap = document.createElement('div');
+					Object.assign(wrap.style, styles.permsWrap);
+					for (const p of row.permissions) wrap.appendChild(permPillEl(p));
+					return wrap;
+				},
+			},
+		];
+		// Edit / Remove only render for team admins; the last remaining admin
+		// cannot remove themselves (a team must keep one admin). Built by hand
+		// instead of createActionsColumn because the button set varies per row.
+		if (isTeamAdmin) {
+			cols.push({
+				title: 'Actions',
+				field: '__rrActions',
+				width: 170,
+				hozAlign: 'right',
+				headerSort: false,
+				headerMenu: false,
+				resizable: false,
+				// Formatter: Edit Perms always; Remove unless last-admin self row.
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as TeamMemberRow;
+					const wrap = document.createElement('span');
+					wrap.dataset.rrActions = 'true';
+					wrap.className = 'rr-cell-actions';
+					wrap.appendChild(buttonEl('ghost', 'Edit Perms', 'edit'));
+					const isSelf = row.userId === profile?.userId;
+					const isLastAdmin = isSelf && row.permissions.includes('team.admin') && adminCount <= 1;
+					if (!isLastAdmin) wrap.appendChild(buttonEl('ghost', 'Remove', 'remove'));
+					return wrap;
+				},
+				// Route clicks on the buttons to the live action router by key.
+				cellClick: (e: UIEvent, cell: CellComponent) => {
+					const target = (e.target as HTMLElement).closest('button[data-action]');
+					if (!target) return;
+					actionRef.current((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as TeamMemberRow);
+				},
+				// `headerMenu: false` (menu-exempt column) predates the @types union
+				// (see createActionsColumn in defaults.ts) — hence the two-step cast.
+			} as unknown as ColumnDefinition);
+		}
+		return cols;
+	}, [isTeamAdmin, adminCount, profile?.userId]);
 
 	return (
 		<Card
@@ -239,33 +386,7 @@ const TeamDetailView: React.FC<TeamDetailViewProps> = ({ teamDetail, profile, on
 			}
 			noBodyPadding
 		>
-			<DataTable<TeamMemberRow>
-				columns={columns}
-				source={source}
-				// Edit / Remove only render for team admins; the last remaining
-				// admin cannot remove themselves (a team must keep one admin).
-				actions={
-					isTeamAdmin
-						? (row) => {
-								const isSelf = row.userId === profile?.userId;
-								const isLastAdmin = isSelf && row.permissions.includes('team.admin') && adminCount <= 1;
-								return (
-									<div style={styles.rowButtons}>
-										<Button variant="ghost" small onClick={() => handleEditPerms(row)}>
-											Edit Perms
-										</Button>
-										{!isLastAdmin && (
-											<Button variant="ghost" small onClick={() => onRemoveMember(row.userId, row.displayName)}>
-												Remove
-											</Button>
-										)}
-									</div>
-								);
-						  }
-						: undefined
-				}
-				emptyState={{ title: 'No members in this team yet' }}
-			/>
+			<DataGrid<TeamMemberRow> columns={columns} data={rows} emptyTitle="No members in this team yet" />
 		</Card>
 	);
 };
@@ -292,31 +413,44 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 		[teams]
 	);
 
-	// Client-side data source over the team rows.
-	const source = useMemo(() => createArrayDataSource<TeamRow>(rows), [rows]);
+	// Live action router — the actions column's onAction is baked into the
+	// memoized column definition, so it dispatches through this ref to always
+	// reach the latest prop closures.
+	const actionRef = useRef<(action: string, row: TeamRow) => void>(() => undefined);
+	actionRef.current = (action, row) => {
+		// Delete removes the team; Manage mirrors the row click into detail.
+		if (action === 'delete') onDeleteTeam(row.id);
+		else onSelectTeam(row.id);
+	};
 
 	// Column definitions; the team cell keeps its color-chip rendering.
-	const columns = useMemo<DataTableColumn<TeamRow>[]>(
+	const columns = useMemo<ColumnDefinition[]>(
 		() => [
 			{
-				key: 'name',
-				label: 'Team',
-				sortable: true,
-				render: (row) => (
-					<div style={styles.cellCluster}>
-						<div style={styles.teamChip(row.name, 32)}>{row.name[0]}</div>
-						<span>{row.name}</span>
-					</div>
-				),
+				title: 'Team',
+				field: 'name',
+				headerSort: true,
+				formatter: (cell: CellComponent) => teamCellEl(String(cell.getValue() ?? '')),
 			},
 			{
-				key: 'members',
-				label: 'Members',
-				sortable: true,
-				render: (row) => `${row.members} member${row.members !== 1 ? 's' : ''}`,
+				title: 'Members',
+				field: 'members',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => {
+					const n = cell.getValue() as number;
+					return `${n} member${n !== 1 ? 's' : ''}`;
+				},
 			},
+			// Trailing Actions column — Delete is org-admin only; Manage mirrors
+			// the row click.
+			createActionsColumn<TeamRow>({
+				actions: [...(isOrgAdmin ? [{ key: 'delete', label: 'Delete' }] : []), { key: 'manage', label: 'Manage →' }],
+				onAction: (key, row) => actionRef.current(key, row),
+				width: isOrgAdmin ? 180 : 120,
+			}),
 		],
-		[]
+		[isOrgAdmin]
 	);
 
 	// -- Detail view -- shown when a team row has been clicked
@@ -342,25 +476,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 				}
 				noBodyPadding
 			>
-				<DataTable<TeamRow>
-					columns={columns}
-					source={source}
-					onRowClick={(row) => onSelectTeam(row.id)}
-					// Delete is org-admin only; Manage mirrors the row click.
-					actions={(row) => (
-						<div style={styles.rowButtons}>
-							{isOrgAdmin && (
-								<Button variant="ghost" small onClick={() => onDeleteTeam(row.id)}>
-									Delete
-								</Button>
-							)}
-							<Button variant="ghost" small onClick={() => onSelectTeam(row.id)}>
-								Manage {'→'}
-							</Button>
-						</div>
-					)}
-					emptyState={{ title: 'No teams yet' }}
-				/>
+				<DataGrid<TeamRow> columns={columns} data={rows} onRowClick={(row) => onSelectTeam(row.id)} emptyTitle="No teams yet" />
 			</Card>
 		</section>
 	);

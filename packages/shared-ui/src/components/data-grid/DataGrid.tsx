@@ -41,7 +41,9 @@ import {
 } from 'react';
 import type { ColumnDefinition, Options } from 'tabulator-tables';
 import { Tabulator } from './modules';
-import { buildHeaderMenu, RESET_LAYOUT_KEY } from './defaults';
+import { buildAutoColumns, buildHeaderMenu, RESET_LAYOUT_KEY } from './defaults';
+import { FilterStrip } from './FilterStrip';
+import type { IGridFilterDef } from './FilterStrip';
 import type { IDataGridPersistence } from './persistence';
 import 'tabulator-tables/dist/css/tabulator_simple.min.css';
 import './tabulator-theme.css';
@@ -58,6 +60,8 @@ export interface IDataGridPageRequest {
 	size: number;
 	/** Active sorters (only populated when `remoteSort` is enabled). */
 	sort: { field: string; dir: 'asc' | 'desc' }[];
+	/** Committed filter-strip values (non-empty only; {} when no filters). */
+	filters: Record<string, string>;
 }
 
 /** One remote page of rows plus the total row count across all pages. */
@@ -96,6 +100,22 @@ export interface IDataGridProps<Row extends Record<string, unknown>> {
 	onLoadError?: (error: Error) => void;
 	/** Layout persistence adapter; active only when `tableId` is also set. */
 	persistence?: IDataGridPersistence;
+	/**
+	 * Derive addable columns from the row keys: any key of the loaded rows
+	 * not covered by a declared column becomes a hidden column (toggleable
+	 * from the header menu, persisted like any other). The rows ARE the
+	 * shape — new server fields appear automatically.
+	 */
+	autoColumns?: boolean;
+	/**
+	 * Filter controls rendered in a strip above the table (grid-owned).
+	 * Values auto-apply after a 300ms debounce: remote grids refetch from
+	 * page 1 with the values in `req.filters`; local grids receive them via
+	 * `onFiltersChange` and filter their own `data`.
+	 */
+	filters?: IGridFilterDef[];
+	/** Debounced committed filter values (local-mode filtering hook). */
+	onFiltersChange?: (values: Record<string, string>) => void;
 	/** Native Tabulator options escape hatch — merged over the defaults. */
 	options?: Options;
 }
@@ -189,6 +209,9 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		onRowClick,
 		onLoadError,
 		persistence,
+		autoColumns = false,
+		filters,
+		onFiltersChange,
 		options,
 	} = props;
 
@@ -214,6 +237,90 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	persistenceRef.current = persistence;
 	const dataRef = useRef(data);
 	dataRef.current = data;
+	const filtersChangeRef = useRef(onFiltersChange);
+	filtersChangeRef.current = onFiltersChange;
+
+	// ── Filter strip state ──────────────────────────────────────────────────
+	// Raw control values (all keys) and typeahead display labels; the compact
+	// non-empty projection is what rides into fetchPage / onFiltersChange.
+	const [filterValues, setFilterValues] = useState<Record<string, string>>({});
+	const [filterLabels, setFilterLabels] = useState<Record<string, string>>({});
+	// Committed (compacted) values read by the remote fetch at request time.
+	const committedFiltersRef = useRef<Record<string, string>>({});
+
+	/** Record one filter edit (the debounce effect below commits it). */
+	const handleFilterChange = (key: string, value: string, label?: string): void => {
+		setFilterValues((prev) => ({ ...prev, [key]: value }));
+		if (label !== undefined) setFilterLabels((prev) => ({ ...prev, [key]: label }));
+	};
+
+	// Auto-apply: 300ms after the last edit, commit the non-empty values and
+	// either re-query from page 1 (remote) or hand them to the view (local).
+	const filterInitRef = useRef(true);
+	useEffect(() => {
+		if (filterInitRef.current) {
+			filterInitRef.current = false;
+			return undefined;
+		}
+		const timer = setTimeout(() => {
+			// Step 1: compact — drop empty values so fetchers see only live filters.
+			const compact: Record<string, string> = {};
+			for (const [key, value] of Object.entries(filterValues)) {
+				if (value !== '') compact[key] = value;
+			}
+			committedFiltersRef.current = compact;
+			// Step 2: apply — remote grids restart from page 1; local grids get
+			// the values and filter their own data.
+			if (fetchRef.current) {
+				whenBuilt((table) => void table.setData());
+			} else {
+				filtersChangeRef.current?.(compact);
+			}
+		}, 300);
+		return () => clearTimeout(timer);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [filterValues]);
+
+	// ── Auto-columns ────────────────────────────────────────────────────────
+	// Row keys already covered by a column (declared or previously auto-added);
+	// reset on rebuild so Reset layout re-derives from the next data load.
+	const autoKeysRef = useRef<Set<string>>(new Set());
+
+	/**
+	 * Extend the column set with hidden columns for any row keys not covered
+	 * yet (the rows ARE the shape). Persisted visibility/width for an auto
+	 * column is re-applied, so a user-shown extra survives reloads even
+	 * though it is created after the persisted layout was restored.
+	 */
+	const maybeExtendColumns = (rows: Record<string, unknown>[] | undefined): void => {
+		if (!autoColumns || !rows || rows.length === 0) return;
+		// Step 1: what is already covered — declared fields + added autos.
+		if (autoKeysRef.current.size === 0) {
+			for (const def of columns) {
+				if (def.field) autoKeysRef.current.add(def.field);
+			}
+		}
+		// Step 2: build defs for the uncovered keys of the sample row.
+		const persisted = tableId && persistenceRef.current
+			? persistenceRef.current.read(tableId, 'columns')
+			: undefined;
+		const extras = buildAutoColumns(
+			rows[0],
+			autoKeysRef.current,
+			Array.isArray(persisted) ? persisted : undefined,
+		);
+		if (extras.length === 0) return;
+		for (const def of extras) {
+			if (def.field) autoKeysRef.current.add(def.field);
+		}
+		// Step 3: append after the current defs — deferred a tick so a load in
+		// progress settles before the column set changes.
+		setTimeout(() => {
+			whenBuilt((table) => {
+				table.setColumns([...table.getColumnDefinitions(), ...extras]);
+			});
+		}, 0);
+	};
 
 	/** Run now if built, otherwise queue for the tableBuilt flush. */
 	const whenBuilt = (fn: (table: Tabulator) => void): void => {
@@ -252,6 +359,8 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	// ── Build / destroy ─────────────────────────────────────────────────────
 	useEffect(() => {
 		if (!containerRef.current) return undefined;
+		// Reset layout rebuilds from primaries; autos re-derive on next load.
+		autoKeysRef.current = new Set();
 		const remote = !!fetchRef.current;
 		const persist = !!(tableId && persistenceRef.current);
 
@@ -292,11 +401,16 @@ function DataGridInner<Row extends Record<string, unknown>>(
 							const page = typeof params.page === 'number' ? params.page : 1;
 							const size = typeof params.size === 'number' ? params.size : pageSizes[0];
 							const sort = (params.sort ?? params.sorters ?? []) as { field: string; dir: 'asc' | 'desc' }[];
-							return fetchRef.current!({ page, size, sort }).then((result) => ({
-								data: result.rows,
-								last_page: Math.max(1, Math.ceil(result.total / size)),
-								last_row: result.total,
-							}));
+							// Committed filter-strip values ride along with every request.
+							return fetchRef.current!({ page, size, sort, filters: committedFiltersRef.current }).then((result) => {
+								// The rows are the shape: derive addable columns.
+								maybeExtendColumns(result.rows as Record<string, unknown>[]);
+								return {
+									data: result.rows,
+									last_page: Math.max(1, Math.ceil(result.total / size)),
+									last_row: result.total,
+								};
+							});
 						},
 				  }
 				: { data: (dataRef.current ?? []) as Record<string, unknown>[] }),
@@ -332,6 +446,8 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			// Flush calls parked while Tabulator was still building.
 			const queued = queueRef.current.splice(0);
 			for (const fn of queued) fn(table);
+			// LOCAL mode: the initial data is already here — derive columns.
+			maybeExtendColumns(dataRef.current as Record<string, unknown>[] | undefined);
 			syncFooter();
 		});
 		table.on('rowClick', (e, row) => {
@@ -361,6 +477,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	// clamp the page in case the set shrank beneath it.
 	useEffect(() => {
 		if (!data) return;
+		maybeExtendColumns(data as Record<string, unknown>[]);
 		whenBuilt((table) => {
 			void table.replaceData(data as Record<string, unknown>[]).then(clampPage);
 		});
@@ -398,11 +515,26 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		resetLayout,
 	}));
 
-	return (
+	// With a filter strip, the strip and the table stack inside a wrapper; the
+	// bare-container form is preserved otherwise (no layout change for
+	// existing consumers, including fixed-height split panels).
+	const gridEl = (
 		<div
 			ref={containerRef}
 			className={onRowClick ? 'rr-grid rr-grid--clickable' : 'rr-grid'}
 		/>
+	);
+	if (!filters || filters.length === 0) return gridEl;
+	return (
+		<div>
+			<FilterStrip
+				defs={filters}
+				values={filterValues}
+				labels={filterLabels}
+				onChange={handleFilterChange}
+			/>
+			{gridEl}
+		</div>
 	);
 }
 

@@ -161,7 +161,7 @@ export interface IModalProps {
 	closeOnEscape?: boolean;
 	/** Box width in px. Default 440 (commonStyles.modalDialog). */
 	width?: number;
-	/** Drop the body padding (for content that fills the box, e.g. a DataTable). */
+	/** Drop the body padding (for content that fills the box, e.g. a DataGrid). */
 	noBodyPadding?: boolean;
 	/** Accessible label when `title` is not a plain string. */
 	ariaLabel?: string;

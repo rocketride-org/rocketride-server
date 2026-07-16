@@ -6,22 +6,24 @@
 /**
  * MembersPanel — the Members tab within AccountView.
  *
- * Lists all organization members in the stock DataTable (search, sort,
- * pagination) inside a stock Card, with the A-Z letter selector preserved as a
- * strip along the table's right edge. Pending invitations show Resend / Cancel
- * actions instead of Edit / Remove. The current user's own row shows their
- * role but no action buttons.
+ * Lists all organization members in the stock DataGrid (sort, pagination)
+ * inside a stock Card, with a toolbar search box above the grid and the A-Z
+ * letter selector preserved as a strip along the table's right edge. Pending
+ * invitations show Resend / Cancel actions instead of Edit / Remove. The
+ * current user's own row shows their role but no action buttons.
  */
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
+import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
-import { DataTable } from '../../../components/data-table/DataTable';
-import type { DataTableColumn } from '../../../components/data-table/DataTable';
-import { createArrayDataSource } from '../../../components/data-table/dataSource';
+import { DataGrid } from '../../../components/data-grid/DataGrid';
+import { avatarEl, buttonEl, matchesSearch } from '../../../components/data-grid/defaults';
+import { InputField } from '../../../components/input-field/InputField';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import type { ConnectResult, OrgDetail, MemberRecord } from '../types';
-import { Badge, Avatar } from './shared';
+import { initials, avatarColor } from './shared';
 
 // =============================================================================
 // STYLES
@@ -40,19 +42,61 @@ const styles = {
 		minWidth: 0,
 	} as CSSProperties,
 
-	/** Horizontal cluster inside a table cell (avatar + text). */
+	/** Toolbar above the grid: search box + row count (old stock-table toolbar spec). */
+	toolbar: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 12,
+		padding: '12px 16px',
+		borderBottom: '1px solid var(--rr-border)',
+	} as CSSProperties,
+
+	/** Toolbar search box sizing (30px tall, 260px wide — old stock-table spec). */
+	search: {
+		width: 260,
+		height: 30,
+	} as CSSProperties,
+
+	/** Toolbar row-count text (old stock-table count spec). */
+	count: {
+		fontSize: 12.5,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** Horizontal cluster inside a grid cell (avatar + text) — DOM style for formatters. */
 	cellCluster: {
 		display: 'flex',
 		alignItems: 'center',
-		gap: 10,
-	} as CSSProperties,
+		gap: '10px',
+	} as Partial<CSSStyleDeclaration>,
 
-	/** "(you)" annotation on the current user's own row. */
+	/** 28px member avatar overrides applied over the stock 32px avatarEl. */
+	avatarSmall: {
+		width: '28px',
+		height: '28px',
+		fontSize: '10.6px',
+		fontWeight: '700',
+	} as Partial<CSSStyleDeclaration>,
+
+	/** "(you)" annotation on the current user's own row (DOM style for the grid formatter). */
 	youTag: {
-		fontSize: 10,
+		fontSize: '10px',
 		color: 'var(--rr-text-disabled)',
-		marginLeft: 5,
-	} as CSSProperties,
+		marginLeft: '5px',
+	} as Partial<CSSStyleDeclaration>,
+
+	/** Role / status badge shape (commonStyles.badge values + surface fill); text color set per variant. */
+	roleBadge: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: '4px',
+		padding: '2px 8px',
+		fontSize: '11px',
+		fontWeight: '600',
+		borderRadius: '10px',
+		letterSpacing: '0.3px',
+		background: 'var(--rr-bg-surface-alt)',
+	} as Partial<CSSStyleDeclaration>,
 
 	/** Vertical A-Z sidebar strip on the right edge. */
 	azBar: {
@@ -94,28 +138,76 @@ const styles = {
 		opacity: 0.4,
 	} as CSSProperties,
 
-	/** Buttons inside a row-actions cell, spaced like the DataTable spec. */
-	rowButtons: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: 5,
-	} as CSSProperties,
-
-	/** "Sent!" confirmation after a successful invite resend. */
+	/** "Sent!" confirmation after a successful invite resend (DOM style for the grid formatter). */
 	sentText: {
-		fontSize: 11,
+		fontSize: '11px',
 		color: 'var(--rr-color-success)',
-		fontWeight: 600,
-	} as CSSProperties,
+		fontWeight: '600',
+	} as Partial<CSSStyleDeclaration>,
 };
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+/** Debounce applied to the toolbar search input (old stock-table spec). */
+const SEARCH_DEBOUNCE_MS = 250;
+
+// =============================================================================
+// CELL BUILDERS
+// =============================================================================
+
+/**
+ * Builds a member cell — 28px initials avatar beside the display name, with a
+ * "(you)" tag on the viewer's own row (DOM clone of the old Avatar + cluster
+ * cell render).
+ *
+ * @param displayName - Member display name (initials + color seed).
+ * @param email - Fallback seed when the name is empty.
+ * @param isSelf - Whether the row belongs to the authenticated user.
+ * @returns The cluster element.
+ */
+function memberCellEl(displayName: string, email: string, isSelf: boolean): HTMLElement {
+	// Cluster wrapper: avatar + name in a horizontal flex row.
+	const wrap = document.createElement('div');
+	Object.assign(wrap.style, styles.cellCluster);
+	// Stock avatar resized to the panel's 28px spec.
+	const avatar = avatarEl(initials(displayName, email), avatarColor(displayName || email));
+	Object.assign(avatar.style, styles.avatarSmall);
+	wrap.appendChild(avatar);
+	// Display-name label, annotated with "(you)" on the viewer's own row.
+	const name = document.createElement('span');
+	name.textContent = displayName;
+	if (isSelf) {
+		const you = document.createElement('span');
+		Object.assign(you.style, styles.youTag);
+		you.textContent = '(you)';
+		name.appendChild(you);
+	}
+	wrap.appendChild(name);
+	return wrap;
+}
+
+/**
+ * Builds a role / status badge (DOM clone of the shared Badge component's
+ * admin / member / pending variants — surface fill, variant text color).
+ *
+ * @param variant - Badge variant determining the text color.
+ * @param label - Badge label text.
+ * @returns The badge element.
+ */
+function roleBadgeEl(variant: 'admin' | 'member' | 'pending', label: string): HTMLElement {
+	const el = document.createElement('span');
+	Object.assign(el.style, styles.roleBadge);
+	// Variant text colors mirror the shared Badge's overrides.
+	el.style.color = variant === 'admin' ? 'var(--rr-brand)' : variant === 'pending' ? 'var(--rr-color-warning)' : 'var(--rr-text-secondary)';
+	el.textContent = label;
+	return el;
+}
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** Flattened row shape fed to the members DataTable. */
+/** Flattened row shape fed to the members DataGrid. */
 interface MemberRow extends Record<string, unknown> {
 	/** Member user id — used to resolve callbacks. */
 	userId: string;
@@ -161,13 +253,16 @@ export interface MembersPanelProps {
  * The Members tab panel.
  *
  * Renders a Card headed with the org name and member count, an Invite action,
- * and a DataTable body (search, sort, pagination) flanked by the A-Z letter
- * selector strip.
+ * a toolbar search box, and a DataGrid body (sort, pagination) flanked by the
+ * A-Z letter selector strip.
  */
 export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profile, onInvite, onChangeRole, onRemove, onResendInvite, isOrgAdmin }) => {
 	const [activeLetter, setActiveLetter] = useState<string | null>(null);
 	const [resendingUserId, setResendingUserId] = useState<string | null>(null);
 	const [resentUserId, setResentUserId] = useState<string | null>(null);
+	// Toolbar search input, debounced before filtering (old stock-table behavior).
+	const [searchInput, setSearchInput] = useState('');
+	const search = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
 
 	// Determine which letters have at least one matching member.
 	const availableLetters = useMemo(() => {
@@ -179,8 +274,8 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 		return set;
 	}, [members]);
 
-	// A-Z letter filter applied BEFORE the table: the DataTable's own search
-	// then narrows within the selected letter.
+	// A-Z letter filter applied BEFORE the search: the toolbar search then
+	// narrows within the selected letter.
 	const letterFiltered = useMemo(() => {
 		if (!activeLetter) return members;
 		return members.filter((m) => {
@@ -190,7 +285,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 	}, [members, activeLetter]);
 
 	// Flatten member records into table rows.
-	const rows = useMemo<MemberRow[]>(
+	const allRows = useMemo<MemberRow[]>(
 		() =>
 			letterFiltered.map((m) => ({
 				userId: m.userId,
@@ -202,38 +297,9 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 		[letterFiltered]
 	);
 
-	// Client-side data source over the (letter-filtered) member rows.
-	const source = useMemo(() => createArrayDataSource<MemberRow>(rows), [rows]);
-
-	// Column definitions; cells keep the existing avatar / badge renderings.
-	const columns = useMemo<DataTableColumn<MemberRow>[]>(
-		() => [
-			{
-				key: 'displayName',
-				label: 'Member',
-				sortable: true,
-				render: (row) => (
-					<div style={styles.cellCluster}>
-						<Avatar name={row.displayName} email={row.email} size={28} />
-						<span>
-							{row.displayName}
-							{/* Annotate the authenticated user's own row with "(you)". */}
-							{row.userId === profile?.userId && <span style={styles.youTag}>(you)</span>}
-						</span>
-					</div>
-				),
-			},
-			{ key: 'email', label: 'Email', sortable: true },
-			{
-				key: 'role',
-				label: 'Role',
-				sortable: true,
-				// Pending invitations show the Pending badge in place of a role.
-				render: (row) => (row.status === 'pending' ? <Badge variant="pending">Pending</Badge> : <Badge variant={row.role === 'admin' ? 'admin' : 'member'}>{row.role}</Badge>),
-			},
-		],
-		[profile?.userId]
-	);
+	// View-side search over the (letter-filtered) rows — replaces the old
+	// stock table's built-in search box.
+	const rows = useMemo<MemberRow[]>(() => allRows.filter((row) => matchesSearch(row, search)), [allRows, search]);
 
 	/**
 	 * Resolves a table row back to its member record. No-ops via undefined if
@@ -277,69 +343,100 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 		}
 	};
 
-	/**
-	 * Renders the per-row action buttons: nothing for the current user,
-	 * Resend / Cancel for pending invitations, Edit / Remove for active
-	 * members — admin only in both cases.
-	 *
-	 * @param row - The member's table row.
-	 * @returns The action node for the row, or null.
-	 */
-	const renderActions = (row: MemberRow): React.ReactNode => {
-		// Current user: no self-edit/remove controls.
-		if (row.userId === profile?.userId) return null;
-
-		if (row.status === 'pending') {
-			// Pending invitation: resend the email or cancel the invite.
-			return (
-				<div style={styles.rowButtons}>
-					{resentUserId === row.userId ? (
-						<span style={styles.sentText}>Sent!</span>
-					) : (
-						<Button variant="ghost" small disabled={resendingUserId === row.userId} onClick={() => handleResend(row)}>
-							{resendingUserId === row.userId ? 'Sending...' : 'Resend'}
-						</Button>
-					)}
-					<Button
-						variant="ghost"
-						small
-						onClick={() => {
-							const record = recordFor(row);
-							if (record) onRemove(record);
-						}}
-					>
-						Cancel
-					</Button>
-				</div>
-			);
+	// Live action router — the actions column's cellClick is baked into the
+	// memoized column definition, so it dispatches through this ref to always
+	// reach the latest prop closures and member records.
+	const actionRef = useRef<(action: string, row: MemberRow) => void>(() => undefined);
+	actionRef.current = (action, row) => {
+		// Route the clicked button's action key to the matching handler.
+		if (action === 'resend') {
+			void handleResend(row);
+			return;
 		}
-
-		// Active member: change role or remove from the organization.
-		return (
-			<div style={styles.rowButtons}>
-				<Button
-					variant="ghost"
-					small
-					onClick={() => {
-						const record = recordFor(row);
-						if (record) onChangeRole(record);
-					}}
-				>
-					Edit
-				</Button>
-				<Button
-					variant="ghost"
-					small
-					onClick={() => {
-						const record = recordFor(row);
-						if (record) onRemove(record);
-					}}
-				>
-					Remove
-				</Button>
-			</div>
-		);
+		const record = recordFor(row);
+		if (!record) return;
+		if (action === 'edit') onChangeRole(record);
+		else if (action === 'remove') onRemove(record);
 	};
+
+	// Column definitions; cells keep the existing avatar / badge renderings.
+	const columns = useMemo<ColumnDefinition[]>(() => {
+		const cols: ColumnDefinition[] = [
+			{
+				title: 'Member',
+				field: 'displayName',
+				headerSort: true,
+				// Avatar + name cluster, "(you)" on the viewer's own row.
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as MemberRow;
+					return memberCellEl(row.displayName, row.email, row.userId === profile?.userId);
+				},
+			},
+			{ title: 'Email', field: 'email', headerSort: true },
+			{
+				title: 'Role',
+				field: 'role',
+				headerSort: true,
+				// Pending invitations show the Pending badge in place of a role.
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as MemberRow;
+					return row.status === 'pending' ? roleBadgeEl('pending', 'Pending') : roleBadgeEl(row.role === 'admin' ? 'admin' : 'member', row.role);
+				},
+			},
+		];
+		// The Actions column only exists for org admins: nothing for the current
+		// user, Resend / Cancel for pending invitations, Edit / Remove for active
+		// members. Built by hand instead of createActionsColumn because the
+		// button set varies per row (and Resend has in-flight / "Sent!" states).
+		if (isOrgAdmin) {
+			cols.push({
+				title: 'Actions',
+				field: '__rrActions',
+				width: 150,
+				hozAlign: 'right',
+				headerSort: false,
+				headerMenu: false,
+				resizable: false,
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as MemberRow;
+					const wrap = document.createElement('span');
+					wrap.dataset.rrActions = 'true';
+					wrap.className = 'rr-cell-actions';
+					// Current user: no self-edit/remove controls.
+					if (row.userId === profile?.userId) return wrap;
+					if (row.status === 'pending') {
+						// Pending invitation: resend the email or cancel the invite.
+						if (resentUserId === row.userId) {
+							// "Sent!" confirmation replaces the Resend button briefly.
+							const sent = document.createElement('span');
+							Object.assign(sent.style, styles.sentText);
+							sent.textContent = 'Sent!';
+							wrap.appendChild(sent);
+						} else {
+							const resend = buttonEl('ghost', resendingUserId === row.userId ? 'Sending...' : 'Resend', 'resend');
+							if (resendingUserId === row.userId) (resend as HTMLButtonElement).disabled = true;
+							wrap.appendChild(resend);
+						}
+						wrap.appendChild(buttonEl('ghost', 'Cancel', 'remove'));
+					} else {
+						// Active member: change role or remove from the organization.
+						wrap.appendChild(buttonEl('ghost', 'Edit', 'edit'));
+						wrap.appendChild(buttonEl('ghost', 'Remove', 'remove'));
+					}
+					return wrap;
+				},
+				// Route clicks on the buttons to the live action router by key.
+				cellClick: (e: UIEvent, cell: CellComponent) => {
+					const target = (e.target as HTMLElement).closest('button[data-action]');
+					if (!target) return;
+					actionRef.current((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as MemberRow);
+				},
+				// `headerMenu: false` (menu-exempt column) predates the @types union
+				// (see createActionsColumn in defaults.ts) — hence the two-step cast.
+			} as unknown as ColumnDefinition);
+		}
+		return cols;
+	}, [isOrgAdmin, profile?.userId, resendingUserId, resentUserId]);
 
 	/** Handles letter click — toggles off if already selected. */
 	const handleLetterClick = (letter: string) => {
@@ -363,15 +460,16 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 				{/* Body: member table + A-Z sidebar */}
 				<div style={styles.body}>
 					<div style={styles.tableWrap}>
-						<DataTable<MemberRow>
+						{/* Toolbar: search box + filtered row count (replaces the old
+						    stock table's built-in toolbar). */}
+						<div style={styles.toolbar}>
+							<InputField style={styles.search} placeholder="Search members…" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
+							<span style={styles.count}>{`${rows.length} member${rows.length !== 1 ? 's' : ''}`}</span>
+						</div>
+						<DataGrid<MemberRow>
 							columns={columns}
-							source={source}
-							searchPlaceholder="Search members…"
-							countLabel={(n) => `${n} member${n !== 1 ? 's' : ''}`}
-							// The Actions column only exists for org admins; member rows
-							// without actions (the viewer's own row) render an empty cell.
-							actions={isOrgAdmin ? renderActions : undefined}
-							emptyState={{ title: members.length === 0 ? 'No members yet' : 'No members match the current filter' }}
+							data={rows}
+							emptyTitle={members.length === 0 ? 'No members yet' : 'No members match the current filter'}
 						/>
 					</div>
 

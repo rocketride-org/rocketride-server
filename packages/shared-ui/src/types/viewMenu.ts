@@ -31,7 +31,7 @@
 //   The VIEW ITSELF renders it as the very first element of its own content
 //   column (above any ContentHeader — the title lives inside each page, below
 //   the strip). There is no publish/host machinery: consistency is enforced
-//   the same way as Card/DataTable — views must use the stock component and
+//   the same way as Card/DataGrid — views must use the stock component and
 //   never hand-roll tab bars.
 //
 // - SidebarMenu — a plain, standard vertical menu-list component. Not

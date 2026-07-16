@@ -10,7 +10,7 @@
  * (title + right-aligned actions) on a quiet `--rr-bg-surface-alt` fill
  * separated from the body by a divider, an optional `toolbar` row beneath the
  * header (e.g. a filter/search strip), and a padded body. Set `noBodyPadding`
- * for content that fills the card edge-to-edge (e.g. a DataTable).
+ * for content that fills the card edge-to-edge (e.g. a DataGrid).
  *
  * Pass `onClick` to make the whole card interactive: it then shows a pointer
  * cursor, a subtle hover treatment (border-color shifts to `--rr-border-hover`),
@@ -43,7 +43,7 @@ export interface ICardProps {
 	/**
 	 * Optional row rendered directly beneath the header row (and above the body):
 	 * filter/search strips, ToggleGroups, or any custom controls — e.g. hosting a
-	 * DataTable's filter box at the card level. Renders with its own divider.
+	 * a DataGrid's search box at the card level. Renders with its own divider.
 	 */
 	toolbar?: ReactNode;
 	/**

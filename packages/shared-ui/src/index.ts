@@ -126,17 +126,13 @@ export type { IChipProps, IChipAddProps } from './components/chip/Chip';
 export { DropZone } from './components/drop-zone/DropZone';
 export type { IDropZoneProps } from './components/drop-zone/DropZone';
 
-// --- DataTable + DataSource (style guide section 6.1) ------------------------
-export { DataTable } from './components/data-table/DataTable';
-export type { DataTableColumn, IDataTableProps } from './components/data-table/DataTable';
-export { createArrayDataSource, createQueryDataSource } from './components/data-table/dataSource';
-export type { DataQuery, DataPage, DataSource } from './components/data-table/dataSource';
-
 // --- DataGrid (style guide section 6.1) ---------------------------------------
 export { DataGrid } from './components/data-grid/DataGrid';
 export type { IDataGridProps, IDataGridHandle, IDataGridPage, IDataGridPageRequest } from './components/data-grid/DataGrid';
 export { createActionsColumn, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch } from './components/data-grid/defaults';
 export type { IGridAction, IActionsColumnConfig, CellBadgeVariant, CellButtonKind } from './components/data-grid/defaults';
+export { FilterStrip } from './components/data-grid/FilterStrip';
+export type { IGridFilterDef, IGridFilterOption, IFilterStripProps } from './components/data-grid/FilterStrip';
 export { createWorkspaceGridPersistence } from './components/data-grid/persistence';
 export type { IDataGridPersistence, DataGridLayout } from './components/data-grid/persistence';
 export { useDebouncedValue } from './hooks/useDebouncedValue';

@@ -6,7 +6,7 @@
 /**
  * CreditsPanel — pure compute credit balance widget.
  *
- * Shows the org's current credit balance per resource as a stock DataTable
+ * Shows the org's current credit balance per resource as the stock DataGrid
  * (Resource / Granted / Consumed / Balance) inside a stock Card headed
  * "Account Balance", with the "Add more capacity..." action in the card
  * header. The host is responsible for the checkout flow via `onAddCapacity`.
@@ -16,11 +16,10 @@
  */
 
 import React, { useMemo, useState, type CSSProperties } from 'react';
+import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
-import { DataTable } from '../../../components/data-table/DataTable';
-import type { DataTableColumn } from '../../../components/data-table/DataTable';
-import { createArrayDataSource } from '../../../components/data-table/dataSource';
+import { DataGrid } from '../../../components/data-grid/DataGrid';
 import type { CreditBalance, CreditPack } from '../types';
 
 // =============================================================================
@@ -28,15 +27,15 @@ import type { CreditBalance, CreditPack } from '../types';
 // =============================================================================
 
 const styles = {
-	/** Resource name cell — uppercase like the original summary table. */
+	/** Resource name cell — uppercase like the original summary table (DOM style for the grid formatter). */
 	resourceCell: {
 		textTransform: 'uppercase',
-	} as CSSProperties,
+	} as Partial<CSSStyleDeclaration>,
 
-	/** Negative balance value — error emphasis. */
+	/** Negative balance value — error emphasis (DOM style for the grid formatter). */
 	balanceNegative: {
 		color: 'var(--rr-color-error)',
-	} as CSSProperties,
+	} as Partial<CSSStyleDeclaration>,
 
 	/** Fallback text when no balance data has loaded. */
 	balanceEmpty: {
@@ -60,7 +59,7 @@ const styles = {
 // TYPES
 // =============================================================================
 
-/** Flattened row shape fed to the balance DataTable. */
+/** Flattened row shape fed to the balance DataGrid. */
 interface BalanceRow extends Record<string, unknown> {
 	/** Display name of the resource (label-derived, falls back to the key). */
 	resource: string;
@@ -101,7 +100,7 @@ export interface CreditsPanelProps {
 // COMPONENT
 // =============================================================================
 
-/** Pure credit balance widget — Card + DataTable over per-resource balances. */
+/** Pure credit balance widget — Card + DataGrid over per-resource balances. */
 export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapacity }) => {
 	// ── Error state ──────────────────────────────────────────────────────────
 	// The in-panel pack purchase flow was removed (the host owns checkout via
@@ -126,27 +125,54 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 		});
 	}, [balance]);
 
-	// Client-side data source over the balance rows.
-	const source = useMemo(() => createArrayDataSource<BalanceRow>(rows), [rows]);
-
 	// Column definitions — numeric columns right-aligned like the original table.
-	const columns = useMemo<DataTableColumn<BalanceRow>[]>(
+	const columns = useMemo<ColumnDefinition[]>(
 		() => [
 			{
-				key: 'resource',
-				label: 'Resource',
-				sortable: true,
-				render: (row) => <span style={styles.resourceCell}>{row.resource}</span>,
+				title: 'Resource',
+				field: 'resource',
+				headerSort: true,
+				// Uppercase resource-name span (DOM clone of the old cell render).
+				formatter: (cell: CellComponent) => {
+					const el = document.createElement('span');
+					Object.assign(el.style, styles.resourceCell);
+					el.textContent = String(cell.getValue() ?? '');
+					return el;
+				},
 			},
-			{ key: 'granted', label: 'Granted', align: 'right', sortable: true, render: (row) => formatCredits(row.granted) },
-			{ key: 'consumed', label: 'Consumed', align: 'right', sortable: true, render: (row) => formatCredits(row.consumed) },
 			{
-				key: 'balance',
-				label: 'Balance',
-				align: 'right',
-				sortable: true,
+				title: 'Granted',
+				field: 'granted',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => formatCredits(cell.getValue() as number),
+			},
+			{
+				title: 'Consumed',
+				field: 'consumed',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => formatCredits(cell.getValue() as number),
+			},
+			{
+				title: 'Balance',
+				field: 'balance',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
 				// Overspent resources render in the error color.
-				render: (row) => <span style={row.balance < 0 ? styles.balanceNegative : undefined}>{formatCredits(row.balance)}</span>,
+				formatter: (cell: CellComponent) => {
+					const value = cell.getValue() as number;
+					const el = document.createElement('span');
+					if (value < 0) Object.assign(el.style, styles.balanceNegative);
+					el.textContent = formatCredits(value);
+					return el;
+				},
 			},
 		],
 		[]
@@ -169,7 +195,7 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 			noBodyPadding={hasData}
 		>
 			{/* Balance table — granted, consumed, net per resource */}
-			{hasData ? <DataTable<BalanceRow> columns={columns} source={source} /> : <div style={styles.balanceEmpty}>— credits available</div>}
+			{hasData ? <DataGrid<BalanceRow> columns={columns} data={rows} /> : <div style={styles.balanceEmpty}>— credits available</div>}
 
 			{/* Error banner */}
 			{error && <div style={styles.error}>{error}</div>}

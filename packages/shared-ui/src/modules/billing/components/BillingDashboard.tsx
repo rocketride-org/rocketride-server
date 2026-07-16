@@ -9,25 +9,25 @@
  * Five sections, each a stock Card:
  *   1. Balance breakdown -- purchased vs consumed per resource with bars
  *   2. Spending velocity -- burn rate + days remaining as MiniCard tiles
- *   3. Usage leaderboard -- top consumers by user or team (stock DataTable)
- *   4. Transaction log   -- paginated ledger detail (stock DataTable over a
- *      prop-fed query adapter; see TransactionLog)
+ *   3. Usage leaderboard -- top consumers by user or team (stock DataGrid)
+ *   4. Transaction log   -- paginated ledger detail (stock DataGrid in REMOTE
+ *      mode over a prop-fed page bridge; see TransactionLog)
  *   5. Active tasks      -- live running tasks (placeholder for live data)
  *
  * All data is received as props; the host (AccountPage) is responsible for
  * fetching via the BillingApi.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
 import { MiniCard, MiniContainer } from '../../../components/mini-card/MiniCard';
-import { DataTable } from '../../../components/data-table/DataTable';
-import type { DataTableColumn } from '../../../components/data-table/DataTable';
-import { createArrayDataSource, createQueryDataSource } from '../../../components/data-table/dataSource';
-import type { DataPage } from '../../../components/data-table/dataSource';
+import { DataGrid } from '../../../components/data-grid/DataGrid';
+import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
+import { mutedEl } from '../../../components/data-grid/defaults';
 import type { CreditBalance, LedgerTransaction, TransactionsResult, UsageRollup } from '../types';
 
 // =============================================================================
@@ -131,52 +131,26 @@ const styles = {
 	} as CSSProperties,
 
 	/**
-	 * Transaction type badge — success tint for credits, brand tint for usage.
-	 *
-	 * @param type - Ledger transaction type string.
+	 * Transaction type badge shape — DOM style applied by {@link typeBadgeEl};
+	 * per-type tint colors are set there (success / brand / neutral).
 	 */
-	typeBadge: (type: string): CSSProperties => ({
+	typeBadgeBase: {
 		display: 'inline-block',
 		padding: '1px 6px',
-		borderRadius: 3,
-		fontSize: 10,
-		fontWeight: 600,
-		background:
-			type === 'purchase' || type === 'credit'
-				? 'color-mix(in srgb, var(--rr-color-success) 15%, transparent)'
-				: type === 'usage'
-				? 'color-mix(in srgb, var(--rr-brand) 15%, transparent)'
-				: 'var(--rr-bg-surface-alt)',
-		color: type === 'purchase' || type === 'credit' ? 'var(--rr-color-success)' : type === 'usage' ? 'var(--rr-brand)' : 'var(--rr-text-secondary)',
-	}),
+		borderRadius: '3px',
+		fontSize: '10px',
+		fontWeight: '600',
+	} as Partial<CSSStyleDeclaration>,
 
-	/** Secondary small-print table cell (descriptions, context). */
-	cellMuted: {
-		fontSize: 11,
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
-
-	/** Context cell with ellipsis truncation. */
-	cellContext: {
-		fontSize: 11,
-		color: 'var(--rr-text-secondary)',
-		display: 'inline-block',
-		maxWidth: 200,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap' as const,
-		verticalAlign: 'bottom',
-	} as CSSProperties,
-
-	/** Uppercase resource cell in the transaction log. */
+	/** Uppercase resource cell in the transaction log (DOM style for the grid formatter). */
 	cellUppercase: {
-		textTransform: 'uppercase' as const,
-	} as CSSProperties,
+		textTransform: 'uppercase',
+	} as Partial<CSSStyleDeclaration>,
 
-	/** Positive (credit) amount cell. */
+	/** Positive (credit) amount cell (DOM style for the grid formatter). */
 	amountPositive: {
 		color: 'var(--rr-color-success)',
-	} as CSSProperties,
+	} as Partial<CSSStyleDeclaration>,
 
 	/** Active task row. */
 	taskRow: {
@@ -226,6 +200,33 @@ function fmt(n: number): string {
 /** Formats a number with no decimals. */
 function fmtInt(n: number): string {
 	return Math.round(n).toLocaleString();
+}
+
+/**
+ * Builds the transaction-type badge element for a grid cell — success tint
+ * for credits/purchases, brand tint for usage, neutral otherwise (DOM clone
+ * of the old typeBadge cell render).
+ *
+ * @param type - Ledger transaction type string.
+ * @returns The badge element.
+ */
+function typeBadgeEl(type: string): HTMLElement {
+	const el = document.createElement('span');
+	// Shape and typography from the shared base style.
+	Object.assign(el.style, styles.typeBadgeBase);
+	// Tint by type: credits green, usage brand, anything else neutral.
+	if (type === 'purchase' || type === 'credit') {
+		el.style.background = 'color-mix(in srgb, var(--rr-color-success) 15%, transparent)';
+		el.style.color = 'var(--rr-color-success)';
+	} else if (type === 'usage') {
+		el.style.background = 'color-mix(in srgb, var(--rr-brand) 15%, transparent)';
+		el.style.color = 'var(--rr-brand)';
+	} else {
+		el.style.background = 'var(--rr-bg-surface-alt)';
+		el.style.color = 'var(--rr-text-secondary)';
+	}
+	el.textContent = type;
+	return el;
 }
 
 // =============================================================================
@@ -413,7 +414,7 @@ const SpendingVelocity: React.FC<{
 // USAGE LEADERBOARD
 // =============================================================================
 
-/** Flattened row shape fed to the leaderboard DataTable. */
+/** Flattened row shape fed to the leaderboard DataGrid. */
 interface LeaderRow extends Record<string, unknown> {
 	/** User or team id. */
 	id: string;
@@ -448,15 +449,20 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 		[data, names]
 	);
 
-	// Client-side data source over the leaderboard rows.
-	const source = useMemo(() => createArrayDataSource<LeaderRow>(rows), [rows]);
-
 	// Column definitions — first column label follows the active mode.
-	const columns = useMemo<DataTableColumn<LeaderRow>[]>(
+	const columns = useMemo<ColumnDefinition[]>(
 		() => [
-			{ key: 'name', label: mode === 'user' ? 'User' : 'Team', sortable: true },
-			{ key: 'total', label: 'Total Tokens', align: 'right', sortable: true, render: (row) => fmt(row.total) },
-			{ key: 'resources', label: 'Resources', align: 'right', sortable: true },
+			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', headerSort: true },
+			{
+				title: 'Total Tokens',
+				field: 'total',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => fmt(cell.getValue() as number),
+			},
+			{ title: 'Resources', field: 'resources', hozAlign: 'right', headerHozAlign: 'right', headerSort: true, sorter: 'number' },
 		],
 		[mode]
 	);
@@ -479,7 +485,7 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 			}
 			noBodyPadding
 		>
-			<DataTable<LeaderRow> columns={columns} source={source} emptyState={{ title: 'No usage data' }} />
+			<DataGrid<LeaderRow> columns={columns} data={rows} emptyTitle="No usage data" />
 		</Card>
 	);
 };
@@ -491,22 +497,28 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 /**
  * Watchdog for a parked page request: if the host never feeds the requested
  * page (e.g. its fetch errored and it never updates `transactions`), the parked
- * promise is rejected after this long so the DataTable clears its loading row
- * instead of spinning forever.
+ * promise is rejected after this long so the DataGrid clears its loading
+ * overlay (it keeps the previous rows) instead of spinning forever.
  */
 const PAGE_FETCH_TIMEOUT_MS = 15000;
+
+/**
+ * Ledger row shape fed to the transaction DataGrid — the SDK interface plus
+ * the index signature the grid's Row constraint requires.
+ */
+type TxRow = LedgerTransaction & Record<string, unknown>;
 
 /**
  * Paginated transaction log with user name resolution.
  *
  * The data is server-paged THROUGH PROPS: the host owns the fetch and hands
  * down one TransactionsResult page plus an `onPageChange(page)` callback. To
- * drive the stock DataTable, a query adapter bridges the prop flow: when the
- * table asks for a page already held in props it resolves synchronously; when
- * it asks for a different page the adapter calls `onPageChange` and parks the
- * promise in a ref until the matching TransactionsResult prop arrives. Sort
- * and search are declared unsupported (the host API does not accept them), so
- * the table hides those affordances.
+ * drive the stock DataGrid in REMOTE mode, `fetchPage` bridges the prop flow:
+ * when the grid asks for the page already held in props it resolves
+ * immediately; when it asks for a different page the bridge calls
+ * `onPageChange` and parks the promise in a ref until the matching
+ * TransactionsResult prop arrives (see the prop-arrival effect). Both the grid
+ * and the host API page 1-based, so page numbers pass through untranslated.
  */
 const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPageChange: (page: number) => void; memberNames?: Record<string, string> }> = ({
 	transactions,
@@ -514,60 +526,56 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 	memberNames,
 }) => {
 	// --- Prop bridge refs ------------------------------------------------------
-	// Latest props, readable from inside the memoized source's fetcher.
+	// Latest props, readable from inside the stable fetchPage callback.
 	const txRef = useRef(transactions);
 	txRef.current = transactions;
 	const onPageRef = useRef(onPageChange);
 	onPageRef.current = onPageChange;
-	// The one in-flight page request the table is waiting on, if any, plus its
-	// watchdog timer so a never-arriving page can't hang the table.
+	// Imperative grid handle — used to re-run the query on host-initiated
+	// refreshes (a new TransactionsResult with no request parked).
+	const gridRef = useRef<IDataGridHandle>(null);
+	// The one in-flight page request the grid is waiting on, if any, plus its
+	// watchdog timer so a never-arriving page can't hang the grid.
 	const pendingRef = useRef<{
 		page: number;
-		// Page size of the parked query — needed to recognise a clamped response
+		// Page size of the parked request — needed to recognise a clamped response
 		// (the host answering an out-of-range request with its own last page).
 		pageSize: number;
-		resolve: (p: DataPage<LedgerTransaction>) => void;
+		resolve: (p: IDataGridPage<TxRow>) => void;
 		reject: (e: unknown) => void;
 		timer: ReturnType<typeof setTimeout>;
 	} | null>(null);
 
-	// --- Query adapter -----------------------------------------------------------
-	// Stable source: resolves from props when possible, otherwise asks the host
+	// --- REMOTE-mode fetcher -----------------------------------------------------
+	// Stable bridge: resolves from props when possible, otherwise asks the host
 	// for the page and resolves once the prop catches up (see effect below).
-	const source = useMemo(
-		() =>
-			createQueryDataSource<LedgerTransaction>(
-				(q) => {
-					// The table pages 0-based; the host API pages 1-based.
-					const wanted = q.page + 1;
-					const current = txRef.current;
-					// Already holding the wanted page: answer synchronously from props.
-					if (current && current.page === wanted) {
-						return Promise.resolve({ rows: current.transactions, total: current.total });
-					}
-					// Ask the host to fetch; park the promise until the prop arrives, with
-					// a watchdog so a failed/never-arriving fetch rejects instead of
-					// spinning forever.
-					return new Promise<DataPage<LedgerTransaction>>((resolve, reject) => {
-						// Supersede any earlier parked request (only the newest matters).
-						if (pendingRef.current) clearTimeout(pendingRef.current.timer);
-						const timer = setTimeout(() => {
-							// Still parked on THIS page after the timeout: give up so the
-							// table clears its loading row (it keeps the previous rows).
-							if (pendingRef.current && pendingRef.current.page === wanted) {
-								pendingRef.current = null;
-								reject(new Error(`Transaction page ${wanted} fetch timed out`));
-							}
-						}, PAGE_FETCH_TIMEOUT_MS);
-						pendingRef.current = { page: wanted, pageSize: q.pageSize, resolve, reject, timer };
-						onPageRef.current(wanted);
-					});
-				},
-				// The host API honors pagination only — no sort or search params.
-				{ sort: false, search: false, paginate: true }
-			),
-		[]
-	);
+	const fetchPage = useCallback((req: IDataGridPageRequest): Promise<IDataGridPage<TxRow>> => {
+		// DataGrid pages 1-based, exactly like the host API — no translation
+		// (the old 0-based stock-table adapter added 1 here).
+		const wanted = req.page;
+		const current = txRef.current;
+		// Already holding the wanted page: answer immediately from props.
+		if (current && current.page === wanted) {
+			return Promise.resolve({ rows: current.transactions as TxRow[], total: current.total });
+		}
+		// Ask the host to fetch; park the promise until the prop arrives, with
+		// a watchdog so a failed/never-arriving fetch rejects instead of
+		// spinning forever.
+		return new Promise<IDataGridPage<TxRow>>((resolve, reject) => {
+			// Supersede any earlier parked request (only the newest matters).
+			if (pendingRef.current) clearTimeout(pendingRef.current.timer);
+			const timer = setTimeout(() => {
+				// Still parked on THIS page after the timeout: give up so the
+				// grid clears its loading overlay (it keeps the previous rows).
+				if (pendingRef.current && pendingRef.current.page === wanted) {
+					pendingRef.current = null;
+					reject(new Error(`Transaction page ${wanted} fetch timed out`));
+				}
+			}, PAGE_FETCH_TIMEOUT_MS);
+			pendingRef.current = { page: wanted, pageSize: req.size, resolve, reject, timer };
+			onPageRef.current(wanted);
+		});
+	}, []);
 
 	// --- Prop-arrival effect ------------------------------------------------------
 	// When a new TransactionsResult lands, settle a parked request or handle a
@@ -583,21 +591,21 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 			// total, so a stale lower page from a superseded request can NOT
 			// settle a newer parked one and briefly show the wrong rows. Any
 			// other page is ignored (leave it parked; the watchdog covers a
-			// genuinely missing page), and DataTable's page-clamp effect snaps
-			// the index back into range after a clamp.
+			// genuinely missing page), and Tabulator snaps its pager back into
+			// range from the returned total after a clamp.
 			const lastPage = Math.max(1, Math.ceil(transactions.total / pending.pageSize));
 			const isClamped = pending.page > lastPage && transactions.page === lastPage;
 			if (transactions.page === pending.page || isClamped) {
 				clearTimeout(pending.timer);
 				pendingRef.current = null;
-				pending.resolve({ rows: transactions.transactions, total: transactions.total });
+				pending.resolve({ rows: transactions.transactions as TxRow[], total: transactions.total });
 			}
 		} else if (transactions) {
-			// No parked request: a host-initiated refresh. Nudge the table to re-run
-			// its current query (it resolves synchronously from the new props).
-			source.refresh();
+			// No parked request: a host-initiated refresh. Nudge the grid to re-run
+			// its current page (fetchPage resolves immediately from the new props).
+			gridRef.current?.refetch();
 		}
-	}, [transactions, source]);
+	}, [transactions]);
 
 	// --- Unmount cleanup ---------------------------------------------------------
 	// Clear any parked watchdog so it can't fire after the component is gone.
@@ -609,33 +617,72 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 	);
 
 	// --- Columns -------------------------------------------------------------------
-	// Cell renderings keep the existing badge / mono / muted treatments.
-	const columns = useMemo<DataTableColumn<LedgerTransaction>[]>(
+	// Cell renderings keep the existing badge / muted / uppercase treatments.
+	const columns = useMemo<ColumnDefinition[]>(
 		() => [
-			{ key: 'createdAt', label: 'Date', render: (tx) => (tx.createdAt ? new Date(tx.createdAt).toLocaleString() : '--') },
-			{ key: 'userId', label: 'User', render: (tx) => (tx.userId ? memberNames?.[tx.userId] ?? tx.userId.slice(0, 8) : '--') },
-			{ key: 'type', label: 'Type', render: (tx) => <span style={styles.typeBadge(tx.type)}>{tx.type}</span> },
-			{ key: 'resource', label: 'Resource', render: (tx) => <span style={styles.cellUppercase}>{tx.resource}</span> },
-			{ key: 'description', label: 'Description', render: (tx) => <span style={styles.cellMuted}>{tx.description || '--'}</span> },
 			{
-				key: 'amount',
-				label: 'Amount',
-				align: 'right',
-				render: (tx) => (
-					<span style={tx.amount >= 0 ? styles.amountPositive : undefined}>
-						{tx.amount >= 0 ? '+' : ''}
-						{fmt(tx.amount)}
-					</span>
-				),
+				title: 'Date',
+				field: 'createdAt',
+				formatter: (cell: CellComponent) => {
+					const iso = cell.getValue() as string | null;
+					return iso ? new Date(iso).toLocaleString() : '--';
+				},
 			},
 			{
-				key: 'context',
-				label: 'Context',
-				render: (tx) => (
-					<span style={styles.cellContext} title={tx.context?.source || tx.context?.task_id || ''}>
-						{tx.context?.pipeline || tx.context?.source || tx.context?.pack_id || tx.context?.subscription_id || '--'}
-					</span>
-				),
+				title: 'User',
+				field: 'userId',
+				formatter: (cell: CellComponent) => {
+					const id = cell.getValue() as string | null;
+					return id ? memberNames?.[id] ?? id.slice(0, 8) : '--';
+				},
+			},
+			{
+				title: 'Type',
+				field: 'type',
+				formatter: (cell: CellComponent) => typeBadgeEl(cell.getValue() as string),
+			},
+			{
+				title: 'Resource',
+				field: 'resource',
+				// Uppercase resource span (DOM clone of the old cell render).
+				formatter: (cell: CellComponent) => {
+					const el = document.createElement('span');
+					Object.assign(el.style, styles.cellUppercase);
+					el.textContent = String(cell.getValue() ?? '');
+					return el;
+				},
+			},
+			{
+				title: 'Description',
+				field: 'description',
+				formatter: (cell: CellComponent) => mutedEl((cell.getValue() as string | null) || '--'),
+			},
+			{
+				title: 'Amount',
+				field: 'amount',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				// Credits render with a '+' prefix in the success color.
+				formatter: (cell: CellComponent) => {
+					const amount = cell.getValue() as number;
+					const el = document.createElement('span');
+					if (amount >= 0) Object.assign(el.style, styles.amountPositive);
+					el.textContent = `${amount >= 0 ? '+' : ''}${fmt(amount)}`;
+					return el;
+				},
+			},
+			{
+				title: 'Context',
+				field: 'context',
+				// Muted, ellipsis-truncated context with the full value as a tooltip.
+				formatter: (cell: CellComponent) => {
+					const tx = cell.getRow().getData() as TxRow;
+					const el = mutedEl(tx.context?.pipeline || tx.context?.source || tx.context?.pack_id || tx.context?.subscription_id || '--');
+					el.classList.add('rr-cell-truncate');
+					el.style.maxWidth = '200px';
+					el.title = tx.context?.source || tx.context?.task_id || '';
+					return el;
+				},
 			},
 		],
 		[memberNames]
@@ -645,13 +692,14 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 
 	return (
 		<Card header="Transaction Log" headerActions={<span style={styles.headerCount}>{transactions.total} total</span>} noBodyPadding>
-			<DataTable<LedgerTransaction>
+			<DataGrid<TxRow>
+				ref={gridRef}
 				columns={columns}
-				source={source}
+				fetchPage={fetchPage}
 				// The host controls the page size; offer exactly that one option so
 				// the pager math matches the server's pages.
 				pageSizes={[transactions.pageSize]}
-				emptyState={{ title: 'No transactions yet' }}
+				emptyTitle="No transactions yet"
 			/>
 		</Card>
 	);

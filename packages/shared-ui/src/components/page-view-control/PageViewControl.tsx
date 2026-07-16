@@ -13,7 +13,7 @@
  * inside each page, below the strip.
  *
  * There is no publish/host machinery: consistency is enforced the same way as
- * Card/DataTable — views with sub-views must use this stock component and
+ * Card/DataGrid — views with sub-views must use this stock component and
  * never hand-roll their own tab bars.
  */
 
