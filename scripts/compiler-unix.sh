@@ -69,6 +69,7 @@ LLVM_APT_VERSION=""         # apt.llvm.org clang major to add when the distro ar
 LLVM_TARBALL_PREFIX="$REAL_HOME/toolchains/llvm"  # user-local install root (no root needed to unpack)
 LLVM_TARBALL_FALLBACK="18.1.8"  # used only if the latest 18.x can't be discovered online
 DUMP_SYMS_DIR="$REAL_HOME/toolchains/bin"  # user-local bin for build tools (dump_syms); on the build PATH via tasks.js
+DUMP_SYMS_VERSION="v2.3.7"  # pinned: the releases/latest API is unauthenticated and rate-limited on CI
 
 # Supported clang range on Linux: 16 (Crashpad needs C++20 <ranges>) .. 18
 # (engine doesn't build with clang >= 19). Install target is clang-18.
@@ -598,16 +599,15 @@ install_dump_syms() {
     local os arch asset
     os=$(uname -s); arch=$(uname -m)
     case "$os/$arch" in
-        Linux/x86_64)  asset='dump_syms-x86_64-unknown-linux-gnu\.tar\.xz' ;;
-        Darwin/arm64)  asset='dump_syms-aarch64-apple-darwin\.tar\.xz' ;;
-        Darwin/x86_64) asset='dump_syms-x86_64-apple-darwin\.tar\.xz' ;;
+        Linux/x86_64)  asset='dump_syms-x86_64-unknown-linux-gnu.tar.xz' ;;
+        Darwin/arm64)  asset='dump_syms-aarch64-apple-darwin.tar.xz' ;;
+        Darwin/x86_64) asset='dump_syms-x86_64-apple-darwin.tar.xz' ;;
         *) echo "⚠ no prebuilt dump_syms for $os/$arch — install it manually (cargo install dump_syms) for crash symbols"; return 0 ;;
     esac
 
-    local url
-    url=$(curl -fsSL "https://api.github.com/repos/mozilla/dump_syms/releases/latest" 2>/dev/null \
-          | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 | grep -E "$asset" | head -1)
-    [ -z "$url" ] && { echo "⚠ no prebuilt dump_syms release found for $os/$arch — skipping"; return 0; }
+    # Build the release URL from the pinned tag: querying releases/latest needs no auth
+    # but is IP-rate-limited, and a throttled reply silently skipped the install.
+    local url="https://github.com/mozilla/dump_syms/releases/download/$DUMP_SYMS_VERSION/$asset"
 
     echo "→ downloading dump_syms ($arch)..."
     local tmp; tmp=$(as_user mktemp -d)
