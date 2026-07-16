@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
-
+          persist-credentials: false
       # The container runs as root but the checked-out tree is owned by the
       # runner UID (host bind-mount), so git aborts ./builder's calls with
       # "detected dubious ownership". Trust the workspace.
