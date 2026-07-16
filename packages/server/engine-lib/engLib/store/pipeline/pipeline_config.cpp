@@ -536,6 +536,18 @@ Error PipelineConfig::upgradeComponent(json::Value &component,
         }
     }
 
+    // Graph nodes were renamed when they moved onto the graph base class, so
+    // pipelines saved with the old provider still resolve to the new service.
+    if (version < 2) {
+        if (provider == "tool_falkordb") {
+            component["provider"] = "graph_falkordb";
+            if (config.isMember("type")) config["type"] = "graph_falkordb";
+        } else if (provider == "db_neo4j") {
+            component["provider"] = "graph_neo4j";
+            if (config.isMember("type")) config["type"] = "graph_neo4j";
+        }
+    }
+
     return {};
 }
 

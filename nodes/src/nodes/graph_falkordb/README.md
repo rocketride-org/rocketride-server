@@ -16,8 +16,8 @@ Queries a FalkorDB graph in two ways, and you can use either or both:
 It derives from `ai.common.graph.GraphInstanceBase`, the base class shared by every graph
 database node: the lane handling, the natural-language-to-Cypher loop and the common tools live
 there, so this node only implements what is specific to FalkorDB — the Redis-protocol client,
-multi-graph selection, and server-side read-only execution. (`db_neo4j` predates the base class
-and is migrated to it separately.)
+multi-graph selection, and server-side read-only execution. (`graph_neo4j` derives from the same
+base.)
 
 Queries are **read-only by default**: they run through `GRAPH.RO_QUERY`, so the FalkorDB server
 itself rejects any write clause (`CREATE`/`MERGE`/`SET`/`DELETE`) — the restriction is enforced

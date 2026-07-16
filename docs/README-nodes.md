@@ -150,13 +150,13 @@ channel; they have no data lanes and **bind to an agent** (see
 | `db_postgres`   | answers, questions → answers, table, text | PostgreSQL and Supabase (insert + NL-to-SQL) |
 | `db_mysql`      | answers, questions → answers, table, text | MySQL                                        |
 | `db_clickhouse` | questions → answers, table, text   | ClickHouse (NL-to-SQL)                       |
-| `db_neo4j`      | questions → answers, table, text   | Neo4j graph database                         |
 
 ### Graph Databases
 
-| Service          | Data flow (in → out)             | Description                                         |
-| ---------------- | -------------------------------- | --------------------------------------------------- |
-| `graph_falkordb` | questions → answers, table, text | FalkorDB graph database (NL-to-Cypher, multi-graph) |
+| Service          | Data flow (in → out)             | Description                                          |
+| ---------------- | -------------------------------- | ---------------------------------------------------- |
+| `graph_falkordb` | questions → answers, table, text | FalkorDB graph database (NL-to-Cypher, multi-graph)  |
+| `graph_neo4j`    | questions → answers, table, text | Neo4j graph database (NL-to-Cypher, READ access)     |
 
 ### Document Processing
 

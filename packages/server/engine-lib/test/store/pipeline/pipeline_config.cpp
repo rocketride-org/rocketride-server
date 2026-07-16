@@ -126,6 +126,29 @@ TEST_CASE("PipelineConfig") {
                       "'pipeline.version' is unsupported");
     }
 
+    SECTION("version:upgrade:graph") {
+        auto &component = pipeline["components"][4];
+
+        SECTION("falkordb") {
+            component["provider"] = "tool_falkordb";
+            component["config"]["type"] = "tool_falkordb";
+
+            REQUIRE_NO_ERROR(config.validate());
+            REQUIRE(component["provider"] == "graph_falkordb");
+            REQUIRE(component["config"]["type"] == "graph_falkordb");
+        }
+
+        SECTION("neo4j") {
+            component["provider"] = "db_neo4j";
+
+            REQUIRE_NO_ERROR(config.validate());
+            REQUIRE(component["provider"] == "graph_neo4j");
+            REQUIRE_FALSE(component["config"].isMember("type"));
+        }
+
+        REQUIRE(pipeline["version"] == IServices::VERSION);
+    }
+
     SECTION("source:missing:optional") {
         pipeline.removeMember("source");
 
