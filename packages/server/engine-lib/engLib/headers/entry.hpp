@@ -570,6 +570,7 @@ public:
     EntryTime docModifyTime;
     EntryJson objectTags;
     EntryJson instanceTags;
+    EntryJson parameters;
 
     EntryJson response;
 
@@ -627,6 +628,7 @@ public:
         docModifyTime.reset();
         objectTags.reset();
         instanceTags.reset();
+        parameters.reset();
     }
 
     //-----------------------------------------------------------------
@@ -761,6 +763,7 @@ public:
             entry.permissionId(value->asUInt());
         if (auto value = val.getKey("objectTags")) entry.objectTags(*value);
         if (auto value = val.getKey("instanceTags")) entry.instanceTags(*value);
+        if (auto value = val.getKey("parameters")) entry.parameters(*value);
         if (auto value = val.getKey("isContainer"))
             entry.isContainer(value->asBool());
 
@@ -851,6 +854,7 @@ public:
 #endif
         if (objectTags) val["objectTags"] = objectTags();
         if (instanceTags) val["instanceTags"] = instanceTags();
+        if (parameters) val["parameters"] = parameters();
 
         if (response) val["response"] = response();
 

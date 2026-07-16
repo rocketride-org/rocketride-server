@@ -611,11 +611,30 @@ class IInstanceBase:
     IEndpoint: IEndpointBase = None  #: Endpoint instance for communication.
     IGlobal: IGlobalBase = None  #: Global instance for shared data.
     instance: IFilterInstance = None  #: Instance data reference.
+    _params: Dict[str, Any] = None  #: Cached effective params for the current object (reset in close()).
 
     """
     These are all the overrides to provide
     the driver funtionality.
     """
+
+    @property
+    def params(self) -> Dict[str, Any]:
+        # Import locally to avoid load-time dep on ai
+        from ai.common.config import Config
+
+        if self._params is None:
+            # TODO: this global/object config stuff needs refactoring
+            glb = self.IGlobal.glb
+            self._params = Config.getNodeConfig(glb.logicalType, glb.connConfig)
+
+            obj = self.instance.currentObject
+            if obj.hasParameters:
+                objParams = IJson.toDict(obj.parameters).get(self.instance.pipeType.id)
+                if objParams:
+                    self._params = {**self._params, **objParams}
+
+        return self._params
 
     def preventDefault(self) -> None:
         """Prevent the default action from occurring."""
@@ -1005,7 +1024,7 @@ class IInstanceBase:
 
     def close(self) -> None:
         """Close the instance."""
-        pass
+        self._params = None
 
 
 class ILoader(Protocol):

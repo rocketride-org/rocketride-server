@@ -477,6 +477,8 @@ class DataConn(DAPConn):
         if mime_type is None:
             raise ValueError('No mimeType specified')
 
+        parameters = args.get('parameters', None)
+
         # Acquire semaphore in async context (non-blocking for event loop)
         self.debug_message(f'Waiting for semaphore slot (max: {self._thread_count})...')
         await self._pipe_sem.acquire()
@@ -491,6 +493,9 @@ class DataConn(DAPConn):
                 try:
                     # Create an entry object from the provided object metadata
                     entry = getObject(obj=obj)
+
+                    if parameters:
+                        entry.setParameters(parameters)
 
                     # Get a pipe from the target endpoint
                     pipe_instance = self._target.getPipe()

@@ -50,7 +50,25 @@ class IInstance(IInstanceBase):
         # Reset the start times
         self._startTimes = []
 
+        interval = self.params.get('interval')
+        if interval is not None:
+            if interval <= 0:
+                raise ValueError(f'interval must be positive, got {interval}')
+            fps = 1.0 / interval
+            if fps != self.IGlobal.config.get('fps'):
+                from ai.common.avi.frame import VideoFrameExtractor
+
+                config = dict(self.IGlobal.config)
+                config['fps'] = fps
+                self._reader = VideoFrameExtractor(
+                    frame_callback=self._frame_callback, name='FrameGrabber', config=config
+                )
+        else:
+            raise RuntimeError('No interval')
+
     def close(self):
+        super().close()
+
         # If we are listening on tables
         if self.instance.hasListener('table') and len(self._startTimes) > 0:
             # Generate the table

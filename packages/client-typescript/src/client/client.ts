@@ -64,6 +64,7 @@ export class DataPipe {
 	private _objinfo: Record<string, unknown>;
 	private _mimeType: string;
 	private _provider?: string;
+	private _parameters: Record<string, unknown>;
 	private _pipeId?: number;
 	private _opened = false;
 	private _closed = false;
@@ -77,15 +78,17 @@ export class DataPipe {
 	 * @param objinfo - Metadata about the object being sent (e.g., filename, size)
 	 * @param mimeType - MIME type of the data being sent (default: 'application/octet-stream')
 	 * @param provider - Optional provider name for the data source
+	 * @param parameters - Optional per-object node parameters, namespaced by component id, e.g. { frame_grabber_1: { interval: 10 } }
 	 * @param onSSE - Optional async callback invoked for each SSE event emitted by
 	 *                the pipeline node for this specific pipe
 	 */
-	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>) {
+	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, parameters: Record<string, unknown> = {}, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>) {
 		this._client = client;
 		this._token = token;
 		this._objinfo = objinfo;
 		this._mimeType = mimeType;
 		this._provider = provider;
+		this._parameters = parameters;
 		this._onSSE = onSSE;
 	}
 
@@ -132,6 +135,7 @@ export class DataPipe {
 				object: this._objinfo,
 				mimeType: this._mimeType,
 				provider: this._provider,
+				parameters: this._parameters,
 			},
 			token: this._token,
 		});
@@ -1284,8 +1288,8 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Create a data pipe for streaming operations.
 	 */
-	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>): Promise<DataPipe> {
-		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE);
+	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, parameters: Record<string, unknown> = {}, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>): Promise<DataPipe> {
+		return new DataPipe(this, token, objinfo, mimeType, provider, parameters, onSSE);
 	}
 
 	/**
@@ -1303,7 +1307,7 @@ export class RocketRideClient extends DAPClient {
 		}
 
 		// Create and use a temporary pipe for the data
-		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, onSSE);
+		const pipe = await this.pipe(token, this._objinfoWithSize(objinfo, buffer.length), mimetype, undefined, undefined, onSSE);
 
 		try {
 			await pipe.open();
@@ -1363,7 +1367,8 @@ export class RocketRideClient extends DAPClient {
 			objinfo?: Record<string, unknown>;
 			mimetype?: string;
 		}>,
-		token: string
+		token: string,
+		parameters: Record<string, unknown> = {}
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
 
@@ -1410,7 +1415,7 @@ export class RocketRideClient extends DAPClient {
 
 			try {
 				// Step 1: Create and open pipe (waits for server to allocate)
-				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype);
+				pipe = await this.pipe(token, this._objinfoWithSize({ name: file.name, ...objinfo }, fileSize), finalMimetype, undefined, parameters);
 				await pipe.open();
 
 				// Step 2: Send status update AFTER we have the pipe
@@ -1511,7 +1516,7 @@ export class RocketRideClient extends DAPClient {
 
 			// Create pipe instance — no provider filter so chat() works with chat, webhook,
 			// and dropper sources. The rocketride-question MIME type routes to the 'questions' lane.
-			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', undefined, onSSE);
+			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', undefined, undefined, onSSE);
 
 			try {
 				// Open the communication channel to the AI

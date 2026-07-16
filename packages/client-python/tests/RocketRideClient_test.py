@@ -93,6 +93,7 @@ from rocketride.mixins.connection import ConnectionMixin
 # Import pipelines - using absolute imports since they're in the same directory
 from echo_pipeline import get_echo_pipeline
 from chat_pipeline import get_chat_pipeline
+from grabber_pipeline import get_grabber_pipeline
 
 # Define type aliases for the types that may not be exported directly
 UPLOAD_RESULT = Dict[str, Any]
@@ -617,6 +618,45 @@ class TestDataOperations:
         finally:
             if pipeline_token:
                 await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+
+class TestFrameGrabber:
+    """Test per-object node parameters via the frame_grabber pipeline."""
+
+    VIDEO_PATH = PROJECT_ROOT / 'testdata' / 'video' / 'BBC - Tear down this wall.mp4'
+    GRAB_TOKEN = 'PY-GRAB'
+    GRAB_TOKEN_LARGE = 'PY-GRAB-L'
+
+    async def _grab_frame_count(self, client, parameters, token):
+        await ensure_clean_pipeline(client, token)
+        result = await client.use(pipeline=get_grabber_pipeline(), token=token)
+        pipeline_token = result['token']
+        try:
+            results = await client.send_files([str(self.VIDEO_PATH)], pipeline_token, parameters=parameters)
+            assert isinstance(results, list) and len(results) == 1
+            upload = results[0]
+            assert upload['action'] == 'complete', f'upload failed: {upload.get("error")}'
+            return len((upload.get('result') or {}).get('image', []))
+        finally:
+            await ensure_clean_pipeline(client, pipeline_token)
+
+    @pytest.mark.asyncio
+    async def test_grabber_with_object_parameters(self):
+        """A per-object interval of 10s extracts fewer frames than the 5s default."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+            default_count = await self._grab_frame_count(client, None, self.GRAB_TOKEN)
+            larger_count = await self._grab_frame_count(
+                client, {'frame_grabber_1': {'interval': 10}}, self.GRAB_TOKEN_LARGE
+            )
+            assert default_count > 0
+            assert larger_count > 0
+            # 10s between frames yields fewer frames than the 5s default for the same video.
+            assert larger_count < default_count
+        finally:
             if client.is_connected():
                 await client.disconnect()
 

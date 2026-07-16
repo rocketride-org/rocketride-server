@@ -637,6 +637,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
         .PYBIND_ENTRY_PROP_READONLY(IJson, metadata, hasMetadata)
         .PYBIND_ENTRY_PROP_READONLY(IJson, response, hasResponse)
+        .PYBIND_ENTRY_PROP_READONLY(IJson, parameters, hasParameters)
 
         .PYBIND_PROP_READONLY_CUSTOM(
             objectFailed,
@@ -696,6 +697,11 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                          [](Entry &entry, py::object &msg) {
                              auto changeMsg = py::cast<std::string>(msg);
                              entry.markChanged(changeMsg);
+                         })
+
+        .PYBIND_FUNCTION(setParameters,
+                         [](Entry &entry, py::dict values) {
+                             entry.parameters(pyjson::dictToJson(values));
                          })
 
         .PYBIND_FUNCTION(toDict,

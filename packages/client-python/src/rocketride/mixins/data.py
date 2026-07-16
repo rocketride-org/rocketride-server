@@ -113,6 +113,7 @@ class DataMixin(DAPClient):
             objinfo: Dict[str, Any] = None,
             mime_type: str = None,
             provider: str = None,
+            parameters: Dict[str, Any] = None,
             on_sse=None,
         ):
             """
@@ -124,6 +125,8 @@ class DataMixin(DAPClient):
                 objinfo: Optional metadata about the data
                 mime_type: MIME type of data (e.g., "text/csv", "application/json")
                 provider: Optional provider specification
+                parameters: Optional per-object node parameters, namespaced by
+                            component id, e.g. {"frame_grabber_1": {"interval": 10}}
                 on_sse: Optional async callback(type: str, data: dict) called for each SSE
                         event emitted by the pipeline node for this specific pipe
             """
@@ -132,6 +135,7 @@ class DataMixin(DAPClient):
             self._objinfo = objinfo or {}
             self._mime_type = mime_type or 'application/octet-stream'
             self._provider = provider
+            self._parameters = parameters or {}
             self._pipe_id = None
             self._opened = False
             self._closed = False
@@ -176,6 +180,7 @@ class DataMixin(DAPClient):
                     'object': self._objinfo,
                     'mimeType': self._mime_type,
                     'provider': self._provider,
+                    'parameters': self._parameters,
                 },
                 token=self._token,
             )
@@ -366,7 +371,13 @@ class DataMixin(DAPClient):
         return out
 
     async def pipe(
-        self, token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None
+        self,
+        token: str,
+        objinfo: Dict[str, Any] = None,
+        mime_type: str = None,
+        provider: str = None,
+        parameters: Dict[str, Any] = None,
+        on_sse=None,
     ) -> DataPipe:
         r"""
         Create a data pipe for streaming operations.
@@ -400,7 +411,15 @@ class DataMixin(DAPClient):
                 results = await pipe.close()
             # Results available after context exits
         """
-        return self.DataPipe(self, token=token, objinfo=objinfo, mime_type=mime_type, provider=provider, on_sse=on_sse)
+        return self.DataPipe(
+            self,
+            token=token,
+            objinfo=objinfo,
+            mime_type=mime_type,
+            provider=provider,
+            parameters=parameters,
+            on_sse=on_sse,
+        )
 
     async def send(
         self,
@@ -487,6 +506,7 @@ class DataMixin(DAPClient):
             ]
         ],
         token: str,
+        parameters: Dict[str, Any] = None,
     ) -> UPLOAD_RESULT:
         """
         Upload multiple files to a pipeline with progress tracking.
@@ -633,7 +653,9 @@ class DataMixin(DAPClient):
                 file_size = os.path.getsize(filepath)
 
                 # Step 1: Create and open pipe (waits for server to allocate)
-                pipe = await self.pipe(token, self._objinfo_with_size(objinfo, file_size), mimetype)
+                pipe = await self.pipe(
+                    token, self._objinfo_with_size(objinfo, file_size), mimetype, parameters=parameters
+                )
                 self.debug_message(f'Opening pipe for {filepath}')
                 await pipe.open()
                 self.debug_message(f'Pipe {pipe.pipe_id} opened for {filepath}')
