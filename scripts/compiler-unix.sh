@@ -124,8 +124,8 @@ LINUX_DEPS=(
     "libxmlsec1-dev|xmlsec1-devel"
     "|xmlsec1-openssl-devel"                # fedora: split out (bundled in libxmlsec1-dev on apt)
     "zlib1g-dev|zlib-devel"
-    "|python3-build"                        # fedora-only
-    "|python3-wheel"                        # fedora-only
+    "python3-build"                         # PEP 517 build frontend (apt: universe)
+    "python3-wheel"                         # wheel backend (apt: universe)
     # Runtime .so libs the prebuilt/compiled engine links against.
     "libc++1|libcxx"                        # libc++.so.1
     "libc++abi1|libcxxabi"                  # libc++abi.so.1
@@ -453,11 +453,13 @@ dep_install() {
 # Put a genuine libtinfo.so.5 into $1 (a dir on the build LD_LIBRARY_PATH) WITHOUT
 # root. The llvm.org clang is built against ncurses 5: it needs libtinfo.so.5 with
 # the NCURSES_TINFO_5 versioned symbols, which libtinfo.so.6 does NOT export — so a
-# .so.6 -> .so.5 symlink fails to load. This is the root-free fallback; the
-# --autoinstall path installs libtinfo5 system-wide instead (see check_dependencies).
+# .so.6 -> .so.5 symlink fails to load. Sources it root-free into lib-compat: an
+# apt-get download, then (Ubuntu 24.04+, where the package is gone) a pinned jammy
+# .deb by URL; dnf uses ncurses-compat-libs (also pulled system-wide under
+# --autoinstall on dnf, see check_dependencies).
 # $1 = target dir, $2 = apt|dnf.
 provide_libtinfo5() {
-    local compat="$1" mgr="$2" existing real tmp deb rpm
+    local compat="$1" mgr="$2" existing real tmp deb rpm larch ldeb lurl
 
     # A genuine libtinfo.so.5 already on the system (e.g. installed above) → link it.
     existing=$(ldconfig -p 2>/dev/null | grep -oE '/[^ ]*/libtinfo\.so\.5(\.[0-9]+)*' | head -1)
@@ -469,6 +471,20 @@ provide_libtinfo5() {
         apt)
             as_user sh -c "cd '$tmp' && apt-get download libtinfo5" >/dev/null 2>&1 || true
             deb=$(ls "$tmp"/*.deb 2>/dev/null | head -1)
+            # Ubuntu 24.04+ dropped libtinfo5, so apt-get download finds nothing.
+            # Fall back to a pinned jammy .deb — it still ships a genuine
+            # libtinfo.so.5 that the tarball clang loads.
+            if [ -z "$deb" ]; then
+                case "$(uname -m)" in
+                    x86_64)        larch=amd64; lurl="http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses" ;;
+                    aarch64|arm64) larch=arm64; lurl="http://ports.ubuntu.com/ubuntu-ports/pool/universe/n/ncurses" ;;
+                esac
+                if [ -n "$larch" ]; then
+                    ldeb="libtinfo5_6.3-2ubuntu0.2_${larch}.deb"
+                    as_user curl -fsSL --retry 3 -o "$tmp/$ldeb" "$lurl/$ldeb" >/dev/null 2>&1 || true
+                    deb=$(ls "$tmp"/*.deb 2>/dev/null | head -1)
+                fi
+            fi
             [ -n "$deb" ] && as_user dpkg-deb -x "$deb" "$tmp/x" >/dev/null 2>&1 || true
             ;;
         dnf)
@@ -550,9 +566,9 @@ install_llvm_tarball() {
     fi
 
     # The llvm.org clang needs a real libtinfo.so.5 (a libtinfo.so.6 symlink fails:
-    # the NCURSES_TINFO_5 versioned symbols are absent). Under --autoinstall it's
-    # already installed system-wide; otherwise fetch it root-free into lib-compat,
-    # which tasks.js puts on the build LD_LIBRARY_PATH.
+    # the NCURSES_TINFO_5 versioned symbols are absent). On dnf --autoinstall it's
+    # already installed system-wide; otherwise (all apt distros) fetch it root-free
+    # into lib-compat, which tasks.js puts on the build LD_LIBRARY_PATH.
     local compat="$prefix/lib-compat"
     as_user mkdir -p "$compat"
     if ! LD_LIBRARY_PATH="$compat" "$prefix/bin/clang" --version >/dev/null 2>&1; then
@@ -631,12 +647,13 @@ check_dependencies() {
     done < <(emit_distro_deps "$mgr")
     pkgs+=("${CLANG_PKGS[@]}")
 
-    # The llvm.org tarball clang needs a real libtinfo.so.5 (ncurses 5). When we're
-    # installing system packages anyway (--autoinstall), pull it in the normal way so
-    # it lands system-wide; the root-free path (provide_libtinfo5) covers the rest.
+    # The llvm.org tarball clang needs a real libtinfo.so.5 (ncurses 5). On dnf we
+    # pull ncurses-compat-libs system-wide. On apt we deliberately do NOT add
+    # libtinfo5 here: it was dropped from Ubuntu 24.04+ repos, so a strict install
+    # would abort the whole apt batch. The root-free provide_libtinfo5 (with its
+    # pinned-.deb fallback) supplies libtinfo.so.5 into lib-compat instead.
     if [ -n "$LLVM_TARBALL_VERSION" ] && [ "$AUTOINSTALL" = "1" ]; then
         case "$mgr" in
-            apt) pkgs+=(libtinfo5) ;;
             dnf) pkgs+=(ncurses-compat-libs) ;;
         esac
     fi

@@ -51,7 +51,9 @@ jobs:
           if command -v apt-get >/dev/null 2>&1; then
             apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
           elif command -v dnf >/dev/null 2>&1; then
-            dnf install -y git ca-certificates curl
+            # --allowerasing: RHEL-family images ship curl-minimal, which the full
+            # curl replaces (a plain install refuses the conflict).
+            dnf install -y --allowerasing git ca-certificates curl
           fi
 
       - name: Check out repository
@@ -59,6 +61,13 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+
+      # The container runs as root but the checkout is owned by another UID, so git
+      # (and the lefthook `prepare` hook pnpm runs during the build) aborts with
+      # "detected dubious ownership". Trust the workspace before anything uses git.
+      - name: Trust workspace (container UID mismatch)
+        shell: bash
+        run: git config --global --add safe.directory '*'
 
       - name: Install build prerequisites (cross-distro)
         shell: bash
