@@ -38,6 +38,16 @@ class IInstance(IInstanceBase):
     _source_descriptor = None
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
+        """Accumulate an inbound image stream, clean it up, and forward it on END.
+
+        Args:
+            action: AVI stream action (BEGIN/WRITE/END).
+            mimeType: MIME type of the image chunk.
+            buffer: Raw bytes on WRITE; the source stream descriptor on BEGIN.
+
+        Returns:
+            preventDefault() to suppress default forwarding.
+        """
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor, not image bytes.

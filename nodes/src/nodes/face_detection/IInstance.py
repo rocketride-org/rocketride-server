@@ -64,6 +64,16 @@ class IInstance(IInstanceBase):
             forward_enriched_image(self.instance, self._source_descriptor, 'image/jpeg', image_bytes)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
+        """Accumulate an inbound image stream and run face detection on END.
+
+        Args:
+            action: AVI stream action (BEGIN/WRITE/END).
+            mimeType: MIME type of the image chunk.
+            buffer: Raw bytes on WRITE; the source stream descriptor on BEGIN.
+
+        Returns:
+            preventDefault() on END to suppress default forwarding; None otherwise.
+        """
         if action == AVI_ACTION.BEGIN:
             # BEGIN carries the source stream descriptor (provenance), not image bytes.
             self._source_descriptor = descriptor_from_payload(buffer)

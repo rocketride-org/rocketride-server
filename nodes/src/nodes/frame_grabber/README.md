@@ -120,6 +120,14 @@ Each frame document is also given a human-readable `metadata.name` of the form `
 | `grabber.profile` | `string` | **Frame grabber mode** | `"interval"` |
 | `grabber.second.interval` | `number` | **Interval (in seconds) between frames** | `5` |
 | `grabber.start_time` | `number` | **Start time (in seconds) for frame extraction (0=beginning)** | `0` |
+| `grabber.watermark` | `string` | **Watermark extracted frames** | `"no"` |
+| `grabber.watermark_filename` | `string` | **Include file name** | `"yes"` |
+| `grabber.watermark_location` | `string` | **Watermark position** | `"bottom_right"` |
+| `grabber.watermark_timestamp` | `string` | **Include timestamp** | `"yes"` |
+
+## Dependencies
+
+- `Pillow` `>=10.1.0 # ImageFont.load_default(size=)`
 
 ## Source
 

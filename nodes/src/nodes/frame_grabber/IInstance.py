@@ -271,17 +271,36 @@ class IInstance(IInstanceBase):
             # Font scales with resolution; white text + black stroke reads on any
             # background without inspecting the pixels (v1).
             font_size = max(14, round(height * 0.03))
-            try:
-                font = ImageFont.truetype('DejaVuSans.ttf', font_size)
-            except Exception:
-                font = ImageFont.load_default(size=font_size)
-            stroke = max(1, font_size // 10)
 
-            left, top, right, bottom = draw.textbbox((0, 0), text, font=font, stroke_width=stroke)
-            text_w, text_h = right - left, bottom - top
+            def load_font(size):
+                try:
+                    return ImageFont.truetype('DejaVuSans.ttf', size)
+                except Exception:
+                    return ImageFont.load_default(size=size)
+
+            def measure(font, stroke):
+                left, top, right, bottom = draw.textbbox((0, 0), text, font=font, stroke_width=stroke)
+                return right - left, bottom - top
+
+            font = load_font(font_size)
+            stroke = max(1, font_size // 10)
+            text_w, text_h = measure(font, stroke)
             margin = font_size
+
+            # Shrink the label (down to a floor) so long source names / small frames
+            # don't push it off-frame; margin scales with the font.
+            while font_size > 10 and (text_w + 2 * margin > width or text_h + 2 * margin > height):
+                font_size = max(10, int(font_size * 0.85))
+                font = load_font(font_size)
+                stroke = max(1, font_size // 10)
+                margin = font_size
+                text_w, text_h = measure(font, stroke)
+
             x = margin if 'left' in self._wm_location else width - text_w - margin
             y = margin if 'top' in self._wm_location else height - text_h - margin
+            # Clamp so the label always starts on-frame even at the size floor.
+            x = max(0, min(x, width - text_w))
+            y = max(0, min(y, height - text_h))
 
             draw.text((x, y), text, font=font, fill='white', stroke_width=stroke, stroke_fill='black')
 
