@@ -311,7 +311,7 @@ function gitLastUpdate(srcAbs) {
  */
 function stampLastUpdate(content, date) {
 	if (!date || /(^|\n)last_update\s*:/.test(content)) return content;
-	if (content.startsWith('---\n')) {
+	if (/^---\r?\n/.test(content)) {
 		const end = content.indexOf('\n---', 4);
 		if (end !== -1) return `${content.slice(0, end)}\nlast_update:\n  date: ${date}${content.slice(end)}`;
 		return content;
