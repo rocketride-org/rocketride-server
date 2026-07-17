@@ -111,6 +111,26 @@ const styles = {
 };
 
 // =============================================================================
+// EXPORTED HEADER CHROME
+// =============================================================================
+
+/**
+ * The Card header's style pieces, exported as the SINGLE SOURCE OF TRUTH for
+ * any component whose own header must be indistinguishable from a Card
+ * header. The DataGrid's title bar composes these directly — grid headers
+ * must never re-declare the fill / divider / title typography (design
+ * decision 2026-07-16), so a Card-header spec change propagates everywhere
+ * from this one place. Buttons inside these headers are plain
+ * `<Button small>` — no special header sizing exists.
+ */
+export const cardHeaderChrome = {
+	/** The header row itself: themed fill, bottom divider, 13.5/700 title. */
+	header: styles.header,
+	/** Right-aligned actions cluster (pushed to the row's right edge). */
+	actions: styles.headerActions,
+} as const;
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 

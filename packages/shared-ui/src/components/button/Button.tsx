@@ -39,6 +39,11 @@ export interface IButtonProps {
 	children: ReactNode;
 	/** Native tooltip text. */
 	title?: string;
+	/**
+	 * ARIA pressed state for toggle/segmented usage (ToggleGroup) — rendered
+	 * as `aria-pressed`; visual selection is conveyed by the variant.
+	 */
+	pressed?: boolean;
 }
 
 // =============================================================================
@@ -63,12 +68,20 @@ const styles = {
 		whiteSpace: 'nowrap',
 	} as CSSProperties,
 
-	// Compact size modifier.
+	// Compact size modifier (11px — the card-header / grid-header scale,
+	// user spec 2026-07-16).
 	small: {
 		height: 26,
 		padding: '0 11px',
-		fontSize: 12,
+		fontSize: 11,
 		borderRadius: 6,
+	} as CSSProperties,
+
+	// Ghost + small combination: quiet utility buttons (grid/card header
+	// chrome like Export... and Clear) read at regular weight, not CTA
+	// weight (user spec 2026-07-16).
+	ghostSmall: {
+		fontWeight: 400,
 	} as CSSProperties,
 
 	// Variant colour treatments.
@@ -118,17 +131,19 @@ const VARIANT_STYLES: Record<ButtonVariant, CSSProperties> = {
  * @param props - {@link IButtonProps}.
  * @returns The button element.
  */
-export function Button({ variant = 'primary', small, disabled, onClick, children, title }: IButtonProps): React.ReactElement {
-	// Compose base + variant colour + optional size + optional disabled modifier.
+export function Button({ variant = 'primary', small, disabled, onClick, children, title, pressed }: IButtonProps): React.ReactElement {
+	// Compose base + variant colour + optional size + the quiet ghost-small
+	// weight + optional disabled modifier.
 	const style: CSSProperties = {
 		...styles.base,
 		...VARIANT_STYLES[variant],
 		...(small ? styles.small : null),
+		...(small && variant === 'ghost' ? styles.ghostSmall : null),
 		...(disabled ? styles.disabled : null),
 	};
 
 	return (
-		<button type="button" style={style} onClick={onClick} disabled={disabled} title={title}>
+		<button type="button" style={style} onClick={onClick} disabled={disabled} title={title} aria-pressed={pressed}>
 			{children}
 		</button>
 	);

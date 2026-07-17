@@ -28,6 +28,7 @@ import type { ViewMenu } from '../../types/viewMenu';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord, AccountSection, ProfileUpdate } from './types';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
 import type { ActiveTask } from '../billing/components/BillingDashboard';
+import type { IDataGridPageRequest } from '../../components/data-grid/DataGrid';
 import { ProfilePanel } from './components/ProfilePanel';
 // EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';
@@ -177,6 +178,10 @@ export interface IAccountViewProps {
 	dashboardLoading?: boolean;
 	/** Callback to change the transaction page. */
 	onTransactionPage?: (page: number) => void;
+	/** Direct ledger query for the transaction log (preferred; see BillingDashboardProps). */
+	fetchTransactions?: (req: IDataGridPageRequest) => Promise<TransactionsResult | null>;
+	/** Org-scoped distinct ledger values for the enum checklist filters. */
+	fetchTransactionDistinct?: (field: string) => Promise<(string | number | boolean)[]>;
 	/** Member lookup: userId -> display name. */
 	memberNames?: Record<string, string>;
 	/** Team lookup: teamId -> display name. */
@@ -265,7 +270,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, memberNames, teamNames, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, memberNames, teamNames, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -755,7 +760,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<>
 						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
 						<div style={commonStyles.tabContent}>
-						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} memberNames={memberNames} teamNames={teamNames} onUpgradeSubscription={onUpgradeSubscription} />
+						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={openCancelSub} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} memberNames={memberNames} teamNames={teamNames} onUpgradeSubscription={onUpgradeSubscription} />
 						</div>
 					</>
 				),
@@ -830,7 +835,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, memberNames, teamNames, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, openCancelSub, handlePortal, openCreateKey, openRevokeKey, openInvite, openChangeRole, openRemoveMember, openRemoveTeamMember, openAddMember, openEditPerms, isOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, memberNames, teamNames, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDefaultTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, openCancelSub, handlePortal, openCreateKey, openRevokeKey, openInvite, openChangeRole, openRemoveMember, openRemoveTeamMember, openAddMember, openEditPerms, isOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================

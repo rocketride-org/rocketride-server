@@ -218,7 +218,9 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 	return (
 		<Card noBodyPadding>
 			{/* Balance table — granted, consumed, net per resource */}
-			<CardDataGrid<BalanceRow> title="Account Balance" actions={addCapacityAction} columns={columns} data={rows} />
+			{/* noSearch: a handful of resource rows needs no search box (the
+			    tool row collapses; Export stays in the right cluster). */}
+			<CardDataGrid<BalanceRow> title="Account Balance" actions={addCapacityAction} columns={columns} data={rows} noSearch />
 
 			{/* Error banner */}
 			{error && <div style={styles.error}>{error}</div>}

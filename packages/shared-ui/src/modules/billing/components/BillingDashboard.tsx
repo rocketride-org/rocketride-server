@@ -6,13 +6,18 @@
 /**
  * BillingDashboard -- admin billing insights rendered below the credits panel.
  *
- * Five sections, each a stock Card:
+ * Five sections. The non-tabular ones (1, 2) are classic Cards; every table
+ * follows the DataGrid standard (docs/README-app-styles.html#ref-datagrid):
+ * a CardDataGrid whose two-row header IS the card header, inside a headerless
+ * Card shell — never a Card header stacked on a grid bar.
  *   1. Balance breakdown -- purchased vs consumed per resource with bars
  *   2. Spending velocity -- burn rate + days remaining as MiniCard tiles
- *   3. Usage leaderboard -- top consumers by user or team (stock DataGrid)
- *   4. Transaction log   -- paginated ledger detail (stock DataGrid in REMOTE
+ *   3. Usage leaderboard -- top consumers (CardDataGrid, LOCAL mode; the
+ *      By User / By Team ToggleGroup rides the header as `actions`)
+ *   4. Transaction log   -- paginated ledger detail (CardDataGrid in REMOTE
  *      mode over a prop-fed page bridge; see TransactionLog)
- *   5. Active tasks      -- live running tasks (placeholder for live data)
+ *   5. Active tasks      -- live running tasks (CardDataGrid, LOCAL mode —
+ *      poll-fed rows apply silently)
  *
  * All data is received as props; the host (AccountPage) is responsible for
  * fetching via the BillingApi.
@@ -20,14 +25,15 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
+import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
 import { MiniCard, MiniContainer } from '../../../components/mini-card/MiniCard';
-import { DataGrid } from '../../../components/data-grid/DataGrid';
+import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
 import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
-import { mutedEl } from '../../../components/data-grid/defaults';
+import { formatDateValue, mutedEl } from '../../../components/data-grid/defaults';
+import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import type { CreditBalance, LedgerTransaction, TransactionsResult, UsageRollup } from '../types';
 
 // =============================================================================
@@ -152,33 +158,11 @@ const styles = {
 		color: 'var(--rr-color-success)',
 	} as Partial<CSSStyleDeclaration>,
 
-	/** Active task row. */
-	taskRow: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		padding: '8px 0',
-		borderBottom: '1px solid var(--rr-border)',
-		fontSize: 12,
-	} as CSSProperties,
-
-	/** Task name. */
-	taskName: {
-		fontWeight: 500,
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-
-	/** Task duration line beneath the name. */
-	taskDuration: {
-		fontSize: 11,
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
-
-	/** Task token count. */
+	/** Task token count cell (DOM style for the grid formatter). */
 	taskTokens: {
-		fontWeight: 600,
+		fontWeight: '600',
 		color: 'var(--rr-brand)',
-	} as CSSProperties,
+	} as Partial<CSSStyleDeclaration>,
 
 	/** Loading placeholder while dashboard data is fetched. */
 	loading: {
@@ -277,8 +261,17 @@ export interface BillingDashboardProps {
 	topupPlans: TopupPlan[];
 	/** Whether data is still loading. */
 	loading: boolean;
-	/** Callback to change the transaction page. */
+	/** Callback to change the transaction page (legacy prop bridge). */
 	onTransactionPage: (page: number) => void;
+	/**
+	 * Direct ledger query (preferred): the full list-convention request —
+	 * page, size, sorters, header-filter values, search — forwards to the
+	 * server. When absent, the transaction log falls back to the page-only
+	 * prop bridge (search suppressed).
+	 */
+	fetchTransactions?: (req: IDataGridPageRequest) => Promise<TransactionsResult | null>;
+	/** Org-scoped distinct ledger values for the enum checklist filters. */
+	fetchTransactionDistinct?: (field: string) => Promise<(string | number | boolean)[]>;
 	/** Callback when user clicks a top-up pack to purchase. */
 	onBuyTopup?: (plan: TopupPlan) => void;
 	/** Called when the user clicks "Add more capacity" in the velocity card. */
@@ -450,42 +443,52 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 	);
 
 	// Column definitions — first column label follows the active mode.
-	const columns = useMemo<ColumnDefinition[]>(
+	// Declared rrTypes per the DataGrid standard: the number columns get the
+	// Min/Max filter and the decimals / thousands FORMAT picks.
+	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', headerSort: true },
+			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', headerSort: true },
 			{
 				title: 'Total Tokens',
 				field: 'total',
+				rrType: 'number',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
 				sorter: 'number',
 				formatter: (cell: CellComponent) => fmt(cell.getValue() as number),
 			},
-			{ title: 'Resources', field: 'resources', hozAlign: 'right', headerHozAlign: 'right', headerSort: true, sorter: 'number' },
+			{ title: 'Resources', field: 'resources', rrType: 'number', hozAlign: 'right', headerHozAlign: 'right', headerSort: true, sorter: 'number' },
 		],
 		[mode]
 	);
 
 	if (!usageByUser.length && !usageByTeam.length) return null;
 
+	// The grid IS the card: its two-row header carries the title and the
+	// By User / By Team toggle (`actions`); the headerless Card is only the
+	// bordered shell. noSearch: a short leaderboard needs no search box (the
+	// tool row collapses to a plain card header); Export still covers the set.
 	return (
-		<Card
-			header="Usage Leaderboard"
-			headerActions={
-				<ToggleGroup<'user' | 'team'>
-					options={[
-						{ id: 'user', label: 'By User' },
-						{ id: 'team', label: 'By Team' },
-					]}
-					value={mode}
-					onChange={setMode}
-					small
-				/>
-			}
-			noBodyPadding
-		>
-			<DataGrid<LeaderRow> columns={columns} data={rows} emptyTitle="No usage data" />
+		<Card noBodyPadding>
+			<CardDataGrid<LeaderRow>
+				title="Usage Leaderboard"
+				actions={
+					<ToggleGroup<'user' | 'team'>
+						options={[
+							{ id: 'user', label: 'By User' },
+							{ id: 'team', label: 'By Team' },
+						]}
+						value={mode}
+						onChange={setMode}
+						small
+					/>
+				}
+				columns={columns}
+				data={rows}
+				noSearch
+				emptyTitle="No usage data"
+			/>
 		</Card>
 	);
 };
@@ -511,26 +514,38 @@ type TxRow = LedgerTransaction & Record<string, unknown>;
 /**
  * Paginated transaction log with user name resolution.
  *
- * The data is server-paged THROUGH PROPS: the host owns the fetch and hands
- * down one TransactionsResult page plus an `onPageChange(page)` callback. To
- * drive the stock DataGrid in REMOTE mode, `fetchPage` bridges the prop flow:
- * when the grid asks for the page already held in props it resolves
- * immediately; when it asks for a different page the bridge calls
- * `onPageChange` and parks the promise in a ref until the matching
- * TransactionsResult prop arrives (see the prop-arrival effect). Both the grid
- * and the host API page 1-based, so page numbers pass through untranslated.
+ * Two remote wirings, best first:
+ *
+ *  - DIRECT (`fetchTransactions` provided): the host exposes the ledger
+ *    query itself, so the grid's full list-convention request — page, size,
+ *    sorters, header-filter values, search term — forwards to the server
+ *    verbatim and header filtering / sorting / search genuinely work.
+ *
+ *  - LEGACY PROP BRIDGE (no `fetchTransactions`; the VSCode host until it is
+ *    wired): the host only pages via `onPageChange(page)` and hands down one
+ *    TransactionsResult prop. `fetchPage` bridges the prop flow — resolving
+ *    immediately when the wanted page is already in props, otherwise parking
+ *    the promise until the matching prop arrives (see the prop-arrival
+ *    effect). Search is suppressed in this mode (the bridge cannot honor
+ *    req.search, and a no-op search box is worse than none).
+ *
+ * Both the grid and the host API page 1-based, so pages pass untranslated.
  */
-const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPageChange: (page: number) => void; memberNames?: Record<string, string> }> = ({
-	transactions,
-	onPageChange,
-	memberNames,
-}) => {
+const TransactionLog: React.FC<{
+	transactions: TransactionsResult | null;
+	onPageChange: (page: number) => void;
+	memberNames?: Record<string, string>;
+	fetchTransactions?: (req: IDataGridPageRequest) => Promise<TransactionsResult | null>;
+	fetchTransactionDistinct?: (field: string) => Promise<(string | number | boolean)[]>;
+}> = ({ transactions, onPageChange, memberNames, fetchTransactions, fetchTransactionDistinct }) => {
 	// --- Prop bridge refs ------------------------------------------------------
 	// Latest props, readable from inside the stable fetchPage callback.
 	const txRef = useRef(transactions);
 	txRef.current = transactions;
 	const onPageRef = useRef(onPageChange);
 	onPageRef.current = onPageChange;
+	const directRef = useRef(fetchTransactions);
+	directRef.current = fetchTransactions;
 	// Imperative grid handle — used to re-run the query on host-initiated
 	// refreshes (a new TransactionsResult with no request parked).
 	const gridRef = useRef<IDataGridHandle>(null);
@@ -547,9 +562,18 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 	} | null>(null);
 
 	// --- REMOTE-mode fetcher -----------------------------------------------------
-	// Stable bridge: resolves from props when possible, otherwise asks the host
-	// for the page and resolves once the prop catches up (see effect below).
+	// Stable bridge: DIRECT mode forwards the full request to the host's
+	// ledger query; otherwise resolves from props when possible and asks the
+	// host for the page, resolving once the prop catches up (effect below).
 	const fetchPage = useCallback((req: IDataGridPageRequest): Promise<IDataGridPage<TxRow>> => {
+		// DIRECT mode: the whole list-convention request reaches the server.
+		const direct = directRef.current;
+		if (direct) {
+			return direct(req).then((result) => {
+				if (!result) throw new Error('Transaction fetch failed');
+				return { rows: result.transactions as TxRow[], total: result.total };
+			});
+		}
 		// DataGrid pages 1-based, exactly like the host API — no translation
 		// (the old 0-based stock-table adapter added 1 here).
 		const wanted = req.page;
@@ -617,20 +641,32 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 	);
 
 	// --- Columns -------------------------------------------------------------------
-	// Cell renderings keep the existing badge / muted / uppercase treatments.
-	const columns = useMemo<ColumnDefinition[]>(
+	// Cell renderings keep the existing badge / muted / uppercase treatments,
+	// with declared rrTypes per the DataGrid standard (date/number columns get
+	// their typed FORMAT picks; the popup's display formatting works even
+	// though this grid's filters cannot reach the prop bridge).
+	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
 				title: 'Date',
 				field: 'createdAt',
+				rrType: 'date',
+				headerSort: true,
 				formatter: (cell: CellComponent) => {
+					// formatDateValue applies the platform wire contract — a
+					// zone-less ISO string IS UTC — then renders in the viewer's
+					// local time. `new Date(iso).toLocaleString()` would misparse
+					// the zone-less wire value as ALREADY-local and show it
+					// unshifted.
 					const iso = cell.getValue() as string | null;
-					return iso ? new Date(iso).toLocaleString() : '--';
+					const text = iso ? formatDateValue(iso, { dateFormat: 'MM/DD/YY', timeFormat: 'HH:MM:SS' }) : null;
+					return text ?? '--';
 				},
 			},
 			{
 				title: 'User',
 				field: 'userId',
+				rrType: 'string',
 				formatter: (cell: CellComponent) => {
 					const id = cell.getValue() as string | null;
 					return id ? memberNames?.[id] ?? id.slice(0, 8) : '--';
@@ -639,11 +675,15 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 			{
 				title: 'Type',
 				field: 'type',
+				rrType: 'enum',
+				headerSort: true,
 				formatter: (cell: CellComponent) => typeBadgeEl(cell.getValue() as string),
 			},
 			{
 				title: 'Resource',
 				field: 'resource',
+				rrType: 'enum',
+				headerSort: true,
 				// Uppercase resource span (DOM clone of the old cell render).
 				formatter: (cell: CellComponent) => {
 					const el = document.createElement('span');
@@ -655,25 +695,34 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 			{
 				title: 'Description',
 				field: 'description',
+				rrType: 'string',
+				headerSort: true,
 				formatter: (cell: CellComponent) => mutedEl((cell.getValue() as string | null) || '--'),
 			},
 			{
 				title: 'Amount',
 				field: 'amount',
+				rrType: 'number',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
-				// Credits render with a '+' prefix in the success color.
+				headerSort: true,
+				sorter: 'number',
+				// SIGNED display: credits '+' in the success color, usage '-'.
+				// The sign must show — the server sorts/filters the true signed
+				// values, and an unsigned render made Min/Max bounds look wrong
+				// (user feedback 2026-07-16).
 				formatter: (cell: CellComponent) => {
 					const amount = cell.getValue() as number;
 					const el = document.createElement('span');
 					if (amount >= 0) Object.assign(el.style, styles.amountPositive);
-					el.textContent = `${amount >= 0 ? '+' : ''}${fmt(amount)}`;
+					el.textContent = `${amount >= 0 ? '+' : '-'}${fmt(amount)}`;
 					return el;
 				},
 			},
 			{
 				title: 'Context',
 				field: 'context',
+				rrType: 'json',
 				// Muted, ellipsis-truncated context with the full value as a tooltip.
 				formatter: (cell: CellComponent) => {
 					const tx = cell.getRow().getData() as TxRow;
@@ -690,15 +739,27 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 
 	if (!transactions) return null;
 
+	// The grid IS the card. DIRECT mode is the full standard: server-side
+	// search / header filters / remote sort all reach the ledger query, and
+	// the bar's own live count replaces the static total. LEGACY bridge mode
+	// suppresses search (the page-only bridge cannot honor req.search — a
+	// no-op search box is worse than none) and shows the prop total as
+	// `actions` instead; Export walks every page through either wiring.
 	return (
-		<Card header="Transaction Log" headerActions={<span style={styles.headerCount}>{transactions.total} total</span>} noBodyPadding>
-			<DataGrid<TxRow>
+		<Card noBodyPadding>
+			<CardDataGrid<TxRow>
+				title="Transaction Log"
+				actions={fetchTransactions ? undefined : <span style={styles.headerCount}>{transactions.total} total</span>}
 				ref={gridRef}
 				columns={columns}
 				fetchPage={fetchPage}
-				// The host controls the page size; offer exactly that one option so
-				// the pager math matches the server's pages.
-				pageSizes={[transactions.pageSize]}
+				fetchDistinct={fetchTransactionDistinct}
+				noSearch={!fetchTransactions}
+				remoteSort={!!fetchTransactions}
+				// LEGACY bridge: the host controls the page size; offer exactly
+				// that one option so the pager math matches the server's pages.
+				// DIRECT mode sizes freely with the grid defaults.
+				{...(fetchTransactions ? {} : { pageSizes: [transactions.pageSize] })}
 				emptyTitle="No transactions yet"
 			/>
 		</Card>
@@ -709,23 +770,91 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 // ACTIVE TASKS
 // =============================================================================
 
-/** Active tasks with live token burn. */
+/** Row shape fed to the active-tasks CardDataGrid. */
+interface TaskRow extends Record<string, unknown> {
+	/** Task identifier (stable row key). */
+	taskId: string;
+	/** Pipeline or source name (falls back to the task id). */
+	name: string;
+	/** Duration in seconds (raw; the formatter renders "Xm Ys"). */
+	durationSeconds: number;
+	/** Current cumulative token total. */
+	tokensTotal: number;
+}
+
+/**
+ * Active tasks with live token burn — a LOCAL CardDataGrid: each poll hands
+ * down a new `activeTasks` array, and a new data identity applies silently
+ * (scroll / sort preserved), so the live counts tick without flicker.
+ */
 const ActiveTasksView: React.FC<{ activeTasks: ActiveTask[] }> = ({ activeTasks }) => {
+	// Flatten props into grid rows (name falls back to the task id).
+	const rows = useMemo<TaskRow[]>(
+		() =>
+			activeTasks.map((task) => ({
+				taskId: task.taskId,
+				name: task.name || task.taskId,
+				durationSeconds: task.durationSeconds,
+				tokensTotal: task.tokensTotal,
+			})),
+		[activeTasks]
+	);
+
+	// Declared typed columns per the DataGrid standard — the number columns
+	// get Min/Max filters and the number FORMAT picks.
+	const columns = useMemo<GridColumnDefinition[]>(
+		() => [
+			{ title: 'Task', field: 'name', rrType: 'string', headerSort: true },
+			{
+				title: 'Duration',
+				field: 'durationSeconds',
+				rrType: 'number',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				// Human duration from the raw seconds (sorting stays numeric).
+				formatter: (cell: CellComponent) => {
+					const secs = cell.getValue() as number;
+					return `${Math.floor(secs / 60)}m ${Math.floor(secs % 60)}s`;
+				},
+			},
+			{
+				title: 'Tokens',
+				field: 'tokensTotal',
+				rrType: 'number',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				// Brand-colored token count (DOM clone of the old row render).
+				formatter: (cell: CellComponent) => {
+					const el = document.createElement('span');
+					Object.assign(el.style, styles.taskTokens);
+					el.textContent = `${fmt(cell.getValue() as number)} tokens`;
+					return el;
+				},
+			},
+		],
+		[]
+	);
+
 	if (!activeTasks.length) return null;
 
+	// The grid IS the card; the live "N running" count rides as `actions`.
+	// noSearch + noExport: a handful of live rows needs no grid chrome — with
+	// both set the grid contributes no buttons, while `actions` still renders.
 	return (
-		<Card header="Active Tasks" headerActions={<span style={styles.runningCount}>{activeTasks.length} running</span>}>
-			{activeTasks.map((task) => (
-				<div key={task.taskId} style={styles.taskRow}>
-					<div>
-						<div style={styles.taskName}>{task.name || task.taskId}</div>
-						<div style={styles.taskDuration}>
-							{Math.floor(task.durationSeconds / 60)}m {Math.floor(task.durationSeconds % 60)}s
-						</div>
-					</div>
-					<div style={styles.taskTokens}>{fmt(task.tokensTotal)} tokens</div>
-				</div>
-			))}
+		<Card noBodyPadding>
+			<CardDataGrid<TaskRow>
+				title="Active Tasks"
+				actions={<span style={styles.runningCount}>{activeTasks.length} running</span>}
+				columns={columns}
+				data={rows}
+				noSearch
+				noExport
+				emptyTitle="No active tasks"
+			/>
 		</Card>
 	);
 };
@@ -743,6 +872,8 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 	activeTasks,
 	loading,
 	onTransactionPage,
+	fetchTransactions,
+	fetchTransactionDistinct,
 	onAddCapacity,
 	memberNames,
 	teamNames,
@@ -757,7 +888,7 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 			<SpendingVelocity balance={balance} transactions={transactions} onAddCapacity={onAddCapacity} />
 			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} memberNames={memberNames} teamNames={teamNames} />
 			<ActiveTasksView activeTasks={activeTasks} />
-			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} memberNames={memberNames} />
+			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} memberNames={memberNames} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} />
 		</div>
 	);
 };

@@ -58,15 +58,35 @@ export function avatarColor(seed: string): string {
 }
 
 /**
+ * Parses a wire datetime string per the platform contract: server datetimes
+ * are UTC, but the wire carries them ZONE-LESS ('2026-07-16T19:40:45') and
+ * JavaScript parses a zone-less datetime as LOCAL — silently skewing every
+ * timestamp by the viewer's zone offset. Zone-less strings are stamped 'Z'
+ * before parsing; strings that already carry a zone pass through.
+ *
+ * @param iso - An ISO 8601 wire string.
+ * @returns The parsed Date (UTC instant).
+ */
+export function parseWireDate(iso: string): Date {
+	const trimmed = iso.trim();
+	// Already zoned (Z or ±hh:mm offset)? Parse verbatim.
+	if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) return new Date(trimmed);
+	// Zone-less datetime: normalize the separator and stamp UTC.
+	if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(trimmed)) return new Date(`${trimmed.replace(' ', 'T')}Z`);
+	return new Date(trimmed);
+}
+
+/**
  * Converts an ISO timestamp (or null) into a human-readable relative time
- * string such as "Just now", "5m ago", "3h ago", or "2d ago".
+ * string such as "Just now", "5m ago", "3h ago", or "2d ago". Parses through
+ * {@link parseWireDate}, so zone-less UTC wire values read correctly.
  *
  * @param iso - An ISO 8601 date string, or null / undefined for never.
  * @returns A concise relative time string.
  */
 export function relativeTime(iso: string | null): string {
 	if (!iso) return 'Never';
-	const diff = Date.now() - new Date(iso).getTime();
+	const diff = Date.now() - parseWireDate(iso).getTime();
 	const m = Math.floor(diff / 60000);
 	if (m < 1) return 'Just now';
 	if (m < 60) return `${m}m ago`;

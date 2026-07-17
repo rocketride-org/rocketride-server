@@ -29,6 +29,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, CSSProperties } from 'react';
 import { AccountView } from 'shared';
+import type { IDataGridPageRequest } from 'shared';
 import type {
 	ConnectResult,
 	AccountSection,
@@ -216,11 +217,40 @@ const AccountPage: React.FC = () => {
 		}
 	}, [client, isConnected, orgId]);
 
-	/** Fetches just the transactions page (for pagination). */
+	/** Fetches just the transactions page (legacy pagination callback). */
 	const handleTransactionPage = useCallback(async (page: number) => {
 		if (!client || !orgId) return;
 		const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
 		if (tx) { setTransactions(tx); }
+	}, [client, orgId]);
+
+	/**
+	 * Direct ledger query for the transaction log grid: the grid's full
+	 * list-convention request — page, size, sorters, header-filter values,
+	 * search — forwards to the server verbatim, so filtering / sorting /
+	 * search work against the WHOLE ledger, not just the loaded page. A
+	 * failure resolves null and the grid keeps its prior rows.
+	 */
+	const fetchTransactions = useCallback(async (req: IDataGridPageRequest): Promise<TransactionsResult | null> => {
+		if (!client || !orgId) return null;
+		return client.billing
+			.getTransactions(orgId, {
+				page: req.page,
+				pageSize: req.size,
+				sort: req.sort,
+				filters: req.filters,
+				search: req.search,
+			})
+			.catch(() => null);
+	}, [client, orgId]);
+
+	/**
+	 * Org-scoped distinct ledger values for the transaction grid's enum
+	 * checklists (Type / Resource). A failure surfaces as an empty checklist.
+	 */
+	const fetchTransactionDistinct = useCallback(async (field: string): Promise<(string | number | boolean)[]> => {
+		if (!client || !orgId) return [];
+		return client.billing.getTransactionDistinct(orgId, field).catch(() => []);
 	}, [client, orgId]);
 
 	/** Purchase a top-up pack by charging the card on file. */
@@ -469,6 +499,8 @@ const AccountPage: React.FC = () => {
 			onUpgradeSubscription={handleUpgradeSubscription}
 			dashboardLoading={dashboardLoading}
 			onTransactionPage={handleTransactionPage}
+			fetchTransactions={fetchTransactions}
+			fetchTransactionDistinct={fetchTransactionDistinct}
 			memberNames={memberNames}
 			teamNames={teamNames}
 			section={section}

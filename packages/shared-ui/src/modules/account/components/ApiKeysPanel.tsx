@@ -6,22 +6,25 @@
 /**
  * ApiKeysPanel — the API Keys tab within AccountView.
  *
- * Renders the user's API keys as the stock DataGrid (sortable columns,
- * pagination) inside a stock Card. Each row shows the key name, status badge,
+ * Renders the user's API keys per the DataGrid standard
+ * (docs/README-app-styles.html#ref-datagrid): a CardDataGrid whose two-row
+ * header IS the card header — "API Keys" title + the "+ New Key" action on
+ * the identity row, the grid's search / count / Export on the tool row —
+ * inside a headerless Card shell. Each row shows the key name, status badge,
  * team scope, last-used timestamp, expiry date, and (for active non-session
- * keys) a Revoke action. All server interactions are delegated to the host via
- * callback props.
+ * keys) a Revoke action. All server interactions are delegated to the host
+ * via callback props.
  */
 
 import React, { useMemo, useRef } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
-import { DataGrid } from '../../../components/data-grid/DataGrid';
+import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
 import { buttonEl } from '../../../components/data-grid/defaults';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import type { ApiKeyRecord } from '../types';
-import { relativeTime } from './shared';
+import { parseWireDate, relativeTime } from './shared';
 
 // =============================================================================
 // STYLES
@@ -152,9 +155,11 @@ function keyBadgeEl(variant: 'active' | 'expired' | 'member' | 'pending', label:
 /**
  * The API Keys tab panel.
  *
- * Renders a Card headed "API Keys — N keys" with a "+ New Key" action and a
- * DataGrid body listing every key with status / team badges, usage and expiry
- * columns, and a Revoke action for active non-session keys.
+ * The grid IS the card: a CardDataGrid headed "API Keys" with the "+ New Key"
+ * action in its identity row (the live row count sits in the grid's own tool
+ * row — the old "— N keys" heading suffix is retired with the second header),
+ * listing every key with status / team badges, usage and expiry columns, and
+ * a Revoke action for active non-session keys.
  */
 export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, onRevokeKey }) => {
 	// Flatten records into sortable / searchable table rows.
@@ -197,13 +202,18 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 		if (action === 'revoke') handleRevoke(row);
 	};
 
-	// Column definitions; cell renderings keep the existing badge treatments.
+	// Column definitions with declared rrTypes per the DataGrid standard;
+	// cell renderings keep the existing badge treatments. Status / team are
+	// enums (a LOCAL grid derives their checklist values from the loaded
+	// rows); the timestamp columns are dates, so the popup FORMAT section
+	// offers the date/time picks.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: 'Name', field: 'name', headerSort: true },
+			{ title: 'Name', field: 'name', rrType: 'string', headerSort: true },
 			{
 				title: 'Status',
 				field: 'status',
+				rrType: 'enum',
 				headerSort: true,
 				formatter: (cell: CellComponent) => {
 					const status = cell.getValue() as string;
@@ -213,6 +223,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 			{
 				title: 'Team',
 				field: 'team',
+				rrType: 'enum',
 				headerSort: true,
 				// Session keys show no team badge; named teams keep the amber badge,
 				// the org-wide scope keeps the neutral badge.
@@ -224,6 +235,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 			{
 				title: 'Last Used',
 				field: 'lastUsedAt',
+				rrType: 'date',
 				headerSort: true,
 				formatter: (cell: CellComponent) => {
 					const iso = cell.getValue() as string | null;
@@ -233,10 +245,14 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 			{
 				title: 'Expires',
 				field: 'expiresAt',
+				rrType: 'date',
 				headerSort: true,
+				// parseWireDate applies the platform contract (zone-less wire
+				// datetimes ARE UTC) — a bare new Date(iso) would misparse them
+				// as local and could show the wrong calendar day.
 				formatter: (cell: CellComponent) => {
 					const iso = cell.getValue() as string | null;
-					return iso ? `Exp. ${new Date(iso).toLocaleDateString()}` : 'No expiry';
+					return iso ? `Exp. ${parseWireDate(iso).toLocaleDateString()}` : 'No expiry';
 				},
 			},
 			// Trailing Actions column — Revoke is only offered on active
@@ -271,18 +287,24 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 		[]
 	);
 
+	// The grid IS the card: its two-row header carries the title and the
+	// "+ New Key" action; the headerless Card is only the bordered shell.
 	return (
 		<section>
-			<Card
-				header={`API Keys — ${keys.length} key${keys.length !== 1 ? 's' : ''}`}
-				headerActions={
-					<Button variant="primary" small onClick={onCreateKey}>
-						+ New Key
-					</Button>
-				}
-				noBodyPadding
-			>
-				<DataGrid<KeyRow> columns={columns} data={rows} emptyTitle="No API keys yet" emptyDescription="Create a key for programmatic access." />
+			<Card noBodyPadding>
+				<CardDataGrid<KeyRow>
+					title="API Keys"
+					actions={
+						<Button variant="primary" small onClick={onCreateKey}>
+							+ New Key
+						</Button>
+					}
+					columns={columns}
+					data={rows}
+					noSearch
+					emptyTitle="No API keys yet"
+					emptyDescription="Create a key for programmatic access."
+				/>
 			</Card>
 		</section>
 	);

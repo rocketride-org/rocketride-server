@@ -77,6 +77,7 @@ import { FilterStrip } from './FilterStrip';
 import type { IGridFilterDef } from './FilterStrip';
 import type { IDataGridPersistence } from './persistence';
 import { Button } from '../button/Button';
+import { cardHeaderChrome } from '../card/Card';
 import { commonStyles } from '../../themes/styles';
 import 'tabulator-tables/dist/css/tabulator_simple.min.css';
 import './tabulator-theme.css';
@@ -272,31 +273,21 @@ const styles = {
 	// the approved spec: left-aligned content, bottom divider, 13.5px/700
 	// title), so a DataGrid title bar is indistinguishable from a Card header.
 	titleBar: {
-		...commonStyles.cardHeader,
-		justifyContent: 'flex-start',
-		borderBottom: '1px solid var(--rr-border)',
-		fontSize: 13.5,
-		fontWeight: 700,
+		...cardHeaderChrome.header,
 	} as CSSProperties,
 
 	// Card-header block (title and/or actions present): ONE fill and ONE
 	// bottom border — a card-hosted grid must not stack two gray strips
-	// (design decision 2026-07-16). Geometry (refined same day): the LEFT
-	// side stacks the title over the search/count tools; the RIGHT side is a
-	// single cluster — card actions then grid buttons — vertically centered
-	// against the whole block. Carries the cardHeader typography (13px/600)
-	// so the title is indistinguishable from a real Card header's.
+	// (design decision 2026-07-16). The chrome — fill, divider, padding, and
+	// the 13.5/700 title typography — comes from Card.tsx's OWN exported
+	// header styles, never re-declared here (user directive, same day), so
+	// the grid title is a Card header by construction. Only the two-row
+	// GEOMETRY is grid-local: title stacked over the tools line on the left,
+	// one vertically-centered cluster on the right.
 	barStack: {
-		display: 'flex',
-		alignItems: 'center',
+		...cardHeaderChrome.header,
 		justifyContent: 'space-between',
 		gap: 12,
-		padding: '12px 16px',
-		background: 'var(--rr-bg-titleBar-inactive)', /* cardHeader fill */
-		borderBottom: '1px solid var(--rr-border)',
-		fontSize: 13,
-		fontWeight: 600,
-		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 
 	// Left side of the block: title line over the tools line.
@@ -308,15 +299,20 @@ const styles = {
 		flex: '1 1 auto',
 	} as CSSProperties,
 
-	// The left side's tools line (search + count).
+	// The left side's tools line (search + count) — resets the header's
+	// title weight so only the title line carries it.
 	barTools: {
 		display: 'flex',
 		alignItems: 'center',
+		fontWeight: 400,
 	} as CSSProperties,
 
 	// Right-side cluster: card-specific actions LEFT of the grid buttons
-	// (Clear / Export), vertically centered by the stack's align-items.
+	// (Clear / Export), vertically centered by the stack's align-items —
+	// Card's own headerActions placement plus the flex layout the multi-
+	// button cluster needs.
 	barActions: {
+		...cardHeaderChrome.actions,
 		display: 'flex',
 		alignItems: 'center',
 		gap: 8,
@@ -881,6 +877,11 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		// Action pseudo-fields ('__rrActions', ...) never filter; neither do
 		// columns that opted out of the header popup entirely (rrNoPopup).
 		if (field.startsWith('__') || isPopupExempt(field)) return 'none';
+		// LOCAL grids never interpret filter values themselves — the VIEW does,
+		// through onFiltersChange. Without that hook the popup's filter section
+		// would commit values into a void, so it is hidden entirely (user
+		// feedback 2026-07-16: a filter that does nothing must not render).
+		if (!fetchRef.current && !filtersChangeRef.current) return 'none';
 		const rrType = columnsRef.current.find((c) => c.field === field)?.rrType;
 		switch (rrType) {
 			case 'boolean':

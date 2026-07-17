@@ -18,6 +18,7 @@ import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { EmptyState } from '../../../components/empty-state/EmptyState';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../../billing/types';
+import type { IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
 import { CreditsPanel } from '../../billing/components/CreditsPanel';
 import { BillingDashboard } from '../../billing/components/BillingDashboard';
 import { TopUpModal } from '../../billing/components/TopUpModal';
@@ -223,8 +224,12 @@ export interface BillingPanelProps {
 	activeTasks?: ActiveTask[];
 	/** Whether dashboard data is still loading. */
 	dashboardLoading?: boolean;
-	/** Callback to change the transaction page. */
+	/** Callback to change the transaction page (legacy prop bridge). */
 	onTransactionPage?: (page: number) => void;
+	/** Direct ledger query (preferred; see BillingDashboardProps). */
+	fetchTransactions?: (req: IDataGridPageRequest) => Promise<TransactionsResult | null>;
+	/** Org-scoped distinct ledger values for the enum checklist filters. */
+	fetchTransactionDistinct?: (field: string) => Promise<(string | number | boolean)[]>;
 	/** Available top-up packs. */
 	topupPlans?: TopupPlan[];
 	/** Callback when user clicks a top-up pack. */
@@ -251,7 +256,7 @@ export interface BillingPanelProps {
  * Renders compute credits and subscription rows using the stock Card
  * pattern. The cancel confirmation dialog is owned by AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, apps, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, memberNames, teamNames, onUpgradeSubscription }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, apps, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, memberNames, teamNames, onUpgradeSubscription }) => {
 	// ── Top-up modal state ──────────────────────────────────────────────────
 	const [showTopUpModal, setShowTopUpModal] = useState(false);
 	// ── Upgrade modal state ─────────────────────────────────────────────────
@@ -414,6 +419,8 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					topupPlans={topupPlans ?? []}
 					loading={dashboardLoading ?? false}
 					onTransactionPage={onTransactionPage ?? (() => {})}
+					fetchTransactions={fetchTransactions}
+					fetchTransactionDistinct={fetchTransactionDistinct}
 					onBuyTopup={onBuyTopup}
 					onAddCapacity={isSubscribed ? handleAddCapacity : undefined}
 					memberNames={memberNames}
