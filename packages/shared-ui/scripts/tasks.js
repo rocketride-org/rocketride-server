@@ -66,10 +66,23 @@ function makeTestAction() {
 	};
 }
 
+// Jest over src/ — component/predicate tests (jsdom-free, via react-dom/server).
+// Separate from shared-ui:test (node:test over scripts/) because it needs the
+// ts-jest transform and a different runtime.
+function makeTestSrcAction() {
+	return {
+		description: 'Testing shared-ui src (jest)',
+		run: async (ctx, task) => {
+			await execCommand('npx', ['jest', '--colors'], { task, cwd: APP_ROOT });
+		},
+	};
+}
+
 module.exports = {
 	name: 'shared-ui',
 	description: 'RocketRide shared-ui package',
 	actions: [
 		{ name: 'shared-ui:test', action: makeTestAction },
+		{ name: 'shared-ui:test-src', action: makeTestSrcAction },
 	],
 };

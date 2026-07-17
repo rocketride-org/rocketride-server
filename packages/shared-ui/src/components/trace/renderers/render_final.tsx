@@ -41,7 +41,9 @@ const S = {
 
 // Pipeline result fields are always arrays (IInstance.py appends one item per write call).
 // Wrap functions operate on individual items; renderSection iterates the array.
-const LANE_RENDERERS: Array<{
+// Exported for unit tests: the wrap ∘ check composition per lane is the load-bearing
+// invariant (a wrap the guard can't recognise silently drops to the JsonTree fallback).
+export const LANE_RENDERERS: Array<{
 	type: string;
 	check: (data: unknown) => boolean;
 	render: (data: any) => ReactElement | null;
@@ -61,8 +63,10 @@ const LANE_RENDERERS: Array<{
 	{ type: 'documents', check: isDocument, render: renderDocument, wrap: (_k, v) => ({ documents: v }) },
 	{ type: 'image', check: isImage, render: renderImage, wrap: (_k, v) => v },
 	{ type: 'text', check: isText, render: renderText, wrap: (_k, v) => ({ text: v }) },
-	{ type: 'audio', check: isAudio, render: renderAudio, wrap: (_k, v) => ({ audio: v }) },
-	{ type: 'video', check: isVideo, render: renderVideo, wrap: (_k, v) => ({ video: v }) },
+	// Media lanes emit {mime_type, <lane>, metadata?}; the guard inspects that shape
+	// directly, so the item must pass through unwrapped (as 'image' does above).
+	{ type: 'audio', check: isAudio, render: renderAudio, wrap: (_k, v) => v },
+	{ type: 'video', check: isVideo, render: renderVideo, wrap: (_k, v) => v },
 	{ type: 'table', check: isTable, render: renderTable, wrap: (_k, v) => ({ text: v }) },
 ];
 

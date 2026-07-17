@@ -196,7 +196,10 @@ const JsonNode: React.FC<JsonNodeProps> = ({ label, value, depth, defaultExpandD
 		display = String(value);
 	} else if (typeof value === 'string') {
 		valStyle = styles.valStr;
-		display = JSON.stringify(value);
+		// Cap leaf strings: an un-recognised media entry (base64 payload) must never
+		// dump megabytes into one DOM node and freeze the webview. Matches the events-ui
+		// JsonTree, which already truncates at 200 chars.
+		display = JSON.stringify(value.length > 200 ? value.slice(0, 200) + '…' : value);
 	} else {
 		display = String(value);
 	}

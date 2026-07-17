@@ -48,6 +48,15 @@ export const RS = {
 	kvMono: {
 		color: 'var(--rr-text-primary)',
 		fontFamily: 'monospace',
+		wordBreak: 'break-all',
+	} as CSSProperties,
+	media: {
+		display: 'block',
+		maxWidth: '100%',
+		maxHeight: 240,
+		marginTop: 4,
+		borderRadius: 4,
+		backgroundColor: 'var(--rr-bg-paper)',
 	} as CSSProperties,
 	badge: {
 		display: 'inline-block',
