@@ -6,20 +6,24 @@
 /**
  * CreditsPanel — pure compute credit balance widget.
  *
- * Shows the org's current credit balance per resource as the stock DataGrid
- * (Resource / Granted / Consumed / Balance) inside a stock Card headed
- * "Account Balance", with the "Add more capacity..." action in the card
- * header. The host is responsible for the checkout flow via `onAddCapacity`.
+ * Shows the org's current credit balance per resource as a CardDataGrid
+ * (Resource / Granted / Consumed / Balance): the grid's two-row header IS
+ * the card header — "Account Balance" + the "Add more capacity..." action
+ * on the identity row, the grid's search / count / Export on the tool row —
+ * inside a headerless Card shell, so the card carries ONE header instead of
+ * a Card header stacked on a grid bar (design decision 2026-07-16). The
+ * host is responsible for the checkout flow via `onAddCapacity`.
  *
  * This component is host-agnostic: it receives all data as props and
  * never fetches from the server directly.
  */
 
 import React, { useMemo, useState, type CSSProperties } from 'react';
-import type { CellComponent, ColumnDefinition } from 'tabulator-tables';
+import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
-import { DataGrid } from '../../../components/data-grid/DataGrid';
+import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
+import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import type { CreditBalance, CreditPack } from '../types';
 
 // =============================================================================
@@ -125,12 +129,16 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 		});
 	}, [balance]);
 
-	// Column definitions — numeric columns right-aligned like the original table.
-	const columns = useMemo<ColumnDefinition[]>(
+	// Column definitions — numeric columns right-aligned like the original
+	// table, with declared rrTypes so the header popups offer the matching
+	// FORMAT picks (number columns: decimals / thousands / currency) and
+	// filter controls instead of falling back to plain text.
+	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
 				title: 'Resource',
 				field: 'resource',
+				rrType: 'string',
 				headerSort: true,
 				// Uppercase resource-name span (DOM clone of the old cell render).
 				formatter: (cell: CellComponent) => {
@@ -143,6 +151,7 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 			{
 				title: 'Granted',
 				field: 'granted',
+				rrType: 'number',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -152,6 +161,7 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 			{
 				title: 'Consumed',
 				field: 'consumed',
+				rrType: 'number',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -161,6 +171,7 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 			{
 				title: 'Balance',
 				field: 'balance',
+				rrType: 'number',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -181,21 +192,33 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 	// Whether any per-resource balance data has loaded.
 	const hasData = rows.length > 0;
 
+	// Card-level action, shared by both render branches.
+	const addCapacityAction = onAddCapacity ? (
+		<Button variant="secondary" small onClick={onAddCapacity}>
+			Add more capacity...
+		</Button>
+	) : undefined;
+
 	// ── Render ──────────────────────────────────────────────────────────────
+	// No data: a classic Card (header + padded body message) — there is no
+	// grid to own the header yet.
+	if (!hasData) {
+		return (
+			<Card header="Account Balance" headerActions={addCapacityAction}>
+				<div style={styles.balanceEmpty}>— credits available</div>
+				{/* Error banner */}
+				{error && <div style={styles.error}>{error}</div>}
+			</Card>
+		);
+	}
+
+	// Data: the grid IS the card — a headerless Card provides only the
+	// bordered shell, and the CardDataGrid's two-row header carries the
+	// title, the capacity action, and the grid tools in ONE block.
 	return (
-		<Card
-			header="Account Balance"
-			headerActions={
-				onAddCapacity ? (
-					<Button variant="secondary" small onClick={onAddCapacity}>
-						Add more capacity...
-					</Button>
-				) : undefined
-			}
-			noBodyPadding={hasData}
-		>
+		<Card noBodyPadding>
 			{/* Balance table — granted, consumed, net per resource */}
-			{hasData ? <DataGrid<BalanceRow> columns={columns} data={rows} /> : <div style={styles.balanceEmpty}>— credits available</div>}
+			<CardDataGrid<BalanceRow> title="Account Balance" actions={addCapacityAction} columns={columns} data={rows} />
 
 			{/* Error banner */}
 			{error && <div style={styles.error}>{error}</div>}

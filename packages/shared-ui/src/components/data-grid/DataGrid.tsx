@@ -58,6 +58,7 @@ import {
 	type CSSProperties,
 	type ForwardedRef,
 	type ReactElement,
+	type ReactNode,
 	type Ref,
 } from 'react';
 import type { Options } from 'tabulator-tables';
@@ -147,10 +148,24 @@ export interface IDataGridProps<Row extends Record<string, unknown>> {
 	 * shows by default. Exports cover EVERY row matching the current committed
 	 * filters AND the active search term (remote grids walk all pages with
 	 * both riding each request), restricted to the visible columns in display
-	 * order. With `noSearch` also set and no `title`, the whole bar
-	 * disappears.
+	 * order. With `noSearch` also set, the grid contributes NO buttons at all
+	 * (even the transient Clear): on a titled grid that leaves an
+	 * actions-only card header — `actions` always render regardless — and
+	 * with no `title`/`actions` either, the whole bar disappears.
 	 */
 	noExport?: boolean;
+	/**
+	 * Card-specific action buttons (e.g. "Add more capacity..."). Providing
+	 * `actions` OR `title` switches the bar to its card-header form: the
+	 * title stacked over the search + count tools on the left, and ONE
+	 * vertically-centered cluster on the right — these actions first, then
+	 * the grid's own buttons (Clear / Export) — under one shared fill and
+	 * bottom border, so a card-hosted grid carries a single header instead
+	 * of a Card header stacked on a grid bar. CardDataGrid is the same
+	 * component re-typed with `title` required, for call sites where the
+	 * grid IS the card.
+	 */
+	actions?: ReactNode;
 	/**
 	 * Declared column definitions — Tabulator-native plus the DataGrid's
 	 * extensions ({@link GridColumnDefinition}): `rrNoPopup` (popup-exempt
@@ -262,6 +277,49 @@ const styles = {
 		borderBottom: '1px solid var(--rr-border)',
 		fontSize: 13.5,
 		fontWeight: 700,
+	} as CSSProperties,
+
+	// Card-header block (title and/or actions present): ONE fill and ONE
+	// bottom border — a card-hosted grid must not stack two gray strips
+	// (design decision 2026-07-16). Geometry (refined same day): the LEFT
+	// side stacks the title over the search/count tools; the RIGHT side is a
+	// single cluster — card actions then grid buttons — vertically centered
+	// against the whole block. Carries the cardHeader typography (13px/600)
+	// so the title is indistinguishable from a real Card header's.
+	barStack: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'space-between',
+		gap: 12,
+		padding: '12px 16px',
+		background: 'var(--rr-bg-titleBar-inactive)', /* cardHeader fill */
+		borderBottom: '1px solid var(--rr-border)',
+		fontSize: 13,
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+
+	// Left side of the block: title line over the tools line.
+	barLeft: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 8,
+		minWidth: 0,
+		flex: '1 1 auto',
+	} as CSSProperties,
+
+	// The left side's tools line (search + count).
+	barTools: {
+		display: 'flex',
+		alignItems: 'center',
+	} as CSSProperties,
+
+	// Right-side cluster: card-specific actions LEFT of the grid buttons
+	// (Clear / Export), vertically centered by the stack's align-items.
+	barActions: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
 	} as CSSProperties,
 
 	// Grid-local search input — 30px inputField-look control; fixed width so
@@ -407,6 +465,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	const {
 		tableId,
 		title,
+		actions,
 		noSearch,
 		noExport,
 		columns,
@@ -1329,14 +1388,19 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	}));
 
 	// ── Render ──────────────────────────────────────────────────────────────
-	// Title-bar activation (see the prop JSDoc): the bar with search + export
-	// is ON BY DEFAULT on every grid; `noSearch` / `noExport` opt out
-	// individually, and the bar disappears only when both are suppressed AND
-	// no title is set. `title` is purely optional heading text.
+	// Bar activation (see the prop JSDoc): the bar with search + export is ON
+	// BY DEFAULT on every grid; `noSearch` / `noExport` opt out individually.
+	// A `title` and/or `actions` switches it to the card-header block (title
+	// over tools left, centered actions + grid buttons right, one shared
+	// fill + border) so a card-hosted grid never stacks a Card header on a
+	// grid bar; with neither, the single tool row renders alone, and the bar
+	// disappears entirely only when search and export are both suppressed
+	// too.
 	const hasTitle = title !== undefined;
+	const hasIdentityRow = hasTitle || actions !== undefined;
 	const showSearch = noSearch !== true;
 	const showExport = noExport !== true;
-	const showBar = hasTitle || showSearch || showExport;
+	const showBar = hasIdentityRow || showSearch || showExport;
 	const hasStrip = !!filters && filters.length > 0;
 	// Clear renders only while something deviates the DATA view from its
 	// defaults — an active sort, a committed search, or a committed filter.
@@ -1380,61 +1444,98 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		/>
 	);
 	if (!showBar && !hasStrip) return gridEl;
-	return (
-		<div style={fillsParent ? { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } : undefined}>
-			{/* Built-in title bar: title + search + count left, Export menu right. */}
-			{showBar && (
-				<div style={styles.titleBar}>
-					{hasTitle && <span>{title}</span>}
-					{showSearch && (
-						<input
-							style={styles.search(hasTitle)}
-							placeholder="Search..."
-							value={searchText}
-							onChange={(e) => setSearchText(e.target.value)}
-						/>
-					)}
-					{/* Matching-row count right after the search input. */}
-					{showSearch && countText !== null && <span style={styles.count}>{countText}</span>}
-					{(showExport || clearVisible) && (
-						<div style={styles.barRight}>
-							{/* Clear appears only while a sort, search, or filter
-							    deviates the view — it resets those three and leaves
-							    the column layout alone (the header popups' Reset
-							    layout is the one that also restores the layout). */}
-							{clearVisible && (
-								<Button variant="ghost" small onClick={clearView}>
-									Clear
-								</Button>
-							)}
-							{showExport && (
-								<div ref={exportWrapRef} style={styles.exportWrap}>
-									{/* Trigger stays enabled during a walk so the menu can be
-									    reopened — the format rows below show the disabled state. */}
-									<Button variant="ghost" small onClick={() => setExportMenuOpen((openNow) => !openNow)}>
-										Export...
-									</Button>
-									{exportMenuOpen && (
-										<div style={styles.exportMenu} role="menu">
-											{(['csv', 'json'] as const).map((format) => (
-												<div
-													key={format}
-													role="menuitem"
-													aria-disabled={exporting}
-													style={styles.exportItem(exportHover === format, exporting)}
-													onMouseEnter={() => setExportHover(format)}
-													onMouseLeave={() => setExportHover((current) => (current === format ? null : current))}
-													onClick={() => handleExportSelect(format)}
-												>
-													{format === 'csv' ? 'CSV' : 'JSON'}
-												</div>
-											))}
-										</div>
-									)}
+
+	// The TOOL pieces are shared by both bar forms (single tool row vs the
+	// two-row header stack), so they are built once. The search never sits
+	// after an inline title anymore — the identity row owns titles — so it
+	// carries no leading gap in either form.
+	const searchInput = showSearch && (
+		<input
+			style={styles.search(false)}
+			placeholder="Search..."
+			value={searchText}
+			onChange={(e) => setSearchText(e.target.value)}
+		/>
+	);
+	// Matching-row count right after the search input.
+	const countEl = showSearch && countText !== null && <span style={styles.count}>{countText}</span>;
+	// Grid-owned buttons (Clear / Export), suppressible as a GROUP: with
+	// noSearch AND noExport both set the grid contributes no buttons at all
+	// (even the transient Clear), leaving an actions-only header on titled
+	// grids — caller-provided `actions` always render regardless. noExport
+	// alone still lets Clear surface while the view deviates.
+	const toolButtons = (showSearch || showExport) && (showExport || clearVisible) && (
+		<div style={styles.barRight}>
+			{/* Clear appears only while a sort, search, or filter
+			    deviates the view — it resets those three and leaves
+			    the column layout alone (the header popups' Reset
+			    layout is the one that also restores the layout). */}
+			{clearVisible && (
+				<Button variant="ghost" small onClick={clearView}>
+					Clear
+				</Button>
+			)}
+			{showExport && (
+				<div ref={exportWrapRef} style={styles.exportWrap}>
+					{/* Trigger stays enabled during a walk so the menu can be
+					    reopened — the format rows below show the disabled state. */}
+					<Button variant="ghost" small onClick={() => setExportMenuOpen((openNow) => !openNow)}>
+						Export...
+					</Button>
+					{exportMenuOpen && (
+						<div style={styles.exportMenu} role="menu">
+							{(['csv', 'json'] as const).map((format) => (
+								<div
+									key={format}
+									role="menuitem"
+									aria-disabled={exporting}
+									style={styles.exportItem(exportHover === format, exporting)}
+									onMouseEnter={() => setExportHover(format)}
+									onMouseLeave={() => setExportHover((current) => (current === format ? null : current))}
+									onClick={() => handleExportSelect(format)}
+								>
+									{format === 'csv' ? 'CSV' : 'JSON'}
 								</div>
-							)}
+							))}
 						</div>
 					)}
+				</div>
+			)}
+		</div>
+	);
+
+	return (
+		<div style={fillsParent ? { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } : undefined}>
+			{/* Card-header block: title stacked over the search/count tools on
+			    the left; card actions + grid buttons as one vertically-centered
+			    cluster on the right; one shared fill and bottom border. */}
+			{showBar && hasIdentityRow && (
+				<div style={styles.barStack}>
+					<div style={styles.barLeft}>
+						<span>{title}</span>
+						{/* Tools line renders only when the search is on; a
+						    title-only grid degrades to a plain card header. */}
+						{showSearch && (
+							<div style={styles.barTools}>
+								{searchInput}
+								{countEl}
+							</div>
+						)}
+					</div>
+					{(actions !== undefined || toolButtons) && (
+						<div style={styles.barActions}>
+							{actions}
+							{toolButtons}
+						</div>
+					)}
+				</div>
+			)}
+			{/* Single tool row (no title / actions): the original bar form. */}
+			{showBar && !hasIdentityRow && (
+				<div style={styles.titleBar}>
+					{searchInput}
+					{countEl}
+					{toolButtons}
 				</div>
 			)}
 			{hasStrip && filters && (

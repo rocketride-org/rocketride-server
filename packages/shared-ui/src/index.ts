@@ -129,6 +129,8 @@ export type { IDropZoneProps } from './components/drop-zone/DropZone';
 // --- DataGrid (style guide section 6.1) ---------------------------------------
 export { DataGrid } from './components/data-grid/DataGrid';
 export type { IDataGridProps, IDataGridHandle, IDataGridPage, IDataGridPageRequest } from './components/data-grid/DataGrid';
+export { CardDataGrid } from './components/data-grid/CardDataGrid';
+export type { ICardDataGridProps } from './components/data-grid/CardDataGrid';
 export { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch } from './components/data-grid/defaults';
 export type { GridColumnDefinition, GridColumnRRType, IGridAction, IActionsColumnConfig, CellBadgeVariant, CellButtonKind } from './components/data-grid/defaults';
 export { FilterStrip } from './components/data-grid/FilterStrip';
