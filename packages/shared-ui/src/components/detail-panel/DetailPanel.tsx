@@ -35,6 +35,18 @@ import { CLOSE_GLYPH, trapFocus, acquireOverlayLayer, isTopOverlayLayer, release
 /** Default drawer width when the caller does not override `width`. */
 const DEFAULT_WIDTH = 560;
 
+/** Narrowest usable drawer — forms and footer verbs break below this. */
+const MIN_WIDTH = 380;
+
+/** Context sliver: dimmed host pixels that must stay visible beside the drawer. */
+const CONTEXT_SLIVER = 120;
+
+/** Widest drawer as a fraction of the owning surface. */
+const MAX_HOST_FRACTION = 0.85;
+
+/** Keyboard resize step (arrow keys on the handle), in px. */
+const KEY_RESIZE_STEP = 24;
+
 // =============================================================================
 // TYPES
 // =============================================================================
@@ -62,6 +74,32 @@ export interface IDetailPanelProps {
 	children: ReactNode;
 	/** Drawer width in px. Default {@link DEFAULT_WIDTH}. */
 	width?: number;
+	/**
+	 * Fixed action row pinned below the scrolling body (record-panel verbs:
+	 * Save / Cancel / destructive actions). Rendered with a top divider;
+	 * omitted = no footer row (pure inspect panels).
+	 */
+	footer?: ReactNode;
+	/**
+	 * Anchor the drawer to the nearest POSITIONED ANCESTOR instead of the
+	 * viewport. A slide-out anchors to the surface that OWNS the record:
+	 * grids on app pages open viewport drawers;
+	 * grids inside a dialog (the Account overlay) open drawers clipped to the
+	 * dialog's own edge — a window-edge drawer over a modal reads as an
+	 * unrelated second window and fights the backdrop stacking. The host
+	 * surface must be `position: relative` with `overflow: hidden`.
+	 */
+	contained?: boolean;
+	/**
+	 * Left-edge drag resizing (ON by default; pass false to opt out). The
+	 * width clamps between {@link MIN_WIDTH} and the OWNING SURFACE's width
+	 * minus a visible sliver of dimmed context (capped at 85%), so the panel
+	 * can neither collapse below a usable form width nor fully occlude the
+	 * page behind it — the dimmed edge is what communicates "overlay, not
+	 * navigation". Double-click the handle to restore the default width; the
+	 * dragged width lasts for the panel's open lifetime.
+	 */
+	resizable?: boolean;
 }
 
 // =============================================================================
@@ -70,12 +108,20 @@ export interface IDetailPanelProps {
 
 const styles = {
 	// Full-area dim backdrop; sits above content but below shell modals (2000).
-	overlay: {
-		position: 'fixed',
+	// Contained mode swaps `fixed` for `absolute` so the backdrop (and the
+	// drawer inside it) fill the nearest positioned ancestor — the surface
+	// that owns the record — instead of the viewport.
+	overlay: (contained: boolean): CSSProperties => ({
+		position: contained ? 'absolute' : 'fixed',
 		inset: 0,
 		zIndex: 1500,
 		background: 'color-mix(in srgb, var(--rr-text-primary) 30%, transparent)',
-	} as CSSProperties,
+		// Clip the drawer while it sits at translateX(100%): a transformed
+		// element EXTENDS ancestor scroll regions, and anything that then
+		// scrolls an ancestor toward it (native autoFocus was the culprit)
+		// visibly drags the page sideways ("the page flies in" bug).
+		overflow: 'hidden',
+	}),
 
 	// The drawer itself, pinned to the right edge. `entered` drives the slide-in.
 	panel: (width: number, entered: boolean): CSSProperties => ({
@@ -173,6 +219,34 @@ const styles = {
 		overflowY: 'auto',
 		padding: '6px 20px 20px',
 	} as CSSProperties,
+
+	// Left-edge resize handle: a slim grab strip over the panel's edge. The
+	// tint appears on hover / during drag (the canvas splitters' sash token,
+	// so the affordance matches the rest of the platform).
+	resizeHandle: (active: boolean): CSSProperties => ({
+		position: 'absolute',
+		left: 0,
+		top: 0,
+		bottom: 0,
+		width: 6,
+		cursor: 'col-resize',
+		zIndex: 1,
+		background: active ? 'var(--rr-sash-hover)' : 'transparent',
+		touchAction: 'none',
+	}),
+
+	// Fixed footer action row (record-panel verbs), divided from the body.
+	// Buttons right-aligned like Modal footers; destructive verbs sit at the
+	// LEFT edge by convention (callers use marginRight:'auto' on that button).
+	footer: {
+		flex: 'none',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'flex-end',
+		gap: 8,
+		padding: '12px 20px',
+		borderTop: '1px solid var(--rr-border)',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -196,11 +270,71 @@ export function DetailPanel({
 	onTabSelect,
 	children,
 	width = DEFAULT_WIDTH,
+	footer,
+	contained,
+	resizable = true,
 }: IDetailPanelProps): React.ReactElement | null {
 	// Drives the slide-in: false on mount (off-screen), flipped true next frame.
 	const [entered, setEntered] = useState(false);
 	// The drawer box — Tab focus is trapped inside it while open.
 	const panelRef = useRef<HTMLDivElement>(null);
+	// The overlay box — its width IS the owning surface, the resize clamp's
+	// reference (dialog in contained mode, viewport otherwise).
+	const overlayRef = useRef<HTMLDivElement>(null);
+	// User-dragged width; null = the caller's `width`. Lives only while open
+	// (the closed panel unmounts), so every open starts at the default.
+	const [dragWidth, setDragWidth] = useState<number | null>(null);
+	// Resize interaction state: hover / drag tint + in-flight drag bookkeeping.
+	const [resizeActive, setResizeActive] = useState(false);
+	const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+	/**
+	 * Clamp a candidate width to the usable band: never below the form-safe
+	 * minimum, never wide enough to hide the owning surface's context sliver.
+	 *
+	 * @param candidate - Proposed width in px.
+	 * @returns The clamped width.
+	 */
+	const clampWidth = (candidate: number): number => {
+		const host = overlayRef.current?.clientWidth ?? window.innerWidth;
+		const max = Math.max(MIN_WIDTH, Math.min(host * MAX_HOST_FRACTION, host - CONTEXT_SLIVER));
+		return Math.min(Math.max(candidate, MIN_WIDTH), max);
+	};
+
+	/** Begin a drag: capture the pointer and record the starting geometry. */
+	const handleResizeDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+		e.preventDefault();
+		e.currentTarget.setPointerCapture(e.pointerId);
+		dragRef.current = { startX: e.clientX, startWidth: dragWidth ?? width };
+		setResizeActive(true);
+	};
+
+	/** Drag: the panel is right-anchored, so moving LEFT grows the width. */
+	const handleResizeMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+		if (!dragRef.current) return;
+		setDragWidth(clampWidth(dragRef.current.startWidth + (dragRef.current.startX - e.clientX)));
+	};
+
+	/** End a drag: release bookkeeping (pointer capture releases natively). */
+	const handleResizeUp = (): void => {
+		dragRef.current = null;
+		setResizeActive(false);
+	};
+
+	/** Keyboard resize on the focused handle: arrows step, Home resets. */
+	const handleResizeKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+		const current = dragWidth ?? width;
+		if (e.key === 'ArrowLeft') {
+			e.preventDefault();
+			setDragWidth(clampWidth(current + KEY_RESIZE_STEP));
+		} else if (e.key === 'ArrowRight') {
+			e.preventDefault();
+			setDragWidth(clampWidth(current - KEY_RESIZE_STEP));
+		} else if (e.key === 'Home') {
+			e.preventDefault();
+			setDragWidth(null);
+		}
+	};
 	// Focus target on open; also the button the close glyph fires.
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
 	// Element focused before opening, restored on close.
@@ -229,6 +363,16 @@ export function DetailPanel({
 		// ancestor — the drawer is position:fixed so this is belt-and-braces
 		// here, but it keeps both focus sites symmetric (see the restore below).
 		const focusRaf = requestAnimationFrame(() => closeButtonRef.current?.focus({ preventScroll: true }));
+		// Late first-field focus: panels mark their opening input with
+		// data-rr-autofocus INSTEAD of native autoFocus. Native autoFocus
+		// fires at MOUNT — while the drawer is still translated off-screen —
+		// and focuses WITHOUT preventScroll, so the browser scrolls ancestors
+		// toward the off-screen input and drags the page sideways. Focusing
+		// after the 200ms slide, with preventScroll, keeps the layout still.
+		const fieldTimer = window.setTimeout(() => {
+			const field = panelRef.current?.querySelector<HTMLElement>('[data-rr-autofocus]');
+			field?.focus({ preventScroll: true });
+		}, 220);
 		// Escape closes the drawer; Tab is trapped inside it — aria-modal alone
 		// does not stop keyboard focus from wandering into the page behind.
 		const onKeyDown = (event: KeyboardEvent): void => {
@@ -246,6 +390,7 @@ export function DetailPanel({
 		return () => {
 			cancelAnimationFrame(enterRaf);
 			cancelAnimationFrame(focusRaf);
+			clearTimeout(fieldTimer);
 			document.removeEventListener('keydown', onKeyDown);
 			// Leave the stack (restores page scroll when the last layer closes).
 			releaseOverlayLayer(layer);
@@ -272,8 +417,29 @@ export function DetailPanel({
 	return (
 		/* Dismissal is deliberate-only per the 2026-07-08 design decision: the
 		   close glyph or Escape — clicking the dim backdrop must NOT close. */
-		<div style={styles.overlay}>
-			<div ref={panelRef} style={styles.panel(width, entered)} role="dialog" aria-modal="true" aria-label={title}>
+		<div ref={overlayRef} style={styles.overlay(contained === true)}>
+			<div ref={panelRef} style={styles.panel(dragWidth ?? width, entered)} role="dialog" aria-modal="true" aria-label={title}>
+				{/* Left-edge resize handle (drag, arrow keys, Home = reset,
+				    double-click = reset). */}
+				{resizable && (
+					<div
+						role="separator"
+						aria-orientation="vertical"
+						aria-label="Resize panel"
+						tabIndex={0}
+						style={styles.resizeHandle(resizeActive)}
+						onPointerDown={handleResizeDown}
+						onPointerMove={handleResizeMove}
+						onPointerUp={handleResizeUp}
+						onPointerCancel={handleResizeUp}
+						onMouseEnter={() => setResizeActive(true)}
+						onMouseLeave={() => {
+							if (!dragRef.current) setResizeActive(false);
+						}}
+						onDoubleClick={() => setDragWidth(null)}
+						onKeyDown={handleResizeKey}
+					/>
+				)}
 				{/* Fixed EntityHeader: avatar slot + name/secondary + close glyph. */}
 				<div style={styles.header}>
 					{avatar != null && <div style={styles.avatar}>{avatar}</div>}
@@ -325,6 +491,9 @@ export function DetailPanel({
 
 				{/* Independently scrolling body composed of stock detail vocabulary. */}
 				<div style={styles.body}>{children}</div>
+
+				{/* Fixed record-action footer (Save / Cancel / destructive verbs). */}
+				{footer != null && <div style={styles.footer}>{footer}</div>}
 			</div>
 		</div>
 	);

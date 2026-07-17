@@ -6,63 +6,71 @@
 /**
  * MembersPanel — the Members tab within AccountView.
  *
- * Lists all organization members in the stock DataGrid (sort, pagination)
- * inside a stock Card, with a toolbar search box above the grid and the A-Z
- * letter selector preserved as a strip along the table's right edge. Pending
- * invitations show Resend / Cancel actions instead of Edit / Remove. The
- * current user's own row shows their role but no action buttons.
+ * Rebuilt to the record-panel standard (see ApiKeysPanel, THE EXEMPLAR): the
+ * grid is PURE DATA — no Actions column, no per-row buttons — and every
+ * operation on a member happens in ONE record surface, a contained
+ * DetailPanel sliding from the Account dialog's edge:
+ *
+ *  - row click                -> the panel in VIEW mode (member facts, an
+ *                                editable role select for org admins, a
+ *                                Resend Invite action on pending invitations,
+ *                                and Remove in the footer guarded by a stock
+ *                                ConfirmDialog)
+ *  - "Invite Member" (header) -> the SAME panel in CREATE mode carrying the
+ *                                retired invite modal's form field-for-field
+ *                                (email, names, org role, per-team access
+ *                                with the PermGrid editor)
+ *
+ * The panel owns its whole lifecycle — form state, validation, saving,
+ * errors, confirmation — through the four raw host actions it receives
+ * (`onInviteMember`, `onUpdateMemberRole`, `onRemoveMember`,
+ * `onResendInvite`). No modals live in AccountView for members.
+ *
+ * Gating: only org admins get the Invite action, the role editor, the
+ * Resend Invite action, and the Remove footer verb; the viewer's own row
+ * never offers self-edit/remove (ported from the old Actions column rules).
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import type { CSSProperties } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
-import { DataGrid } from '../../../components/data-grid/DataGrid';
-import { avatarEl, buttonEl, matchesSearch } from '../../../components/data-grid/defaults';
+import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
+import { avatarEl } from '../../../components/data-grid/defaults';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
-import { InputField } from '../../../components/input-field/InputField';
-import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
-import type { ConnectResult, OrgDetail, MemberRecord } from '../types';
-import { initials, avatarColor } from './shared';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
+import { Section, LabelValue } from '../../../components/section/Section';
+import { commonStyles } from '../../../themes/styles';
+import type { ConnectResult, MemberRecord, TeamRecord } from '../types';
+import { S, PermGrid, PermPill, Avatar, Badge, initials, avatarColor } from './shared';
 
 // =============================================================================
 // STYLES
 // =============================================================================
 
 const styles = {
-	/** Container that holds the member table and the A-Z sidebar side by side. */
-	body: {
-		display: 'flex',
-		alignItems: 'stretch',
-	} as CSSProperties,
-
-	/** Table region occupying the remaining width beside the A-Z bar. */
-	tableWrap: {
-		flex: 1,
-		minWidth: 0,
-	} as CSSProperties,
-
-	/** Toolbar above the grid: search box + row count (old stock-table toolbar spec). */
-	toolbar: {
-		display: 'flex',
+	/** Role / status badge shape (commonStyles.badge values + surface fill); text color set per variant. */
+	badge: {
+		display: 'inline-flex',
 		alignItems: 'center',
-		gap: 12,
-		padding: '12px 16px',
-		borderBottom: '1px solid var(--rr-border)',
-	} as CSSProperties,
+		gap: '4px',
+		padding: '2px 8px',
+		fontSize: '11px',
+		fontWeight: '600',
+		borderRadius: '10px',
+		letterSpacing: '0.3px',
+		background: 'var(--rr-bg-surface-alt)',
+	} as Partial<CSSStyleDeclaration>,
 
-	/** Toolbar search box sizing (30px tall, 260px wide — old stock-table spec). */
-	search: {
-		width: 260,
-		height: 30,
-	} as CSSProperties,
-
-	/** Toolbar row-count text (old stock-table count spec). */
-	count: {
-		fontSize: 12.5,
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
+	/** Glowing green dot inside the 'active' badge (commonStyles.indicatorSuccess clone). */
+	activeDot: {
+		width: '8px',
+		height: '8px',
+		borderRadius: '50%',
+		backgroundColor: 'var(--rr-color-success)',
+		boxShadow: '0 0 4px var(--rr-color-success)',
+	} as Partial<CSSStyleDeclaration>,
 
 	/** Horizontal cluster inside a grid cell (avatar + text) — DOM style for formatters. */
 	cellCluster: {
@@ -86,79 +94,228 @@ const styles = {
 		marginLeft: '5px',
 	} as Partial<CSSStyleDeclaration>,
 
-	/** Role / status badge shape (commonStyles.badge values + surface fill); text color set per variant. */
-	roleBadge: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: '4px',
-		padding: '2px 8px',
-		fontSize: '11px',
-		fontWeight: '600',
-		borderRadius: '10px',
-		letterSpacing: '0.3px',
-		background: 'var(--rr-bg-surface-alt)',
-	} as Partial<CSSStyleDeclaration>,
+	/** Select control styling for role pickers (inputField + pointer cursor). */
+	select: {
+		...commonStyles.inputField,
+		cursor: 'pointer',
+	} as React.CSSProperties,
 
-	/** Vertical A-Z sidebar strip on the right edge. */
-	azBar: {
+	/** Role editor row in VIEW mode: select beside its Save button. */
+	roleRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
+	} as React.CSSProperties,
+
+	/** Invitation row in VIEW mode: explanatory note beside the Resend action. */
+	inviteRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+	} as React.CSSProperties,
+
+	/** Muted explanatory note filling the invitation row. */
+	inviteNote: {
+		flex: 1,
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+	} as React.CSSProperties,
+
+	/** "Sent!" confirmation shown in place of the Resend button after success. */
+	sentText: {
+		fontSize: 11,
+		fontWeight: 600,
+		color: 'var(--rr-color-success)',
+	} as React.CSSProperties,
+
+	/** Vertical stack of team-access rows in the invite form. */
+	teamList: {
 		display: 'flex',
 		flexDirection: 'column',
+		gap: 6,
+	} as React.CSSProperties,
+
+	/** A single team-access row: checkbox + name + Edit Perms toggle. */
+	teamRow: {
+		display: 'flex',
 		alignItems: 'center',
-		justifyContent: 'flex-start',
-		padding: '4px 2px',
-		borderLeft: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-surface-alt)',
-		userSelect: 'none',
-		overflowY: 'auto',
-	} as CSSProperties,
+		gap: 8,
+	} as React.CSSProperties,
 
-	/** A single letter button in the A-Z sidebar. */
-	azLetter: {
-		fontSize: 10,
-		fontWeight: 500,
-		lineHeight: 1,
-		padding: '3px 6px',
-		cursor: 'pointer',
+	/** Custom team-access checkbox; fills with the info accent when checked. */
+	teamCheckbox: (checked: boolean): React.CSSProperties => ({
+		width: 14,
+		height: 14,
 		borderRadius: 3,
-		border: 'none',
-		background: 'transparent',
-		color: 'var(--rr-text-secondary)',
-		transition: 'background 0.1s, color 0.1s',
-	} as CSSProperties,
-
-	/** Active/selected letter style override. */
-	azLetterActive: {
-		background: 'var(--rr-brand)',
+		flexShrink: 0,
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		fontSize: 9,
+		cursor: 'pointer',
+		border: `1px solid ${checked ? 'var(--rr-color-info)' : 'var(--rr-border-input)'}`,
+		background: checked ? 'var(--rr-color-info)' : 'var(--rr-bg-input)',
 		color: 'var(--rr-fg-button)',
-	} as CSSProperties,
+	}),
 
-	/** Disabled letter (no members start with this letter). */
-	azLetterDisabled: {
-		color: 'var(--rr-text-disabled)',
-		cursor: 'default',
-		opacity: 0.4,
-	} as CSSProperties,
+	/** Team name label; brightens when the team is checked. */
+	teamName: (checked: boolean): React.CSSProperties => ({
+		flex: 1,
+		fontSize: 12,
+		fontWeight: 500,
+		color: checked ? 'var(--rr-text-primary)' : 'var(--rr-text-secondary)',
+	}),
 
-	/** "Sent!" confirmation after a successful invite resend (DOM style for the grid formatter). */
-	sentText: {
-		fontSize: '11px',
-		color: 'var(--rr-color-success)',
-		fontWeight: '600',
-	} as Partial<CSSStyleDeclaration>,
+	/** Compact "Edit Perms" / "Done" toggle on a checked team row. */
+	permsToggle: {
+		...commonStyles.buttonSecondary,
+		...commonStyles.cardBodyButton,
+		fontSize: 10,
+		padding: '2px 8px',
+	} as React.CSSProperties,
+
+	/** Permission-pill cluster shown under a checked team (when not editing). */
+	teamPerms: {
+		display: 'flex',
+		flexWrap: 'wrap',
+		gap: 4,
+		marginTop: 4,
+		paddingLeft: 22,
+	} as React.CSSProperties,
+
+	/** PermGrid indentation under a team row while editing its permissions. */
+	teamPermGrid: {
+		marginTop: 6,
+		paddingLeft: 22,
+	} as React.CSSProperties,
+
+	/** Emphasized member name inside the remove-confirmation copy. */
+	confirmName: {
+		color: 'var(--rr-text-primary)',
+	} as React.CSSProperties,
+
+	/** Inline save/validation error line under the form. */
+	error: {
+		fontSize: 11,
+		color: 'var(--rr-color-error)',
+		marginTop: 8,
+	} as React.CSSProperties,
+
+	/** Left-anchored destructive slot in the panel footer (footer is flex-end). */
+	footerDanger: {
+		marginRight: 'auto',
+	} as React.CSSProperties,
 };
 
-const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-
-/** Debounce applied to the toolbar search input (old stock-table spec). */
-const SEARCH_DEBOUNCE_MS = 250;
-
 // =============================================================================
-// CELL BUILDERS
+// TYPES
 // =============================================================================
 
 /**
+ * Flattened row shape fed to the members grid. Sortable / searchable values
+ * are primitives; `status` is a pre-computed display string so client-side
+ * sort operates on what the user sees.
+ */
+interface MemberRow extends Record<string, unknown> {
+	/** Member user id — resolves the record for the panel on row click. */
+	id: string;
+	/** Member display name. */
+	displayName: string;
+	/** Member email address. */
+	email: string;
+	/** Organization-level role (e.g. "admin" or "member"). */
+	role: string;
+	/** Display status: 'Active' | 'Pending' (title-cased wire status). */
+	status: string;
+}
+
+/** The record panel's mode: closed, viewing one member, or inviting one. */
+type PanelState = { mode: 'view'; userId: string } | { mode: 'create' } | null;
+
+// =============================================================================
+// PROPS
+// =============================================================================
+
+/** Props accepted by the MembersPanel component. */
+export interface MembersPanelProps {
+	/** Full list of organization members to display. */
+	members: MemberRecord[];
+	/** Teams available for the invite form's Team Access assignments. */
+	teams: TeamRecord[];
+	/** The current user's profile, used to suppress self-edit/remove controls. */
+	profile: ConnectResult | null;
+	/** True when the current user has org.admin permissions. */
+	isOrgAdmin: boolean;
+	/** Sends an invitation to a new organization member. */
+	onInviteMember: (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => Promise<void>;
+	/** Updates an organization member's role. */
+	onUpdateMemberRole: (userId: string, role: string) => Promise<void>;
+	/** Removes an organization member. */
+	onRemoveMember: (userId: string) => Promise<void>;
+	/** Resends the initialization email for a pending member. */
+	onResendInvite: (userId: string) => Promise<void>;
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Derives the display status string for a member's wire status by
+ * title-casing it ('active' -> 'Active', 'pending' -> 'Pending').
+ *
+ * @param status - The raw wire status.
+ * @returns The display status string.
+ */
+function memberStatus(status: string): string {
+	return status ? status.charAt(0).toUpperCase() + status.slice(1) : status;
+}
+
+/**
+ * Maps a display status string to its badge variant.
+ *
+ * @param status - Display status produced by {@link memberStatus}.
+ * @returns The badge variant carrying the current color treatment.
+ */
+function statusBadgeVariant(status: string): 'active' | 'pending' | 'member' {
+	if (status === 'Active') return 'active';
+	if (status === 'Pending') return 'pending';
+	return 'member';
+}
+
+/** Per-variant badge text colors — mirrors the shared Badge's overrides. */
+const BADGE_COLORS: Record<'active' | 'admin' | 'member' | 'pending', string> = {
+	active: 'var(--rr-color-success)',
+	admin: 'var(--rr-brand)',
+	member: 'var(--rr-text-secondary)',
+	pending: 'var(--rr-color-warning)',
+};
+
+/**
+ * Builds a role / status badge (DOM clone of the shared Badge component):
+ * surface fill, variant text color, and the glowing green dot on 'active'.
+ *
+ * @param variant - Badge variant determining the text color.
+ * @param label - Badge label text.
+ * @returns The badge element.
+ */
+function memberBadgeEl(variant: 'active' | 'admin' | 'member' | 'pending', label: string): HTMLElement {
+	const el = document.createElement('span');
+	Object.assign(el.style, styles.badge);
+	el.style.color = BADGE_COLORS[variant];
+	// The active variant carries the glowing success dot before its label.
+	if (variant === 'active') {
+		const dot = document.createElement('span');
+		Object.assign(dot.style, styles.activeDot);
+		el.appendChild(dot);
+	}
+	el.appendChild(document.createTextNode(label));
+	return el;
+}
+
+/**
  * Builds a member cell — 28px initials avatar beside the display name, with a
- * "(you)" tag on the viewer's own row (DOM clone of the old Avatar + cluster
+ * "(you)" tag on the viewer's own row (DOM clone of the Avatar + cluster
  * cell render).
  *
  * @param displayName - Member display name (initials + color seed).
@@ -187,132 +344,50 @@ function memberCellEl(displayName: string, email: string, isSelf: boolean): HTML
 	return wrap;
 }
 
-/**
- * Builds a role / status badge (DOM clone of the shared Badge component's
- * admin / member / pending variants — surface fill, variant text color).
- *
- * @param variant - Badge variant determining the text color.
- * @param label - Badge label text.
- * @returns The badge element.
- */
-function roleBadgeEl(variant: 'admin' | 'member' | 'pending', label: string): HTMLElement {
-	const el = document.createElement('span');
-	Object.assign(el.style, styles.roleBadge);
-	// Variant text colors mirror the shared Badge's overrides.
-	el.style.color = variant === 'admin' ? 'var(--rr-brand)' : variant === 'pending' ? 'var(--rr-color-warning)' : 'var(--rr-text-secondary)';
-	el.textContent = label;
-	return el;
-}
-
-// =============================================================================
-// TYPES
-// =============================================================================
-
-/** Flattened row shape fed to the members DataGrid. */
-interface MemberRow extends Record<string, unknown> {
-	/** Member user id — used to resolve callbacks. */
-	userId: string;
-	/** Member display name. */
-	displayName: string;
-	/** Member email address. */
-	email: string;
-	/** Organization-level role (e.g. "admin" or "member"). */
-	role: string;
-	/** Membership status (e.g. "active" or "pending"). */
-	status: string;
-}
-
-// =============================================================================
-// PROPS
-// =============================================================================
-
-/** Props accepted by the MembersPanel component. */
-export interface MembersPanelProps {
-	/** The current organization detail, used for the section header label. */
-	org: OrgDetail | null;
-	/** Full list of organization members to display. */
-	members: MemberRecord[];
-	/** The current user's profile, used to suppress self-edit/remove controls. */
-	profile: ConnectResult | null;
-	/** Opens the Invite Member modal. */
-	onInvite: () => void;
-	/** Opens the Change Role modal for a specific member. */
-	onChangeRole: (m: MemberRecord) => void;
-	/** Opens the remove/cancel-invite confirmation modal for the given member. */
-	onRemove: (m: MemberRecord) => void;
-	/** Resends the initialization email for a pending member. */
-	onResendInvite: (m: MemberRecord) => Promise<void>;
-	/** True when the current user has org.admin permissions. */
-	isOrgAdmin: boolean;
-}
-
 // =============================================================================
 // MEMBERS PANEL
 // =============================================================================
 
 /**
- * The Members tab panel.
- *
- * Renders a Card headed with the org name and member count, an Invite action,
- * a toolbar search box, and a DataGrid body (sort, pagination) flanked by the
- * A-Z letter selector strip.
+ * The Members tab: a pure-data CardDataGrid plus the single record panel
+ * that hosts view, role editing, invite resend, remove, and the invite form.
+ * See the module doc for the standard this file follows.
  */
-export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profile, onInvite, onChangeRole, onRemove, onResendInvite, isOrgAdmin }) => {
-	const [activeLetter, setActiveLetter] = useState<string | null>(null);
-	const [resendingUserId, setResendingUserId] = useState<string | null>(null);
-	const [resentUserId, setResentUserId] = useState<string | null>(null);
-	// Toolbar search input, debounced before filtering (old stock-table behavior).
-	const [searchInput, setSearchInput] = useState('');
-	const search = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
+export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, profile, isOrgAdmin, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite }) => {
+	// ── Record panel state ──────────────────────────────────────────────────
+	const [panel, setPanel] = useState<PanelState>(null);
+	// Invite-form fields (reset on every open of create mode).
+	const [formEmail, setFormEmail] = useState('');
+	const [formGivenName, setFormGivenName] = useState('');
+	const [formFamilyName, setFormFamilyName] = useState('');
+	const [formRole, setFormRole] = useState('member');
+	// Team access assignments: teamId -> selected permission keys.
+	const [formTeams, setFormTeams] = useState<Record<string, string[]>>({});
+	// Which team row's PermGrid editor is expanded, or null for none.
+	const [editPermsTeamId, setEditPermsTeamId] = useState<string | null>(null);
+	// View-mode role editor value (initialized from the record on open).
+	const [roleValue, setRoleValue] = useState('member');
+	// Async lifecycle shared by invite, role save, and remove.
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	// Resend-invite transient states (in-flight and "Sent!" confirmation).
+	const [resending, setResending] = useState(false);
+	const [resent, setResent] = useState(false);
+	// Remove confirmation gate (stacks over the panel via the overlay stack).
+	const [confirmRemove, setConfirmRemove] = useState(false);
 
-	// Determine which letters have at least one matching member.
-	const availableLetters = useMemo(() => {
-		const set = new Set<string>();
-		for (const m of members) {
-			const first = (m.displayName || m.email || '').charAt(0).toUpperCase();
-			if (first >= 'A' && first <= 'Z') set.add(first);
-		}
-		return set;
-	}, [members]);
+	// The viewed record resolves LIVE from props so server refreshes (e.g. a
+	// role save flipping role -> admin) update the open panel in place.
+	const viewedMember = panel?.mode === 'view' ? members.find((m) => m.userId === panel.userId) ?? null : null;
 
-	// A-Z letter filter applied BEFORE the search: the toolbar search then
-	// narrows within the selected letter.
-	const letterFiltered = useMemo(() => {
-		if (!activeLetter) return members;
-		return members.filter((m) => {
-			const first = (m.displayName || m.email || '').charAt(0).toUpperCase();
-			return first === activeLetter;
-		});
-	}, [members, activeLetter]);
-
-	// Flatten member records into table rows.
-	const allRows = useMemo<MemberRow[]>(
-		() =>
-			letterFiltered.map((m) => ({
-				userId: m.userId,
-				displayName: m.displayName,
-				email: m.email,
-				role: m.role,
-				status: m.status,
-			})),
-		[letterFiltered]
-	);
-
-	// View-side search over the (letter-filtered) rows — replaces the old
-	// stock table's built-in search box.
-	const rows = useMemo<MemberRow[]>(() => allRows.filter((row) => matchesSearch(row, search)), [allRows, search]);
-
-	/**
-	 * Resolves a table row back to its member record. No-ops via undefined if
-	 * the record has vanished from the prop between render and click.
-	 *
-	 * @param row - The clicked table row.
-	 * @returns The matching member record, or undefined.
-	 */
-	const recordFor = (row: MemberRow): MemberRecord | undefined => members.find((m) => m.userId === row.userId);
+	// Gating derived from the viewed record: never self-edit/remove, and only
+	// org admins manage members at all (ported from the old Actions column).
+	const isSelf = viewedMember != null && viewedMember.userId === profile?.userId;
+	const isPending = viewedMember != null && viewedMember.status === 'pending';
+	const canManage = isOrgAdmin && viewedMember != null && !isSelf;
 
 	// Mounted flag guarding the async resend flow — the await and the 3s
-	// confirmation timer can both outlive the panel (e.g. the modal closes).
+	// confirmation timer can both outlive the panel (e.g. the dialog closes).
 	const mountedRef = useRef(true);
 	useEffect(
 		() => () => {
@@ -321,182 +396,412 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ org, members, profil
 		[],
 	);
 
-	/**
-	 * Resends the invitation email for a pending member, tracking in-flight and
-	 * "Sent!" confirmation state per user id.
-	 *
-	 * @param row - The pending member's table row.
-	 */
-	const handleResend = async (row: MemberRow): Promise<void> => {
-		const record = recordFor(row);
-		if (!record) return;
-		setResendingUserId(row.userId);
-		try {
-			await onResendInvite(record);
-			// Skip the confirmation state entirely if the panel is already gone.
-			if (!mountedRef.current) return;
-			setResentUserId(row.userId);
-			setTimeout(() => {
-				if (mountedRef.current) setResentUserId(null);
-			}, 3000);
-		} finally {
-			if (mountedRef.current) setResendingUserId(null);
-		}
-	};
+	// ── Table rows ──────────────────────────────────────────────────────────
+	const rows = useMemo<MemberRow[]>(
+		() =>
+			members.map((m) => ({
+				id: m.userId,
+				displayName: m.displayName,
+				email: m.email,
+				role: m.role,
+				status: memberStatus(m.status),
+			})),
+		[members]
+	);
 
-	// Live action router — the actions column's cellClick is baked into the
-	// memoized column definition, so it dispatches through this ref to always
-	// reach the latest prop closures and member records.
-	const actionRef = useRef<(action: string, row: MemberRow) => void>(() => undefined);
-	actionRef.current = (action, row) => {
-		// Route the clicked button's action key to the matching handler.
-		if (action === 'resend') {
-			void handleResend(row);
-			return;
-		}
-		const record = recordFor(row);
-		if (!record) return;
-		if (action === 'edit') onChangeRole(record);
-		else if (action === 'remove') onRemove(record);
-	};
-
-	// Column definitions; cells keep the existing avatar / badge renderings.
-	const columns = useMemo<GridColumnDefinition[]>(() => {
-		const cols: GridColumnDefinition[] = [
+	// ── Columns (pure data — the record panel replaced the Actions column) ──
+	const columns = useMemo<GridColumnDefinition[]>(
+		() => [
 			{
 				title: 'Member',
 				field: 'displayName',
+				rrType: 'string',
 				headerSort: true,
 				// Avatar + name cluster, "(you)" on the viewer's own row.
 				formatter: (cell: CellComponent) => {
 					const row = cell.getRow().getData() as MemberRow;
-					return memberCellEl(row.displayName, row.email, row.userId === profile?.userId);
+					return memberCellEl(row.displayName, row.email, row.id === profile?.userId);
 				},
 			},
-			{ title: 'Email', field: 'email', headerSort: true },
+			{ title: 'Email', field: 'email', rrType: 'string', headerSort: true },
 			{
 				title: 'Role',
 				field: 'role',
+				rrType: 'enum',
 				headerSort: true,
-				// Pending invitations show the Pending badge in place of a role.
+				// Role badge: brand for admins, neutral for members.
 				formatter: (cell: CellComponent) => {
-					const row = cell.getRow().getData() as MemberRow;
-					return row.status === 'pending' ? roleBadgeEl('pending', 'Pending') : roleBadgeEl(row.role === 'admin' ? 'admin' : 'member', row.role);
+					const role = cell.getValue() as string;
+					return memberBadgeEl(role === 'admin' ? 'admin' : 'member', role);
 				},
 			},
-		];
-		// The Actions column only exists for org admins: nothing for the current
-		// user, Resend / Cancel for pending invitations, Edit / Remove for active
-		// members. Built by hand instead of createActionsColumn because the
-		// button set varies per row (and Resend has in-flight / "Sent!" states).
-		if (isOrgAdmin) {
-			cols.push({
-				title: 'Actions',
-				field: '__rrActions',
-				width: 150,
-				hozAlign: 'right',
-				headerSort: false,
-				// Popup-exempt actions column (no header popup, no toggle-list
-				// entry); the marker is stripped before reaching Tabulator.
-				rrNoPopup: true,
-				resizable: false,
+			{
+				title: 'Status',
+				field: 'status',
+				rrType: 'enum',
+				headerSort: true,
+				// Status badge: green dot for active, amber for pending invites.
 				formatter: (cell: CellComponent) => {
-					const row = cell.getRow().getData() as MemberRow;
-					const wrap = document.createElement('span');
-					wrap.dataset.rrActions = 'true';
-					wrap.className = 'rr-cell-actions';
-					// Current user: no self-edit/remove controls.
-					if (row.userId === profile?.userId) return wrap;
-					if (row.status === 'pending') {
-						// Pending invitation: resend the email or cancel the invite.
-						if (resentUserId === row.userId) {
-							// "Sent!" confirmation replaces the Resend button briefly.
-							const sent = document.createElement('span');
-							Object.assign(sent.style, styles.sentText);
-							sent.textContent = 'Sent!';
-							wrap.appendChild(sent);
-						} else {
-							const resend = buttonEl('ghost', resendingUserId === row.userId ? 'Sending...' : 'Resend', 'resend');
-							if (resendingUserId === row.userId) (resend as HTMLButtonElement).disabled = true;
-							wrap.appendChild(resend);
-						}
-						wrap.appendChild(buttonEl('ghost', 'Cancel', 'remove'));
-					} else {
-						// Active member: change role or remove from the organization.
-						wrap.appendChild(buttonEl('ghost', 'Edit', 'edit'));
-						wrap.appendChild(buttonEl('ghost', 'Remove', 'remove'));
-					}
-					return wrap;
+					const status = cell.getValue() as string;
+					return memberBadgeEl(statusBadgeVariant(status), status);
 				},
-				// Route clicks on the buttons to the live action router by key.
-				cellClick: (e: UIEvent, cell: CellComponent) => {
-					const target = (e.target as HTMLElement).closest('button[data-action]');
-					if (!target) return;
-					actionRef.current((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as MemberRow);
-				},
-			});
-		}
-		return cols;
-	}, [isOrgAdmin, profile?.userId, resendingUserId, resentUserId]);
+			},
+		],
+		[profile?.userId]
+	);
 
-	/** Handles letter click — toggles off if already selected. */
-	const handleLetterClick = (letter: string) => {
-		if (!availableLetters.has(letter)) return;
-		setActiveLetter((prev) => (prev === letter ? null : letter));
+	// ── Panel lifecycle ─────────────────────────────────────────────────────
+
+	/** Open the record panel in CREATE (invite) mode with a fresh form. */
+	const openInvite = (): void => {
+		setFormEmail('');
+		setFormGivenName('');
+		setFormFamilyName('');
+		setFormRole('member');
+		setFormTeams({});
+		setEditPermsTeamId(null);
+		setError(null);
+		setPanel({ mode: 'create' });
 	};
+
+	/**
+	 * Open the record panel in VIEW mode for a clicked row's member, seeding
+	 * the role editor from the record's current role.
+	 *
+	 * @param userId - The clicked member's user id.
+	 */
+	const openView = (userId: string): void => {
+		const record = members.find((m) => m.userId === userId);
+		setRoleValue(record?.role ?? 'member');
+		setError(null);
+		setResent(false);
+		setPanel({ mode: 'view', userId });
+	};
+
+	/** Close the panel and drop every transient state it owned. */
+	const closePanel = (): void => {
+		setPanel(null);
+		setError(null);
+		setConfirmRemove(false);
+	};
+
+	/** Validate + submit the invite form; success closes the panel. */
+	const handleInvite = async (): Promise<void> => {
+		// Step 1: validation mirrors the retired invite modal's rules.
+		if (!formEmail.trim()) {
+			setError('Email is required');
+			return;
+		}
+		if (!formGivenName.trim()) {
+			setError('First name is required');
+			return;
+		}
+		if (!formFamilyName.trim()) {
+			setError('Last name is required');
+			return;
+		}
+		setSaving(true);
+		setError(null);
+		try {
+			// Step 2: build team assignments from the checked teams.
+			const teamAssignments = Object.entries(formTeams).map(([teamId, permissions]) => ({ teamId, permissions }));
+			// Step 3: delegate to the host action; success closes the panel.
+			await onInviteMember({
+				email: formEmail.trim(),
+				givenName: formGivenName.trim(),
+				familyName: formFamilyName.trim(),
+				role: formRole,
+				teamAssignments: teamAssignments.length > 0 ? teamAssignments : undefined,
+			});
+			closePanel();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : 'Failed to invite member');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	/** Persist the role editor's value for the viewed member. */
+	const handleSaveRole = async (): Promise<void> => {
+		if (!viewedMember) return;
+		setSaving(true);
+		setError(null);
+		try {
+			await onUpdateMemberRole(viewedMember.userId, roleValue);
+			// Keep the panel open: the live record resolve shows the new role
+			// immediately and the Save button drops back to disabled/unchanged.
+		} catch (e) {
+			setError(e instanceof Error ? e.message : 'Failed to update role');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	/** Remove the viewed member after the ConfirmDialog's confirmation. */
+	const handleRemove = async (): Promise<void> => {
+		if (!viewedMember) return;
+		setSaving(true);
+		setError(null);
+		try {
+			await onRemoveMember(viewedMember.userId);
+			// The member is gone from the organization — close everything.
+			closePanel();
+		} catch (e) {
+			setConfirmRemove(false);
+			setError(e instanceof Error ? e.message : 'Failed to remove member');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	/**
+	 * Resend the invitation email for the viewed pending member, tracking
+	 * in-flight and "Sent!" confirmation states.
+	 */
+	const handleResend = async (): Promise<void> => {
+		if (!viewedMember) return;
+		setResending(true);
+		setError(null);
+		try {
+			await onResendInvite(viewedMember.userId);
+			// Skip the confirmation state entirely if the panel is already gone.
+			if (!mountedRef.current) return;
+			setResent(true);
+			setTimeout(() => {
+				if (mountedRef.current) setResent(false);
+			}, 3000);
+		} catch (e) {
+			if (mountedRef.current) setError(e instanceof Error ? e.message : 'Failed to resend invitation');
+		} finally {
+			if (mountedRef.current) setResending(false);
+		}
+	};
+
+	// ── Render ──────────────────────────────────────────────────────────────
 
 	return (
 		<section>
-			<Card
-				header={`${org ? `${org.name} — ` : ''}${members.length} member${members.length !== 1 ? 's' : ''}`}
-				headerActions={
-					isOrgAdmin ? (
-						<Button variant="primary" small onClick={onInvite}>
-							+ Invite
-						</Button>
-					) : undefined
-				}
-				noBodyPadding
-			>
-				{/* Body: member table + A-Z sidebar */}
-				<div style={styles.body}>
-					<div style={styles.tableWrap}>
-						{/* Toolbar: search box + filtered row count (replaces the old
-						    stock table's built-in toolbar). */}
-						<div style={styles.toolbar}>
-							<InputField style={styles.search} placeholder="Search members…" value={searchInput} onChange={(e) => setSearchInput(e.target.value)} />
-							<span style={styles.count}>{`${rows.length} member${rows.length !== 1 ? 's' : ''}`}</span>
-						</div>
-						<DataGrid<MemberRow>
-							columns={columns}
-							data={rows}
-							emptyTitle={members.length === 0 ? 'No members yet' : 'No members match the current filter'}
-						/>
-					</div>
-
-					{/* A-Z letter sidebar */}
-					<div style={styles.azBar}>
-						{LETTERS.map((letter) => {
-							const available = availableLetters.has(letter);
-							const active = activeLetter === letter;
-							return (
-								<button
-									key={letter}
-									style={{
-										...styles.azLetter,
-										...(active ? styles.azLetterActive : {}),
-										...(!available && !active ? styles.azLetterDisabled : {}),
-									}}
-									onClick={() => handleLetterClick(letter)}
-									tabIndex={available ? 0 : -1}
-								>
-									{letter}
-								</button>
-							);
-						})}
-					</div>
-				</div>
+			{/* Pure-data grid: row click opens the record panel. */}
+			<Card noBodyPadding>
+				<CardDataGrid<MemberRow>
+					title="Members"
+					actions={
+						isOrgAdmin ? (
+							<Button variant="primary" small onClick={openInvite}>
+								Invite Member
+							</Button>
+						) : undefined
+					}
+					columns={columns}
+					data={rows}
+					noSearch
+					onRowClick={(row) => openView(row.id)}
+					emptyTitle="No members yet"
+					emptyDescription="Invite a colleague to join this organization."
+				/>
 			</Card>
+
+			{/* ── Record panel: VIEW mode ─────────────────────────────────── */}
+			{viewedMember != null && (
+				<DetailPanel
+					contained
+					open
+					onClose={closePanel}
+					avatar={<Avatar name={viewedMember.displayName} email={viewedMember.email} size={42} />}
+					title={viewedMember.displayName}
+					subtitle={viewedMember.email}
+					footer={
+						<>
+							{canManage && (
+								<div style={styles.footerDanger}>
+									<Button variant="danger" small onClick={() => setConfirmRemove(true)}>
+										{isPending ? 'Cancel Invitation' : 'Remove from Organization'}
+									</Button>
+								</div>
+							)}
+							<Button variant="ghost" small onClick={closePanel}>
+								Close
+							</Button>
+						</>
+					}
+				>
+					<Section label="Member">
+						<LabelValue label="Name">{isSelf ? `${viewedMember.displayName} (you)` : viewedMember.displayName}</LabelValue>
+						<LabelValue label="Email">{viewedMember.email}</LabelValue>
+						<LabelValue label="Status">
+							<Badge variant={statusBadgeVariant(memberStatus(viewedMember.status))}>{memberStatus(viewedMember.status)}</Badge>
+						</LabelValue>
+						{/* Read-only role row for viewers who cannot manage this member. */}
+						{!canManage && (
+							<LabelValue label="Role">
+								<Badge variant={viewedMember.role === 'admin' ? 'admin' : 'member'}>{viewedMember.role}</Badge>
+							</LabelValue>
+						)}
+					</Section>
+					{/* Editable role (org admins, never self) — ports the retired
+					    change-role modal: a select seeded from the record plus a Save
+					    button disabled while saving or unchanged. */}
+					{canManage && (
+						<Section label="Organization Role">
+							<div style={styles.roleRow}>
+								<select value={roleValue} onChange={(e) => setRoleValue(e.target.value)} style={styles.select}>
+									<option value="member">Member</option>
+									<option value="admin">Admin</option>
+								</select>
+								<Button variant="primary" small disabled={saving || roleValue === viewedMember.role} onClick={() => void handleSaveRole()}>
+									{saving ? 'Saving…' : 'Save'}
+								</Button>
+							</div>
+						</Section>
+					)}
+					{/* Pending invitation actions (org admins): resend the email,
+					    with the in-flight / "Sent!" states from the old Actions column. */}
+					{canManage && isPending && (
+						<Section label="Invitation">
+							<div style={styles.inviteRow}>
+								<span style={styles.inviteNote}>This member has not accepted their invitation yet.</span>
+								{resent ? (
+									<span style={styles.sentText}>Sent!</span>
+								) : (
+									<Button variant="ghost" small disabled={resending} onClick={() => void handleResend()}>
+										{resending ? 'Sending…' : 'Resend Invite'}
+									</Button>
+								)}
+							</div>
+						</Section>
+					)}
+					{error && <div style={styles.error}>{error}</div>}
+				</DetailPanel>
+			)}
+
+			{/* ── Record panel: CREATE (invite) mode ──────────────────────── */}
+			{panel?.mode === 'create' && (
+				<DetailPanel
+					contained
+					open
+					onClose={closePanel}
+					title="Invite Member"
+					subtitle="Send an invitation to join this organization"
+					footer={
+						<>
+							<Button variant="ghost" small onClick={closePanel}>
+								Cancel
+							</Button>
+							<Button variant="primary" small disabled={saving} onClick={() => void handleInvite()}>
+								{saving ? 'Inviting…' : 'Send Invite'}
+							</Button>
+						</>
+					}
+				>
+					{/* Invite form (ported field-for-field from the retired modal). */}
+					<div style={S.field}>
+						<div style={S.fieldLabel}>Email Address</div>
+						<input value={formEmail} onChange={(e) => setFormEmail(e.target.value)} placeholder="colleague@acme.com" style={commonStyles.inputField} data-rr-autofocus="true" />
+					</div>
+					<div style={S.fieldRow}>
+						<div style={S.field}>
+							<div style={S.fieldLabel}>First Name</div>
+							<input value={formGivenName} onChange={(e) => setFormGivenName(e.target.value)} placeholder="Jane" style={commonStyles.inputField} />
+						</div>
+						<div style={S.field}>
+							<div style={S.fieldLabel}>Last Name</div>
+							<input value={formFamilyName} onChange={(e) => setFormFamilyName(e.target.value)} placeholder="Smith" style={commonStyles.inputField} />
+						</div>
+					</div>
+					<div style={S.field}>
+						<div style={S.fieldLabel}>Organization Role</div>
+						<select value={formRole} onChange={(e) => setFormRole(e.target.value)} style={styles.select}>
+							<option value="member">Member</option>
+							<option value="admin">Admin</option>
+						</select>
+					</div>
+					{/* Team Access: check a team to assign it, expanding to a PermGrid
+					    editor per team; unchecked teams carry no assignment. */}
+					{teams.length > 0 && (
+						<div style={S.field}>
+							<div style={S.fieldLabel}>Team Access</div>
+							<div style={styles.teamList}>
+								{teams.map((t) => {
+									// Checked = the team has an assignment entry; default perms seed on check.
+									const checked = t.id in formTeams;
+									const perms = formTeams[t.id] ?? [];
+									const editingPerms = editPermsTeamId === t.id;
+									return (
+										<div key={t.id}>
+											<div style={styles.teamRow}>
+												{/* Custom checkbox toggling the team's assignment entry. */}
+												<div
+													style={styles.teamCheckbox(checked)}
+													onClick={() => {
+														if (checked) {
+															// Unchecking drops the assignment (and closes its perms editor).
+															const next = { ...formTeams };
+															delete next[t.id];
+															setFormTeams(next);
+															if (editingPerms) setEditPermsTeamId(null);
+														} else {
+															// Checking seeds the default capability permissions.
+															setFormTeams({ ...formTeams, [t.id]: ['task.control', 'task.monitor'] });
+														}
+													}}
+												>
+													{checked && '✓'}
+												</div>
+												{/* Team name */}
+												<span style={styles.teamName(checked)}>{t.name}</span>
+												{/* Edit Perms toggle (only for checked teams). */}
+												{checked && (
+													<button type="button" style={styles.permsToggle} onClick={() => setEditPermsTeamId(editingPerms ? null : t.id)}>
+														{editingPerms ? 'Done' : 'Edit Perms'}
+													</button>
+												)}
+											</div>
+											{/* Permission badges (when not editing). */}
+											{checked && !editingPerms && perms.length > 0 && (
+												<div style={styles.teamPerms}>
+													{perms.map((p) => (
+														<PermPill key={p} perm={p} />
+													))}
+												</div>
+											)}
+											{/* PermGrid (when editing). */}
+											{editingPerms && (
+												<div style={styles.teamPermGrid}>
+													<PermGrid value={perms} onChange={(v) => setFormTeams({ ...formTeams, [t.id]: v })} />
+												</div>
+											)}
+										</div>
+									);
+								})}
+							</div>
+						</div>
+					)}
+					{error && <div style={styles.error}>{error}</div>}
+				</DetailPanel>
+			)}
+
+			{/* ── Remove confirmation (stacks over the record panel) ────────── */}
+			{confirmRemove && viewedMember != null && (
+				<ConfirmDialog
+					title={isPending ? 'Cancel Invitation' : 'Remove Member'}
+					destructive
+					confirmLabel={saving ? 'Removing…' : isPending ? 'Yes, Cancel Invite' : 'Yes, Remove'}
+					confirmDisabled={saving}
+					message={
+						isPending ? (
+							<>
+								Are you sure you want to cancel the invitation for <strong style={styles.confirmName}>{viewedMember.displayName}</strong> ({viewedMember.email})?
+							</>
+						) : (
+							<>
+								Are you sure you want to remove <strong style={styles.confirmName}>{viewedMember.displayName}</strong> ({viewedMember.email}) from the organization?
+							</>
+						)
+					}
+					onConfirm={() => void handleRemove()}
+					onCancel={() => setConfirmRemove(false)}
+				/>
+			)}
 		</section>
 	);
 };

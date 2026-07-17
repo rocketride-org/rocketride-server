@@ -6,25 +6,35 @@
 /**
  * ApiKeysPanel — the API Keys tab within AccountView.
  *
- * Renders the user's API keys per the DataGrid standard
- * (docs/README-app-styles.html#ref-datagrid): a CardDataGrid whose two-row
- * header IS the card header — "API Keys" title + the "+ New Key" action on
- * the identity row, the grid's search / count / Export on the tool row —
- * inside a headerless Card shell. Each row shows the key name, status badge,
- * team scope, last-used timestamp, expiry date, and (for active non-session
- * keys) a Revoke action. All server interactions are delegated to the host
- * via callback props.
+ * THE EXEMPLAR of the record-panel standard:
+ * the grid is PURE DATA — no Actions column — and every operation on a key
+ * happens in ONE record surface, a contained DetailPanel sliding from the
+ * Account dialog's edge:
+ *
+ *  - row click            -> the panel in VIEW mode (key facts + Revoke in
+ *                            the footer, guarded by a stock ConfirmDialog)
+ *  - "+ New Key" (header) -> the SAME panel in CREATE mode (name / team
+ *                            scope / permissions / expiry), which flips to
+ *                            the one-time secret reveal after the server
+ *                            returns the key
+ *
+ * The panel owns its whole lifecycle — form state, validation, saving,
+ * errors, confirmation — through the two host actions it receives
+ * (`onCreateKey`, `onRevokeKey`). No modals live in AccountView for keys.
  */
 
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import { buttonEl } from '../../../components/data-grid/defaults';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
-import type { ApiKeyRecord } from '../types';
-import { parseWireDate, relativeTime } from './shared';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
+import { Section, LabelValue } from '../../../components/section/Section';
+import { commonStyles } from '../../../themes/styles';
+import type { ApiKeyRecord, TeamRecord } from '../types';
+import { S, PermGrid, PermPill, ExpiryOpts, parseWireDate, relativeTime } from './shared';
 
 // =============================================================================
 // STYLES
@@ -52,6 +62,68 @@ const styles = {
 		backgroundColor: 'var(--rr-color-success)',
 		boxShadow: '0 0 4px var(--rr-color-success)',
 	} as Partial<CSSStyleDeclaration>,
+
+	/** One-time secret reveal box (ported from the retired reveal-key modal). */
+	revealBox: {
+		background: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 7,
+		padding: '12px 14px',
+		marginBottom: 14,
+	} as React.CSSProperties,
+
+	revealLabel: {
+		fontSize: 10.5,
+		fontWeight: 600,
+		letterSpacing: '0.6px',
+		textTransform: 'uppercase',
+		color: 'var(--rr-text-secondary)',
+		marginBottom: 6,
+	} as React.CSSProperties,
+
+	revealRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
+	} as React.CSSProperties,
+
+	revealKey: {
+		flex: 1,
+		fontFamily: 'var(--rr-font-mono, monospace)',
+		fontSize: 12,
+		wordBreak: 'break-all',
+		color: 'var(--rr-text-primary)',
+	} as React.CSSProperties,
+
+	/** Copy affordance; flips to the success treatment for 2s after copying. */
+	copyBtn: (copied: boolean): React.CSSProperties => ({
+		padding: '7px 10px',
+		background: 'var(--rr-bg-input)',
+		border: `1px solid ${copied ? 'var(--rr-color-success)' : 'var(--rr-border-input)'}`,
+		borderRadius: 5,
+		color: copied ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
+		cursor: 'pointer',
+		fontSize: 12,
+		flexShrink: 0,
+	}),
+
+	revealWarn: {
+		marginTop: 8,
+		fontSize: 11,
+		color: 'var(--rr-color-error)',
+	} as React.CSSProperties,
+
+	/** Inline save/validation error line under the form. */
+	error: {
+		fontSize: 11,
+		color: 'var(--rr-color-error)',
+		marginTop: 8,
+	} as React.CSSProperties,
+
+	/** Left-anchored destructive slot in the panel footer (footer is flex-end). */
+	footerDanger: {
+		marginRight: 'auto',
+	} as React.CSSProperties,
 };
 
 // =============================================================================
@@ -59,12 +131,12 @@ const styles = {
 // =============================================================================
 
 /**
- * Flattened row shape fed to the API keys DataGrid. Sortable / searchable
- * values are primitives; `status` and `team` are pre-computed display strings
- * so client-side sort and search operate on what the user sees.
+ * Flattened row shape fed to the API keys grid. Sortable / searchable values
+ * are primitives; `status` and `team` are pre-computed display strings so
+ * client-side sort operates on what the user sees.
  */
 interface KeyRow extends Record<string, unknown> {
-	/** Key id — used to resolve the original record for callbacks. */
+	/** Key id — resolves the record for the panel on row click. */
 	id: string;
 	/** Key display name. */
 	name: string;
@@ -78,6 +150,9 @@ interface KeyRow extends Record<string, unknown> {
 	expiresAt: string | null;
 }
 
+/** The record panel's mode: closed, viewing one key, or creating one. */
+type PanelState = { mode: 'view'; keyId: string } | { mode: 'create' } | null;
+
 // =============================================================================
 // PROPS
 // =============================================================================
@@ -86,10 +161,12 @@ interface KeyRow extends Record<string, unknown> {
 export interface ApiKeysPanelProps {
 	/** The list of API key records to display. */
 	keys: ApiKeyRecord[];
-	/** Opens the Create API Key modal. */
-	onCreateKey: () => void;
-	/** Opens the Revoke confirmation modal for the given key. */
-	onRevokeKey: (k: ApiKeyRecord) => void;
+	/** Teams available for the create form's scope select. */
+	teams: TeamRecord[];
+	/** Creates a key; resolves with the one-time raw key value. */
+	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string }>;
+	/** Revokes a key by id. */
+	onRevokeKey: (keyId: string) => Promise<void>;
 }
 
 // =============================================================================
@@ -148,65 +225,63 @@ function keyBadgeEl(variant: 'active' | 'expired' | 'member' | 'pending', label:
 	return el;
 }
 
+/**
+ * Team scope display string for a key record. Keys off teamId (the source of
+ * truth): session keys carry no scope; teamId null is genuinely org-wide;
+ * a set-but-unresolved teamId must NOT read as org-wide.
+ *
+ * @param k - The API key record.
+ * @returns The display string ('' for session keys).
+ */
+function teamScope(k: ApiKeyRecord): string {
+	return k.isSession ? '' : k.teamId == null ? 'All Teams' : k.teamName ?? 'Unknown team';
+}
+
 // =============================================================================
 // API KEYS PANEL
 // =============================================================================
 
 /**
- * The API Keys tab panel.
- *
- * The grid IS the card: a CardDataGrid headed "API Keys" with the "+ New Key"
- * action in its identity row (the live row count sits in the grid's own tool
- * row — the old "— N keys" heading suffix is retired with the second header),
- * listing every key with status / team badges, usage and expiry columns, and
- * a Revoke action for active non-session keys.
+ * The API Keys tab: a pure-data CardDataGrid plus the single record panel
+ * that hosts view, create, and revoke. See the module doc for the standard
+ * this file exemplifies.
  */
-export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, onRevokeKey }) => {
-	// Flatten records into sortable / searchable table rows.
+export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreateKey, onRevokeKey }) => {
+	// ── Record panel state ──────────────────────────────────────────────────
+	const [panel, setPanel] = useState<PanelState>(null);
+	// Create-form fields (reset on every open of create mode).
+	const [formName, setFormName] = useState('');
+	const [formTeamId, setFormTeamId] = useState('');
+	const [formPerms, setFormPerms] = useState<string[]>([]);
+	const [formExpiry, setFormExpiry] = useState<number | null>(90);
+	// Async lifecycle shared by create and revoke.
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	// One-time secret returned by a successful create (reveal presentation).
+	const [revealed, setRevealed] = useState<{ key: string; expiresAt: string | null } | null>(null);
+	const [copied, setCopied] = useState(false);
+	// Revoke confirmation gate (stacks over the panel via the overlay stack).
+	const [confirmRevoke, setConfirmRevoke] = useState(false);
+
+	// The viewed record resolves LIVE from props so server refreshes (e.g. a
+	// revoke flipping active -> false) update the open panel in place.
+	const viewedKey = panel?.mode === 'view' ? keys.find((k) => k.id === panel.keyId) ?? null : null;
+
+	// ── Table rows ──────────────────────────────────────────────────────────
 	const rows = useMemo<KeyRow[]>(
 		() =>
 			keys.map((k) => ({
 				id: k.id,
 				name: k.name,
 				status: keyStatus(k),
-				// Team scope keys off teamId (the source of truth), not teamName:
-				//  - session keys carry no team scope -> '';
-				//  - teamId null -> genuinely org-wide -> 'All Teams';
-				//  - teamId set but name unresolved -> 'Unknown team' (NOT 'All Teams',
-				//    which would wrongly imply org-wide access).
-				team: k.isSession ? '' : k.teamId == null ? 'All Teams' : k.teamName ?? 'Unknown team',
+				team: teamScope(k),
 				lastUsedAt: k.lastUsedAt,
 				expiresAt: k.expiresAt,
 			})),
 		[keys]
 	);
 
-	/**
-	 * Resolves a table row back to its API key record and opens the Revoke
-	 * confirmation. No-ops if the record has vanished from the prop between
-	 * render and click.
-	 *
-	 * @param row - The clicked table row.
-	 */
-	const handleRevoke = (row: KeyRow): void => {
-		const record = keys.find((k) => k.id === row.id);
-		if (record) onRevokeKey(record);
-	};
-
-	// Live action router — the actions column's cellClick is baked into the
-	// memoized column definition, so it dispatches through this ref to always
-	// reach the latest key records.
-	const actionRef = useRef<(action: string, row: KeyRow) => void>(() => undefined);
-	actionRef.current = (action, row) => {
-		// Revoke is the only action this panel offers.
-		if (action === 'revoke') handleRevoke(row);
-	};
-
-	// Column definitions with declared rrTypes per the DataGrid standard;
-	// cell renderings keep the existing badge treatments. Status / team are
-	// enums (a LOCAL grid derives their checklist values from the loaded
-	// rows); the timestamp columns are dates, so the popup FORMAT section
-	// offers the date/time picks.
+	// ── Columns (pure data — the record panel replaced the Actions column) ──
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{ title: 'Name', field: 'name', rrType: 'string', headerSort: true },
@@ -255,57 +330,263 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, onCreateKey, o
 					return iso ? `Exp. ${parseWireDate(iso).toLocaleDateString()}` : 'No expiry';
 				},
 			},
-			// Trailing Actions column — Revoke is only offered on active
-			// non-session keys. Built by hand instead of createActionsColumn
-			// because the button renders conditionally per row.
-			{
-				title: 'Actions',
-				field: '__rrActions',
-				width: 120,
-				hozAlign: 'right',
-				headerSort: false,
-				// Popup-exempt actions column (no header popup, no toggle-list
-				// entry); the marker is stripped before reaching Tabulator.
-				rrNoPopup: true,
-				resizable: false,
-				formatter: (cell: CellComponent) => {
-					const row = cell.getRow().getData() as KeyRow;
-					const wrap = document.createElement('span');
-					wrap.dataset.rrActions = 'true';
-					wrap.className = 'rr-cell-actions';
-					if (row.status === 'Active') wrap.appendChild(buttonEl('ghost', 'Revoke', 'revoke'));
-					return wrap;
-				},
-				// Route clicks on the button to the live action router by key.
-				cellClick: (e: UIEvent, cell: CellComponent) => {
-					const target = (e.target as HTMLElement).closest('button[data-action]');
-					if (!target) return;
-					actionRef.current((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as KeyRow);
-				},
-			},
 		],
 		[]
 	);
 
-	// The grid IS the card: its two-row header carries the title and the
-	// "+ New Key" action; the headerless Card is only the bordered shell.
+	// ── Panel lifecycle ─────────────────────────────────────────────────────
+
+	/** Open the record panel in CREATE mode with a fresh form. */
+	const openCreate = (): void => {
+		setFormName('');
+		setFormTeamId('');
+		setFormPerms([]);
+		setFormExpiry(90);
+		setError(null);
+		setRevealed(null);
+		setPanel({ mode: 'create' });
+	};
+
+	/** Close the panel and drop every transient state it owned. */
+	const closePanel = (): void => {
+		setPanel(null);
+		setError(null);
+		setRevealed(null);
+		setConfirmRevoke(false);
+	};
+
+	/** Validate + submit the create form; success flips to the reveal step. */
+	const handleCreate = async (): Promise<void> => {
+		// Step 1: validation mirrors the retired modal's rules.
+		if (!formName.trim()) {
+			setError('Name is required');
+			return;
+		}
+		if (formTeamId && formPerms.length === 0) {
+			setError('Select at least one permission for a team-scoped key');
+			return;
+		}
+		setSaving(true);
+		setError(null);
+		try {
+			// Step 2: expiry days -> absolute ISO instant (server contract).
+			const expiresAt = formExpiry ? new Date(Date.now() + formExpiry * 86400000).toISOString() : undefined;
+			const params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string } = {
+				name: formName.trim(),
+				permissions: formTeamId ? formPerms : [],
+				...(expiresAt ? { expiresAt } : {}),
+			};
+			if (formTeamId) params.teamId = formTeamId;
+			const body = await onCreateKey(params);
+			// Step 3: show the one-time secret in place — the panel stays open.
+			setRevealed({ key: body.key, expiresAt: expiresAt ?? null });
+		} catch (e) {
+			setError(e instanceof Error ? e.message : 'Failed to create key');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	/** Revoke the viewed key after the ConfirmDialog's confirmation. */
+	const handleRevoke = async (): Promise<void> => {
+		if (!viewedKey) return;
+		setSaving(true);
+		setError(null);
+		try {
+			await onRevokeKey(viewedKey.id);
+			setConfirmRevoke(false);
+			// Keep the panel open: the live record resolve shows the key's new
+			// Expired status immediately — better feedback than vanishing.
+		} catch (e) {
+			setConfirmRevoke(false);
+			setError(e instanceof Error ? e.message : 'Failed to revoke key');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// ── Render ──────────────────────────────────────────────────────────────
+	const isRevocable = viewedKey != null && !viewedKey.isSession && viewedKey.active;
+
 	return (
 		<section>
+			{/* Pure-data grid: row click opens the record panel. */}
 			<Card noBodyPadding>
 				<CardDataGrid<KeyRow>
 					title="API Keys"
 					actions={
-						<Button variant="primary" small onClick={onCreateKey}>
+						<Button variant="primary" small onClick={openCreate}>
 							+ New Key
 						</Button>
 					}
 					columns={columns}
 					data={rows}
 					noSearch
+					onRowClick={(row) => {
+						setError(null);
+						setPanel({ mode: 'view', keyId: row.id });
+					}}
 					emptyTitle="No API keys yet"
 					emptyDescription="Create a key for programmatic access."
 				/>
 			</Card>
+
+			{/* ── Record panel: VIEW mode ─────────────────────────────────── */}
+			{viewedKey != null && (
+				<DetailPanel
+					contained
+					open
+					onClose={closePanel}
+					title={viewedKey.name}
+					subtitle={keyStatus(viewedKey)}
+					footer={
+						<>
+							{isRevocable && (
+								<div style={styles.footerDanger}>
+									<Button variant="danger" small onClick={() => setConfirmRevoke(true)}>
+										Revoke Key
+									</Button>
+								</div>
+							)}
+							<Button variant="ghost" small onClick={closePanel}>
+								Close
+							</Button>
+						</>
+					}
+				>
+					<Section label="Key">
+						<LabelValue label="Status">{keyStatus(viewedKey)}</LabelValue>
+						<LabelValue label="Team Scope">{teamScope(viewedKey) || 'Session'}</LabelValue>
+						<LabelValue label="Created">{viewedKey.createdAt ? parseWireDate(viewedKey.createdAt).toLocaleString() : '--'}</LabelValue>
+						<LabelValue label="Last Used">{viewedKey.lastUsedAt ? `Used ${relativeTime(viewedKey.lastUsedAt)}` : 'Never used'}</LabelValue>
+						<LabelValue label="Expires">{viewedKey.expiresAt ? parseWireDate(viewedKey.expiresAt).toLocaleDateString() : 'No expiry'}</LabelValue>
+					</Section>
+					{(viewedKey.permissions?.length ?? 0) > 0 && (
+						<Section label="Permissions">
+							<div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+								{viewedKey.permissions!.map((perm) => (
+									<PermPill key={perm} perm={perm} />
+								))}
+							</div>
+						</Section>
+					)}
+					{error && <div style={styles.error}>{error}</div>}
+				</DetailPanel>
+			)}
+
+			{/* ── Record panel: CREATE mode (form, then one-time reveal) ───── */}
+			{panel?.mode === 'create' && (
+				<DetailPanel
+					contained
+					open
+					onClose={closePanel}
+					title={revealed ? 'Key Created' : 'New API Key'}
+					subtitle={revealed ? 'Copy it now — it will not be shown again' : undefined}
+					footer={
+						revealed ? (
+							<Button variant="primary" small onClick={closePanel}>
+								Done
+							</Button>
+						) : (
+							<>
+								<Button variant="ghost" small onClick={closePanel}>
+									Cancel
+								</Button>
+								<Button variant="primary" small disabled={saving} onClick={() => void handleCreate()}>
+									{saving ? 'Creating…' : 'Create Key'}
+								</Button>
+							</>
+						)
+					}
+				>
+					{revealed ? (
+						<>
+							{/* One-time secret reveal (ported from the retired modal). */}
+							<div style={styles.revealBox}>
+								<div style={styles.revealLabel}>Your API Key</div>
+								<div style={styles.revealRow}>
+									<div style={styles.revealKey}>{revealed.key}</div>
+									<button
+										type="button"
+										style={styles.copyBtn(copied)}
+										onClick={() => {
+											void navigator.clipboard.writeText(revealed.key);
+											setCopied(true);
+											setTimeout(() => setCopied(false), 2000);
+										}}
+									>
+										{copied ? '✓ Copied' : '⎘ Copy'}
+									</button>
+								</div>
+								<div style={styles.revealWarn}>Warning: store safely — it cannot be retrieved after closing.</div>
+							</div>
+							<Section label="Details">
+								<LabelValue label="Expires">{revealed.expiresAt ? new Date(revealed.expiresAt).toLocaleDateString() : 'No expiry'}</LabelValue>
+							</Section>
+						</>
+					) : (
+						<>
+							{/* Create form (ported field-for-field from the retired modal). */}
+							<div style={S.field}>
+								<div style={S.fieldLabel}>Key Name</div>
+								<input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Production Server, CI Pipeline" style={commonStyles.inputField} />
+							</div>
+							<div style={S.field}>
+								<div style={S.fieldLabel}>Team Scope</div>
+								<select
+									value={formTeamId}
+									onChange={(e) => {
+										setFormTeamId(e.target.value);
+										// Permissions are team-relative; reset on scope change.
+										setFormPerms([]);
+									}}
+									style={{ ...commonStyles.inputField, cursor: 'pointer' } as React.CSSProperties}
+								>
+									<option value="">All Teams</option>
+									{teams.map((t) => (
+										<option key={t.id} value={t.id}>
+											{t.name}
+										</option>
+									))}
+								</select>
+								<div style={commonStyles.textMuted}>{formTeamId ? 'Key is restricted to this team only.' : 'Key inherits all teams from your account.'}</div>
+							</div>
+							{formTeamId && (
+								<div style={{ ...S.field, marginBottom: 14 }}>
+									<div style={S.fieldLabel}>Permissions</div>
+									<PermGrid value={formPerms} onChange={setFormPerms} />
+								</div>
+							)}
+							<div style={S.field}>
+								<div style={S.fieldLabel}>Expiry</div>
+								<ExpiryOpts value={formExpiry} onChange={setFormExpiry} />
+							</div>
+							{error && <div style={styles.error}>{error}</div>}
+						</>
+					)}
+				</DetailPanel>
+			)}
+
+			{/* ── Revoke confirmation (stacks over the record panel) ────────── */}
+			{confirmRevoke && viewedKey != null && (
+				<ConfirmDialog
+					title="Revoke API Key"
+					destructive
+					confirmLabel={saving ? 'Revoking…' : 'Revoke Key'}
+					confirmDisabled={saving}
+					message={
+						<>
+							<div style={{ fontSize: 13, fontWeight: 700, color: 'var(--rr-text-primary)', marginBottom: 2 }}>{viewedKey.name}</div>
+							<div style={{ fontSize: 11, color: 'var(--rr-text-secondary)', marginBottom: 12 }}>
+								{viewedKey.lastUsedAt ? `Last used ${relativeTime(viewedKey.lastUsedAt)}` : 'Never used'}
+							</div>
+							<strong>This cannot be undone.</strong> Any service using this key will immediately lose access.
+						</>
+					}
+					onConfirm={() => void handleRevoke()}
+					onCancel={() => setConfirmRevoke(false)}
+				/>
+			)}
 		</section>
 	);
 };

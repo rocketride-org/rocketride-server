@@ -15,7 +15,9 @@
  *   3. Usage leaderboard -- top consumers (CardDataGrid, LOCAL mode; the
  *      By User / By Team ToggleGroup rides the header as `actions`)
  *   4. Transaction log   -- paginated ledger detail (CardDataGrid in REMOTE
- *      mode over a prop-fed page bridge; see TransactionLog)
+ *      mode over a prop-fed page bridge; see TransactionLog). Row click opens
+ *      the transaction record panel (a contained DetailPanel) with the FULL
+ *      transaction, per the record-panel standard.
  *   5. Active tasks      -- live running tasks (CardDataGrid, LOCAL mode —
  *      poll-fed rows apply silently)
  *
@@ -34,6 +36,8 @@ import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
 import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
 import { formatDateValue, mutedEl } from '../../../components/data-grid/defaults';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { Section, LabelValue } from '../../../components/section/Section';
 import type { CreditBalance, LedgerTransaction, TransactionsResult, UsageRollup } from '../types';
 
 // =============================================================================
@@ -163,6 +167,32 @@ const styles = {
 		fontWeight: '600',
 		color: 'var(--rr-brand)',
 	} as Partial<CSSStyleDeclaration>,
+
+	/**
+	 * Signed amount value in the transaction record panel — success color for
+	 * credits, default text for debits (React twin of the amount cell render).
+	 *
+	 * @param positive - Whether the amount is a credit (>= 0).
+	 */
+	panelAmount: (positive: boolean): CSSProperties => ({
+		color: positive ? 'var(--rr-color-success)' : 'var(--rr-text-primary)',
+	}),
+
+	/** Pretty-printed context JSON block in the transaction record panel. */
+	contextPre: {
+		margin: '8px 0 0',
+		padding: '10px 12px',
+		background: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 7,
+		fontFamily: "Consolas, 'Courier New', monospace",
+		fontSize: 11.5,
+		lineHeight: 1.5,
+		color: 'var(--rr-text-primary)',
+		// Wrap long values instead of forcing the panel body to scroll sideways.
+		whiteSpace: 'pre-wrap' as const,
+		wordBreak: 'break-word' as const,
+	} as CSSProperties,
 
 	/** Loading placeholder while dashboard data is fetched. */
 	loading: {
@@ -530,6 +560,12 @@ type TxRow = LedgerTransaction & Record<string, unknown>;
  *    req.search, and a no-op search box is worse than none).
  *
  * Both the grid and the host API page 1-based, so pages pass untranslated.
+ *
+ * Row click opens the transaction record panel (record-panel standard): a
+ * contained DetailPanel showing the FULL transaction — every ledger field
+ * plus the raw context JSON. The clicked row is held whole in local state
+ * (REMOTE rows are transient; paging / filtering replaces them, so there is
+ * no stable list to resolve the record from live).
  */
 const TransactionLog: React.FC<{
 	transactions: TransactionsResult | null;
@@ -549,6 +585,10 @@ const TransactionLog: React.FC<{
 	// Imperative grid handle — used to re-run the query on host-initiated
 	// refreshes (a new TransactionsResult with no request parked).
 	const gridRef = useRef<IDataGridHandle>(null);
+	// --- Record panel state ------------------------------------------------------
+	// The clicked row, held WHOLE: remote pages replace the row set, so the
+	// panel keeps its own copy instead of resolving live from a list.
+	const [viewedTx, setViewedTx] = useState<TxRow | null>(null);
 	// The one in-flight page request the grid is waiting on, if any, plus its
 	// watchdog timer so a never-arriving page can't hang the grid.
 	const pendingRef = useRef<{
@@ -709,8 +749,7 @@ const TransactionLog: React.FC<{
 				sorter: 'number',
 				// SIGNED display: credits '+' in the success color, usage '-'.
 				// The sign must show — the server sorts/filters the true signed
-				// values, and an unsigned render made Min/Max bounds look wrong
-				// (user feedback 2026-07-16).
+				// values, and an unsigned render made Min/Max bounds look wrong.
 				formatter: (cell: CellComponent) => {
 					const amount = cell.getValue() as number;
 					const el = document.createElement('span');
@@ -746,23 +785,73 @@ const TransactionLog: React.FC<{
 	// no-op search box is worse than none) and shows the prop total as
 	// `actions` instead; Export walks every page through either wiring.
 	return (
-		<Card noBodyPadding>
-			<CardDataGrid<TxRow>
-				title="Transaction Log"
-				actions={fetchTransactions ? undefined : <span style={styles.headerCount}>{transactions.total} total</span>}
-				ref={gridRef}
-				columns={columns}
-				fetchPage={fetchPage}
-				fetchDistinct={fetchTransactionDistinct}
-				noSearch={!fetchTransactions}
-				remoteSort={!!fetchTransactions}
-				// LEGACY bridge: the host controls the page size; offer exactly
-				// that one option so the pager math matches the server's pages.
-				// DIRECT mode sizes freely with the grid defaults.
-				{...(fetchTransactions ? {} : { pageSizes: [transactions.pageSize] })}
-				emptyTitle="No transactions yet"
-			/>
-		</Card>
+		<>
+			<Card noBodyPadding>
+				<CardDataGrid<TxRow>
+					title="Transaction Log"
+					actions={fetchTransactions ? undefined : <span style={styles.headerCount}>{transactions.total} total</span>}
+					ref={gridRef}
+					columns={columns}
+					fetchPage={fetchPage}
+					fetchDistinct={fetchTransactionDistinct}
+					noSearch={!fetchTransactions}
+					remoteSort={!!fetchTransactions}
+					// LEGACY bridge: the host controls the page size; offer exactly
+					// that one option so the pager math matches the server's pages.
+					// DIRECT mode sizes freely with the grid defaults.
+					{...(fetchTransactions ? {} : { pageSizes: [transactions.pageSize] })}
+					onRowClick={(row) => setViewedTx(row)}
+					emptyTitle="No transactions yet"
+				/>
+			</Card>
+
+			{/* ── Record panel: the FULL transaction (pure inspect + Close) ──── */}
+			{viewedTx != null && (
+				<DetailPanel
+					contained
+					open
+					onClose={() => setViewedTx(null)}
+					title={`Transaction #${viewedTx.id}`}
+					subtitle={viewedTx.type}
+					footer={
+						<Button variant="ghost" small onClick={() => setViewedTx(null)}>
+							Close
+						</Button>
+					}
+				>
+					<Section label="Transaction">
+						{/* formatDateValue applies the wire contract (zone-less ISO IS
+						    UTC) and renders exactly like the Date column. */}
+						<LabelValue label="Date">{(viewedTx.createdAt ? formatDateValue(viewedTx.createdAt, { dateFormat: 'MM/DD/YY', timeFormat: 'HH:MM:SS' }) : null) ?? '--'}</LabelValue>
+						<LabelValue label="User">{viewedTx.userId ? memberNames?.[viewedTx.userId] ?? viewedTx.userId.slice(0, 8) : '--'}</LabelValue>
+						<LabelValue label="Type">{viewedTx.type}</LabelValue>
+						<LabelValue label="Resource">{viewedTx.resource}</LabelValue>
+						<LabelValue label="Description">{viewedTx.description || '--'}</LabelValue>
+						<LabelValue label="Amount">
+							{/* Signed render matching the Amount column treatment. */}
+							<span style={styles.panelAmount(viewedTx.amount >= 0)}>{`${viewedTx.amount >= 0 ? '+' : '-'}${fmt(viewedTx.amount)}`}</span>
+						</LabelValue>
+						<LabelValue label="Idempotency Key" mono>
+							{viewedTx.idempotencyKey}
+						</LabelValue>
+					</Section>
+
+					{/* Context: well-known fields as rows, then the raw JSON whole. */}
+					{viewedTx.context != null && (
+						<Section label="Context">
+							{viewedTx.context.task_id != null && (
+								<LabelValue label="Task" mono>
+									{String(viewedTx.context.task_id)}
+								</LabelValue>
+							)}
+							{viewedTx.context.source != null && <LabelValue label="Source">{String(viewedTx.context.source)}</LabelValue>}
+							{viewedTx.context.pipeline != null && <LabelValue label="Pipeline">{String(viewedTx.context.pipeline)}</LabelValue>}
+							<pre style={styles.contextPre}>{JSON.stringify(viewedTx.context, null, 2)}</pre>
+						</Section>
+					)}
+				</DetailPanel>
+			)}
+		</>
 	);
 };
 

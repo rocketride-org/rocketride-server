@@ -16,9 +16,10 @@ import React, { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import { Card } from '../../../components/card/Card';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
 import { Button } from '../../../components/button/Button';
 import type { ConnectResult, ProfileUpdate } from '../types';
-import { S, Badge, Avatar, Modal, initials, avatarColor } from './shared';
+import { S, Badge, Avatar, initials, avatarColor } from './shared';
 
 // =============================================================================
 // STYLES
@@ -394,17 +395,23 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 				</Card>
 			)}
 
-			{/* -- Edit Profile Dialog -- */}
+			{/* -- Edit Profile record panel (record-panel standard 2026-07-17:
+			      the profile IS a record — editing slides out from the Account
+			      dialog's edge like every other record, no dialog). -- */}
 			{editOpen && (
-				<Modal
-					title="Edit Profile"
+				<DetailPanel
+					contained
+					open
 					onClose={closeEdit}
+					avatar={<div style={styles.avatarLarge(displayName || email)}>{initials(displayName, email)}</div>}
+					title={displayName}
+					subtitle={email || undefined}
 					footer={
 						<>
-							<Button variant="ghost" onClick={closeEdit} disabled={saving}>
+							<Button variant="ghost" small onClick={closeEdit} disabled={saving}>
 								Cancel
 							</Button>
-							<Button variant="primary" onClick={handleSave} disabled={saving}>
+							<Button variant="primary" small onClick={() => void handleSave()} disabled={saving}>
 								{saving ? 'Saving…' : 'Save Changes'}
 							</Button>
 						</>
@@ -413,7 +420,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 					<div style={S.fieldRow}>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Nickname</div>
-							<input value={fields.displayName} onChange={set('displayName')} style={commonStyles.inputField} autoFocus />
+							<input value={fields.displayName} onChange={set('displayName')} style={commonStyles.inputField} data-rr-autofocus="true" />
 							<div style={commonStyles.textMuted}>What we call you in the app</div>
 						</div>
 						<div style={S.field}>
@@ -439,7 +446,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 						</div>
 					</div>
 					{error && <div style={styles.modalError}>{error}</div>}
-				</Modal>
+				</DetailPanel>
 			)}
 		</section>
 	);

@@ -6,45 +6,60 @@
 /**
  * TeamsPanel — the Teams tab within AccountView.
  *
- * Renders either a flat list of all teams (when `activeTeamId` is null) or a
- * drill-down detail view for a single team (when a team has been selected).
- * Both views are stock Cards with stock DataGrid bodies: the list view shows
- * team name and member count with Delete / Manage actions; the detail view
- * lists members with permission pills and Edit Perms / Remove actions.
+ * Converted to the record-panel standard (see
+ * ApiKeysPanel, THE EXEMPLAR): the grid is PURE DATA — no Actions column, no
+ * drill-down view swap — and every operation on a team happens in ONE record
+ * surface, a contained DetailPanel sliding from the Account dialog's edge:
+ *
+ *  - row click             -> the panel in VIEW mode: team facts, the live
+ *                             member list with permission pills, an inline
+ *                             per-member permissions editor, member removal
+ *                             (ConfirmDialog-guarded), the add-member form,
+ *                             and Delete Team in the footer (ConfirmDialog-
+ *                             guarded, org-admin only)
+ *  - "+ New Team" (header) -> the SAME panel in CREATE mode (team name form)
+ *
+ * WHY: the previous implementation swapped the whole tab between a list Card
+ * and a drill-down members Card, and delegated create / delete / add-member /
+ * edit-perms / remove-member to five modals owned by AccountView. The record
+ * panel absorbs all of them, so the host passes RAW async actions and the
+ * panel owns its whole lifecycle — form state, validation, saving, errors,
+ * confirmations. No team modals live in AccountView anymore.
+ *
+ * The VIEW panel keeps the host-owned `activeTeamId` / `onLoadTeamDetail`
+ * mechanics: opening a row raises the id on the host, an effect requests the
+ * detail load, and the body renders LIVE from the `teamDetail` prop — so
+ * server refreshes (a member added, permissions changed) update the open
+ * panel in place.
  */
 
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
-import { DataGrid } from '../../../components/data-grid/DataGrid';
-import { avatarEl, buttonEl, createActionsColumn } from '../../../components/data-grid/defaults';
+import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
-import type { ConnectResult, TeamRecord, TeamDetail, TeamMemberRecord } from '../types';
-import { PERM_DISPLAY, initials, avatarColor } from './shared';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
+import { Section, LabelValue } from '../../../components/section/Section';
+import { commonStyles } from '../../../themes/styles';
+import type { ConnectResult, MemberRecord, TeamRecord, TeamDetail, TeamMemberRecord } from '../types';
+import { S, Avatar, PermGrid, PermPill, avatarColor } from './shared';
 
 // =============================================================================
 // STYLES
 // =============================================================================
 
 const styles = {
-	/** Horizontal cluster inside a grid cell (avatar + text) — DOM style for formatters. */
+	/** Horizontal cluster inside a grid cell (chip + text) — DOM style for formatters. */
 	cellCluster: {
 		display: 'flex',
 		alignItems: 'center',
 		gap: '10px',
 	} as Partial<CSSStyleDeclaration>,
 
-	/** 28px member avatar overrides applied over the stock 32px avatarEl. */
-	avatarSmall: {
-		width: '28px',
-		height: '28px',
-		fontSize: '10.6px',
-		fontWeight: '700',
-	} as Partial<CSSStyleDeclaration>,
-
-	/** 32px team chip in the list-view Team cell (DOM clone of teamChip(name, 32)). */
+	/** 32px team chip in the grid's Team cell (DOM clone of teamChip(name, 32)). */
 	teamChipCell: {
 		width: '32px',
 		height: '32px',
@@ -58,53 +73,108 @@ const styles = {
 		flexShrink: '0',
 	} as Partial<CSSStyleDeclaration>,
 
-	/** Wrapping flex row for permission pills (DOM clone of the shared S.perms). */
-	permsWrap: {
-		display: 'flex',
-		flexWrap: 'wrap',
-		gap: '3px',
-		marginTop: '4px',
-	} as Partial<CSSStyleDeclaration>,
-
-	/** Permission pill shape (commonStyles.badge values + PermPill overrides); accent colors set per pill. */
-	permPill: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: '4px',
-		padding: '1px 6px',
-		fontSize: '11px',
-		fontWeight: '600',
-		borderRadius: '3px',
-		letterSpacing: '0.3px',
-		background: 'var(--rr-bg-surface-alt)',
-	} as Partial<CSSStyleDeclaration>,
-
-	/** Detail-view header cluster: back button + team avatar + label. */
-	detailHeader: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-	} as CSSProperties,
-
 	/**
-	 * Deterministic-color initial chip for a team.
+	 * Deterministic-color initial chip for a team — fills the DetailPanel's
+	 * 42px avatar slot (the slot's own 50% radius clips it round).
 	 *
-	 * @param name - Team name seeding the color and initial.
-	 * @param size - Chip edge length in pixels.
+	 * @param name - Team name seeding the color.
 	 */
-	teamChip: (name: string, size: number): CSSProperties => ({
-		width: size,
-		height: size,
-		borderRadius: size >= 32 ? 7 : 5,
+	teamChipAvatar: (name: string): CSSProperties => ({
+		width: 42,
+		height: 42,
 		background: avatarColor(name),
 		display: 'flex',
 		alignItems: 'center',
 		justifyContent: 'center',
-		fontSize: Math.round(size * 0.4),
+		fontSize: 17,
 		fontWeight: 700,
 		color: 'var(--rr-fg-button)',
-		flexShrink: 0,
 	}),
+
+	/** One member entry in the panel's Members section (identity row + pills / editor). */
+	memberItem: {
+		padding: '10px 0',
+		borderBottom: '1px solid var(--rr-border)',
+	} as CSSProperties,
+
+	/** Identity row: avatar + name/email column + right-aligned action buttons. */
+	memberIdentity: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+	} as CSSProperties,
+
+	/** Flex-growing name/email column inside the identity row. */
+	memberInfo: {
+		flex: 1,
+		minWidth: 0,
+	} as CSSProperties,
+
+	/** Member display name line. */
+	memberName: {
+		fontSize: 12.5,
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+
+	/** Member email line under the name. */
+	memberEmail: {
+		fontSize: 11,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** Right-aligned action button cluster inside the identity row. */
+	memberActions: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 5,
+		flexShrink: 0,
+	} as CSSProperties,
+
+	/** Inline editor block (PermGrid + its action row) under an identity row. */
+	editorBlock: {
+		marginTop: 10,
+	} as CSSProperties,
+
+	/** Right-aligned action row closing an inline form (Save/Cancel, Add/Cancel). */
+	editorActions: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'flex-end',
+		gap: 8,
+		marginTop: 10,
+	} as CSSProperties,
+
+	/** Spacing above the "+ Add Member" reveal button / the revealed add form. */
+	addBlock: {
+		marginTop: 12,
+	} as CSSProperties,
+
+	/** Muted line shown when every org member already belongs to the team. */
+	emptyEligible: {
+		fontSize: 12,
+		color: 'var(--rr-text-disabled)',
+		padding: '7px 0',
+	} as CSSProperties,
+
+	/** Muted placeholder while the team detail loads or the team has no members. */
+	mutedLine: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		padding: '7px 0',
+	} as CSSProperties,
+
+	/** Inline save/validation error line under the active form. */
+	error: {
+		fontSize: 11,
+		color: 'var(--rr-color-error)',
+		marginTop: 8,
+	} as CSSProperties,
+
+	/** Left-anchored destructive slot in the panel footer (footer is flex-end). */
+	footerDanger: {
+		marginRight: 'auto',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -112,31 +182,8 @@ const styles = {
 // =============================================================================
 
 /**
- * Builds a person cell — 28px initials avatar beside the display name (DOM
- * clone of the old Avatar + cluster cell render).
- *
- * @param displayName - Member display name (initials + color seed).
- * @param email - Fallback seed when the name is empty.
- * @returns The cluster element.
- */
-function personCellEl(displayName: string, email: string): HTMLElement {
-	// Cluster wrapper: avatar + name in a horizontal flex row.
-	const wrap = document.createElement('div');
-	Object.assign(wrap.style, styles.cellCluster);
-	// Stock avatar resized to the panel's 28px spec.
-	const avatar = avatarEl(initials(displayName, email), avatarColor(displayName || email));
-	Object.assign(avatar.style, styles.avatarSmall);
-	wrap.appendChild(avatar);
-	// Display-name label.
-	const name = document.createElement('span');
-	name.textContent = displayName;
-	wrap.appendChild(name);
-	return wrap;
-}
-
-/**
  * Builds a team cell — 32px deterministic-color chip with the team's initial
- * beside the team name (DOM clone of the old teamChip + cluster cell render).
+ * beside the team name (DOM clone of the retired teamChip + cluster render).
  *
  * @param name - Team display name (chip color seed and initial).
  * @returns The cluster element.
@@ -158,32 +205,16 @@ function teamCellEl(name: string): HTMLElement {
 	return wrap;
 }
 
-/**
- * Builds a permission pill (DOM clone of the shared PermPill): admin and
- * wildcard permissions use the brand accent, capability flags use info.
- *
- * @param perm - The permission key string to display.
- * @returns The pill element.
- */
-function permPillEl(perm: string): HTMLElement {
-	const el = document.createElement('span');
-	Object.assign(el.style, styles.permPill);
-	// Distinguish elevated permissions (admin/*) from standard capability flags.
-	const isAdmin = perm === 'team.admin' || perm === 'org.admin' || perm === '*';
-	const accent = isAdmin ? 'var(--rr-brand)' : 'var(--rr-color-info)';
-	el.style.color = accent;
-	el.style.border = `1px solid ${accent}`;
-	el.textContent = PERM_DISPLAY[perm] ?? perm;
-	return el;
-}
-
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** Flattened row shape fed to the teams list DataGrid. */
+/**
+ * Flattened row shape fed to the teams grid. Sortable / filterable values are
+ * primitives; TeamRecord carries no timestamps, so the grid is names + counts.
+ */
 interface TeamRow extends Record<string, unknown> {
-	/** Team id — used to resolve callbacks. */
+	/** Team id — resolves the record for the panel on row click. */
 	id: string;
 	/** Team display name. */
 	name: string;
@@ -191,17 +222,13 @@ interface TeamRow extends Record<string, unknown> {
 	members: number;
 }
 
-/** Flattened row shape fed to the team-detail members DataGrid. */
-interface TeamMemberRow extends Record<string, unknown> {
-	/** Member user id — used to resolve callbacks. */
-	userId: string;
-	/** Member display name. */
-	displayName: string;
-	/** Member email address. */
-	email: string;
-	/** Permission keys held within the team. */
-	permissions: string[];
-}
+/**
+ * The record panel's mode: closed, viewing one team, or creating one. VIEW
+ * mode is DERIVED from the host-owned `activeTeamId` (never duplicated in
+ * local state) so the existing drill-down mechanics — including the host
+ * clearing the id on tab switches — keep working unchanged.
+ */
+type PanelState = { mode: 'view'; teamId: string } | { mode: 'create' } | null;
 
 // =============================================================================
 // PROPS
@@ -211,199 +238,88 @@ interface TeamMemberRow extends Record<string, unknown> {
 export interface TeamsPanelProps {
 	/** Flat list of all teams in the organization. */
 	teams: TeamRecord[];
-	/** Full detail for the currently selected team, or null when none is selected. */
+	/** Full detail for the currently selected team, or null while loading / none selected. */
 	teamDetail: TeamDetail | null;
-	/** ID of the team currently being drilled into, or null for the list view. */
+	/** ID of the team whose record panel is open, or null when closed. */
 	activeTeamId: string | null;
-	/** The current user's profile, used to suppress self-removal controls. */
+	/** Called when the user opens / closes a team's record panel. */
+	onActiveTeamIdChange: (id: string | null) => void;
+	/** Requests the host to load full detail for a specific team. */
+	onLoadTeamDetail: (teamId: string) => void;
+	/** Flat list of all organization members (the add-member eligibility pool). */
+	members: MemberRecord[];
+	/** The current user's profile, used to suppress last-admin self-removal. */
 	profile: ConnectResult | null;
-	/** Drills into the detail view for the given team ID. */
-	onSelectTeam: (id: string) => void;
-	/** Returns from team detail back to the flat team list. */
-	onBack: () => void;
-	/** Opens the Create Team modal. */
-	onCreateTeam: () => void;
-	/** Opens the Add Member to Team modal. */
-	onAddMember: () => void;
-	/** Opens the Edit Permissions modal for a team member. */
-	onEditPerms: (m: TeamMemberRecord) => void;
-	/** Opens the remove-from-team confirmation modal. */
-	onRemoveMember: (userId: string, displayName: string) => void;
-	/** Immediately deletes the given team. */
-	onDeleteTeam: (id: string) => void;
+	/** Creates a new team. */
+	onCreateTeam: (name: string) => Promise<void>;
+	/** Deletes a team. */
+	onDeleteTeam: (teamId: string) => Promise<void>;
+	/** Adds a member to a team with specified permissions. */
+	onAddTeamMember: (params: { teamId: string; userId: string; permissions: string[] }) => Promise<void>;
+	/** Updates a team member's permissions. */
+	onEditTeamMemberPerms: (params: { teamId: string; userId: string; permissions: string[] }) => Promise<void>;
+	/** Removes a member from a team. */
+	onRemoveTeamMember: (params: { teamId: string; userId: string }) => Promise<void>;
 	/** True when the current user has org.admin permissions. */
 	isOrgAdmin: boolean;
 	/** True when the current user has team.admin on the active team. */
-	isTeamAdmin: boolean;
+	isActiveTeamAdmin: boolean;
 }
-
-// =============================================================================
-// TEAM DETAIL VIEW
-// =============================================================================
-
-/** Props for the internal team-detail members view. */
-interface TeamDetailViewProps {
-	/** Full detail for the selected team. */
-	teamDetail: TeamDetail;
-	/** The current user's profile, used to suppress self-removal controls. */
-	profile: ConnectResult | null;
-	/** Returns from team detail back to the flat team list. */
-	onBack: () => void;
-	/** Opens the Add Member to Team modal. */
-	onAddMember: () => void;
-	/** Opens the Edit Permissions modal for a team member. */
-	onEditPerms: (m: TeamMemberRecord) => void;
-	/** Opens the remove-from-team confirmation modal. */
-	onRemoveMember: (userId: string, displayName: string) => void;
-	/** True when the current user has team.admin on the active team. */
-	isTeamAdmin: boolean;
-}
-
-/**
- * Drill-down view for a single team: a Card whose header carries a back
- * button, the team chip, and the member count, and whose body is a DataGrid
- * of the team's members with permission pills and admin actions.
- */
-const TeamDetailView: React.FC<TeamDetailViewProps> = ({ teamDetail, profile, onBack, onAddMember, onEditPerms, onRemoveMember, isTeamAdmin }) => {
-	// Flatten member records into table rows.
-	const rows = useMemo<TeamMemberRow[]>(
-		() =>
-			teamDetail.members.map((m) => ({
-				userId: m.userId,
-				displayName: m.displayName,
-				email: m.email,
-				permissions: m.permissions,
-			})),
-		[teamDetail.members]
-	);
-
-	// Count team admins so the last admin cannot remove themselves.
-	const adminCount = useMemo(() => teamDetail.members.filter((m) => m.permissions.includes('team.admin')).length, [teamDetail.members]);
-
-	/**
-	 * Resolves a table row back to its team-member record and opens the Edit
-	 * Permissions modal. No-ops if the record has vanished.
-	 *
-	 * @param row - The clicked table row.
-	 */
-	const handleEditPerms = (row: TeamMemberRow): void => {
-		const record = teamDetail.members.find((m) => m.userId === row.userId);
-		if (record) onEditPerms(record);
-	};
-
-	// Live action router — the actions column's cellClick is baked into the
-	// memoized column definition, so it dispatches through this ref to always
-	// reach the latest prop closures.
-	const actionRef = useRef<(action: string, row: TeamMemberRow) => void>(() => undefined);
-	actionRef.current = (action, row) => {
-		// Route the clicked button's action key to the matching handler.
-		if (action === 'edit') handleEditPerms(row);
-		else if (action === 'remove') onRemoveMember(row.userId, row.displayName);
-	};
-
-	// Column definitions; cells keep the existing avatar / pill renderings.
-	const columns = useMemo<GridColumnDefinition[]>(() => {
-		const cols: GridColumnDefinition[] = [
-			{
-				title: 'Member',
-				field: 'displayName',
-				headerSort: true,
-				formatter: (cell: CellComponent) => {
-					const row = cell.getRow().getData() as TeamMemberRow;
-					return personCellEl(row.displayName, row.email);
-				},
-			},
-			{ title: 'Email', field: 'email', headerSort: true },
-			{
-				title: 'Permissions',
-				field: 'permissions',
-				headerSort: false,
-				// One pill per permission key, in a wrapping flex row.
-				formatter: (cell: CellComponent) => {
-					const row = cell.getRow().getData() as TeamMemberRow;
-					const wrap = document.createElement('div');
-					Object.assign(wrap.style, styles.permsWrap);
-					for (const p of row.permissions) wrap.appendChild(permPillEl(p));
-					return wrap;
-				},
-			},
-		];
-		// Edit / Remove only render for team admins; the last remaining admin
-		// cannot remove themselves (a team must keep one admin). Built by hand
-		// instead of createActionsColumn because the button set varies per row.
-		if (isTeamAdmin) {
-			cols.push({
-				title: 'Actions',
-				field: '__rrActions',
-				width: 170,
-				hozAlign: 'right',
-				headerSort: false,
-				// Popup-exempt actions column (no header popup, no toggle-list
-				// entry); the marker is stripped before reaching Tabulator.
-				rrNoPopup: true,
-				resizable: false,
-				// Formatter: Edit Perms always; Remove unless last-admin self row.
-				formatter: (cell: CellComponent) => {
-					const row = cell.getRow().getData() as TeamMemberRow;
-					const wrap = document.createElement('span');
-					wrap.dataset.rrActions = 'true';
-					wrap.className = 'rr-cell-actions';
-					wrap.appendChild(buttonEl('ghost', 'Edit Perms', 'edit'));
-					const isSelf = row.userId === profile?.userId;
-					const isLastAdmin = isSelf && row.permissions.includes('team.admin') && adminCount <= 1;
-					if (!isLastAdmin) wrap.appendChild(buttonEl('ghost', 'Remove', 'remove'));
-					return wrap;
-				},
-				// Route clicks on the buttons to the live action router by key.
-				cellClick: (e: UIEvent, cell: CellComponent) => {
-					const target = (e.target as HTMLElement).closest('button[data-action]');
-					if (!target) return;
-					actionRef.current((target as HTMLElement).dataset.action ?? '', cell.getRow().getData() as TeamMemberRow);
-				},
-			});
-		}
-		return cols;
-	}, [isTeamAdmin, adminCount, profile?.userId]);
-
-	return (
-		<Card
-			header={
-				<div style={styles.detailHeader}>
-					<Button variant="ghost" small onClick={onBack} title="Back to teams">
-						{'←'}
-					</Button>
-					<div style={styles.teamChip(teamDetail.name, 22)}>{teamDetail.name[0]}</div>
-					<span>
-						{teamDetail.name} — {teamDetail.members.length} member{teamDetail.members.length !== 1 ? 's' : ''}
-					</span>
-				</div>
-			}
-			headerActions={
-				isTeamAdmin ? (
-					<Button variant="primary" small onClick={onAddMember}>
-						+ Add Member
-					</Button>
-				) : undefined
-			}
-			noBodyPadding
-		>
-			<DataGrid<TeamMemberRow> columns={columns} data={rows} emptyTitle="No members in this team yet" />
-		</Card>
-	);
-};
 
 // =============================================================================
 // TEAMS PANEL
 // =============================================================================
 
 /**
- * The Teams tab panel.
- *
- * Renders either a flat list of all teams (when `activeTeamId` is null) or a
- * drill-down detail view for a single team (when a team has been selected).
+ * The Teams tab: a pure-data CardDataGrid plus the single record panel that
+ * hosts view, create, member management, and delete. See the module doc for
+ * the standard this file follows.
  */
-export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activeTeamId, profile, onSelectTeam, onBack, onCreateTeam, onAddMember, onEditPerms, onRemoveMember, onDeleteTeam, isOrgAdmin, isTeamAdmin }) => {
-	// Flatten team records into table rows.
+export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activeTeamId, onActiveTeamIdChange, onLoadTeamDetail, members, profile, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, isOrgAdmin, isActiveTeamAdmin }) => {
+	// ── Record panel state ──────────────────────────────────────────────────
+	// CREATE mode is local; VIEW mode is derived from the host-owned id below.
+	const [createOpen, setCreateOpen] = useState(false);
+	// Create-form field (reset on every open of create mode).
+	const [formName, setFormName] = useState('');
+	// Inline per-member permissions editor: the member being edited + draft.
+	const [editingUserId, setEditingUserId] = useState<string | null>(null);
+	const [editPerms, setEditPerms] = useState<string[]>([]);
+	// Add-member form: reveal flag + selected user + draft permissions.
+	const [addOpen, setAddOpen] = useState(false);
+	const [addUserId, setAddUserId] = useState('');
+	const [addPerms, setAddPerms] = useState<string[]>(['task.control', 'task.monitor']);
+	// Async lifecycle shared by every action the panel hosts.
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	// Confirmation gates (each stacks over the panel via the overlay stack).
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [confirmRemove, setConfirmRemove] = useState<{ userId: string; displayName: string } | null>(null);
+
+	// The panel's mode: create wins (the grid is unreachable under an open
+	// panel, so both can never be user-driven at once); otherwise the host's
+	// activeTeamId opens VIEW mode.
+	const panel: PanelState = createOpen ? { mode: 'create' } : activeTeamId != null ? { mode: 'view', teamId: activeTeamId } : null;
+
+	// The viewed record resolves LIVE from props so server refreshes (member
+	// added / removed, permissions changed) update the open panel in place.
+	const viewedTeam = panel?.mode === 'view' ? teams.find((t) => t.id === panel.teamId) ?? null : null;
+	// Detail must MATCH the viewed team — a stale detail from a previously
+	// viewed team must not render under the wrong title while the load runs.
+	const viewedDetail = panel?.mode === 'view' && teamDetail?.id === panel.teamId ? teamDetail : null;
+
+	// ── Detail load on panel open ───────────────────────────────────────────
+	// Latest loader kept in a ref so the effect depends only on the team id —
+	// an inline host lambda must not re-trigger loads on every parent render.
+	const loadDetailRef = useRef(onLoadTeamDetail);
+	loadDetailRef.current = onLoadTeamDetail;
+
+	// Preserved drill-down mechanic: whenever the VIEW panel opens (or the
+	// viewed team changes), request the fresh detail from the host.
+	useEffect(() => {
+		if (activeTeamId != null) loadDetailRef.current(activeTeamId);
+	}, [activeTeamId]);
+
+	// ── Table rows ──────────────────────────────────────────────────────────
 	const rows = useMemo<TeamRow[]>(
 		() =>
 			teams.map((t) => ({
@@ -414,28 +330,20 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 		[teams]
 	);
 
-	// Live action router — the actions column's onAction is baked into the
-	// memoized column definition, so it dispatches through this ref to always
-	// reach the latest prop closures.
-	const actionRef = useRef<(action: string, row: TeamRow) => void>(() => undefined);
-	actionRef.current = (action, row) => {
-		// Delete removes the team; Manage mirrors the row click into detail.
-		if (action === 'delete') onDeleteTeam(row.id);
-		else onSelectTeam(row.id);
-	};
-
-	// Column definitions; the team cell keeps its color-chip rendering.
+	// ── Columns (pure data — the record panel replaced the Actions column) ──
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
 				title: 'Team',
 				field: 'name',
+				rrType: 'string',
 				headerSort: true,
 				formatter: (cell: CellComponent) => teamCellEl(String(cell.getValue() ?? '')),
 			},
 			{
 				title: 'Members',
 				field: 'members',
+				rrType: 'number',
 				headerSort: true,
 				sorter: 'number',
 				formatter: (cell: CellComponent) => {
@@ -443,42 +351,403 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 					return `${n} member${n !== 1 ? 's' : ''}`;
 				},
 			},
-			// Trailing Actions column — Delete is org-admin only; Manage mirrors
-			// the row click.
-			createActionsColumn<TeamRow>({
-				actions: [...(isOrgAdmin ? [{ key: 'delete', label: 'Delete' }] : []), { key: 'manage', label: 'Manage →' }],
-				onAction: (key, row) => actionRef.current(key, row),
-				width: isOrgAdmin ? 180 : 120,
-			}),
 		],
-		[isOrgAdmin]
+		[]
 	);
 
-	// -- Detail view -- shown when a team row has been clicked
-	if (activeTeamId && teamDetail) {
-		return (
-			<section>
-				<TeamDetailView teamDetail={teamDetail} profile={profile} onBack={onBack} onAddMember={onAddMember} onEditPerms={onEditPerms} onRemoveMember={onRemoveMember} isTeamAdmin={isTeamAdmin} />
-			</section>
-		);
-	}
+	// ── Panel lifecycle ─────────────────────────────────────────────────────
 
-	// -- List view -- default when no team is selected
+	/** Open the record panel in CREATE mode with a fresh form. */
+	const openCreate = (): void => {
+		setFormName('');
+		setError(null);
+		setCreateOpen(true);
+	};
+
+	/** Open the record panel in VIEW mode for the clicked team. */
+	const openView = (teamId: string): void => {
+		// Reset every transient sub-state from a previously viewed team.
+		setError(null);
+		setEditingUserId(null);
+		setAddOpen(false);
+		// Raise the id on the host — the detail-load effect fires off this.
+		onActiveTeamIdChange(teamId);
+	};
+
+	/** Close the panel and drop every transient state it owned. */
+	const closePanel = (): void => {
+		setCreateOpen(false);
+		// Clear the host-owned id only when it is actually set (VIEW mode).
+		if (activeTeamId != null) onActiveTeamIdChange(null);
+		setError(null);
+		setEditingUserId(null);
+		setAddOpen(false);
+		setConfirmDelete(false);
+		setConfirmRemove(null);
+	};
+
+	// ── Create team ─────────────────────────────────────────────────────────
+
+	/** Validate + submit the create form; success closes the panel. */
+	const handleCreate = async (): Promise<void> => {
+		// Step 1: validation mirrors the retired modal's rules.
+		if (!formName.trim()) {
+			setError('Name is required');
+			return;
+		}
+		setSaving(true);
+		setError(null);
+		try {
+			// Step 2: create on the server; the host refreshes the teams list.
+			await onCreateTeam(formName.trim());
+			closePanel();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : 'Failed to create team');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// ── Delete team ─────────────────────────────────────────────────────────
+
+	/** Delete the viewed team after the ConfirmDialog's confirmation. */
+	const handleDelete = async (): Promise<void> => {
+		if (panel?.mode !== 'view') return;
+		setSaving(true);
+		setError(null);
+		try {
+			await onDeleteTeam(panel.teamId);
+			// The record is gone — close both the confirmation and the panel.
+			setConfirmDelete(false);
+			closePanel();
+		} catch (e) {
+			setConfirmDelete(false);
+			setError(e instanceof Error ? e.message : 'Failed to delete team');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// ── Edit member permissions ─────────────────────────────────────────────
+
+	/**
+	 * Swap a member row to the inline PermGrid editor, seeded with the
+	 * member's current permissions (ported 'edit-perms' semantics).
+	 *
+	 * @param m - The team member to edit.
+	 */
+	const startEditPerms = (m: TeamMemberRecord): void => {
+		setEditingUserId(m.userId);
+		setEditPerms([...m.permissions]);
+		setError(null);
+	};
+
+	/** Persist the draft permissions for the member being edited. */
+	const handleSavePerms = async (): Promise<void> => {
+		if (editingUserId == null || viewedDetail == null) return;
+		setSaving(true);
+		setError(null);
+		try {
+			await onEditTeamMemberPerms({ teamId: viewedDetail.id, userId: editingUserId, permissions: editPerms });
+			// Collapse the editor — the pills re-render from the refreshed detail.
+			setEditingUserId(null);
+		} catch (e) {
+			setError(e instanceof Error ? e.message : 'Failed to update permissions');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// ── Add member ──────────────────────────────────────────────────────────
+
+	/** Reveal the add-member form with the stock default permissions. */
+	const openAddForm = (): void => {
+		setAddUserId('');
+		setAddPerms(['task.control', 'task.monitor']);
+		setError(null);
+		setAddOpen(true);
+	};
+
+	/** Validate + submit the add-member form; success collapses the form. */
+	const handleAddMember = async (): Promise<void> => {
+		// Step 1: validation mirrors the retired modal's rules.
+		if (!addUserId || viewedDetail == null) {
+			setError('Select a member');
+			return;
+		}
+		setSaving(true);
+		setError(null);
+		try {
+			// Step 2: add on the server; the member list refreshes from props.
+			await onAddTeamMember({ teamId: viewedDetail.id, userId: addUserId, permissions: addPerms });
+			setAddOpen(false);
+		} catch (e) {
+			setError(e instanceof Error ? e.message : 'Failed to add member');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// ── Remove member ───────────────────────────────────────────────────────
+
+	/** Remove the confirmed member after the ConfirmDialog's confirmation. */
+	const handleRemoveMember = async (): Promise<void> => {
+		if (confirmRemove == null || viewedDetail == null) return;
+		setSaving(true);
+		setError(null);
+		try {
+			await onRemoveTeamMember({ teamId: viewedDetail.id, userId: confirmRemove.userId });
+			// Keep the panel open: the live member list shows the removal.
+			setConfirmRemove(null);
+		} catch (e) {
+			setConfirmRemove(null);
+			setError(e instanceof Error ? e.message : 'Failed to remove team member');
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	// ── Derived view-mode values ────────────────────────────────────────────
+	// Live member count: the loaded detail wins over the list's cached count.
+	const memberCount = viewedDetail != null ? viewedDetail.members.length : viewedTeam?.memberCount ?? 0;
+	// Count team admins so the last admin cannot remove themselves.
+	const adminCount = useMemo(() => (viewedDetail == null ? 0 : viewedDetail.members.filter((m) => m.permissions.includes('team.admin')).length), [viewedDetail]);
+	// Org members not already in the team — the add-member eligibility pool.
+	const eligible = useMemo(() => (viewedDetail == null ? [] : members.filter((m) => !viewedDetail.members.some((tm) => tm.userId === m.userId))), [members, viewedDetail]);
+
+	// ── Render ──────────────────────────────────────────────────────────────
 	return (
 		<section>
-			<Card
-				header={`Teams — ${teams.length} team${teams.length !== 1 ? 's' : ''}`}
-				headerActions={
-					isOrgAdmin ? (
-						<Button variant="primary" small onClick={onCreateTeam}>
-							+ New Team
-						</Button>
-					) : undefined
-				}
-				noBodyPadding
-			>
-				<DataGrid<TeamRow> columns={columns} data={rows} onRowClick={(row) => onSelectTeam(row.id)} emptyTitle="No teams yet" />
+			{/* Pure-data grid: row click opens the record panel. */}
+			<Card noBodyPadding>
+				<CardDataGrid<TeamRow>
+					title="Teams"
+					actions={
+						isOrgAdmin ? (
+							<Button variant="primary" small onClick={openCreate}>
+								+ New Team
+							</Button>
+						) : undefined
+					}
+					columns={columns}
+					data={rows}
+					noSearch
+					onRowClick={(row) => openView(row.id)}
+					emptyTitle="No teams yet"
+					emptyDescription="Create a team to group members and scope their permissions."
+				/>
 			</Card>
+
+			{/* ── Record panel: VIEW mode ─────────────────────────────────── */}
+			{viewedTeam != null && (
+				<DetailPanel
+					contained
+					open
+					onClose={closePanel}
+					avatar={<div style={styles.teamChipAvatar(viewedTeam.name)}>{viewedTeam.name[0] ?? ''}</div>}
+					title={viewedTeam.name}
+					subtitle={`${memberCount} member${memberCount !== 1 ? 's' : ''}`}
+					footer={
+						<>
+							{isOrgAdmin && (
+								<div style={styles.footerDanger}>
+									<Button variant="danger" small onClick={() => setConfirmDelete(true)}>
+										Delete Team
+									</Button>
+								</div>
+							)}
+							<Button variant="ghost" small onClick={closePanel}>
+								Close
+							</Button>
+						</>
+					}
+				>
+					{/* Team facts from the live list record. */}
+					<Section label="Team">
+						<LabelValue label="Name">{viewedTeam.name}</LabelValue>
+						<LabelValue label="Members">{`${memberCount} member${memberCount !== 1 ? 's' : ''}`}</LabelValue>
+						<LabelValue label="Team ID" mono>
+							{viewedTeam.id}
+						</LabelValue>
+					</Section>
+
+					{/* Member list — rendered from the host-loaded detail. */}
+					<Section label="Members">
+						{viewedDetail == null ? (
+							/* Detail still in flight for this team. */
+							<div style={styles.mutedLine}>Loading members…</div>
+						) : viewedDetail.members.length === 0 ? (
+							<div style={styles.mutedLine}>No members in this team yet</div>
+						) : (
+							viewedDetail.members.map((m) => {
+								// The last remaining team admin cannot remove themselves
+								// (a team must keep one admin) — ported from the old grid.
+								const isSelf = m.userId === profile?.userId;
+								const isLastAdmin = isSelf && m.permissions.includes('team.admin') && adminCount <= 1;
+								const isEditing = editingUserId === m.userId;
+								return (
+									<div key={m.userId} style={styles.memberItem}>
+										{/* Identity row: avatar + name/email + admin actions. */}
+										<div style={styles.memberIdentity}>
+											<Avatar name={m.displayName} email={m.email} size={28} />
+											<div style={styles.memberInfo}>
+												<div style={styles.memberName}>{m.displayName}</div>
+												<div style={styles.memberEmail}>{m.email}</div>
+											</div>
+											{isActiveTeamAdmin && !isEditing && (
+												<div style={styles.memberActions}>
+													<Button variant="ghost" small onClick={() => startEditPerms(m)}>
+														Edit Permissions
+													</Button>
+													{!isLastAdmin && (
+														<Button variant="ghost" small onClick={() => setConfirmRemove({ userId: m.userId, displayName: m.displayName })}>
+															Remove
+														</Button>
+													)}
+												</div>
+											)}
+										</div>
+										{isEditing ? (
+											/* Inline editor: PermGrid draft + Save/Cancel (ported 'edit-perms'). */
+											<div style={styles.editorBlock}>
+												<PermGrid value={editPerms} onChange={setEditPerms} />
+												<div style={styles.editorActions}>
+													<Button variant="ghost" small onClick={() => setEditingUserId(null)}>
+														Cancel
+													</Button>
+													<Button variant="primary" small disabled={saving} onClick={() => void handleSavePerms()}>
+														{saving ? 'Saving…' : 'Save Permissions'}
+													</Button>
+												</div>
+											</div>
+										) : (
+											/* Read view: one pill per permission key. */
+											<div style={S.perms}>
+												{m.permissions.map((p) => (
+													<PermPill key={p} perm={p} />
+												))}
+											</div>
+										)}
+									</div>
+								);
+							})
+						)}
+
+						{/* Add-member affordance — team admins only, needs the loaded detail
+						    for the eligibility pool. */}
+						{isActiveTeamAdmin && viewedDetail != null && (
+							<div style={styles.addBlock}>
+								{addOpen ? (
+									/* Revealed add form (ported 'add-member' modal). */
+									<>
+										<div style={S.field}>
+											<div style={S.fieldLabel}>Member</div>
+											{eligible.length === 0 ? (
+												<div style={styles.emptyEligible}>All organization members are already in this team.</div>
+											) : (
+												<select value={addUserId} onChange={(e) => setAddUserId(e.target.value)} style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}>
+													<option value="" disabled>
+														Select a member…
+													</option>
+													{eligible.map((m) => (
+														<option key={m.userId} value={m.userId}>
+															{m.displayName} — {m.email}
+														</option>
+													))}
+												</select>
+											)}
+										</div>
+										{eligible.length > 0 && (
+											<div style={{ ...S.field, marginBottom: 0 }}>
+												<div style={S.fieldLabel}>Permissions</div>
+												<PermGrid value={addPerms} onChange={setAddPerms} />
+											</div>
+										)}
+										<div style={styles.editorActions}>
+											<Button variant="ghost" small onClick={() => setAddOpen(false)}>
+												Cancel
+											</Button>
+											{eligible.length > 0 && (
+												<Button variant="primary" small disabled={saving} onClick={() => void handleAddMember()}>
+													{saving ? 'Adding…' : 'Add to Team'}
+												</Button>
+											)}
+										</div>
+									</>
+								) : (
+									<Button variant="primary" small onClick={openAddForm}>
+										+ Add Member
+									</Button>
+								)}
+							</div>
+						)}
+					</Section>
+
+					{error && <div style={styles.error}>{error}</div>}
+				</DetailPanel>
+			)}
+
+			{/* ── Record panel: CREATE mode ───────────────────────────────── */}
+			{panel?.mode === 'create' && (
+				<DetailPanel
+					contained
+					open
+					onClose={closePanel}
+					title="New Team"
+					footer={
+						<>
+							<Button variant="ghost" small onClick={closePanel}>
+								Cancel
+							</Button>
+							<Button variant="primary" small disabled={saving} onClick={() => void handleCreate()}>
+								{saving ? 'Creating…' : 'Create Team'}
+							</Button>
+						</>
+					}
+				>
+					{/* Create form (ported field-for-field from the retired modal). */}
+					<div style={S.field}>
+						<div style={S.fieldLabel}>Team Name</div>
+						<input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Engineering, Data Science, QA" style={commonStyles.inputField} data-rr-autofocus="true" />
+						<div style={commonStyles.textMuted}>You'll be added as admin automatically.</div>
+					</div>
+					{error && <div style={styles.error}>{error}</div>}
+				</DetailPanel>
+			)}
+
+			{/* ── Delete confirmation (stacks over the record panel) ────────── */}
+			{confirmDelete && viewedTeam != null && (
+				<ConfirmDialog
+					title="Delete Team"
+					destructive
+					confirmLabel={saving ? 'Deleting…' : 'Yes, Delete'}
+					confirmDisabled={saving}
+					message={
+						<>
+							Are you sure you want to delete <strong style={{ color: 'var(--rr-text-primary)' }}>{viewedTeam.name}</strong>? Members will not be removed from the organization.
+						</>
+					}
+					onConfirm={() => void handleDelete()}
+					onCancel={() => setConfirmDelete(false)}
+				/>
+			)}
+
+			{/* ── Remove-member confirmation (stacks over the record panel) ── */}
+			{confirmRemove != null && viewedTeam != null && (
+				<ConfirmDialog
+					title="Remove from Team"
+					destructive
+					confirmLabel={saving ? 'Removing…' : 'Yes, Remove'}
+					confirmDisabled={saving}
+					message={
+						<>
+							Are you sure you want to remove <strong style={{ color: 'var(--rr-text-primary)' }}>{confirmRemove.displayName}</strong> from <strong style={{ color: 'var(--rr-text-primary)' }}>{viewedTeam.name}</strong>?
+						</>
+					}
+					onConfirm={() => void handleRemoveMember()}
+					onCancel={() => setConfirmRemove(null)}
+				/>
+			)}
 		</section>
 	);
 };
