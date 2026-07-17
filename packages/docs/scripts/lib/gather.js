@@ -91,12 +91,17 @@ async function readNodeMeta(nodeDir) {
 	return { classType, title, description: extractDescription(text) };
 }
 
-/** Extract a first-sentence description from a raw services*.json text string. */
+/**
+ * Extract a first-sentence description from a raw services*.json text string.
+ * The JSON `description` is an array of complete lines, so they join with a
+ * space — joining bare runs them together ("a node.Can be invoked"), which also
+ * defeats the '. ' sentence split below and returns the whole blob.
+ */
 function extractDescription(text) {
 	const m = /"description"\s*:\s*\[([^\]]*)\]/.exec(text);
 	if (!m) return '';
 	const parts = m[1].match(/"((?:[^"\\]|\\.)*)"/g) || [];
-	const full = parts.map((s) => s.slice(1, -1)).join('').trim();
+	const full = parts.map((s) => s.slice(1, -1)).join(' ').replace(/\s+/g, ' ').trim();
 	const dot = full.indexOf('. ');
 	return dot >= 0 ? full.slice(0, dot + 1) : full;
 }
@@ -211,6 +216,48 @@ function frontMatterTitle(content) {
 	if (!m) return null;
 	const t = /(^|\n)title:\s*(.+?)\s*(\n|$)/.exec(m[1]);
 	return t ? t[2].replace(/^['"]|['"]$/g, '') : null;
+}
+
+/**
+ * First-sentence description for a markdown/MDX page, mirroring what Docusaurus
+ * derives for its meta description. A front-matter `description:` wins when the
+ * page declares one; otherwise the first prose paragraph is used, skipping MDX
+ * imports, JSX, headings, code fences, tables and admonitions. Node pages get
+ * their description from services*.json instead (see extractDescription).
+ * @param {string} content - raw page content (md/mdx).
+ * @return {string} description, or '' when the page has no leading prose.
+ */
+function pageDescription(content) {
+	const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+	if (fm) {
+		const d = /(^|\n)description:\s*(.+?)\s*(\n|$)/.exec(fm[1]);
+		if (d) return d[2].replace(/^['"]|['"]$/g, '');
+	}
+	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+	const para = [];
+	let inFence = false;
+	for (const line of body.split(/\r?\n/)) {
+		const t = line.trim();
+		// Skip fenced blocks wholesale — the fence delimiters AND their contents.
+		if (/^(```|~~~)/.test(t)) {
+			if (para.length) break;
+			inFence = !inFence;
+			continue;
+		}
+		if (inFence) continue;
+		if (!t) {
+			if (para.length) break;
+			continue;
+		}
+		if (/^(#{1,6}\s|:::|<!--|\||[<{]|import\s|export\s|-{3,})/.test(t)) {
+			if (para.length) break;
+			continue;
+		}
+		para.push(t);
+	}
+	const prose = para.join(' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*`_]/g, '').trim();
+	const m = /^(.+?[.!?])(\s|$)/.exec(prose);
+	return (m ? m[1] : prose).slice(0, 200).trim();
 }
 
 /** First markdown heading, as a title fallback. */
@@ -385,7 +432,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 			const destAbs = path.join(contentDir, `${docId || 'index'}${ext}`);
 			const siblingAbs = path.join(staticDir, `${docId || 'index'}.md`);
 			await stageFile({ srcAbs, destAbs, siblingAbs, content, mode });
-			manifest.push({ id: docId || 'index', route: docId ? `/${docId}` : '/', title: frontMatterTitle(content) || headingTitle(content) || docId || 'Home', mdSibling: `/${docId || 'index'}.md`, source: srcAbs });
+			manifest.push({ id: docId || 'index', route: docId ? `/${docId}` : '/', title: frontMatterTitle(content) || headingTitle(content) || docId || 'Home', mdSibling: `/${docId || 'index'}.md`, source: srcAbs, description: pageDescription(content) });
 		}
 	}
 
@@ -489,7 +536,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		const destAbs = path.join(contentDir, `${docId}${ext}`);
 		const siblingAbs = path.join(staticDir, `${docId}.md`);
 		await stageFile({ srcAbs: abs, destAbs, siblingAbs, content, mode });
-		manifest.push({ id: docId, route: `/${docId}`, title: frontMatterTitle(content) || headingTitle(content) || docId, mdSibling: `/${docId}.md`, source: abs, module: owner.module });
+		manifest.push({ id: docId, route: `/${docId}`, title: frontMatterTitle(content) || headingTitle(content) || docId, mdSibling: `/${docId}.md`, source: abs, module: owner.module, description: pageDescription(content) });
 	}
 
 	// 4. Placeholders for spine slots still lacking content (keeps the build green).
@@ -553,4 +600,4 @@ async function ensurePlaceholders({ contentDir, staticDir, routes, manifest }) {
 	}
 }
 
-module.exports = { gather, docIdFor };
+module.exports = { gather, docIdFor, pageDescription, stampLastUpdate };
