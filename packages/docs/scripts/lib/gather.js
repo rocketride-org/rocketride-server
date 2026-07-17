@@ -230,8 +230,22 @@ function frontMatterTitle(content) {
 function pageDescription(content) {
 	const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
 	if (fm) {
-		const d = /(^|\n)description:\s*(.+?)\s*(\n|$)/.exec(fm[1]);
-		if (d) return d[2].replace(/^['"]|['"]$/g, '');
+		const d = /(^|\n)description:[ \t]*(.*)/.exec(fm[1]);
+		if (d) {
+			const inline = d[2].trim();
+			if (/^[>|][-+\d]*$/.test(inline)) {
+				// YAML block scalar (`description: >`, `|`, `>-`, …). The text is the
+				// indented run that follows; the indicator itself is not the value.
+				const block = [];
+				for (const line of fm[1].slice(d.index + d[0].length).split(/\r?\n/).slice(1)) {
+					if (!/^[ \t]+\S/.test(line)) break;
+					block.push(line.trim());
+				}
+				if (block.length) return block.join(' ');
+			} else if (inline) {
+				return inline.replace(/^['"]|['"]$/g, '');
+			}
+		}
 	}
 	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
 	const para = [];
@@ -357,7 +371,11 @@ function gitLastUpdate(srcAbs) {
  * @return {string}
  */
 function stampLastUpdate(content, date) {
-	if (!date || /(^|\n)last_update\s*:/.test(content)) return content;
+	if (!date) return content;
+	// Scope the check to the front matter — a `last_update:` line in the body
+	// (a YAML sample, say) must not silently cost the page its sitemap date.
+	const declared = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+	if (declared && /(^|\n)last_update\s*:/.test(declared[1])) return content;
 	if (/^---\r?\n/.test(content)) {
 		const end = content.indexOf('\n---', 4);
 		if (end !== -1) return `${content.slice(0, end)}\nlast_update:\n  date: ${date}${content.slice(end)}`;

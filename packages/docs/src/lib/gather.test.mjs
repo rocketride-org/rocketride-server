@@ -11,6 +11,27 @@ describe('pageDescription', () => {
 		assert.equal(pageDescription(md), 'Declared up front.');
 	});
 
+	// A block scalar's value is the indented run beneath it; the bare '>' or '|'
+	// indicator must never become the description.
+	it('reads a folded block-scalar description', () => {
+		const md = '---\ntitle: T\ndescription: >\n  Folded across\n  two lines.\n---\n\n# T\n\nProse.\n';
+		assert.equal(pageDescription(md), 'Folded across two lines.');
+	});
+
+	it('reads a literal block-scalar description', () => {
+		const md = '---\ntitle: T\ndescription: |\n  Literal block.\n---\n\n# T\n\nProse.\n';
+		assert.equal(pageDescription(md), 'Literal block.');
+	});
+
+	it('reads a chomped block-scalar description', () => {
+		const md = '---\ntitle: T\ndescription: >-\n  Stripped fold.\n---\n\n# T\n\nProse.\n';
+		assert.equal(pageDescription(md), 'Stripped fold.');
+	});
+
+	it('strips surrounding quotes from an inline description', () => {
+		assert.equal(pageDescription('---\ntitle: T\ndescription: "Quoted."\n---\n\n# T\n\nProse.\n'), 'Quoted.');
+	});
+
 	it('falls back to the first prose sentence, skipping the heading', () => {
 		const md = '---\ntitle: Hi\n---\n\n# Hi\n\nA pipeline is a graph. More after the stop.\n';
 		assert.equal(pageDescription(md), 'A pipeline is a graph.');
@@ -54,6 +75,13 @@ describe('stampLastUpdate', () => {
 		// title must still be inside the front matter, not stranded in the body.
 		const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(out)[1];
 		assert.match(fm, /title: Hi/);
+	});
+
+	// The guard reads the front matter only: a `last_update:` line in the body
+	// (a YAML code sample) must not cost the page its sitemap date.
+	it('stamps a page whose body merely mentions last_update', () => {
+		const md = '---\ntitle: T\n---\n\n# T\n\n```yaml\nlast_update:\n  date: 2020-01-01\n```\n';
+		assert.match(stampLastUpdate(md, D), /date: 2026-07-16/);
 	});
 
 	it('is a no-op when the date is null or a date is already declared', () => {
