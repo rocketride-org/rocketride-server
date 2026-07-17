@@ -389,15 +389,187 @@ export function autoFormatter(cell: CellComponent): HTMLElement | string {
 		return wrap;
 	}
 	if (typeof value === 'object') {
+		// No own width cap — .rr-cell-truncate ellipsizes at 100% of the CELL,
+		// so the text fills however wide the user makes the column (a fixed
+		// cap here truncated JSON far short of the column edge). Runaway
+		// column widths are contained where they arise: the popup's
+		// reveal-fit clamps its measured width (REVEAL_FIT_MAX_WIDTH).
 		const el = document.createElement('span');
 		el.className = 'rr-cell-mono rr-cell-truncate';
-		el.style.maxWidth = '260px';
 		const text = JSON.stringify(value);
 		el.textContent = text;
 		el.title = text.length > 500 ? `${text.slice(0, 500)}...` : text;
 		return el;
 	}
 	return String(value);
+}
+
+// =============================================================================
+// FORMAT OVERRIDES (header popup FORMAT section — value rendering)
+// =============================================================================
+
+/** Zero-pad a date/time part to two digits. */
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/**
+ * Stamp a zone-less ISO datetime string as UTC. The platform wire contract
+ * is that server datetimes are UTC, but JavaScript parses a zone-less
+ * datetime string ('2026-07-16T15:42:07', with or without the T) as LOCAL
+ * time — silently skewing the display by the viewer's zone offset. Strings
+ * that already carry a zone (Z or a ±hh:mm offset) and date-only strings
+ * (which the ISO spec already parses as UTC midnight) pass through.
+ *
+ * @param text - The raw wire string.
+ * @returns The string to hand to `new Date()`.
+ */
+const assumeUtc = (text: string): string => {
+	const trimmed = text.trim();
+	if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) return trimmed;
+	if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(trimmed)) return `${trimmed.replace(' ', 'T')}Z`;
+	return trimmed;
+};
+
+/**
+ * Render a 'date' column value per its {@link IColumnFormat} date/time pick.
+ * The date and time parts are independent: either alone renders just that
+ * part; both render "date time". The 12-hour clock is the default; `clock24`
+ * switches the time part to 24-hour. Values render in the viewer's LOCAL
+ * time by default (the wire carries UTC); the `utc` pick renders the UTC
+ * parts instead — including the date part, since a UTC instant near midnight
+ * falls on a different local date.
+ *
+ * The modifiers ([24HR] / [UTC]) act even WITHOUT a pattern pick: toggled
+ * alone, the override takes over the full default datetime
+ * (MM/DD/YY HH:MM:SS) — otherwise the toggle would sit dead on a column
+ * still rendered by its own formatter.
+ *
+ * @param value - The raw cell value (ISO string / epoch / Date).
+ * @param fmt - The column's format override.
+ * @returns The formatted text, or null when no date/time/modifier pick is
+ *     set or the value does not parse as a date (callers fall back to the
+ *     base render).
+ */
+export function formatDateValue(value: unknown, fmt: IColumnFormat): string | null {
+	// No pick -> not our business; unparsable -> base formatter knows best.
+	if (!fmt.dateFormat && !fmt.timeFormat && !fmt.utc && !fmt.clock24) return null;
+	if (typeof value !== 'string' && typeof value !== 'number' && !(value instanceof Date)) return null;
+	const date = value instanceof Date ? value : new Date(typeof value === 'string' ? assumeUtc(value) : value);
+	if (Number.isNaN(date.getTime())) return null;
+	// Pattern picks; a bare modifier defaults to the full datetime.
+	let dateFormat = fmt.dateFormat;
+	let timeFormat = fmt.timeFormat;
+	if (!dateFormat && !timeFormat) {
+		dateFormat = 'MM/DD/YY';
+		timeFormat = 'HH:MM:SS';
+	}
+	// One instant, two readouts: pick the UTC or the local part set whole.
+	const parts = fmt.utc
+		? {
+				year: date.getUTCFullYear(),
+				month: date.getUTCMonth() + 1,
+				day: date.getUTCDate(),
+				hours: date.getUTCHours(),
+				minutes: date.getUTCMinutes(),
+				seconds: date.getUTCSeconds(),
+		  }
+		: {
+				year: date.getFullYear(),
+				month: date.getMonth() + 1,
+				day: date.getDate(),
+				hours: date.getHours(),
+				minutes: date.getMinutes(),
+				seconds: date.getSeconds(),
+		  };
+	const out: string[] = [];
+	// Step 1: the date part (exclusive pair).
+	if (dateFormat === 'MM/YY') {
+		out.push(`${pad2(parts.month)}/${pad2(parts.year % 100)}`);
+	} else if (dateFormat === 'MM/DD/YY') {
+		out.push(`${pad2(parts.month)}/${pad2(parts.day)}/${pad2(parts.year % 100)}`);
+	}
+	// Step 2: the time part (exclusive pair), 12-hour unless clock24.
+	if (timeFormat) {
+		const minutes = pad2(parts.minutes);
+		const seconds = timeFormat === 'HH:MM:SS' ? `:${pad2(parts.seconds)}` : '';
+		if (fmt.clock24) {
+			out.push(`${pad2(parts.hours)}:${minutes}${seconds}`);
+		} else {
+			const hours12 = parts.hours % 12 === 0 ? 12 : parts.hours % 12;
+			out.push(`${hours12}:${minutes}${seconds} ${parts.hours < 12 ? 'AM' : 'PM'}`);
+		}
+	}
+	return out.join(' ');
+}
+
+/**
+ * Render a 'number' column value per its {@link IColumnFormat} number picks:
+ * fixed decimals (0-3), thousands separators, and a '$' currency prefix —
+ * each independent, composed as `-$1,234.50` (sign outside the currency).
+ *
+ * @param value - The raw cell value (number or numeric string).
+ * @param fmt - The column's format override.
+ * @returns The formatted text, or null when no number pick is set or the
+ *     value is not numeric (callers fall back to the base render).
+ */
+export function formatNumberValue(value: unknown, fmt: IColumnFormat): string | null {
+	if (fmt.decimals === undefined && !fmt.thousands && !fmt.currency) return null;
+	const num =
+		typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : Number.NaN;
+	if (Number.isNaN(num)) return null;
+	// Format the magnitude, then re-apply sign and prefix around it.
+	let text = fmt.decimals !== undefined ? Math.abs(num).toFixed(fmt.decimals) : String(Math.abs(num));
+	if (fmt.thousands) {
+		const [integer, fraction] = text.split('.');
+		text = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction !== undefined ? `.${fraction}` : '');
+	}
+	if (fmt.currency) text = `$${text}`;
+	return (num < 0 ? '-' : '') + text;
+}
+
+/** A column formatter FUNCTION (the string built-in names excluded). */
+type ColumnFormatterFn = Exclude<ColumnDefinition['formatter'], string | undefined>;
+
+/**
+ * Wrap a column's formatter with the FORMAT-override layer: on every cell
+ * render, read the grid's live format map (through the instance stash) and
+ * apply the field's picks — alignment as an inline text-align on the cell,
+ * date/number picks as replacement text — falling back to the column's own
+ * formatter (or a safe plaintext render) when no pick claims the value.
+ *
+ * @param field - The column's field (the format map key).
+ * @param base - The column's declared formatter, if any.
+ * @returns The wrapping formatter to place on the Tabulator definition.
+ */
+function wrapFormatter(field: string, base: ColumnFormatterFn | undefined): ColumnFormatterFn {
+	return (cell, formatterParams, onRendered) => {
+		const fmt = (cell.getTable() as IGridInstanceState).__rrFormat?.get(field);
+		if (fmt) {
+			// Alignment rides as inline styles; a fresh render without an
+			// override never sets them, so clearing falls back to the column
+			// default on the reformat the bridge triggers. text-align alone is
+			// NOT enough: the grid's vertAlign columnDefault makes every cell
+			// inline-flex (verified in tabulator_esm.mjs — vertAlign switches
+			// the cell to flex and horizontal position to justify-content), so
+			// both properties are set to cover flex and non-flex cells alike.
+			if (fmt.align) {
+				const el = cell.getElement();
+				el.style.textAlign = fmt.align;
+				el.style.justifyContent =
+					fmt.align === 'left' ? 'flex-start' : fmt.align === 'center' ? 'center' : 'flex-end';
+			}
+			const dateText = formatDateValue(cell.getValue(), fmt);
+			if (dateText !== null) return mutedEl(dateText);
+			const numberText = formatNumberValue(cell.getValue(), fmt);
+			if (numberText !== null) return numberText;
+		}
+		if (base) return base(cell, formatterParams, onRendered);
+		// No declared formatter: mimic Tabulator's plaintext default, but via
+		// textContent so raw values can never inject markup.
+		const value = cell.getValue();
+		const span = document.createElement('span');
+		span.textContent = value === null || value === undefined ? '' : String(value);
+		return span;
+	};
 }
 
 /** Persisted layout entry shape for one column (Tabulator columns blob). */
@@ -454,6 +626,15 @@ export function buildAutoColumns(
 // =============================================================================
 // HEADER POPUP (filter + column show/hide + reset layout)
 // =============================================================================
+
+/**
+ * Widest a column may come in at when the popup's show toggle content-fits it
+ * (`setWidth(true)` measures the loaded cells UNBOUNDED, and a JSON payload
+ * cell measures at its full serialized length). Purely the reveal's opening
+ * width — the user can drag wider, and cell text ellipsizes at the real
+ * column edge either way.
+ */
+const REVEAL_FIT_MAX_WIDTH = 480;
 
 /**
  * Filter control of one column's header popup, resolved by the DataGrid from
@@ -513,6 +694,49 @@ export interface IHeaderFilterBridge {
 }
 
 /**
+ * Display-format override of one column, edited in the header popup's FORMAT
+ * section. Every key is optional — an absent key means "the column's own
+ * default rendering". Alignment applies to any column type; the date keys
+ * only ever get set on 'date' columns and the number keys on 'number'
+ * columns (the popup renders type-matched controls).
+ */
+export interface IColumnFormat {
+	/** Cell text alignment; unset = the column's declared hozAlign. */
+	align?: 'left' | 'center' | 'right';
+	/** Date part of a 'date' column's rendering (exclusive pair). */
+	dateFormat?: 'MM/YY' | 'MM/DD/YY';
+	/** Time part of a 'date' column's rendering (exclusive pair). */
+	timeFormat?: 'HH:MM' | 'HH:MM:SS';
+	/** 24-hour clock for the time part (default 12-hour AM/PM). */
+	clock24?: boolean;
+	/**
+	 * Render the picked date/time parts in UTC. Default (unset) converts to
+	 * the viewer's LOCAL time — the platform wire contract is that server
+	 * datetimes are UTC.
+	 */
+	utc?: boolean;
+	/** Fixed decimal places of a 'number' column (exclusive 0-3). */
+	decimals?: 0 | 1 | 2 | 3;
+	/** Thousands separators on a 'number' column. */
+	thousands?: boolean;
+	/** '$' currency prefix on a 'number' column. */
+	currency?: boolean;
+}
+
+/**
+ * The DataGrid format bridge the header popup's FORMAT section drives.
+ * Unlike the filter bridge there is no pending state — format picks apply
+ * LIVE (like the column show/hide toggles): each set() merges the patch,
+ * persists the per-table format blob, and re-renders the loaded cells.
+ */
+export interface IHeaderFormatBridge {
+	/** Current override of a field (undefined when the field has none). */
+	get(field: string): IColumnFormat | undefined;
+	/** Merge a patch into a field's override; `undefined` values CLEAR keys. */
+	set(field: string, patch: Partial<IColumnFormat>): void;
+}
+
+/**
  * DataGrid-private state stashed on the Tabulator instance at build time, so
  * the header popup (built outside React) can reach the grid's callbacks.
  */
@@ -521,6 +745,8 @@ export interface IGridInstanceState extends Tabulator {
 	__rrResetLayout?: () => void;
 	/** Header-popup filter bridge ({@link IHeaderFilterBridge}). */
 	__rrHeaderFilter?: IHeaderFilterBridge;
+	/** Header-popup format bridge ({@link IHeaderFormatBridge}). */
+	__rrFormat?: IHeaderFormatBridge;
 }
 
 /**
@@ -542,9 +768,16 @@ export function normalizeColumns(columns: GridColumnDefinition[]): ColumnDefinit
 		delete rest.rrType;
 		// Step 2: exempt columns get no popup at all (no affordance rendered).
 		if (def.rrNoPopup) return rest;
-		// Step 3: an explicit caller-provided headerPopup wins untouched.
+		// Step 3: the FORMAT-override layer wraps the cell formatter (popup
+		// FORMAT section: alignment / date / number picks). String built-in
+		// formatters are left alone — none of our views use them, and they
+		// cannot be composed.
+		if (rest.field && typeof rest.formatter !== 'string') {
+			rest.formatter = wrapFormatter(rest.field, rest.formatter);
+		}
+		// Step 4: an explicit caller-provided headerPopup wins untouched.
 		if (rest.headerPopup !== undefined) return rest;
-		// Step 4: default wiring — the combined popup and Tabulator's own
+		// Step 5: default wiring — the combined popup and Tabulator's own
 		// vertical-ellipsis glyph (set explicitly for clarity; the theme's
 		// hover-reveal keys off the .tabulator-header-popup-button class).
 		return { ...rest, headerPopup: buildHeaderPopup, headerPopupIcon: '&#8942;' };
@@ -1117,14 +1350,186 @@ function buildFilterSection(
 }
 
 /**
+ * Build an MS-Office-style justification icon (four horizontal bars, the
+ * narrow ones anchored per direction) as an inline SVG in currentColor.
+ *
+ * @param dir - The alignment the icon depicts.
+ * @returns The SVG element for the button.
+ */
+function alignIcon(dir: 'left' | 'center' | 'right'): SVGElement {
+	const NS = 'http://www.w3.org/2000/svg';
+	const svg = document.createElementNS(NS, 'svg');
+	svg.setAttribute('viewBox', '0 0 12 11');
+	svg.setAttribute('width', '12');
+	svg.setAttribute('height', '11');
+	svg.setAttribute('aria-hidden', 'true');
+	// Bars alternate full / narrow; the narrow ones sit flush per direction.
+	const narrowX = dir === 'left' ? 0 : dir === 'center' ? 2 : 4;
+	const bars: [number, number][] = [[0, 12], [narrowX, 8], [0, 12], [narrowX, 8]];
+	bars.forEach(([x, width], i) => {
+		const rect = document.createElementNS(NS, 'rect');
+		rect.setAttribute('x', String(x));
+		rect.setAttribute('y', String(i * 3));
+		rect.setAttribute('width', String(width));
+		rect.setAttribute('height', '1.6');
+		rect.setAttribute('rx', '0.8');
+		rect.setAttribute('fill', 'currentColor');
+		svg.appendChild(rect);
+	});
+	return svg;
+}
+
+/**
+ * Build the popup's FORMAT section: a row of alignment buttons (all column
+ * types) plus a type-specific second row — date/time pattern picks on 'date'
+ * columns, decimals / thousands / currency picks on 'number' columns.
+ *
+ * Every pick applies LIVE through {@link IHeaderFormatBridge.set} (like the
+ * column show/hide toggles — display concerns have no Apply step): clicking
+ * an inactive option selects it (exclusive within its pair/group), clicking
+ * the active one clears it back to the column default. The popup stays open,
+ * so each click restyles the whole section from the fresh override state.
+ *
+ * @param bridge - The grid's format bridge.
+ * @param field - The opened column's field.
+ * @param mode - The column's resolved filter mode (reused as the rrType
+ *     signal: 'date' / 'number' select the second row).
+ * @returns The section element.
+ */
+function buildFormatSection(bridge: IHeaderFormatBridge, field: string, mode: HeaderFilterMode): HTMLElement {
+	const section = document.createElement('div');
+	section.className = 'rr-grid-hp-section';
+	section.appendChild(popupLabelEl('Format'));
+
+	// Live restyle pass — every option button re-derives its on/off state
+	// from the bridge after any click.
+	const refreshers: (() => void)[] = [];
+	const refresh = (): void => {
+		for (const restyle of refreshers) restyle();
+	};
+	const current = (): IColumnFormat => bridge.get(field) ?? {};
+
+	/**
+	 * One small option button.
+	 *
+	 * @param content - Text label or icon element.
+	 * @param title - Tooltip describing the pick.
+	 * @param isOn - Whether the pick is active in the current override.
+	 * @param onClick - Applies the pick's patch through the bridge.
+	 * @returns The button element.
+	 */
+	const optionBtn = (
+		content: string | SVGElement,
+		title: string,
+		isOn: () => boolean,
+		onClick: () => void,
+	): HTMLElement => {
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.className = 'rr-grid-hp-fmt-btn';
+		btn.title = title;
+		if (typeof content === 'string') btn.textContent = content;
+		else btn.appendChild(content);
+		btn.addEventListener('click', () => {
+			onClick();
+			refresh();
+		});
+		refreshers.push(() => btn.classList.toggle('rr-grid-hp-fmt-btn--on', isOn()));
+		return btn;
+	};
+
+	// Row 1: alignment (every column type). Clicking the active direction
+	// clears the override back to the column's declared alignment.
+	const alignRow = document.createElement('div');
+	alignRow.className = 'rr-grid-hp-fmt-row';
+	for (const dir of ['left', 'center', 'right'] as const) {
+		alignRow.appendChild(
+			optionBtn(alignIcon(dir), `Align ${dir}`, () => current().align === dir, () =>
+				bridge.set(field, { align: current().align === dir ? undefined : dir }),
+			),
+		);
+	}
+	section.appendChild(alignRow);
+
+	// Rows 2 + 3 on 'date' columns (user feedback 2026-07-16: date picks and
+	// time picks each get their OWN row): the date part and the time part are
+	// each an exclusive pair; 24HR is an independent clock toggle riding the
+	// time row.
+	if (mode === 'date') {
+		const dateRow = document.createElement('div');
+		dateRow.className = 'rr-grid-hp-fmt-row';
+		for (const dateFormat of ['MM/YY', 'MM/DD/YY'] as const) {
+			dateRow.appendChild(
+				optionBtn(dateFormat, `Date as ${dateFormat}`, () => current().dateFormat === dateFormat, () =>
+					bridge.set(field, { dateFormat: current().dateFormat === dateFormat ? undefined : dateFormat }),
+				),
+			);
+		}
+		section.appendChild(dateRow);
+
+		const timeRow = document.createElement('div');
+		timeRow.className = 'rr-grid-hp-fmt-row';
+		for (const timeFormat of ['HH:MM', 'HH:MM:SS'] as const) {
+			timeRow.appendChild(
+				optionBtn(timeFormat, `Time as ${timeFormat}`, () => current().timeFormat === timeFormat, () =>
+					bridge.set(field, { timeFormat: current().timeFormat === timeFormat ? undefined : timeFormat }),
+				),
+			);
+		}
+		timeRow.appendChild(
+			optionBtn('24HR', '24-hour clock', () => current().clock24 === true, () =>
+				bridge.set(field, { clock24: current().clock24 ? undefined : true }),
+			),
+		);
+		timeRow.appendChild(
+			optionBtn('UTC', 'Show in UTC (default: your local time)', () => current().utc === true, () =>
+				bridge.set(field, { utc: current().utc ? undefined : true }),
+			),
+		);
+		section.appendChild(timeRow);
+	}
+
+	// Row 2 on 'number' columns: decimals are exclusive; thousands separator
+	// and currency prefix are independent toggles.
+	if (mode === 'number') {
+		const row = document.createElement('div');
+		row.className = 'rr-grid-hp-fmt-row';
+		for (const [label, places] of [['.', 0], ['.0', 1], ['.00', 2], ['.000', 3]] as const) {
+			row.appendChild(
+				optionBtn(label, `${places} decimal place${places === 1 ? '' : 's'}`, () => current().decimals === places, () =>
+					bridge.set(field, { decimals: current().decimals === places ? undefined : places }),
+				),
+			);
+		}
+		row.appendChild(
+			optionBtn(',', 'Thousands separators', () => current().thousands === true, () =>
+				bridge.set(field, { thousands: current().thousands ? undefined : true }),
+			),
+		);
+		row.appendChild(
+			optionBtn('$', 'Currency prefix', () => current().currency === true, () =>
+				bridge.set(field, { currency: current().currency ? undefined : true }),
+			),
+		);
+		section.appendChild(row);
+	}
+
+	refresh();
+	return section;
+}
+
+/**
  * Build the per-column header popup: an Excel-style combined panel with
  * (1) a filter section for the opened column — the control follows the
  * column's declared type via {@link IHeaderFilterBridge.mode}: 'text' input,
  * 'values' / 'boolean' checklist, 'date' Start/End range, or 'number'
  * Min/Max range — edited as PENDING state and committed by the section's
- * Apply button ({@link buildFilterSection}) — (2) a show/hide toggle for
- * every titled column (live, not pending), and (3) a "Reset layout" row when
- * the grid persists its layout.
+ * Apply button ({@link buildFilterSection}) — (2) a FORMAT section of live
+ * display picks ({@link buildFormatSection}: alignment for every type,
+ * date/time patterns on 'date' columns, decimals / thousands / currency on
+ * 'number' columns) — (3) a show/hide toggle for every titled column (live,
+ * not pending) — and (4) a "Reset layout" button when the grid persists its
+ * layout.
  *
  * Wired per column by {@link normalizeColumns}; Tabulator invokes it on open
  * so the states are always current. Columns opt out with `rrNoPopup: true` in
@@ -1175,7 +1580,14 @@ export function buildHeaderPopup(
 		panel.appendChild(popupDividerEl());
 	}
 
-	// ── Section 2: column show/hide toggles ────────────────────────────────
+	// ── Section 2: format (live display picks; see buildFormatSection) ─────
+	const formatBridge = state.__rrFormat;
+	if (formatBridge && field && !(bridge && bridge.isPopupExempt(field))) {
+		panel.appendChild(buildFormatSection(formatBridge, field, mode));
+		panel.appendChild(popupDividerEl());
+	}
+
+	// ── Section 3: column show/hide toggles ────────────────────────────────
 	// One toggle row per titled, popup-participating column, inside a
 	// scroll-capped list so wide grids stay usable. Toggles apply LIVE (only
 	// the filter section is pending). `rrNoPopup` columns (actions / icon)
@@ -1193,6 +1605,12 @@ export function buildHeaderPopup(
 		if (bridge && colField && bridge.isPopupExempt(colField)) return false;
 		return (col.getDefinition().title ?? '') !== '';
 	});
+	// Alphabetical by title (user feedback 2026-07-16): the list is a lookup
+	// ("is X available?"), so dictionary order beats display order — which
+	// drifts per user as columns get dragged around and persisted.
+	titled.sort((a, b) =>
+		String(a.getDefinition().title).localeCompare(String(b.getDefinition().title), undefined, { numeric: true }),
+	);
 	for (const col of titled) {
 		const row = checkRowEl(String(col.getDefinition().title), col.isVisible(), (box) => {
 			// Last-visible guard, then toggle and restyle in place (the popup
@@ -1200,6 +1618,22 @@ export function buildHeaderPopup(
 			const visibleCount = titled.filter((c) => c.isVisible()).length;
 			if (col.isVisible() && visibleCount <= 1) return;
 			col.toggle();
+			// A newly revealed column arrives width-less, and the fitColumns
+			// layout crushes it to the 40px minimum (unreadable for UUID/date
+			// content). setWidth(true) is Tabulator's content-fit: verified in
+			// tabulator_esm.mjs 6.5.2 — reinitializeWidth(true) clears the
+			// width, measures the header and every LOADED cell, applies the
+			// max, then re-runs the column layout, which treats the new width
+			// as fixed and redistributes the rest (user choice 2026-07-16 over
+			// a platform-wide fitData* layout switch). The fit is unbounded —
+			// a JSON payload cell measures at its FULL serialized length once
+			// the formatter stopped capping its own width — so clamp the
+			// reveal; the user can still drag wider, and cells ellipsize at
+			// whatever the real column width is.
+			if (col.isVisible()) {
+				col.setWidth(true);
+				if (col.getWidth() > REVEAL_FIT_MAX_WIDTH) col.setWidth(REVEAL_FIT_MAX_WIDTH);
+			}
 			box.className = col.isVisible() ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check';
 		});
 		columnList.appendChild(row);
@@ -1207,21 +1641,27 @@ export function buildHeaderPopup(
 	columnsSection.appendChild(columnList);
 	panel.appendChild(columnsSection);
 
-	// ── Section 3: reset layout ────────────────────────────────────────────
+	// ── Section 4: reset layout ────────────────────────────────────────────
 	// Only meaningful when the grid was built with persistence; the DataGrid
 	// stashes its reset callback on the instance in that case. Rendered as a
-	// proper menu row in its own section, behind a real divider.
+	// footer-style button row — the same quiet-outline button as the filter
+	// section's Clear (user feedback 2026-07-16: a button, not a menu row) —
+	// behind a real divider.
 	const reset = state.__rrResetLayout;
 	if (reset) {
 		panel.appendChild(popupDividerEl());
 		const resetSection = document.createElement('div');
 		resetSection.className = 'rr-grid-hp-section';
-		const item = document.createElement('div');
-		item.className = 'rr-grid-hp-item';
-		item.textContent = 'Reset layout';
+		const actions = document.createElement('div');
+		actions.className = 'rr-grid-hp-actions';
+		const resetBtn = document.createElement('button');
+		resetBtn.type = 'button';
+		resetBtn.className = 'rr-grid-hp-btn';
+		resetBtn.textContent = 'Reset layout';
 		// The reset rebuilds the table, which auto-hides this popup.
-		item.addEventListener('click', () => reset());
-		resetSection.appendChild(item);
+		resetBtn.addEventListener('click', () => reset());
+		actions.appendChild(resetBtn);
+		resetSection.appendChild(actions);
 		panel.appendChild(resetSection);
 	}
 

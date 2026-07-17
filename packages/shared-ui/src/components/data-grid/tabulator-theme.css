@@ -528,11 +528,54 @@
 	border-color: var(--rr-brand);
 	color: var(--rr-fg-button);          /* on-brand text (buttonPrimarySmall) */
 }
-/* Section divider — a real full-width rule between Filter / Columns / Reset
-   (the panel has no horizontal padding, so it spans edge to edge). */
+/* Section divider — a real full-width rule between Filter / Format / Columns
+   / Reset (the panel has no horizontal padding, so it spans edge to edge). */
 .rr-grid-hp-divider {
 	border-top: 1px solid var(--rr-border);
 	margin: 4px 0;
+}
+
+/* ── Format section (alignment + type-specific display picks) ──────────────
+   Rows of small toggle buttons; wrap so the five date picks fit the panel. */
+.rr-grid-hp-fmt-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: 0 0 6px;
+}
+.rr-grid-hp-fmt-row:last-child {
+	margin-bottom: 0;
+}
+/* Option button — the hp-btn quiet outline at toggle-chip scale. */
+.rr-grid-hp-fmt-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 24px;
+	height: 22px;
+	padding: 0 6px;
+	font-size: 10.5px;                   /* chip text (below buttonSmall) */
+	font-weight: 500;
+	font-family: inherit;
+	border-radius: 5px;
+	border: 1px solid var(--rr-border);  /* outline (buttonSecondarySmall) */
+	background: var(--rr-bg-paper);      /* fill (buttonSecondarySmall) */
+	color: var(--rr-text-secondary);     /* text (buttonSecondarySmall) */
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+.rr-grid-hp-fmt-btn:hover {
+	opacity: 0.85;
+}
+/* Active pick — filled like the primary Apply so state reads at a glance. */
+.rr-grid-hp-fmt-btn--on {
+	background: var(--rr-brand);         /* fill (buttonPrimarySmall) */
+	border-color: var(--rr-brand);
+	color: var(--rr-fg-button);          /* on-brand text (buttonPrimarySmall) */
+}
+/* Alignment icons inherit the button's currentColor. */
+.rr-grid-hp-fmt-btn svg {
+	display: block;
 }
 
 /* ── Active-filter indicator ───────────────────────────────────────────────

@@ -23,16 +23,24 @@
  *    Excel-style filter section whose control follows the column's declared
  *    `rrType` (text / checklist / Yes-No / date range / number range) —
  *    edits stay pending inside the popup until its Apply commits them —
- *    plus show/hide toggles + "Reset layout"
+ *    plus a live FORMAT section (alignment on every type; date/time
+ *    patterns on 'date' columns; decimals / thousands / currency on
+ *    'number' columns; persisted with the layout), show/hide toggles, and
+ *    "Reset layout"
  *  - per-user layout persistence via {@link IDataGridPersistence}
  *  - the footer contract: footer renders only when the set spans >1 page
  *  - remote paging through `fetchPage` (DAP fetchers, not URLs)
  *  - a built-in title bar (Card-header look), ON BY DEFAULT on every grid,
- *    with a grid-local search (narrows the LOADED rows only — deliberate),
- *    a matching-row count, and an "Export..." menu (CSV / JSON) covering
- *    every row matching the current filters; `noSearch` / `noExport` opt
- *    out individually and the bar hides only when both are suppressed and
- *    no `title` is set
+ *    with a search box (REMOTE grids send the term server-side so it spans
+ *    ALL pages; LOCAL grids narrow their fully-loaded rows client-side),
+ *    a matching-row count, an "Export..." menu (CSV / JSON) covering every
+ *    row matching the current filters and search, and a "Clear" button
+ *    that appears only while a sort / search / filter deviates the view
+ *    and resets exactly those three (the header popups' "Reset layout"
+ *    additionally restores the declared column layout and deletes the
+ *    per-user persisted state); `noSearch` / `noExport` opt out
+ *    individually and the bar hides only when both are suppressed and no
+ *    `title` is set
  *
  * Data modes (mutually exclusive):
  *  - LOCAL:  pass `data` — identity change applies silently (scroll, page and
@@ -55,7 +63,15 @@ import {
 import type { Options } from 'tabulator-tables';
 import { Tabulator } from './modules';
 import { buildAutoColumns, exportRowsAsCsv, exportRowsAsJson, matchesSearch, normalizeColumns } from './defaults';
-import type { GridColumnDefinition, HeaderFilterMode, IExportColumn, IGridInstanceState, IHeaderFilterBridge } from './defaults';
+import type {
+	GridColumnDefinition,
+	HeaderFilterMode,
+	IColumnFormat,
+	IExportColumn,
+	IGridInstanceState,
+	IHeaderFilterBridge,
+	IHeaderFormatBridge,
+} from './defaults';
 import { FilterStrip } from './FilterStrip';
 import type { IGridFilterDef } from './FilterStrip';
 import type { IDataGridPersistence } from './persistence';
@@ -87,6 +103,13 @@ export interface IDataGridPageRequest {
 	 * from its Min / Max inputs (the server coerces numeric bounds).
 	 */
 	filters: Record<string, string | string[]>;
+	/**
+	 * The committed title-bar search term — present only when non-empty.
+	 * Forward it verbatim as the list_* `search` arg: the server matches it
+	 * case-insensitively across the endpoint's searchable columns, so the
+	 * search spans ALL pages (not just the loaded one).
+	 */
+	search?: string;
 }
 
 /** One remote page of rows plus the total row count across all pages. */
@@ -111,19 +134,21 @@ export interface IDataGridProps<Row extends Record<string, unknown>> {
 	 */
 	title?: string;
 	/**
-	 * Hide the title bar's grid-local search input (and its matching-row
-	 * count), which every grid shows by default. The search is grid-local ON
-	 * PURPOSE: it narrows the rows Tabulator has loaded (the current page for
-	 * remote grids), never the server query. With `noExport` also set and no
-	 * `title`, the whole bar disappears.
+	 * Hide the title bar's search input (and its matching-row count), which
+	 * every grid shows by default. REMOTE grids search server-side: the term
+	 * rides every page request as {@link IDataGridPageRequest.search}, so
+	 * matches span ALL pages and the pager pages within the results. LOCAL
+	 * grids (all rows already loaded) narrow client-side across every value.
+	 * With `noExport` also set and no `title`, the whole bar disappears.
 	 */
 	noSearch?: boolean;
 	/**
 	 * Hide the title bar's "Export..." menu (CSV / JSON), which every grid
 	 * shows by default. Exports cover EVERY row matching the current committed
-	 * filters (remote grids walk all pages), narrowed by the active grid-local
-	 * search, restricted to the visible columns in display order. With
-	 * `noSearch` also set and no `title`, the whole bar disappears.
+	 * filters AND the active search term (remote grids walk all pages with
+	 * both riding each request), restricted to the visible columns in display
+	 * order. With `noSearch` also set and no `title`, the whole bar
+	 * disappears.
 	 */
 	noExport?: boolean;
 	/**
@@ -250,21 +275,31 @@ const styles = {
 		...(afterTitle ? { marginLeft: 12 } : {}),
 	}),
 
-	// Matching-row count after the search input — the retired footer-count
-	// spec (12.5px --rr-text-secondary, same values as .tabulator-page-counter
-	// in tabulator-theme.css).
+	// Matching-row count after the search input — quiet metadata, not a
+	// heading: the weight must be reset explicitly (the bar itself is 700 and
+	// the span would inherit it) and the size sits below the footer-count's
+	// 12.5px (user feedback 2026-07-16: smaller, not bold).
 	count: {
 		marginLeft: 10,
-		fontSize: 12.5,
+		fontSize: 11.5,
+		fontWeight: 400,
 		color: 'var(--rr-text-secondary)',
 		whiteSpace: 'nowrap',
 	} as CSSProperties,
 
-	// Export dropdown anchor — pushed to the bar's right edge like Card.tsx
-	// styles.headerActions (marginLeft: 'auto'); position:relative so the
-	// menu can absolutely position below-right of the trigger button.
-	exportWrap: {
+	// Right-aligned button cluster — Reset Layout (only while the view
+	// deviates from its defaults) + the Export dropdown — pushed to the
+	// bar's right edge like Card.tsx styles.headerActions.
+	barRight: {
 		marginLeft: 'auto',
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
+	} as CSSProperties,
+
+	// Export dropdown anchor — position:relative so the menu can absolutely
+	// position below-right of the trigger button.
+	exportWrap: {
 		position: 'relative',
 	} as CSSProperties,
 
@@ -497,6 +532,8 @@ function DataGridInner<Row extends Record<string, unknown>>(
 				if (Array.isArray(value) ? value.length > 0 : value !== '') compact[key] = value;
 			}
 			committedFiltersRef.current = compact;
+			// The Reset Layout button tracks the committed (non-empty) state.
+			setFiltersActive(Object.keys(compact).length > 0);
 			// Step 2: apply — remote grids restart from page 1; local grids get
 			// the values and filter their own data.
 			if (fetchRef.current) {
@@ -511,21 +548,28 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [filterValues]);
 
-	// ── Grid-local search (title bar) ───────────────────────────────────────
-	// Deliberately CLIENT-SIDE: the predicate narrows the rows Tabulator has
-	// loaded (LOCAL mode: the whole set; REMOTE mode: the current page only),
-	// never the server query. Mechanism: Tabulator's Filter module with the
-	// default filterMode 'local' — verified in tabulator_esm.mjs that
-	// refreshFilter() only calls reloadData when filterMode is 'remote', so
-	// setFilter re-runs the local data pipeline WITHOUT an ajax reload even
-	// when paginationMode is 'remote'.
+	// ── Title-bar search ────────────────────────────────────────────────────
+	// Mode follows the grid's data mode. REMOTE: the committed term rides
+	// every fetchPage request as `search` and re-queries from page 1, so the
+	// server matches across ALL pages (its searchable string columns) and
+	// the pager pages within the results. LOCAL: all rows are already loaded,
+	// so a client-side predicate narrows them across every value. Mechanism
+	// for LOCAL: Tabulator's Filter module with the default filterMode
+	// 'local' — verified in tabulator_esm.mjs that refreshFilter() only calls
+	// reloadData when filterMode is 'remote', so setFilter re-runs the local
+	// data pipeline WITHOUT an ajax reload.
 	const [searchText, setSearchText] = useState('');
-	// Committed term, read by the installed predicate and the export path (a
-	// ref so replaceData-triggered re-filters always see the current term).
+	// Committed (trimmed) term, read by the remote request builders, the
+	// LOCAL predicate, and the export path (a ref so all of them always see
+	// the current term without rebuilding the instance).
 	const committedSearchRef = useRef('');
+	// Live mirror of the raw input for resetLayout (stashed on the Tabulator
+	// instance at build time, so it reads through a ref, not a stale closure).
+	const searchTextRef = useRef(searchText);
+	searchTextRef.current = searchText;
 	// Render mirror of "a search term is committed" — switches the title-bar
-	// count between "N rows" and "X of N rows" in step with the actual filter
-	// (NOT with the raw keystrokes, which commit 250ms later).
+	// count into its matching-rows form in step with the actual commit (NOT
+	// with the raw keystrokes, which commit 250ms later).
 	const [searchActive, setSearchActive] = useState(false);
 
 	// Commit the term 250ms after the last keystroke.
@@ -536,38 +580,64 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			return undefined;
 		}
 		const timer = setTimeout(() => {
-			committedSearchRef.current = searchText;
-			setSearchActive(searchText.trim() !== '');
-			whenBuilt((table) => {
-				// Step 1: install / clear the predicate over the loaded rows.
-				if (searchText.trim()) {
-					table.setFilter((row: Record<string, unknown>) => matchesSearch(row, committedSearchRef.current));
-				} else {
-					table.clearFilter(false);
-				}
-				// Step 2: the filter refresh is synchronous and local-only, so
-				// re-run the page clamp and the footer contract by hand. LOCAL
-				// paging recomputes max pages from the narrowed set; REMOTE
-				// paging keeps the server totals — the pager and counter then
-				// reflect the SERVER's pages while the visible rows are locally
-				// narrowed, by design.
-				clampPage();
-				syncFooter();
-			});
+			const term = searchText.trim();
+			committedSearchRef.current = term;
+			setSearchActive(term !== '');
+			if (fetchRef.current) {
+				// REMOTE: re-query from page 1 — the request builder reads the
+				// committed term and sends it server-side.
+				whenBuilt((table) => void table.setData());
+			} else {
+				whenBuilt((table) => {
+					// Step 1: install / clear the predicate over the loaded rows.
+					if (term) {
+						table.setFilter((row: Record<string, unknown>) => matchesSearch(row, committedSearchRef.current));
+					} else {
+						table.clearFilter(false);
+					}
+					// Step 2: the filter refresh is synchronous and local-only,
+					// so re-run the page clamp and the footer contract by hand
+					// (local paging recomputes max pages from the narrowed set).
+					clampPage();
+					syncFooter();
+				});
+			}
 		}, SEARCH_DEBOUNCE_MS);
 		return () => clearTimeout(timer);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [searchText]);
 
+	// ── Per-column display formats (header popup FORMAT section) ───────────
+	// Live map of field -> IColumnFormat override (alignment, date/time
+	// pattern, number decimals/separators). The popup edits it through the
+	// __rrFormat bridge; the wrapping cell formatters (normalizeColumns) read
+	// it at render time through the instance stash. Persisted under the
+	// RR-private 'format' blob so Reset layout's clear() wipes it with the
+	// rest of the layout while the Clear button leaves it alone.
+	const formatsRef = useRef<Record<string, IColumnFormat>>({});
+
+	// ── Clear button (title bar) ────────────────────────────────────────────
+	// Render mirrors of "the grid deviates from its default DATA view": an
+	// active sort, a committed search, or any committed filter makes the bar
+	// show a Clear button (resets those three; the layout stays). Sort is
+	// tracked from the remote request builder (authoritative for remote
+	// grids — every sort change reloads) and the 'dataSorted' event (local
+	// pipeline); filters from the same debounced commit the fetchers read.
+	const [sortActive, setSortActive] = useState(false);
+	const [filtersActive, setFiltersActive] = useState(false);
+
 	// ── Matching-row count (title bar) ──────────────────────────────────────
 	// The "N" of the count: remote grids capture the server total from the
-	// last fetchPage result (updated in the ajaxRequestFunc .then); local
-	// grids read data.length directly at render. Null until the first load.
+	// last fetchPage result (updated in the ajaxRequestFunc .then — with a
+	// search active that total already reflects it, since the term rides the
+	// request); local grids read data.length directly at render. Null until
+	// the first load.
 	const [totalRows, setTotalRows] = useState<number | null>(null);
-	// The "X" of "X of N rows": Tabulator's active (post-search) row count,
-	// refreshed on the 'dataFiltered' event — verified in tabulator_esm.mjs
-	// that the Filter module dispatches it with the post-filter row set on
-	// every local pipeline refresh, so the count tracks the search predicate.
+	// The "X" of the LOCAL "X of N rows": Tabulator's active (post-predicate)
+	// row count, refreshed on the 'dataFiltered' event — verified in
+	// tabulator_esm.mjs that the Filter module dispatches it with the
+	// post-filter row set on every local pipeline refresh, so the count
+	// tracks the search predicate.
 	const [activeCount, setActiveCount] = useState<number | null>(null);
 
 	// ── Export (CSV / JSON of every matching row) ───────────────────────────
@@ -623,12 +693,13 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	};
 
 	/**
-	 * Gather EVERY row matching the grid's current filters (not just the
-	 * loaded page). LOCAL mode starts from the current `data` prop (which
-	 * already reflects the view's strip filtering); REMOTE mode walks all
-	 * pages through `fetchPage` with the committed filters and current sort,
-	 * up to {@link EXPORT_ROW_CAP}. Both modes then apply the active
-	 * grid-local search predicate so the export matches what the user sees.
+	 * Gather EVERY row matching the grid's current filters and search (not
+	 * just the loaded page). LOCAL mode starts from the current `data` prop
+	 * (which already reflects the view's strip filtering) and applies the
+	 * client-side search predicate. REMOTE mode walks all pages through
+	 * `fetchPage` with the committed filters, search term, and current sort
+	 * riding each request — the server narrows, so no client re-filter (its
+	 * match rules differ) — up to {@link EXPORT_ROW_CAP}.
 	 *
 	 * @returns The matching rows plus whether the cap truncated the set.
 	 */
@@ -637,11 +708,15 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		let partial = false;
 		const fetchPageFn = fetchRef.current;
 		if (!fetchPageFn) {
-			// LOCAL: the data prop is the full (strip-filtered) set already.
+			// LOCAL: the data prop is the full (strip-filtered) set already;
+			// the active search predicate narrows it like the grid does.
 			rows = (dataRef.current ?? []) as Record<string, unknown>[];
+			const term = committedSearchRef.current;
+			if (term) rows = rows.filter((row) => matchesSearch(row, term));
 		} else {
-			// REMOTE: mirror what the grid itself sends — committed filters
-			// always; the current sorters only when the grid sorts remotely.
+			// REMOTE: mirror what the grid itself sends — committed filters and
+			// search always; the current sorters only when the grid sorts
+			// remotely.
 			const sort = remoteSort && tableRef.current && builtRef.current
 				? tableRef.current.getSorters().map((sorter) => ({ field: sorter.field, dir: sorter.dir }))
 				: [];
@@ -655,6 +730,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 					size: EXPORT_PAGE_SIZE,
 					sort,
 					filters: committedFiltersRef.current,
+					...(committedSearchRef.current ? { search: committedSearchRef.current } : {}),
 				});
 				total = result.total;
 				rows.push(...(result.rows as Record<string, unknown>[]));
@@ -668,9 +744,6 @@ function DataGridInner<Row extends Record<string, unknown>>(
 				console.warn(`DataGrid export: capped at ${rows.length} of ${total} matching rows; exporting what was fetched.`);
 			}
 		}
-		// Both modes: the active grid-local search narrows the export too.
-		const term = committedSearchRef.current;
-		if (term.trim()) rows = rows.filter((row) => matchesSearch(row, term));
 		return { rows, partial };
 	};
 
@@ -866,26 +939,36 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	};
 
 	/**
-	 * The Reset layout action (also reachable from the header popup): returns
-	 * the grid to its declared defaults COMPLETELY — persisted layout wiped,
-	 * sort dropped (it dies with the torn-down instance), every filter
-	 * cleared (strip + header popups: raw values, typeahead labels, AND the
-	 * committed projection), and the grid-local search emptied — then
-	 * rebuilds. The fresh instance's own initial load re-queries page 1 with
-	 * the now-empty filters, and tableBuilt's syncFilterIndicators clears
-	 * every header dot from the empty committed record.
+	 * Shared reset mechanics behind the title bar's Clear button and the
+	 * header popups' Reset layout row: clears every DATA-VIEW deviation —
+	 * sort (it dies with the torn-down instance), every filter (strip +
+	 * header popups: raw values, typeahead labels, AND the committed
+	 * projection), and the search — then rebuilds. The fresh instance's own
+	 * initial load re-queries page 1 with the now-empty filters, and
+	 * tableBuilt's syncFilterIndicators clears every header dot from the
+	 * empty committed record.
+	 *
+	 * @param wipeLayout - true (Reset layout) ALSO deletes the table's
+	 *     persisted per-user state, so the rebuild restores the declared
+	 *     column set / widths / order / page size; false (Clear) leaves the
+	 *     layout and its persisted state untouched — only the persisted sort
+	 *     blob is emptied, so the rebuilt instance does not restore the very
+	 *     sort it just cleared.
 	 */
-	const resetLayout = (): void => {
-		// Step 1: re-arm the FILTER debounce guard before the state write —
+	const performReset = (wipeLayout: boolean): void => {
+		// Step 1: re-arm the debounce guards before the state writes —
 		// setFilterValues({}) always changes identity, so its effect always
 		// fires, and unguarded it would re-commit 300ms later and issue a
 		// redundant second fetch on top of the rebuild's own initial load.
-		// The SEARCH guard is deliberately NOT re-armed: setSearchText('')
-		// bails out entirely when the search was already empty (primitive
-		// state), so an armed guard could survive and swallow the user's next
-		// real commit; when it does fire, its delayed commit is a harmless
-		// local-only clearFilter on the fresh instance — never a fetch.
+		// The SEARCH guard is re-armed only when there is text to clear:
+		// setSearchText('') bails out entirely when the search was already
+		// empty (primitive state — the effect never fires), so an
+		// unconditionally armed guard could survive and swallow the user's
+		// next real commit; when text IS cleared the effect fires exactly
+		// once, and unguarded its delayed commit would re-query (remote
+		// grids send the search server-side) on top of the rebuild's load.
 		filterInitRef.current = true;
+		if (searchTextRef.current !== '') searchInitRef.current = true;
 		// Step 2: clear every filter surface — raw control values, typeahead
 		// labels, and the committed projection the fetchers read.
 		setFilterValues({});
@@ -895,17 +978,43 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		// them the cleared values now, since the guarded debounce won't.
 		if (!fetchRef.current) filtersChangeRef.current?.({});
 		// Step 3: clear the grid-local search (input, committed term, and the
-		// count-mode flag). The predicate itself dies with the instance.
+		// count-mode flag). The predicate itself dies with the instance, as
+		// does the sort — drop the Clear button's signals with them.
 		setSearchText('');
 		committedSearchRef.current = '';
 		setSearchActive(false);
-		// Step 4: wipe the persisted layout, then rebuild from primaries (the
-		// fresh instance re-queries page 1 with the now-empty filters, and
-		// tableBuilt's syncFilterIndicators clears every header dot).
-		if (tableId) persistenceRef.current?.clear(tableId);
+		setSortActive(false);
+		setFiltersActive(false);
+		// Step 4: persisted state — Reset layout deletes the table's whole
+		// per-user entry; Clear only EMPTIES the sort blob (a write, not a
+		// clear, so persisted columns / widths / page size survive the
+		// rebuild) — then rebuild (the fresh instance re-queries page 1 with
+		// the now-empty filters, and tableBuilt's syncFilterIndicators clears
+		// every header dot).
+		if (tableId) {
+			if (wipeLayout) persistenceRef.current?.clear(tableId);
+			else persistenceRef.current?.write(tableId, 'sort', []);
+		}
+		// Display formats are LAYOUT state: Reset layout drops them (in-memory
+		// too, covering non-persisted grids — persisted ones also re-seed {}
+		// from the cleared store); Clear leaves them untouched.
+		if (wipeLayout) formatsRef.current = {};
 		builtRef.current = false;
 		setEpoch((e) => e + 1);
 	};
+
+	/**
+	 * The title bar's Clear action: back to the default DATA view — filters,
+	 * sort, and search — keeping the user's column layout as it is.
+	 */
+	const clearView = (): void => performReset(false);
+
+	/**
+	 * The header popups' Reset layout action: everything Clear does PLUS the
+	 * column layout — the per-user persisted state is deleted and the rebuild
+	 * restores the declared defaults (columns, widths, order, page size).
+	 */
+	const resetLayout = (): void => performReset(true);
 
 	// ── Build / destroy ─────────────────────────────────────────────────────
 	useEffect(() => {
@@ -914,6 +1023,17 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		autoKeysRef.current = new Set();
 		const remote = !!fetchRef.current;
 		const persist = !!(tableId && persistenceRef.current);
+
+		// Seed the display-format map from its persisted blob (Reset layout's
+		// clear() deleted it -> {} -> declared rendering; Clear's sort-only
+		// write left it alone -> the user's formats survive the rebuild).
+		if (persist) {
+			const storedFormats = persistenceRef.current!.read(tableId!, 'format');
+			formatsRef.current =
+				storedFormats && typeof storedFormats === 'object'
+					? { ...(storedFormats as Record<string, IColumnFormat>) }
+					: {};
+		}
 
 		// Column defaults: shared layout behavior only. The header popup
 		// (filter + column visibility + reset) is wired PER COLUMN by
@@ -968,8 +1088,18 @@ function DataGridInner<Row extends Record<string, unknown>>(
 							const page = typeof params.page === 'number' ? params.page : 1;
 							const size = typeof params.size === 'number' ? params.size : pageSizes[0];
 							const sort = (params.sort ?? params.sorters ?? []) as { field: string; dir: 'asc' | 'desc' }[];
-							// Committed filter-strip values ride along with every request.
-							return fetchRef.current!({ page, size, sort, filters: committedFiltersRef.current }).then((result) => {
+							// Every sort change reloads remotely, so the request's
+							// sorters are the authoritative active-sort signal.
+							setSortActive(sort.length > 0);
+							// Committed filters AND the committed search term ride
+							// along with every request (search only when non-empty).
+							return fetchRef.current!({
+								page,
+								size,
+								sort,
+								filters: committedFiltersRef.current,
+								...(committedSearchRef.current ? { search: committedSearchRef.current } : {}),
+							}).then((result) => {
 								// The rows are the shape: derive addable columns.
 								maybeExtendColumns(result.rows as Record<string, unknown>[]);
 								// The server total feeds the title bar's row count.
@@ -988,9 +1118,19 @@ function DataGridInner<Row extends Record<string, unknown>>(
 						persistence: { sort: true, columns: ['width', 'visible'], page: { size: true, page: false } },
 						persistenceID: tableId,
 						persistenceMode: true,
-						persistenceReaderFunc: (id: string, type: string) => persistenceRef.current?.read(id, type) ?? false,
-						persistenceWriterFunc: (id: string, type: string, blob: unknown) =>
-							persistenceRef.current?.write(id, type, blob),
+						// Tabulator PREFIXES persistenceID before handing it to the
+						// reader/writer (verified in tabulator_esm.mjs 6.5.2:
+						// this.id = "tabulator-" + id), which silently forked the
+						// store keys: Tabulator saved/restored under the prefixed
+						// key while the grid's own paths (Clear's empty-sort write,
+						// Reset layout's clear, auto-column width re-application)
+						// targeted the raw tableId — so Clear could never empty the
+						// sort Tabulator then restored. Ignore Tabulator's id and
+						// key EVERYTHING by the raw tableId.
+						persistenceReaderFunc: (_id: string, type: string) =>
+							persistenceRef.current?.read(tableId!, type) ?? false,
+						persistenceWriterFunc: (_id: string, type: string, blob: unknown) =>
+							persistenceRef.current?.write(tableId!, type, blob),
 				  }
 				: {}),
 			...options,
@@ -1064,6 +1204,35 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		};
 		(table as IGridInstanceState).__rrHeaderFilter = bridge;
 
+		// Header-popup FORMAT bridge: live per-column display picks. Each set()
+		// merges the patch (undefined values CLEAR keys), persists the map, and
+		// reformats the loaded rows in place so every cell re-runs its wrapped
+		// formatter. Deliberately NOT redraw(true): a force redraw re-measures
+		// column widths against the PRE-format cell content and clobbers
+		// user-set widths — a format change must never move the columns.
+		const formatBridge: IHeaderFormatBridge = {
+			get: (field) => formatsRef.current[field],
+			set: (field, patch) => {
+				// Step 1: merge, dropping keys the patch explicitly cleared.
+				const merged: IColumnFormat = { ...formatsRef.current[field], ...patch };
+				for (const key of Object.keys(merged) as (keyof IColumnFormat)[]) {
+					if (merged[key] === undefined) delete merged[key];
+				}
+				// Step 2: an emptied override disappears from the map entirely.
+				if (Object.keys(merged).length === 0) delete formatsRef.current[field];
+				else formatsRef.current[field] = merged;
+				// Step 3: persist (RR-private blob type) and re-render in place.
+				// row.reformat() rebuilds each visible row's cells (verified in
+				// tabulator_esm.mjs: reinitialize -> initialize(true), rows off
+				// the virtual window re-render lazily on scroll) — widths stay.
+				if (tableId) persistenceRef.current?.write(tableId, 'format', { ...formatsRef.current });
+				whenBuilt((t) => {
+					for (const row of t.getRows()) row.reformat();
+				});
+			},
+		};
+		(table as IGridInstanceState).__rrFormat = formatBridge;
+
 		table.on('tableBuilt', () => {
 			builtRef.current = true;
 			// Flush calls parked while Tabulator was still building.
@@ -1081,6 +1250,12 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		});
 		table.on('dataProcessed', syncFooter);
 		table.on('pageLoaded', syncFooter);
+		// LOCAL grids sort in the data pipeline (no request to observe), so
+		// the active-sort signal for the Reset Layout button comes from the
+		// 'dataSorted' event, which carries the current sorter list.
+		table.on('dataSorted', (sorters) => {
+			setSortActive(sorters.length > 0);
+		});
 		// Track the active (post grid-local-search) row count for the title
 		// bar's "X of N rows" readout. The Filter module dispatches
 		// 'dataFiltered' with the post-filter set on every local pipeline
@@ -1163,18 +1338,29 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	const showExport = noExport !== true;
 	const showBar = hasTitle || showSearch || showExport;
 	const hasStrip = !!filters && filters.length > 0;
+	// Clear renders only while something deviates the DATA view from its
+	// defaults — an active sort, a committed search, or a committed filter.
+	const clearVisible = sortActive || searchActive || filtersActive;
 
-	// Matching-row count: N is the full set size (remote: server total from
-	// the last fetchPage; local: the data prop length); X is Tabulator's
-	// active row count while the grid-local search narrows the loaded rows.
-	// Null N (remote grid before its first page resolves) renders no count.
+	// Matching-row count. LOCAL grids know both numbers — the data prop
+	// length (N) and Tabulator's post-predicate active count (X) — so an
+	// active search reads "X of N rows". REMOTE grids send the search
+	// server-side, so the captured server total IS the match count and an
+	// active search reads "N matching rows" (the unsearched baseline isn't
+	// re-queried just for the label). Null total (remote grid before its
+	// first page resolves) renders no count.
 	const totalCount = data ? data.length : totalRows;
-	const countText =
-		totalCount === null
-			? null
-			: searchActive && activeCount !== null
-				? `${activeCount} of ${totalCount} row${totalCount === 1 ? '' : 's'}`
-				: `${totalCount} row${totalCount === 1 ? '' : 's'}`;
+	let countText: string | null = null;
+	if (totalCount !== null) {
+		const noun = `row${totalCount === 1 ? '' : 's'}`;
+		if (!searchActive) {
+			countText = `${totalCount} ${noun}`;
+		} else if (fetchPage) {
+			countText = `${totalCount} matching ${noun}`;
+		} else {
+			countText = activeCount !== null ? `${activeCount} of ${totalCount} ${noun}` : `${totalCount} ${noun}`;
+		}
+	}
 
 	// With a title bar or a filter strip, the pieces stack inside a wrapper;
 	// the bare-container form is preserved otherwise (no layout change for
@@ -1210,28 +1396,41 @@ function DataGridInner<Row extends Record<string, unknown>>(
 					)}
 					{/* Matching-row count right after the search input. */}
 					{showSearch && countText !== null && <span style={styles.count}>{countText}</span>}
-					{showExport && (
-						<div ref={exportWrapRef} style={styles.exportWrap}>
-							{/* Trigger stays enabled during a walk so the menu can be
-							    reopened — the format rows below show the disabled state. */}
-							<Button variant="ghost" small onClick={() => setExportMenuOpen((openNow) => !openNow)}>
-								Export...
-							</Button>
-							{exportMenuOpen && (
-								<div style={styles.exportMenu} role="menu">
-									{(['csv', 'json'] as const).map((format) => (
-										<div
-											key={format}
-											role="menuitem"
-											aria-disabled={exporting}
-											style={styles.exportItem(exportHover === format, exporting)}
-											onMouseEnter={() => setExportHover(format)}
-											onMouseLeave={() => setExportHover((current) => (current === format ? null : current))}
-											onClick={() => handleExportSelect(format)}
-										>
-											{format === 'csv' ? 'CSV' : 'JSON'}
+					{(showExport || clearVisible) && (
+						<div style={styles.barRight}>
+							{/* Clear appears only while a sort, search, or filter
+							    deviates the view — it resets those three and leaves
+							    the column layout alone (the header popups' Reset
+							    layout is the one that also restores the layout). */}
+							{clearVisible && (
+								<Button variant="ghost" small onClick={clearView}>
+									Clear
+								</Button>
+							)}
+							{showExport && (
+								<div ref={exportWrapRef} style={styles.exportWrap}>
+									{/* Trigger stays enabled during a walk so the menu can be
+									    reopened — the format rows below show the disabled state. */}
+									<Button variant="ghost" small onClick={() => setExportMenuOpen((openNow) => !openNow)}>
+										Export...
+									</Button>
+									{exportMenuOpen && (
+										<div style={styles.exportMenu} role="menu">
+											{(['csv', 'json'] as const).map((format) => (
+												<div
+													key={format}
+													role="menuitem"
+													aria-disabled={exporting}
+													style={styles.exportItem(exportHover === format, exporting)}
+													onMouseEnter={() => setExportHover(format)}
+													onMouseLeave={() => setExportHover((current) => (current === format ? null : current))}
+													onClick={() => handleExportSelect(format)}
+												>
+													{format === 'csv' ? 'CSV' : 'JSON'}
+												</div>
+											))}
 										</div>
-									))}
+									)}
 								</div>
 							)}
 						</div>
