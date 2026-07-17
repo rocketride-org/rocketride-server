@@ -222,8 +222,9 @@ const redirects: RedirectItem[] = [
     ]
   },
   {
-    "to": "/nodes/db_neo4j",
+    "to": "/nodes/graph_neo4j",
     "from": [
+      "/nodes/db_neo4j",
       "/database/neo4j",
       "/database/neo4j/neo4j"
     ]

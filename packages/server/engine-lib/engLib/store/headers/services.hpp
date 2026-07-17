@@ -30,7 +30,7 @@ namespace engine::store {
 //-------------------------------------------------------------------------
 class IServices {
 public:
-    _const int VERSION = 1;
+    _const int VERSION = 2;
 
     //-----------------------------------------------------------------
     /// @details

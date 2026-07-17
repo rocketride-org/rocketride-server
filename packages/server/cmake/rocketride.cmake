@@ -78,15 +78,25 @@ function(rocketride_set_common_target_options target)
             if(ROCKETRIDE_PLAT_LIN AND "${CMAKE_BUILD_TYPE}" MATCHES "Release")
                 set(breakpad_bin_dump_syms "${VCPKG_INSTALLED_TRIPLET_DIR}/bin/dump_syms")
                 if(NOT EXISTS ${breakpad_bin_dump_syms})
-                    message(FATAL_ERROR "Breakpad's dump_syms tool not found at expected path: ${breakpad_bin_dump_syms}")
-                endif()
+                    if(ROCKETRIDE_REQUIRE_BREAKPAD_SYMBOLS)
+                        message(FATAL_ERROR "Breakpad's dump_syms tool not found at expected path: ${breakpad_bin_dump_syms}")
+                    endif()
+                    message(WARNING "Breakpad's dump_syms tool not found at ${breakpad_bin_dump_syms}; building ${TARGET_NAME} without Breakpad symbols")
+                else()
+                    rocketride_msg("Breakpad's dump_syms tool found at ${breakpad_bin_dump_syms}")
 
-                rocketride_msg("Breakpad's dump_syms tool found at ${breakpad_bin_dump_syms}")
-                add_custom_command(TARGET ${target} POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E env bash -c "${breakpad_bin_dump_syms} ${TARGET_DEBUG_FILE} > ${TARGET_DEBUG_SYMS_FILE}"
-                    COMMENT "Dumping Breakpad symbols from ${TARGET_NAME}(${TARGET_DEBUG_SYMS_FILE})"
-                    VERBATIM
-                )
+                    set(dump_syms_cmd "${breakpad_bin_dump_syms} ${TARGET_DEBUG_FILE} > ${TARGET_DEBUG_SYMS_FILE}")
+                    if(NOT ROCKETRIDE_REQUIRE_BREAKPAD_SYMBOLS)
+                        # Discard the truncated output so nothing downstream mistakes it for real symbols.
+                        string(APPEND dump_syms_cmd " || { rm -f ${TARGET_DEBUG_SYMS_FILE}; echo 'WARNING: dump_syms failed for ${TARGET_NAME}; continuing without Breakpad symbols' >&2; }")
+                    endif()
+
+                    add_custom_command(TARGET ${target} POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E env bash -c "${dump_syms_cmd}"
+                        COMMENT "Dumping Breakpad symbols from ${TARGET_NAME}(${TARGET_DEBUG_SYMS_FILE})"
+                        VERBATIM
+                    )
+                endif()
             endif()
         endif()
     endif()

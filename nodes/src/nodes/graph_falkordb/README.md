@@ -1,17 +1,26 @@
-# tool_falkordb
+# graph_falkordb
 
-A RocketRide tool node that exposes a FalkorDB graph database to an AI agent.
-
-> **Experimental.** This node is marked experimental and its surface may change.
+A RocketRide graph database node for [FalkorDB](https://www.falkordb.com).
 
 ## What it does
 
-Lets an agent query a [FalkorDB](https://www.falkordb.com) graph database with Cypher. The
-agent can run queries, list the graphs on the server, and inspect a graph's schema (labels,
-relationship types, and property keys) to discover the data model before querying.
+Queries a FalkorDB graph in two ways, and you can use either or both:
+
+- **Wired into a pipeline** — connect it to a `questions` lane like any other database. A
+  natural-language question is translated to Cypher by the LLM, validated against the live graph
+  with `EXPLAIN` (and repaired if the server rejects it), executed, and the result is emitted on
+  the `text`, `table` and `answers` lanes.
+- **Bound to an agent as a tool** — the agent gets `get_data` (ask in plain language),
+  `query` (run Cypher it wrote itself), `get_schema`, `get_query`, `list_graphs` and `dialect`.
+
+It derives from `ai.common.graph.GraphInstanceBase`, the base class shared by every graph
+database node: the lane handling, the natural-language-to-Cypher loop and the common tools live
+there, so this node only implements what is specific to FalkorDB — the Redis-protocol client,
+multi-graph selection, and server-side read-only execution. (`graph_neo4j` derives from the same
+base.)
 
 Queries are **read-only by default**: they run through `GRAPH.RO_QUERY`, so the FalkorDB server
-itself rejects any write clause (`CREATE`/`MERGE`/`SET`/`DELETE`), the restriction is enforced
+itself rejects any write clause (`CREATE`/`MERGE`/`SET`/`DELETE`) — the restriction is enforced
 server-side, not by client-side parsing. Turn on **Allow Writes** to let the agent mutate the
 graph.
 
@@ -32,8 +41,12 @@ agent's context.
 | `password` | string | Default empty. Password for the FalkorDB instance. Leave empty for no auth. |
 | `tls` | boolean | Default false. Connect with TLS (for FalkorDB Cloud TLS endpoints). |
 | `graph` | string | Default `agent`. Graph queried when the agent does not pass one explicitly. |
-| `allow_writes` | boolean | Default false. Permit `CREATE`/`MERGE`/`SET`/`DELETE`. When off, queries run via `GRAPH.RO_QUERY` and the server rejects write clauses. |
+| `db_description` | string | Default empty. What this graph holds, in your own words. Given to the LLM so it writes better Cypher. |
+| `allow_writes` | boolean | Default false. Permit `CREATE`/`MERGE`/`SET`/`DELETE` in `query`. When off, queries run via `GRAPH.RO_QUERY` and the server rejects write clauses. |
+| `allow_execute` | boolean | Default false. Enable the `execute` tool, which runs raw Cypher with no LLM translation and no read-only gate. |
+| `max_attempts` | integer | Default 5 (1–10). How many times a generated query is repaired and re-validated with `EXPLAIN` before giving up. |
 | `max_rows` | integer | Default 250 (1–25000). Upper cap on rows returned to the agent per query. |
+| `max_execute_rows` | integer | Default 25000 (1–25000). Upper cap on rows returned by the `execute` tool. |
 | `query_timeout_ms` | integer | Default 30000 (100–600000). Server-side timeout for a single query. |
 
 ---
@@ -42,9 +55,17 @@ agent's context.
 
 | Tool | Description |
 |---|---|
-| `query` | Run a Cypher query against a graph and return rows. |
+| `get_data` | Describe the data you want in plain language; the node writes the Cypher, runs it, and returns rows. |
+| `query` | Run a Cypher query you wrote yourself against a graph. |
+| `get_query` | Translate a question into Cypher **without** executing it. |
+| `get_schema` | Return the graph's node labels with their properties, and the relationship types connecting them. |
 | `list_graphs` | List the graph names that exist on this FalkorDB instance. |
-| `get_schema` | Return a graph's node labels, relationship types, and property keys. |
+| `execute` | Run raw Cypher with writes allowed. Disabled unless `allow_execute` is on. |
+| `dialect` | Return `falkordb`, so an SDK caller can tell it is talking to a graph database. |
+
+`get_data`, `get_query`, `get_schema`, `execute` and `dialect` come from the shared graph base
+class, so every graph node exposes them identically. `query` and `list_graphs` are specific to
+FalkorDB, which hosts many graphs on one server.
 
 ### query
 
@@ -65,12 +86,10 @@ No parameters. Returns `graphs` (or `error` on failure).
 
 ### get_schema
 
-| Parameter | Required | Description |
-|---|---|---|
-| `graph` | no | Graph to inspect. Defaults to the graph configured on the node. |
-
-Returns `labels`, `relationship_types`, and `property_keys` (or `error` on failure). Useful when
-a query returns unexpected results or the agent needs to discover the data model.
+No parameters. Returns `labels`, `nodes` (each label with its property names and types) and
+`relationships` (each type with its start and end labels), reflected from the graph when the
+pipeline starts. Useful when a query returns unexpected results or the agent needs to discover
+the data model.
 
 ---
 
@@ -99,7 +118,7 @@ Point the node at `localhost:6379` and ask the agent to `MATCH` away, or to `CRE
 
 ```bash
 # Unit tests (mocked FalkorDB client — no server or network needed)
-pytest nodes/test/test_tool_falkordb.py -v
+pytest nodes/test/test_graph_falkordb.py -v
 ```
 
 ---

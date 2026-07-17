@@ -1,10 +1,12 @@
-# db_neo4j
+# graph_neo4j
 
-A RocketRide database and tool node that answers natural-language questions against a Neo4J graph database by translating them to Cypher with a connected LLM.
+A RocketRide graph and tool node that answers natural-language questions against a Neo4J graph database by translating them to Cypher with a connected LLM.
 
 ## What it does
 
-Connects to a Neo4J instance over the Bolt protocol using the official **neo4j Python driver** and plays two roles. As a **pipeline node**, it receives natural-language questions on the `questions` lane, asks the connected LLM to generate a Cypher query, executes it against the graph, and emits results downstream on `table`, `text`, and `answers`. As a **tool node**, it exposes `get_data`, `get_schema`, and `get_cypher` directly to an agent. Designed for knowledge graph retrieval, entity linking, and graph-based RAG workflows.
+Connects to a Neo4J instance over the Bolt protocol using the official **neo4j Python driver** and plays two roles. As a **pipeline node**, it receives natural-language questions on the `questions` lane, asks the connected LLM to generate a Cypher query, executes it against the graph, and emits results downstream on `table`, `text`, and `answers`. As a **tool node**, it exposes `get_data`, `get_query`, `get_schema`, `execute`, and `dialect` to an agent, plus a deprecated `get_cypher` alias for `get_query` kept for agents written against the previous tool surface. Designed for knowledge graph retrieval, entity linking, and graph-based RAG workflows.
+
+It derives from `ai.common.graph.GraphInstanceBase`, the base class shared by every graph database node (also used by `graph_falkordb`): the lane handling, the natural-language-to-Cypher loop and the common tools live there, so this node only implements what is specific to Neo4J — the Bolt driver, READ access-mode sessions, and schema reflection.
 
 The graph schema (node labels with property types, and relationship types with their start/end labels) is reflected once at pipeline start using `db.schema.nodeTypeProperties()` and `db.schema.visualization()` (falling back to `db.labels()` and `db.relationshipTypes()` on older servers) and included in every LLM prompt so Cypher is generated against the real graph structure.
 
@@ -28,7 +30,7 @@ The node is **read-only by design**: every generated or supplied Cypher statemen
 |---------|-----------|-------------|
 | `questions` | `table`, `text`, `answers` | Translate question to Cypher, execute, emit results on each connected lane |
 
-For a normal question, results are emitted as a markdown table on `table` and `answers`, and as plain text on `text`. If the LLM judges the question unrelated to the graph, its text reply is forwarded in place of a query result.
+For a normal question, results are emitted as a markdown table on `table` and `answers`, and as plain text on `text`. If the LLM judges the question unrelated to the graph, its text reply is forwarded in place of a query result. Rows read on this lane are capped at 25,000 so a broad query cannot exhaust worker memory.
 
 Two special question types are handled on the `questions` lane:
 
@@ -115,16 +117,16 @@ Connectivity and authentication are verified at pipeline start with `verify_conn
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `neo4jdb.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly. | `false` |
-| `neo4jdb.auth_method` | `string` | **Authentication** | `"userpass"` |
-| `neo4jdb.database` | `string` | **Database name**<br/>Name of the Neo4J database to connect to. Use 'neo4j' for the default database. | `"neo4j"` |
-| `neo4jdb.db_description` | `string` | **Graph description**<br/>What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries. | `""` |
-| `neo4jdb.max_attempts` | `integer` | **Max validation attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query | `5` |
-| `neo4jdb.password` | `string` | **Password**<br/>Password to authenticate with the Neo4J instance. |  |
-| `neo4jdb.profile` | `string` |  | `"default"` |
-| `neo4jdb.token` | `string` | **Bearer token**<br/>Bearer token for token-based authentication (e.g. Neo4J Aura cloud). |  |
-| `neo4jdb.uri` | `string` | **Connection URI**<br/>Bolt URI for the Neo4J instance. Use neo4j:// or bolt:// for plaintext, neo4j+s:// or bolt+s:// for TLS (e.g. Neo4J Aura cloud) | `"neo4j://localhost:7687"` |
-| `neo4jdb.user` | `string` | **User**<br/>Username to authenticate with the Neo4J instance. | `"neo4j"` |
+| `graph_neo4j.allow_execute` | `boolean` | **Allow direct query execution**<br/>Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly. | `false` |
+| `graph_neo4j.auth_method` | `string` | **Authentication** | `"userpass"` |
+| `graph_neo4j.database` | `string` | **Database name**<br/>Name of the Neo4J database to connect to. Use 'neo4j' for the default database. | `"neo4j"` |
+| `graph_neo4j.db_description` | `string` | **Graph description**<br/>What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries. | `""` |
+| `graph_neo4j.max_attempts` | `integer` | **Max validation attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query | `5` |
+| `graph_neo4j.password` | `string` | **Password**<br/>Password to authenticate with the Neo4J instance. |  |
+| `graph_neo4j.profile` | `string` |  | `"default"` |
+| `graph_neo4j.token` | `string` | **Bearer token**<br/>Bearer token for token-based authentication (e.g. Neo4J Aura cloud). |  |
+| `graph_neo4j.uri` | `string` | **Connection URI**<br/>Bolt URI for the Neo4J instance. Use neo4j:// or bolt:// for plaintext, neo4j+s:// or bolt+s:// for TLS (e.g. Neo4J Aura cloud) | `"neo4j://localhost:7687"` |
+| `graph_neo4j.user` | `string` | **User**<br/>Username to authenticate with the Neo4J instance. | `"neo4j"` |
 
 ## Dependencies
 
@@ -132,5 +134,5 @@ Connectivity and authentication are verified at pipeline start with `verify_conn
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/db_neo4j)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/graph_neo4j)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

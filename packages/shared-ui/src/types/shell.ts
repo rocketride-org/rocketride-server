@@ -34,7 +34,7 @@
 
 import type { ConnectResult, DAPMessage } from 'rocketride';
 import type { ConnectionStatus } from './connection';
-import type { CheckoutPlan } from '../modules/checkout/types';
+import type { CheckoutPlan, PromoValidation } from '../modules/checkout/types';
 
 // =============================================================================
 // APP ENTRY — minimal shape for app catalog events
@@ -190,8 +190,10 @@ export interface ShellConnectionEventMap {
 	 * Opens the CheckoutModal. The `app` field is the manifest entry. The
 	 * optional `plan` preselects a tier and skips the picker — going straight
 	 * to payment (used by the web pricing page); omit it to show the picker.
+	 * The optional `promo` carries a discount code already validated on the
+	 * pricing page, so the skipped-picker checkout still applies the discount.
 	 */
-	'shell:subscribe': { app: ShellAppEntry; plan?: CheckoutPlan };
+	'shell:subscribe': { app: ShellAppEntry; plan?: CheckoutPlan; promo?: PromoValidation | null };
 
 	/**
 	 * User cancelled a subscription for an app from the account/billing UI.

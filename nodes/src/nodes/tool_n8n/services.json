@@ -49,6 +49,7 @@
 			"type": "string",
 			"title": "API Key (X-N8N-API-KEY)",
 			"default": "",
+			"optional": true,
 			"description": "n8n public API key. Needed only to list/inspect workflows and poll executions — not for triggering webhooks.",
 			"secure": true,
 			"ui": {
@@ -79,11 +80,21 @@
 				["sync", "Wait for the webhook response"],
 				["async", "Trigger then poll execution"]
 			],
+			"conditional": [
+				{
+					"value": "sync",
+					"properties": ["tool_n8n.syncTimeout"]
+				},
+				{
+					"value": "async",
+					"properties": ["tool_n8n.asyncTimeout"]
+				}
+			],
 			"description": "Sync requires the workflow to end in a 'Respond to Webhook' node. Async polls the execution via the public API (API key required)."
 		},
 		"tool_n8n.syncTimeout": {
 			"type": "integer",
-			"title": "Sync timeout (seconds)",
+			"title": "Response timeout (seconds)",
 			"default": 30,
 			"minimum": 1,
 			"maximum": 3600,
@@ -91,7 +102,7 @@
 		},
 		"tool_n8n.asyncTimeout": {
 			"type": "integer",
-			"title": "Async timeout (seconds)",
+			"title": "Execution timeout (seconds)",
 			"default": 120,
 			"minimum": 5,
 			"maximum": 3600,
@@ -108,20 +119,40 @@
 				["bearer", "Bearer token"],
 				["jwt", "JWT (n8n)"]
 			],
+			"conditional": [
+				{
+					"value": "none",
+					"properties": []
+				},
+				{
+					"value": "header",
+					"properties": ["tool_n8n.webhookHeaderName", "tool_n8n.webhookHeaderValue"]
+				},
+				{
+					"value": "basic",
+					"properties": ["tool_n8n.webhookUser", "tool_n8n.webhookPassword"]
+				},
+				{
+					"value": "bearer",
+					"properties": ["tool_n8n.webhookToken"]
+				},
+				{
+					"value": "jwt",
+					"properties": ["tool_n8n.webhookToken"]
+				}
+			],
 			"description": "Authentication on the workflow's Webhook node. Separate from the API key above."
 		},
 		"tool_n8n.webhookHeaderName": {
 			"type": "string",
-			"title": "Webhook header name",
+			"title": "Header name",
 			"default": "",
-			"optional": true,
 			"description": "Header name (when Webhook auth = Header auth)."
 		},
 		"tool_n8n.webhookHeaderValue": {
 			"type": "string",
-			"title": "Webhook header value",
+			"title": "Header value",
 			"default": "",
-			"optional": true,
 			"description": "Header value (when Webhook auth = Header auth).",
 			"secure": true,
 			"ui": {
@@ -130,16 +161,14 @@
 		},
 		"tool_n8n.webhookUser": {
 			"type": "string",
-			"title": "Webhook user",
+			"title": "Username",
 			"default": "",
-			"optional": true,
 			"description": "Username (when Webhook auth = Basic auth)."
 		},
 		"tool_n8n.webhookPassword": {
 			"type": "string",
-			"title": "Webhook password",
+			"title": "Password",
 			"default": "",
-			"optional": true,
 			"description": "Password (when Webhook auth = Basic auth).",
 			"secure": true,
 			"ui": {
@@ -148,9 +177,8 @@
 		},
 		"tool_n8n.webhookToken": {
 			"type": "string",
-			"title": "Webhook token (Bearer/JWT)",
+			"title": "Token",
 			"default": "",
-			"optional": true,
 			"description": "Token sent as 'Authorization: Bearer <token>' (when Webhook auth = Bearer token or JWT).",
 			"secure": true,
 			"ui": {
@@ -195,7 +223,12 @@
 		{
 			"section": "Pipe",
 			"title": "n8n",
-			"properties": ["type", "tool_n8n.baseUrl", "tool_n8n.apiKey", "tool_n8n.workflow", "tool_n8n.payloadMode", "tool_n8n.mode", "tool_n8n.syncTimeout", "tool_n8n.asyncTimeout", "tool_n8n.webhookAuth", "tool_n8n.webhookHeaderName", "tool_n8n.webhookHeaderValue", "tool_n8n.webhookUser", "tool_n8n.webhookPassword", "tool_n8n.webhookToken", "tool_n8n.verifyTls", "tool_n8n.readOnly"]
+			"properties": ["type", "tool_n8n.baseUrl", "tool_n8n.apiKey", "tool_n8n.workflow", "tool_n8n.payloadMode", "tool_n8n.mode", "tool_n8n.webhookAuth", "tool_n8n.verifyTls", "tool_n8n.readOnly"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
 		}
 	]
 }

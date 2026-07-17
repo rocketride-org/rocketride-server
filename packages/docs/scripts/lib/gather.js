@@ -52,7 +52,8 @@ const NODE_CATEGORIES = {
 	guard: { slug: 'guardrails', label: 'Guardrails', position: 17 },
 	target: { slug: 'outputs', label: 'Outputs', position: 18 },
 	infrastructure: { slug: 'infrastructure', label: 'Infrastructure', position: 19 },
-	other: { slug: 'other', label: 'Other', position: 20 },
+	graph: { slug: 'graph-databases', label: 'Graph Databases', position: 20 },
+	other: { slug: 'other', label: 'Other', position: 21 },
 };
 const FALLBACK_CATEGORY = NODE_CATEGORIES.other;
 

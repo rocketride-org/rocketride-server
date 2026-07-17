@@ -8,12 +8,12 @@
 	// Required:
 	//		The protocol is the endpoint protocol
 	//
-	"protocol": "db_neo4j://",
+	"protocol": "graph_neo4j://",
 	//
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["database", "tool"],
+	"classType": ["graph", "tool"],
 	//
 	// Required:
 	//		Capabilities are flags that change the behavior of the underlying
@@ -37,7 +37,7 @@
 	//		The path is the executable/script code - it is node dependent
 	// 		and is optional for most node
 	//
-	"path": "nodes.db_neo4j",
+	"path": "nodes.graph_neo4j",
 	//
 	// Required:
 	//		The prefix map when added/removed when converting URLs <=> paths
@@ -97,13 +97,13 @@
 	//		in the shape
 	//
 	"fields": {
-		"neo4jdb.uri": {
+		"graph_neo4j.uri": {
 			"type": "string",
 			"title": "Connection URI",
 			"default": "neo4j://localhost:7687",
 			"description": "Bolt URI for the Neo4J instance. Use neo4j:// or bolt:// for plaintext, neo4j+s:// or bolt+s:// for TLS (e.g. Neo4J Aura cloud)"
 		},
-		"neo4jdb.auth_method": {
+		"graph_neo4j.auth_method": {
 			"type": "string",
 			"title": "Authentication",
 			"default": "userpass",
@@ -114,21 +114,21 @@
 			"conditional": [
 				{
 					"value": "userpass",
-					"properties": ["neo4jdb.user", "neo4jdb.password"]
+					"properties": ["graph_neo4j.user", "graph_neo4j.password"]
 				},
 				{
 					"value": "token",
-					"properties": ["neo4jdb.token"]
+					"properties": ["graph_neo4j.token"]
 				}
 			]
 		},
-		"neo4jdb.user": {
+		"graph_neo4j.user": {
 			"type": "string",
 			"title": "User",
 			"default": "neo4j",
 			"description": "Username to authenticate with the Neo4J instance."
 		},
-		"neo4jdb.password": {
+		"graph_neo4j.password": {
 			"type": "string",
 			"title": "Password",
 			"description": "Password to authenticate with the Neo4J instance.",
@@ -137,7 +137,7 @@
 				"ui:widget": "password"
 			}
 		},
-		"neo4jdb.token": {
+		"graph_neo4j.token": {
 			"type": "string",
 			"title": "Bearer token",
 			"description": "Bearer token for token-based authentication (e.g. Neo4J Aura cloud).",
@@ -146,19 +146,19 @@
 				"ui:widget": "password"
 			}
 		},
-		"neo4jdb.database": {
+		"graph_neo4j.database": {
 			"type": "string",
 			"title": "Database name",
 			"default": "neo4j",
 			"description": "Name of the Neo4J database to connect to. Use 'neo4j' for the default database."
 		},
-		// "neo4jdb.label": {
+		// "graph_neo4j.label": {
 		// 	"type": "string",
 		// 	"title": "Node label",
 		// 	"default": "Row",
 		// 	"description": "Label applied to graph nodes created when inserting data from the pipeline (e.g. Person, Event, Row)."
 		// },
-		"neo4jdb.db_description": {
+		"graph_neo4j.db_description": {
 			"type": "string",
 			"title": "Graph description",
 			"default": "",
@@ -167,7 +167,7 @@
 				"ui:widget": "textarea"
 			}
 		},
-		"neo4jdb.max_attempts": {
+		"graph_neo4j.max_attempts": {
 			"type": "integer",
 			"title": "Max validation attempts",
 			"default": 5,
@@ -175,25 +175,25 @@
 			"maximum": 20,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query"
 		},
-		"neo4jdb.allow_execute": {
+		"graph_neo4j.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
 			"description": "Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
 		},
-		"neo4jdb.default": {
+		"graph_neo4j.default": {
 			"object": "default",
 			"properties": [
-				"neo4jdb.db_description",
-				"neo4jdb.uri",
-				"neo4jdb.auth_method",
-				"neo4jdb.database",
-				// "neo4jdb.label",
-				"neo4jdb.max_attempts",
-				"neo4jdb.allow_execute"
+				"graph_neo4j.db_description",
+				"graph_neo4j.uri",
+				"graph_neo4j.auth_method",
+				"graph_neo4j.database",
+				// "graph_neo4j.label",
+				"graph_neo4j.max_attempts",
+				"graph_neo4j.allow_execute"
 			]
 		},
-		"neo4jdb.profile": {
+		"graph_neo4j.profile": {
 			"hidden": true,
 			"type": "string",
 			"default": "default",
@@ -201,7 +201,7 @@
 			"conditional": [
 				{
 					"value": "default",
-					"properties": ["neo4jdb.default"]
+					"properties": ["graph_neo4j.default"]
 				}
 			]
 		}
@@ -215,7 +215,7 @@
 		{
 			"section": "Pipe",
 			"title": "Neo4J",
-			"properties": ["neo4jdb.profile"]
+			"properties": ["graph_neo4j.profile"]
 		}
 	]
 }

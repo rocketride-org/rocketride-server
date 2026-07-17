@@ -169,6 +169,7 @@ export const buildInventory = (forms: Record<string, IService> = {}) => {
 		embedding: {},
 		llm: {},
 		database: {},
+		graph: {},
 		filter: {},
 		image: {},
 		preprocessor: {},

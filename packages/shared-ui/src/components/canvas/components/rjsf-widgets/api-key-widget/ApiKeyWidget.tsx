@@ -29,6 +29,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
 import EnvVarSuggestions from '../env-var-suggestions/EnvVarSuggestions';
+import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
 
 // =============================================================================
 // Helpers
@@ -66,8 +67,12 @@ const getMaskedValue = (val: string): string => {
  * becomes editable for entering a new key. This prevents accidental modification
  * of existing keys while still allowing replacement.
  */
-const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, formContext }) => {
+const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, formContext, schema, options }) => {
 	const { t } = useTranslation();
+
+	// Prefer description from uiSchema options, falling back to the JSON Schema description
+	const description = options.description ?? schema.description;
+	const compactDescriptions = formContext?.compactDescriptions === true;
 
 	// If a value already exists, start in masked (read-only) mode to prevent accidental edits
 	const [maskApiKey, setMaskApiKey] = useState(!!value);
@@ -86,7 +91,7 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 			setTempValue(newValue);
 			onChange(newValue);
 		},
-		[autocomplete, tempValue, onChange],
+		[autocomplete, tempValue, onChange]
 	);
 
 	const handleKeyDown = useCallback(
@@ -107,7 +112,7 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				autocomplete.handleDismiss();
 			}
 		},
-		[autocomplete, onEnvVarSelect],
+		[autocomplete, onEnvVarSelect]
 	);
 
 	// When in masked mode, scroll the input to the end so the visible trailing characters are shown
@@ -124,7 +129,7 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				name={id}
 				required={required}
 				type={'text'}
-				label={label}
+				label={label && compactDescriptions ? <FieldLabelWithInfo label={label} description={description} fieldTitle={label} /> : label}
 				inputRef={inputRef}
 				size="small"
 				value={tempValue}
@@ -146,6 +151,15 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				helperText={rawErrors}
 				slotProps={{
 					input: {
+						...(compactDescriptions
+							? {
+									// Pass the plain label (not the rich FieldLabelWithInfo node) to the
+									// outlined input so its aria-hidden NotchedOutline legend never wraps the
+									// tabbable info tooltip trigger, which would otherwise create a phantom
+									// keyboard focus stop.
+									label: label || undefined,
+								}
+							: {}),
 						readOnly: maskApiKey || readonly,
 						endAdornment: maskApiKey && !readonly && (
 							<InputAdornment position="end">
@@ -171,9 +185,7 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 					},
 				}}
 			/>
-			{envKeys.length > 0 && (
-				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />
-			)}
+			{envKeys.length > 0 && <EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />}
 		</>
 	);
 };

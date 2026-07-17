@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,16 +23,21 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Shared utilities for the Neo4J database node."""
+"""Cypher safety checks shared by every graph database node.
+
+Mirrors ``ai.common.database.sql_safety`` for the graph side.
+
+This is a client-side guard, not the primary defence. A driver whose engine can
+refuse writes server-side should rely on that instead and use this only as
+defence-in-depth: a regex cannot be made airtight against every Cypher dialect.
+The implemented example is FalkorDB, whose ``GRAPH.RO_QUERY`` rejects writes at
+the server; a future Neo4j driver on this base should open sessions in READ
+access mode for the same guarantee.
+"""
 
 from __future__ import annotations
 
 import re
-
-
-# ---------------------------------------------------------------------------
-# Cypher safety check — read-only queries only
-# ---------------------------------------------------------------------------
 
 _UNSAFE_CYPHER = re.compile(
     r'\b(?:CREATE|MERGE|DELETE|DETACH\s+DELETE|SET|REMOVE|DROP|FOREACH|LOAD\s+CSV|'
@@ -39,46 +46,16 @@ _UNSAFE_CYPHER = re.compile(
 )
 
 
-def _parse_is_valid(value: object) -> bool:
-    """Normalise an ``isValid`` value from LLM JSON output to a Python bool.
-
-    Args:
-        value (object): Raw value from the LLM response dict — may be a
-            ``bool`` (``True``/``False``) or a ``str`` (``'true'``/``'false'``).
-
-    Returns:
-        bool: ``True`` only when the value is the boolean ``True`` or the
-            case-insensitive string ``'true'``.
-    """
-    if isinstance(value, bool):
-        return value
-    return str(value).lower() == 'true'
-
-
-def _is_cypher_safe(cypher: str) -> bool:
-    """Return True when the Cypher statement is read-only (MATCH/RETURN/CALL schema only).
+def is_cypher_safe(cypher: str) -> bool:
+    """Return True when the Cypher statement is read-only (MATCH/RETURN/schema CALLs).
 
     Args:
         cypher (str): The Cypher statement to inspect.
 
     Returns:
-        bool: ``True`` if the statement contains no write or admin clauses,
-            ``False`` otherwise.
+        bool: ``True`` if the statement contains no write or admin clauses.
     """
-    # Strip both single-line and block comments before checking.
+    # Strip line and block comments so a commented-out DELETE can't hide a live one.
     stripped = re.sub(r'//[^\n]*', '', cypher)
     stripped = re.sub(r'/\*.*?\*/', '', stripped, flags=re.DOTALL)
     return not bool(_UNSAFE_CYPHER.search(stripped))
-
-
-def _strip_ns(tool_name: str) -> str:
-    """Strip the ``'neo4j.'`` namespace prefix from a tool name.
-
-    Args:
-        tool_name (str): Fully-qualified tool name (e.g. ``'neo4j.get_data'``).
-
-    Returns:
-        str: Bare tool name without the namespace prefix.
-    """
-    prefix = 'neo4j.'
-    return tool_name[len(prefix) :] if tool_name.startswith(prefix) else tool_name

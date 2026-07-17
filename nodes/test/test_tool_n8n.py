@@ -53,6 +53,54 @@ if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
 
+_SERVICES_PATH = _NODES_SRC / 'nodes' / 'tool_n8n' / 'services.json'
+
+
+def _conditional_properties(field):
+    """Return each conditional value mapped to its child field names."""
+    result = {}
+    for conditional in field['conditional']:
+        values = conditional['value'] if isinstance(conditional['value'], list) else [conditional['value']]
+        for value in values:
+            result[value] = conditional['properties']
+    return result
+
+
+def test_services_schema_only_shows_relevant_n8n_fields():
+    service = json.loads(_SERVICES_PATH.read_text(encoding='utf-8'))
+    fields = service['fields']
+
+    assert service['shape'][0]['ui']['ui:options']['compactDescriptions'] is True
+    assert fields['tool_n8n.apiKey']['optional'] is True
+    assert _conditional_properties(fields['tool_n8n.mode']) == {
+        'sync': ['tool_n8n.syncTimeout'],
+        'async': ['tool_n8n.asyncTimeout'],
+    }
+    assert _conditional_properties(fields['tool_n8n.webhookAuth']) == {
+        'none': [],
+        'header': ['tool_n8n.webhookHeaderName', 'tool_n8n.webhookHeaderValue'],
+        'basic': ['tool_n8n.webhookUser', 'tool_n8n.webhookPassword'],
+        'bearer': ['tool_n8n.webhookToken'],
+        'jwt': ['tool_n8n.webhookToken'],
+    }
+    assert all(
+        not isinstance(conditional['value'], list) for conditional in fields['tool_n8n.webhookAuth']['conditional']
+    )
+
+    conditional_fields = {
+        'tool_n8n.syncTimeout',
+        'tool_n8n.asyncTimeout',
+        'tool_n8n.webhookHeaderName',
+        'tool_n8n.webhookHeaderValue',
+        'tool_n8n.webhookUser',
+        'tool_n8n.webhookPassword',
+        'tool_n8n.webhookToken',
+    }
+    top_level = set(service['shape'][0]['properties'])
+    assert conditional_fields.isdisjoint(top_level)
+    assert all(fields[field].get('optional') is not True for field in conditional_fields)
+
+
 def _build_import_stubs():
     """Return {module_name: stub} for the deps needed only to import the modules."""
     rocketlib = MagicMock()
