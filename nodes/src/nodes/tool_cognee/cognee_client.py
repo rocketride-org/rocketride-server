@@ -15,7 +15,7 @@ Why REST, not the cognee SDK: the ``cognee`` package is a heavy, fully-async
 library that pulls its own LLM/embedding client stack and embedded databases,
 which conflicts with the engine's provider nodes — the same reason ``tool_mem0``
 talks to Mem0 over REST rather than importing ``mem0ai``. Only ``requests`` and
-``tenacity`` (already engine deps) are used here.
+the shared idempotent GET helper are used here.
 
 Modern memory endpoints are ``remember``, ``recall``, and dataset status.
 """
@@ -26,7 +26,8 @@ import json
 from typing import Any, Dict, Optional
 
 import requests
-from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential
+
+from ai.common.utils import get_with_retry
 
 _REMEMBER_PATH = '/api/v1/remember'
 _RECALL_PATH = '/api/v1/recall'
@@ -49,42 +50,6 @@ def _headers(api_key: str) -> Dict[str, str]:
     if api_key:
         headers['X-Api-Key'] = api_key
     return headers
-
-
-def _is_retryable(exc: BaseException) -> bool:
-    """Retry transient transport failures and 429 / 5xx responses only."""
-    if isinstance(exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)):
-        return True
-    if isinstance(exc, requests.exceptions.HTTPError):
-        resp = exc.response
-        return resp is not None and (resp.status_code == 429 or 500 <= resp.status_code < 600)
-    return False
-
-
-def _request_with_retry(
-    method: str,
-    url: str,
-    *,
-    headers: Dict[str, str],
-    timeout: float,
-    params: Optional[Dict[str, str]] = None,
-) -> requests.Response:
-    """Retry idempotent Cognee requests on 429, 5xx, and transport failures."""
-
-    def _attempt() -> requests.Response:
-        request_kwargs: Dict[str, Any] = {'headers': headers, 'timeout': timeout}
-        if params is not None:
-            request_kwargs['params'] = params
-        resp = requests.request(method, url, **request_kwargs)
-        resp.raise_for_status()
-        return resp
-
-    return Retrying(
-        stop=stop_after_attempt(4),
-        wait=wait_exponential(multiplier=2, max=60),
-        retry=retry_if_exception(_is_retryable),
-        reraise=True,
-    )(_attempt)
 
 
 def remember(
@@ -165,8 +130,7 @@ def recall(
 def list_datasets(base_url: str, api_key: str, *, timeout: float) -> list[dict[str, Any]]:
     """List datasets visible to the authenticated Cognee user."""
     try:
-        response = _request_with_retry(
-            'GET',
+        response = get_with_retry(
             f'{base_url}{_DATASETS_PATH}',
             headers=_headers(api_key),
             timeout=timeout,
@@ -190,8 +154,7 @@ def get_dataset_status(
 ) -> str:
     """Return a stable pending/running/completed/failed dataset status."""
     try:
-        response = _request_with_retry(
-            'GET',
+        response = get_with_retry(
             f'{base_url}{_STATUS_PATH}',
             headers=_headers(api_key),
             timeout=timeout,

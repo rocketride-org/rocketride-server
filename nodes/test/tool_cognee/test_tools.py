@@ -82,6 +82,8 @@ def _ensure_ai_common() -> None:
         utils.normalize_tool_input = _passthrough
     if not hasattr(utils, 'post_with_retry'):
         utils.post_with_retry = lambda *a, **k: None
+    if not hasattr(utils, 'get_with_retry'):
+        utils.get_with_retry = lambda *a, **k: None
     if not hasattr(sys.modules['ai.common.config'], 'Config'):
 
         class _Config:
@@ -281,15 +283,26 @@ def test_remember_posts_one_multipart_file_to_api_v1_remember(monkeypatch):
     ]
 
 
-def test_remember_is_single_attempt_on_timeout(monkeypatch):
-    """A non-idempotent remember timeout is surfaced after one POST without leaking secrets."""
+@pytest.mark.parametrize(
+    'failure',
+    [
+        requests.exceptions.Timeout('sentinel-secret timed out'),
+        requests.exceptions.ConnectionError('sentinel-secret disconnected'),
+        _http_error(429),
+        _http_error(500),
+        _http_error(503),
+    ],
+    ids=['timeout', 'connection-error', '429', '500', '503'],
+)
+def test_remember_is_single_attempt_for_ambiguous_write_failures(monkeypatch, failure):
+    """A non-idempotent remember failure is surfaced after one POST without leaking secrets."""
     calls = []
 
-    def timeout(*args, **kwargs):
+    def fail(*args, **kwargs):
         calls.append((args, kwargs))
-        raise requests.exceptions.Timeout('sentinel-secret timed out')
+        raise failure
 
-    monkeypatch.setattr(client.requests, 'post', timeout)
+    monkeypatch.setattr(client.requests, 'post', fail)
 
     with pytest.raises(client.CogneeRequestError) as error:
         client.remember(
@@ -467,8 +480,8 @@ def test_recall_timeout_is_one_attempt_and_redacted(monkeypatch):
     assert 'sentinel-secret' not in str(error.value)
 
 
-def test_list_datasets_gets_api_v1_datasets_collection(monkeypatch):
-    """Dataset discovery calls the trailing-slash collection URL and returns its list."""
+def test_list_datasets_delegates_to_shared_get_with_retry(monkeypatch):
+    """Dataset discovery forwards its exact request data to the shared GET retry helper."""
     calls = []
     rows = [
         {
@@ -480,16 +493,15 @@ def test_list_datasets_gets_api_v1_datasets_collection(monkeypatch):
         }
     ]
 
-    def fake_request(method, url, *, headers, timeout, **kwargs):
-        calls.append({'method': method, 'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
+    def fake_get_with_retry(url, *, headers, timeout, **kwargs):
+        calls.append({'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
         return _FakeResponse(payload=rows)
 
-    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+    monkeypatch.setattr(client, 'get_with_retry', fake_get_with_retry)
 
     assert client.list_datasets('https://cognee.example', 'sentinel-secret', timeout=11) == rows
     assert calls == [
         {
-            'method': 'GET',
             'url': 'https://cognee.example/api/v1/datasets/',
             'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
             'timeout': 11,
@@ -497,15 +509,15 @@ def test_list_datasets_gets_api_v1_datasets_collection(monkeypatch):
     ]
 
 
-def test_status_sends_dataset_uuid_and_cognify_pipeline(monkeypatch):
-    """Memory status addresses the dataset by UUID and selects its Cognee pipeline."""
+def test_status_delegates_to_shared_get_with_retry(monkeypatch):
+    """Memory status forwards its exact request data to the shared GET retry helper."""
     calls = []
 
-    def fake_request(method, url, *, headers, timeout, **kwargs):
-        calls.append({'method': method, 'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
+    def fake_get_with_retry(url, *, headers, timeout, **kwargs):
+        calls.append({'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
         return _FakeResponse(payload={'dataset-uuid': 'DATASET_PROCESSING_STARTED'})
 
-    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+    monkeypatch.setattr(client, 'get_with_retry', fake_get_with_retry)
 
     status = client.get_dataset_status(
         'https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=13
@@ -514,7 +526,6 @@ def test_status_sends_dataset_uuid_and_cognify_pipeline(monkeypatch):
     assert status == 'running'
     assert calls == [
         {
-            'method': 'GET',
             'url': 'https://cognee.example/api/v1/datasets/status',
             'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
             'timeout': 13,
@@ -535,10 +546,10 @@ def test_status_sends_dataset_uuid_and_cognify_pipeline(monkeypatch):
 def test_status_normalizes_initiated_started_completed_errored(monkeypatch, remote_status, normalized):
     """Cognee pipeline enum values become a stable four-state status vocabulary."""
 
-    def fake_request(*_args, **_kwargs):
+    def fake_get_with_retry(*_args, **_kwargs):
         return _FakeResponse(payload={'dataset-uuid': remote_status})
 
-    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+    monkeypatch.setattr(client, 'get_with_retry', fake_get_with_retry)
 
     assert (
         client.get_dataset_status('https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=5)
@@ -546,16 +557,16 @@ def test_status_normalizes_initiated_started_completed_errored(monkeypatch, remo
     )
 
 
-def test_http_errors_are_redacted_and_402_is_distinct(monkeypatch):
+def test_get_http_errors_are_redacted_and_402_is_distinct(monkeypatch):
     """Client errors never echo vendor details or keys, and 402 explains exhausted budget."""
     responses = [_FakeResponse(status_code=400), _FakeResponse(status_code=402)]
 
-    def fake_request(*_args, **_kwargs):
+    def fake_get_with_retry(*_args, **_kwargs):
         response = responses.pop(0)
         response._payload = {'error': 'sentinel-secret vendor detail'}
-        return response
+        response.raise_for_status()
 
-    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
+    monkeypatch.setattr(client, 'get_with_retry', fake_get_with_retry)
 
     with pytest.raises(client.CogneeRequestError) as server_error:
         client.list_datasets('https://cognee.example', 'sentinel-secret', timeout=5)
@@ -568,26 +579,19 @@ def test_http_errors_are_redacted_and_402_is_distinct(monkeypatch):
     assert 'token budget exhausted' in str(budget_error.value).lower()
 
 
-@pytest.mark.parametrize(
-    ('exc', 'expected'),
-    [
-        (_http_error(429), True),  # rate limited
-        (_http_error(500), True),  # server error
-        (_http_error(503), True),  # server error (upper 5xx)
-        (_http_error(404), False),  # 4xx other than 429 is terminal
-        (_http_error(None), False),  # HTTPError with no response attached
-        (requests.exceptions.Timeout('t'), True),
-        (requests.exceptions.ConnectionError('c'), True),
-        (ValueError('not an http/transport error'), False),
-    ],
-)
-def test_is_retryable_classification(exc, expected):
-    """_is_retryable retries only transient 429/5xx/timeout/connection failures.
+def test_status_rejects_unknown_remote_value(monkeypatch):
+    """An unknown remote status is rejected without exposing vendor response detail."""
+    monkeypatch.setattr(
+        client,
+        'get_with_retry',
+        lambda *_args, **_kwargs: _FakeResponse(payload={'dataset-uuid': 'SENTINEL-SECRET-UNKNOWN'}),
+    )
 
-    Exercised directly (not through tenacity's loop), so the classification is
-    verified regardless of whether the stub or the real tenacity backend is loaded.
-    """
-    assert client._is_retryable(exc) is expected
+    with pytest.raises(client.CogneeRequestError) as error:
+        client.get_dataset_status('https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=5)
+
+    assert str(error.value) == 'cognee: dataset status returned an invalid response'
+    assert 'sentinel-secret' not in str(error.value)
 
 
 # ---------------------------------------------------------------------------
@@ -682,6 +686,14 @@ def test_remember_delegates_plain_text_only(modern_calls):
             },
         }
     ]
+
+
+@pytest.mark.parametrize('run_in_background', ['true', 1])
+def test_remember_rejects_non_boolean_run_in_background(modern_calls, run_in_background):
+    """Only JSON booleans may choose the remember execution mode."""
+    with pytest.raises(ValueError, match='run_in_background'):
+        _instance(_make_global()).remember({'text': 'memory', 'run_in_background': run_in_background})
+    assert modern_calls['calls'] == []
 
 
 def test_recall_defaults_to_decomposition_with_references(modern_calls):
@@ -852,6 +864,35 @@ def test_tool_propagates_client_runtimeerror(monkeypatch):
     monkeypatch.setattr(client, 'recall', boom)
     with pytest.raises(RuntimeError):
         _instance(_make_global()).recall({'query': 'question'})
+
+
+def test_instances_interleave_calls_without_mutating_shared_global(monkeypatch):
+    """Two agents share immutable configuration while making independent memory calls."""
+    glb = _make_global()
+    before = dict(vars(glb))
+    calls = []
+
+    def remember(base_url, api_key, **kwargs):
+        calls.append(('remember', base_url, api_key, kwargs))
+        return {'status': 'started'}
+
+    def recall(base_url, api_key, **kwargs):
+        calls.append(('recall', base_url, api_key, kwargs))
+        return []
+
+    monkeypatch.setattr(client, 'remember', remember)
+    monkeypatch.setattr(client, 'recall', recall)
+    agent_a = _instance(glb)
+    agent_b = _instance(glb)
+
+    agent_a.remember({'text': 'A memory'})
+    agent_b.recall({'query': 'B query'})
+    agent_b.remember({'text': 'B memory', 'run_in_background': True})
+    agent_a.recall({'query': 'A query'})
+
+    assert [call[0] for call in calls] == ['remember', 'recall', 'remember', 'recall']
+    assert [call[3]['dataset'] for call in calls] == ['main', 'main', 'main', 'main']
+    assert vars(glb) == before
 
 
 # ---------------------------------------------------------------------------
