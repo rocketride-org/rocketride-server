@@ -32,6 +32,21 @@ from pathlib import Path
 import pytest
 
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_cognee'
+_MISSING_MODULE = object()
+_ISOLATED_MODULE_NAMES = (
+    'rocketlib',
+    'ai',
+    'ai.common',
+    'ai.common.utils',
+    'ai.common.config',
+    'requests',
+    'requests.exceptions',
+    'tenacity',
+    'tool_cognee',
+    'tool_cognee.cognee_client',
+    'tool_cognee.IInstance',
+    'tool_cognee.IGlobal',
+)
 
 
 # ---------------------------------------------------------------------------
@@ -136,20 +151,34 @@ def _ensure_pkg() -> None:
         sys.modules['tool_cognee'] = pkg
 
 
-_ensure_rocketlib()
-_ensure_ai_common()
-_ensure_requests()
-_ensure_tenacity()
-_ensure_pkg()
+_ORIGINAL_TEST_MODULES = {name: sys.modules.get(name, _MISSING_MODULE) for name in _ISOLATED_MODULE_NAMES}
+_ORIGINAL_MODULE_ATTRS = {
+    name: module.__dict__.copy() for name, module in _ORIGINAL_TEST_MODULES.items() if module is not _MISSING_MODULE
+}
 
-import requests  # noqa: E402
+try:
+    _ensure_rocketlib()
+    _ensure_ai_common()
+    _ensure_requests()
+    _ensure_tenacity()
+    _ensure_pkg()
 
-from tool_cognee import cognee_client as client  # noqa: E402
-from tool_cognee import IInstance as IInstanceMod  # noqa: E402
-from tool_cognee.IInstance import IInstance  # noqa: E402
-from tool_cognee.IGlobal import IGlobal  # noqa: E402
+    import requests  # noqa: E402
 
-IGlobalMod = importlib.import_module('tool_cognee.IGlobal')
+    from tool_cognee import cognee_client as client  # noqa: E402
+    from tool_cognee import IInstance as IInstanceMod  # noqa: E402
+    from tool_cognee.IInstance import IInstance  # noqa: E402
+    from tool_cognee.IGlobal import IGlobal  # noqa: E402
+
+    IGlobalMod = importlib.import_module('tool_cognee.IGlobal')
+finally:
+    for _module_name, _original_module in _ORIGINAL_TEST_MODULES.items():
+        if _original_module is _MISSING_MODULE:
+            sys.modules.pop(_module_name, None)
+        else:
+            _original_module.__dict__.clear()
+            _original_module.__dict__.update(_ORIGINAL_MODULE_ATTRS[_module_name])
+            sys.modules[_module_name] = _original_module
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +205,15 @@ def _make_global(**overrides):
     for k, v in overrides.items():
         setattr(glb, k, v)
     return glb
+
+
+def test_collection_stubs_are_restored_after_node_imports():
+    """Collection-time import scaffolding leaves the wider pytest session unchanged."""
+    for name, original_module in _ORIGINAL_TEST_MODULES.items():
+        if original_module is _MISSING_MODULE:
+            assert name not in sys.modules
+        else:
+            assert sys.modules.get(name) is original_module
 
 
 def _instance(glb):
@@ -228,10 +266,10 @@ class _FakeResponse:
             raise err
 
 
-def _http_error(status):
+def _http_error(status, detail=None, response_body=None):
     """Build an HTTPError with a fake response of the given status (or no response when None)."""
-    err = requests.exceptions.HTTPError(f'{status} error')
-    err.response = _FakeResponse(status) if status is not None else None
+    err = requests.exceptions.HTTPError(detail or f'{status} error')
+    err.response = _FakeResponse(status, content=response_body or b'{}') if status is not None else None
     return err
 
 
@@ -454,15 +492,47 @@ def test_recall_rejects_invalid_successful_response(
     assert 'sentinel-secret' not in str(error.value)
 
 
-def test_recall_timeout_is_one_attempt_and_redacted(monkeypatch):
-    """A recall timeout is never retried and never exposes transport text or the API key."""
+@pytest.mark.parametrize(
+    ('failure', 'http_status'),
+    [
+        (requests.exceptions.Timeout('sentinel-secret timed out'), None),
+        (requests.exceptions.ConnectionError('sentinel-secret disconnected'), None),
+        (
+            _http_error(
+                429,
+                'sentinel-exception-detail',
+                b'sentinel-response-body',
+            ),
+            429,
+        ),
+        (
+            _http_error(
+                500,
+                'sentinel-exception-detail',
+                b'sentinel-response-body',
+            ),
+            500,
+        ),
+        (
+            _http_error(
+                503,
+                'sentinel-exception-detail',
+                b'sentinel-response-body',
+            ),
+            503,
+        ),
+    ],
+    ids=['timeout', 'connection-error', '429', '500', '503'],
+)
+def test_recall_is_single_attempt_for_failures_and_redacts_api_key(monkeypatch, failure, http_status):
+    """Recall failures are surfaced after one POST without leaking secrets."""
     calls = []
 
-    def timeout(*args, **kwargs):
+    def fail(*args, **kwargs):
         calls.append((args, kwargs))
-        raise requests.exceptions.Timeout('sentinel-secret timed out')
+        raise failure
 
-    monkeypatch.setattr(client.requests, 'post', timeout)
+    monkeypatch.setattr(client.requests, 'post', fail)
 
     with pytest.raises(client.CogneeRequestError) as error:
         client.recall(
@@ -477,11 +547,19 @@ def test_recall_timeout_is_one_attempt_and_redacted(monkeypatch):
         )
 
     assert len(calls) == 1
-    assert 'sentinel-secret' not in str(error.value)
+    safe_error = str(error.value)
+    assert 'sentinel-secret' not in safe_error
+    assert 'sentinel-exception-detail' not in safe_error
+    assert 'sentinel-response-body' not in safe_error
+    if http_status is not None:
+        assert f'HTTP {http_status}' in safe_error
 
 
-def test_list_datasets_delegates_to_shared_get_with_retry(monkeypatch):
-    """Dataset discovery forwards its exact request data to the shared GET retry helper."""
+@pytest.mark.parametrize('payload_shape', ['bare-list', 'datasets-envelope'])
+def test_list_datasets_accepts_supported_response_shapes_and_delegates_to_shared_get_with_retry(
+    monkeypatch, payload_shape
+):
+    """Dataset discovery accepts implementation-supported response shapes and forwards request data."""
     calls = []
     rows = [
         {
@@ -495,7 +573,8 @@ def test_list_datasets_delegates_to_shared_get_with_retry(monkeypatch):
 
     def fake_get_with_retry(url, *, headers, timeout, **kwargs):
         calls.append({'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
-        return _FakeResponse(payload=rows)
+        payload = rows if payload_shape == 'bare-list' else {'datasets': rows}
+        return _FakeResponse(payload=payload)
 
     monkeypatch.setattr(client, 'get_with_retry', fake_get_with_retry)
 
@@ -535,19 +614,24 @@ def test_status_delegates_to_shared_get_with_retry(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ('remote_status', 'normalized'),
+    ('remote_status', 'nested', 'normalized'),
     [
-        ('DATASET_PROCESSING_INITIATED', 'pending'),
-        ('DATASET_PROCESSING_STARTED', 'running'),
-        ('DATASET_PROCESSING_COMPLETED', 'completed'),
-        ('DATASET_PROCESSING_ERRORED', 'failed'),
+        ('DATASET_PROCESSING_INITIATED', False, 'pending'),
+        ('DATASET_PROCESSING_INITIATED', True, 'pending'),
+        ('DATASET_PROCESSING_STARTED', False, 'running'),
+        ('DATASET_PROCESSING_STARTED', True, 'running'),
+        ('DATASET_PROCESSING_COMPLETED', False, 'completed'),
+        ('DATASET_PROCESSING_COMPLETED', True, 'completed'),
+        ('DATASET_PROCESSING_ERRORED', False, 'failed'),
+        ('DATASET_PROCESSING_ERRORED', True, 'failed'),
     ],
 )
-def test_status_normalizes_initiated_started_completed_errored(monkeypatch, remote_status, normalized):
-    """Cognee pipeline enum values become a stable four-state status vocabulary."""
+def test_status_normalizes_scalar_and_nested_pipeline_values(monkeypatch, remote_status, nested, normalized):
+    """Scalar and nested Cognee pipeline enums become a stable four-state status vocabulary."""
 
     def fake_get_with_retry(*_args, **_kwargs):
-        return _FakeResponse(payload={'dataset-uuid': remote_status})
+        status = {'cognify_pipeline': remote_status} if nested else remote_status
+        return _FakeResponse(payload={'dataset-uuid': status})
 
     monkeypatch.setattr(client, 'get_with_retry', fake_get_with_retry)
 
@@ -642,7 +726,8 @@ def test_inventory_methods_normalize_first_with_their_exact_tool_name():
     for name, method in _decorated_tools().items():
         tree = compile(textwrap.dedent(inspect.getsource(method)), '<tool>', 'exec', ast.PyCF_ONLY_AST)
         function = tree.body[0]
-        first = function.body[0]
+        assert ast.get_docstring(function)
+        first = function.body[1]
         assert isinstance(first, ast.Assign)
         call = first.value
         assert isinstance(call, ast.Call)

@@ -11,7 +11,7 @@
 	"documentation": "https://docs.cognee.ai",
 	"description": [
 		"Persistent semantic memory backed by a Cognee server, exposed as three agent tools. ",
-		"Remember plain text, recall grounded results, and check background processing. The knowledge graph captures semantic relationships; it is not an AST, import graph, or call graph."
+		"Remember plain text, recall memory results while requesting references, and check background processing. The knowledge graph captures semantic relationships; it is not an AST, import graph, or call graph."
 	],
 	"tile": ["Dataset: ${parameters.cognee.dataset}"],
 	"lanes": {},
@@ -63,7 +63,7 @@
 		"cognee.search_type": {
 			"type": "string",
 			"title": "Default recall strategy",
-			"description": "How recall retrieves memory. Graph completion decomposition is the grounded semantic default; the agent can override it per call.",
+			"description": "How recall retrieves memory. Graph completion decomposition is the semantic default; the agent can override it per call.",
 			"default": "GRAPH_COMPLETION_DECOMPOSITION",
 			"enum": [
 				["GRAPH_COMPLETION_DECOMPOSITION", "Graph completion decomposition (default)"],

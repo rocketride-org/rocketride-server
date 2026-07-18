@@ -97,7 +97,7 @@ def recall(
     include_references: bool,
     timeout: float,
 ) -> list[dict[str, Any]]:
-    """Recall ranked memory results with mandatory references using one POST attempt.
+    """Recall ranked memory results while requesting references in one POST attempt.
 
     ``include_references`` remains in the helper signature for adapter compatibility,
     but the wire contract always enables it so callers cannot disable provenance.

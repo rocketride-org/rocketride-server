@@ -53,11 +53,12 @@ class IInstance(IInstanceBase):
         description=(
             'Store plain text in persistent Cognee memory and build its semantic knowledge graph in '
             'one operation. Use memory_status after a background call, then recall to retrieve '
-            'grounded memory. The graph captures semantic relationships; it is not an AST, import '
+            'memory results. The graph captures semantic relationships; it is not an AST, import '
             'graph, or call graph, and this tool does not ingest repository URLs.'
         ),
     )
     def remember(self, args: Any) -> Dict[str, Any]:
+        """Store plain text in the configured Cognee dataset."""
         args = normalize_tool_input(args, tool_name='remember')
         cfg = self.IGlobal
         text = _required_string(args, 'text', tool_name='remember')
@@ -106,12 +107,13 @@ class IInstance(IInstanceBase):
             },
         },
         description=(
-            'Recall grounded results from persistent Cognee memory with source references always '
-            'enabled. Use after remember has completed. Graph retrieval follows semantic '
+            'Recall results from persistent Cognee memory while always requesting source references. '
+            'Use after remember has completed. Graph retrieval follows semantic '
             'relationships; it does not inspect an AST, import graph, or call graph.'
         ),
     )
     def recall(self, args: Any) -> Dict[str, Any]:
+        """Recall memory results while requesting references from Cognee."""
         args = normalize_tool_input(args, tool_name='recall')
         cfg = self.IGlobal
         query = _required_string(args, 'query', tool_name='recall')
@@ -169,6 +171,7 @@ class IInstance(IInstanceBase):
         ),
     )
     def memory_status(self, args: Any) -> Dict[str, Any]:
+        """Return the normalized processing status for a Cognee dataset."""
         args = normalize_tool_input(args, tool_name='memory_status')
         cfg = self.IGlobal
         dataset = _dataset(args, cfg, tool_name='memory_status')
