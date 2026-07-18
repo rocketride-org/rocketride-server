@@ -32,6 +32,7 @@ from pathlib import Path
 import pytest
 
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_cognee'
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _MISSING_MODULE = object()
 _ISOLATED_MODULE_NAMES = (
     'rocketlib',
@@ -180,6 +181,20 @@ finally:
             _original_module.__dict__.update(_ORIGINAL_MODULE_ATTRS[_module_name])
             sys.modules[_module_name] = _original_module
 
+_RESTORATION_AUDIT = tuple(
+    (
+        name,
+        name not in sys.modules
+        if original_module is _MISSING_MODULE
+        else (
+            sys.modules.get(name) is original_module
+            and original_module.__dict__.keys() == _ORIGINAL_MODULE_ATTRS[name].keys()
+            and all(original_module.__dict__[key] is value for key, value in _ORIGINAL_MODULE_ATTRS[name].items())
+        ),
+    )
+    for name, original_module in _ORIGINAL_TEST_MODULES.items()
+)
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -209,11 +224,100 @@ def _make_global(**overrides):
 
 def test_collection_stubs_are_restored_after_node_imports():
     """Collection-time import scaffolding leaves the wider pytest session unchanged."""
-    for name, original_module in _ORIGINAL_TEST_MODULES.items():
-        if original_module is _MISSING_MODULE:
-            assert name not in sys.modules
-        else:
-            assert sys.modules.get(name) is original_module
+    assert [name for name, restored in _RESTORATION_AUDIT if not restored] == []
+
+
+def test_shared_cognee_example_topology_and_documentation():
+    """The canonical example gives two agents one locked shared Cognee memory scope."""
+    example_path = _REPO_ROOT / 'examples' / 'cognee-shared-memory-agents.pipe'
+    pipeline = json.loads(example_path.read_text(encoding='utf-8'))
+    components = pipeline['components']
+    by_id = {component['id']: component for component in components}
+
+    writer = by_id['agent_writer_1']
+    researcher = by_id['agent_researcher_1']
+    assert writer['provider'] == researcher['provider'] == 'agent_rocketride'
+    assert {component['id'] for component in components if component['provider'] == 'agent_rocketride'} == {
+        'agent_writer_1',
+        'agent_researcher_1',
+    }
+    chat_sources = [component for component in components if component['provider'] == 'chat']
+    response_terminals = [component for component in components if component['provider'] == 'response_answers']
+    assert len(chat_sources) == len(response_terminals) == 1
+    chat_inputs = [
+        (component['id'], edge)
+        for component in components
+        for edge in component.get('input', [])
+        if edge.get('from') == chat_sources[0]['id']
+    ]
+    assert chat_inputs == [('agent_writer_1', {'lane': 'questions', 'from': 'chat_1'})]
+    assert researcher.get('input', []) == []
+    assert researcher['control'] == [{'classType': 'tool', 'from': 'agent_writer_1'}]
+    assert response_terminals[0]['id'] == 'response_answers_1'
+    assert response_terminals[0]['input'] == [{'lane': 'answers', 'from': 'agent_writer_1'}]
+    writer_instructions = ' '.join(writer['config']['instructions']).lower()
+    researcher_instructions = ' '.join(researcher['config']['instructions']).lower()
+    for tool_name in ('cognee.memory_status', 'cognee.recall'):
+        assert tool_name in writer_instructions
+    assert 'without receiving the fact directly' in writer_instructions
+    assert 'cognee.remember' in researcher_instructions
+    assert 'do not return the stored facts directly' in researcher_instructions
+
+    for agent_id in ('agent_writer_1', 'agent_researcher_1'):
+        llm_connections = [
+            (component, entry)
+            for component in components
+            for entry in component.get('control', [])
+            if entry == {'classType': 'llm', 'from': agent_id}
+        ]
+        memory_connections = [
+            (component, entry)
+            for component in components
+            for entry in component.get('control', [])
+            if entry == {'classType': 'memory', 'from': agent_id}
+        ]
+        assert len(llm_connections) == 1
+        assert llm_connections[0][0]['provider'] == 'llm_anthropic'
+        assert len(memory_connections) == 1
+        assert memory_connections[0][0]['provider'] == 'memory_internal'
+
+    cognee_components = [component for component in components if component['provider'] == 'tool_cognee']
+    assert len(cognee_components) == 1
+    cognee = cognee_components[0]
+    assert cognee['control'] == [
+        {'classType': 'tool', 'from': 'agent_researcher_1'},
+        {'classType': 'tool', 'from': 'agent_writer_1'},
+    ]
+    assert cognee['config']['profile'] == 'default'
+    assert cognee['config']['default']['dataset'] == 'shared-research'
+    assert cognee['config']['default']['allow_dataset_override'] is False
+    assert cognee['config']['default']['base_url'] == '${COGNEE_BASE_URL}'
+    assert cognee['config']['default']['api_key'] == '${COGNEE_API_KEY}'
+
+    serialized = example_path.read_text(encoding='utf-8')
+    assert 'ROCKETRIDE_ANTHROPIC_KEY' in serialized
+    assert 'sk-' not in serialized
+    assert 'ck_' not in serialized
+    api_keys = [cognee['config']['default']['api_key']]
+    api_keys.extend(
+        component['config'][component['config']['profile']]['apikey']
+        for component in components
+        if component['provider'] == 'llm_anthropic'
+    )
+    assert all(value.startswith('${') and value.endswith('}') for value in api_keys)
+
+    readme = (_NODE_DIR / 'README.md').read_text(encoding='utf-8').lower()
+    for requirement in (
+        'same cognee server',
+        'authenticated identity',
+        'same dataset',
+        'eventually consistent',
+        'no transaction',
+        'sequential handoff',
+    ):
+        assert requirement in readme
+    for removed_name in ('pipeline_status', 'export_visualization', 'artifact_dir'):
+        assert removed_name not in readme
 
 
 def _instance(glb):

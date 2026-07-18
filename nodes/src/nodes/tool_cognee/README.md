@@ -44,25 +44,57 @@ Configure these node settings:
 
 ## Shared-agent example
 
-Connect both agent nodes to one `tool_cognee` node over tool/control connections. Leave
-`allow_dataset_override` disabled so both agents use the same operator-controlled dataset.
+See the copyable
+[`cognee-shared-memory-agents.pipe`](../../../../examples/cognee-shared-memory-agents.pipe)
+pipeline. A RocketRide component can have multiple tool/control entries, so one `tool_cognee` node
+can be controlled by both the writer and researcher agents. Prefer one shared Cognee node to
+duplicating it for each agent: one component keeps the server, credentials, dataset, and retrieval
+settings from drifting apart.
 
-A typical sequence is:
+Shared recall requires all participants to use the same Cognee server, an authenticated identity
+with permissions to the shared memory, and the same dataset. Leave `allow_dataset_override`
+disabled to keep every call in the operator-controlled dataset; per-call dataset drift is rejected
+unless the setting is explicitly enabled.
 
-1. One agent calls `cognee.remember` with
-   `{ "text": "Ada Lovelace wrote the first algorithm." }`.
-2. If processing runs in the background, either agent polls `cognee.memory_status` until it returns
-   `completed`.
-3. Either agent calls `cognee.recall` with
-   `{ "query": "Who wrote the first algorithm?" }`.
+Wiring agents to Cognee does not automatically copy their prompts, transcripts, or tool results.
+An agent must explicitly call `cognee.remember` to create durable memory, and another agent must
+explicitly call `cognee.recall` to retrieve it. Each `agent_rocketride` still needs its own
+`memory_internal` control for run-scoped working memory. Cognee adds durable cross-agent memory; it
+does not replace that working memory.
+
+Simultaneous writes from shared agents may overlap. This node provides no transaction,
+serialization, or ordering guarantee across tool calls, and recall is eventually consistent with
+processing. Prefer a sequential handoff: let the storing agent finish, wait for
+`cognee.memory_status` to report `completed`, and only then have the receiving agent recall.
+
+To test the example sequentially:
+
+1. Set `COGNEE_BASE_URL`, `COGNEE_API_KEY`, and `ROCKETRIDE_ANTHROPIC_KEY`, then open the example.
+2. Send this prompt. It gives the writer only a research subject, not the fact that must cross the
+   agent boundary:
+
+   ```text
+   Ask the researcher to identify one lesser-known fact about Grace Hopper and store it in shared
+   memory. The researcher must return only a storage confirmation, not the fact. After processing
+   completes, recover the fact yourself from shared memory and tell me what it is.
+   ```
+
+   The researcher independently determines the fact, calls `cognee.remember`, and returns only a
+   storage confirmation.
+3. If remember ran in the background, have the writer call `cognee.memory_status` until the shared
+   dataset reports `completed`.
+4. Have the writer call `cognee.recall` for the fact and produce the final response from recalled
+   memory, without receiving the fact directly from the researcher.
 
 ## Limits
 
 - `remember` accepts plain text only and is not retried automatically because retrying a write
   could duplicate ingestion.
-- `recall` requests references and does not retry its generation request.
+- `recall` requests references and is also single-attempt because it may perform generation.
+- Dataset discovery and status checks are idempotent GETs and use RocketRide's shared retry helper.
 - `memory_status` requires the dataset to exist and resolve by exact name.
 - Per-call dataset values are rejected unless `allow_dataset_override` is enabled.
+- No destructive dataset operation is exposed to an agent.
 
 ## Troubleshooting
 
