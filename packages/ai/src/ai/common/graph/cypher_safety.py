@@ -58,9 +58,13 @@ _UNSAFE_CYPHER = re.compile(
 # unbalanced quote in a comment swallowing a trailing write keyword). An
 # unterminated string or block comment does not match, so its keywords survive
 # and the statement is rejected, which is the safe direction.
+#
+# A line comment ends at a carriage return as well as a line feed. Stopping only
+# at ``\n`` would let ``// ...\rDELETE`` be read as one long comment here while
+# Cypher ends the comment at the ``\r`` and runs the DELETE.
 _STRIP_LITERALS = re.compile(
     r"""
-      //[^\n]*             # line comment
+      //[^\r\n]*           # line comment
     | /\*.*?\*/            # block comment
     | '(?:\\.|[^'\\])*'    # single-quoted string
     | "(?:\\.|[^"\\])*"    # double-quoted string

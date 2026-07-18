@@ -144,3 +144,20 @@ def test_unbalanced_quote_in_comment_cannot_hide_write():
     """
     cypher = "MATCH (n) // note: don't forget\nDELETE n"
     assert is_cypher_safe(cypher) is False
+
+
+@pytest.mark.parametrize(
+    'cypher',
+    [
+        'MATCH (n) // hide me\rDELETE n',
+        'MATCH (n) //\rCREATE (m)',
+    ],
+)
+def test_carriage_return_ends_line_comment(cypher):
+    """
+    A line comment ends at a carriage return, not only a line feed.
+
+    Cypher stops the ``//`` comment at the ``\\r`` and executes what follows, so
+    the strip must too, otherwise a write hidden after a lone ``\\r`` slips past.
+    """
+    assert is_cypher_safe(cypher) is False
