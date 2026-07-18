@@ -257,11 +257,13 @@ def test_shared_cognee_example_topology_and_documentation():
     assert response_terminals[0]['input'] == [{'lane': 'answers', 'from': 'agent_writer_1'}]
     writer_instructions = ' '.join(writer['config']['instructions']).lower()
     researcher_instructions = ' '.join(researcher['config']['instructions']).lower()
-    for tool_name in ('cognee.memory_status', 'cognee.recall'):
+    for tool_name in ('tool_cognee_1.memory_status', 'tool_cognee_1.recall'):
         assert tool_name in writer_instructions
     assert 'without receiving the fact directly' in writer_instructions
-    assert 'cognee.remember' in researcher_instructions
+    assert 'tool_cognee_1.remember' in researcher_instructions
     assert 'do not return the stored facts directly' in researcher_instructions
+    all_instructions = f'{writer_instructions} {researcher_instructions}'
+    assert not any(name in all_instructions for name in ('cognee.remember', 'cognee.recall', 'cognee.memory_status'))
 
     for agent_id in ('agent_writer_1', 'agent_researcher_1'):
         llm_connections = [

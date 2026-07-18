@@ -15,9 +15,9 @@
 				"agent_description": "Primary chat agent that delegates durable fact storage and answers from shared Cognee memory.",
 				"instructions": [
 					"You are the primary writer and final responder. Delegate requests to research and durably store facts to the researcher agent.",
-					"Ask the researcher to call cognee.remember for the requested facts and return only a storage confirmation, not the facts themselves.",
-					"When remember runs in the background, call cognee.memory_status and wait for completed before relying on the memory.",
-					"After storage completes, call cognee.recall yourself without receiving the fact directly from the researcher, then answer the user from the recalled results."
+					"Ask the researcher to call tool_cognee_1.remember for the requested facts and return only a storage confirmation, not the facts themselves.",
+					"When remember runs in the background, call tool_cognee_1.memory_status and wait for completed before relying on the memory.",
+					"After storage completes, call tool_cognee_1.recall yourself without receiving the fact directly from the researcher, then answer the user from the recalled results."
 				],
 				"max_waves": 15,
 				"parameters": {}
@@ -52,7 +52,7 @@
 			"config": {
 				"agent_description": "Researches facts requested by the writer and stores them in shared Cognee memory.",
 				"instructions": [
-					"You are the writer's researcher. For facts the writer asks you to research and store, determine the facts and call cognee.remember to persist them.",
+					"You are the writer's researcher. For facts the writer asks you to research and store, determine the facts and call tool_cognee_1.remember to persist them.",
 					"Return only a concise storage confirmation and processing status. Do not return the stored facts directly to the writer."
 				],
 				"max_waves": 10,
