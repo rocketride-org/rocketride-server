@@ -8,10 +8,11 @@ right: eviction, non-finite no-ops, the periodic recompute boundary,
 large-magnitude numerical stability, and concurrent access.
 
 Exact 4dp equality is asserted at moderate magnitudes (including a 1e6
-cancellation trap that a naive sum_sq/n - mean**2 would fail). At 1e9 magnitude,
-four decimal places on the mean exceed float64 precision for any algorithm, so
-those streams assert the stability invariants (finite, non-negative variance,
-exact zero-variance detection) rather than a byte-identical details string.
+cancellation trap that a naive sum_sq/n - mean**2 would fail). At 1e9 magnitude
+four decimals are still well within float64 resolution (spacing ~1.2e-7), so
+those streams compare mean, std, and z against the oracle within explicit
+tolerances rather than a byte-identical details string, which pins the accuracy
+while tolerating a last-digit summation-order flip.
 """
 
 import math
@@ -36,6 +37,7 @@ _NON_FINITE_RESULT = {'score': 0.0, 'severity': 'normal', 'is_anomalous': False,
 
 
 def _make_detector(**overrides):
+    """Build a z_score AnomalyDetector with default config plus any overrides."""
     config = {
         'method': 'z_score',
         'sensitivity': 2.0,
@@ -122,11 +124,13 @@ class TestZScoreBaseline:
     """Baseline z_score behavior that had no coverage before this change."""
 
     def test_insufficient_data_below_two(self):
+        """Fewer than two values in the window reports 'insufficient data'."""
         det = _make_detector()
         assert det.detect(5.0)['details'] == 'insufficient data'  # empty window
         assert det.detect(6.0)['details'] == 'insufficient data'  # one value
 
     def test_golden_window_mean5_std2(self):
+        """A hand-checked window [3, 7] scores value 9 as z = 2.0 exactly."""
         # Window [3, 7] -> mean 5, population std 2. Value 9 -> z = |9-5|/2 = 2.0.
         det = _make_detector()
         det.detect(3.0)
@@ -138,6 +142,7 @@ class TestZScoreBaseline:
         assert result['is_anomalous'] is True
 
     def test_severity_boundaries(self):
+        """Severity flips at the exact warning (z=2.0) and critical (z=3.0) points."""
         # Window [3, 7]: mean 5, std 2. z = 1.95 (normal), 2.0 (warning), 3.0 (critical).
         for value, expected in [(8.9, 'normal'), (9.0, 'warning'), (11.0, 'critical')]:
             det = _make_detector()
@@ -156,6 +161,7 @@ class TestZeroVariance:
     """
 
     def test_all_identical_small(self):
+        """A window of identical small values reports exact 'zero variance'."""
         det = _make_detector()
         for _ in range(10):
             det.detect(7.0)
@@ -165,6 +171,7 @@ class TestZeroVariance:
         assert result['is_anomalous'] is False
 
     def test_all_identical_large_magnitude(self):
+        """Identical 1e9 values still yield exact 'zero variance', not float noise."""
         det = _make_detector()
         for _ in range(50):
             det.detect(1e9)
@@ -172,6 +179,7 @@ class TestZeroVariance:
         assert result['details'] == 'zero variance', result
 
     def test_zero_variance_after_eviction(self):
+        """Once the old spread is evicted, a constant window returns to zero variance."""
         # Fill with varied data, then flood with a constant until the window is
         # entirely that constant. Eviction of the old spread must leave variance
         # at exactly zero.
@@ -188,16 +196,19 @@ class TestEquivalence:
     """Exact dict equality vs the two-pass oracle across many evictions."""
 
     def test_moderate_stream_window_10(self):
+        """A small window over many evictions matches the oracle at every step."""
         rng = random.Random(1234)
         values = [rng.gauss(100.0, 15.0) for _ in range(60)]
         _assert_equiv(values, windowSize=10)
 
     def test_moderate_stream_window_100(self):
+        """A default-sized window over a long stream matches the oracle at every step."""
         rng = random.Random(5678)
         values = [rng.gauss(500.0, 40.0) for _ in range(600)]
         _assert_equiv(values, windowSize=100)
 
     def test_stream_with_spikes(self):
+        """Periodic large spikes entering and leaving the window stay equivalent."""
         rng = random.Random(99)
         values = []
         for i in range(500):
@@ -206,58 +217,94 @@ class TestEquivalence:
         _assert_equiv(values, windowSize=50)
 
     def test_cancellation_trap_1e6(self):
-        # Large base with a small spread: sum_sq ~ 1e12*n while mean**2 ~ 1e12,
-        # so the naive identity loses ~12 digits. The shifted sums keep 4dp exact.
+        """A 1e6 base with tiny spread (where the naive identity loses ~12 digits) stays 4dp-exact."""
+        # sum_sq ~ 1e12*n while mean**2 ~ 1e12, so sum_sq/n - mean**2 cancels
+        # catastrophically; the shifted sums keep 4dp exact.
         rng = random.Random(4321)
         values = [1e6 + rng.uniform(-3.0, 3.0) for _ in range(400)]
         _assert_equiv(values, windowSize=50)
 
     def test_negative_and_mixed_sign(self):
+        """A stream centered on zero with both signs matches the oracle."""
         rng = random.Random(2718)
         values = [rng.gauss(0.0, 25.0) for _ in range(400)]
         _assert_equiv(values, windowSize=64)
 
     @pytest.mark.slow
     def test_large_window_10000(self):
+        """The maximum window over 3x its size (crossing recomputes) stays 4dp-exact."""
         rng = random.Random(2024)
         values = [rng.gauss(0.0, 1.0) for _ in range(30000)]  # 3x window; crosses recompute
         _assert_equiv(values, windowSize=10000)
 
 
 class TestLargeMagnitudeStability:
-    """1e9-magnitude streams: assert the numeric invariants, not a 4dp string.
+    """1e9-magnitude streams must track the two-pass oracle closely, not merely
+    stay finite.
 
-    Four decimals on a ~1e9 mean is below float64 resolution for any method, so
-    exact string equality is not a meaningful contract here. What must hold is
-    that variance never goes negative and sqrt never raises.
+    At ~1e9 the float64 spacing is about 1.2e-7, so four decimals is well within
+    resolution and the results are accurate. What makes an exact byte-for-byte
+    string match fragile is only that two different summation orders can round
+    the last displayed digit differently. So these streams compare the parsed
+    mean, std, and z against the oracle within explicit tolerances, which is what
+    actually pins the numerical-stability behavior. On the pinned seeds the
+    measured discrepancy is tiny: the mean agrees to a relative ~1e-13 and the
+    displayed std and z match the oracle exactly (rel 0.0 at 4dp); the tolerances
+    below are deliberately looser headroom for a last-digit summation-order flip.
+    A naive sum_sq/n - mean**2 would miss by orders of magnitude or return a
+    negative variance here, blowing past any of these tolerances.
     """
 
-    def _assert_sane(self, values, **cfg):
+    def _assert_close(self, values, *, mean_rel, std_rel, z_rel, abs_tol, **cfg):
+        """Feed values through the detector and oracle, asserting each numeric
+        result agrees within the given tolerances (guard strings must match exactly).
+        """
         det = _make_detector(**cfg)
-        for v in values:
-            result = det.detect(v)
-            parsed = _parse_z_details(result['details'])
-            if parsed is not None:
-                assert math.isfinite(parsed['std']), result
-                assert parsed['std'] >= 0.0, result
-                assert math.isfinite(parsed['z']), result
+        mirror = deque(maxlen=det.window_size)
+        for i, v in enumerate(values):
+            expected = _ref_z_score(list(mirror), v, det.warning_threshold, det.critical_threshold)
+            got = det.detect(v)
+            mirror.append(v)
+
+            exp_p = _parse_z_details(expected['details'])
+            got_p = _parse_z_details(got['details'])
+            # Guard-string branches (insufficient data / zero variance) must match
+            # exactly; only the numeric branch is compared with a tolerance.
+            assert (exp_p is None) == (got_p is None), f'step {i}: branch mismatch\n  {expected}\n  {got}'
+            if exp_p is None:
+                assert got['details'] == expected['details'], f'step {i}: {got} != {expected}'
+                continue
+
+            assert math.isfinite(got_p['std']) and got_p['std'] >= 0.0, got
+            assert math.isclose(got_p['mean'], exp_p['mean'], rel_tol=mean_rel, abs_tol=abs_tol), (
+                f'step {i}: mean {got_p["mean"]} vs oracle {exp_p["mean"]}'
+            )
+            assert math.isclose(got_p['std'], exp_p['std'], rel_tol=std_rel, abs_tol=abs_tol), (
+                f'step {i}: std {got_p["std"]} vs oracle {exp_p["std"]}'
+            )
+            assert math.isclose(got_p['z'], exp_p['z'], rel_tol=z_rel, abs_tol=abs_tol), (
+                f'step {i}: z {got_p["z"]} vs oracle {exp_p["z"]}'
+            )
         return det
 
     def test_large_base_small_spread(self):
+        """1e9 +/- small spread: mean/std/z stay within tolerance of the oracle."""
         rng = random.Random(7)
         values = [1e9 + rng.uniform(-5.0, 5.0) for _ in range(400)]
-        self._assert_sane(values, windowSize=50)
+        self._assert_close(values, mean_rel=1e-9, std_rel=1e-3, z_rel=1e-3, abs_tol=2e-4, windowSize=50)
 
     def test_monotonic_timestamp_like(self):
+        """A drifting ~1.7e9 timestamp stream stays within tolerance of the oracle."""
         base = 1_700_000_000.0
         values = [base + i * 0.5 for i in range(400)]
-        self._assert_sane(values, windowSize=100)
+        self._assert_close(values, mean_rel=1e-9, std_rel=1e-3, z_rel=1e-3, abs_tol=2e-4, windowSize=100)
 
 
 class TestEviction:
     """Once past capacity the window holds exactly the last W values."""
 
     def test_snapshot_is_last_window_values(self):
+        """After 3x window of input, the window is exactly the last W values fed."""
         window_size = 20
         rng = random.Random(555)
         values = [rng.gauss(50.0, 5.0) for _ in range(3 * window_size)]
@@ -273,6 +320,7 @@ class TestNonFinite:
     """Interleaved NaN/inf must be a complete no-op and never corrupt aggregates."""
 
     def test_interleaved_non_finite_equivalence(self):
+        """NaN/inf interleaved with finite data stay no-ops and preserve equivalence."""
         rng = random.Random(808)
         values = []
         for i in range(300):
@@ -290,6 +338,7 @@ class TestNonFinite:
         assert det._get_window_snapshot() == list(mirror)
 
     def test_non_finite_does_not_shift_aggregates(self):
+        """Injecting non-finite values leaves the shifted sums exactly as they were."""
         # Two detectors with identical finite history; inject non-finite values
         # into one only. A subsequent identical value must score the same, which
         # can only hold if the non-finite inputs left the window and the shifted
@@ -310,6 +359,7 @@ class TestRecomputeBoundary:
     """Crossing several recompute checkpoints must not introduce a discontinuity."""
 
     def test_crosses_multiple_recomputes(self):
+        """A stream long enough to trigger ~10 rebuilds matches the oracle throughout."""
         window_size = 10  # recompute fires every 10 values
         rng = random.Random(31337)
         values = [rng.gauss(75.0, 12.0) for _ in range(10 * window_size)]  # ~10 recomputes
@@ -321,11 +371,13 @@ class TestConcurrency:
 
     @pytest.mark.timeout(60)
     def test_concurrent_detect_is_consistent(self):
+        """8 threads x 2000 calls on one detector leave aggregates matching a two-pass."""
         window_size = 100
         det = _make_detector(windowSize=window_size)
         errors = []
 
         def worker(seed):
+            """Run 2000 detections with a per-thread seeded stream, recording any failure."""
             rng = random.Random(seed)
             try:
                 for _ in range(2000):
@@ -346,11 +398,9 @@ class TestConcurrency:
         snapshot = det._get_window_snapshot()
         assert len(snapshot) <= window_size
 
-        # After the concurrent churn the aggregates must still agree with a
-        # two-pass over the current window. Force a rebuild so the check is
-        # exact rather than dependent on where the recompute counter landed.
-        with det._lock:
-            det._recompute_z_aggregates()
+        # The maintained aggregates (never rebuilt here on purpose, so any update
+        # lost to a race stays observable) must still match a fresh two-pass over
+        # the current window.
         expected = _ref_z_score(snapshot, 123.4, det.warning_threshold, det.critical_threshold)
         got = det.detect(123.4)
         assert got == expected, f'post-concurrency mismatch:\n  expected {expected}\n  got      {got}'
