@@ -40,8 +40,9 @@
 export { default as MonitorView } from './modules/server';
 export type { IMonitorViewProps } from './modules/server';
 export { parseActivityEvent } from './modules/server';
-export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent } from './modules/server';
-export { OverviewTab, ConnectionsTab, TasksTab, ActivityTab } from './modules/server/components';
+export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from './modules/server';
+export { OverviewTab, OverviewGrid, ConnectionsGrid, TasksGrid, ActivityGrid, ConnectionRecordPanel, TaskRecordPanel, taskStatusText, taskStatusVariant, getEventDisplay } from './modules/server/components';
+export type { IOverviewGridProps, IConnectionsGridProps, ITasksGridProps, IActivityGridProps, IConnectionRecordPanelProps, ITaskRecordPanelProps, IEventDisplay, EventTone } from './modules/server/components';
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
@@ -135,8 +136,9 @@ export { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl
 export type { GridColumnDefinition, GridColumnRRType, IGridAction, IActionsColumnConfig, CellBadgeVariant, CellButtonKind } from './components/data-grid/defaults';
 export { FilterStrip } from './components/data-grid/FilterStrip';
 export type { IGridFilterDef, IGridFilterOption, IFilterStripProps } from './components/data-grid/FilterStrip';
-export { createWorkspaceGridPersistence } from './components/data-grid/persistence';
 export type { IDataGridPersistence, DataGridLayout } from './components/data-grid/persistence';
+export { createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from './components/data-grid/gridConfigChannel';
+export type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail } from './components/data-grid/gridConfigChannel';
 export { useDebouncedValue } from './hooks/useDebouncedValue';
 export type { ColumnDefinition, CellComponent, RowComponent, Options as TabulatorOptions } from 'tabulator-tables';
 

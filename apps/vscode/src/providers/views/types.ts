@@ -31,10 +31,20 @@ export type ProjectWebviewToHost = { type: 'view:ready' } | { type: 'view:initia
 // =============================================================================
 
 /** All messages the extension host can send to the MonitorWebview. */
-export type MonitorHostToWebview = { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:event'; event: unknown } | { type: 'monitor:dashboard'; data: DashboardResponse };
+export type MonitorHostToWebview = { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:event'; event: unknown } | { type: 'monitor:dashboard'; data: DashboardResponse }
+	// Grid config channel seed: the stored per-table layout map (tableId ->
+	// { persistence type -> blob }) from the extension's workspaceState, sent
+	// with the view:ready reply BEFORE the first dashboard snapshot so the
+	// webview bridge cache is primed before any grid reads its layout.
+	| { type: 'grid:config:init'; layouts: Record<string, Record<string, unknown>> };
 
 /** All messages the MonitorWebview can send to the extension host. */
-export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'monitor:refresh' };
+export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'monitor:refresh' }
+	// Grid config channel writes: persist / drop one table's layout blobs in
+	// the extension's workspaceState (blobType is the Tabulator persistence
+	// type — 'sort' | 'columns' | 'page' | the RR-private 'display'/'format').
+	| { type: 'grid:config:set'; tableId: string; blobType: string; blob: unknown }
+	| { type: 'grid:config:clear'; tableId: string };
 
 // =============================================================================
 // ACCOUNT PAGE PROTOCOL

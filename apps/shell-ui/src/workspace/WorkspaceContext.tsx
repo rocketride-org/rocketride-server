@@ -29,6 +29,8 @@ import { RocketRideClient } from 'rocketride';
 import { useWorkspaceState } from './useWorkspaceState';
 import type { WorkspacePrefs, AppDescriptor, AppManifestEntry } from './types';
 import type { ShellConnectionEventMap } from 'shared';
+import { GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from 'shared';
+import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail, DataGridLayout } from 'shared';
 import { ConnectionManager } from '../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../constants';
 import { resetRemote } from '../lib/appLoader';
@@ -183,6 +185,48 @@ export const WorkspaceProvider: React.FC<{
 		loaded, seeded, activeAppId, prefs, appState, settings,
 		switchApp, updatePrefs, updateAppState, updateSetting,
 	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
+
+	// ── Grid config channel bridge (web host) ──────────────────────────────
+	// Answers shared-ui DataGrid persistence over the document CustomEvent
+	// channel from THIS app's workspace prefs (`prefs.tableLayouts`). The
+	// bridge is what lets shared components persist layouts WITHOUT importing
+	// shell-ui: grids dispatch, the active app's provider answers. `get` must
+	// reply synchronously (Tabulator's reader is sync) — hence the live ref;
+	// `set`/`clear` merge over the freshest map so several grids in one view
+	// never clobber each other's entries.
+	const gridPrefsRef = useRef(prefs);
+	gridPrefsRef.current = prefs;
+	useEffect(() => {
+		/** The current per-table layout map from the live prefs. */
+		const layoutMap = (): Record<string, DataGridLayout> => {
+			const stored = gridPrefsRef.current.tableLayouts;
+			return stored && typeof stored === 'object' ? { ...(stored as Record<string, DataGridLayout>) } : {};
+		};
+		const onGet = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigGetDetail>).detail;
+			detail.reply(layoutMap()[detail.tableId]);
+		};
+		const onSet = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigSetDetail>).detail;
+			const map = layoutMap();
+			map[detail.tableId] = { ...map[detail.tableId], [detail.type]: detail.blob };
+			updatePrefs({ tableLayouts: map });
+		};
+		const onClear = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigClearDetail>).detail;
+			const map = layoutMap();
+			delete map[detail.tableId];
+			updatePrefs({ tableLayouts: map });
+		};
+		document.addEventListener(GRID_CONFIG_GET, onGet);
+		document.addEventListener(GRID_CONFIG_SET, onSet);
+		document.addEventListener(GRID_CONFIG_CLEAR, onClear);
+		return () => {
+			document.removeEventListener(GRID_CONFIG_GET, onGet);
+			document.removeEventListener(GRID_CONFIG_SET, onSet);
+			document.removeEventListener(GRID_CONFIG_CLEAR, onClear);
+		};
+	}, [updatePrefs]);
 
 	// --- Lazy descriptor loading -----------------------------------------------
 

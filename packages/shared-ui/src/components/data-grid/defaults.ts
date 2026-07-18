@@ -5,8 +5,10 @@
 
 /**
  * DataGrid helpers — DOM cell factories, the actions column builder, the
- * per-column header popup (filter + column show/hide + reset layout), and the
- * local-search predicate.
+ * per-column header popup (filter + column show/hide + reset layout), the
+ * local-search predicate, and the grid-internal LOCAL filter predicate
+ * ({@link rowMatchesFilters} — the client twin of the server list
+ * convention's filter semantics).
  *
  * Tabulator formatters build DOM outside React, so in-cell primitives are
  * plain elements styled by the token CSS classes in `tabulator-theme.css`
@@ -236,6 +238,245 @@ export function matchesSearch(row: Record<string, unknown>, term: string): boole
 		if (String(value).toLowerCase().includes(needle)) return true;
 	}
 	return false;
+}
+
+// =============================================================================
+// LOCAL FILTERS (grid-internal twin of the server list convention)
+// =============================================================================
+
+/** Range-operator suffixes carried by filter keys (e.g. `createdAt__gte`). */
+const RANGE_SUFFIXES = ['__gte', '__lte'] as const;
+
+/** A filter key's range operator — '' when the key carries none. */
+type RangeSuffix = (typeof RANGE_SUFFIXES)[number] | '';
+
+/**
+ * Split a filter key into its base field and range suffix — the client twin
+ * of the server convention's `split_range_suffix` (ai/common/list_rows.py).
+ *
+ * @param key - Raw filter key (e.g. 'createdAt__gte').
+ * @returns The base field plus the suffix ('' when the key carries none).
+ */
+function splitRangeSuffix(key: string): { base: string; suffix: RangeSuffix } {
+	for (const suffix of RANGE_SUFFIXES) {
+		if (key.endsWith(suffix)) return { base: key.slice(0, -suffix.length), suffix };
+	}
+	return { base: key, suffix: '' };
+}
+
+/**
+ * Coerce a filter string to a boolean — the server's truthy spellings
+ * (`coerce_bool`: '1' / 'true' / 'yes' / 'on', case-insensitive).
+ *
+ * @param value - Committed filter value.
+ * @returns The coerced boolean.
+ */
+function coerceBooleanText(value: string): boolean {
+	return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+/**
+ * Render one cell value as comparable filter text: null/undefined become ''
+ * (the server renders missing values empty), objects and arrays render as
+ * their JSON serialization (the server's text-cast path), and primitives pass
+ * through String().
+ *
+ * @param value - The raw cell value.
+ * @returns The comparable text.
+ */
+function filterCellText(value: unknown): string {
+	if (value === null || value === undefined) return '';
+	if (typeof value === 'object') return JSON.stringify(value);
+	return String(value);
+}
+
+/**
+ * Parse one committed date bound to an epoch-ms instant. Bounds ride the wire
+ * as date-only strings or `${date}T${time}` ISO datetimes; zone-less strings
+ * are stamped UTC first (the shared {@link assumeUtc} contract). A date-only
+ * UPPER bound widens to end-of-day inclusive, mirroring the server's
+ * `parse_datetime_bound` so "until 2026-07-15" covers that whole day.
+ *
+ * @param value - The committed bound string.
+ * @param endInclusive - True for `__lte` bounds.
+ * @returns The instant in epoch ms, or null when the bound does not parse.
+ */
+function parseDateBoundMs(value: string, endInclusive: boolean): number | null {
+	const trimmed = value.trim();
+	const ms = new Date(assumeUtc(trimmed)).getTime();
+	if (Number.isNaN(ms)) return null;
+	// Server parity: a 10-char bound is date-only — widen the upper bound to
+	// the last instant of that day (the server subtracts one microsecond;
+	// millisecond resolution is the client equivalent).
+	if (endInclusive && trimmed.length === 10) return ms + 24 * 60 * 60 * 1000 - 1;
+	return ms;
+}
+
+/**
+ * Parse one cell value as an epoch-ms instant for date-bound comparison:
+ * Date instances pass through, numbers are epoch ms (the same reading
+ * {@link formatDateValue} uses), and strings parse with the zone-less-is-UTC
+ * wire contract applied.
+ *
+ * @param value - The raw cell value.
+ * @returns The instant in epoch ms, or null when the value does not parse.
+ */
+function parseCellDateMs(value: unknown): number | null {
+	if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
+	if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+	if (typeof value === 'string' && value.trim() !== '') {
+		const ms = new Date(assumeUtc(value)).getTime();
+		return Number.isNaN(ms) ? null : ms;
+	}
+	return null;
+}
+
+/**
+ * Evaluate ONE committed filter entry against one cell value — the client
+ * twin of the server convention's `_row_matches_filter`
+ * (ai/common/list_rows.py), with the column's declared rrType standing in
+ * for the server's row-value type dispatch:
+ *
+ *  - ARRAY value → set membership (checklist commits; server-side IN):
+ *    scalar cells match when their lowercased text equals ANY member;
+ *    array-valued cells (e.g. sysPermissions) match when ANY element does
+ *    (contains-ANY); boolean cells match their 'true'/'false' spelling.
+ *    Arrays are invalid on range keys — the entry is inert (row passes).
+ *  - `__gte` / `__lte` bounds on a 'number' column (or an undeclared column
+ *    with a numeric cell) → numeric comparison; on a 'date' column (and
+ *    everything else) → parsed-instant comparison with the date-only
+ *    end-of-day widening. An unparsable bound is inert; a cell with no
+ *    parsable value fails lower bounds and passes upper bounds (the server's
+ *    empty-string comparison behavior).
+ *  - Bare string on a 'boolean' column (or a boolean cell) → both sides
+ *    coerce through the truthy spellings and compare equal.
+ *  - Bare string on a 'number' column (or a numeric cell) → numeric
+ *    equality; an unparsable filter value is inert, an unparsable cell fails.
+ *  - Bare string otherwise ('string' / 'strings' / 'json' / 'enum' /
+ *    undeclared) → case-insensitive containment over the cell's text
+ *    rendering ({@link filterCellText}: objects and arrays — 'json' blobs
+ *    included — compare over their JSON serialization).
+ *
+ * @param cellValue - The row's value for the entry's base field.
+ * @param value - The committed filter value (string, or array = membership).
+ * @param suffix - The key's range suffix ('' for a bare key).
+ * @param rrType - The base field's declared column type, if any.
+ * @returns True when the cell passes this entry.
+ */
+function matchesFilterEntry(
+	cellValue: unknown,
+	value: string | string[],
+	suffix: RangeSuffix,
+	rrType: GridColumnRRType | undefined,
+): boolean {
+	// ── Array value: set membership (server-side IN / contains-ANY) ─────────
+	if (Array.isArray(value)) {
+		// Arrays are invalid on range keys — the entry is inert.
+		if (suffix !== '') return true;
+		// Normalize members to lowercased text, dropping empties; an emptied
+		// set means "filter off".
+		const members = new Set(value.map((item) => String(item).toLowerCase()).filter((item) => item !== ''));
+		if (members.size === 0) return true;
+		// Array-valued cell: ANY element matching admits the row.
+		if (Array.isArray(cellValue)) {
+			return cellValue.some((element) => members.has(String(element).toLowerCase()));
+		}
+		// Boolean cell: match the stringified spelling the checklist commits.
+		if (typeof cellValue === 'boolean') return members.has(cellValue ? 'true' : 'false');
+		return members.has(filterCellText(cellValue).toLowerCase());
+	}
+
+	// ── Range bounds (`__gte` / `__lte` string entries) ─────────────────────
+	if (suffix !== '') {
+		const numericCell = typeof cellValue === 'number' && Number.isFinite(cellValue);
+		if (rrType === 'number' || (rrType === undefined && numericCell)) {
+			// Numeric bound: an unparsable bound is inert (server parity).
+			const bound = Number(value);
+			if (value.trim() === '' || Number.isNaN(bound)) return true;
+			const cellText = filterCellText(cellValue);
+			const cellNum = typeof cellValue === 'number' ? cellValue : Number(cellText);
+			if (cellText === '' || Number.isNaN(cellNum)) return false;
+			return suffix === '__gte' ? cellNum >= bound : cellNum <= bound;
+		}
+		// Date bound ('date' columns and non-numeric fallbacks): compare
+		// parsed instants; an unparsable bound is inert.
+		const boundMs = parseDateBoundMs(value, suffix === '__lte');
+		if (boundMs === null) return true;
+		const cellMs = parseCellDateMs(cellValue);
+		// Server parity: a valueless cell compares like the empty string —
+		// below every lower bound, under every upper bound.
+		if (cellMs === null) return suffix === '__lte';
+		return suffix === '__gte' ? cellMs >= boundMs : cellMs <= boundMs;
+	}
+
+	// ── Bare string value: coercion follows the declared column type ────────
+	if (rrType === 'boolean' || typeof cellValue === 'boolean') {
+		// Both sides coerce through the truthy spellings and compare equal.
+		const cellBool = typeof cellValue === 'boolean' ? cellValue : coerceBooleanText(filterCellText(cellValue));
+		return cellBool === coerceBooleanText(value);
+	}
+	if (rrType === 'number' || (typeof cellValue === 'number' && Number.isFinite(cellValue))) {
+		// Numeric equality; an unparsable filter value is inert (server
+		// parity: float(value) raising leaves the row admitted).
+		const bound = Number(value);
+		if (value.trim() === '' || Number.isNaN(bound)) return true;
+		const cellText = filterCellText(cellValue);
+		const cellNum = typeof cellValue === 'number' ? cellValue : Number(cellText);
+		if (cellText === '' || Number.isNaN(cellNum)) return false;
+		return cellNum === bound;
+	}
+	// Strings, string-arrays, and 'json' blobs: case-insensitive containment
+	// over the text rendering (objects/arrays serialize as JSON).
+	return filterCellText(cellValue).toLowerCase().includes(value.toLowerCase());
+}
+
+/**
+ * True when a row passes EVERY committed filter entry — the grid-internal
+ * predicate LOCAL grids run over their loaded rows, mirroring the server
+ * list convention's semantics (ai/common/list_rows.py `_row_matches_filter`)
+ * so a grid cannot tell whether its filters ran client- or server-side.
+ * Entry semantics live on {@link matchesFilterEntry}; per-entry behavior:
+ *
+ *  - Entries AND together; '' and [] values mean "filter off" (skipped —
+ *    the DataGrid's compaction drops them before commit anyway).
+ *  - Range keys (`${field}__gte` / `${field}__lte`) resolve their BASE field
+ *    by stripping the suffix; the base field's declared rrType selects
+ *    numeric vs date bound comparison.
+ *  - A key whose base field is not a property of the row is SKIPPED, exactly
+ *    like the server drops unknown filter keys — so a strip-only key (e.g. a
+ *    typeahead filtering by a joined value the host applies itself) never
+ *    zeroes the grid.
+ *
+ * @param row - The row object.
+ * @param filters - Committed filter record (the DataGrid's compacted state).
+ * @param columns - The grid's declared columns (rrType lookup by base field).
+ * @returns True when the row passes every committed entry.
+ */
+export function rowMatchesFilters(
+	row: Record<string, unknown>,
+	filters: Record<string, string | string[]>,
+	columns: GridColumnDefinition[],
+): boolean {
+	for (const [key, rawValue] of Object.entries(filters)) {
+		// Step 1: normalize — empty string / emptied array means "filter off".
+		let value: string | string[];
+		if (Array.isArray(rawValue)) {
+			value = rawValue.map(String).filter((item) => item !== '');
+			if (value.length === 0) continue;
+		} else {
+			value = String(rawValue);
+			if (value === '') continue;
+		}
+		// Step 2: resolve the base field (range suffixes ride separate keys)
+		// and its declared column type.
+		const { base, suffix } = splitRangeSuffix(key);
+		// Step 3: unknown keys are skipped (server parity — see the JSDoc).
+		if (!(base in row)) continue;
+		const rrType = columns.find((c) => c.field === base)?.rrType;
+		// Step 4: every committed entry must pass (AND semantics).
+		if (!matchesFilterEntry(row[base], value, suffix, rrType)) return false;
+	}
+	return true;
 }
 
 // =============================================================================
@@ -1740,6 +1981,9 @@ export function buildHeaderPopup(
 
 	// ── Section 1: filter (mode resolved from the column's declared type) ──
 	// Pending-state controls + Clear / Apply footer; see buildFilterSection.
+	// Section visibility is INDEPENDENT: 'none' (action pseudo-fields only —
+	// LOCAL and REMOTE grids both resolve real modes) hides ONLY this
+	// section; the FORMAT and COLUMNS sections below render regardless.
 	const bridge = state.__rrHeaderFilter;
 	const field = column.getField();
 	const mode: HeaderFilterMode = bridge && field ? bridge.mode(field) : 'none';
@@ -1749,6 +1993,9 @@ export function buildHeaderPopup(
 	}
 
 	// ── Section 2: format (live display picks; see buildFormatSection) ─────
+	// Every non-exempt column gets its FORMAT section — the gate is the
+	// rrNoPopup exemption alone, never the filter mode (a filterless column
+	// keeps its display controls).
 	const formatBridge = state.__rrFormat;
 	if (formatBridge && field && !(bridge && bridge.isPopupExempt(field))) {
 		panel.appendChild(buildFormatSection(formatBridge, field, mode));

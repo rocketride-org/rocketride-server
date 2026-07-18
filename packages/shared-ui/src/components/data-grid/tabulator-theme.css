@@ -802,10 +802,13 @@
 	border-bottom-color: transparent;
 }
 
-/* Alternating rows ON: even rows carry a faint surface wash. Hover still
-   reads over the stripe (hover token wins on both parities). */
+/* Alternating rows ON: even rows carry a faint wash mixed from the TEXT
+   token, not a surface token — surface tokens can equal the table's own
+   background in embedded themes (VSCode maps --rr-bg-surface-alt to the
+   editor background), which makes the stripe invisible; a 4% text mix
+   contrasts in every theme. Hover still wins on both parities. */
 .rr-grid--zebra.tabulator .tabulator-row.tabulator-row-even {
-	background: color-mix(in srgb, var(--rr-bg-surface-alt) 55%, transparent);
+	background: color-mix(in srgb, var(--rr-text-primary) 4%, transparent);
 }
 .rr-grid--zebra.tabulator .tabulator-row.tabulator-row-even:hover {
 	background: var(--rr-bg-list-hover);

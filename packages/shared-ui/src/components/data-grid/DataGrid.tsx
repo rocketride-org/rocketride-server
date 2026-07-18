@@ -22,8 +22,11 @@
  *    (Asc -> Desc -> None), and the per-column header popup with an
  *    Excel-style filter section whose control follows the column's declared
  *    `rrType` (text / checklist / Yes-No / date range / number range) —
- *    edits stay pending inside the popup until its Apply commits them —
- *    plus a live FORMAT section (alignment on every type; date/time
+ *    edits stay pending inside the popup until its Apply commits them, and
+ *    committed filters apply on BOTH data modes: REMOTE grids send them with
+ *    every page request; LOCAL grids filter their own loaded rows with the
+ *    server convention's exact semantics (rowMatchesFilters — no host
+ *    wiring) — plus a live FORMAT section (alignment on every type; date/time
  *    patterns on 'date' columns; decimals / thousands / currency on
  *    'number' columns; persisted with the layout), show/hide toggles, and
  *    "Reset layout"
@@ -67,7 +70,7 @@ import {
 import type { Options } from 'tabulator-tables';
 import { Tabulator } from './modules';
 import { createPortal } from 'react-dom';
-import { applyDefaultLayout, buildAutoColumns, closeHeaderPopup, defaultGroupFields, defaultSorters, exportRowsAsCsv, exportRowsAsJson, matchesSearch, normalizeColumns, toggleColumnWithFit } from './defaults';
+import { applyDefaultLayout, buildAutoColumns, closeHeaderPopup, defaultGroupFields, defaultSorters, exportRowsAsCsv, exportRowsAsJson, matchesSearch, normalizeColumns, rowMatchesFilters, toggleColumnWithFit } from './defaults';
 import { BxCog } from '../BoxIcon';
 import type {
 	GridColumnDefinition,
@@ -81,6 +84,18 @@ import type {
 import { FilterStrip } from './FilterStrip';
 import type { IGridFilterDef } from './FilterStrip';
 import type { IDataGridPersistence } from './persistence';
+import { createMessageGridPersistence } from './gridConfigChannel';
+
+// One lazy shared message adapter backs every grid that supplies only a
+// tableId — the adapter caches per table, so sharing is safe, and laziness
+// keeps SSR/test environments without a document from touching it at import.
+let defaultMessagePersistence: IDataGridPersistence | null = null;
+
+/** The tableId-default persistence: the grid config channel adapter. */
+function getDefaultPersistence(): IDataGridPersistence {
+	if (!defaultMessagePersistence) defaultMessagePersistence = createMessageGridPersistence();
+	return defaultMessagePersistence;
+}
 import { Button } from '../button/Button';
 import { cardHeaderChrome } from '../card/Card';
 import { commonStyles } from '../../themes/styles';
@@ -220,7 +235,12 @@ export interface IDataGridProps<Row extends Record<string, unknown>> {
 	onRowClick?: (row: Row) => void;
 	/** Remote load failure (prior rows are kept; an overlay shows briefly). */
 	onLoadError?: (error: Error) => void;
-	/** Layout persistence adapter; active only when `tableId` is also set. */
+	/**
+	 * Layout persistence adapter override. Normally OMITTED: a grid with a
+	 * `tableId` persists over the grid config channel by default (the host
+	 * bridge answers — web shell from workspace prefs, VSCode from project
+	 * state; no bridge = defaults). Supply one only to bypass the channel.
+	 */
 	persistence?: IDataGridPersistence;
 	/**
 	 * Derive addable columns from the row keys: any key of the loaded rows
@@ -234,11 +254,20 @@ export interface IDataGridProps<Row extends Record<string, unknown>> {
 	/**
 	 * Filter controls rendered in a strip above the table (grid-owned).
 	 * Values auto-apply after a 300ms debounce: remote grids refetch from
-	 * page 1 with the values in `req.filters`; local grids receive them via
-	 * `onFiltersChange` and filter their own `data`.
+	 * page 1 with the values in `req.filters`; local grids filter THEMSELVES
+	 * — the committed record runs through the grid-internal predicate
+	 * (rowMatchesFilters, the server convention's semantics) over the loaded
+	 * rows. A strip key with no matching row field is skipped by the
+	 * predicate (server parity), so cross-field strip filters (typeaheads
+	 * over joined values) stay the host's job via `onFiltersChange`.
 	 */
 	filters?: IGridFilterDef[];
-	/** Debounced committed filter values (local-mode filtering hook). */
+	/**
+	 * Debounced committed filter values — an OPTIONAL observation hook (URL
+	 * sync, analytics, host-side filtering of strip-only keys). LOCAL grids
+	 * no longer require it to filter: they apply committed header-popup and
+	 * strip filters to their own rows grid-internally.
+	 */
 	onFiltersChange?: (values: Record<string, string | string[]>) => void;
 	/**
 	 * Async distinct-value lookup for the checklist filter of `rrType: 'enum'`
@@ -574,8 +603,12 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	rowClickRef.current = onRowClick;
 	const loadErrorRef = useRef(onLoadError);
 	loadErrorRef.current = onLoadError;
-	const persistenceRef = useRef(persistence);
-	persistenceRef.current = persistence;
+	// An explicit adapter wins; with only a tableId the grid persists over
+	// the grid config channel (the host bridge — web shell or VSCode webview
+	// — answers it; no bridge = declared defaults, writes dropped).
+	const resolvedPersistence = persistence ?? (tableId ? getDefaultPersistence() : undefined);
+	const persistenceRef = useRef(resolvedPersistence);
+	persistenceRef.current = resolvedPersistence;
 	const dataRef = useRef(data);
 	dataRef.current = data;
 	const filtersChangeRef = useRef(onFiltersChange);
@@ -587,15 +620,17 @@ function DataGridInner<Row extends Record<string, unknown>>(
 
 	// ── Filter state (strip + header popups) ────────────────────────────────
 	// Raw control values (all keys) and typeahead display labels; the compact
-	// non-empty projection is what rides into fetchPage / onFiltersChange.
-	// Strings come from the strip and 'text' popups (server-side "contains");
-	// arrays come from checklist popups (server-side IN); 'date' / 'number'
-	// popups write their bounds as `${field}__gte` / `${field}__lte` string
-	// entries. Header popups batch their edits locally and commit through
-	// the bridge only on Apply; the strip still auto-applies per keystroke.
+	// non-empty projection is what rides into fetchPage, the grid-internal
+	// LOCAL predicate, and onFiltersChange. Strings come from the strip and
+	// 'text' popups ("contains"); arrays come from checklist popups (IN);
+	// 'date' / 'number' popups write their bounds as `${field}__gte` /
+	// `${field}__lte` string entries. Header popups batch their edits locally
+	// and commit through the bridge only on Apply; the strip still
+	// auto-applies per keystroke.
 	const [filterValues, setFilterValues] = useState<Record<string, string | string[]>>({});
 	const [filterLabels, setFilterLabels] = useState<Record<string, string>>({});
-	// Committed (compacted) values read by the remote fetch at request time.
+	// Committed (compacted) values, read at evaluation time by the remote
+	// request builder, the LOCAL row predicate, and the export walk.
 	const committedFiltersRef = useRef<Record<string, string | string[]>>({});
 	// Live mirror of filterValues for the header-popup bridge (built outside
 	// React, so it reads through a ref instead of a stale closure).
@@ -645,7 +680,8 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	};
 
 	// Auto-apply: 300ms after the last edit, commit the non-empty values and
-	// either re-query from page 1 (remote) or hand them to the view (local).
+	// either re-query from page 1 (remote) or refresh the grid-internal row
+	// predicate (local — the observation callback fires too).
 	const filterInitRef = useRef(true);
 	useEffect(() => {
 		if (filterInitRef.current) {
@@ -662,11 +698,14 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			committedFiltersRef.current = compact;
 			// The Reset Layout button tracks the committed (non-empty) state.
 			setFiltersActive(Object.keys(compact).length > 0);
-			// Step 2: apply — remote grids restart from page 1; local grids get
-			// the values and filter their own data.
+			// Step 2: apply — remote grids restart from page 1; local grids
+			// filter THEMSELVES by refreshing the grid-internal predicate over
+			// the loaded rows, then still hand observers the committed record
+			// (an optional hook — URL sync, host-side strip-only filtering).
 			if (fetchRef.current) {
-				whenBuilt((table) => void table.setData());
+				whenBuilt(requeryFromPageOne);
 			} else {
+				whenBuilt(applyLocalPredicate);
 				filtersChangeRef.current?.(compact);
 			}
 			// Step 3: reflect the committed state in the header indicators.
@@ -714,21 +753,11 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			if (fetchRef.current) {
 				// REMOTE: re-query from page 1 — the request builder reads the
 				// committed term and sends it server-side.
-				whenBuilt((table) => void table.setData());
+				whenBuilt(requeryFromPageOne);
 			} else {
-				whenBuilt((table) => {
-					// Step 1: install / clear the predicate over the loaded rows.
-					if (term) {
-						table.setFilter((row: Record<string, unknown>) => matchesSearch(row, committedSearchRef.current));
-					} else {
-						table.clearFilter(false);
-					}
-					// Step 2: the filter refresh is synchronous and local-only,
-					// so re-run the page clamp and the footer contract by hand
-					// (local paging recomputes max pages from the narrowed set).
-					clampPage();
-					syncFooter();
-				});
+				// LOCAL: refresh the combined search + filter predicate over
+				// the loaded rows (it reads the committed term through the ref).
+				whenBuilt(applyLocalPredicate);
 			}
 		}, SEARCH_DEBOUNCE_MS);
 		return () => clearTimeout(timer);
@@ -781,7 +810,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	// row count, refreshed on the 'dataFiltered' event — verified in
 	// tabulator_esm.mjs that the Filter module dispatches it with the
 	// post-filter row set on every local pipeline refresh, so the count
-	// tracks the search predicate.
+	// tracks the combined search + committed-filter predicate.
 	const [activeCount, setActiveCount] = useState<number | null>(null);
 
 	// ── Export (CSV / JSON of every matching row) ───────────────────────────
@@ -880,8 +909,9 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	/**
 	 * Gather EVERY row matching the grid's current filters and search (not
 	 * just the loaded page). LOCAL mode starts from the current `data` prop
-	 * (which already reflects the view's strip filtering) and applies the
-	 * client-side search predicate. REMOTE mode walks all pages through
+	 * and applies the grid's own combined predicate — the committed search
+	 * term AND the committed filters ({@link rowMatchesFilters}) — exactly
+	 * like the grid narrows itself. REMOTE mode walks all pages through
 	 * `fetchPage` with the committed filters, search term, and current sort
 	 * riding each request — the server narrows, so no client re-filter (its
 	 * match rules differ) — up to {@link EXPORT_ROW_CAP}.
@@ -893,11 +923,14 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		let partial = false;
 		const fetchPageFn = fetchRef.current;
 		if (!fetchPageFn) {
-			// LOCAL: the data prop is the full (strip-filtered) set already;
-			// the active search predicate narrows it like the grid does.
-			rows = (dataRef.current ?? []) as Record<string, unknown>[];
-			const term = committedSearchRef.current;
-			if (term) rows = rows.filter((row) => matchesSearch(row, term));
+			// LOCAL: the grid-internal predicate narrows the full data prop
+			// the same way the visible grid does (an empty term / record
+			// admits everything, so the filter is unconditional).
+			rows = ((dataRef.current ?? []) as Record<string, unknown>[]).filter(
+				(row) =>
+					matchesSearch(row, committedSearchRef.current) &&
+					rowMatchesFilters(row, committedFiltersRef.current, columnsRef.current),
+			);
 		} else {
 			// REMOTE: mirror what the grid itself sends — committed filters and
 			// search always; the current sorters only when the grid sorts
@@ -1081,7 +1114,11 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	/**
 	 * Resolve the filter control of a field from its declared column type
 	 * ({@link GridColumnDefinition.rrType} on the retained pre-normalized
-	 * defs):
+	 * defs). Every non-exempt column resolves a REAL mode on BOTH data modes:
+	 * REMOTE grids send committed values with each page request, and LOCAL
+	 * grids apply them grid-internally over their loaded rows
+	 * ({@link rowMatchesFilters} — no host callback required, so no filter
+	 * ever commits into a void):
 	 *
 	 *  - action pseudo-fields ('__*') and `rrNoPopup` columns: 'none'
 	 *  - 'boolean' → static Yes/No checklist; 'date' → Start/End range;
@@ -1095,18 +1132,13 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	 *    without `fetchDistinct` — the page at hand is only one page of
 	 *    rows, not the full distinct set, so a checklist would lie
 	 *  - 'string' / 'json' and undeclared fields (including auto-derived
-	 *    columns) → 'text' (server-side "contains" / coercion handles the
-	 *    rest)
+	 *    columns) → 'text' ("contains" / coercion — server-side remotely,
+	 *    the grid-internal predicate locally — handles the rest)
 	 */
 	const resolveFilterMode = (field: string): HeaderFilterMode => {
 		// Action pseudo-fields ('__rrActions', ...) never filter; neither do
 		// columns that opted out of the header popup entirely (rrNoPopup).
 		if (field.startsWith('__') || isPopupExempt(field)) return 'none';
-		// LOCAL grids never interpret filter values themselves — the VIEW does,
-		// through onFiltersChange. Without that hook the popup's filter section
-		// would commit values into a void, so it is hidden entirely (user
-		// feedback 2026-07-16: a filter that does nothing must not render).
-		if (!fetchRef.current && !filtersChangeRef.current) return 'none';
 		const column = columnsRef.current.find((c) => c.field === field);
 		// A declared static vocabulary (rrOptions) makes ANY column a
 		// checklist — enum-like strings, JSON string-arrays (sysPermissions),
@@ -1238,6 +1270,22 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		else queueRef.current.push(fn);
 	};
 
+	/**
+	 * Re-query a REMOTE grid from page 1 with the freshly committed
+	 * filters/search (the request builder reads them from refs). QUIET when
+	 * the grid is already ON page 1 — the overwhelmingly common case while
+	 * filtering — via replaceData(), which re-runs the request pipeline and
+	 * swaps rows in place with no loading overlay; only a genuine page jump
+	 * goes through setData()'s loader path.
+	 */
+	const requeryFromPageOne = (table: Tabulator): void => {
+		// getPage() is false when pagination is off — nothing to reset, so
+		// the quiet path applies there too.
+		const page = table.getPage();
+		if (page === 1 || page === false) void table.replaceData();
+		else void table.setData();
+	};
+
 	/** Snap the page back in range after a local data shrink. */
 	const clampPage = (): void => {
 		const table = tableRef.current;
@@ -1256,6 +1304,40 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		if (!table || !el || !builtRef.current) return;
 		const max = table.getPageMax();
 		el.classList.toggle('rr-grid--single-page', typeof max !== 'number' || max <= 1);
+	};
+
+	/**
+	 * Install / clear the ONE Tabulator filter a LOCAL grid runs: a row must
+	 * pass the committed search term AND every committed filter (header
+	 * popups + strip), the latter evaluated grid-internally by
+	 * {@link rowMatchesFilters} with the server convention's exact semantics
+	 * — LOCAL grids filter THEMSELVES, no host callback required. The
+	 * predicate reads the committed refs at evaluation time, so re-running
+	 * this after each commit is the whole refresh; with nothing committed the
+	 * filter clears entirely. Tabulator's filter refresh is synchronous and
+	 * local-only (see the search-mode note above), so the page clamp and the
+	 * footer contract re-run by hand — and the 'dataFiltered' event it fires
+	 * keeps the title bar's "X of N rows" active count tracking the combined
+	 * predicate.
+	 *
+	 * @param table - The built Tabulator instance (via whenBuilt).
+	 */
+	const applyLocalPredicate = (table: Tabulator): void => {
+		// Step 1: install / clear the combined predicate over the loaded rows.
+		const hasFilters = Object.keys(committedFiltersRef.current).length > 0;
+		if (committedSearchRef.current !== '' || hasFilters) {
+			table.setFilter(
+				(row: Record<string, unknown>) =>
+					matchesSearch(row, committedSearchRef.current) &&
+					rowMatchesFilters(row, committedFiltersRef.current, columnsRef.current),
+			);
+		} else {
+			table.clearFilter(false);
+		}
+		// Step 2: re-run the page clamp and the footer contract (local paging
+		// recomputes max pages from the narrowed set).
+		clampPage();
+		syncFooter();
 	};
 
 	/**
@@ -1294,8 +1376,10 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		setFilterValues({});
 		setFilterLabels({});
 		committedFiltersRef.current = {};
-		// Local grids filter their own `data` from onFiltersChange — hand
-		// them the cleared values now, since the guarded debounce won't.
+		// The grid-internal LOCAL predicate dies with the torn-down instance
+		// (the rebuilt table starts unfiltered over the emptied refs); hosts
+		// observing commits through onFiltersChange still get the cleared
+		// record now, since the guarded debounce won't fire.
 		if (!fetchRef.current) filtersChangeRef.current?.({});
 		// Step 3: clear the grid-local search (input, committed term, and the
 		// count-mode flag). The predicate itself dies with the instance, as
@@ -1647,10 +1731,25 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			popupScrollCloser = null;
 		});
 
+		// Hidden-panel reveal: a grid built inside a display:none tab panel
+		// measures 0 wide and Tabulator crushes its column layout (the known
+		// hidden-panel-dimensions gotcha). Watch the container; when it first
+		// gains real width, force a full re-layout.
+		let lastWidth = containerRef.current.clientWidth;
+		const revealObserver = new ResizeObserver(() => {
+			const width = containerRef.current?.clientWidth ?? 0;
+			if (lastWidth === 0 && width > 0 && builtRef.current) {
+				table.redraw(true);
+			}
+			lastWidth = width;
+		});
+		revealObserver.observe(containerRef.current);
+
 		// Step 3: teardown reverses everything.
 		return () => {
 			builtRef.current = false;
 			tableRef.current = null;
+			revealObserver.disconnect();
 			if (popupScrollCloser) {
 				document.removeEventListener('scroll', popupScrollCloser, true);
 				popupScrollCloser = null;
@@ -1711,11 +1810,15 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		refetch(opts?: { resetPage?: boolean }) {
 			whenBuilt((table) => {
 				if (opts?.resetPage) {
-					// setData() restarts the remote query from page 1.
-					void table.setData();
+					// Page-1 restart — quiet when already there.
+					requeryFromPageOne(table);
 				} else {
-					const page = table.getPage();
-					void table.setPage(typeof page === 'number' ? page : 1);
+					// replaceData() re-runs the CURRENT request quietly: rows
+					// swap in place with scroll preserved and NO loading
+					// overlay — setPage(current) re-requested too, but through
+					// the loader path, flashing the grid on every poll-driven
+					// refresh (the same reason LOCAL mode uses replaceData).
+					void table.replaceData();
 				}
 			});
 		},
@@ -1742,17 +1845,21 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	const clearVisible = sortActive || searchActive || filtersActive;
 
 	// Matching-row count. LOCAL grids know both numbers — the data prop
-	// length (N) and Tabulator's post-predicate active count (X) — so an
-	// active search reads "X of N rows". REMOTE grids send the search
-	// server-side, so the captured server total IS the match count and an
+	// length (N) and Tabulator's post-predicate active count (X) — so any
+	// grid-internal narrowing (a committed search OR committed filters, both
+	// live in the one local predicate) reads "X of N rows". REMOTE grids
+	// narrow server-side — filters shape the reported total directly, and an
 	// active search reads "N matching rows" (the unsearched baseline isn't
 	// re-queried just for the label). Null total (remote grid before its
 	// first page resolves) renders no count.
 	const totalCount = data ? data.length : totalRows;
+	// LOCAL narrowing spans search and filters; REMOTE only flags search
+	// (a filtered remote total is already the plain count).
+	const narrowed = fetchPage ? searchActive : searchActive || filtersActive;
 	let countText: string | null = null;
 	if (totalCount !== null) {
 		const noun = `row${totalCount === 1 ? '' : 's'}`;
-		if (!searchActive) {
+		if (!narrowed) {
 			countText = `${totalCount} ${noun}`;
 		} else if (fetchPage) {
 			countText = `${totalCount} matching ${noun}`;

@@ -4,26 +4,22 @@
 // =============================================================================
 
 /**
- * DataGrid layout persistence — the bridge between Tabulator's persistence
- * module and the per-user workspace store.
+ * DataGrid layout persistence — the storage contract behind Tabulator's
+ * persistence module.
  *
  * Tabulator persists layout state (column widths / order / visibility, sort,
- * page size) through a SYNCHRONOUS reader/writer pair. The workspace store is
- * asynchronous on disk but its `prefs` object is hydrated before app views
- * mount, so a getter over the live prefs satisfies the sync contract.
+ * page size) through a SYNCHRONOUS reader/writer pair;
+ * {@link IDataGridPersistence} is that contract plus `clear` for the grid's
+ * "Reset layout" action.
  *
- * shared-ui must not import shell-ui (module-federation layering), so views
- * wire this adapter themselves:
- *
- *   const { prefs, updatePrefs } = useWorkspace();          // shell-ui
- *   const prefsRef = useRef(prefs); prefsRef.current = prefs;
- *   const persistence = useMemo(
- *       () => createWorkspaceGridPersistence(() => prefsRef.current, updatePrefs),
- *       [updatePrefs]);
- *
- * One adapter instance per view — the instance caches the whole `tableLayouts`
- * map so several grids in one view (e.g. benchmark's three) never clobber each
- * other's entries when writing.
+ * Views do NOT wire an adapter themselves. Whenever a DataGrid has a
+ * `tableId` and no explicit `persistence` prop, it defaults to the
+ * message-channel adapter (see gridConfigChannel.ts): the grid speaks a tiny
+ * CustomEvent protocol and whatever host is present answers it — the web
+ * shell from the active app's workspace prefs, the VSCode webview from the
+ * extension host's project workspaceState; with no bridge listening the grid
+ * simply renders its declared defaults. The `persistence` prop remains only
+ * as an override for hosts that need a custom store.
  */
 
 // =============================================================================
@@ -82,6 +78,12 @@ const PREFS_KEY = 'tableLayouts';
  * funnels every write through it, so concurrent writes from multiple grids in
  * the same view are last-writer-safe; the workspace store's own debounce
  * batches the disk writes.
+ *
+ * @internal Not exported from the package barrel. Views rely on the
+ * tableId-default message adapter instead (gridConfigChannel.ts); the web
+ * shell's WorkspaceProvider bridge inlines these prefs semantics on the host
+ * side of that channel. Retained for direct-path import by a host that needs
+ * a prefs-backed adapter as an explicit `persistence` override.
  *
  * @param getPrefs - Getter over the LIVE workspace prefs object (use a ref).
  * @param updatePrefs - The workspace `updatePrefs` patch function.

@@ -66,6 +66,18 @@ try {
 	console.error('[useMessaging] Failed to acquire VS Code API:', err);
 }
 
+/**
+ * The singleton VS Code webview API handle acquired at module load, or null
+ * outside a VS Code webview. Auxiliary bridges (e.g. useGridConfigBridge)
+ * that must post to the extension host WITHOUT re-running the view:ready
+ * handshake read the handle here instead of calling useMessaging again.
+ *
+ * @returns The acquired VS Code API, or null when unavailable.
+ */
+export function getVsCodeApi(): VSCodeAPI | null {
+	return vscodeApi;
+}
+
 // =============================================================================
 // HOOK
 // =============================================================================

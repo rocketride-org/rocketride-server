@@ -25,7 +25,7 @@
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
@@ -2397,6 +2397,53 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getDashboard(): Promise<DashboardResponse> {
 		return this.call<DashboardResponse>('rrext_dashboard', {});
+	}
+
+	/**
+	 * Build the wire arguments for a rrext_list_* command from a page request.
+	 *
+	 * Only supplied fields are forwarded, so server defaults (page 1, size 50,
+	 * default sort) apply when the caller omits them.
+	 *
+	 * @param req - The list page request (already in wire naming, e.g. page_size)
+	 * @returns The wire argument record for RocketRideClient.call
+	 */
+	private buildListArgs(req: ListPageRequest): Record<string, unknown> {
+		const args: Record<string, unknown> = {};
+		// Forward each convention argument only when the caller provided it
+		if (req.page !== undefined) args.page = req.page;
+		if (req.page_size !== undefined) args.page_size = req.page_size;
+		if (req.search !== undefined) args.search = req.search;
+		if (req.sort !== undefined) args.sort = req.sort;
+		if (req.filters !== undefined) args.filters = req.filters;
+		return args;
+	}
+
+	/**
+	 * Retrieve one page of the caller's active connections (platform list-API
+	 * convention). Rows carry the same shape as the dashboard's connections
+	 * list; the default sort is connectedAt ascending (registration order,
+	 * matching the dashboard) with the monotonic id as tiebreak.
+	 * Requires 'task.monitor' permission.
+	 *
+	 * @param req - Paging, search, sort, and filter arguments (all optional)
+	 * @returns The standard { rows, total, page, pageSize } envelope
+	 */
+	async listConnections(req: ListPageRequest = {}): Promise<ListConnectionsResponse> {
+		return this.call<ListConnectionsResponse>('rrext_list_connections', this.buildListArgs(req));
+	}
+
+	/**
+	 * Retrieve one page of the caller's tasks (platform list-API convention).
+	 * Rows carry the same shape as the dashboard's tasks list; the default
+	 * sort is startTime ascending (creation order, matching the dashboard)
+	 * with the task id as tiebreak. Requires 'task.monitor' permission.
+	 *
+	 * @param req - Paging, search, sort, and filter arguments (all optional)
+	 * @returns The standard { rows, total, page, pageSize } envelope
+	 */
+	async listTasks(req: ListPageRequest = {}): Promise<ListTasksResponse> {
+		return this.call<ListTasksResponse>('rrext_list_tasks', this.buildListArgs(req));
 	}
 
 	// ============================================================================

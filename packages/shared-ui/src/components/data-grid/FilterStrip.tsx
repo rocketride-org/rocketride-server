@@ -9,8 +9,9 @@
  * Rendered by DataGrid above the table when the `filters` prop is set: one
  * labelled control per {@link IGridFilterDef}, in the platform filter-bar
  * style (uppercase labels, 30px controls). Values are controlled by DataGrid,
- * which debounces changes into a remote refetch or the `onFiltersChange`
- * callback (local mode) — there is no Apply button.
+ * which debounces changes into a remote refetch or, in local mode, its own
+ * grid-internal row predicate (plus the optional `onFiltersChange`
+ * observation hook) — there is no Apply button.
  *
  * Control types: free text, select (options include their own "All ..."
  * empty-value entry), date, and typeahead (async suggestions; the stored
