@@ -167,6 +167,7 @@ def _make_global(**overrides):
     glb.base_url = 'http://localhost:8000'
     glb.api_key = 'ck_test'
     glb.dataset = 'main'
+    glb.allow_dataset_override = False
     glb.search_type = 'GRAPH_COMPLETION_DECOMPOSITION'
     glb.top_k = 15
     glb.request_timeout = 120
@@ -700,11 +701,69 @@ def test_recall_defaults_to_decomposition_with_references(modern_calls):
 
 
 @pytest.mark.parametrize(
+    ('tool_name', 'args', 'client_name', 'kwargs'),
+    [
+        ('remember', {'text': 'memory'}, 'remember', {'text': 'memory', 'run_in_background': False}),
+        ('recall', {'query': 'question'}, 'recall', {'query': 'question'}),
+    ],
+)
+def test_tools_use_configured_dataset_when_omitted(modern_calls, tool_name, args, client_name, kwargs):
+    """Remember and recall bind omitted datasets to the node-configured scope."""
+    glb = _make_global(dataset='team-memory')
+    getattr(_instance(glb), tool_name)(args)
+    call = next(call for call in modern_calls['calls'] if call['name'] == client_name)
+    assert call['kwargs']['dataset'] == 'team-memory'
+    assert call['kwargs'].items() >= kwargs.items()
+
+
+@pytest.mark.parametrize(
+    ('tool_name', 'args'),
+    [
+        ('remember', {'text': 'memory', 'dataset': 'project-b'}),
+        ('recall', {'query': 'question', 'dataset': 'project-b'}),
+    ],
+)
+def test_different_dataset_override_is_rejected_by_default(tool_name, args):
+    """Remember and recall reject a dataset that differs from the operator scope."""
+    with pytest.raises(ValueError, match='dataset'):
+        getattr(_instance(_make_global(dataset='team-memory')), tool_name)(args)
+
+
+@pytest.mark.parametrize(
+    ('tool_name', 'args'),
+    [
+        ('remember', {'text': 'memory', 'dataset': ' team-memory '}),
+        ('recall', {'query': 'question', 'dataset': ' team-memory '}),
+    ],
+)
+def test_equal_dataset_override_is_accepted_by_default(modern_calls, tool_name, args):
+    """An explicit spelling of the configured dataset remains valid by default."""
+    getattr(_instance(_make_global(dataset='team-memory')), tool_name)(args)
+    assert modern_calls['calls'][-1]['kwargs']['dataset'] == 'team-memory'
+
+
+@pytest.mark.parametrize(
+    ('tool_name', 'args'),
+    [
+        ('remember', {'text': 'memory', 'dataset': ' project-b '}),
+        ('recall', {'query': 'question', 'dataset': ' project-b '}),
+    ],
+)
+def test_enabled_dataset_override_passes_trimmed_alternate_dataset(modern_calls, tool_name, args):
+    """The explicit operator switch permits an alternate per-call dataset."""
+    getattr(_instance(_make_global(dataset='team-memory', allow_dataset_override=True)), tool_name)(args)
+    assert modern_calls['calls'][-1]['kwargs']['dataset'] == 'project-b'
+
+
+@pytest.mark.parametrize(
     ('tool_name', 'args'),
     [
         ('remember', {'text': 'memory', 'dataset': '  '}),
         ('recall', {'query': 'question', 'dataset': '  '}),
         ('memory_status', {'dataset': '  '}),
+        ('remember', {'text': 'memory', 'dataset': 1}),
+        ('recall', {'query': 'question', 'dataset': 1}),
+        ('memory_status', {'dataset': 1}),
     ],
 )
 def test_blank_dataset_is_rejected(tool_name, args):
@@ -755,11 +814,33 @@ def test_memory_status_resolves_dataset_name_to_uuid(monkeypatch):
     ]
 
 
+def test_memory_status_obeys_dataset_override_policy(monkeypatch):
+    """Status rejects alternate scopes by default and uses them when the switch is enabled."""
+    calls = []
+    monkeypatch.setattr(
+        client, 'list_datasets', lambda *_args, **_kwargs: [{'id': 'project-b-id', 'name': 'project-b'}]
+    )
+    monkeypatch.setattr(
+        client,
+        'get_dataset_status',
+        lambda *_args, dataset_id, **_kwargs: calls.append(dataset_id) or 'completed',
+    )
+
+    with pytest.raises(ValueError, match='dataset'):
+        _instance(_make_global(dataset='team-memory')).memory_status({'dataset': 'project-b'})
+
+    result = _instance(_make_global(dataset='team-memory', allow_dataset_override=True)).memory_status(
+        {'dataset': ' project-b '}
+    )
+    assert result == {'dataset': 'project-b', 'dataset_id': 'project-b-id', 'status': 'completed'}
+    assert calls == ['project-b-id']
+
+
 def test_memory_status_rejects_unknown_dataset(monkeypatch):
     """A missing dataset is a clear input error and never triggers a status request."""
     monkeypatch.setattr(client, 'list_datasets', lambda *_args, **_kwargs: [])
     with pytest.raises(ValueError, match='not found'):
-        _instance(_make_global()).memory_status({'dataset': 'missing'})
+        _instance(_make_global(dataset='missing')).memory_status({})
 
 
 def test_tool_propagates_client_runtimeerror(monkeypatch):
@@ -797,11 +878,12 @@ def test_global_config_mode_skips_setup(monkeypatch):
 
 
 def test_global_loads_exact_runtime_configuration(monkeypatch):
-    """Runtime setup loads the six shared-memory configuration values."""
+    """Runtime setup loads the shared-memory configuration values."""
     config = {
         'base_url': 'https://cognee.example/',
         'api_key': '',
         'dataset': 'demo',
+        'allow_dataset_override': True,
         'search_type': 'GRAPH_COMPLETION_DECOMPOSITION',
         'top_k': 7,
         'request_timeout': 45,
@@ -815,6 +897,7 @@ def test_global_loads_exact_runtime_configuration(monkeypatch):
     assert glb.base_url == 'https://cognee.example'
     assert glb.api_key == 'env-key'
     assert glb.dataset == 'demo'
+    assert glb.allow_dataset_override is True
     assert glb.search_type == 'GRAPH_COMPLETION_DECOMPOSITION'
     assert glb.top_k == 7
     assert glb.request_timeout == 45
@@ -849,8 +932,21 @@ def _load_services():
     return json.loads(text)
 
 
-def test_global_services_keep_tool_contract_and_exact_six_fields():
-    """The schema remains an invoke-only tool with no lanes and six config values."""
+@pytest.mark.parametrize('value', ['true', 1, None])
+def test_global_defaults_non_boolean_dataset_override_to_false(monkeypatch, value):
+    """Only a JSON boolean can enable per-call dataset selection at runtime."""
+    monkeypatch.setattr(
+        IGlobalMod.Config,
+        'getNodeConfig',
+        lambda *_args: {'base_url': 'https://cognee.example', 'allow_dataset_override': value},
+    )
+    glb = _configured_global()
+    glb.beginGlobal()
+    assert glb.allow_dataset_override is False
+
+
+def test_global_services_expose_dataset_override_boolean_in_profile_and_shape():
+    """The schema makes the opt-in shared-memory scope escape hatch explicit."""
     services = _load_services()
     assert services['classType'] == ['tool']
     assert services['capabilities'] == ['invoke']
@@ -859,9 +955,15 @@ def test_global_services_keep_tool_contract_and_exact_six_fields():
         'cognee.base_url',
         'cognee.api_key',
         'cognee.dataset',
+        'cognee.allow_dataset_override',
         'cognee.search_type',
         'cognee.top_k',
         'cognee.request_timeout',
     }
     assert services['fields']['cognee.api_key']['secure'] is True
     assert services['fields']['cognee.api_key']['ui']['ui:widget'] == 'ApiKeyWidget'
+    override = services['fields']['cognee.allow_dataset_override']
+    assert override['type'] == 'boolean'
+    assert override['default'] is False
+    assert services['preconfig']['profiles']['default']['allow_dataset_override'] is False
+    assert 'cognee.allow_dataset_override' in services['shape'][0]['properties']

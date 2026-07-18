@@ -33,7 +33,7 @@ class IInstance(IInstanceBase):
                 },
                 'dataset': {
                     'type': 'string',
-                    'description': 'Dataset to remember this text in. Defaults to node configuration.',
+                    'description': 'Operator-configured dataset to remember this text in. A different dataset requires the node override setting.',
                 },
                 'run_in_background': {
                     'type': 'boolean',
@@ -61,7 +61,7 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='remember')
         cfg = self.IGlobal
         text = _required_string(args, 'text', tool_name='remember')
-        dataset = _dataset(args, cfg.dataset, tool_name='remember')
+        dataset = _dataset(args, cfg, tool_name='remember')
         run_in_background = args.get('run_in_background', False)
         if not isinstance(run_in_background, bool):
             raise ValueError('cognee.remember: "run_in_background" must be a boolean')
@@ -86,7 +86,7 @@ class IInstance(IInstanceBase):
                 },
                 'dataset': {
                     'type': 'string',
-                    'description': 'Dataset to recall from. Defaults to node configuration.',
+                    'description': 'Operator-configured dataset to recall from. A different dataset requires the node override setting.',
                 },
                 'search_type': {
                     'type': 'string',
@@ -115,7 +115,7 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='recall')
         cfg = self.IGlobal
         query = _required_string(args, 'query', tool_name='recall')
-        dataset = _dataset(args, cfg.dataset, tool_name='recall')
+        dataset = _dataset(args, cfg, tool_name='recall')
 
         search_type = args.get('search_type', cfg.search_type)
         if not isinstance(search_type, str) or not search_type.strip():
@@ -147,7 +147,7 @@ class IInstance(IInstanceBase):
             'properties': {
                 'dataset': {
                     'type': 'string',
-                    'description': 'Dataset whose remember pipeline should be checked.',
+                    'description': 'Operator-configured dataset whose remember pipeline should be checked. A different dataset requires the node override setting.',
                 },
             },
         },
@@ -171,7 +171,7 @@ class IInstance(IInstanceBase):
     def memory_status(self, args: Any) -> Dict[str, Any]:
         args = normalize_tool_input(args, tool_name='memory_status')
         cfg = self.IGlobal
-        dataset = _dataset(args, cfg.dataset, tool_name='memory_status')
+        dataset = _dataset(args, cfg, tool_name='memory_status')
         dataset_id = self._resolve_dataset_id(dataset)
         status = cognee_client.get_dataset_status(
             cfg.base_url,
@@ -205,11 +205,14 @@ def _required_string(args: Dict[str, Any], field: str, *, tool_name: str) -> str
     return value.strip()
 
 
-def _dataset(args: Dict[str, Any], default: str, *, tool_name: str) -> str:
-    """Resolve a dataset while rejecting an explicitly blank override."""
+def _dataset(args: Dict[str, Any], cfg: IGlobal, *, tool_name: str) -> str:
+    """Resolve the operator dataset and allow alternate scopes only when enabled."""
     if 'dataset' not in args:
-        return default
+        return cfg.dataset
     value = args['dataset']
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'cognee.{tool_name}: "dataset" must be a non-empty string')
-    return value.strip()
+    dataset = value.strip()
+    if dataset != cfg.dataset and not cfg.allow_dataset_override:
+        raise ValueError(f'cognee.{tool_name}: "dataset" must match the configured dataset')
+    return dataset

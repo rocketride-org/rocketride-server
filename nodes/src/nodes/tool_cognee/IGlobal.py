@@ -47,6 +47,7 @@ class IGlobal(IGlobalBase):
     base_url: str = _DEFAULT_BASE_URL
     api_key: str = ''
     dataset: str = _DEFAULT_DATASET
+    allow_dataset_override: bool = False
     search_type: str = _DEFAULT_SEARCH_TYPE
     top_k: int = _DEFAULT_TOP_K
     request_timeout: int = _DEFAULT_REQUEST_TIMEOUT
@@ -69,6 +70,10 @@ class IGlobal(IGlobalBase):
         self.api_key = str(cfg.get('api_key') or os.environ.get('COGNEE_API_KEY', '')).strip()
 
         self.dataset = str(cfg.get('dataset') or _DEFAULT_DATASET).strip() or _DEFAULT_DATASET
+        raw_allow_dataset_override = cfg.get('allow_dataset_override', False)
+        self.allow_dataset_override = (
+            raw_allow_dataset_override if isinstance(raw_allow_dataset_override, bool) else False
+        )
 
         search_type = str(cfg.get('search_type') or _DEFAULT_SEARCH_TYPE).strip().upper()
         self.search_type = search_type if search_type in SEARCH_TYPES else _DEFAULT_SEARCH_TYPE

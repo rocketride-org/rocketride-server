@@ -23,6 +23,7 @@
 				"base_url": "http://localhost:8000",
 				"api_key": "",
 				"dataset": "main",
+				"allow_dataset_override": false,
 				"search_type": "GRAPH_COMPLETION_DECOMPOSITION",
 				"top_k": 15,
 				"request_timeout": 120
@@ -50,8 +51,14 @@
 		"cognee.dataset": {
 			"type": "string",
 			"title": "Dataset",
-			"description": "Default Cognee dataset used by all four tools. A tool call can override it.",
+			"description": "Default Cognee dataset used by all agent tools. Tool calls stay in this operator-controlled scope unless per-call overrides are enabled.",
 			"default": "main"
+		},
+		"cognee.allow_dataset_override": {
+			"type": "boolean",
+			"title": "Allow dataset override",
+			"description": "Allow agents to select a dataset per call. Leave off when several agents should share one operator-controlled memory scope.",
+			"default": false
 		},
 		"cognee.search_type": {
 			"type": "string",
@@ -104,6 +111,7 @@
 				"cognee.base_url",
 				"cognee.api_key",
 				"cognee.dataset",
+				"cognee.allow_dataset_override",
 				"cognee.search_type",
 				"cognee.top_k",
 				"cognee.request_timeout"
