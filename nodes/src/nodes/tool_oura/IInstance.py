@@ -140,7 +140,15 @@ class IInstance(IInstanceBase):
     # =======================================================================
 
     @tool_function(
-        input_schema={'type': 'object', 'properties': dict(_DATE_RANGE_PROPS)},
+        # No next_token here: this tool merges four collections per call and does
+        # not paginate, so advertising a pagination param would mislead agents.
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'start_date': {'type': 'string', 'description': _START_DATE_DESC},
+                'end_date': {'type': 'string', 'description': _END_DATE_DESC},
+            },
+        },
         description=_dated(
             'Get a merged day-by-day overview combining sleep score, readiness score, activity '
             '(steps, calories), and stress. The best first call for "how have I been doing" questions.'

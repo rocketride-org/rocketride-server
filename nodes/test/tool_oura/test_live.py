@@ -12,15 +12,26 @@ anything on the account.
 
 from __future__ import annotations
 
+import importlib.util
 import os
-import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_oura'))
-from oura_client import call, fetch_collection, merge_daily_summary  # noqa: E402
+# Load oura_client.py directly under a unique module name instead of touching
+# sys.path. Importing through the `nodes` package is not possible here because
+# nodes/__init__.py depends on the engine-only `depends` bootstrapper, and
+# injecting the node directory into sys.path would shadow top-level module
+# names and duplicate the module if it is also imported through the package.
+_CLIENT_PATH = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_oura' / 'oura_client.py'
+_spec = importlib.util.spec_from_file_location('tool_oura_live_client', _CLIENT_PATH)
+_client = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_client)
+
+call = _client.call
+fetch_collection = _client.fetch_collection
+merge_daily_summary = _client.merge_daily_summary
 
 TOKEN = os.getenv('OURA_TOKEN', '')
 
@@ -42,7 +53,10 @@ def _skip_if_scope_missing(exc: ValueError) -> None:
 
 class TestProfile:
     def test_personal_info(self):
-        data = call(TOKEN, '/usercollection/personal_info')
+        try:
+            data = call(TOKEN, '/usercollection/personal_info')
+        except ValueError as exc:
+            _skip_if_scope_missing(exc)
         assert 'id' in data
 
     def test_ring_configuration(self):
@@ -69,10 +83,13 @@ class TestDailyCollections:
 
     def test_daily_summary_merge(self):
         params = _last_week()
-        collections = {
-            name: fetch_collection(TOKEN, name, params=params)['data']
-            for name in ('daily_sleep', 'daily_readiness', 'daily_activity', 'daily_stress')
-        }
+        try:
+            collections = {
+                name: fetch_collection(TOKEN, name, params=params)['data']
+                for name in ('daily_sleep', 'daily_readiness', 'daily_activity', 'daily_stress')
+            }
+        except ValueError as exc:
+            _skip_if_scope_missing(exc)
         merged = merge_daily_summary(collections)
         assert isinstance(merged, list)
         assert merged == sorted(merged, key=lambda d: d['day'])
@@ -80,22 +97,31 @@ class TestDailyCollections:
 
 class TestDetailedCollections:
     def test_sleep_periods(self):
-        result = fetch_collection(TOKEN, 'sleep', params=_last_week())
+        try:
+            result = fetch_collection(TOKEN, 'sleep', params=_last_week())
+        except ValueError as exc:
+            _skip_if_scope_missing(exc)
         assert isinstance(result['data'], list)
 
     def test_heartrate_window(self):
         end = datetime.now(timezone.utc)
         start = end - timedelta(hours=6)
-        result = fetch_collection(
-            TOKEN,
-            'heartrate',
-            params={'start_datetime': start.isoformat(), 'end_datetime': end.isoformat()},
-            max_pages=1,
-        )
+        try:
+            result = fetch_collection(
+                TOKEN,
+                'heartrate',
+                params={'start_datetime': start.isoformat(), 'end_datetime': end.isoformat()},
+                max_pages=1,
+            )
+        except ValueError as exc:
+            _skip_if_scope_missing(exc)
         assert isinstance(result['data'], list)
 
     def test_workouts(self):
-        result = fetch_collection(TOKEN, 'workout', params=_last_week())
+        try:
+            result = fetch_collection(TOKEN, 'workout', params=_last_week())
+        except ValueError as exc:
+            _skip_if_scope_missing(exc)
         assert isinstance(result['data'], list)
 
 
