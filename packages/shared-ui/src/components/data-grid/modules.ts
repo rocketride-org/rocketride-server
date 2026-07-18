@@ -31,7 +31,7 @@ import {
 	SortModule,
 	TooltipModule,
 } from 'tabulator-tables';
-import type { ColumnComponent } from 'tabulator-tables';
+import type { CellComponent, ColumnComponent } from 'tabulator-tables';
 
 // =============================================================================
 // TYPE AUGMENTATION
@@ -61,6 +61,17 @@ declare module 'tabulator-tables' {
 		 * from the column component. Supported at runtime; missing from @types.
 		 */
 		headerPopupIcon?: string | HTMLElement | ((component: ColumnComponent) => HTMLElement | string);
+	}
+
+	interface EventCallBackMethods {
+		/**
+		 * Popup-open lifecycle event — dispatched by the 6.5.2 runtime
+		 * (verified in tabulator_esm.mjs); missing from @types 6.2.11, which
+		 * declares only `popupClosed`. Typed to match that declaration. The
+		 * DataGrid pairs them to close body-anchored popups when an ancestor
+		 * container scrolls.
+		 */
+		popupOpened: (cell: CellComponent) => void;
 	}
 }
 

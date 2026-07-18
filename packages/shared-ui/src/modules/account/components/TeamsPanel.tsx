@@ -331,12 +331,17 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 	);
 
 	// ── Columns (pure data — the record panel replaced the Actions column) ──
+	// Contract flags (rrDefault, array order) declare the default layout; name asc keeps the short
+	// team list alphabetical.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
 				title: 'Team',
 				field: 'name',
 				rrType: 'string',
+				rrDefault: true,
+				rrDefaultSort: 'asc',
+				rrDescription: 'Display name of the team; the chip color and initial derive deterministically from it.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => teamCellEl(String(cell.getValue() ?? '')),
 			},
@@ -344,6 +349,8 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 				title: 'Members',
 				field: 'members',
 				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Number of users currently in the team, counted server-side when the list loads.',
 				headerSort: true,
 				sorter: 'number',
 				formatter: (cell: CellComponent) => {

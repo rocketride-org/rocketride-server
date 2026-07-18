@@ -354,10 +354,6 @@ export interface BillingPanelProps {
 	allPlans?: CheckoutPlan[];
 	/** Called to purchase a top-up pack (charges card on file). */
 	onPurchaseTopup?: (plan: CheckoutPlan) => Promise<{ status: string; clientSecret?: string }>;
-	/** Member lookup: userId -> display name. */
-	memberNames?: Record<string, string>;
-	/** Team lookup: teamId -> display name. */
-	teamNames?: Record<string, string>;
 	/** Called when the user confirms a plan change. */
 	onUpgradeSubscription?: (appId: string, newPriceId: string) => Promise<void>;
 }
@@ -373,7 +369,7 @@ export interface BillingPanelProps {
  * panel (view / change plan / cancel), and the admin dashboard. The cancel
  * confirmation and its error handling live HERE, not in AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, apps, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, memberNames, teamNames, onUpgradeSubscription }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription }) => {
 	// ── Top-up modal state ──────────────────────────────────────────────────
 	const [showTopUpModal, setShowTopUpModal] = useState(false);
 	// ── Upgrade modal state ─────────────────────────────────────────────────
@@ -390,12 +386,6 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 	const [panelError, setPanelError] = useState<string | null>(null);
 	const isSubscribed = subscriptions.length > 0;
 	const handleAddCapacity = useCallback(() => setShowTopUpModal(true), []);
-	// Build appId → app lookup for display name resolution
-	const appMap = useMemo(() => {
-		const map: Record<string, { id: string; name: string; icon?: string; description?: string }> = {};
-		for (const a of apps ?? []) map[a.id] = a;
-		return map;
-	}, [apps]);
 
 	// The viewed record resolves LIVE from the subscriptions prop by appId.
 	const viewedSub = viewedAppId != null ? subscriptions.find((s) => s.appId === viewedAppId) ?? null : null;
@@ -408,7 +398,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 				const sv = statusVariant(sub.status);
 				return {
 					appId: sub.appId,
-					app: appMap[sub.appId]?.name ?? sub.appId,
+					app: sub.appName ?? sub.appId,
 					plan: sub.planNickname ?? '--',
 					unitAmount: sub.unitAmount,
 					interval: sub.billingInterval,
@@ -419,18 +409,22 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					statusBadge: sv.variant,
 				};
 			}),
-		[subscriptions, appMap]
+		[subscriptions]
 	);
 
 	// ── Columns (pure data — the record panel replaced the row buttons) ─────
+	// Contract flags (rrDefault, array order) declare the default layout; app asc keeps the short
+	// subscriptions list alphabetical.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: 'App', field: 'app', rrType: 'string', headerSort: true },
-			{ title: 'Plan', field: 'plan', rrType: 'enum', headerSort: true },
+			{ title: 'App', field: 'app', rrType: 'string', rrDefault: true, rrDefaultSort: 'asc', rrDescription: 'App-registry display name of the subscribed app; the raw app id stands in when no registry entry matches.', headerSort: true },
+			{ title: 'Plan', field: 'plan', rrType: 'enum', rrDefault: true, rrDescription: 'Stripe price nickname of the subscribed plan; "--" when the price carries no nickname.', headerSort: true },
 			{
 				title: 'Price',
 				field: 'unitAmount',
 				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Recurring plan price. The raw value is Stripe unit_amount in USD cents — sorting and Min/Max filters operate on cents; the cell renders dollars per interval.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -443,11 +437,13 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					return row.interval ? `${formatUsd(cents)} / ${row.interval}` : formatUsd(cents);
 				},
 			},
-			{ title: 'Billing Cycle', field: 'cycle', rrType: 'enum', headerSort: true },
+			{ title: 'Billing Cycle', field: 'cycle', rrType: 'enum', rrDefault: true, rrDescription: 'How often the plan charges — the Stripe billing interval (month or year), shown as Monthly / Yearly.', headerSort: true },
 			{
 				title: 'Renews/Ends',
 				field: 'currentPeriodEnd',
 				rrType: 'date',
+				rrDefault: true,
+				rrDescription: 'End of the current Stripe billing period (UTC): the next renewal charge date, or the access-end date once cancellation at period end is requested.',
 				headerSort: true,
 				// parseWireDate applies the platform contract (zone-less wire
 				// datetimes ARE UTC — a bare new Date(iso) would misparse them
@@ -463,6 +459,8 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 				title: 'Status',
 				field: 'status',
 				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Stripe subscription status: Active, Trial (trialing), Past Due (last payment failed), or Canceled.',
 				headerSort: true,
 				// Badge formatter — DOM clone of the shared Badge component.
 				formatter: (cell: CellComponent) => {
@@ -562,7 +560,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					contained
 					open
 					onClose={closePanel}
-					title={appMap[viewedSub.appId]?.name ?? viewedSub.appId}
+					title={viewedSub.appName ?? viewedSub.appId}
 					subtitle={viewedStatus.label}
 					footer={
 						<>
@@ -607,7 +605,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 										<div style={styles.grantHeading}>As a Welcome gift</div>
 										{grants.bonuses.map(({ res, diff }) => (
 											<div key={`bonus-${res}`} style={styles.grantItem}>
-												{formatGrant(res, diff, viewedSub.creditLabels)} bonus
+												{formatGrant(res, diff, viewedSub.labels)} bonus
 											</div>
 										))}
 									</>
@@ -618,7 +616,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 										<div style={styles.grantHeading}>Monthly</div>
 										{Object.entries(grants.recurring).map(([res, amt]) => (
 											<div key={`rec-${res}`} style={styles.grantItem}>
-												{formatGrant(res, amt, viewedSub.creditLabels)}
+												{formatGrant(res, amt, viewedSub.labels)}
 											</div>
 										))}
 									</>
@@ -641,7 +639,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					confirmDisabled={cancelling}
 					message={
 						<>
-							Are you sure you want to cancel <strong style={styles.confirmName}>{appMap[viewedSub.appId]?.name ?? viewedSub.appId}</strong>? Your access will continue until
+							Are you sure you want to cancel <strong style={styles.confirmName}>{viewedSub.appName ?? viewedSub.appId}</strong>? Your access will continue until
 							the end of the current billing period, after which the subscription will not renew.
 						</>
 					}
@@ -665,8 +663,6 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					fetchTransactionDistinct={fetchTransactionDistinct}
 					onBuyTopup={onBuyTopup}
 					onAddCapacity={isSubscribed ? handleAddCapacity : undefined}
-					memberNames={memberNames}
-					teamNames={teamNames}
 				/>
 			)}
 

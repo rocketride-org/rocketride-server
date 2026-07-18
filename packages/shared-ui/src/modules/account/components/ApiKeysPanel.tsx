@@ -28,6 +28,7 @@ import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
+import { autoFormatter } from '../../../components/data-grid/defaults';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
 import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
@@ -148,6 +149,8 @@ interface KeyRow extends Record<string, unknown> {
 	lastUsedAt: string | null;
 	/** ISO expiry timestamp, or null for no expiry. */
 	expiresAt: string | null;
+	/** ISO creation timestamp, or null (carries the newest-first default sort). */
+	createdAt: string | null;
 }
 
 /** The record panel's mode: closed, viewing one key, or creating one. */
@@ -277,18 +280,24 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				team: teamScope(k),
 				lastUsedAt: k.lastUsedAt,
 				expiresAt: k.expiresAt,
+				createdAt: k.createdAt,
 			})),
 		[keys]
 	);
 
 	// ── Columns (pure data — the record panel replaced the Actions column) ──
+	// Contract flags (rrDefault, array order) declare the default layout. Created stays declared but
+	// unindexed (hidden, toggleable) and carries the grid's newest-first
+	// default sort — the server's own key ordering.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: 'Name', field: 'name', rrType: 'string', headerSort: true },
+			{ title: 'Name', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Key label chosen at creation (e.g. "Production Server") — purely descriptive, not part of the secret.', headerSort: true },
 			{
 				title: 'Status',
 				field: 'status',
 				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Derived from the key lifecycle: Expired once the key is revoked or past its expiry, Active otherwise; keys minted by interactive sign-in show Interactive login.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => {
 					const status = cell.getValue() as string;
@@ -299,6 +308,8 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				title: 'Team',
 				field: 'team',
 				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Key scope: a named team restricts the key to that team, All Teams inherits every team from the owner at auth time; session keys carry no scope.',
 				headerSort: true,
 				// Session keys show no team badge; named teams keep the amber badge,
 				// the org-wide scope keeps the neutral badge.
@@ -311,6 +322,8 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				title: 'Last Used',
 				field: 'lastUsedAt',
 				rrType: 'date',
+				rrDefault: true,
+				rrDescription: 'When the key last authenticated successfully — stamped server-side on each use; empty when the key has never been used.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => {
 					const iso = cell.getValue() as string | null;
@@ -321,6 +334,8 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				title: 'Expires',
 				field: 'expiresAt',
 				rrType: 'date',
+				rrDefault: true,
+				rrDescription: 'UTC instant after which the key stops authenticating; empty means the key never expires.',
 				headerSort: true,
 				// parseWireDate applies the platform contract (zone-less wire
 				// datetimes ARE UTC) — a bare new Date(iso) would misparse them
@@ -330,6 +345,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 					return iso ? `Exp. ${parseWireDate(iso).toLocaleDateString()}` : 'No expiry';
 				},
 			},
+			{ title: 'Created', field: 'createdAt', rrType: 'date', rrDefaultSort: 'desc', rrDescription: 'UTC creation time of the key; the grid sorts newest-first on it by default.', headerSort: true, formatter: autoFormatter },
 		],
 		[]
 	);

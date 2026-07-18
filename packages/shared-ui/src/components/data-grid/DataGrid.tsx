@@ -33,14 +33,16 @@
  *  - a built-in title bar (Card-header look), ON BY DEFAULT on every grid,
  *    with a search box (REMOTE grids send the term server-side so it spans
  *    ALL pages; LOCAL grids narrow their fully-loaded rows client-side),
- *    a matching-row count, an "Export..." menu (CSV / JSON) covering every
- *    row matching the current filters and search, and a "Clear" button
- *    that appears only while a sort / search / filter deviates the view
- *    and resets exactly those three (the header popups' "Reset layout"
- *    additionally restores the declared column layout and deletes the
- *    per-user persisted state); `noSearch` / `noExport` opt out
- *    individually and the bar hides only when both are suppressed and no
- *    `title` is set
+ *    a matching-row count, a GEAR settings menu — DISPLAY toggles (grid
+ *    lines / alternating rows, persisted per user), the
+ *    COLUMNS show/hide checklist, and the EXPORT rows (CSV / JSON covering
+ *    every row matching the current filters and search) — and a "Clear"
+ *    button that appears only while a sort / search / filter deviates the
+ *    view and resets exactly those three (the header popups' "Reset layout"
+ *    additionally restores the declared column layout, display settings,
+ *    and deletes the per-user persisted state); `noExport` hides the gear's
+ *    Export section, and the bar hides only when `noSearch` and `noExport`
+ *    are both suppressed and no `title` is set
  *
  * Data modes (mutually exclusive):
  *  - LOCAL:  pass `data` — identity change applies silently (scroll, page and
@@ -53,6 +55,7 @@ import {
 	forwardRef,
 	useEffect,
 	useImperativeHandle,
+	useLayoutEffect,
 	useRef,
 	useState,
 	type CSSProperties,
@@ -63,7 +66,9 @@ import {
 } from 'react';
 import type { Options } from 'tabulator-tables';
 import { Tabulator } from './modules';
-import { buildAutoColumns, exportRowsAsCsv, exportRowsAsJson, matchesSearch, normalizeColumns } from './defaults';
+import { createPortal } from 'react-dom';
+import { applyDefaultLayout, buildAutoColumns, closeHeaderPopup, defaultGroupFields, defaultSorters, exportRowsAsCsv, exportRowsAsJson, matchesSearch, normalizeColumns, toggleColumnWithFit } from './defaults';
+import { BxCog } from '../BoxIcon';
 import type {
 	GridColumnDefinition,
 	HeaderFilterMode,
@@ -145,13 +150,14 @@ export interface IDataGridProps<Row extends Record<string, unknown>> {
 	 */
 	noSearch?: boolean;
 	/**
-	 * Hide the title bar's "Export..." menu (CSV / JSON), which every grid
+	 * Hide the EXPORT section of the gear menu (CSV / JSON), which every grid
 	 * shows by default. Exports cover EVERY row matching the current committed
 	 * filters AND the active search term (remote grids walk all pages with
 	 * both riding each request), restricted to the visible columns in display
-	 * order. With `noSearch` also set, the grid contributes NO buttons at all
-	 * (even the transient Clear): on a titled grid that leaves an
-	 * actions-only card header — `actions` always render regardless — and
+	 * order. The gear itself (display toggles + column checklist) remains.
+	 * With `noSearch` also set, the grid contributes NO buttons at all
+	 * (gear and the transient Clear included): on a titled grid that leaves
+	 * an actions-only card header — `actions` always render regardless — and
 	 * with no `title`/`actions` either, the whole bar disappears.
 	 */
 	noExport?: boolean;
@@ -168,14 +174,30 @@ export interface IDataGridProps<Row extends Record<string, unknown>> {
 	 */
 	actions?: ReactNode;
 	/**
-	 * Declared column definitions — Tabulator-native plus the DataGrid's
-	 * extensions ({@link GridColumnDefinition}): `rrNoPopup` (popup-exempt
-	 * actions / icon columns) and `rrType`, the declared value type that
-	 * selects the column's header-popup filter control. Declare EVERY
-	 * available column — hidden ones with Tabulator's native `visible: false`
-	 * (the default set is the visible ones; a persisted workspace layout
-	 * still overrides visibility once saved). Memoize; identity change
-	 * re-applies.
+	 * Declared column definitions — the full per-column contract
+	 * ({@link GridColumnDefinition}): Tabulator-native options plus the
+	 * DataGrid extensions. Declare EVERY available column; each declares its
+	 * result-row key (`field`), value type (`rrType` — selects the filter
+	 * control), and its place in the DEFAULT view:
+	 *
+	 * - `rrDefault: true` — part of the default view; the default ORDER is
+	 *   the order defaulted columns appear in this array. A column WITHOUT
+	 *   the flag is available (toggleable from the header menu, filterable,
+	 *   exportable) but hidden by default. The synthesized default layout
+	 *   applies exactly when the user has NO persisted layout; a saved
+	 *   workspace layout always wins, and Reset layout returns to the
+	 *   declared defaults.
+	 * - `rrDefaultSort: 'asc' | 'desc'` — the grid's default sort (composes
+	 *   across columns in array order; Clear returns to it).
+	 * - `rrGroup` — default row grouping by this column.
+	 * - `rrDescription` — human description; becomes the header tooltip and
+	 *   the COLUMNS toggle-list tooltip.
+	 * - `rrOptions` — static filter vocabulary; the column's filter becomes a
+	 *   checklist of exactly these options (how enum-like strings and JSON
+	 *   string-arrays like sysPermissions get real selectors).
+	 *
+	 * Legacy (flag-free) declarations keep the old behavior: array order +
+	 * native `visible` flags. Memoize; identity change re-applies.
 	 */
 	columns: GridColumnDefinition[];
 	/** LOCAL mode: current rows. Identity change applies silently in place. */
@@ -263,6 +285,20 @@ const EXPORT_PAGE_SIZE = 100;
 /** Export safety cap: larger sets export partially with a console warning. */
 const EXPORT_ROW_CAP = 10000;
 
+/** Per-grid display settings the gear menu controls (persisted per user). */
+interface IGridDisplaySettings {
+	/** Row separator hairlines. */
+	lines: boolean;
+	/** Alternating even-row wash. */
+	zebra: boolean;
+}
+
+/** The declared default view: hairlines on, no striping. */
+const DEFAULT_DISPLAY_SETTINGS: IGridDisplaySettings = { lines: true, zebra: false };
+
+/** Gear panel width — the header popup panel's width (.rr-grid-hp / .rr-grid-gear). */
+const GEAR_PANEL_WIDTH = 248;
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -284,10 +320,21 @@ const styles = {
 	// the grid title is a Card header by construction. Only the two-row
 	// GEOMETRY is grid-local: title stacked over the tools line on the left,
 	// one vertically-centered cluster on the right.
+	// position:relative anchors the gear's absolute corner slot.
 	barStack: {
 		...cardHeaderChrome.header,
 		justifyContent: 'space-between',
 		gap: 12,
+		position: 'relative',
+	} as CSSProperties,
+
+	// The gear's slot in the STACKED header form: pinned to the header's
+	// upper-right corner (design owner), out of the vertically-centered
+	// actions cluster.
+	gearCorner: {
+		position: 'absolute',
+		top: 6,
+		right: 8,
 	} as CSSProperties,
 
 	// Left side of the block: title line over the tools line.
@@ -311,11 +358,14 @@ const styles = {
 	// (Clear / Export), vertically centered by the stack's align-items —
 	// Card's own headerActions placement plus the flex layout the multi-
 	// button cluster needs.
+	// marginRight clears the gear's corner column so the centered cluster
+	// never slides under it.
 	barActions: {
 		...cardHeaderChrome.actions,
 		display: 'flex',
 		alignItems: 'center',
 		gap: 8,
+		marginRight: 24,
 	} as CSSProperties,
 
 	// Grid-local search input — 30px inputField-look control; fixed width so
@@ -351,33 +401,56 @@ const styles = {
 		gap: 8,
 	} as CSSProperties,
 
-	// Export dropdown anchor — position:relative so the menu can absolutely
-	// position below-right of the trigger button.
+	// Gear anchor — position:relative so the panel can absolutely position
+	// below-right of the trigger button.
 	exportWrap: {
 		position: 'relative',
 	} as CSSProperties,
 
-	// Export dropdown menu — commonStyles.popupMenu (paper surface, --rr-border
-	// edge, radius 8, widget shadow, 4px padding: the same values the
-	// .tabulator-menu popups replicate in tabulator-theme.css), re-anchored
-	// from fixed to absolute so it hangs below the trigger's right edge.
-	exportMenu: {
-		...commonStyles.popupMenu,
-		position: 'absolute',
-		top: '100%',
-		right: 0,
-		marginTop: 4,
-		minWidth: 120,
-	} as CSSProperties,
-
-	// One export menu row — commonStyles.menuRow values (hover via a React
-	// state flag since inline styles have no :hover); disabled rows dim and
-	// refuse the pointer while an export walk is in flight.
-	exportItem: (hovered: boolean, disabled: boolean): CSSProperties => ({
-		...commonStyles.menuRow,
-		...(hovered && !disabled ? { background: 'var(--rr-bg-list-hover)' } : {}),
-		...(disabled ? { opacity: 0.5, cursor: 'default' } : {}),
+	// Gear settings panel — commonStyles.popupMenu (paper surface, --rr-border
+	// edge, radius 8, widget shadow: the same values the .tabulator-menu
+	// popups replicate in tabulator-theme.css), re-anchored from fixed to
+	// absolute so it hangs below the trigger's right edge. Width and padding
+	// mirror the header popup panel (sections own the horizontal inset).
+	// The panel's SURFACE, width, and typography all come from the header
+	// popup's own classes (the panel carries the full .tabulator-popup class
+	// stack — see the JSX), so the gear panel and the column popups are the
+	// same surface by construction. Inline carries ONLY the FIXED viewport
+	// anchoring (the panel portals into document.body so it escapes the
+	// account overlay's clipping and scroll region — like the header popups),
+	// capped to the viewport below the anchor and internally scrollable so a
+	// gear near the bottom edge never clips its sections. z-index clears the
+	// shell Modal layer (2000).
+	// The panel NEVER scrolls as a whole (matching the header popup) — only
+	// the COLUMNS list inside caps and scrolls; the open-clamp effect shifts
+	// the whole panel up instead when it would overflow the viewport.
+	gearMenu: (anchor: { top: number; left: number }): CSSProperties => ({
+		position: 'fixed',
+		top: anchor.top,
+		left: anchor.left,
+		zIndex: 2100,
 	}),
+
+	// The gear trigger — a BARE glyph, not a Button: quiet secondary tone at
+	// rest, primary while hovered or with the panel open (the close-glyph /
+	// header-ellipsis treatment, per the design owner).
+	gearButton: (active: boolean): CSSProperties => ({
+		display: 'flex',
+		alignItems: 'center',
+		background: 'none',
+		border: 'none',
+		padding: 2,
+		cursor: 'pointer',
+		color: active ? 'var(--rr-text-primary)' : 'var(--rr-text-secondary)',
+	}),
+
+	// Spacer standing in for the 13px check box on label-only rows (the
+	// Export CSV / Json rows), so every section row's label starts at the
+	// same x as the checkbox rows above.
+	gearCheckSpacer: {
+		width: 13,
+		flexShrink: 0,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -681,6 +754,22 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	const [sortActive, setSortActive] = useState(false);
 	const [filtersActive, setFiltersActive] = useState(false);
 
+	/**
+	 * Whether a live sorter list DEVIATES from the grid's DECLARED default
+	 * sort. On a grid with `rrDefaultSort` declarations the default view is
+	 * SORTED — the default sort riding a request must not light the Clear
+	 * button, while clearing it (tristate to none) must. Order-sensitive
+	 * comparison; on grids without declarations this reduces to `length > 0`.
+	 *
+	 * @param sorters - Live sorters ({field, dir}) from either tracking site.
+	 * @returns True when the view's sort differs from the declared default.
+	 */
+	const sortDeviates = (sorters: { field?: string; dir?: string }[]): boolean => {
+		const declared = defaultSorters(columnsRef.current);
+		if (sorters.length !== declared.length) return true;
+		return sorters.some((s, i) => s.field !== declared[i].column || s.dir !== declared[i].dir);
+	};
+
 	// ── Matching-row count (title bar) ──────────────────────────────────────
 	// The "N" of the count: remote grids capture the server total from the
 	// last fetchPage result (updated in the ajaxRequestFunc .then — with a
@@ -696,38 +785,79 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	const [activeCount, setActiveCount] = useState<number | null>(null);
 
 	// ── Export (CSV / JSON of every matching row) ───────────────────────────
-	// One "Export..." trigger opens a small format menu; the menu items
+	// The format rows live in the gear menu's EXPORT section; the rows
 	// disable while a walk is in flight; failures warn and re-enable.
 	const [exporting, setExporting] = useState(false);
 	// Re-entry guard (state updates flush async; the ref blocks double-clicks
 	// landing before the disabled render).
 	const exportingRef = useRef(false);
-	// Dropdown open state + hovered row (inline styles have no :hover).
-	const [exportMenuOpen, setExportMenuOpen] = useState(false);
-	const [exportHover, setExportHover] = useState<'csv' | 'json' | null>(null);
-	// The trigger + menu wrapper, for the outside-click dismissal check.
-	const exportWrapRef = useRef<HTMLDivElement>(null);
 
-	// While the export menu is open: outside-click AND Escape both dismiss it.
+	// ── Gear menu (display settings + column toggles + export) ─────────────
+	// One gear trigger opens the grid's settings panel: DISPLAY toggles (grid
+	// lines / alternating rows), the COLUMNS show-hide list
+	// (same behavior as the header popups' checklist), and the EXPORT rows.
+	const [gearOpen, setGearOpen] = useState(false);
+	// Hover tint for the bare gear glyph (inline styles have no :hover).
+	const [gearHover, setGearHover] = useState(false);
+	// The trigger wrapper, for the outside-click dismissal check.
+	const gearWrapRef = useRef<HTMLDivElement>(null);
+	// The PORTALED panel (it escapes clipped/scrolled ancestors by rendering
+	// into document.body) — a second containment check for dismissal, and
+	// the guard that keeps the panel's own internal scrolling from closing it.
+	const gearPanelRef = useRef<HTMLDivElement>(null);
+	// Viewport anchor computed when the panel opens (fixed positioning).
+	const [gearAnchor, setGearAnchor] = useState<{ top: number; left: number } | null>(null);
+	// Snapshot of toggleable columns for the panel's checklist, refreshed on
+	// open and after every toggle (the table is the source of truth).
+	const [gearColumns, setGearColumns] = useState<
+		{ field: string; title: string; visible: boolean; tooltip?: string }[]
+	>([]);
+	// Per-grid display settings; persisted per user under the 'display' blob
+	// (Reset layout deletes the table's entry, restoring these defaults).
+	// The ref mirror lets the build effect read the CURRENT value while
+	// seeding from the persisted blob.
+	const [displaySettings, setDisplaySettings] = useState<IGridDisplaySettings>(DEFAULT_DISPLAY_SETTINGS);
+	const displaySettingsRef = useRef(displaySettings);
+	displaySettingsRef.current = displaySettings;
+
+	// While the gear panel is open: outside-click, Escape, ancestor scroll,
+	// and window resize all dismiss it. Scroll-close is what keeps a
+	// viewport-anchored panel honest — the account overlay scrolls its own
+	// body, and a fixed panel would otherwise float away from its gear (the
+	// exact drift the header popups exhibited). The panel's OWN scrolling
+	// (its overflow, the COLUMNS list) must not close it — hence the
+	// containment guard on the scroll target.
 	useEffect(() => {
-		if (!exportMenuOpen) return undefined;
-		// Step 1: any pointer-down outside the trigger/menu wrapper closes.
+		if (!gearOpen) return undefined;
+		// Step 1: any pointer-down outside the trigger AND the portaled panel
+		// closes (the panel lives in document.body, not inside the trigger).
 		const onPointerDown = (event: MouseEvent): void => {
-			if (!exportWrapRef.current?.contains(event.target as Node)) {
-				setExportMenuOpen(false);
+			const target = event.target as Node;
+			if (!gearWrapRef.current?.contains(target) && !gearPanelRef.current?.contains(target)) {
+				setGearOpen(false);
 			}
 		};
 		// Step 2: Escape closes too (keyboard parity with the header popups).
 		const onKeyDown = (event: KeyboardEvent): void => {
-			if (event.key === 'Escape') setExportMenuOpen(false);
+			if (event.key === 'Escape') setGearOpen(false);
 		};
+		// Step 3: ancestor scroll / resize invalidate the anchor — close.
+		const onScroll = (event: Event): void => {
+			if (event.target instanceof Node && gearPanelRef.current?.contains(event.target)) return;
+			setGearOpen(false);
+		};
+		const onResize = (): void => setGearOpen(false);
 		document.addEventListener('mousedown', onPointerDown);
 		document.addEventListener('keydown', onKeyDown);
+		document.addEventListener('scroll', onScroll, true);
+		window.addEventListener('resize', onResize);
 		return () => {
 			document.removeEventListener('mousedown', onPointerDown);
 			document.removeEventListener('keydown', onKeyDown);
+			document.removeEventListener('scroll', onScroll, true);
+			window.removeEventListener('resize', onResize);
 		};
-	}, [exportMenuOpen]);
+	}, [gearOpen]);
 
 	/**
 	 * The grid's currently VISIBLE columns in display order, as export
@@ -839,8 +969,99 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	 */
 	const handleExportSelect = (format: 'csv' | 'json'): void => {
 		if (exportingRef.current) return;
-		setExportMenuOpen(false);
+		setGearOpen(false);
 		runExport(format);
+	};
+
+	// ── Gear panel helpers ──────────────────────────────────────────────────
+
+	/**
+	 * Rebuild the gear panel's column snapshot from the live table: titled,
+	 * non-exempt columns (same filter as the header popups' checklist), in
+	 * alphabetical order — the list is a lookup, not a layout mirror.
+	 */
+	const refreshGearColumns = (): void => {
+		const table = tableRef.current;
+		if (!table) {
+			setGearColumns([]);
+			return;
+		}
+		const snapshot = table
+			.getColumns()
+			.filter((col) => {
+				const colField = col.getField();
+				if (!colField || colField.startsWith('__') || isPopupExempt(colField)) return false;
+				return (col.getDefinition().title ?? '') !== '';
+			})
+			.map((col) => {
+				// The declared rrDescription lands on headerTooltip
+				// (normalizeColumns), so the row inherits it as its tooltip.
+				const tooltip = col.getDefinition().headerTooltip;
+				return {
+					field: col.getField(),
+					title: String(col.getDefinition().title),
+					visible: col.isVisible(),
+					...(typeof tooltip === 'string' ? { tooltip } : {}),
+				};
+			})
+			.sort((a, b) => a.title.localeCompare(b.title, undefined, { numeric: true }));
+		setGearColumns(snapshot);
+	};
+
+	/** Toggle the gear trigger: snapshot the columns and the panel's viewport
+	    anchor fresh on every open (fixed positioning under the gear, right
+	    edges aligned, clamped on-screen). */
+	const handleGearClick = (): void => {
+		if (!gearOpen) {
+			refreshGearColumns();
+			const rect = gearWrapRef.current?.getBoundingClientRect();
+			setGearAnchor(rect ? { top: rect.bottom + 4, left: Math.max(8, rect.right - GEAR_PANEL_WIDTH) } : null);
+		}
+		setGearOpen((openNow) => !openNow);
+	};
+
+	// On-screen clamp: once the panel has rendered (and whenever its content
+	// changes its height), shift it UP if its bottom would pass the viewport
+	// — the panel itself never scrolls (only its COLUMNS list does), so a
+	// gear near the bottom edge gets a fully visible panel above the fold.
+	useLayoutEffect(() => {
+		if (!gearOpen || !gearAnchor) return;
+		const panel = gearPanelRef.current;
+		if (!panel) return;
+		const overflow = gearAnchor.top + panel.offsetHeight - (window.innerHeight - 8);
+		if (overflow > 0) {
+			const top = Math.max(8, gearAnchor.top - overflow);
+			if (top !== gearAnchor.top) setGearAnchor({ ...gearAnchor, top });
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [gearOpen, gearAnchor, gearColumns]);
+
+	/**
+	 * Show/hide one column from the gear panel's checklist — the same
+	 * last-visible guard and reveal content-fit as the header popups.
+	 */
+	const handleGearColumnToggle = (field: string): void => {
+		const table = tableRef.current;
+		if (!table) return;
+		const col = table.getColumns().find((c) => c.getField() === field);
+		if (!col) return;
+		const visibleCount = gearColumns.filter((c) => c.visible).length;
+		if (col.isVisible() && visibleCount <= 1) return;
+		toggleColumnWithFit(col);
+		refreshGearColumns();
+	};
+
+	/**
+	 * Merge a display-settings patch, persisting the result per user (the
+	 * 'display' blob rides the same store as the layout, so Reset layout —
+	 * which deletes the table's whole entry — restores these defaults too).
+	 */
+	const updateDisplaySettings = (patch: Partial<IGridDisplaySettings>): void => {
+		setDisplaySettings((current) => {
+			const next = { ...current, ...patch };
+			if (tableId) persistenceRef.current?.write(tableId, 'display', next);
+			return next;
+		});
 	};
 
 	// ── Header-popup filter bridge ──────────────────────────────────────────
@@ -866,12 +1087,16 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	 *  - 'boolean' → static Yes/No checklist; 'date' → Start/End range;
 	 *    'number' → Min/Max range (both ranges commit `${field}__gte` /
 	 *    `${field}__lte` bounds)
-	 *  - 'enum' → distinct-value checklist, downgraded to 'text' on a REMOTE
-	 *    grid without `fetchDistinct` — the page at hand is only one page of
+	 *  - any column with declared `rrOptions` → checklist (the entries UNION
+	 *    the declared vocabulary with the live distinct values)
+	 *  - 'enum' / 'strings' → distinct-value checklist ('strings' arrays are
+	 *    exploded to their elements — by list_distinct remotely, by local
+	 *    derivation otherwise), downgraded to 'text' on a REMOTE grid
+	 *    without `fetchDistinct` — the page at hand is only one page of
 	 *    rows, not the full distinct set, so a checklist would lie
-	 *  - 'string' / 'strings' / 'json' and undeclared fields (including
-	 *    auto-derived columns) → 'text' (server-side "contains" / coercion
-	 *    handles the rest)
+	 *  - 'string' / 'json' and undeclared fields (including auto-derived
+	 *    columns) → 'text' (server-side "contains" / coercion handles the
+	 *    rest)
 	 */
 	const resolveFilterMode = (field: string): HeaderFilterMode => {
 		// Action pseudo-fields ('__rrActions', ...) never filter; neither do
@@ -882,8 +1107,14 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		// would commit values into a void, so it is hidden entirely (user
 		// feedback 2026-07-16: a filter that does nothing must not render).
 		if (!fetchRef.current && !filtersChangeRef.current) return 'none';
-		const rrType = columnsRef.current.find((c) => c.field === field)?.rrType;
-		switch (rrType) {
+		const column = columnsRef.current.find((c) => c.field === field);
+		// A declared static vocabulary (rrOptions) makes ANY column a
+		// checklist — enum-like strings, JSON string-arrays (sysPermissions),
+		// and remote enums with no distinct endpoint. The committed array
+		// reaches the server as IN on scalar columns, contains-ANY on array
+		// columns.
+		if (column?.rrOptions && column.rrOptions.length > 0) return 'values';
+		switch (column?.rrType) {
 			case 'boolean':
 				return 'boolean';
 			case 'date':
@@ -891,36 +1122,65 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			case 'number':
 				return 'number';
 			case 'enum':
+			case 'strings':
 				// A checklist needs an enumeration source: remote grids derive
 				// nothing from their single loaded page, so without a
-				// fetchDistinct they fall back to the text filter.
+				// fetchDistinct they fall back to the text filter. 'strings'
+				// (JSON string-array) qualifies like 'enum': the server's
+				// list_distinct explodes array columns into their distinct
+				// ELEMENTS, and local derivation flattens arrays the same way.
 				return fetchRef.current && !fetchDistinctRef.current ? 'text' : 'values';
 			default:
-				// 'string' / 'strings' / 'json' / undeclared.
+				// 'string' / 'json' / undeclared.
 				return 'text';
 		}
 	};
 
 	/**
+	 * The DECLARED static filter vocabulary of a column (`rrOptions`),
+	 * normalized to value/label pairs for the popup checklist — null when the
+	 * column declares none (the checklist then falls back to distinct values).
+	 */
+	const getDeclaredOptions = (field: string): { value: string; label: string }[] | null => {
+		const options = columnsRef.current.find((c) => c.field === field)?.rrOptions;
+		if (!options || options.length === 0) return null;
+		return options.map((option) =>
+			typeof option === 'string' ? { value: option, label: option } : { value: option.value, label: option.label },
+		);
+	};
+
+	/**
 	 * Distinct values of a field for a 'values' checklist: the view's
 	 * `fetchDistinct` when wired (server `list_distinct`), otherwise derived
-	 * from the current LOCAL rows (remote grids never reach this branch —
-	 * {@link resolveFilterMode} already fell back to 'text').
+	 * from the current LOCAL rows. A REMOTE grid without `fetchDistinct` only
+	 * reaches this via a declared `rrOptions` column — its `data` is undefined,
+	 * so this returns [] and the checklist shows the declared options alone.
 	 */
 	const getDistinctValues = (field: string): Promise<(string | number | boolean)[]> => {
 		if (fetchDistinctRef.current) return fetchDistinctRef.current(field);
 		// LOCAL derivation: unique primitive values of the current data rows.
+		// String-array values (JSON array columns like sysPermissions) flatten
+		// to their elements — mirroring the server's list_distinct explosion.
 		const rows = (dataRef.current ?? []) as Record<string, unknown>[];
 		const seen = new Set<string>();
 		const values: (string | number | boolean)[] = [];
-		for (const row of rows) {
-			const value = row[field];
-			if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue;
-			if (value === '') continue;
+		const add = (value: string | number | boolean): void => {
+			if (value === '') return;
 			const key = String(value);
-			if (seen.has(key)) continue;
+			if (seen.has(key)) return;
 			seen.add(key);
 			values.push(value);
+		};
+		for (const row of rows) {
+			const value = row[field];
+			if (Array.isArray(value)) {
+				for (const item of value) {
+					if (typeof item === 'string') add(item);
+				}
+				continue;
+			}
+			if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue;
+			add(value);
 		}
 		// Human sort (numeric-aware) so the checklist reads naturally.
 		values.sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
@@ -1046,19 +1306,26 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		setSortActive(false);
 		setFiltersActive(false);
 		// Step 4: persisted state — Reset layout deletes the table's whole
-		// per-user entry; Clear only EMPTIES the sort blob (a write, not a
-		// clear, so persisted columns / widths / page size survive the
-		// rebuild) — then rebuild (the fresh instance re-queries page 1 with
-		// the now-empty filters, and tableBuilt's syncFilterIndicators clears
-		// every header dot).
+		// per-user entry; Clear only REWRITES the sort blob to the DECLARED
+		// default sort (a write, not a clear, so persisted columns / widths /
+		// page size survive the rebuild; the persisted blob is what the
+		// rebuilt instance restores, so writing the declared sorters is how
+		// "Clear" returns a default-sorted grid to its default ORDER rather
+		// than to unsorted) — then rebuild (the fresh instance re-queries
+		// page 1 with the now-empty filters, and tableBuilt's
+		// syncFilterIndicators clears every header dot).
 		if (tableId) {
 			if (wipeLayout) persistenceRef.current?.clear(tableId);
-			else persistenceRef.current?.write(tableId, 'sort', []);
+			else persistenceRef.current?.write(tableId, 'sort', defaultSorters(columnsRef.current));
 		}
-		// Display formats are LAYOUT state: Reset layout drops them (in-memory
-		// too, covering non-persisted grids — persisted ones also re-seed {}
-		// from the cleared store); Clear leaves them untouched.
-		if (wipeLayout) formatsRef.current = {};
+		// Display formats AND the gear's display settings are LAYOUT state:
+		// Reset layout drops both (in-memory too, covering non-persisted
+		// grids — persisted ones also re-seed defaults from the cleared
+		// store); Clear leaves them untouched.
+		if (wipeLayout) {
+			formatsRef.current = {};
+			setDisplaySettings(DEFAULT_DISPLAY_SETTINGS);
+		}
 		builtRef.current = false;
 		setEpoch((e) => e + 1);
 	};
@@ -1095,6 +1362,21 @@ function DataGridInner<Row extends Record<string, unknown>>(
 					: {};
 		}
 
+		// Gear display settings: the persisted blob (merged over the defaults
+		// so blobs written before a setting existed stay valid) or the live
+		// state on non-persisted grids. Resolved SYNCHRONOUSLY into a local —
+		// the options assembly below needs the value NOW (fixed height is a
+		// build option), while setState only lands next render.
+		const seededDisplay = persist
+			? (() => {
+					const storedDisplay = persistenceRef.current!.read(tableId!, 'display');
+					return storedDisplay && typeof storedDisplay === 'object'
+						? { ...DEFAULT_DISPLAY_SETTINGS, ...(storedDisplay as Partial<IGridDisplaySettings>) }
+						: DEFAULT_DISPLAY_SETTINGS;
+			  })()
+			: displaySettingsRef.current;
+		if (persist) setDisplaySettings(seededDisplay);
+
 		// Column defaults: shared layout behavior only. The header popup
 		// (filter + column visibility + reset) is wired PER COLUMN by
 		// normalizeColumns, so `rrNoPopup` columns simply never receive the
@@ -1112,6 +1394,18 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			resizable: 'header',
 		};
 
+		// The declared DEFAULT view, synthesized from the column contract:
+		// layout (contract mode orders by rrDefault and hides unindexed
+		// columns), sort (rrDefaultSort compositions feed initialSort — the
+		// persistence module REPLACES initialSort with the persisted blob when
+		// one exists, so declarations apply exactly when the user has saved
+		// nothing; verified in tabulator_esm.mjs 6.5.2 Persistence.tableBuilt),
+		// and grouping (rrGroup fields feed groupBy; client-side, so remote
+		// grids group within the loaded page).
+		const laidOut = applyDefaultLayout(columns);
+		const declaredSort = defaultSorters(columns);
+		const groupFields = defaultGroupFields(columns);
+
 		// Step 1: assemble the option set — platform defaults, then the mode
 		// block (local vs remote), then persistence, then the caller's
 		// escape-hatch options merged last (columnDefaults merged one level).
@@ -1119,7 +1413,9 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		// header popup is attached to every non-exempt column.
 		const built: Options = {
 			layout: 'fitColumns',
-			columns: normalizeColumns(columns),
+			columns: normalizeColumns(laidOut),
+			...(declaredSort.length > 0 ? { initialSort: declaredSort } : {}),
+			...(groupFields.length > 0 ? { groupBy: groupFields } : {}),
 			placeholder: buildPlaceholder(emptyTitle, emptyDescription),
 			movableColumns: true,
 			columnDefaults: {
@@ -1149,8 +1445,9 @@ function DataGridInner<Row extends Record<string, unknown>>(
 							const size = typeof params.size === 'number' ? params.size : pageSizes[0];
 							const sort = (params.sort ?? params.sorters ?? []) as { field: string; dir: 'asc' | 'desc' }[];
 							// Every sort change reloads remotely, so the request's
-							// sorters are the authoritative active-sort signal.
-							setSortActive(sort.length > 0);
+							// sorters are the authoritative active-sort signal —
+							// "active" meaning DEVIATING from the declared default.
+							setSortActive(sortDeviates(sort));
 							// Committed filters AND the committed search term ride
 							// along with every request (search only when non-empty).
 							return fetchRef.current!({
@@ -1260,6 +1557,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 				col?.getElement().classList.toggle('rr-col-filtered', active);
 			},
 			getDistinct: getDistinctValues,
+			getOptions: getDeclaredOptions,
 			isPopupExempt,
 		};
 		(table as IGridInstanceState).__rrHeaderFilter = bridge;
@@ -1311,10 +1609,11 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		table.on('dataProcessed', syncFooter);
 		table.on('pageLoaded', syncFooter);
 		// LOCAL grids sort in the data pipeline (no request to observe), so
-		// the active-sort signal for the Reset Layout button comes from the
-		// 'dataSorted' event, which carries the current sorter list.
+		// the active-sort signal for the Clear button comes from the
+		// 'dataSorted' event, which carries the current sorter list —
+		// compared against the declared default sort, same as remote.
 		table.on('dataSorted', (sorters) => {
-			setSortActive(sorters.length > 0);
+			setSortActive(sortDeviates(sorters.map((s) => ({ field: s.field, dir: s.dir }))));
 		});
 		// Track the active (post grid-local-search) row count for the title
 		// bar's "X of N rows" readout. The Filter module dispatches
@@ -1327,11 +1626,35 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		table.on('dataLoadError', (error) => {
 			loadErrorRef.current?.(error instanceof Error ? error : new Error(String(error)));
 		});
+		// Header popups are body-anchored at DOCUMENT coordinates: when an
+		// ANCESTOR container scrolls (the account overlay's body), the popup
+		// stays put while the grid moves under it — visibly drifting away
+		// from its column. Close on any scroll outside the popup itself
+		// (its own checklist scrolling must not dismiss it), mirroring the
+		// gear panel's behavior.
+		let popupScrollCloser: ((event: Event) => void) | null = null;
+		table.on('popupOpened', () => {
+			if (popupScrollCloser) return;
+			popupScrollCloser = (event: Event) => {
+				if (event.target instanceof Element && event.target.closest('.tabulator-popup')) return;
+				closeHeaderPopup();
+			};
+			document.addEventListener('scroll', popupScrollCloser, true);
+		});
+		table.on('popupClosed', () => {
+			if (!popupScrollCloser) return;
+			document.removeEventListener('scroll', popupScrollCloser, true);
+			popupScrollCloser = null;
+		});
 
 		// Step 3: teardown reverses everything.
 		return () => {
 			builtRef.current = false;
 			tableRef.current = null;
+			if (popupScrollCloser) {
+				document.removeEventListener('scroll', popupScrollCloser, true);
+				popupScrollCloser = null;
+			}
 			table.destroy();
 		};
 		// Rebuild only on explicit epoch bumps (Reset layout) — options are a
@@ -1363,11 +1686,22 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			return;
 		}
 		whenBuilt((table) => {
-			table.setColumns(normalizeColumns(columns));
+			table.setColumns(normalizeColumns(applyDefaultLayout(columns)));
 			syncFilterIndicators();
 		});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [columns]);
+
+	// Display-setting classes (grid lines / zebra) via classList — NEVER the
+	// React className prop: Tabulator stamps its own classes on the container
+	// at build, and a className rewrite would wipe them (see gridEl). The
+	// epoch dep re-applies after a rebuild in case teardown touched classes.
+	useEffect(() => {
+		const el = containerRef.current;
+		if (!el) return;
+		el.classList.toggle('rr-grid--no-lines', !displaySettings.lines);
+		el.classList.toggle('rr-grid--zebra', displaySettings.zebra);
+	}, [displaySettings.lines, displaySettings.zebra, epoch]);
 
 	// ── Imperative handle ───────────────────────────────────────────────────
 	useImperativeHandle(ref, () => ({
@@ -1438,6 +1772,12 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	const gridEl = (
 		<div
 			ref={containerRef}
+			// The className prop must stay CONSTANT across renders: Tabulator
+			// stamps its own classes onto this element at build, and a React
+			// className change REWRITES the whole class attribute — wiping
+			// them and unstyling the entire grid (headers collapse to bare
+			// text). The gear's display-setting classes therefore apply via
+			// classList in an effect, never through this prop.
 			className={onRowClick ? 'rr-grid rr-grid--clickable' : 'rr-grid'}
 			// flex-basis 0 makes the main size flex-determined, so Tabulator's
 			// inline height:100% is ignored in favour of the flexed remainder.
@@ -1460,58 +1800,151 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	);
 	// Matching-row count right after the search input.
 	const countEl = showSearch && countText !== null && <span style={styles.count}>{countText}</span>;
-	// Grid-owned buttons (Clear / Export), suppressible as a GROUP: with
+	// One gear-panel toggle row (display settings): popup-vocabulary check
+	// row, React-rendered — the class names are the same global CSS the
+	// header popups use, so the two surfaces stay visually identical.
+	const settingRow = (label: string, on: boolean, onToggle: () => void): ReactNode => (
+		<div className="rr-grid-hp-item" role="menuitemcheckbox" aria-checked={on} onClick={onToggle}>
+			<span className={on ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check'} />
+			<span className="rr-grid-hp-item-label">{label}</span>
+		</div>
+	);
+	// Grid-owned controls (Clear / the gear), suppressible as a GROUP: with
 	// noSearch AND noExport both set the grid contributes no buttons at all
 	// (even the transient Clear), leaving an actions-only header on titled
-	// grids — caller-provided `actions` always render regardless. noExport
-	// alone still lets Clear surface while the view deviates.
-	const toolButtons = (showSearch || showExport) && (showExport || clearVisible) && (
-		<div style={styles.barRight}>
-			{/* Clear appears only while a sort, search, or filter
-			    deviates the view — it resets those three and leaves
-			    the column layout alone (the header popups' Reset
-			    layout is the one that also restores the layout). */}
-			{clearVisible && (
-				<Button variant="ghost" small onClick={clearView}>
-					Clear
-				</Button>
-			)}
-			{showExport && (
-				<div ref={exportWrapRef} style={styles.exportWrap}>
-					{/* Trigger stays enabled during a walk so the menu can be
-					    reopened — the format rows below show the disabled state. */}
-					<Button variant="ghost" small onClick={() => setExportMenuOpen((openNow) => !openNow)}>
-						Export...
-					</Button>
-					{exportMenuOpen && (
-						<div style={styles.exportMenu} role="menu">
-							{(['csv', 'json'] as const).map((format) => (
-								<div
-									key={format}
-									role="menuitem"
-									aria-disabled={exporting}
-									style={styles.exportItem(exportHover === format, exporting)}
-									onMouseEnter={() => setExportHover(format)}
-									onMouseLeave={() => setExportHover((current) => (current === format ? null : current))}
-									onClick={() => handleExportSelect(format)}
-								>
-									{format === 'csv' ? 'CSV' : 'JSON'}
-								</div>
-							))}
+	// grids — caller-provided `actions` always render regardless.
+	const showGridButtons = showSearch || showExport;
+	// Clear appears only while a sort, search, or filter deviates the view —
+	// it resets those three and leaves the column layout alone (the gear's
+	// Reset layout is the one that also restores the layout). Rides the
+	// actions cluster.
+	const clearButton = showGridButtons && clearVisible && (
+		<Button variant="ghost" small onClick={clearView}>
+			Clear
+		</Button>
+	);
+	// The gear (DISPLAY toggles, EXPORT rows, COLUMNS list, Reset layout) is
+	// its own control: the STACKED header pins it to the upper-right CORNER
+	// (design owner) instead of the vertically-centered cluster; the
+	// single-row bar keeps it at the row's right end (the corner there).
+	const gearControl = showGridButtons && (
+		<div ref={gearWrapRef} style={styles.exportWrap}>
+				{/* BARE gear glyph — never a Button (design owner): quiet
+				    secondary tone, primary on hover / while open. */}
+				<button
+					type="button"
+					style={styles.gearButton(gearHover || gearOpen)}
+					onMouseEnter={() => setGearHover(true)}
+					onMouseLeave={() => setGearHover(false)}
+					onClick={handleGearClick}
+					aria-label="Grid settings"
+					aria-expanded={gearOpen}
+				>
+					<BxCog size={15} />
+				</button>
+				{gearOpen &&
+					gearAnchor &&
+					createPortal(
+						/* The FULL header-popup class stack: .tabulator-popup +
+						   container paint the popup surface, .rr-grid-hp shapes
+						   the box (248px, vertical padding), .rr-grid-gear adds
+						   the font reset — the gear panel and the column popups
+						   are the same surface by construction. */
+						<div
+							ref={gearPanelRef}
+							style={styles.gearMenu(gearAnchor)}
+							className="tabulator-popup tabulator-popup-container rr-grid-hp rr-grid-gear"
+							role="menu"
+						>
+						{/* DISPLAY: per-grid presentation toggles (persisted per
+						    user). */}
+						<div className="rr-grid-hp-section">
+							<div className="rr-grid-hp-label">Display</div>
+							{settingRow('Grid lines', displaySettings.lines, () => updateDisplaySettings({ lines: !displaySettings.lines }))}
+							{settingRow('Alternating rows', displaySettings.zebra, () => updateDisplaySettings({ zebra: !displaySettings.zebra }))}
 						</div>
+						{/* EXPORT: a labelled section with the CSV / JSON walk
+						    rows, indented under the label like every other
+						    section's rows (noExport hides just this section;
+						    the gear itself remains). */}
+						{showExport && (
+							<div className="rr-grid-hp-section">
+								<div className="rr-grid-hp-label">Export</div>
+								{(['csv', 'json'] as const).map((format) => (
+									<div
+										key={format}
+										className="rr-grid-hp-item"
+										role="menuitem"
+										aria-disabled={exporting}
+										style={exporting ? { opacity: 0.5, cursor: 'default' } : undefined}
+										onClick={() => handleExportSelect(format)}
+									>
+										<span style={styles.gearCheckSpacer} />
+										<span className="rr-grid-hp-item-label">{format === 'csv' ? 'CSV' : 'Json'}</span>
+									</div>
+								))}
+							</div>
+						)}
+						{/* COLUMNS: the same show/hide checklist the header
+						    popups carry (alphabetical lookup; last-visible
+						    guard; reveal content-fit). LAST section (design
+						    owner): the open-ended list sits at the bottom so
+						    the fixed-size sections above never move. */}
+						{gearColumns.length > 0 && (
+							<div className="rr-grid-hp-section">
+								<div className="rr-grid-hp-label">Columns</div>
+								<div className="rr-grid-hp-list">
+									{gearColumns.map((col) => (
+										<div
+											key={col.field}
+											className="rr-grid-hp-item"
+											role="menuitemcheckbox"
+											aria-checked={col.visible}
+											title={col.tooltip}
+											onClick={() => handleGearColumnToggle(col.field)}
+										>
+											<span className={col.visible ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check'} />
+											<span className="rr-grid-hp-item-label">{col.title}</span>
+										</div>
+									))}
+								</div>
+							</div>
+						)}
+						{/* Reset layout: the header popup's exact bottom form —
+						    divider + right-aligned quiet-outline button.
+						    Restores the declared defaults (layout, sort,
+						    filters, formats, display settings) and deletes
+						    the per-user stored entry. */}
+						<div className="rr-grid-hp-divider" />
+						<div className="rr-grid-hp-section">
+							<div className="rr-grid-hp-actions">
+								<button
+									type="button"
+									className="rr-grid-hp-btn"
+									onClick={() => {
+										setGearOpen(false);
+										resetLayout();
+									}}
+								>
+									Reset layout
+								</button>
+							</div>
+						</div>
+						</div>,
+						document.body,
 					)}
-				</div>
-			)}
 		</div>
 	);
 
 	return (
 		<div style={fillsParent ? { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } : undefined}>
 			{/* Card-header block: title stacked over the search/count tools on
-			    the left; card actions + grid buttons as one vertically-centered
-			    cluster on the right; one shared fill and bottom border. */}
+			    the left; card actions + Clear as the vertically-centered
+			    cluster on the right; the GEAR pinned to the upper-right
+			    corner; one shared fill and bottom border. */}
 			{showBar && hasIdentityRow && (
 				<div style={styles.barStack}>
+					{gearControl && <div style={styles.gearCorner}>{gearControl}</div>}
 					<div style={styles.barLeft}>
 						<span>{title}</span>
 						{/* Tools line renders only when the search is on; a
@@ -1523,20 +1956,26 @@ function DataGridInner<Row extends Record<string, unknown>>(
 							</div>
 						)}
 					</div>
-					{(actions !== undefined || toolButtons) && (
+					{(actions !== undefined || clearButton) && (
 						<div style={styles.barActions}>
 							{actions}
-							{toolButtons}
+							{clearButton}
 						</div>
 					)}
 				</div>
 			)}
-			{/* Single tool row (no title / actions): the original bar form. */}
+			{/* Single tool row (no title / actions): the original bar form —
+			    Clear and the gear sit at the row's right end. */}
 			{showBar && !hasIdentityRow && (
 				<div style={styles.titleBar}>
 					{searchInput}
 					{countEl}
-					{toolButtons}
+					{(clearButton || gearControl) && (
+						<div style={styles.barRight}>
+							{clearButton}
+							{gearControl}
+						</div>
+					)}
 				</div>
 			)}
 			{hasStrip && filters && (

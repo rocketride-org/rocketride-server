@@ -51,11 +51,40 @@ import type { Tabulator } from './modules';
 export type GridColumnRRType = 'string' | 'number' | 'boolean' | 'date' | 'enum' | 'strings' | 'json';
 
 /**
- * ColumnDefinition plus DataGrid extensions. `rrNoPopup` exempts a column
- * from the header popup (filter + show/hide + reset) AND from the toggle
- * list — actions and icon columns. `rrType` declares the column's value type
- * ({@link GridColumnRRType}), which selects the header-popup filter control.
- * Both markers are stripped before the definitions reach Tabulator
+ * ColumnDefinition plus DataGrid extensions — the full per-column contract a
+ * view declares. `field` is the key in the result rows; `title`, `rrType`,
+ * and any Tabulator-native option (width, formatter, `headerSort`, ...) ride
+ * alongside. The DataGrid-private markers:
+ *
+ * - `rrNoPopup` exempts a column from the header popup (filter + show/hide +
+ *   reset) AND from the toggle list — icon/chrome columns.
+ * - `rrType` declares the column's value type ({@link GridColumnRRType}),
+ *   which selects the header-popup filter control.
+ * - `rrDefault` marks the column as part of the DEFAULT view; the default
+ *   ORDER is the order the defaulted columns appear in the `columns` array.
+ *   A column WITHOUT it is available (declared, filterable, toggleable from
+ *   the header menu) but hidden by default. When ANY column declares
+ *   `rrDefault` the grid runs in contract mode: the default layout derives
+ *   from the flags alone ({@link applyDefaultLayout}) and applies whenever
+ *   the user has no persisted layout — a persisted workspace layout, once
+ *   saved, still wins. With NO flags declared the legacy behavior holds
+ *   (array order + native `visible` flags).
+ * - `rrDefaultSort` opts the column into the grid's DEFAULT sort (applied
+ *   when the user has no persisted sort; multiple declarations compose in
+ *   array order). Remote grids send it on the first request.
+ * - `rrGroup` groups rows by this column by default (client-side — on remote
+ *   grids groups form within the loaded page).
+ * - `rrDescription` documents the column for humans: it becomes the header
+ *   tooltip (Tabulator `headerTooltip`) and the toggle-list row tooltip.
+ * - `rrOptions` declares a curated selection vocabulary: the filter control
+ *   becomes a checklist of the declared options (label defaults to the
+ *   value) UNIONed with the live distinct values, so values that ship in
+ *   data appear without a code change — declared labels win on overlap.
+ *   This is how enum-like string columns and JSON-array columns (e.g.
+ *   sysPermissions) get a real selector: the committed array reaches the
+ *   server as IN on scalar columns and contains-ANY on array columns.
+ *
+ * Every marker is stripped before the definitions reach Tabulator
  * ({@link normalizeColumns}), so exempt columns simply never receive the
  * `headerPopup` option and Tabulator never sees an unknown option.
  */
@@ -64,6 +93,22 @@ export type GridColumnDefinition = ColumnDefinition & {
 	rrNoPopup?: boolean;
 	/** Declared value type — selects the header-popup filter control. */
 	rrType?: GridColumnRRType;
+	/** Part of the default view (order = position in the columns array). */
+	rrDefault?: boolean;
+	/** Direction this column contributes to the grid's default sort. */
+	rrDefaultSort?: 'asc' | 'desc';
+	/** Group rows by this column by default. */
+	rrGroup?: boolean;
+	/**
+	 * REQUIRED short human description — every declared column carries a name
+	 * (`title`) and a description; the description renders as the header
+	 * tooltip and the COLUMNS toggle-list tooltip. State what the value IS
+	 * (units, sign conventions, id semantics) — not a restatement of the
+	 * title.
+	 */
+	rrDescription: string;
+	/** Curated filter vocabulary — checklist, unioned with live distinct values. */
+	rrOptions?: (string | { value: string; label: string })[];
 };
 
 /** Semantic variants for {@link badgeEl} — mirrors StatusBadge's variants. */
@@ -312,6 +357,7 @@ export function createActionsColumn<Row>(config: IActionsColumnConfig<Row>): Gri
 	return {
 		title: 'Actions',
 		field: '__rrActions',
+		rrDescription: 'Row actions.',
 		width,
 		hozAlign: 'right',
 		headerSort: false,
@@ -637,6 +683,28 @@ export function buildAutoColumns(
 const REVEAL_FIT_MAX_WIDTH = 480;
 
 /**
+ * Toggle a column's visibility with the reveal content-fit — shared by the
+ * header popup's COLUMNS checklist and the gear menu's column list. A newly
+ * revealed column arrives width-less, and the fitColumns layout crushes it to
+ * the 40px minimum (unreadable for UUID/date content). `setWidth(true)` is
+ * Tabulator's content-fit: verified in tabulator_esm.mjs 6.5.2 —
+ * reinitializeWidth(true) clears the width, measures the header and every
+ * LOADED cell, applies the max, then re-runs the column layout, which treats
+ * the new width as fixed and redistributes the rest. The fit is unbounded — a
+ * JSON payload cell measures at its FULL serialized length — so the reveal is
+ * clamped at {@link REVEAL_FIT_MAX_WIDTH}; the user can still drag wider.
+ *
+ * @param col - The column to toggle.
+ */
+export function toggleColumnWithFit(col: ColumnComponent): void {
+	col.toggle();
+	if (col.isVisible()) {
+		col.setWidth(true);
+		if (col.getWidth() > REVEAL_FIT_MAX_WIDTH) col.setWidth(REVEAL_FIT_MAX_WIDTH);
+	}
+}
+
+/**
  * Filter control of one column's header popup, resolved by the DataGrid from
  * the column's declared {@link GridColumnRRType}: 'text' (contains input),
  * 'values' (distinct-value checklist), 'boolean' (static Yes/No checklist),
@@ -684,6 +752,13 @@ export interface IHeaderFilterBridge {
 	setRange(field: string, range: { start?: string; end?: string }): void;
 	/** Distinct values of a field for the 'values' checklist. */
 	getDistinct(field: string): Promise<(string | number | boolean)[]>;
+	/**
+	 * The field's DECLARED static filter vocabulary (`rrOptions`), normalized
+	 * to value/label pairs — or null when the column declares none. When
+	 * present, the 'values' checklist renders exactly these options (no
+	 * distinct lookup, no dependence on the loaded rows).
+	 */
+	getOptions(field: string): { value: string; label: string }[] | null;
 	/**
 	 * True when the field's declared column carries the `rrNoPopup` marker
 	 * (actions / icon columns). The marker is stripped before definitions
@@ -750,24 +825,100 @@ export interface IGridInstanceState extends Tabulator {
 }
 
 /**
- * Prepare caller-declared column definitions for Tabulator: strip the
- * DataGrid-private markers (`rrNoPopup`, `rrType`), and wire the header
- * popup (builder + icon) onto every non-exempt column. This is the single
- * place popup wiring happens — exempt columns simply never receive the
- * `headerPopup` option, so no `false` sentinel is needed anywhere.
+ * Synthesize the DEFAULT layout from the declared column contract. Contract
+ * mode engages when ANY column declares `rrDefault`: the default view is
+ * exactly the flagged columns, in the order they appear in the array; every
+ * unflagged column exists hidden (declared and toggleable — the persisted
+ * workspace layout, once the user saves one, still overrides all of this
+ * through Tabulator persistence). With no flags declared the legacy contract
+ * holds and the input is returned untouched (array order + native `visible`
+ * flags).
  *
- * @param columns - Caller-declared column definitions (pre-normalized).
+ * @param columns - Caller-declared column definitions.
+ * @returns Definitions in default order with visibility applied.
+ */
+export function applyDefaultLayout(columns: GridColumnDefinition[]): GridColumnDefinition[] {
+	// Legacy mode: no column opted into the contract — change nothing.
+	if (!columns.some((c) => c.rrDefault === true)) return columns;
+	// Contract mode: defaulted columns first (array order, visible), then
+	// every other column (array order, hidden).
+	const defaulted = columns.filter((c) => c.rrDefault === true);
+	const rest = columns.filter((c) => c.rrDefault !== true);
+	return [
+		...defaulted.map((c) => ({ ...c, visible: true })),
+		...rest.map((c) => ({ ...c, visible: false })),
+	];
+}
+
+/**
+ * The grid's declared DEFAULT sort, in Tabulator's sorter shape (`column` =
+ * field name — the same shape `initialSort` takes and the persistence module
+ * stores). Multiple `rrDefaultSort` declarations compose in array order.
+ *
+ * @param columns - Caller-declared column definitions.
+ * @returns Sorters for `initialSort` / the persisted-sort blob; [] when the
+ *     grid declares no default sort.
+ */
+export function defaultSorters(columns: GridColumnDefinition[]): { column: string; dir: 'asc' | 'desc' }[] {
+	return columns
+		.filter((c) => c.rrDefaultSort != null && typeof c.field === 'string')
+		.map((c) => ({ column: c.field as string, dir: c.rrDefaultSort as 'asc' | 'desc' }));
+}
+
+/**
+ * Fields the grid groups rows by, by declaration (`rrGroup`), in array
+ * order. Feeds Tabulator's `groupBy` option — client-side grouping, so
+ * remote grids group within the loaded page.
+ *
+ * @param columns - Caller-declared column definitions.
+ * @returns Group-by field names; [] when the grid declares no grouping.
+ */
+export function defaultGroupFields(columns: GridColumnDefinition[]): string[] {
+	return columns
+		.filter((c) => c.rrGroup === true && typeof c.field === 'string')
+		.map((c) => c.field as string);
+}
+
+/**
+ * Prepare caller-declared column definitions for Tabulator: strip the
+ * DataGrid-private markers (`rrNoPopup`, `rrType`, `rrDefault`,
+ * `rrDefaultSort`, `rrGroup`, `rrDescription`, `rrOptions`), map
+ * `rrDescription` onto Tabulator's native `headerTooltip` (unless the caller
+ * set one explicitly), and wire the header popup (builder + icon) onto every
+ * non-exempt column. This is the single place popup wiring happens — exempt
+ * columns simply never receive the `headerPopup` option, so no `false`
+ * sentinel is needed anywhere.
+ *
+ * Accepts the LOOSE marker form (every marker optional) because AUTO-derived
+ * columns pass through here too, and an undeclared row key carries no
+ * contract — the `rrDescription` requirement binds DECLARED columns only.
+ *
+ * @param columns - Column definitions (pre-normalized; run
+ *     {@link applyDefaultLayout} first so contract-mode order/visibility land).
  * @returns Tabulator-ready definitions without DataGrid-private markers.
  */
-export function normalizeColumns(columns: GridColumnDefinition[]): ColumnDefinition[] {
+export function normalizeColumns(
+	columns: (ColumnDefinition & Partial<Pick<GridColumnDefinition, 'rrNoPopup' | 'rrType' | 'rrDefault' | 'rrDefaultSort' | 'rrGroup' | 'rrDescription' | 'rrOptions'>>)[],
+): ColumnDefinition[] {
 	return columns.map((def) => {
-		// Step 1: strip the markers so Tabulator never sees unknown options
-		// (the DataGrid retains the PRE-normalized defs for its own lookups).
-		const rest: GridColumnDefinition = { ...def };
-		delete rest.rrNoPopup;
-		delete rest.rrType;
+		// Step 1: strip the markers by destructuring so Tabulator never sees
+		// unknown options (the DataGrid retains the PRE-normalized defs for
+		// its own lookups). Destructuring, not `delete` — rrDescription is a
+		// REQUIRED member of the declared contract, and required properties
+		// cannot be deleted through the typed reference.
+		const { rrNoPopup, rrType, rrDefault, rrDefaultSort, rrGroup, rrDescription, rrOptions, ...rest } = def;
+		void rrType;
+		void rrDefault;
+		void rrDefaultSort;
+		void rrGroup;
+		void rrOptions;
+		// The declared description IS the header tooltip; an explicit
+		// caller-provided headerTooltip wins.
+		if (rrDescription && rest.headerTooltip === undefined) {
+			rest.headerTooltip = rrDescription;
+		}
 		// Step 2: exempt columns get no popup at all (no affordance rendered).
-		if (def.rrNoPopup) return rest;
+		if (rrNoPopup) return rest;
 		// Step 3: the FORMAT-override layer wraps the cell formatter (popup
 		// FORMAT section: alignment / date / number picks). String built-in
 		// formatters are left alone — none of our views use them, and they
@@ -847,7 +998,7 @@ function checkRowEl(text: string, on: boolean, onToggle: (box: HTMLElement) => v
  * fires its external `popupClosed` event. (The blur listeners bind ~100ms
  * after open; nothing human can reach Apply inside that window.)
  */
-function closeHeaderPopup(): void {
+export function closeHeaderPopup(): void {
 	document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 }
 
@@ -1291,13 +1442,30 @@ function buildFilterSection(
 	// section and hand back the Clear / Apply verbs for the footer.
 	let controls: IPendingFilterControls;
 	switch (mode) {
-		case 'values':
-			// Distinct values, stringified into checklist entries (dedupe
-			// happens inside the controls builder).
+		case 'values': {
+			// Checklist entries are the UNION of the declared vocabulary
+			// (rrOptions — curated values with labels) and the live distinct
+			// values, so a value that ships in data (a new sys permission, a
+			// new enum code) appears without a code change; declared labels
+			// win on overlap. Degrades gracefully: declared-only when no
+			// distinct source exists or it fails, distinct-only when nothing
+			// is declared.
+			const declared = bridge.getOptions(field) ?? [];
 			controls = buildChecklistFilterControls(section, bridge, field, () =>
-				bridge.getDistinct(field).then((values) => values.map((value) => ({ value: String(value), label: String(value) }))),
+				bridge.getDistinct(field).then(
+					(values) => {
+						const declaredValues = new Set(declared.map((option) => option.value));
+						const extras = values
+							.map(String)
+							.filter((value) => value !== '' && !declaredValues.has(value))
+							.map((value) => ({ value, label: value }));
+						return [...declared, ...extras];
+					},
+					() => declared,
+				),
 			);
 			break;
+		}
 		case 'boolean':
 			// Static two-entry checklist — no enumeration source needed.
 			controls = buildChecklistFilterControls(section, bridge, field, () => Promise.resolve(BOOLEAN_ENTRIES));
@@ -1612,30 +1780,18 @@ export function buildHeaderPopup(
 		String(a.getDefinition().title).localeCompare(String(b.getDefinition().title), undefined, { numeric: true }),
 	);
 	for (const col of titled) {
+		// The declared rrDescription lands on headerTooltip (normalizeColumns),
+		// so the toggle row inherits it as its native title tooltip.
+		const colTooltip = col.getDefinition().headerTooltip;
 		const row = checkRowEl(String(col.getDefinition().title), col.isVisible(), (box) => {
 			// Last-visible guard, then toggle and restyle in place (the popup
 			// stays open, so the box must track the new state itself).
 			const visibleCount = titled.filter((c) => c.isVisible()).length;
 			if (col.isVisible() && visibleCount <= 1) return;
-			col.toggle();
-			// A newly revealed column arrives width-less, and the fitColumns
-			// layout crushes it to the 40px minimum (unreadable for UUID/date
-			// content). setWidth(true) is Tabulator's content-fit: verified in
-			// tabulator_esm.mjs 6.5.2 — reinitializeWidth(true) clears the
-			// width, measures the header and every LOADED cell, applies the
-			// max, then re-runs the column layout, which treats the new width
-			// as fixed and redistributes the rest (user choice 2026-07-16 over
-			// a platform-wide fitData* layout switch). The fit is unbounded —
-			// a JSON payload cell measures at its FULL serialized length once
-			// the formatter stopped capping its own width — so clamp the
-			// reveal; the user can still drag wider, and cells ellipsize at
-			// whatever the real column width is.
-			if (col.isVisible()) {
-				col.setWidth(true);
-				if (col.getWidth() > REVEAL_FIT_MAX_WIDTH) col.setWidth(REVEAL_FIT_MAX_WIDTH);
-			}
+			toggleColumnWithFit(col);
 			box.className = col.isVisible() ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check';
 		});
+		if (typeof colTooltip === 'string') row.title = colTooltip;
 		columnList.appendChild(row);
 	}
 	columnsSection.appendChild(columnList);

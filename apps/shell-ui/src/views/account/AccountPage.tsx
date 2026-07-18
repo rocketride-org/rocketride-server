@@ -27,7 +27,7 @@
 // and async callbacks down to the host-agnostic AccountView.
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, useMemo, CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
 import { AccountView } from 'shared';
 import type { IDataGridPageRequest } from 'shared';
 import type {
@@ -459,16 +459,6 @@ const AccountPage: React.FC = () => {
 		window.open(url, '_blank', 'noopener');
 	}, [client, orgId]);
 
-	// ── Memoized lookups ────────────────────────────────────────────────────
-	const memberNames = useMemo(
-		() => Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId])),
-		[members],
-	);
-	const teamNames = useMemo(
-		() => Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id])),
-		[teams],
-	);
-
 	// ── Render ──────────────────────────────────────────────────────────────
 	return (
 		<div style={accountStyles.root}>
@@ -501,8 +491,6 @@ const AccountPage: React.FC = () => {
 			onTransactionPage={handleTransactionPage}
 			fetchTransactions={fetchTransactions}
 			fetchTransactionDistinct={fetchTransactionDistinct}
-			memberNames={memberNames}
-			teamNames={teamNames}
 			section={section}
 			onSectionChange={setSection}
 			activeTeamId={activeTeamId}

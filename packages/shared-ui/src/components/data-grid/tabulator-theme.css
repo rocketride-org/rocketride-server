@@ -333,7 +333,8 @@
    when on (kept in both container scopes — a caller-provided headerMenu can
    reuse it). Vertical centring comes from the flex .rr-grid-hp-item row. */
 .tabulator-menu .rr-menu-check,
-.tabulator-popup .rr-menu-check {
+.tabulator-popup .rr-menu-check,
+.rr-grid-gear .rr-menu-check {
 	display: inline-block;
 	width: 13px;
 	height: 13px;
@@ -343,7 +344,8 @@
 	flex-shrink: 0;
 }
 .tabulator-menu .rr-menu-check--on,
-.tabulator-popup .rr-menu-check--on {
+.tabulator-popup .rr-menu-check--on,
+.rr-grid-gear .rr-menu-check--on {
 	background: var(--rr-brand);        /* checked fill (checkbox brand) */
 	border-color: var(--rr-brand);
 	box-shadow: inset 0 0 0 2px var(--rr-bg-paper); /* inner tick well */
@@ -742,4 +744,69 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	vertical-align: bottom;
+}
+
+/* =============================================================================
+   ROW GROUPS — declared rrGroup grouping (Tabulator groupBy)
+   ============================================================================= */
+
+/* Group header row: header-strip treatment (same fill/typography family as
+   the column header) so groups read as section dividers, not data rows. */
+.rr-grid.tabulator .tabulator-group {
+	background: var(--rr-bg-surface-alt);   /* header fill (tableHeader) */
+	border-bottom: 1px solid var(--rr-border); /* section separator */
+	padding: 7px 12px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--rr-text-primary);
+}
+
+/* Group open/close arrow inherits the secondary tone, brand when open. */
+.rr-grid.tabulator .tabulator-group .tabulator-arrow {
+	border-left-color: var(--rr-text-secondary);
+}
+.rr-grid.tabulator .tabulator-group.tabulator-group-visible .tabulator-arrow {
+	border-top-color: var(--rr-brand);
+	border-left-color: transparent;
+}
+
+/* The per-group row count Tabulator appends after the group key. */
+.rr-grid.tabulator .tabulator-group span {
+	margin-left: 6px;
+	font-weight: 400;
+	color: var(--rr-text-secondary);
+}
+
+/* =============================================================================
+   GEAR-MENU DISPLAY SETTINGS — per-grid, per-user (persisted with the layout)
+   ============================================================================= */
+
+/* The gear panel itself: the header popup's EXACT base. The panel renders
+   inside the card-header actions cluster, whose typography would otherwise
+   cascade in (bold compact header text) — reset to the popup's font here,
+   and match the popup's fixed width so the two surfaces are twins. */
+.rr-grid-gear {
+	width: 248px;              /* header popup panel width (.rr-grid-hp) */
+	font-family: var(--rr-font-family);
+	font-size: 13px;           /* popup row text (menuRow) */
+	font-weight: 400;
+	letter-spacing: normal;
+	text-transform: none;
+	color: var(--rr-text-primary);
+	text-align: left;
+}
+
+/* Grid lines OFF: the row separator hairline disappears; the header's own
+   bottom border stays (it separates chrome from data, not row from row). */
+.rr-grid--no-lines.tabulator .tabulator-row {
+	border-bottom-color: transparent;
+}
+
+/* Alternating rows ON: even rows carry a faint surface wash. Hover still
+   reads over the stripe (hover token wins on both parities). */
+.rr-grid--zebra.tabulator .tabulator-row.tabulator-row-even {
+	background: color-mix(in srgb, var(--rr-bg-surface-alt) 55%, transparent);
+}
+.rr-grid--zebra.tabulator .tabulator-row.tabulator-row-even:hover {
+	background: var(--rr-bg-list-hover);
 }

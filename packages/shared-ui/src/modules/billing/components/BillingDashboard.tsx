@@ -306,10 +306,6 @@ export interface BillingDashboardProps {
 	onBuyTopup?: (plan: TopupPlan) => void;
 	/** Called when the user clicks "Add more capacity" in the velocity card. */
 	onAddCapacity?: () => void;
-	/** Member lookup: userId -> display name. */
-	memberNames?: Record<string, string>;
-	/** Team lookup: teamId -> display name. */
-	teamNames?: Record<string, string>;
 }
 
 // =============================================================================
@@ -441,7 +437,7 @@ const SpendingVelocity: React.FC<{
 interface LeaderRow extends Record<string, unknown> {
 	/** User or team id. */
 	id: string;
-	/** Resolved display name. */
+	/** Server-resolved display name ('--' when unresolved). */
 	name: string;
 	/** Total tokens consumed across all resources. */
 	total: number;
@@ -450,45 +446,48 @@ interface LeaderRow extends Record<string, unknown> {
 }
 
 /** Usage leaderboard -- top consumers by user or team. */
-const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[]; memberNames?: Record<string, string>; teamNames?: Record<string, string> }> = ({
+const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[] }> = ({
 	usageByUser,
 	usageByTeam,
-	memberNames,
-	teamNames,
 }) => {
 	const [mode, setMode] = useState<'user' | 'team'>('user');
 	const data = mode === 'user' ? usageByUser : usageByTeam;
-	const names = mode === 'user' ? memberNames : teamNames;
 
-	// Flatten rollups into table rows with resolved names and computed totals.
+	// Flatten rollups into table rows with computed totals; the display name
+	// arrives resolved on the rollup row itself.
 	const rows = useMemo<LeaderRow[]>(
 		() =>
 			data.map((row) => ({
 				id: row.id,
-				name: row.id === '__none__' ? '(unassigned)' : names?.[row.id] ?? row.id.slice(0, 8),
+				name: row.id === '__none__' ? '(unassigned)' : row.name ?? '--',
 				total: Object.values(row.credits).reduce((s, v) => s + v, 0),
 				resources: Object.keys(row.credits).length,
 			})),
-		[data, names]
+		[data]
 	);
 
 	// Column definitions — first column label follows the active mode.
 	// Declared rrTypes per the DataGrid standard: the number columns get the
-	// Min/Max filter and the decimals / thousands FORMAT picks.
+	// Min/Max filter and the decimals / thousands FORMAT picks. The contract
+	// indexes declare the default layout; total desc mirrors the server's
+	// top-consumers-first rollup order.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', headerSort: true },
+			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Consumer display name resolved server-side — user display name with email fallback, or team name; "(unassigned)" pools usage rows carrying no user/team id.', headerSort: true },
 			{
 				title: 'Total Tokens',
 				field: 'total',
 				rrType: 'number',
+				rrDefault: true,
+				rrDefaultSort: 'desc',
+				rrDescription: 'Credits consumed by this consumer: the sum of absolute usage-ledger debits across every metered resource (not only tokens).',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
 				sorter: 'number',
 				formatter: (cell: CellComponent) => fmt(cell.getValue() as number),
 			},
-			{ title: 'Resources', field: 'resources', rrType: 'number', hozAlign: 'right', headerHozAlign: 'right', headerSort: true, sorter: 'number' },
+			{ title: 'Resources', field: 'resources', rrType: 'number', rrDefault: true, rrDescription: 'Count of distinct metered resources this consumer drew from (tokens, GPU seconds, storage, ...).', hozAlign: 'right', headerHozAlign: 'right', headerSort: true, sorter: 'number' },
 		],
 		[mode]
 	);
@@ -542,7 +541,7 @@ const PAGE_FETCH_TIMEOUT_MS = 15000;
 type TxRow = LedgerTransaction & Record<string, unknown>;
 
 /**
- * Paginated transaction log with user name resolution.
+ * Paginated transaction log.
  *
  * Two remote wirings, best first:
  *
@@ -570,10 +569,9 @@ type TxRow = LedgerTransaction & Record<string, unknown>;
 const TransactionLog: React.FC<{
 	transactions: TransactionsResult | null;
 	onPageChange: (page: number) => void;
-	memberNames?: Record<string, string>;
 	fetchTransactions?: (req: IDataGridPageRequest) => Promise<TransactionsResult | null>;
 	fetchTransactionDistinct?: (field: string) => Promise<(string | number | boolean)[]>;
-}> = ({ transactions, onPageChange, memberNames, fetchTransactions, fetchTransactionDistinct }) => {
+}> = ({ transactions, onPageChange, fetchTransactions, fetchTransactionDistinct }) => {
 	// --- Prop bridge refs ------------------------------------------------------
 	// Latest props, readable from inside the stable fetchPage callback.
 	const txRef = useRef(transactions);
@@ -684,13 +682,19 @@ const TransactionLog: React.FC<{
 	// Cell renderings keep the existing badge / muted / uppercase treatments,
 	// with declared rrTypes per the DataGrid standard (date/number columns get
 	// their typed FORMAT picks; the popup's display formatting works even
-	// though this grid's filters cannot reach the prop bridge).
+	// though this grid's filters cannot reach the prop bridge). Contract
+	// indexes declare the default layout; createdAt desc is the ledger's
+	// newest-first server default. The raw userId stays declared (unindexed,
+	// hidden) so it remains toggleable and filterable.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
 				title: 'Date',
 				field: 'createdAt',
 				rrType: 'date',
+				rrDefault: true,
+				rrDefaultSort: 'desc',
+				rrDescription: 'When the ledger entry was written — UTC on the wire, rendered in your local time; newest-first is the default sort.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => {
 					// formatDateValue applies the platform wire contract — a
@@ -705,17 +709,20 @@ const TransactionLog: React.FC<{
 			},
 			{
 				title: 'User',
-				field: 'userId',
+				field: 'userName',
 				rrType: 'string',
-				formatter: (cell: CellComponent) => {
-					const id = cell.getValue() as string | null;
-					return id ? memberNames?.[id] ?? id.slice(0, 8) : '--';
-				},
+				rrDefault: true,
+				rrDescription: 'Actor display name resolved server-side from the ledger user id, falling back to email; system-generated entries carry none.',
+				headerSort: true,
+				// Server-resolved display name; system events carry none.
+				formatter: (cell: CellComponent) => (cell.getValue() as string | null) ?? '--',
 			},
 			{
 				title: 'Type',
 				field: 'type',
 				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Ledger entry kind: purchase and credit grant credits, usage consumes them — determines the sign of Amount.',
 				headerSort: true,
 				formatter: (cell: CellComponent) => typeBadgeEl(cell.getValue() as string),
 			},
@@ -723,6 +730,8 @@ const TransactionLog: React.FC<{
 				title: 'Resource',
 				field: 'resource',
 				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Metered resource the credits applied to (tokens, GPU seconds, storage, ...).',
 				headerSort: true,
 				// Uppercase resource span (DOM clone of the old cell render).
 				formatter: (cell: CellComponent) => {
@@ -736,6 +745,8 @@ const TransactionLog: React.FC<{
 				title: 'Description',
 				field: 'description',
 				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Free-text note recorded with the entry by the ledger writer (e.g. the pack purchased or the task metered).',
 				headerSort: true,
 				formatter: (cell: CellComponent) => mutedEl((cell.getValue() as string | null) || '--'),
 			},
@@ -743,6 +754,8 @@ const TransactionLog: React.FC<{
 				title: 'Amount',
 				field: 'amount',
 				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Signed credit delta: positive = credits granted (purchase, promo, refund), negative = consumption.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -762,6 +775,8 @@ const TransactionLog: React.FC<{
 				title: 'Context',
 				field: 'context',
 				rrType: 'json',
+				rrDefault: true,
+				rrDescription: 'Structured JSON attached to the entry (task id, pipeline, source, pack id); the cell shows one salient field — click the row for the full payload.',
 				// Muted, ellipsis-truncated context with the full value as a tooltip.
 				formatter: (cell: CellComponent) => {
 					const tx = cell.getRow().getData() as TxRow;
@@ -772,8 +787,9 @@ const TransactionLog: React.FC<{
 					return el;
 				},
 			},
+			{ title: 'User ID', field: 'userId', rrType: 'string', rrDescription: 'Raw internal user UUID on the ledger row (empty for system entries); the User column shows the resolved display name.', headerSort: true },
 		],
-		[memberNames]
+		[]
 	);
 
 	if (!transactions) return null;
@@ -823,7 +839,7 @@ const TransactionLog: React.FC<{
 						{/* formatDateValue applies the wire contract (zone-less ISO IS
 						    UTC) and renders exactly like the Date column. */}
 						<LabelValue label="Date">{(viewedTx.createdAt ? formatDateValue(viewedTx.createdAt, { dateFormat: 'MM/DD/YY', timeFormat: 'HH:MM:SS' }) : null) ?? '--'}</LabelValue>
-						<LabelValue label="User">{viewedTx.userId ? memberNames?.[viewedTx.userId] ?? viewedTx.userId.slice(0, 8) : '--'}</LabelValue>
+						<LabelValue label="User">{viewedTx.userName ?? '--'}</LabelValue>
 						<LabelValue label="Type">{viewedTx.type}</LabelValue>
 						<LabelValue label="Resource">{viewedTx.resource}</LabelValue>
 						<LabelValue label="Description">{viewedTx.description || '--'}</LabelValue>
@@ -890,14 +906,17 @@ const ActiveTasksView: React.FC<{ activeTasks: ActiveTask[] }> = ({ activeTasks 
 	);
 
 	// Declared typed columns per the DataGrid standard — the number columns
-	// get Min/Max filters and the number FORMAT picks.
+	// get Min/Max filters and the number FORMAT picks. Contract flags
+	// declare the default layout; no default sort — the live poll order holds.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: 'Task', field: 'name', rrType: 'string', headerSort: true },
+			{ title: 'Task', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Pipeline or source name of the running task; falls back to the task id when unnamed.', headerSort: true },
 			{
 				title: 'Duration',
 				field: 'durationSeconds',
 				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Elapsed run time of the task in seconds (rendered as minutes and seconds), refreshed by the live poll.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -912,6 +931,8 @@ const ActiveTasksView: React.FC<{ activeTasks: ActiveTask[] }> = ({ activeTasks 
 				title: 'Tokens',
 				field: 'tokensTotal',
 				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Cumulative tokens the task has consumed so far; ticks upward with each poll while the task runs.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -964,8 +985,6 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 	fetchTransactions,
 	fetchTransactionDistinct,
 	onAddCapacity,
-	memberNames,
-	teamNames,
 }) => {
 	if (loading) {
 		return <div style={styles.loading}>Loading billing data...</div>;
@@ -975,9 +994,9 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 		<div style={styles.stack}>
 			<BalanceBreakdown balance={balance} transactions={transactions} />
 			<SpendingVelocity balance={balance} transactions={transactions} onAddCapacity={onAddCapacity} />
-			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} memberNames={memberNames} teamNames={teamNames} />
+			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} />
 			<ActiveTasksView activeTasks={activeTasks} />
-			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} memberNames={memberNames} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} />
+			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} />
 		</div>
 	);
 };

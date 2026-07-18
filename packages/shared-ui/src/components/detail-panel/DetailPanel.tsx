@@ -4,12 +4,19 @@
 // =============================================================================
 
 /**
- * DetailPanel — the right slide-over drawer for entity details.
+ * DetailPanel — the slide-over drawer for entity details.
  *
  * The standard way to show an entity's details (connection, user, model, job):
- * a full-height panel that slides in from the right over a dimmed client area,
- * replacing detail modals. Centered modals (`commonStyles.modalDialog`) remain
- * only for confirmations and short forms.
+ * a panel that slides in over a dimmed client area, replacing detail modals.
+ * Centered modals (`commonStyles.modalDialog`) remain only for confirmations
+ * and short forms.
+ *
+ * Orientation: `side: 'right'` (the default — full-height drawer from the
+ * right edge) is THE record-panel standard; vertical record content (forms,
+ * LabelValue stacks) fits a tall narrow surface. `side: 'bottom'` slides a
+ * full-width tray up from the bottom edge — for WIDE, ambient content
+ * (consoles, logs, traces, wide tables) that reads better short-and-wide,
+ * mirroring the record/console split familiar from Stripe's dashboard.
  *
  * Anatomy (matches the style-guide 6.2 / mockup):
  * - a fixed EntityHeader (42px avatar/icon slot + title + secondary line + close),
@@ -37,6 +44,12 @@ const DEFAULT_WIDTH = 560;
 
 /** Narrowest usable drawer — forms and footer verbs break below this. */
 const MIN_WIDTH = 380;
+
+/** Default bottom-tray height when the caller does not override `height`. */
+const DEFAULT_HEIGHT = 420;
+
+/** Shortest usable bottom tray — header + a few content rows break below. */
+const MIN_HEIGHT = 240;
 
 /** Context sliver: dimmed host pixels that must stay visible beside the drawer. */
 const CONTEXT_SLIVER = 120;
@@ -72,8 +85,18 @@ export interface IDetailPanelProps {
 	/** Body content — composed from Section / LabelValue / Chip / StatusBadge /
 	    MiniContainer / Button. Scrolls independently of the header and tabs. */
 	children: ReactNode;
-	/** Drawer width in px. Default {@link DEFAULT_WIDTH}. */
+	/**
+	 * Which edge the panel slides from. `'right'` (default) is the record-panel
+	 * standard: a full-height drawer for vertical record content. `'bottom'`
+	 * is a full-width tray for wide, ambient content (consoles, logs, wide
+	 * tables). All layering, focus, containment, and footer behavior is
+	 * identical between the two.
+	 */
+	side?: 'right' | 'bottom';
+	/** Drawer width in px (side 'right' only). Default {@link DEFAULT_WIDTH}. */
 	width?: number;
+	/** Tray height in px (side 'bottom' only). Default {@link DEFAULT_HEIGHT}. */
+	height?: number;
 	/**
 	 * Fixed action row pinned below the scrolling body (record-panel verbs:
 	 * Save / Cancel / destructive actions). Rendered with a top divider;
@@ -91,13 +114,15 @@ export interface IDetailPanelProps {
 	 */
 	contained?: boolean;
 	/**
-	 * Left-edge drag resizing (ON by default; pass false to opt out). The
-	 * width clamps between {@link MIN_WIDTH} and the OWNING SURFACE's width
-	 * minus a visible sliver of dimmed context (capped at 85%), so the panel
-	 * can neither collapse below a usable form width nor fully occlude the
-	 * page behind it — the dimmed edge is what communicates "overlay, not
-	 * navigation". Double-click the handle to restore the default width; the
-	 * dragged width lasts for the panel's open lifetime.
+	 * Growing-edge drag resizing (ON by default; pass false to opt out) —
+	 * the left edge of a right drawer, the top edge of a bottom tray. The
+	 * size clamps between the axis floor ({@link MIN_WIDTH} / {@link MIN_HEIGHT})
+	 * and the OWNING SURFACE's size minus a visible sliver of dimmed context
+	 * (capped at 85%), so the panel can neither collapse below a usable
+	 * content size nor fully occlude the page behind it — the dimmed edge is
+	 * what communicates "overlay, not navigation". Double-click the handle to
+	 * restore the default size; the dragged size lasts for the panel's open
+	 * lifetime.
 	 */
 	resizable?: boolean;
 }
@@ -123,19 +148,22 @@ const styles = {
 		overflow: 'hidden',
 	}),
 
-	// The drawer itself, pinned to the right edge. `entered` drives the slide-in.
-	panel: (width: number, entered: boolean): CSSProperties => ({
+	// The drawer itself, pinned to its edge. `entered` drives the slide-in:
+	// right = full-height drawer entering along X; bottom = full-width tray
+	// entering along Y. Shadow always falls toward the dimmed host content.
+	panel: (size: number, entered: boolean, bottom: boolean): CSSProperties => ({
 		position: 'absolute',
-		top: 0,
-		right: 0,
-		bottom: 0,
-		width,
+		...(bottom
+			? { left: 0, right: 0, bottom: 0, height: size }
+			: { top: 0, right: 0, bottom: 0, width: size }),
 		background: 'var(--rr-bg-default)',
-		boxShadow: '-10px 0 30px color-mix(in srgb, var(--rr-text-primary) 20%, transparent)',
+		boxShadow: bottom
+			? '0 -10px 30px color-mix(in srgb, var(--rr-text-primary) 20%, transparent)'
+			: '-10px 0 30px color-mix(in srgb, var(--rr-text-primary) 20%, transparent)',
 		display: 'flex',
 		flexDirection: 'column',
-		// Slide-in: off-screen to flush-right over a 200ms ease-out transition.
-		transform: entered ? 'translateX(0)' : 'translateX(100%)',
+		// Slide-in: off-screen to flush over a 200ms ease-out transition.
+		transform: entered ? 'translate(0, 0)' : bottom ? 'translateY(100%)' : 'translateX(100%)',
 		transition: 'transform 200ms ease-out',
 	}),
 
@@ -220,16 +248,15 @@ const styles = {
 		padding: '6px 20px 20px',
 	} as CSSProperties,
 
-	// Left-edge resize handle: a slim grab strip over the panel's edge. The
-	// tint appears on hover / during drag (the canvas splitters' sash token,
-	// so the affordance matches the rest of the platform).
-	resizeHandle: (active: boolean): CSSProperties => ({
+	// Resize handle: a slim grab strip over the panel's growing edge — the
+	// LEFT edge of a right drawer, the TOP edge of a bottom tray. The tint
+	// appears on hover / during drag (the canvas splitters' sash token, so
+	// the affordance matches the rest of the platform).
+	resizeHandle: (active: boolean, bottom: boolean): CSSProperties => ({
 		position: 'absolute',
-		left: 0,
-		top: 0,
-		bottom: 0,
-		width: 6,
-		cursor: 'col-resize',
+		...(bottom
+			? { top: 0, left: 0, right: 0, height: 6, cursor: 'row-resize' }
+			: { left: 0, top: 0, bottom: 0, width: 6, cursor: 'col-resize' }),
 		zIndex: 1,
 		background: active ? 'var(--rr-sash-hover)' : 'transparent',
 		touchAction: 'none',
@@ -269,50 +296,64 @@ export function DetailPanel({
 	activeTab,
 	onTabSelect,
 	children,
+	side = 'right',
 	width = DEFAULT_WIDTH,
+	height = DEFAULT_HEIGHT,
 	footer,
 	contained,
 	resizable = true,
 }: IDetailPanelProps): React.ReactElement | null {
+	// Orientation flag: a bottom tray resizes along Y instead of X; every
+	// other behavior (layering, focus, containment) is orientation-agnostic.
+	const bottom = side === 'bottom';
+	// The caller's default size along the slide axis (width or height).
+	const defaultSize = bottom ? height : width;
+	// The axis floor: form-safe width for a drawer, content-safe height for a tray.
+	const minSize = bottom ? MIN_HEIGHT : MIN_WIDTH;
 	// Drives the slide-in: false on mount (off-screen), flipped true next frame.
 	const [entered, setEntered] = useState(false);
 	// The drawer box — Tab focus is trapped inside it while open.
 	const panelRef = useRef<HTMLDivElement>(null);
-	// The overlay box — its width IS the owning surface, the resize clamp's
+	// The overlay box — its size IS the owning surface, the resize clamp's
 	// reference (dialog in contained mode, viewport otherwise).
 	const overlayRef = useRef<HTMLDivElement>(null);
-	// User-dragged width; null = the caller's `width`. Lives only while open
-	// (the closed panel unmounts), so every open starts at the default.
-	const [dragWidth, setDragWidth] = useState<number | null>(null);
+	// User-dragged size along the slide axis; null = the caller's default.
+	// Lives only while open (the closed panel unmounts), so every open starts
+	// at the default.
+	const [dragSize, setDragSize] = useState<number | null>(null);
 	// Resize interaction state: hover / drag tint + in-flight drag bookkeeping.
 	const [resizeActive, setResizeActive] = useState(false);
-	const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+	const dragRef = useRef<{ start: number; startSize: number } | null>(null);
 
 	/**
-	 * Clamp a candidate width to the usable band: never below the form-safe
-	 * minimum, never wide enough to hide the owning surface's context sliver.
+	 * Clamp a candidate size to the usable band: never below the axis floor,
+	 * never large enough to hide the owning surface's context sliver.
 	 *
-	 * @param candidate - Proposed width in px.
-	 * @returns The clamped width.
+	 * @param candidate - Proposed size in px along the slide axis.
+	 * @returns The clamped size.
 	 */
-	const clampWidth = (candidate: number): number => {
-		const host = overlayRef.current?.clientWidth ?? window.innerWidth;
-		const max = Math.max(MIN_WIDTH, Math.min(host * MAX_HOST_FRACTION, host - CONTEXT_SLIVER));
-		return Math.min(Math.max(candidate, MIN_WIDTH), max);
+	const clampSize = (candidate: number): number => {
+		const host = bottom
+			? (overlayRef.current?.clientHeight ?? window.innerHeight)
+			: (overlayRef.current?.clientWidth ?? window.innerWidth);
+		const max = Math.max(minSize, Math.min(host * MAX_HOST_FRACTION, host - CONTEXT_SLIVER));
+		return Math.min(Math.max(candidate, minSize), max);
 	};
 
 	/** Begin a drag: capture the pointer and record the starting geometry. */
 	const handleResizeDown = (e: React.PointerEvent<HTMLDivElement>): void => {
 		e.preventDefault();
 		e.currentTarget.setPointerCapture(e.pointerId);
-		dragRef.current = { startX: e.clientX, startWidth: dragWidth ?? width };
+		dragRef.current = { start: bottom ? e.clientY : e.clientX, startSize: dragSize ?? defaultSize };
 		setResizeActive(true);
 	};
 
-	/** Drag: the panel is right-anchored, so moving LEFT grows the width. */
+	/** Drag: the panel is edge-anchored, so moving TOWARD the opposite edge
+	    (left for a right drawer, up for a bottom tray) grows the size. */
 	const handleResizeMove = (e: React.PointerEvent<HTMLDivElement>): void => {
 		if (!dragRef.current) return;
-		setDragWidth(clampWidth(dragRef.current.startWidth + (dragRef.current.startX - e.clientX)));
+		const position = bottom ? e.clientY : e.clientX;
+		setDragSize(clampSize(dragRef.current.startSize + (dragRef.current.start - position)));
 	};
 
 	/** End a drag: release bookkeeping (pointer capture releases natively). */
@@ -321,18 +362,21 @@ export function DetailPanel({
 		setResizeActive(false);
 	};
 
-	/** Keyboard resize on the focused handle: arrows step, Home resets. */
+	/** Keyboard resize on the focused handle: arrows along the slide axis
+	    step the size (toward the opposite edge grows), Home resets. */
 	const handleResizeKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
-		const current = dragWidth ?? width;
-		if (e.key === 'ArrowLeft') {
+		const current = dragSize ?? defaultSize;
+		const grow = bottom ? 'ArrowUp' : 'ArrowLeft';
+		const shrink = bottom ? 'ArrowDown' : 'ArrowRight';
+		if (e.key === grow) {
 			e.preventDefault();
-			setDragWidth(clampWidth(current + KEY_RESIZE_STEP));
-		} else if (e.key === 'ArrowRight') {
+			setDragSize(clampSize(current + KEY_RESIZE_STEP));
+		} else if (e.key === shrink) {
 			e.preventDefault();
-			setDragWidth(clampWidth(current - KEY_RESIZE_STEP));
+			setDragSize(clampSize(current - KEY_RESIZE_STEP));
 		} else if (e.key === 'Home') {
 			e.preventDefault();
-			setDragWidth(null);
+			setDragSize(null);
 		}
 	};
 	// Focus target on open; also the button the close glyph fires.
@@ -418,16 +462,18 @@ export function DetailPanel({
 		/* Dismissal is deliberate-only per the 2026-07-08 design decision: the
 		   close glyph or Escape — clicking the dim backdrop must NOT close. */
 		<div ref={overlayRef} style={styles.overlay(contained === true)}>
-			<div ref={panelRef} style={styles.panel(dragWidth ?? width, entered)} role="dialog" aria-modal="true" aria-label={title}>
-				{/* Left-edge resize handle (drag, arrow keys, Home = reset,
-				    double-click = reset). */}
+			<div ref={panelRef} style={styles.panel(dragSize ?? defaultSize, entered, bottom)} role="dialog" aria-modal="true" aria-label={title}>
+				{/* Growing-edge resize handle (drag, arrow keys, Home = reset,
+				    double-click = reset). A separator's aria-orientation names
+				    the SEPARATOR's own axis: vertical for a drawer's left edge,
+				    horizontal for a tray's top edge. */}
 				{resizable && (
 					<div
 						role="separator"
-						aria-orientation="vertical"
+						aria-orientation={bottom ? 'horizontal' : 'vertical'}
 						aria-label="Resize panel"
 						tabIndex={0}
-						style={styles.resizeHandle(resizeActive)}
+						style={styles.resizeHandle(resizeActive, bottom)}
 						onPointerDown={handleResizeDown}
 						onPointerMove={handleResizeMove}
 						onPointerUp={handleResizeUp}
@@ -436,7 +482,7 @@ export function DetailPanel({
 						onMouseLeave={() => {
 							if (!dragRef.current) setResizeActive(false);
 						}}
-						onDoubleClick={() => setDragWidth(null)}
+						onDoubleClick={() => setDragSize(null)}
 						onKeyDown={handleResizeKey}
 					/>
 				)}

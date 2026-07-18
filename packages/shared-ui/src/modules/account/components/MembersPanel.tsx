@@ -36,7 +36,7 @@ import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import { avatarEl } from '../../../components/data-grid/defaults';
+import { autoFormatter, avatarEl, badgeEl, mutedEl } from '../../../components/data-grid/defaults';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
 import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
@@ -227,6 +227,10 @@ interface MemberRow extends Record<string, unknown> {
 	role: string;
 	/** Display status: 'Active' | 'Pending' (title-cased wire status). */
 	status: string;
+	/** ISO membership creation timestamp, or null. */
+	createdAt: string | null;
+	/** Teams the member belongs to (id + display name pairs). */
+	teams: Array<{ id: string; name: string }>;
 }
 
 /** The record panel's mode: closed, viewing one member, or inviting one. */
@@ -405,17 +409,25 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 				email: m.email,
 				role: m.role,
 				status: memberStatus(m.status),
+				createdAt: m.createdAt ?? null,
+				teams: m.teams ?? [],
 			})),
 		[members]
 	);
 
 	// ── Columns (pure data — the record panel replaced the Actions column) ──
+	// Contract flags (rrDefault, array order) declare the default layout; displayName asc keeps the
+	// member list alphabetical. Created and Teams stay declared but unindexed
+	// (hidden by default, toggleable from the header menu).
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
 				title: 'Member',
 				field: 'displayName',
 				rrType: 'string',
+				rrDefault: true,
+				rrDefaultSort: 'asc',
+				rrDescription: 'Display name from the user profile (the avatar initials and color derive from it); "(you)" marks the signed-in viewer\'s own row.',
 				headerSort: true,
 				// Avatar + name cluster, "(you)" on the viewer's own row.
 				formatter: (cell: CellComponent) => {
@@ -423,11 +435,13 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 					return memberCellEl(row.displayName, row.email, row.id === profile?.userId);
 				},
 			},
-			{ title: 'Email', field: 'email', rrType: 'string', headerSort: true },
+			{ title: 'Email', field: 'email', rrType: 'string', rrDefault: true, rrDescription: 'Sign-in email address of the member\'s user account; invitations are sent here.', headerSort: true },
 			{
 				title: 'Role',
 				field: 'role',
 				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Organization-level role: admin manages members, teams, and billing; member has standard access.',
 				headerSort: true,
 				// Role badge: brand for admins, neutral for members.
 				formatter: (cell: CellComponent) => {
@@ -439,11 +453,29 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 				title: 'Status',
 				field: 'status',
 				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Membership state: Pending until the invitee completes the initialization email; the first sign-in flips it to Active.',
 				headerSort: true,
 				// Status badge: green dot for active, amber for pending invites.
 				formatter: (cell: CellComponent) => {
 					const status = cell.getValue() as string;
 					return memberBadgeEl(statusBadgeVariant(status), status);
+				},
+			},
+			{ title: 'Created', field: 'createdAt', rrType: 'date', rrDescription: 'UTC time the org membership was created — for invited members, when the invitation was sent.', headerSort: true, formatter: autoFormatter },
+			{
+				title: 'Teams',
+				field: 'teams',
+				rrDescription: 'Teams of this organization the member belongs to; memberships in other organizations are not listed.',
+				headerSort: false,
+				// Badge per team name (the raw value is {id, name} pairs).
+				formatter: (cell: CellComponent) => {
+					const teams = (cell.getValue() as Array<{ id: string; name: string }> | null) ?? [];
+					if (teams.length === 0) return mutedEl('--');
+					const wrap = document.createElement('span');
+					wrap.className = 'rr-cell-badges';
+					for (const team of teams) wrap.appendChild(badgeEl('info', team.name));
+					return wrap;
 				},
 			},
 		],
@@ -631,6 +663,7 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 						<LabelValue label="Status">
 							<Badge variant={statusBadgeVariant(memberStatus(viewedMember.status))}>{memberStatus(viewedMember.status)}</Badge>
 						</LabelValue>
+						<LabelValue label="Teams">{viewedMember.teams?.length ? viewedMember.teams.map((t) => t.name).join(', ') : '--'}</LabelValue>
 						{/* Read-only role row for viewers who cannot manage this member. */}
 						{!canManage && (
 							<LabelValue label="Role">

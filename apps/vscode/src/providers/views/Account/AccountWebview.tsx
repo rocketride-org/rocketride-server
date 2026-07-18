@@ -474,8 +474,6 @@ const AccountWebview: React.FC = () => {
 						sendMessageRef.current({ type: 'billing:upgrade', appId, newPriceId } as any);
 					});
 				}}
-				memberNames={Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId]))}
-				teamNames={Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id]))}
 				section={section}
 				onSectionChange={(s) => {
 					setSection(s);

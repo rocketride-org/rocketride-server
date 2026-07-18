@@ -132,13 +132,16 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 	// Column definitions — numeric columns right-aligned like the original
 	// table, with declared rrTypes so the header popups offer the matching
 	// FORMAT picks (number columns: decimals / thousands / currency) and
-	// filter controls instead of falling back to plain text.
+	// filter controls instead of falling back to plain text. Contract flags
+	// declare the default layout; no default sort — the balance map order holds.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
 				title: 'Resource',
 				field: 'resource',
 				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Metered resource this balance row covers; the display name comes from subscription label templates, falling back to the raw resource key.',
 				headerSort: true,
 				// Uppercase resource-name span (DOM clone of the old cell render).
 				formatter: (cell: CellComponent) => {
@@ -152,6 +155,8 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 				title: 'Granted',
 				field: 'granted',
 				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Total credits ever added for the resource — the sum of positive ledger entries (credit grants and purchases).',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -162,6 +167,8 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 				title: 'Consumed',
 				field: 'consumed',
 				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Total credits used for the resource — the sum of usage debits, shown as a positive number.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -172,6 +179,8 @@ export const CreditsPanel: React.FC<CreditsPanelProps> = ({ balance, onAddCapaci
 				title: 'Balance',
 				field: 'balance',
 				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Net credits remaining: granted minus consumed, rounded to one decimal; negative means overspent and renders in the error color.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
