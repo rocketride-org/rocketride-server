@@ -1194,8 +1194,8 @@ def test_global_services_expose_dataset_override_boolean_in_profile_and_shape():
     assert services['lanes'] == {}
     assert services['icon'] == 'cognee.svg'
     icon = (_NODE_DIR / services['icon']).read_text(encoding='utf-8')
-    assert '#5C10F4' in icon
-    assert '<rect width="2539.97" height="2539.97" fill="#F4F4F4"/>' in icon
+    assert 'fill="currentColor"' in icon
+    assert '<rect width="2539.97" height="2539.97"' not in icon
     assert 'rx=' not in icon
     assert '<svg' in icon
     assert set(services['fields']) == {
