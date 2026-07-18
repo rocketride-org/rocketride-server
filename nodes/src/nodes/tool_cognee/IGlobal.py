@@ -6,22 +6,19 @@
 """
 Cognee node — global (per-pipe) state.
 
-Reads the cognee server URL, optional API key, default dataset, artifact path,
-and recall settings from node config. The four instance tools reuse this state.
+Reads the cognee server URL, optional API key, default dataset, and recall
+settings from node config. The three instance tools reuse this state.
 """
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
-
 from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, error, warning
 
 # Defaults / bounds (avoid magic constants scattered in the code).
 _DEFAULT_BASE_URL = 'http://localhost:8000'
 _DEFAULT_DATASET = 'main'
-_DEFAULT_ARTIFACT_DIR = '~/.rocketride/artifacts/cognee'
 _DEFAULT_SEARCH_TYPE = 'GRAPH_COMPLETION_DECOMPOSITION'
 _DEFAULT_TOP_K = 15
 MAX_TOP_K = 100
@@ -50,7 +47,6 @@ class IGlobal(IGlobalBase):
     base_url: str = _DEFAULT_BASE_URL
     api_key: str = ''
     dataset: str = _DEFAULT_DATASET
-    artifact_dir: str = str(Path(_DEFAULT_ARTIFACT_DIR).expanduser())
     search_type: str = _DEFAULT_SEARCH_TYPE
     top_k: int = _DEFAULT_TOP_K
     request_timeout: int = _DEFAULT_REQUEST_TIMEOUT
@@ -74,13 +70,6 @@ class IGlobal(IGlobalBase):
 
         self.dataset = str(cfg.get('dataset') or _DEFAULT_DATASET).strip() or _DEFAULT_DATASET
 
-        raw_artifact_dir = str(cfg.get('artifact_dir') or _DEFAULT_ARTIFACT_DIR).strip()
-        artifact_path = Path(raw_artifact_dir).expanduser()
-        if not artifact_path.is_absolute():
-            error('cognee: artifact_dir must be an absolute path')
-            raise ValueError('cognee: artifact_dir must be an absolute path')
-        self.artifact_dir = str(artifact_path.resolve())
-
         search_type = str(cfg.get('search_type') or _DEFAULT_SEARCH_TYPE).strip().upper()
         self.search_type = search_type if search_type in SEARCH_TYPES else _DEFAULT_SEARCH_TYPE
 
@@ -99,9 +88,6 @@ class IGlobal(IGlobalBase):
             base_url = str(cfg.get('base_url') or '').strip()
             if not base_url:
                 warning('base_url is required — set the cognee server URL')
-            raw_artifact_dir = str(cfg.get('artifact_dir') or _DEFAULT_ARTIFACT_DIR).strip()
-            if not Path(raw_artifact_dir).expanduser().is_absolute():
-                warning('artifact_dir must be an absolute path')
         except Exception as e:
             warning(str(e))
 

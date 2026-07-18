@@ -6,8 +6,8 @@
 """
 Cognee node for RocketRide Engine.
 
-Exposes Cognee persistent semantic memory as four agent tools: remember,
-recall, pipeline_status, and export_visualization.
+Exposes Cognee persistent semantic memory as three agent tools: remember,
+recall, and memory_status.
 """
 
 from .IGlobal import IGlobal as IGlobal

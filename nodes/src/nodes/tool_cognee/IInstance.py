@@ -7,19 +7,18 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any, Dict
 
 from rocketlib import IInstanceBase, tool_function
 
 from ai.common.utils import normalize_tool_input
 
-from . import artifact_store, cognee_client
+from . import cognee_client
 from .IGlobal import IGlobal, MAX_TOP_K, SEARCH_TYPES
 
 
 class IInstance(IInstanceBase):
-    """Expose Cognee's modern memory workflow as four agent tools."""
+    """Expose Cognee's shared memory workflow as three agent tools."""
 
     IGlobal: IGlobal
 
@@ -53,7 +52,7 @@ class IInstance(IInstanceBase):
         },
         description=(
             'Store plain text in persistent Cognee memory and build its semantic knowledge graph in '
-            'one operation. Use pipeline_status after a background call, then recall to retrieve '
+            'one operation. Use memory_status after a background call, then recall to retrieve '
             'grounded memory. The graph captures semantic relationships; it is not an AST, import '
             'graph, or call graph, and this tool does not ingest repository URLs.'
         ),
@@ -165,14 +164,14 @@ class IInstance(IInstanceBase):
         },
         description=(
             'Check whether background Cognee memory processing is pending, running, completed, or '
-            'failed before calling recall or export_visualization. The resulting graph is semantic, '
+            'failed before calling recall. The resulting graph is semantic, '
             'not an AST, import graph, or call graph.'
         ),
     )
-    def pipeline_status(self, args: Any) -> Dict[str, Any]:
-        args = normalize_tool_input(args, tool_name='pipeline_status')
+    def memory_status(self, args: Any) -> Dict[str, Any]:
+        args = normalize_tool_input(args, tool_name='memory_status')
         cfg = self.IGlobal
-        dataset = _dataset(args, cfg.dataset, tool_name='pipeline_status')
+        dataset = _dataset(args, cfg.dataset, tool_name='memory_status')
         dataset_id = self._resolve_dataset_id(dataset)
         status = cognee_client.get_dataset_status(
             cfg.base_url,
@@ -182,56 +181,8 @@ class IInstance(IInstanceBase):
         )
         return {'dataset': dataset, 'dataset_id': dataset_id, 'status': status}
 
-    @tool_function(
-        input_schema={
-            'type': 'object',
-            'properties': {
-                'dataset': {
-                    'type': 'string',
-                    'description': 'Dataset whose semantic graph should be exported.',
-                },
-            },
-        },
-        output_schema={
-            'type': 'object',
-            'properties': {
-                'dataset': {'type': 'string'},
-                'dataset_id': {'type': 'string'},
-                'path': {'type': 'string'},
-                'sha256': {'type': 'string'},
-                'bytes': {'type': 'integer'},
-                'media_type': {'type': 'string'},
-            },
-        },
-        description=(
-            'Export a completed Cognee semantic knowledge graph to a private local HTML artifact. '
-            'Returns only its absolute path, SHA-256 hash, byte count, and media type, never the HTML '
-            'payload. This visualizes semantic relationships, not an AST, import graph, or call graph.'
-        ),
-    )
-    def export_visualization(self, args: Any) -> Dict[str, Any]:
-        args = normalize_tool_input(args, tool_name='export_visualization')
-        cfg = self.IGlobal
-        dataset = _dataset(args, cfg.dataset, tool_name='export_visualization')
-        dataset_id = self._resolve_dataset_id(dataset)
-        html, media_type = cognee_client.get_visualization_html(
-            cfg.base_url,
-            cfg.api_key,
-            dataset_id=dataset_id,
-            timeout=cfg.request_timeout,
-        )
-        path = artifact_store.write_html_artifact(cfg.artifact_dir, dataset=dataset, html=html)
-        return {
-            'dataset': dataset,
-            'dataset_id': dataset_id,
-            'path': str(path),
-            'sha256': hashlib.sha256(html).hexdigest(),
-            'bytes': len(html),
-            'media_type': media_type,
-        }
-
     def _resolve_dataset_id(self, dataset: str) -> str:
-        """Resolve an exact dataset name to the UUID required by status/visualization."""
+        """Resolve an exact dataset name to the UUID required by memory status."""
         cfg = self.IGlobal
         datasets = cognee_client.list_datasets(
             cfg.base_url,

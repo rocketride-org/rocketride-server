@@ -9,28 +9,21 @@ Pure-Python: no server, no engine, no real HTTP. The node module is imported
 under composable stubs for ``rocketlib`` and ``ai.common.*`` so the relative
 imports resolve without the engine runtime. Tool methods are tested by patching
 the ``cognee_client`` helper functions; the client's own HTTP layer is exercised
-only for the pure response/error shaping helpers and key redaction (with
-``requests`` patched to raise).
+for the supported REST contracts and key redaction (with ``requests`` patched to
+raise).
 
-Covers:
-* ``cognee_client`` pure helpers — ``_headers``, ``_shape_run``,
-  ``_shape_results``, ``_find_dataset_id``, ``_as_runtime_error`` redaction.
-* ``cognee_client.reset`` network-level behavior — the GET/DELETE dataset
-  lifecycle via a stubbed ``requests.request``, including the 404-as-not_found
-  delete-race handling and key redaction on transport/HTTP failures.
-* The exact modern public surface — ``remember``, ``recall``,
-  ``pipeline_status``, and ``export_visualization`` — plus lifecycle/config
-  validation and delegation without live Cognee calls.
+Covers the supported REST contracts — ``remember``, ``recall``, and dataset
+status — and the exact public tool surface — ``remember``, ``recall``, and
+``memory_status`` — plus lifecycle/config validation and delegation without
+live Cognee calls.
 """
 
 from __future__ import annotations
 
 import ast
 import importlib
-import hashlib
 import inspect
 import json
-import re
 import textwrap
 import sys
 import types
@@ -174,7 +167,6 @@ def _make_global(**overrides):
     glb.base_url = 'http://localhost:8000'
     glb.api_key = 'ck_test'
     glb.dataset = 'main'
-    glb.artifact_dir = '/tmp/rocketride/cognee'
     glb.search_type = 'GRAPH_COMPLETION_DECOMPOSITION'
     glb.top_k = 15
     glb.request_timeout = 120
@@ -199,61 +191,6 @@ def test_headers_include_key_only_when_set():
     """X-Api-Key is sent only when a key is configured; accept is always present."""
     assert client._headers('ck_x') == {'accept': 'application/json', 'X-Api-Key': 'ck_x'}
     assert client._headers('') == {'accept': 'application/json'}
-
-
-def test_shape_run_variants():
-    """Run shaping: direct run object, cognify's dataset-keyed map, and empty."""
-    direct = client._shape_run({'pipeline_run_id': 'r1', 'status': 'DONE'}, 'main')
-    assert direct == {'dataset': 'main', 'status': 'DONE', 'pipeline_run_id': 'r1'}
-    # cognify returns {dataset: PipelineRunInfo} — first entry is unwrapped.
-    keyed = client._shape_run({'main': {'pipeline_run_id': 'r2', 'status': 'RUNNING'}}, 'main')
-    assert keyed['pipeline_run_id'] == 'r2' and keyed['status'] == 'RUNNING'
-    # run_id alias and empty body default to a safe status.
-    assert client._shape_run({'run_id': 'r3'}, 'main')['pipeline_run_id'] == 'r3'
-    assert client._shape_run({}, 'main') == {'dataset': 'main', 'status': 'ok', 'pipeline_run_id': ''}
-
-
-def test_shape_results_variants():
-    """Results shaping: dict rows pass through, string rows wrap, wrappers/None tolerated."""
-    rows = client._shape_results([{'id': 'c1', 'text': 'chunk'}, 'a plain answer'])
-    assert rows[0] == {'id': 'c1', 'text': 'chunk'}
-    assert rows[1] == {'text': 'a plain answer'}
-    assert client._shape_results({'results': [{'id': 'c2'}]})[0]['id'] == 'c2'
-    assert client._shape_results(None) == []
-    assert client._shape_results({'results': []}) == []
-
-
-def test_find_dataset_id_variants():
-    """Dataset id resolved by exact name; wrapper and misses tolerated."""
-    rows = [{'id': 'u1', 'name': 'other'}, {'id': 'u2', 'name': 'main'}]
-    assert client._find_dataset_id(rows, 'main') == 'u2'
-    assert client._find_dataset_id({'datasets': rows}, 'other') == 'u1'
-    assert client._find_dataset_id(rows, 'missing') == ''
-    assert client._find_dataset_id(None, 'main') == ''
-
-
-def test_runtime_error_redacts_and_formats():
-    """The error helper never carries the key and includes the HTTP status when present."""
-    err = client._as_runtime_error(requests.exceptions.Timeout(), 'search')
-    assert isinstance(err, RuntimeError)
-    assert 'search request failed' in str(err) and 'Timeout' in str(err)
-
-
-def test_add_error_never_leaks_key(monkeypatch):
-    """A failing add raises RuntimeError whose message never contains the API key."""
-
-    def boom(*a, **k):
-        raise requests.exceptions.ConnectionError('connect failed')
-
-    monkeypatch.setattr(client.requests, 'post', boom)
-    with pytest.raises(RuntimeError) as ei:
-        client.add('http://localhost:8000', 'ck_supersecret', text='hi', dataset='main', timeout=5)
-    assert 'ck_supersecret' not in str(ei.value)
-
-
-# ---------------------------------------------------------------------------
-# cognee_client.reset — retry-wrapped GET/DELETE against a stubbed requests.request
-# ---------------------------------------------------------------------------
 
 
 class _FakeResponse:
@@ -286,117 +223,6 @@ class _FakeResponse:
             err = requests.exceptions.HTTPError(f'{self.status_code} error')
             err.response = self
             raise err
-
-
-def _stub_request(monkeypatch, *, get=None, get_exc=None, delete=None, delete_exc=None):
-    """Stub ``requests.request`` (what ``_request_with_retry`` calls) by HTTP method.
-
-    Returns the list of recorded calls so tests can assert whether DELETE happened.
-    """
-    calls = []
-
-    def fake(method, url, *, headers, timeout):
-        calls.append({'method': method, 'url': url})
-        if method == 'GET':
-            if get_exc is not None:
-                raise get_exc
-            resp = get
-        elif method == 'DELETE':
-            if delete_exc is not None:
-                raise delete_exc
-            resp = delete
-        else:
-            raise AssertionError(f'unexpected method {method}')
-        resp.raise_for_status()
-        return resp
-
-    monkeypatch.setattr(client.requests, 'request', fake, raising=False)
-    return calls
-
-
-def test_reset_client_dataset_missing_skips_delete(monkeypatch):
-    """Dataset absent from the list -> not_found, deleted False, DELETE never called."""
-    calls = _stub_request(monkeypatch, get=_FakeResponse(200, {'datasets': [{'id': 'u1', 'name': 'other'}]}))
-    out = client.reset('http://localhost:8000', 'ck_test', dataset='main', timeout=5)
-    assert out == {'dataset': 'main', 'status': 'not_found', 'deleted': False}
-    assert [c['method'] for c in calls] == ['GET']
-
-
-def test_reset_client_happy_path(monkeypatch):
-    """GET lists the dataset, DELETE 2xx -> status='reset', deleted=True."""
-    calls = _stub_request(
-        monkeypatch,
-        get=_FakeResponse(200, {'datasets': [{'id': 'u2', 'name': 'main'}]}),
-        delete=_FakeResponse(200),
-    )
-    out = client.reset('http://localhost:8000', 'ck_test', dataset='main', timeout=5)
-    assert out == {'dataset': 'main', 'status': 'reset', 'deleted': True}
-    assert [c['method'] for c in calls] == ['GET', 'DELETE']
-    assert calls[1]['url'] == 'http://localhost:8000/api/v1/datasets/u2'
-
-
-def test_reset_client_delete_404_is_not_found(monkeypatch):
-    """DELETE 404 (already gone) is reported as not_found, never raised — the regression guard."""
-    _stub_request(
-        monkeypatch,
-        get=_FakeResponse(200, {'datasets': [{'id': 'u2', 'name': 'main'}]}),
-        delete=_FakeResponse(404),
-    )
-    out = client.reset('http://localhost:8000', 'ck_test', dataset='main', timeout=5)
-    assert out == {'dataset': 'main', 'status': 'not_found', 'deleted': False}
-
-
-def _stub_request_with_retry(monkeypatch, *, get=None, get_exc=None, delete_exc=None):
-    """Stub ``cognee_client._request_with_retry`` directly, bypassing tenacity's retry/backoff.
-
-    For the two "final failure after retries exhausted" cases below: whether ``tenacity`` is
-    the in-file passthrough stub (isolated unit runs) or the real dependency (``./builder
-    nodes:test``, which really retries 429/5xx/timeout with real backoff) is an environment
-    detail ``reset()`` shouldn't care about. Raising directly here models the exception tenacity
-    re-raises once attempts are exhausted, without depending on real sleep timing or attempt
-    counts.
-    """
-    calls = []
-
-    def fake(method, url, *, headers, timeout):
-        calls.append(method)
-        if method == 'GET':
-            if get_exc is not None:
-                raise get_exc
-            return get
-        if method == 'DELETE':
-            if delete_exc is not None:
-                raise delete_exc
-            raise AssertionError('unexpected DELETE call')
-        raise AssertionError(f'unexpected method {method}')
-
-    monkeypatch.setattr(client, '_request_with_retry', fake)
-    return calls
-
-
-def test_reset_client_delete_500_raises_without_key_leak(monkeypatch):
-    """A non-404 DELETE error (e.g. exhausted 500 retries) raises RuntimeError, no key leak."""
-    err = requests.exceptions.HTTPError('500 error')
-    err.response = _FakeResponse(500)
-    calls = _stub_request_with_retry(
-        monkeypatch,
-        get=_FakeResponse(200, {'datasets': [{'id': 'u2', 'name': 'main'}]}),
-        delete_exc=err,
-    )
-    with pytest.raises(RuntimeError) as ei:
-        client.reset('http://localhost:8000', 'ck_supersecret', dataset='main', timeout=5)
-    assert 'ck_supersecret' not in str(ei.value)
-    assert 'reset request failed' in str(ei.value)
-    assert calls == ['GET', 'DELETE']
-
-
-def test_reset_client_get_transport_error_raises_without_key_leak(monkeypatch):
-    """A transport failure exhausting retries on the GET raises RuntimeError; no key leak, no DELETE."""
-    calls = _stub_request_with_retry(monkeypatch, get_exc=requests.exceptions.ConnectionError('connect failed'))
-    with pytest.raises(RuntimeError) as ei:
-        client.reset('http://localhost:8000', 'ck_supersecret', dataset='main', timeout=5)
-    assert 'ck_supersecret' not in str(ei.value)
-    assert calls == ['GET']
 
 
 def _http_error(status):
@@ -671,7 +497,7 @@ def test_list_datasets_gets_api_v1_datasets_collection(monkeypatch):
 
 
 def test_status_sends_dataset_uuid_and_cognify_pipeline(monkeypatch):
-    """Pipeline status addresses the dataset by UUID and explicitly selects cognify."""
+    """Memory status addresses the dataset by UUID and selects its Cognee pipeline."""
     calls = []
 
     def fake_request(method, url, *, headers, timeout, **kwargs):
@@ -719,40 +545,6 @@ def test_status_normalizes_initiated_started_completed_errored(monkeypatch, remo
     )
 
 
-def test_visualization_requires_nonempty_html(monkeypatch):
-    """Visualization returns nonempty HTML bytes plus media type and rejects an empty body."""
-    responses = [
-        _FakeResponse(content=b'<html>graph</html>', headers={'Content-Type': 'text/html; charset=utf-8'}),
-        _FakeResponse(content=b'', headers={'Content-Type': 'text/html'}),
-    ]
-    calls = []
-
-    def fake_request(method, url, *, headers, timeout, **kwargs):
-        calls.append({'method': method, 'url': url, 'headers': headers, 'timeout': timeout, **kwargs})
-        return responses.pop(0)
-
-    monkeypatch.setattr(client.requests, 'request', fake_request, raising=False)
-
-    html, media_type = client.get_visualization_html(
-        'https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=17
-    )
-    assert html == b'<html>graph</html>'
-    assert media_type == 'text/html; charset=utf-8'
-
-    with pytest.raises(client.CogneeRequestError, match='empty HTML'):
-        client.get_visualization_html(
-            'https://cognee.example', 'sentinel-secret', dataset_id='dataset-uuid', timeout=17
-        )
-
-    assert calls[0] == {
-        'method': 'GET',
-        'url': 'https://cognee.example/api/v1/visualize',
-        'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
-        'timeout': 17,
-        'params': {'dataset_id': 'dataset-uuid'},
-    }
-
-
 def test_http_errors_are_redacted_and_402_is_distinct(monkeypatch):
     """Client errors never echo vendor details or keys, and 402 explains exhausted budget."""
     responses = [_FakeResponse(status_code=400), _FakeResponse(status_code=402)]
@@ -773,37 +565,6 @@ def test_http_errors_are_redacted_and_402_is_distinct(monkeypatch):
     assert 'token budget exhausted' not in str(server_error.value).lower()
     assert 'sentinel-secret' not in str(budget_error.value)
     assert 'token budget exhausted' in str(budget_error.value).lower()
-
-
-def test_artifact_writer_contains_sanitizes_and_atomically_replaces(tmp_path, monkeypatch):
-    """Artifact paths stay contained, names are safe, and replacement uses a sibling temp file."""
-    artifact_store = importlib.import_module('tool_cognee.artifact_store')
-    expected = (tmp_path / 'Team-Alpha-graph.html').resolve()
-    expected.write_bytes(b'old graph')
-    real_replace = artifact_store.os.replace
-    replacements = []
-
-    def recording_replace(source, destination):
-        replacements.append((Path(source).resolve(), Path(destination).resolve()))
-        real_replace(source, destination)
-
-    monkeypatch.setattr(artifact_store.os, 'replace', recording_replace)
-
-    written = artifact_store.write_html_artifact(
-        tmp_path,
-        dataset='../../Team / Alpha?*',
-        html=b'<html>new graph</html>',
-    )
-
-    assert written == expected
-    assert written.parent == tmp_path.resolve()
-    assert written.read_bytes() == b'<html>new graph</html>'
-    assert (written.stat().st_mode & 0o777) == 0o600
-    assert len(replacements) == 1
-    source, destination = replacements[0]
-    assert source.parent == destination.parent == tmp_path.resolve()
-    assert source != destination == written
-    assert not source.exists()
 
 
 @pytest.mark.parametrize(
@@ -833,7 +594,7 @@ def test_is_retryable_classification(exc, expected):
 # ---------------------------------------------------------------------------
 
 
-_PUBLIC_TOOLS = {'remember', 'recall', 'pipeline_status', 'export_visualization'}
+_PUBLIC_TOOLS = {'remember', 'recall', 'memory_status'}
 
 
 def _decorated_tools():
@@ -845,25 +606,26 @@ def _decorated_tools():
     }
 
 
-def test_inventory_is_exactly_four_modern_memory_tools():
-    """The LLM sees only the four approved modern Cognee operations."""
+def test_tool_catalog_exposes_only_shared_memory_essentials():
+    """The LLM sees exactly the three shared-memory operations."""
     assert set(_decorated_tools()) == _PUBLIC_TOOLS
+    for removed in (
+        'reset',
+        'delete_dataset',
+        'export_visualization',
+        'add',
+        'cognify',
+        'search',
+        'pipeline_status',
+    ):
+        assert removed not in _decorated_tools()
 
 
 def test_legacy_public_tools_and_descriptions_are_absent():
     """No legacy, destructive, or generic repository-ingestion surface remains public."""
-    for legacy in ('add', 'cognify', 'search', 'reset'):
+    for legacy in ('add', 'cognify', 'search', 'reset', 'delete_dataset', 'export_visualization', 'pipeline_status'):
         assert not hasattr(IInstance, legacy)
 
-    public_copy = '\n'.join(
-        [
-            (_NODE_DIR / 'IInstance.py').read_text(),
-            (_NODE_DIR / 'services.json').read_text(),
-            (_NODE_DIR / 'README.md').read_text(),
-        ]
-    ).lower()
-    for legacy_call in ('cognee.add', 'cognee.cognify', 'cognee.search', 'cognee.reset'):
-        assert re.search(rf'{re.escape(legacy_call)}\b(?!_)', public_copy) is None
     remember_properties = IInstance.remember.__tool_meta__['input_schema']['properties']
     assert set(remember_properties) == {'text', 'dataset', 'run_in_background'}
     assert 'url' not in remember_properties['text']['description'].lower()
@@ -942,8 +704,7 @@ def test_recall_defaults_to_decomposition_with_references(modern_calls):
     [
         ('remember', {'text': 'memory', 'dataset': '  '}),
         ('recall', {'query': 'question', 'dataset': '  '}),
-        ('pipeline_status', {'dataset': '  '}),
-        ('export_visualization', {'dataset': '  '}),
+        ('memory_status', {'dataset': '  '}),
     ],
 )
 def test_blank_dataset_is_rejected(tool_name, args):
@@ -971,7 +732,7 @@ def test_recall_rejects_json_boolean_top_k():
         _instance(_make_global()).recall({'query': 'question', 'top_k': True})
 
 
-def test_pipeline_status_resolves_dataset_name_to_uuid(monkeypatch):
+def test_memory_status_resolves_dataset_name_to_uuid(monkeypatch):
     """Status lists datasets, resolves the exact name, then addresses the UUID."""
     calls = []
 
@@ -986,7 +747,7 @@ def test_pipeline_status_resolves_dataset_name_to_uuid(monkeypatch):
     monkeypatch.setattr(client, 'list_datasets', list_datasets)
     monkeypatch.setattr(client, 'get_dataset_status', get_status)
 
-    result = _instance(_make_global()).pipeline_status({})
+    result = _instance(_make_global()).memory_status({})
     assert result == {'dataset': 'main', 'dataset_id': 'dataset-uuid', 'status': 'running'}
     assert calls == [
         ('list', 'http://localhost:8000', 'ck_test', 120),
@@ -994,39 +755,11 @@ def test_pipeline_status_resolves_dataset_name_to_uuid(monkeypatch):
     ]
 
 
-def test_export_visualization_returns_path_hash_and_bytes_never_html(tmp_path, monkeypatch):
-    """Visualization HTML is stored privately; the tool returns metadata, never raw HTML."""
-    html = b'<html><body>semantic graph</body></html>'
-    monkeypatch.setattr(
-        client,
-        'list_datasets',
-        lambda *_args, **_kwargs: [{'id': 'dataset-uuid', 'name': 'main'}],
-    )
-    monkeypatch.setattr(
-        client,
-        'get_visualization_html',
-        lambda *_args, **_kwargs: (html, 'text/html; charset=utf-8'),
-    )
-
-    result = _instance(_make_global(artifact_dir=str(tmp_path))).export_visualization({})
-    expected_path = (tmp_path / 'main-graph.html').resolve()
-    assert result == {
-        'dataset': 'main',
-        'dataset_id': 'dataset-uuid',
-        'path': str(expected_path),
-        'sha256': hashlib.sha256(html).hexdigest(),
-        'bytes': len(html),
-        'media_type': 'text/html; charset=utf-8',
-    }
-    assert 'html' not in result
-    assert expected_path.read_bytes() == html
-
-
-def test_pipeline_status_rejects_unknown_dataset(monkeypatch):
+def test_memory_status_rejects_unknown_dataset(monkeypatch):
     """A missing dataset is a clear input error and never triggers a status request."""
     monkeypatch.setattr(client, 'list_datasets', lambda *_args, **_kwargs: [])
     with pytest.raises(ValueError, match='not found'):
-        _instance(_make_global()).pipeline_status({'dataset': 'missing'})
+        _instance(_make_global()).memory_status({'dataset': 'missing'})
 
 
 def test_tool_propagates_client_runtimeerror(monkeypatch):
@@ -1063,14 +796,12 @@ def test_global_config_mode_skips_setup(monkeypatch):
     _configured_global(open_mode=IGlobalMod.OPEN_MODE.CONFIG).beginGlobal()
 
 
-def test_global_loads_exact_runtime_configuration(monkeypatch, tmp_path):
-    """Runtime setup loads all seven values, including an absolute artifact directory."""
-    artifact_dir = tmp_path / 'graphs'
+def test_global_loads_exact_runtime_configuration(monkeypatch):
+    """Runtime setup loads the six shared-memory configuration values."""
     config = {
         'base_url': 'https://cognee.example/',
         'api_key': '',
         'dataset': 'demo',
-        'artifact_dir': str(artifact_dir),
         'search_type': 'GRAPH_COMPLETION_DECOMPOSITION',
         'top_k': 7,
         'request_timeout': 45,
@@ -1084,21 +815,9 @@ def test_global_loads_exact_runtime_configuration(monkeypatch, tmp_path):
     assert glb.base_url == 'https://cognee.example'
     assert glb.api_key == 'env-key'
     assert glb.dataset == 'demo'
-    assert glb.artifact_dir == str(artifact_dir.resolve())
     assert glb.search_type == 'GRAPH_COMPLETION_DECOMPOSITION'
     assert glb.top_k == 7
     assert glb.request_timeout == 45
-
-
-def test_global_rejects_relative_artifact_directory(monkeypatch):
-    """Artifact storage must be explicitly absolute to avoid cwd-dependent writes."""
-    monkeypatch.setattr(
-        IGlobalMod.Config,
-        'getNodeConfig',
-        lambda *_args: {'base_url': 'https://cognee.example', 'artifact_dir': 'relative/path'},
-    )
-    with pytest.raises(ValueError, match='artifact_dir'):
-        _configured_global().beginGlobal()
 
 
 def test_global_validate_config_warns_instead_of_raising(monkeypatch):
@@ -1107,12 +826,11 @@ def test_global_validate_config_warns_instead_of_raising(monkeypatch):
     monkeypatch.setattr(
         IGlobalMod.Config,
         'getNodeConfig',
-        lambda *_args: {'base_url': '', 'artifact_dir': 'relative/path'},
+        lambda *_args: {'base_url': ''},
     )
     monkeypatch.setattr(IGlobalMod, 'warning', warnings.append)
     _configured_global().validateConfig()
     assert any('base_url' in message for message in warnings)
-    assert any('artifact_dir' in message for message in warnings)
 
 
 def test_global_end_clears_api_key():
@@ -1131,8 +849,8 @@ def _load_services():
     return json.loads(text)
 
 
-def test_global_services_keep_tool_contract_and_exact_seven_fields():
-    """The schema remains an invoke-only tool with no lanes and seven config values."""
+def test_global_services_keep_tool_contract_and_exact_six_fields():
+    """The schema remains an invoke-only tool with no lanes and six config values."""
     services = _load_services()
     assert services['classType'] == ['tool']
     assert services['capabilities'] == ['invoke']
@@ -1141,7 +859,6 @@ def test_global_services_keep_tool_contract_and_exact_seven_fields():
         'cognee.base_url',
         'cognee.api_key',
         'cognee.dataset',
-        'cognee.artifact_dir',
         'cognee.search_type',
         'cognee.top_k',
         'cognee.request_timeout',

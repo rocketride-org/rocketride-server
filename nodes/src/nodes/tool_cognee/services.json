@@ -10,8 +10,8 @@
 	"icon": "cognee.svg",
 	"documentation": "https://docs.cognee.ai",
 	"description": [
-		"Persistent semantic memory backed by a Cognee server, exposed as four agent tools. ",
-		"Remember plain text, recall grounded results, check background processing, and export a private graph visualization. The knowledge graph captures semantic relationships; it is not an AST, import graph, or call graph."
+		"Persistent semantic memory backed by a Cognee server, exposed as three agent tools. ",
+		"Remember plain text, recall grounded results, and check background processing. The knowledge graph captures semantic relationships; it is not an AST, import graph, or call graph."
 	],
 	"tile": ["Dataset: ${parameters.cognee.dataset}"],
 	"lanes": {},
@@ -23,7 +23,6 @@
 				"base_url": "http://localhost:8000",
 				"api_key": "",
 				"dataset": "main",
-				"artifact_dir": "~/.rocketride/artifacts/cognee",
 				"search_type": "GRAPH_COMPLETION_DECOMPOSITION",
 				"top_k": 15,
 				"request_timeout": 120
@@ -53,12 +52,6 @@
 			"title": "Dataset",
 			"description": "Default Cognee dataset used by all four tools. A tool call can override it.",
 			"default": "main"
-		},
-		"cognee.artifact_dir": {
-			"type": "string",
-			"title": "Artifact directory",
-			"description": "Absolute directory for private visualization HTML files. A leading <code>~</code> expands to the engine user's home directory.",
-			"default": "~/.rocketride/artifacts/cognee"
 		},
 		"cognee.search_type": {
 			"type": "string",
@@ -111,7 +104,6 @@
 				"cognee.base_url",
 				"cognee.api_key",
 				"cognee.dataset",
-				"cognee.artifact_dir",
 				"cognee.search_type",
 				"cognee.top_k",
 				"cognee.request_timeout"
