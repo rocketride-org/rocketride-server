@@ -288,17 +288,26 @@ def test_shared_cognee_example_topology_and_documentation():
         {'classType': 'tool', 'from': 'agent_researcher_1'},
         {'classType': 'tool', 'from': 'agent_writer_1'},
     ]
-    assert cognee['config']['profile'] == 'default'
-    assert cognee['config']['default']['dataset'] == 'shared-research'
-    assert cognee['config']['default']['allow_dataset_override'] is False
-    assert cognee['config']['default']['base_url'] == '${COGNEE_BASE_URL}'
-    assert cognee['config']['default']['api_key'] == '${COGNEE_API_KEY}'
+    assert 'profile' not in cognee['config']
+    assert 'default' not in cognee['config']
+    assert cognee['config'] == {
+        'base_url': '${COGNEE_BASE_URL}',
+        'api_key': '${COGNEE_API_KEY}',
+        'dataset': 'shared-research',
+        'allow_dataset_override': False,
+        'search_type': 'GRAPH_COMPLETION_DECOMPOSITION',
+        'top_k': 15,
+        'request_timeout': 120,
+        'show_advanced': False,
+        'type': 'tool_cognee',
+        'name': 'Shared Cognee memory',
+    }
 
     serialized = example_path.read_text(encoding='utf-8')
     assert 'ROCKETRIDE_ANTHROPIC_KEY' in serialized
     assert 'sk-' not in serialized
     assert 'ck_' not in serialized
-    api_keys = [cognee['config']['default']['api_key']]
+    api_keys = [cognee['config']['api_key']]
     api_keys.extend(
         component['config'][component['config']['profile']]['apikey']
         for component in components

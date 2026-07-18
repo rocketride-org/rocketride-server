@@ -86,17 +86,16 @@
 			"provider": "tool_cognee",
 			"name": "Shared Cognee memory",
 			"config": {
-				"profile": "default",
-				"default": {
-					"base_url": "${COGNEE_BASE_URL}",
-					"api_key": "${COGNEE_API_KEY}",
-					"dataset": "shared-research",
-					"allow_dataset_override": false,
-					"search_type": "GRAPH_COMPLETION_DECOMPOSITION",
-					"top_k": 15,
-					"request_timeout": 120
-				},
-				"parameters": {}
+				"base_url": "${COGNEE_BASE_URL}",
+				"api_key": "${COGNEE_API_KEY}",
+				"dataset": "shared-research",
+				"allow_dataset_override": false,
+				"search_type": "GRAPH_COMPLETION_DECOMPOSITION",
+				"top_k": 15,
+				"request_timeout": 120,
+				"show_advanced": false,
+				"type": "tool_cognee",
+				"name": "Shared Cognee memory"
 			},
 			"control": [
 				{ "classType": "tool", "from": "agent_researcher_1" },
