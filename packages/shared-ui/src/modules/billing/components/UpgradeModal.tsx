@@ -39,7 +39,9 @@ const S = {
 		maxHeight: '60vh',
 		overflowY: 'auto' as const,
 		scrollbarWidth: 'thin' as const,
-		scrollbarColor: 'var(--rr-scrollbar-thumb, rgba(128,128,128,0.3)) transparent',
+		// The REAL token is --rr-bg-scrollbar-thumb (the old --rr-scrollbar-thumb
+		// name never existed, so this always fell back to the hardcoded grey).
+		scrollbarColor: 'var(--rr-bg-scrollbar-thumb, rgba(121, 121, 121, 0.4)) transparent',
 	} as CSSProperties,
 
 	/** Current plan info banner. */

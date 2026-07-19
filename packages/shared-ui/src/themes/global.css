@@ -6,6 +6,7 @@
  *   - Box-model reset
  *   - html/body/#root full-height layout
  *   - Sensible button/input defaults
+ *   - Thin token-themed scrollbars on every scroll surface
  *
  * CSS custom properties (--rr-*) are injected separately by the theme
  * system (applyTheme / fetchAndApplyTheme) at runtime.
@@ -52,4 +53,16 @@ input,
 textarea {
 	font-family: inherit;
 	font-size: inherit;
+}
+
+/* Scrollbars — every scroll surface gets the thin token-themed form: the
+   thumb token (vscode themes map it to the editor's own slider color) over
+   a transparent track, so the surface behind shows through. The universal
+   selector carries BOTH properties: scrollbar-color inherits but
+   scrollbar-width does not, and unstyled containers were rendering the
+   browser's light native chrome inside dark themes (the dashboard grid's
+   horizontal bar, 2026-07-18). */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--rr-bg-scrollbar-thumb, rgba(121, 121, 121, 0.4)) transparent;
 }
