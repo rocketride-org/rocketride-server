@@ -437,10 +437,12 @@ export const OverviewGrid: React.FC<IOverviewGridProps> = ({ data, onRefresh }) 
 	return (
 		<>
 			{/* ── Unified Connections & Tasks grid ─────────────────────
-			    The grid IS the card: its header carries the title and
-			    the Refresh action. noSearch + paginate={false}: a small
-			    live table renders whole with no grid chrome beyond the
-			    gear. Clicking a client row opens the record panel. */}
+			    The grid IS the card: its header carries the title, the
+			    magnifier search toggle (collapsed by default — search is
+			    one glyph now, so even this small live table keeps it),
+			    and the Refresh action. paginate={false}: the table
+			    renders whole. Clicking a client row opens the record
+			    panel. */}
 			<Card noBodyPadding>
 				<CardDataGrid<ConnTaskRow>
 					title="Connections & Tasks"
@@ -453,7 +455,6 @@ export const OverviewGrid: React.FC<IOverviewGridProps> = ({ data, onRefresh }) 
 					}
 					columns={columns}
 					data={rows}
-					noSearch
 					paginate={false}
 					tableId="server-overview"
 					emptyTitle="No connections or tasks"

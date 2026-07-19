@@ -34,10 +34,14 @@
  *  - the footer contract: footer renders only when the set spans >1 page
  *  - remote paging through `fetchPage` (DAP fetchers, not URLs)
  *  - a built-in title bar (Card-header look), ON BY DEFAULT on every grid,
- *    with a search box (REMOTE grids send the term server-side so it spans
- *    ALL pages; LOCAL grids narrow their fully-loaded rows client-side),
- *    a matching-row count, a GEAR settings menu — DISPLAY toggles (grid
- *    lines / alternating rows, persisted per user), the
+ *    with a COLLAPSIBLE search box behind a magnifier toggle (collapsed by
+ *    default — the bar reads {title} {magnifier} {count}; expanding
+ *    autofocuses the field, collapsing clears the term so a hidden field
+ *    never hides an active search; the open state persists per user with
+ *    the display settings; REMOTE grids send the term server-side so it
+ *    spans ALL pages; LOCAL grids narrow their fully-loaded rows
+ *    client-side), a matching-row count, a GEAR settings menu — DISPLAY
+ *    toggles (grid lines / alternating rows, persisted per user), the
  *    COLUMNS show/hide checklist, and the EXPORT rows (CSV / JSON covering
  *    every row matching the current filters and search) — and a "Clear"
  *    button that appears only while a sort / search / filter deviates the
@@ -71,7 +75,7 @@ import type { Options } from 'tabulator-tables';
 import { Tabulator } from './modules';
 import { createPortal } from 'react-dom';
 import { applyDefaultLayout, buildAutoColumns, closeHeaderPopup, defaultGroupFields, defaultSorters, exportRowsAsCsv, exportRowsAsJson, matchesSearch, normalizeColumns, rowMatchesFilters, toggleColumnWithFit } from './defaults';
-import { BxCog } from '../BoxIcon';
+import { BxCog, BxSearch } from '../BoxIcon';
 import type {
 	GridColumnDefinition,
 	HeaderFilterMode,
@@ -156,11 +160,14 @@ export interface IDataGridProps<Row extends Record<string, unknown>> {
 	 */
 	title?: string;
 	/**
-	 * Hide the title bar's search input (and its matching-row count), which
-	 * every grid shows by default. REMOTE grids search server-side: the term
-	 * rides every page request as {@link IDataGridPageRequest.search}, so
-	 * matches span ALL pages and the pager pages within the results. LOCAL
-	 * grids (all rows already loaded) narrow client-side across every value.
+	 * Hide the title bar's search entirely — magnifier toggle, input, and
+	 * matching-row count. EXCEPTIONAL (2026-07-18): the field is collapsed
+	 * behind the magnifier by default, so search costs one glyph and should
+	 * stay enabled everywhere — "the table is small" no longer justifies
+	 * this prop. REMOTE grids search server-side: the term rides every page
+	 * request as {@link IDataGridPageRequest.search}, so matches span ALL
+	 * pages and the pager pages within the results. LOCAL grids (all rows
+	 * already loaded) narrow client-side across every value.
 	 * With `noExport` also set and no `title`, the whole bar disappears.
 	 */
 	noSearch?: boolean;
@@ -314,16 +321,23 @@ const EXPORT_PAGE_SIZE = 100;
 /** Export safety cap: larger sets export partially with a console warning. */
 const EXPORT_ROW_CAP = 10000;
 
-/** Per-grid display settings the gear menu controls (persisted per user). */
+/** Per-grid display settings (persisted per user under the 'display' blob). */
 interface IGridDisplaySettings {
 	/** Row separator hairlines. */
 	lines: boolean;
 	/** Alternating even-row wash. */
 	zebra: boolean;
+	/**
+	 * Title-bar search field expanded (the magnifier toggle). Collapsed is
+	 * the default — the bar reads {title} {magnifier} {count} on one line —
+	 * and collapsing always clears the term, so the hidden field never hides
+	 * an active search.
+	 */
+	searchOpen: boolean;
 }
 
-/** The declared default view: hairlines on, no striping. */
-const DEFAULT_DISPLAY_SETTINGS: IGridDisplaySettings = { lines: true, zebra: false };
+/** The declared default view: hairlines on, no striping, search collapsed. */
+const DEFAULT_DISPLAY_SETTINGS: IGridDisplaySettings = { lines: true, zebra: false, searchOpen: false };
 
 /** Gear panel width — the header popup panel's width (.rr-grid-hp / .rr-grid-gear). */
 const GEAR_PANEL_WIDTH = 248;
@@ -375,6 +389,16 @@ const styles = {
 		flex: '1 1 auto',
 	} as CSSProperties,
 
+	// The stacked header's title line: heading + the magnifier toggle, plus
+	// the row count while the search field is collapsed (the one-row
+	// {title} {magnifier} {count} form).
+	barTitleRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 6,
+		minWidth: 0,
+	} as CSSProperties,
+
 	// The left side's tools line (search + count) — resets the header's
 	// title weight so only the title line carries it.
 	barTools: {
@@ -398,14 +422,15 @@ const styles = {
 	} as CSSProperties,
 
 	// Grid-local search input — 30px inputField-look control; fixed width so
-	// the bar never reflows while typing. Gains a left gap when a title
-	// precedes it (the bar itself carries no gap, keeping it an exact copy of
-	// the Card header values).
-	search: (afterTitle: boolean): CSSProperties => ({
+	// the bar never reflows while typing. Gains a left gap when the
+	// magnifier precedes it on the same row (the single tool row); the
+	// stacked form's tools line keeps it flush left (the bar itself carries
+	// no gap, keeping it an exact copy of the Card header values).
+	search: (afterToggle: boolean): CSSProperties => ({
 		...commonStyles.inputField,
 		height: 30,
 		width: 200,
-		...(afterTitle ? { marginLeft: 12 } : {}),
+		...(afterToggle ? { marginLeft: 12 } : {}),
 	}),
 
 	// Matching-row count after the search input — quiet metadata, not a
@@ -1096,6 +1121,41 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			return next;
 		});
 	};
+
+	// ── Search visibility (title-bar magnifier toggle) ─────────────────────
+	// The field is COLLAPSED by default and the magnifier expands it in
+	// place; the open state is a display setting (rides the persisted
+	// 'display' blob with lines/zebra, so Reset layout restores the
+	// collapsed default while Clear leaves it alone).
+	const [searchHover, setSearchHover] = useState(false);
+	// The input node, for the expand autofocus.
+	const searchInputRef = useRef<HTMLInputElement | null>(null);
+	// True only across the render following an EXPLICIT expand click — a
+	// grid whose persisted state is open must not steal focus on mount.
+	const searchFocusPendingRef = useRef(false);
+
+	/**
+	 * Toggle the search field open/closed from the magnifier. Collapsing
+	 * CLEARS the term (through the normal debounced commit, so the re-query
+	 * or local-predicate refresh rides the standard path): the field-hidden
+	 * state never hides an active search — the same visibility principle as
+	 * the header-filter brand dots.
+	 */
+	const toggleSearchOpen = (): void => {
+		const opening = !displaySettings.searchOpen;
+		if (opening) searchFocusPendingRef.current = true;
+		else setSearchText('');
+		updateDisplaySettings({ searchOpen: opening });
+	};
+
+	// Autofocus the input after an explicit expand (never on mount): the bar
+	// does not animate, so a plain focus on the post-toggle render is safe.
+	useEffect(() => {
+		if (displaySettings.searchOpen && searchFocusPendingRef.current) {
+			searchFocusPendingRef.current = false;
+			searchInputRef.current?.focus();
+		}
+	}, [displaySettings.searchOpen]);
 
 	// ── Header-popup filter bridge ──────────────────────────────────────────
 	// The popup panel is built outside React (defaults.buildHeaderPopup); it
@@ -1828,15 +1888,19 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	// ── Render ──────────────────────────────────────────────────────────────
 	// Bar activation (see the prop JSDoc): the bar with search + export is ON
 	// BY DEFAULT on every grid; `noSearch` / `noExport` opt out individually.
-	// A `title` and/or `actions` switches it to the card-header block (title
-	// over tools left, centered actions + grid buttons right, one shared
-	// fill + border) so a card-hosted grid never stacks a Card header on a
-	// grid bar; with neither, the single tool row renders alone, and the bar
-	// disappears entirely only when search and export are both suppressed
-	// too.
+	// A `title` and/or `actions` switches it to the card-header block (the
+	// title line — heading + magnifier, plus the count while the field is
+	// collapsed — over the expanded tools line on the left, centered actions
+	// + grid buttons right, one shared fill + border) so a card-hosted grid
+	// never stacks a Card header on a grid bar; with neither, the single
+	// tool row renders alone, and the bar disappears entirely only when
+	// search and export are both suppressed too.
 	const hasTitle = title !== undefined;
 	const hasIdentityRow = hasTitle || actions !== undefined;
 	const showSearch = noSearch !== true;
+	// The input itself renders only while the magnifier has it expanded;
+	// collapsed, the bar shows just {magnifier} {count}.
+	const searchVisible = showSearch && displaySettings.searchOpen;
 	const showExport = noExport !== true;
 	const showBar = hasIdentityRow || showSearch || showExport;
 	const hasStrip = !!filters && filters.length > 0;
@@ -1894,18 +1958,46 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	if (!showBar && !hasStrip) return gridEl;
 
 	// The TOOL pieces are shared by both bar forms (single tool row vs the
-	// two-row header stack), so they are built once. The search never sits
-	// after an inline title anymore — the identity row owns titles — so it
-	// carries no leading gap in either form.
-	const searchInput = showSearch && (
+	// two-row header stack), so they are built once. The input renders only
+	// while expanded; in the single tool row it follows the magnifier on the
+	// same line and takes the leading gap, while the stacked form's tools
+	// line keeps it flush left (the magnifier sits up on the title line).
+	const searchInput = searchVisible && (
 		<input
-			style={styles.search(false)}
+			ref={searchInputRef}
+			style={styles.search(!hasIdentityRow)}
 			placeholder="Search..."
 			value={searchText}
 			onChange={(e) => setSearchText(e.target.value)}
+			onKeyDown={(e) => {
+				if (e.key !== 'Escape') return;
+				// Escape clears a live term; a second press (field already
+				// empty) collapses. Consumed here so a host overlay's
+				// document-level Escape handling never also fires.
+				e.stopPropagation();
+				if (searchText !== '') setSearchText('');
+				else toggleSearchOpen();
+			}}
 		/>
 	);
-	// Matching-row count right after the search input.
+	// The magnifier — the search field's visibility toggle. A BARE glyph
+	// like the gear (design owner): quiet secondary tone at rest, primary
+	// while hovered or with the field expanded.
+	const searchToggle = showSearch && (
+		<button
+			type="button"
+			style={styles.gearButton(searchHover || displaySettings.searchOpen)}
+			onMouseEnter={() => setSearchHover(true)}
+			onMouseLeave={() => setSearchHover(false)}
+			onClick={toggleSearchOpen}
+			aria-label="Toggle search"
+			aria-expanded={displaySettings.searchOpen}
+		>
+			<BxSearch size={15} />
+		</button>
+	);
+	// Matching-row count: after the input while expanded, after the
+	// magnifier on the title line while collapsed.
 	const countEl = showSearch && countText !== null && <span style={styles.count}>{countText}</span>;
 	// One gear-panel toggle row (display settings): popup-vocabulary check
 	// row, React-rendered — the class names are the same global CSS the
@@ -2053,10 +2145,17 @@ function DataGridInner<Row extends Record<string, unknown>>(
 				<div style={styles.barStack}>
 					{gearControl && <div style={styles.gearCorner}>{gearControl}</div>}
 					<div style={styles.barLeft}>
-						<span>{title}</span>
-						{/* Tools line renders only when the search is on; a
-						    title-only grid degrades to a plain card header. */}
-						{showSearch && (
+						{/* Title line: heading + magnifier; while the field is
+						    collapsed the count rides here too — the one-row
+						    {title} {magnifier} {count} form. A noSearch grid
+						    degrades to a plain card-header title line. */}
+						<div style={styles.barTitleRow}>
+							<span>{title}</span>
+							{searchToggle}
+							{!searchVisible && countEl}
+						</div>
+						{/* Tools line only while the field is expanded. */}
+						{searchVisible && (
 							<div style={styles.barTools}>
 								{searchInput}
 								{countEl}
@@ -2072,9 +2171,11 @@ function DataGridInner<Row extends Record<string, unknown>>(
 				</div>
 			)}
 			{/* Single tool row (no title / actions): the original bar form —
-			    Clear and the gear sit at the row's right end. */}
+			    magnifier + (expanded) input + count on the left, Clear and
+			    the gear at the row's right end. */}
 			{showBar && !hasIdentityRow && (
 				<div style={styles.titleBar}>
+					{searchToggle}
 					{searchInput}
 					{countEl}
 					{(clearButton || gearControl) && (
