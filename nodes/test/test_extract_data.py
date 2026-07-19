@@ -14,7 +14,26 @@ import importlib
 import os
 import sys
 import types
+from pathlib import Path
 from unittest.mock import MagicMock
+
+
+_TEST_ROOT = Path(__file__).resolve().parent
+if str(_TEST_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TEST_ROOT))
+
+from framework.discovery import _parse_service_json
+
+
+_SERVICES_PATH = _TEST_ROOT.parent / 'src' / 'nodes' / 'extract_data' / 'services.json'
+
+
+def test_services_documents_lane_maps_to_answers_and_documents():
+    """The services contract exposes the documents input lane."""
+    services = _parse_service_json(str(_SERVICES_PATH))
+
+    assert services is not None
+    assert services['lanes']['documents'] == ['answers', 'documents']
 
 
 class _StubBase:
