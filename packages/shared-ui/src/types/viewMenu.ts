@@ -68,6 +68,16 @@ export interface ViewMenuEntry {
 	 * SidebarMenu; ignored by PageViewControl.
 	 */
 	disabled?: boolean;
+	/**
+	 * Child entries, making this entry an expandable SECTION in SidebarMenu
+	 * (one level deep — children never declare children of their own). A
+	 * section row does not navigate: clicking it expands its children and
+	 * collapses any other open section (accordion — at most ONE section is
+	 * open at a time, decision 2026-07-18). While the sidebar is collapsed
+	 * to the icon rail, sections flatten: their children render as icon
+	 * squares directly. Ignored by PageViewControl and DetailPanel tabs.
+	 */
+	children?: ViewMenuEntry[];
 }
 
 // =============================================================================
