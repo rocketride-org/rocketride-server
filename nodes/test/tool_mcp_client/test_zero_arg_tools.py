@@ -14,6 +14,8 @@ Covers:
 
 import os
 import sys
+import types
+from pathlib import Path
 
 import pytest
 
@@ -22,8 +24,42 @@ import pytest
 _NODE_SRC = os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'tool_mcp_client')
 sys.path.insert(0, _NODE_SRC)
 
+
+def _ensure_iglobal_import_stubs():
+    """Provide the minimal engine imports required by the real IGlobal module."""
+    rocketlib = sys.modules.get('rocketlib') or types.ModuleType('rocketlib')
+    if not hasattr(rocketlib, 'IGlobalBase'):
+        rocketlib.IGlobalBase = type('IGlobalBase', (), {})
+    if not hasattr(rocketlib, 'OPEN_MODE'):
+        rocketlib.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config'})
+    if not hasattr(rocketlib, 'warning'):
+        rocketlib.warning = lambda *_args, **_kwargs: None
+    sys.modules['rocketlib'] = rocketlib
+
+    for name in ('ai', 'ai.common', 'ai.common.config'):
+        if name not in sys.modules:
+            sys.modules[name] = types.ModuleType(name)
+    if not hasattr(sys.modules['ai.common.config'], 'Config'):
+
+        class _Config:
+            @staticmethod
+            def getNodeConfig(*_args, **_kwargs):
+                return {}
+
+        sys.modules['ai.common.config'].Config = _Config
+
+    if 'tool_mcp_client' not in sys.modules:
+        package = types.ModuleType('tool_mcp_client')
+        package.__path__ = [str(Path(_NODE_SRC).resolve())]
+        sys.modules['tool_mcp_client'] = package
+
+
+_ensure_iglobal_import_stubs()
+
 from mcp_schema import NOOP_ARG_NAME, normalize_tool_input_schema, strip_synthesized_args  # noqa: E402
 from mcp_stdio_client import McpStdioClient  # noqa: E402
+from tool_mcp_client.IGlobal import IGlobal  # noqa: E402
+from tool_mcp_client.mcp_stdio_client import McpToolDef  # noqa: E402
 
 STUB_SERVER = os.path.join(os.path.dirname(__file__), 'stub_mcp_server.py')
 
@@ -95,6 +131,31 @@ class TestStripSynthesizedArgs:
     def test_non_dict_unchanged(self):
         assert strip_synthesized_args(None) is None
         assert strip_synthesized_args('x') == 'x'
+
+
+# ---------------------------------------------------------------------------
+# IGlobal cached-descriptor contract — server-free production path
+# ---------------------------------------------------------------------------
+
+
+def test_list_namespaced_tools_emits_cached_schema_under_camel_case_key():
+    """The production cache accessor exposes the MCP schema as ``inputSchema``."""
+    schema = {
+        'type': 'object',
+        'properties': {'query': {'type': 'string'}},
+        'required': ['query'],
+    }
+    iglobal = IGlobal.__new__(IGlobal)
+    iglobal.serverName = 'cached'
+    iglobal._cache_tools([McpToolDef(name='search', description='Search documents', inputSchema=schema)])
+
+    [descriptor] = iglobal.list_namespaced_tools()
+
+    assert descriptor['name'] == 'cached.search'
+    assert descriptor['description'] == 'Search documents'
+    assert descriptor['inputSchema'] is schema
+    assert descriptor['inputSchema'] == schema
+    assert 'input_schema' not in descriptor
 
 
 # ---------------------------------------------------------------------------
