@@ -7,9 +7,10 @@ tool, and strips that field again before the real ``tools/call``.
 
 Covers:
 - ``normalize_tool_input_schema`` (pure) — every degenerate schema shape.
-- ``strip_synthesized_args`` (pure) — the exact helper the invoke path uses.
-- End-to-end against a stub stdio MCP server: discovery shapes + that the
-  synthesized field never reaches the server.
+- The production invoke path — synthesized placeholders are removed, while a
+  real MCP argument named ``rr_no_args`` is preserved.
+- End-to-end against a stub stdio MCP server: discovery shapes + transport
+  normalization.
 """
 
 import os
@@ -30,6 +31,8 @@ def _ensure_iglobal_import_stubs():
     rocketlib = sys.modules.get('rocketlib') or types.ModuleType('rocketlib')
     if not hasattr(rocketlib, 'IGlobalBase'):
         rocketlib.IGlobalBase = type('IGlobalBase', (), {})
+    if not hasattr(rocketlib, 'IInstanceBase'):
+        rocketlib.IInstanceBase = type('IInstanceBase', (), {})
     if not hasattr(rocketlib, 'OPEN_MODE'):
         rocketlib.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config'})
     if not hasattr(rocketlib, 'warning'):
@@ -56,10 +59,10 @@ def _ensure_iglobal_import_stubs():
 
 _ensure_iglobal_import_stubs()
 
-from mcp_schema import NOOP_ARG_NAME, normalize_tool_input_schema, strip_synthesized_args  # noqa: E402
-from mcp_stdio_client import McpStdioClient  # noqa: E402
 from tool_mcp_client.IGlobal import IGlobal  # noqa: E402
-from tool_mcp_client.mcp_stdio_client import McpToolDef  # noqa: E402
+from tool_mcp_client.IInstance import IInstance  # noqa: E402
+from tool_mcp_client.mcp_schema import NOOP_ARG_NAME, normalize_tool_input_schema, strip_synthesized_args  # noqa: E402
+from tool_mcp_client.mcp_stdio_client import McpStdioClient, McpToolDef  # noqa: E402
 
 STUB_SERVER = os.path.join(os.path.dirname(__file__), 'stub_mcp_server.py')
 
@@ -110,7 +113,7 @@ class TestNormalizeSchema:
 
 
 # ---------------------------------------------------------------------------
-# strip_synthesized_args — pure unit tests (the exact invoke-path helper)
+# strip_synthesized_args — pure unit tests
 # ---------------------------------------------------------------------------
 
 
@@ -158,6 +161,60 @@ def test_list_namespaced_tools_emits_cached_schema_under_camel_case_key():
     assert 'input_schema' not in descriptor
 
 
+class _RecordingClient:
+    def __init__(self):
+        self.calls = []
+
+    def call_tool(self, *, name, arguments):
+        self.calls.append((name, arguments))
+        return {'received_arguments': arguments}
+
+
+def _instance_with_cached_tool(tool):
+    client = _RecordingClient()
+    iglobal = IGlobal.__new__(IGlobal)
+    iglobal.serverName = 'cached'
+    iglobal._client = client
+    iglobal._cache_tools([tool])
+    instance = IInstance.__new__(IInstance)
+    instance.IGlobal = iglobal
+    return instance, client
+
+
+def test_invoke_strips_synthesized_noop_argument_before_tools_call():
+    instance, client = _instance_with_cached_tool(
+        McpToolDef(
+            name='zero_arg',
+            description='',
+            inputSchema=normalize_tool_input_schema(None),
+            has_synthesized_noop_arg=True,
+        )
+    )
+
+    result = instance._tool_invoke_dynamic(tool_name='cached.zero_arg', input_obj={NOOP_ARG_NAME: 'ignored'})
+
+    assert result['received_arguments'] == {}
+    assert client.calls == [('zero_arg', {})]
+
+
+def test_invoke_preserves_real_rr_no_args_argument_before_tools_call():
+    schema = {
+        'type': 'object',
+        'properties': {NOOP_ARG_NAME: {'type': 'string'}},
+        'required': [NOOP_ARG_NAME],
+    }
+    instance, client = _instance_with_cached_tool(
+        McpToolDef(name='real_rr_no_args', description='', inputSchema=schema)
+    )
+
+    result = instance._tool_invoke_dynamic(
+        tool_name='cached.real_rr_no_args', input_obj={NOOP_ARG_NAME: 'forward this'}
+    )
+
+    assert result['received_arguments'] == {NOOP_ARG_NAME: 'forward this'}
+    assert client.calls == [('real_rr_no_args', {NOOP_ARG_NAME: 'forward this'})]
+
+
 # ---------------------------------------------------------------------------
 # End-to-end against the stub stdio MCP server
 # ---------------------------------------------------------------------------
@@ -184,16 +241,18 @@ class TestStubIntegration:
             props = tools[name].inputSchema.get('properties')
             assert isinstance(props, dict) and props, f'{name} still has empty properties'
             assert NOOP_ARG_NAME in props, f'{name} missing synthesized arg'
+            assert tools[name].has_synthesized_noop_arg
 
     def test_real_arg_tool_schema_untouched(self, client):
         tools = {t.name: t for t in client.list_tools()}
         echo = tools['echo_tool'].inputSchema
         assert set(echo['properties']) == {'msg'}
         assert NOOP_ARG_NAME not in echo['properties']
+        assert not tools['echo_tool'].has_synthesized_noop_arg
 
     def test_synthesized_arg_never_reaches_server(self, client):
-        # Simulate the invoke path: a model fills in the presentation-only no-op
-        # field; the node strips it before dispatching to the MCP server.
+        # Exercise the transport with the exact arguments the production invoke
+        # path sends after it removes the presentation-only no-op field.
         model_args = strip_synthesized_args({NOOP_ARG_NAME: 'ignored'})
         result = client.call_tool(name='no_schema_tool', arguments=model_args)
         assert result['received_arguments'] == {}

@@ -55,11 +55,13 @@ class IInstance(IInstanceBase):
         if input_obj is None:
             arguments: Dict[str, Any] = {}
         elif isinstance(input_obj, dict):
-            # Drop framework-injected keys, then strip the synthesized no-op
-            # placeholder (see mcp_schema.normalize_tool_input_schema) so the MCP
-            # server only ever receives the tool's real arguments.
+            # Drop framework-injected keys. A placeholder is removed only for a
+            # cached tool whose schema normalization actually synthesized it;
+            # ``rr_no_args`` remains a valid real MCP argument otherwise.
             arguments = {k: v for k, v in input_obj.items() if k not in _FRAMEWORK_KEYS}
-            arguments = strip_synthesized_args(arguments)
+            tool = self.IGlobal.get_tool(server_name=server_name, tool_name=bare_tool)
+            if tool is not None and getattr(tool, 'has_synthesized_noop_arg', False):
+                arguments = strip_synthesized_args(arguments)
         else:
             raise ValueError('Tool input must be a JSON object (dict)')
         return self.IGlobal.call_tool(server_name=server_name, tool_name=bare_tool, arguments=arguments)

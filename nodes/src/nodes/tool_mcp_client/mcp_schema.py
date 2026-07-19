@@ -33,10 +33,11 @@ models (e.g. ``llama-3.3-70b``) tolerate it. The MCP client cannot know which
 model consumes the tool, so it always presents a well-formed, non-empty schema.
 
 ``normalize_tool_input_schema`` synthesizes a single *optional* no-op field for
-empty-schema tools. The field is a presentation-only placeholder: it is stripped
-from the arguments before the real ``tools/call`` (see
-``IInstance._tool_invoke_dynamic``), so the MCP server never sees it. Schemas
-that already declare real ``properties`` pass through unchanged.
+empty-schema tools. The cached tool definition records when that field was
+synthesized, so it is stripped from the arguments before the real ``tools/call``
+(see ``IInstance._tool_invoke_dynamic``) without removing a real MCP argument
+that happens to share its name. Schemas that already declare real ``properties``
+pass through unchanged.
 """
 
 from __future__ import annotations
@@ -49,6 +50,11 @@ from typing import Any, Dict, Optional
 # no leading underscore: pydantic ``create_model`` (used by the LangChain/CrewAI/
 # DeepAgent tool builders) rejects field names that start with ``_``.
 NOOP_ARG_NAME = 'rr_no_args'
+
+
+def input_schema_needs_noop_placeholder(schema: Any) -> bool:
+    """Return whether normalization will synthesize the no-op placeholder."""
+    return not isinstance(schema, dict) or not isinstance(schema.get('properties'), dict) or not schema['properties']
 
 
 def normalize_tool_input_schema(schema: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -64,8 +70,7 @@ def normalize_tool_input_schema(schema: Optional[Dict[str, Any]]) -> Dict[str, A
     if not isinstance(schema, dict):
         schema = {'type': 'object'}
 
-    props = schema.get('properties')
-    if isinstance(props, dict) and props:
+    if not input_schema_needs_noop_placeholder(schema):
         # Real arguments — leave the tool's declared schema untouched.
         return schema
 

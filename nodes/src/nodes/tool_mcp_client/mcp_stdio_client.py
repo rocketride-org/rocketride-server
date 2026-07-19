@@ -44,9 +44,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 try:
-    from .mcp_schema import normalize_tool_input_schema
+    from .mcp_schema import input_schema_needs_noop_placeholder, normalize_tool_input_schema
 except ImportError:  # pragma: no cover - standalone import (e.g. unit tests)
-    from mcp_schema import normalize_tool_input_schema
+    from mcp_schema import input_schema_needs_noop_placeholder, normalize_tool_input_schema
 
 
 class McpProtocolError(RuntimeError):
@@ -58,6 +58,7 @@ class McpToolDef:
     name: str
     description: str
     inputSchema: Dict[str, Any]
+    has_synthesized_noop_arg: bool = False
 
 
 class McpStdioClient:
@@ -183,8 +184,16 @@ class McpStdioClient:
                 continue
             desc = t.get('description') if isinstance(t.get('description'), str) else ''
             raw = t.get('inputSchema')
-            schema = normalize_tool_input_schema(raw if isinstance(raw, dict) else None)
-            out.append(McpToolDef(name=name, description=desc, inputSchema=schema))
+            input_schema = raw if isinstance(raw, dict) else None
+            schema = normalize_tool_input_schema(input_schema)
+            out.append(
+                McpToolDef(
+                    name=name,
+                    description=desc,
+                    inputSchema=schema,
+                    has_synthesized_noop_arg=input_schema_needs_noop_placeholder(input_schema),
+                )
+            )
         return out
 
     def call_tool(self, *, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
