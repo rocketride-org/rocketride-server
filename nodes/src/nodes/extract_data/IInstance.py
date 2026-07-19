@@ -38,16 +38,15 @@ class IInstance(IInstanceBase):
     chunkId: int = 0
     table: List = []
 
-    def _extractData(self, text: Union[str, List[Doc]]) -> List[Doc]:
+    def _extractData(self, text: Union[str, List[Doc]]) -> None:
         """
         Extract data from the given text/tables/documents.
 
         Args:
-            metadata (Dict[str, Any]): Metadata associated with the document.
             text (Union[str, List[Doc]]): Text content, or documents, to extract from.
 
         Returns:
-            List[Doc]: A list of documents with extracted definitions.
+            None: The LLM result is forwarded to ``writeAnswers``.
         """
         question: Question = Question(
             type=QuestionType.QUESTION, expectJson=True, role='You are a master at extracting data from text documents.'
