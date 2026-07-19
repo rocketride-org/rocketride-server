@@ -98,4 +98,25 @@ TEST_CASE("crypto::Hash") {
         auto hash2 = _fs<crypto::Sha384Hash>(str);
         REQUIRE(hash2 == hash);
     }
+
+    SECTION("toString is lowercase and full width") {
+        auto hash = crypto::Sha512::make(Data);
+        auto str = _ts(hash);
+
+        REQUIRE(str.size() == crypto::Sha512Hash::DigestLen * 2);
+        for (auto chr : str) REQUIRE(!(chr >= 'A' && chr <= 'F'));
+        REQUIRE(str == ExpectedSha512Hash);
+    }
+
+    SECTION("fromString rejects a wrong length") {
+        REQUIRE(!_fsc<crypto::Sha512Hash>("abcd"_tv));
+    }
+
+    SECTION("fromString rejects an invalid hex character") {
+        // Right length, one non-hex character. Valid inputs still round trip.
+        Text bad{ExpectedSha512Hash};
+        bad[0] = 'z';
+        REQUIRE(!_fsc<crypto::Sha512Hash>(bad));
+        REQUIRE(_fsc<crypto::Sha512Hash>(ExpectedSha512Hash));
+    }
 }
