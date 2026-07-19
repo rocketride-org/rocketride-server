@@ -49,15 +49,19 @@ inline Error Hash<DigestLen>::__fromString(Hash &hash,
         return APERR(Ec::InvalidParam, "Hex-encoded hash has unexpected length",
                      str, str.size(), DigestLen * 2);
 
+    // Decode into a local buffer first so an invalid character leaves the
+    // caller's hash untouched rather than partially overwritten.
     auto src = _reCast<const uint8_t *>(str.data());
+    uint8_t decoded[DigestLen];
     for (size_t i = 0; i < DigestLen; ++i) {
         auto hi = HexReverse[src[i * 2]];
         auto lo = HexReverse[src[i * 2 + 1]];
         if (hi == 0xFF || lo == 0xFF)
             return APERR(Ec::InvalidParam,
                          "Hex-encoded hash has an invalid character", str);
-        hash.data[i] = _cast<uint8_t>((hi << 4) | lo);
+        decoded[i] = _cast<uint8_t>((hi << 4) | lo);
     }
+    std::copy(std::begin(decoded), std::end(decoded), std::begin(hash.data));
     return {};
 }
 
