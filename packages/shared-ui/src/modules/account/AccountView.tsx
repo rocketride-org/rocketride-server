@@ -206,7 +206,7 @@ export interface IAccountViewProps {
 	/** Persists an updated organization name. */
 	onSaveOrgName: (name: string) => Promise<void>;
 	/** Creates a new API key and returns the raw key string. */
-	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string }) => Promise<{ key: string }>;
+	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string }>;
 	/** Revokes an API key by its ID. */
 	onRevokeKey: (keyId: string) => Promise<void>;
 	/** Sends an invitation to a new organization member. */

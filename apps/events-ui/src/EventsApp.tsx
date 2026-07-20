@@ -116,7 +116,12 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 						config={config}
 						canStart={canStart}
 						onToggleActive={toggleActive}
-						onClear={clear}
+						onClear={() => {
+							// Clearing the buffer must also dismiss the detail drawer:
+							// the selected row no longer exists in the (now-empty) capture.
+							clear();
+							setSelected(null);
+						}}
 						onSetToken={setToken}
 						onToggleType={toggleType}
 						onSelectAllTypes={selectAllTypes}

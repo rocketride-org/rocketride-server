@@ -355,8 +355,10 @@ const AccountPage: React.FC = () => {
 	}, [client, orgId]);
 
 	/** Creates a new API key and returns the raw key string. */
-	const handleCreateKey = useCallback(async (params: { name: string; permissions: string[]; expiresAt?: string }) => {
+	const handleCreateKey = useCallback(async (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => {
 		if (!client) throw new Error('Not connected');
+		// Forward the full params (incl. teamId) so a team-scoped key is created
+		// team-scoped rather than silently falling back to org-wide.
 		const { key } = await client.account.createKey(params);
 		await loadKeys();
 		return { key };

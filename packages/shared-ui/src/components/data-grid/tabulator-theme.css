@@ -617,7 +617,7 @@
 	width: 7px;
 	height: 7px;
 	border-radius: 50%;
-	background: currentColor; /* dot follows the variant text colour */
+	background: currentcolor; /* dot follows the variant text colour */
 	flex-shrink: 0;
 }
 .rr-cell-badge--success {

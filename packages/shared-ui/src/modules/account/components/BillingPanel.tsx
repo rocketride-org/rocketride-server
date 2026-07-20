@@ -569,13 +569,18 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					subtitle={viewedStatus.label}
 					busy={cancelling}
 					footer={
-						isCancelable && isOrgAdmin ? (
+						// Footer shows for an org admin when EITHER verb is available; the
+						// Cancel button is gated on isCancelable independently, so a sub
+						// already set to cancel-at-period-end still offers Change Plan.
+						isOrgAdmin && (isCancelable || onUpgradeSubscription) ? (
 							<>
-								<div style={styles.footerDanger}>
-									<Button variant="danger" small disabled={cancelling} onClick={() => setConfirmCancel(true)}>
-										Cancel Subscription
-									</Button>
-								</div>
+								{isCancelable && (
+									<div style={styles.footerDanger}>
+										<Button variant="danger" small disabled={cancelling} onClick={() => setConfirmCancel(true)}>
+											Cancel Subscription
+										</Button>
+									</div>
+								)}
 								{onUpgradeSubscription && (
 									<Button variant="ghost" small disabled={cancelling} onClick={() => setUpgradeTarget(viewedSub)}>
 										Change Plan

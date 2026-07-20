@@ -55,8 +55,11 @@ const path = require('path');
 function stripNonPublicMembers(dtsText, ts) {
 	const sourceFile = ts.createSourceFile('decl.d.ts', dtsText, ts.ScriptTarget.Latest, true);
 
-	// True when a class member carries a private or protected modifier.
+	// True when a class member is non-public: a `private`/`protected` modifier,
+	// OR an ECMAScript private name (`#field`) — TypeScript types both nominally,
+	// so both must be stripped for the class to compare structurally.
 	const isNonPublic = (member) => {
+		if (member.name && ts.isPrivateIdentifier(member.name)) return true;
 		const mods = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
 		return (
 			!!mods &&

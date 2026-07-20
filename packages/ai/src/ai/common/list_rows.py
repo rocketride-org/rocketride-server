@@ -46,7 +46,7 @@ Request arguments::
 
 Response envelope::
 
-    { 'rows': [...], 'total': int, 'page': int, 'pageSize': int }
+    {'rows': [...], 'total': int, 'page': int, 'pageSize': int}
 
 This module is the PURE-python half of the convention: it operates on
 already-materialized dict rows — the equivalent of WHERE + ORDER BY +
@@ -146,8 +146,11 @@ def clamp_paging(args: Dict[str, Any], *, default_size: int = 50, max_size: int 
         (page, page_size) — page is 1-based; the caller applies
         ``.offset((page - 1) * page_size).limit(page_size)``.
     """
-    page = max(1, int(args.get('page', 1)))
-    page_size = min(max_size, max(1, int(args.get('page_size', default_size))))
+    # `or` (not a default arg) so an explicit null / 0 / '' from client JSON
+    # falls back to the default instead of raising int(None) / clamping to a
+    # nonsense page — malformed paging degrades to the clamped default.
+    page = max(1, int(args.get('page') or 1))
+    page_size = min(max_size, max(1, int(args.get('page_size') or default_size)))
     return page, page_size
 
 
@@ -281,8 +284,7 @@ def paginate_rows(
     term = str(args.get('search', '') or '').strip().lower()
     if term and searchable_keys:
         working = [
-            row for row in working
-            if any(term in str(row.get(key, '') or '').lower() for key in searchable_keys)
+            row for row in working if any(term in str(row.get(key, '') or '').lower() for key in searchable_keys)
         ]
 
     # Step 2: filters (same key/operator convention as the SQL path).
@@ -306,7 +308,8 @@ def paginate_rows(
 
     # Step 3: sort (whitelisted against row keys), tiebreak least-significant.
     sorters = [
-        s for s in (args.get('sort') or [])
+        s
+        for s in (args.get('sort') or [])
         if (s or {}).get('field') and (not working or (s or {}).get('field') in working[0])
     ]
     if not sorters:

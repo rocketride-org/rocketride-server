@@ -472,7 +472,15 @@ class MiscCommands(DAPConn):
         for control in task_controls:
             if control.task is None:
                 continue
-            task_name = getattr(control.task.get_status(), 'name', None) or control.source
+            try:
+                status = control.task.get_status()
+            except Exception as e:
+                # Control torn down between snapshot and row build — skip it, the
+                # same defensive stance _build_task_rows takes, so one dead task
+                # never fails the whole connections/dashboard response.
+                self.debug_message(f'Error reading task status for connection map "{control.id}": {e}')
+                continue
+            task_name = getattr(status, 'name', None) or control.source
             for cid, conn in conn_items:
                 if not hasattr(conn, '_monitors'):
                     continue
@@ -494,7 +502,12 @@ class MiscCommands(DAPConn):
         for control in task_controls:
             if control.task is None:
                 continue
-            status = control.task.get_status()
+            try:
+                status = control.task.get_status()
+            except Exception as e:
+                # Control torn down mid-snapshot — skip it (matches _build_task_rows).
+                self.debug_message(f'Error reading task status for project map "{control.id}": {e}')
+                continue
             task_name = getattr(status, 'name', None) or control.source
             # Use the task_name prefix (before the dot) as project label
             name_parts = task_name.split('.', 1)

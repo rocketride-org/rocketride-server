@@ -33,7 +33,7 @@ import type { CellBadgeVariant, GridColumnDefinition } from '../../../components
 import type { DashboardResponse, DashboardTask } from '../types';
 import { formatNumber, formatTimeAgo, formatUptime } from '../util';
 import { ConnectionRecordPanel } from './ConnectionRecordPanel';
-import { TaskRecordPanel } from './TaskRecordPanel';
+import { TaskRecordPanel, taskStatusText } from './TaskRecordPanel';
 
 // =============================================================================
 // TYPES
@@ -161,19 +161,6 @@ const domStyles = {
 // =============================================================================
 // HELPERS
 // =============================================================================
-
-/**
- * Derive the unified-table state label of a task: exit code once finished,
- * idle warning when past 80% of the TTL, running otherwise.
- *
- * @param task - The dashboard task.
- * @returns The Status cell label (also the enum filter value).
- */
-function taskStatusText(task: DashboardTask): string {
-	if (task.completed) return `exit ${task.exitCode}`;
-	if (task.idleTime > 0 && task.ttl > 0 && task.idleTime > task.ttl * 0.8) return 'idle (ttl)';
-	return 'running';
-}
 
 /**
  * Pick the status badge variant for a unified-table row: success for

@@ -496,8 +496,20 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 						const expanded = expandedGroups.has(groupKey);
 						return (
 							<div key={groupKey}>
-								{/* Section header */}
-								<div style={styles.sectionHeader} onClick={() => toggleGroup(groupKey)}>
+								{/* Section header — keyboard-operable (Enter/Space expand). */}
+								<div
+									style={styles.sectionHeader}
+									role="button"
+									tabIndex={0}
+									aria-expanded={expanded}
+									onClick={() => toggleGroup(groupKey)}
+									onKeyDown={(e) => {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											toggleGroup(groupKey);
+										}
+									}}
+								>
 									<ChevronIcon expanded={expanded} />
 									<span>{CATEGORY_TITLES[groupKey] ?? groupKey}</span>
 								</div>
@@ -510,8 +522,16 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 												<div
 													key={key}
 													draggable
+													role="button"
+													tabIndex={0}
 													onDragStart={(e) => onDragStart(e, key)}
 													onClick={() => onClickItem(key)}
+													onKeyDown={(e) => {
+														if (e.key === 'Enter' || e.key === ' ') {
+															e.preventDefault();
+															onClickItem(key);
+														}
+													}}
 													style={styles.iconTile}
 													title={service.title ?? key}
 													onMouseEnter={(e) => {
@@ -532,8 +552,16 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 											<div
 												key={key}
 												draggable
+												role="button"
+												tabIndex={0}
 												onDragStart={(e) => onDragStart(e, key)}
 												onClick={() => onClickItem(key)}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														onClickItem(key);
+													}
+												}}
 												style={styles.item}
 												onMouseEnter={(e) => {
 													(e.currentTarget as HTMLElement).style.backgroundColor = 'var(--rr-bg-list-hover)';

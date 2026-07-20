@@ -292,9 +292,17 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	// and writes through, handed down via <PrefsProvider> below. getPref reads the
 	// local prefs bag; setPref merges a key and threads the whole bag to the host
 	// (onPrefsChange → useWorkspace on web / the extension host in VS Code).
+	//
+	// getPref reads through a ref so prefsApi keeps a STABLE identity across pref
+	// writes: memoizing on [prefs] would hand FlowPreferences a fresh getPref on
+	// every toolbar/view/width write, re-running its layout-read effect and
+	// churning the canvas. The ref always holds the latest prefs, so reactivity is
+	// preserved (prefs state lives here and re-renders the subtree).
+	const prefsRef = useRef(prefs);
+	prefsRef.current = prefs;
 	const prefsApi = useMemo<IPrefsApi>(
 		() => ({
-			getPref: (key) => prefs?.[key],
+			getPref: (key) => prefsRef.current?.[key],
 			setPref: (key, value) =>
 				setPrefs((prev) => {
 					const next = { ...prev, [key]: value };
@@ -302,7 +310,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 					return next;
 				}),
 		}),
-		[prefs],
+		[],
 	);
 
 	// --- Idle-timeout (TTL) settings ------------------------------------------

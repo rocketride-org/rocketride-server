@@ -52,14 +52,36 @@ export const FOCUSABLE_SELECTOR =
  * over a DetailPanel drawer) dismiss one at a time instead of all at once,
  * and two focus traps never fight over document.activeElement.
  */
-const openLayers: object[] = [];
+interface OverlayLayer {
+	/** Whether this layer wants document.body scroll locked while open. */
+	lock: boolean;
+}
+
+const openLayers: OverlayLayer[] = [];
 
 /**
- * The page's body overflow value from BEFORE the first layer opened. Restored
- * only when the LAST layer closes: per-layer save/restore would let a lower
- * overlay closing out of order re-enable page scroll behind a still-open one.
+ * The page's body overflow value from BEFORE the first layer opened, captured
+ * once and restored when the LAST layer closes. It is the "unlocked" target
+ * {@link syncBodyOverflow} falls back to, so scroll state is always derived
+ * from the layers still open rather than saved/restored per layer (which would
+ * let an out-of-order close mis-set scroll behind a still-open overlay).
  */
 let originalBodyOverflow: string | null = null;
+
+/**
+ * Reconcile document.body scroll with the current stack: locked while ANY open
+ * layer requests a lock, otherwise the captured pre-lock value. Run on every
+ * acquire and release so closing a locking modal that sits above a modeless
+ * drawer leaves the page scrollable, and closing a modeless drawer under a
+ * modal leaves it locked — the body always matches what REMAINS open.
+ */
+function syncBodyOverflow(): void {
+	if (openLayers.some((layer) => layer.lock)) {
+		document.body.style.overflow = 'hidden';
+	} else if (originalBodyOverflow !== null) {
+		document.body.style.overflow = originalBodyOverflow;
+	}
+}
 
 /**
  * Joins the shared overlay stack as the new topmost layer and (by default) locks
@@ -78,9 +100,9 @@ let originalBodyOverflow: string | null = null;
  */
 export function acquireOverlayLayer(lockScroll = true): object {
 	if (openLayers.length === 0) originalBodyOverflow = document.body.style.overflow;
-	const layer = {};
+	const layer: OverlayLayer = { lock: lockScroll };
 	openLayers.push(layer);
-	if (lockScroll) document.body.style.overflow = 'hidden';
+	syncBodyOverflow();
 	return layer;
 }
 
@@ -102,11 +124,19 @@ export function isTopOverlayLayer(layer: object): boolean {
  * @param layer - The token returned by {@link acquireOverlayLayer}.
  */
 export function releaseOverlayLayer(layer: object): void {
-	const i = openLayers.indexOf(layer);
+	const i = openLayers.indexOf(layer as OverlayLayer);
 	if (i >= 0) openLayers.splice(i, 1);
-	if (openLayers.length === 0 && originalBodyOverflow !== null) {
-		document.body.style.overflow = originalBodyOverflow;
-		originalBodyOverflow = null;
+	if (openLayers.length === 0) {
+		// Last layer gone: restore the captured pre-lock overflow and reset.
+		if (originalBodyOverflow !== null) {
+			document.body.style.overflow = originalBodyOverflow;
+			originalBodyOverflow = null;
+		}
+	} else {
+		// Layers remain: match the body to whatever they still require — a
+		// modeless drawer left open after a locking modal closes must NOT keep
+		// the page scroll-locked.
+		syncBodyOverflow();
 	}
 }
 
