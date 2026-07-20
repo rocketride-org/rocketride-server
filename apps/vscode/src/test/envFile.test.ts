@@ -29,6 +29,29 @@ const URI = 'http://localhost:54321';
 const KEY = 'MYAPIKEY';
 const updates = { ROCKETRIDE_URI: URI, ROCKETRIDE_APIKEY: KEY };
 
+/** Mimics the workspace .env parsing in packages/client-python/src/rocketride/client.py. */
+function parseClientPythonEnv(text: string): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const line of text.split(/\r?\n/)) {
+		const trimmedLine = line.trim();
+		if (!trimmedLine || trimmedLine.startsWith('#') || !trimmedLine.includes('=')) {
+			continue;
+		}
+
+		const separator = trimmedLine.indexOf('=');
+		const key = trimmedLine.slice(0, separator).trim();
+		let value = trimmedLine.slice(separator + 1).trim();
+		if (
+			(value.startsWith('"') && value.endsWith('"')) ||
+			(value.startsWith("'") && value.endsWith("'"))
+		) {
+			value = value.slice(1, -1);
+		}
+		env[key] = value;
+	}
+	return env;
+}
+
 // --- mergeEnvText ------------------------------------------------------------
 
 test('creates a new file from scratch when none exists', () => {
@@ -90,10 +113,25 @@ test('removes keys listed in keysToRemove', () => {
 	);
 });
 
-test('escapes internal quotes and backslashes when a value needs quoting', () => {
+test('writes raw internal quotes and backslashes when a value needs quoting', () => {
 	assert.equal(
 		mergeEnvText('', { ROCKETRIDE_APIKEY: 'has "quote" and \\slash' }),
-		'ROCKETRIDE_APIKEY="has \\"quote\\" and \\\\slash"\n',
+		'ROCKETRIDE_APIKEY="has "quote" and \\slash"\n',
+	);
+});
+
+test('round-trips values through the client.py parser', () => {
+	for (const value of ['plain', 'has spaces', 'has an "inner quote"', '"fully wrapped"', "'fully wrapped'", 'ends with "']) {
+		assert.equal(parseClientPythonEnv(mergeEnvText('', { VALUE: value })).VALUE, value);
+	}
+});
+
+test('does not treat inherited property names as sync updates', () => {
+	const existing = 'toString=x\n__proto__=y\nFOO=bar';
+	assert.doesNotThrow(() => mergeEnvText(existing, { ROCKETRIDE_URI: URI }));
+	assert.equal(
+		mergeEnvText(existing, { ROCKETRIDE_URI: URI }),
+		`toString=x\n__proto__=y\nFOO=bar\n\nROCKETRIDE_URI=${URI}`,
 	);
 });
 
@@ -105,6 +143,13 @@ test('preserves CRLF line endings without mixing in LF-only lines', () => {
 		`# my env\r\nFOO=bar\r\nROCKETRIDE_URI=${URI}\r\n\r\nROCKETRIDE_APIKEY=${KEY}`,
 	);
 	assert.ok(!/[^\r]\n/.test(result), 'no bare LF line endings');
+});
+
+test('uses CRLF when generating from a whitespace-only CRLF file', () => {
+	assert.equal(
+		mergeEnvText(' \r\n\t\r\n', { ROCKETRIDE_URI: URI }),
+		`ROCKETRIDE_URI=${URI}\r\n`,
+	);
 });
 
 // --- resolveConnectionEnv ----------------------------------------------------
@@ -135,6 +180,17 @@ test('skips the deployment group so it never fights over .env', () => {
 test('returns null when there is no resolvable URI', () => {
 	assert.equal(
 		resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: '', apiKey: KEY }),
+		null,
+	);
+});
+
+test('returns null when URI or API key contains a newline', () => {
+	assert.equal(
+		resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: `${URI}\nnext`, apiKey: KEY }),
+		null,
+	);
+	assert.equal(
+		resolveConnectionEnv({ group: 'development', mode: 'local', httpUrl: URI, apiKey: `${KEY}\rnext` }),
 		null,
 	);
 });

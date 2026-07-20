@@ -8,8 +8,10 @@ When you connect the extension to a **self-hosted engine** (local, docker, servi
 
 ```env
 # Self-hosted engines: auto-filled on connect (local uses the real dynamic port).
-ROCKETRIDE_URI=http://localhost:54123   # live engine address (auto-filled)
-ROCKETRIDE_APIKEY=MYAPIKEY              # self-hosted default; set your own for cloud
+# live engine address (auto-filled)
+ROCKETRIDE_URI=http://localhost:54123
+# self-hosted default; set your own for cloud
+ROCKETRIDE_APIKEY=MYAPIKEY
 
 # Add your custom variables:
 ROCKETRIDE_INPUT_PATH=/data/input
@@ -112,8 +114,10 @@ When you connect the extension to a **self-hosted engine** (local, docker, servi
 
 ```env
 # Self-hosted engines: auto-filled on connect (local uses the real dynamic port).
-ROCKETRIDE_URI=http://localhost:54123   # live engine address (auto-filled)
-ROCKETRIDE_APIKEY=MYAPIKEY              # self-hosted default; set your own for cloud
+# live engine address (auto-filled)
+ROCKETRIDE_URI=http://localhost:54123
+# self-hosted default; set your own for cloud
+ROCKETRIDE_APIKEY=MYAPIKEY
 
 # Add your custom variables:
 ROCKETRIDE_INPUT_PATH=/data/input

@@ -40,10 +40,18 @@ export const ROCKETRIDE_APIKEY_KEY = 'ROCKETRIDE_APIKEY';
 
 /** Quote a value only when it contains characters that would break parsing. */
 function quoteIfNeeded(value: string): string {
-	if (!/[\s#="]/.test(value)) {
+	const isWrappedInMatchingQuotes =
+		(value.startsWith('"') && value.endsWith('"')) ||
+		(value.startsWith("'") && value.endsWith("'"));
+	if (!/[\s#=]/.test(value) && !isWrappedInMatchingQuotes) {
 		return value;
 	}
-	return `"${value.replace(/(["\\])/g, '\\$1')}"`;
+
+	// Written so client.py's parser reads back exactly the original value.
+	if (value.endsWith('"') && !value.includes("'")) {
+		return `'${value}'`;
+	}
+	return `"${value}"`;
 }
 
 /**
@@ -64,13 +72,15 @@ export function mergeEnvText(
 	updates: Record<string, string>,
 	keysToRemove?: Set<string>,
 ): string {
+	const updateEntries = Object.entries(updates);
+
 	// New/empty file — generate from scratch in insertion order.
 	if (!existingText.trim()) {
-		const keys = Object.keys(updates);
-		if (keys.length === 0) {
+		if (updateEntries.length === 0) {
 			return existingText;
 		}
-		return keys.map((key) => `${key}=${quoteIfNeeded(updates[key])}`).join('\n') + '\n';
+		const eol = existingText.includes('\r\n') ? '\r\n' : '\n';
+		return updateEntries.map(([key, value]) => `${key}=${quoteIfNeeded(value)}`).join(eol) + eol;
 	}
 
 	// Match the file's existing line-ending convention so rewritten or appended
@@ -102,7 +112,7 @@ export function mergeEnvText(
 			continue;
 		}
 
-		if (key in updates) {
+		if (Object.hasOwn(updates, key)) {
 			resultLines.push(`${key}=${quoteIfNeeded(updates[key])}`);
 			consumedKeys.add(key);
 		} else {
@@ -111,14 +121,14 @@ export function mergeEnvText(
 	}
 
 	// Append keys that weren't already present.
-	const newKeys = Object.keys(updates).filter((k) => !consumedKeys.has(k));
-	if (newKeys.length > 0) {
+	const newEntries = updateEntries.filter(([key]) => !consumedKeys.has(key));
+	if (newEntries.length > 0) {
 		const lastLine = resultLines[resultLines.length - 1];
 		if (lastLine !== undefined && lastLine.trim() !== '') {
 			resultLines.push('');
 		}
-		for (const key of newKeys) {
-			resultLines.push(`${key}=${quoteIfNeeded(updates[key])}`);
+		for (const [key, value] of newEntries) {
+			resultLines.push(`${key}=${quoteIfNeeded(value)}`);
 		}
 	}
 
@@ -159,7 +169,7 @@ export function resolveConnectionEnv(args: ConnectionEnvArgs): Record<string, st
 	if (connectionModeUsesOAuth(mode)) {
 		return null;
 	}
-	if (!httpUrl) {
+	if (!httpUrl || /[\r\n]/.test(httpUrl) || /[\r\n]/.test(apiKey)) {
 		return null;
 	}
 
