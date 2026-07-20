@@ -43,7 +43,7 @@ class IGlobal(IGlobalTransform):
             pass
         else:
             # Import store definition - even though
-            from .vectordb_postgres import Store
+            from .postgres import Store
 
             # Declare store
             self.store: Store | None = None

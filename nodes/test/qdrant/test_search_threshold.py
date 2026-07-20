@@ -50,7 +50,7 @@ try:
     _store_mod.DocumentStoreBase = _FakeDocumentStoreBase
     sys.modules['ai.common.store'] = _store_mod
 
-    _spec = importlib.util.spec_from_file_location('_qdrant_store', str(NODES_SRC / 'qdrant' / 'qdrant.py'))
+    _spec = importlib.util.spec_from_file_location('_qdrant_store', str(NODES_SRC / 'store_qdrant' / 'qdrant.py'))
     _qdrant_mod = importlib.util.module_from_spec(_spec)
     _spec.loader.exec_module(_qdrant_mod)
     Store = _qdrant_mod.Store

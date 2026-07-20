@@ -3,12 +3,12 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Pinecone",
+	"title": "Qdrant",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol
 	//
-	"protocol": "pinecone://",
+	"protocol": "qdrant://",
 	//
 	// Required:
 	//		Class type of the node - what it does
@@ -38,38 +38,33 @@
 	//     The path is the executable/script code - it is node dependent
 	//     and is optional for most node
 	//
-	"path": "nodes.pinecone",
+	"path": "nodes.store_qdrant",
 	//
 	// Required:
 	//     The prefix map when added/removed when convertting URLs <=> paths
 	//
-	"prefix": "Pinecone Vector Store",
-	//
-	//	Optional:
-	//		As a pipe component, define what this pipe component takes
-	//		and what it produces
-	//
+	"prefix": "Qdrant Vector Store",
 	//
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that connects to the Pinecone vector database for storing and retrieving ", "high-dimensional embeddings. It enables efficient similarity search, indexing, and ", "management of vectorized data, such as text or image embeddings. Configurable with ", "API credentials, index settings, and metadata filtering, the component supports fast ", "and scalable operations across large embedding datasets. Ideal for semantic search, ", "recommendation systems, and retrieval-augmented generation workflows."],
+	"description": ["A vector database component for Qdrant, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance and advanced matching capabilities."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
-	"icon": "pinecone.svg",
+	"icon": "qdrant.svg",
 	"documentation": "https://docs.rocketride.org",
 	//
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	"tile": ["Mode: ${parameters.pinecone.profile}", "Collection: ${parameters.pinecone.${profile}.collection}"],
+	"tile": ["Host/Port: ${parameters.qdrant.${profile}.host}:${parameters.qdrant.${profile}.port}", "Collection: ${parameters.qdrant.${profile}.collection}"],
 	//
-	// Optional:
-	//      As a pipe component, define what this pipe component takes
-	//      and what it produces
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
 	//
 	"lanes": {
 		"documents": [],
@@ -79,7 +74,7 @@
 	// Test configuration for automated node testing
 	//
 	"test": {
-		"profiles": ["serverless-dense"],
+		"profiles": ["local"],
 		"cases": [
 			{
 				"name": "Add document to store",
@@ -121,7 +116,7 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{ "path": "[0].score", "greaterThanOrEqual": 0.5 },
+							{ "path": "[0].score", "greaterThan": 0.5 },
 							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
@@ -137,22 +132,25 @@
 	"preconfig": {
 		// Define the values that will be merged into any profile configuration
 		// specified, unless the profile is 'absolute'
-		"default": "serverless-dense",
+		"default": "cloud",
 		// Defines profiles used with the "profile": key
 		"profiles": {
-			"pod-based": {
-				"mode": "pod-based",
-				"title": "Pinecone Pod-Based Index",
-				"apikey": "",
-				"collection": "rocketride",
-				"serverName": "pinecone"
+			"local": {
+				"mode": "local",
+				"title": "Your own Qdrant server",
+				"host": "localhost",
+				"port": 6333,
+				"collection": "ROCKETRIDE",
+				"serverName": "qdrant"
 			},
-			"serverless-dense": {
-				"mode": "serverless-dense",
-				"title": "Pinecone Serverless Dense Index",
+			"cloud": {
+				"mode": "cloud",
+				"title": "Qdrant cloud server",
+				"host": "",
+				"port": 6333,
 				"apikey": "",
-				"collection": "rocketride",
-				"serverName": "pinecone"
+				"collection": "ROCKETRIDE",
+				"serverName": "qdrant"
 			}
 		}
 	},
@@ -163,65 +161,71 @@
 	//     in the shape
 	//
 	"fields": {
-		"pinecone.collection": {
-			"type": "string",
-			"title": "Collection",
-			"description": "Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens",
-			"default": "rocketride"
+		"vector.cloud.host": {
+			"description": "Enter the server IP address e.g. <your-instance-name>.<region>.qdrant.io"
 		},
-		"pinecone.serverName": {
+		"vector.cloud.port": {
+			"default": 6333
+		},
+		"vector.local.host": {
+			"default": "localhost"
+		},
+		"vector.local.port": {
+			"default": 6333
+		},
+		"qdrant.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
-			"description": "Namespace for agent-facing tool names, e.g. 'pinecone' exposes tools as pinecone.search / pinecone.upsert / pinecone.delete. Change this when running multiple Pinecone nodes in the same pipeline so their tool names do not collide.",
-			"default": "pinecone",
+			"description": "Namespace for agent-facing tool names, e.g. 'qdrant' exposes tools as qdrant.search / qdrant.upsert / qdrant.delete. Change this when running multiple Qdrant nodes in the same pipeline so their tool names do not collide.",
+			"default": "qdrant",
 			"minLength": 1
 		},
-		"pinecone.pod-based": {
-			"object": "pod-based",
-			"properties": ["vector.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
+		"qdrant.cloud": {
+			"object": "cloud",
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "qdrant.serverName"]
 		},
-		"pinecone.serverless-dense": {
-			"object": "serverless-dense",
-			"properties": ["vector.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
+		"qdrant.local": {
+			"object": "local",
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "qdrant.serverName"]
 		},
-		"pinecone.profile": {
-			"title": "Type of Pinecone Connection",
+		"qdrant.profile": {
+			"title": "Type of Qdrant host",
 			"description": "Connect to...",
 			"type": "string",
-			"default": "pod-based",
+			"default": "cloud",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
-					"value": "pod-based",
-					"properties": ["pinecone.pod-based"]
+					"value": "cloud",
+					"properties": ["qdrant.cloud"]
 				},
 				{
-					"value": "serverless-dense",
-					"properties": ["pinecone.serverless-dense"]
+					"value": "local",
+					"properties": ["qdrant.local"]
 				}
 			]
 		},
-		"pinecone.provider": {
+		"qdrant.provider": {
 			"type": "string",
-			"const": "pinecone",
-			"default": "pinecone"
+			"const": "qdrant",
+			"default": "qdrant"
 		},
-		"pinecone.pinecone": {
-			"object": "pinecone",
-			"properties": ["pinecone.profile"]
+		"qdrant.qdrant": {
+			"object": "qdrant",
+			"properties": ["qdrant.profile"]
 		},
-		"pinecone.store": {
+		"qdrant.store": {
 			"object": "store",
 			"title": "Store",
-			"properties": ["pinecone.provider", "pinecone.pinecone"]
+			"properties": ["qdrant.provider", "qdrant.qdrant"]
 		},
-		"pinecone.target.autopipe": {
+		"qdrant.target.autopipe": {
 			"object": "parameters",
-			"properties": ["remote", "pinecone.store", "all.embedding"]
+			"properties": ["remote", "qdrant.store", "all.embedding"]
 		},
-		"pinecone.target.parameters": {
+		"qdrant.target.parameters": {
 			"object": "parameters",
-			"properties": ["pinecone.target.autopipe"]
+			"properties": ["qdrant.target.autopipe"]
 		}
 	},
 	//
@@ -232,13 +236,13 @@
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Pinecone Vector Store",
-			"properties": ["pinecone.profile"]
+			"title": "Qdrant Vector Store",
+			"properties": ["qdrant.profile"]
 		},
 		{
 			"section": "Transform",
-			"title": "Pinecone",
-			"properties": ["type", "pinecone.target.parameters", "target.mode"]
+			"title": "Qdrant",
+			"properties": ["type", "qdrant.target.parameters", "target.mode"]
 		}
 	]
 }

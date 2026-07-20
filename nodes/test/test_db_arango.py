@@ -149,7 +149,7 @@ def _build_import_stubs() -> dict:
     }
 
 
-_NODE_DIR = Path(__file__).resolve().parent.parent / 'src' / 'nodes' / 'db_arango'
+_NODE_DIR = Path(__file__).resolve().parent.parent / 'src' / 'nodes' / 'graph_arango'
 
 
 def _load_node():

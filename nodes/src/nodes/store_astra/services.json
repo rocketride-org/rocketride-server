@@ -3,12 +3,12 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Milvus",
+	"title": "Astra DB",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol
 	//
-	"protocol": "milvus://",
+	"protocol": "astra_db://",
 	//
 	// Required:
 	//		Class type of the node - what it does
@@ -37,30 +37,29 @@
 	//     The path is the executable/script code - it is node dependent
 	//     and is optional for most node
 	//
-	"path": "nodes.milvus",
+	"path": "nodes.store_astra",
 	//
 	// Required:
 	//     The prefix map when added/removed when convertting URLs <=> paths
 	//
-	"prefix": "Milvus Vector Store",
+	"prefix": "Astra DB Vector Store",
 	//
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A vector database component for Milvus, enabling efficient storage, indexing, ", "and retrieval of vector embeddings. It supports high-performance similarity search, ", "flexible indexing strategies (IVF, HNSW), scalable deployment, and management ", "of vector data for machine learning and AI retrieval workflows."],
+	"description": ["A vector database component for Astra DB, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance and advanced matching capabilities."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
-	"icon": "milvus.svg",
+	"icon": "astra_db.svg",
 	"documentation": "https://docs.rocketride.org",
 	//
 	//
 	//  Optional:
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
-	//
-	"tile": ["Host/Port: ${parameters.milvus.${profile}.host}:${parameters.milvus.${profile}.port}", "Collection: ${parameters.milvus.${profile}.collection}"],
+	"tile": ["Mode : ${parameters.astra_db.profile}", "Collection: ${parameters.astra_db.${profile}.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -70,6 +69,11 @@
 		"documents": [],
 		"questions": ["documents", "answers", "questions"]
 	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
 	//
 	// Test configuration for automated node testing
 	//
@@ -124,11 +128,6 @@
 			}
 		]
 	},
-	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
 	"preconfig": {
 		// Define the values that will be merged into any profile configuration
 		// specified, unless the profile is 'absolute'
@@ -137,17 +136,16 @@
 		"profiles": {
 			"local": {
 				"mode": "local",
-				"title": "Your own Milvus server",
-				"host": "localhost",
-				"port": 19530,
+				"title": "Local test server",
+				"api_endpoint": "http://localhost:8080",
+				"application_token": "test-token",
 				"collection": "ROCKETRIDE"
 			},
 			"cloud": {
 				"mode": "cloud",
-				"title": "Milvus cloud server",
-				"host": "",
-				"port": 443,
-				"apikey": "",
+				"title": "Astra DB cloud server",
+				"api_endpoint": "",
+				"application_token": "",
 				"collection": "ROCKETRIDE"
 			}
 		}
@@ -159,79 +157,45 @@
 	//     in the shape
 	//
 	"fields": {
-		"vector.cloud.host": {
-			"description": "Enter the server IP address e.g. <your-instance-name>.<region>.zillizcloud.com"
-		},
-		"vector.cloud.port": {
-			"default": 443
-		},
-		"vector.local.host": {
-			"default": "localhost"
-		},
-		"vector.local.port": {
-			"default": 19530
-		},
-		"milvus.cloud": {
-			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection"]
-		},
-		"milvus.local": {
-			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection"]
-		},
-		"milvus.profile": {
-			"title": "Type of Milvus host",
-			"description": "Connect to...",
+		"astra_db.api_endpoint": {
 			"type": "string",
-			"default": "cloud",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "cloud",
-					"properties": ["milvus.cloud"]
-				},
-				{
-					"value": "local",
-					"properties": ["milvus.local"]
-				}
-			]
+			"title": "API Endpoint",
+			"description": "Enter the server API endpoint e.g. <instance-name>.<region>.apps.astra.datastax.com"
 		},
-		"milvus.provider": {
+		"astra_db.application_token": {
 			"type": "string",
-			"const": "milvus",
-			"default": "milvus"
+			"title": "Application Token",
+			"description": "Enter the server API application token"
 		},
-		"milvus.milvus": {
-			"object": "milvus",
-			"properties": ["milvus.profile"]
+		"astra_db.provider": {
+			"type": "string",
+			"const": "astra_db",
+			"default": "astra_db"
 		},
-		"milvus.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["milvus.provider", "milvus.milvus"]
-		},
-		"milvus.target.autopipe": {
+		"astra_db.target.autopipe": {
 			"object": "parameters",
-			"properties": ["remote", "milvus.store", "all.embedding"]
+			"properties": ["remote", "astra_db.provider", "all.embedding"]
 		},
-		"milvus.target.parameters": {
+		"astra_db.target.parameters": {
 			"object": "parameters",
-			"properties": ["milvus.target.autopipe"]
+			"properties": ["astra_db.target.autopipe"]
 		}
 	},
 	//
 	// Required:
+	//     Defines the fields (shape) of the service. Either source or target
+	//     map be specified, or both, but at least one is required
 	//
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Milvus VectorDB",
-			"properties": ["milvus.profile"]
+			"title": "Astra DB Vector Store",
+			"properties": ["astra_db.api_endpoint", "astra_db.application_token", "vector.score", "vector.collection"]
 		},
 		{
 			"section": "Transform",
-			"title": "Milvus",
-			"properties": ["type", "milvus.target.parameters", "target.mode"]
+			"title": "Astra DB",
+			"properties": ["type", "astra_db.target.parameters", "target.mode"]
 		}
 	]
 }

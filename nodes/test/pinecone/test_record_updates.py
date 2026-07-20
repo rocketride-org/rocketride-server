@@ -65,7 +65,7 @@ def _scoped_stubs() -> Iterator[None]:
 def _load_store_module() -> types.ModuleType:
     """Load the Pinecone Store module from source with temporary stubs."""
     with _scoped_stubs():
-        pinecone_file = _ROOT / 'nodes' / 'src' / 'nodes' / 'pinecone' / 'pinecone.py'
+        pinecone_file = _ROOT / 'nodes' / 'src' / 'nodes' / 'store_pinecone' / 'pinecone.py'
         spec = importlib.util.spec_from_file_location('test_pinecone_store_module', pinecone_file)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)

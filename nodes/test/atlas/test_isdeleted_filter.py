@@ -67,7 +67,7 @@ class DocFilter:
 
 # Do NOT stub pydantic: atlas.py imports ai.common.store -> rocketlib, and
 # rocketlib.types needs the real pydantic (BaseModel, ConfigDict, Field).
-_atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'atlas' / 'atlas.py'
+_atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'store_atlas' / 'atlas.py'
 _spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
 atlas_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(atlas_mod)

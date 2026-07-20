@@ -35,7 +35,7 @@ def getStore():
     """
     Return the postgres store class.
     """
-    from .vectordb_postgres import Store
+    from .postgres import Store
 
     return Store
 

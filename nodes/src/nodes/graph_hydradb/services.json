@@ -10,7 +10,7 @@
 	//
 	// Required: Class type of the node - a database that is also an agent-callable tool
 	//
-	"classType": ["database", "tool"],
+	"classType": ["graph", "database", "tool"],
 	//
 	// Required: Capabilities are flags that change engine behavior.
 	//   noremote - holds a client + credentials, so it pins to the local worker (per db_neo4j/db_arango)
@@ -29,7 +29,7 @@
 	//
 	// Optional: The python module path (must be nodes.<dir_name>)
 	//
-	"path": "nodes.db_hydradb",
+	"path": "nodes.graph_hydradb",
 	//
 	// Required: The prefix map used when converting URLs <=> paths (unique across the catalog)
 	//

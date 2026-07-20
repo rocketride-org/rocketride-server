@@ -45,7 +45,7 @@ def _load_store_class() -> type:
     with _scoped_stubs():
         root = Path(__file__).resolve().parents[3]
         mocks_path = root / 'nodes' / 'test' / 'mocks'
-        weaviate_file = root / 'nodes' / 'src' / 'nodes' / 'weaviate' / 'weaviate.py'
+        weaviate_file = root / 'nodes' / 'src' / 'nodes' / 'store_weaviate' / 'weaviate.py'
         inserted = False
         if str(mocks_path) not in sys.path:
             sys.path.insert(0, str(mocks_path))

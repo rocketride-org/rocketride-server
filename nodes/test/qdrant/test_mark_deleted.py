@@ -75,7 +75,7 @@ for name, mock in {
 # Import qdrant.py DIRECTLY (bypassing __init__.py which pulls IEndpoint etc.)
 # ---------------------------------------------------------------------------
 
-_qdrant_path = NODES_SRC / 'qdrant' / 'qdrant.py'
+_qdrant_path = NODES_SRC / 'store_qdrant' / 'qdrant.py'
 _spec = importlib.util.spec_from_file_location('_qdrant_store', str(_qdrant_path))
 _qdrant_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_qdrant_mod)

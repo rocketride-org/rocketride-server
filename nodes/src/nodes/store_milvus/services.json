@@ -3,12 +3,12 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Weaviate",
+	"title": "Milvus",
 	//
 	// Required:
 	//     The protocol is the endpoint protocol
 	//
-	"protocol": "weaviate://",
+	"protocol": "milvus://",
 	//
 	// Required:
 	//		Class type of the node - what it does
@@ -31,28 +31,28 @@
 	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//
-	"node": "python", //ai
+	"node": "python",
 	//
 	// Optional:
 	//     The path is the executable/script code - it is node dependent
 	//     and is optional for most node
 	//
-	"path": "nodes.weaviate",
+	"path": "nodes.store_milvus",
 	//
 	// Required:
 	//     The prefix map when added/removed when convertting URLs <=> paths
 	//
-	"prefix": "Weaviate Vector Store",
+	"prefix": "Milvus Vector Store",
 	//
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that stores vector embeddings in a Weaviate instance ", "for semantic search and retrieval. It supports structured metadata and schema ", "configuration, enabling efficient storage, indexing, and querying ", "of high-dimensional data. Ideal for AI pipelines involving similarity search, ", "recommendation systems, and knowledge management."],
+	"description": ["A vector database component for Milvus, enabling efficient storage, indexing, ", "and retrieval of vector embeddings. It supports high-performance similarity search, ", "flexible indexing strategies (IVF, HNSW), scalable deployment, and management ", "of vector data for machine learning and AI retrieval workflows."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
-	"icon": "weaviate.svg",
+	"icon": "milvus.svg",
 	"documentation": "https://docs.rocketride.org",
 	//
 	//
@@ -60,7 +60,7 @@
 	//      Rendering hints to the UI which indicate which fields of
 	//      the configuration should be used to display information
 	//
-	"tile": ["Host/Port: ${parameters.weaviate.${profile}.host}:${parameters.weaviate.${profile}.port}", "Collection: ${parameters.weaviate.${profile}.collection}"],
+	"tile": ["Host/Port: ${parameters.milvus.${profile}.host}:${parameters.milvus.${profile}.port}", "Collection: ${parameters.milvus.${profile}.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -116,7 +116,7 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						"property": [
-							{ "path": "[0].score", "greaterThanOrEqual": 0.5 },
+							{ "path": "[0].score", "greaterThan": 0.5 },
 							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
@@ -137,14 +137,14 @@
 		"profiles": {
 			"local": {
 				"mode": "local",
-				"title": "Your own Weaviate server",
+				"title": "Your own Milvus server",
 				"host": "localhost",
-				"port": 8080,
+				"port": 19530,
 				"collection": "ROCKETRIDE"
 			},
 			"cloud": {
 				"mode": "cloud",
-				"title": "Weaviate cloud server",
+				"title": "Milvus cloud server",
 				"host": "",
 				"port": 443,
 				"apikey": "",
@@ -160,7 +160,7 @@
 	//
 	"fields": {
 		"vector.cloud.host": {
-			"description": "Enter the server IP address e.g. <your-instance-name>.weaviate.cloud"
+			"description": "Enter the server IP address e.g. <your-instance-name>.<region>.zillizcloud.com"
 		},
 		"vector.cloud.port": {
 			"default": 443
@@ -169,76 +169,69 @@
 			"default": "localhost"
 		},
 		"vector.local.port": {
-			"default": 8080
+			"default": 19530
 		},
-		"vector.local.grpc_port": {
-			"default": 50051
-		},
-		"weaviate.cloud": {
+		"milvus.cloud": {
 			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.apikey", "vector.score", "vector.collection"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection"]
 		},
-		"weaviate.local": {
+		"milvus.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.local.grpc_port", "vector.score", "vector.collection"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection"]
 		},
-		"weaviate.profile": {
-			"title": "Type of Weaviate host",
+		"milvus.profile": {
+			"title": "Type of Milvus host",
 			"description": "Connect to...",
 			"type": "string",
-			"default": "local",
+			"default": "cloud",
 			"enum": ["*>preconfig.profiles.*.title"],
 			"conditional": [
 				{
 					"value": "cloud",
-					"properties": ["weaviate.cloud"]
+					"properties": ["milvus.cloud"]
 				},
 				{
 					"value": "local",
-					"properties": ["weaviate.local"]
+					"properties": ["milvus.local"]
 				}
 			]
 		},
-		"weaviate.provider": {
+		"milvus.provider": {
 			"type": "string",
-			"const": "weaviate",
-			"default": "weaviate"
+			"const": "milvus",
+			"default": "milvus"
 		},
-		"weaviate.weaviate": {
-			"object": "weaviate",
-			"properties": ["weaviate.profile"]
+		"milvus.milvus": {
+			"object": "milvus",
+			"properties": ["milvus.profile"]
 		},
-		"weaviate.store": {
+		"milvus.store": {
 			"object": "store",
 			"title": "Store",
-			"properties": ["weaviate.provider", "weaviate.weaviate"]
+			"properties": ["milvus.provider", "milvus.milvus"]
 		},
-		"weaviate.target.autopipe": {
+		"milvus.target.autopipe": {
 			"object": "parameters",
-			"title": "Parameters",
-			"properties": ["remote", "weaviate.store", "all.embedding"]
+			"properties": ["remote", "milvus.store", "all.embedding"]
 		},
-		"weaviate.target.parameters": {
+		"milvus.target.parameters": {
 			"object": "parameters",
-			"title": "Parameters",
-			"properties": ["weaviate.target.autopipe"]
+			"properties": ["milvus.target.autopipe"]
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
 	//
 	"shape": [
 		{
 			"section": "Pipe",
-			"title": "Weaviate Vector Store",
-			"properties": ["weaviate.profile"]
+			"title": "Milvus VectorDB",
+			"properties": ["milvus.profile"]
 		},
 		{
 			"section": "Transform",
-			"title": "Weaviate",
-			"properties": ["type", "weaviate.target.parameters", "target.mode"]
+			"title": "Milvus",
+			"properties": ["type", "milvus.target.parameters", "target.mode"]
 		}
 	]
 }

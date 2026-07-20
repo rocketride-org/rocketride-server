@@ -12,7 +12,7 @@ documents are excluded unless the caller explicitly sets isDeleted=True.
 
 from ai.common.schema import DocFilter
 
-from nodes.astra_db.astra_db import Store
+from nodes.store_astra.astra_db import Store
 
 
 def _store() -> Store:

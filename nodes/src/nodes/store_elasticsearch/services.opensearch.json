@@ -5,7 +5,7 @@
 	"capabilities": [],
 	"register": "filter",
 	"node": "python",
-	"path": "nodes.index_search",
+	"path": "nodes.store_elasticsearch",
 	"preconfig": {
 		"default": "local",
 		"profiles": {

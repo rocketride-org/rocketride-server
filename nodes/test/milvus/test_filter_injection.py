@@ -11,7 +11,7 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'milvus'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src', 'nodes', 'store_milvus'))
 
 # Mock heavy dependencies only for the duration of the milvus import so that
 # real modules (numpy, ai.*) remain available to other test files collected in

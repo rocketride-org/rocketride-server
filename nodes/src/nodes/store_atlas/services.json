@@ -37,7 +37,7 @@
 	//     The path is the executable/script code - it is node dependent
 	//     and is optional for most node
 	//
-	"path": "nodes.atlas",
+	"path": "nodes.store_atlas",
 	//
 	// Required:
 	//     The prefix map when added/removed when convertting URLs <=> paths
