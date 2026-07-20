@@ -1,13 +1,10 @@
 # =============================================================================
 # MIT License — Copyright (c) 2026 Aparavi Software AG
-# (full text in ast_deps.py)
 # =============================================================================
 
-"""Unit tests for ``ast_deps`` — provider resolution + AST dependency discovery.
+"""Tests for ``ast_deps`` — provider resolution and AST dependency discovery.
 
-Pure-logic tests (JSONC stripping, provider aliasing) run anywhere. The golden
-requirement-set tests need the real node/ai source tree and are skipped when the
-repo layout is not reachable from this file (e.g. an installed/packaged context).
+Tests needing the real node/ai source tree are skipped when it is not reachable.
 """
 
 from __future__ import annotations
@@ -18,7 +15,7 @@ import pytest
 
 import ast_deps as A
 
-# lib/ -> rocketlib-python -> engine-lib -> server -> packages -> repo root
+# tests/ -> rocketlib-python -> engine-lib -> server -> packages -> repo root
 _REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), *([os.pardir] * 5)))
 _NODES_SRC = os.path.join(_REPO, 'nodes', 'src')
 _AI_SRC = os.path.join(_REPO, 'packages', 'ai', 'src')
@@ -26,17 +23,20 @@ _FIXTURES = os.path.join(_REPO, 'nodes', 'test', 'fixtures')
 
 _HAVE_TREE = os.path.isdir(os.path.join(_NODES_SRC, 'nodes')) and os.path.isdir(os.path.join(_AI_SRC, 'ai'))
 _needs_tree = pytest.mark.skipif(not _HAVE_TREE, reason='node/ai source tree not reachable')
+_needs_fixtures = pytest.mark.skipif(
+    not os.path.isdir(os.path.join(_FIXTURES, 'nodes', 'vtest_alpha')), reason='vtest fixtures not present'
+)
 
 
-# --- pure logic: JSONC stripping -------------------------------------------
+# --- JSONC parsing ----------------------------------------------------------
 
 
 def test_strip_jsonc_preserves_scheme_in_strings():
-    src = '{ // a comment\n  "protocol": "webhook://", /* blk */ "path": "nodes.webhook" }'
     import json
 
+    src = '{ // a comment\n  "protocol": "webhook://", /* blk */ "path": "nodes.webhook" }'
     data = json.loads(A.strip_jsonc(src))
-    assert data['protocol'] == 'webhook://'  # the // inside the string survived
+    assert data['protocol'] == 'webhook://'  # the // inside the string must survive
     assert data['path'] == 'nodes.webhook'
 
 
@@ -53,7 +53,7 @@ def test_string_consts_flatten():
     assert A._string_consts(node) == ['a.txt', 'b.txt', 'c.txt']
 
 
-# --- provider resolution (the services.json 'path' mapping) -----------------
+# --- provider -> module resolution ------------------------------------------
 
 
 @_needs_tree
@@ -88,7 +88,7 @@ def test_provider_native_and_unknown():
     assert idx.resolve('does_not_exist') is None
 
 
-# --- golden requirement sets (transitive walk correctness) ------------------
+# --- transitive walk --------------------------------------------------------
 
 
 @_needs_tree
@@ -105,14 +105,13 @@ def test_golden_requirement_sets(provider, must_include):
     assert not res.unresolved_providers
     basenames = {os.path.basename(p) for p in res.requirement_files}
     assert must_include <= basenames, f'{provider} missing {must_include - basenames}'
-    # torch is reached in every heavy vision/audio node's local branch
+    # torch is reached through each heavy node's local (non-model-server) branch
     assert any('torch' in os.path.relpath(p, _REPO).replace(os.sep, '/') for p in res.requirement_files)
-    assert res.dynamic_imports == []  # none of these three use dynamic imports
+    assert res.dynamic_imports == []
 
 
 @_needs_tree
 def test_only_needed_excludes_unrelated_families():
-    # a detect-only env must not drag in audio (whisper) or NER (gliner) deps
     res = A.discover_for_providers(['detect'], _NODES_SRC, _AI_SRC)
     basenames = {os.path.basename(p) for p in res.requirement_files}
     assert 'requirements_whisper.txt' not in basenames
@@ -121,30 +120,39 @@ def test_only_needed_excludes_unrelated_families():
 
 @_needs_tree
 def test_dynamic_import_is_flagged():
-    # preprocessor_code uses importlib.import_module(modmap[lang]) — must be flagged
+    # preprocessor_code resolves its module from a config-driven dict at runtime
     res = A.discover_for_providers(['preprocessor_code'], _NODES_SRC, _AI_SRC)
-    assert res.dynamic_imports, 'expected the dynamic importlib call to be flagged'
+    assert res.dynamic_imports
 
 
-# --- conflict fixture nodes (lightweight, decoupled from ai/*) --------------
+# --- conflict fixture nodes -------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not os.path.isdir(os.path.join(_FIXTURES, 'nodes', 'vtest_alpha')),
-    reason='vtest fixture nodes not present',
-)
+@_needs_fixtures
 def test_fixture_nodes_pin_conflicting_versions_without_ai():
     idx = A.ProviderIndex(_FIXTURES)
     roots_ai = _AI_SRC if _HAVE_TREE else _FIXTURES
     for prov, pin in (('vtest_alpha', 'tabulate==0.8.10'), ('vtest_beta', 'tabulate==0.9.0')):
         entry = idx.resolve(prov)
         assert entry is not None and not entry.native
-        res = A.discover([f for f in entry.entry_files], {'nodes': _FIXTURES, 'ai': roots_ai})
-        # the fixture's own requirements.txt is found ...
-        reqs = res.requirement_files
-        assert any(os.path.basename(r) == 'requirements.txt' for r in reqs)
-        contents = ''.join(open(r, encoding='utf-8').read() for r in reqs)
+        res = A.discover(entry.entry_files, {'nodes': _FIXTURES, 'ai': roots_ai})
+        contents = ''.join(open(r, encoding='utf-8').read() for r in res.requirement_files)
         assert pin in contents
-        # ... and it pulls nothing from ai/*
         assert res.reached_modules == []
         assert 'tabulate' in res.third_party
+
+
+@_needs_fixtures
+def test_discover_for_providers_dedupes_repeated_providers(monkeypatch):
+    # a pipeline may hold many nodes of one type; each provider must resolve once
+    seen = []
+    orig = A.ProviderIndex.resolve
+
+    def counting(self, provider):
+        seen.append(provider)
+        return orig(self, provider)
+
+    monkeypatch.setattr(A.ProviderIndex, 'resolve', counting)
+    res = A.discover_for_providers(['vtest_alpha', 'vtest_alpha', 'vtest_beta', 'vtest_alpha'], _FIXTURES, _FIXTURES)
+    assert seen == ['vtest_alpha', 'vtest_beta']
+    assert {os.path.basename(r) for r in res.requirement_files} >= {'requirements.txt'}
