@@ -67,6 +67,19 @@ def _build_import_stubs():
     requests.ConnectionError = ConnectionError
     requests.RequestException = Exception
 
+    # oura_client compares against named HTTP status codes per repo convention
+    # (from requests.status_codes import codes); mirror the real values here.
+    class _Codes:
+        unauthorized = 401
+        forbidden = 403
+        unprocessable_entity = 422
+        upgrade_required = 426
+        too_many_requests = 429
+
+    status_codes = MagicMock()
+    status_codes.codes = _Codes
+    requests.status_codes = status_codes
+
     rocketlib = MagicMock()
     rocketlib.IInstanceBase = object  # must be a real class for inheritance
     rocketlib.IGlobalBase = object
@@ -85,6 +98,7 @@ def _build_import_stubs():
 
     return {
         'requests': requests,
+        'requests.status_codes': status_codes,
         'rocketlib': rocketlib,
         'depends': depends,
         'ai': MagicMock(),
@@ -101,6 +115,7 @@ for _name, _stub in _build_import_stubs().items():
         _added_stubs.append(_name)
 
 mod = importlib.import_module('nodes.tool_oura.oura_client')
+glb_mod = importlib.import_module('nodes.tool_oura.IGlobal')
 
 # Drop the stubs we injected so they never leak into the shared pytest session.
 for _name in _added_stubs:
@@ -336,3 +351,42 @@ def test_date_helpers_reject_non_iso_types():
     with pytest.raises(ValueError):
         mod._parse_date('07/01/2026', 'start_date')
     assert mod._parse_date('2026-07-01', 'start_date') == date(2026, 7, 1)
+
+
+# ---------------------------------------------------------------------------
+# IGlobal._get_token credential precedence
+# ---------------------------------------------------------------------------
+
+
+def test_get_token_node_config_wins_over_all():
+    with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': 'env-token'}):
+        token = glb_mod.IGlobal._get_token({'token': 'cfg-token'}, {'token': 'conn-token'})
+    assert token == 'cfg-token'
+
+
+def test_get_token_falls_back_to_connection_config():
+    with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': 'env-token'}):
+        token = glb_mod.IGlobal._get_token({}, {'token': 'conn-token'})
+    assert token == 'conn-token'
+
+
+def test_get_token_falls_back_to_environment():
+    with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': 'env-token'}):
+        token = glb_mod.IGlobal._get_token({}, {})
+    assert token == 'env-token'
+
+
+def test_get_token_empty_when_no_source():
+    with patch.dict('os.environ', {}, clear=False):
+        import os
+
+        os.environ.pop('ROCKETRIDE_OURA_TOKEN', None)
+        token = glb_mod.IGlobal._get_token({}, {})
+    assert token == ''
+
+
+def test_get_token_strips_whitespace_and_skips_blank_values():
+    # A whitespace-only node-config token must not shadow the next source.
+    with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': ''}):
+        token = glb_mod.IGlobal._get_token({'token': '   '}, {'token': '  conn-token  '})
+    assert token == 'conn-token'

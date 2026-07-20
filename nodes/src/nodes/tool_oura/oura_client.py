@@ -44,6 +44,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import requests
+from requests.status_codes import codes as status_codes
 
 BASE_URL = 'https://api.ouraring.com/v2'
 DEFAULT_TIMEOUT = 30
@@ -132,19 +133,19 @@ def _map_error(resp: requests.Response) -> ValueError:
         detail = resp.text or resp.reason or 'unknown error'
 
     status = resp.status_code
-    if status == 401:
+    if status == status_codes.unauthorized:
         # Oura reports missing scopes as 401 rather than 403 — surface that
         # distinctly so agents don't conclude the token itself is bad.
         if 'scope' in str(detail).lower():
             return ValueError(f'Oura scope not granted (401) — re-authorize the app with this scope: {detail}')
         return ValueError(f'Oura authentication failed (401) — check the access token: {detail}')
-    if status == 403:
+    if status == status_codes.forbidden:
         return ValueError(f'Oura access denied (403) — the token may lack the required scope: {detail}')
-    if status == 422:
+    if status == status_codes.unprocessable_entity:
         return ValueError(f'Oura rejected the request parameters (422): {detail}')
-    if status == 426:
+    if status == status_codes.upgrade_required:
         return ValueError(f'Oura subscription required (426) — this data needs an active Oura membership: {detail}')
-    if status == 429:
+    if status == status_codes.too_many_requests:
         return ValueError(f'Oura rate limit exceeded (429) — back off and retry later: {detail}')
     return ValueError(f'Oura API {status}: {detail}')
 

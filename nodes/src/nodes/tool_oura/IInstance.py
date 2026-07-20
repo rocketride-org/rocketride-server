@@ -101,14 +101,20 @@ class IInstance(IInstanceBase):
     def _fetch_range(self, collection: str, args: dict, *, default_days: int = 7) -> dict:
         """Fetch a date-filtered collection and return a compact result envelope."""
         start, end = resolve_date_range(args, default_days=default_days)
+        next_token = args.get('next_token') or None
         result = fetch_collection(
             self._token(),
             collection,
             params={'start_date': start, 'end_date': end},
-            next_token=(args.get('next_token') or None),
+            next_token=next_token,
         )
         compacted = compact_result(result, include_detail=bool(args.get('include_detail')))
-        compacted['query'] = {'collection': collection, 'start_date': start, 'end_date': end}
+        if next_token:
+            # Oura ignores date filters when a next_token is present, so echoing
+            # the resolved range here would misdescribe what was fetched.
+            compacted['query'] = {'collection': collection, 'continued_from_next_token': True}
+        else:
+            compacted['query'] = {'collection': collection, 'start_date': start, 'end_date': end}
         return compacted
 
     # =======================================================================
@@ -168,7 +174,9 @@ class IInstance(IInstanceBase):
 
     @tool_function(
         input_schema={'type': 'object', 'properties': dict(_DATE_RANGE_PROPS)},
-        description=_dated('Get daily sleep scores and their contributors (deep sleep, efficiency, latency, REM, restfulness, timing, total sleep).'),
+        description=_dated(
+            'Get daily sleep scores and their contributors (deep sleep, efficiency, latency, REM, restfulness, timing, total sleep).'
+        ),
     )
     def sleep_daily(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
@@ -176,7 +184,9 @@ class IInstance(IInstanceBase):
 
     @tool_function(
         input_schema={'type': 'object', 'properties': dict(_DATE_RANGE_PROPS)},
-        description=_dated('Get daily readiness scores and contributors (HRV balance, resting heart rate, body temperature, recovery index, previous day activity).'),
+        description=_dated(
+            'Get daily readiness scores and contributors (HRV balance, resting heart rate, body temperature, recovery index, previous day activity).'
+        ),
     )
     def readiness_daily(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
@@ -190,7 +200,9 @@ class IInstance(IInstanceBase):
                 'include_detail': {'type': 'boolean', 'description': _INCLUDE_DETAIL_DESC},
             },
         },
-        description=_dated('Get daily activity: score, steps, active/total/target calories, MET minutes, sedentary and resting time.'),
+        description=_dated(
+            'Get daily activity: score, steps, active/total/target calories, MET minutes, sedentary and resting time.'
+        ),
     )
     def activity_daily(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
@@ -198,7 +210,9 @@ class IInstance(IInstanceBase):
 
     @tool_function(
         input_schema={'type': 'object', 'properties': dict(_DATE_RANGE_PROPS)},
-        description=_dated('Get daily stress: high-stress and high-recovery seconds and the day summary (restored / normal / stressful).'),
+        description=_dated(
+            'Get daily stress: high-stress and high-recovery seconds and the day summary (restored / normal / stressful).'
+        ),
     )
     def stress_daily(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
@@ -206,7 +220,9 @@ class IInstance(IInstanceBase):
 
     @tool_function(
         input_schema={'type': 'object', 'properties': dict(_DATE_RANGE_PROPS)},
-        description=_dated('Get daily resilience: level (limited/adequate/solid/strong/exceptional) and sleep/daytime recovery contributors.'),
+        description=_dated(
+            'Get daily resilience: level (limited/adequate/solid/strong/exceptional) and sleep/daytime recovery contributors.'
+        ),
     )
     def resilience_daily(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
@@ -214,7 +230,9 @@ class IInstance(IInstanceBase):
 
     @tool_function(
         input_schema={'type': 'object', 'properties': dict(_DATE_RANGE_PROPS)},
-        description=_dated('Get daily blood oxygen saturation (SpO2) averages and breathing disturbance index from sleep.'),
+        description=_dated(
+            'Get daily blood oxygen saturation (SpO2) averages and breathing disturbance index from sleep.'
+        ),
     )
     def spo2_daily(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
@@ -284,7 +302,9 @@ class IInstance(IInstanceBase):
 
     @tool_function(
         input_schema={'type': 'object', 'properties': dict(_DATE_RANGE_PROPS)},
-        description=_dated('Get logged workouts: activity type, intensity, calories, distance, start/end time, source.'),
+        description=_dated(
+            'Get logged workouts: activity type, intensity, calories, distance, start/end time, source.'
+        ),
     )
     def workouts(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
@@ -298,7 +318,9 @@ class IInstance(IInstanceBase):
                 'include_detail': {'type': 'boolean', 'description': _INCLUDE_DETAIL_DESC},
             },
         },
-        description=_dated('Get guided and unguided sessions (meditation, breathing, relaxation, rest) with heart rate and HRV outcomes.'),
+        description=_dated(
+            'Get guided and unguided sessions (meditation, breathing, relaxation, rest) with heart rate and HRV outcomes.'
+        ),
     )
     def sessions(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
@@ -306,7 +328,9 @@ class IInstance(IInstanceBase):
 
     @tool_function(
         input_schema={'type': 'object', 'properties': dict(_DATE_RANGE_PROPS)},
-        description=_dated('Get enhanced tags: user-logged events (caffeine, alcohol, sickness, custom tags) with timestamps and comments.'),
+        description=_dated(
+            'Get enhanced tags: user-logged events (caffeine, alcohol, sickness, custom tags) with timestamps and comments.'
+        ),
     )
     def tags(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')

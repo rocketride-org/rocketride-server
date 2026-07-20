@@ -4,7 +4,7 @@ A RocketRide agent tool node that exposes the [Oura API v2](https://cloud.ourari
 
 ## What it does
 
-Wraps every documented Oura v2 `usercollection` endpoint behind 19 tool functions. All operations are **read-only** — the Oura v2 API offers no write endpoints for personal data, so an agent bound to this node can never modify anything.
+Wraps every documented Oura v2 `usercollection` endpoint behind 20 tool functions. All operations are **read-only** — the Oura v2 API offers no write endpoints for personal data, so an agent bound to this node can never modify anything.
 
 Responses are compacted before they reach the agent: heavy time-series fields (`class_5_min`, `sleep_phase_5_min`, `hrv`, `heart_rate`, `met`, `movement_30_sec`, `motion_count`) are stripped unless the tool call passes `include_detail: true`. This keeps multi-day queries within sane token budgets while leaving full-resolution data one flag away.
 
