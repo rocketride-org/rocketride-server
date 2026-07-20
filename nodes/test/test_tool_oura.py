@@ -72,6 +72,7 @@ def _build_import_stubs():
     class _Codes:
         unauthorized = 401
         forbidden = 403
+        not_found = 404
         unprocessable_entity = 422
         upgrade_required = 426
         too_many_requests = 429
@@ -136,9 +137,11 @@ def test_resolve_date_range_explicit():
 
 def test_resolve_date_range_defaults_to_last_week():
     start, end = mod.resolve_date_range({}, default_days=7)
-    today = datetime.now(timezone.utc).date()
-    assert end == today.isoformat()
-    assert start == (today - timedelta(days=7)).isoformat()
+    # Default end is UTC tomorrow so wearers ahead of UTC never lose their
+    # current local day (Oura `day` fields are in the wearer's timezone).
+    default_end = datetime.now(timezone.utc).date() + timedelta(days=1)
+    assert end == default_end.isoformat()
+    assert start == (default_end - timedelta(days=7)).isoformat()
 
 
 def test_resolve_date_range_default_start_follows_explicit_end():
@@ -207,6 +210,11 @@ def test_compact_document_include_detail_passthrough():
 def test_compact_document_non_dict_passthrough():
     assert mod.compact_document([1, 2, 3]) == [1, 2, 3]
     assert mod.compact_document(None) is None
+
+
+def test_compact_document_recurses_into_lists():
+    doc = {'sessions': [{'score': 1, 'heart_rate': {'items': [50]}}, {'score': 2}]}
+    assert mod.compact_document(doc) == {'sessions': [{'score': 1}, {'score': 2}]}
 
 
 def test_compact_result_wraps_data_and_token():
@@ -299,11 +307,12 @@ def test_fetch_collection_respects_page_cap():
 # ---------------------------------------------------------------------------
 
 
-def _resp(status, payload=None, text=''):
+def _resp(status, payload=None, text='', headers=None):
     resp = MagicMock()
     resp.status_code = status
     resp.text = text
     resp.reason = 'reason'
+    resp.headers = headers or {}
     if payload is None:
         resp.json.side_effect = ValueError('no json')
     else:
@@ -325,6 +334,37 @@ def test_map_error_426_mentions_subscription():
 def test_map_error_429_mentions_rate_limit():
     err = mod._map_error(_resp(429, {'detail': 'slow down'}))
     assert 'rate limit' in str(err)
+
+
+def test_map_error_429_surfaces_retry_after():
+    err = mod._map_error(_resp(429, {'detail': 'slow down'}, headers={'Retry-After': '30'}))
+    assert 'Retry after 30 seconds' in str(err)
+
+
+def test_map_error_404_mentions_document_id():
+    err = mod._map_error(_resp(404, {'detail': 'not found'}))
+    assert 'resource not found' in str(err)
+    assert 'document ID' in str(err)
+
+
+def test_map_error_429_retry_after_http_date_gets_no_seconds_suffix():
+    err = mod._map_error(_resp(429, {'detail': 'slow down'}, headers={'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT'}))
+    assert 'Retry after Wed, 21 Oct 2026 07:28:00 GMT.' in str(err)
+    assert 'GMT seconds' not in str(err)
+
+
+def test_map_error_401_scope_detected_past_truncation_cap():
+    """Scope classification must use the full body, not the truncated excerpt."""
+    detail = 'x' * 600 + ' missing scope: daily'
+    err = mod._map_error(_resp(401, {'detail': detail}))
+    assert 'scope not granted' in str(err)
+    assert '(truncated)' in str(err)
+
+
+def test_map_error_truncates_huge_non_json_body():
+    err = mod._map_error(_resp(502, text='<html>' + 'x' * 5000 + '</html>'))
+    assert len(str(err)) < 600
+    assert '(truncated)' in str(err)
 
 
 def test_map_error_422_joins_validation_list():
@@ -445,3 +485,182 @@ def test_heartrate_next_token_skips_datetime_validation():
     assert calls['next_token'] == 'abc'
     assert calls['params'] is None
     assert out['query'] == {'collection': 'heartrate', 'continued_from_next_token': True}
+
+
+# ---------------------------------------------------------------------------
+# IInstance response contracts
+# ---------------------------------------------------------------------------
+
+
+def test_daily_summary_reports_truncated_collections():
+    """A page-cap hit must be surfaced — silent truncation misleads the agent."""
+    inst = _make_instance()
+
+    def fetch(token, collection, *, params=None, next_token=None, max_pages=None):
+        if collection == 'daily_sleep':
+            return {'data': [{'day': '2026-07-01', 'score': 80}], 'next_token': 'more'}
+        return {'data': [], 'next_token': None}
+
+    with patch.object(inst_mod, 'fetch_collection', fetch):
+        out = inst.daily_summary({'start_date': '2026-01-01', 'end_date': '2026-07-01'})
+
+    assert out['truncated']['collections'] == ['daily_sleep']
+    assert 'narrower' in out['truncated']['note']
+    assert out['query']['collections'] == ['daily_sleep', 'daily_readiness', 'daily_activity', 'daily_stress']
+
+
+def test_daily_summary_complete_response_has_no_truncated_key():
+    inst = _make_instance()
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch({})):
+        out = inst.daily_summary({'start_date': '2026-07-01', 'end_date': '2026-07-08'})
+    assert 'truncated' not in out
+    assert 'skipped_collections' not in out
+
+
+def test_daily_summary_skips_scope_missing_collections():
+    """A token without one collection's scope must yield a partial summary, not a failure."""
+    inst = _make_instance()
+
+    def fetch(token, collection, *, params=None, next_token=None, max_pages=None):
+        if collection == 'daily_stress':
+            raise ValueError('Oura scope not granted (401) — re-authorize the app with this scope: daily_stress')
+        return {'data': [{'day': '2026-07-01', 'score': 80}], 'next_token': None}
+
+    with patch.object(inst_mod, 'fetch_collection', fetch):
+        out = inst.daily_summary({'start_date': '2026-07-01', 'end_date': '2026-07-08'})
+
+    assert out['skipped_collections']['collections'] == ['daily_stress']
+    assert out['days']  # the other three collections still produced data
+
+
+def test_daily_summary_raises_when_every_collection_lacks_scope():
+    inst = _make_instance()
+
+    def fetch(token, collection, *, params=None, next_token=None, max_pages=None):
+        raise ValueError('Oura scope not granted (401)')
+
+    with patch.object(inst_mod, 'fetch_collection', fetch):
+        with pytest.raises(ValueError, match='scope not granted'):
+            inst.daily_summary({'start_date': '2026-07-01', 'end_date': '2026-07-08'})
+
+
+def test_daily_summary_non_scope_error_still_fails_the_call():
+    """Only scope errors are recoverable — auth/rate-limit failures must propagate."""
+    inst = _make_instance()
+
+    def fetch(token, collection, *, params=None, next_token=None, max_pages=None):
+        raise ValueError('Oura rate limit exceeded (429) — back off and retry later.')
+
+    with patch.object(inst_mod, 'fetch_collection', fetch):
+        with pytest.raises(ValueError, match='rate limit'):
+            inst.daily_summary({'start_date': '2026-07-01', 'end_date': '2026-07-08'})
+
+
+def test_ring_configuration_returns_query_envelope():
+    inst = _make_instance()
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch({})):
+        out = inst.ring_configuration({})
+    assert out['query'] == {'collection': 'ring_configuration'}
+
+
+def test_ring_configuration_next_token_flags_continuation():
+    inst = _make_instance()
+    calls = {}
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch(calls)):
+        out = inst.ring_configuration({'next_token': 'abc'})
+    assert calls['next_token'] == 'abc'
+    assert out['query'] == {'collection': 'ring_configuration', 'continued_from_next_token': True}
+
+
+def test_document_get_url_escapes_document_id():
+    """A document_id containing path metacharacters must stay in the path segment."""
+    inst = _make_instance()
+    paths = []
+
+    def fake_call(token, path, *, params=None):
+        paths.append(path)
+        return {'id': 'x'}
+
+    with patch.object(inst_mod, 'call', fake_call):
+        inst.document_get({'collection': 'sleep', 'document_id': '../personal_info?x=1'})
+
+    assert paths == ['/usercollection/sleep/..%2Fpersonal_info%3Fx%3D1']
+
+
+def test_collection_get_rejects_heartrate():
+    """The date-range escape hatch must refuse heartrate (it filters on datetimes)."""
+    inst = _make_instance()
+    with pytest.raises(ValueError, match='dedicated tools'):
+        inst.collection_get({'collection': 'heartrate'})
+
+
+def test_collection_get_rejects_ring_configuration():
+    inst = _make_instance()
+    with pytest.raises(ValueError, match='not a date-filtered collection'):
+        inst.collection_get({'collection': 'ring_configuration'})
+
+
+def test_document_get_rejects_heartrate():
+    """Reject heartrate locally — it has no per-document endpoint, so Oura would 404."""
+    inst = _make_instance()
+    with pytest.raises(ValueError, match='no per-document endpoint'):
+        inst.document_get({'collection': 'heartrate', 'document_id': 'abc'})
+
+
+def test_collection_get_unknown_name_says_unknown():
+    """A typo must be reported as unknown, not as a known-but-excluded collection."""
+    inst = _make_instance()
+    with pytest.raises(ValueError, match='unknown collection'):
+        inst.collection_get({'collection': 'daily_slep'})
+
+
+def test_document_get_unknown_name_says_unknown():
+    inst = _make_instance()
+    with pytest.raises(ValueError, match='unknown collection'):
+        inst.document_get({'collection': 'nope', 'document_id': 'abc'})
+
+
+def test_date_range_props_advertise_the_real_default_window():
+    """The schema must not claim a 7-day default for tools that fetch 30 or 90 days."""
+    assert 'minus 30 days' in inst_mod._date_range_props(30)['start_date']['description']
+    assert 'minus 90 days' in inst_mod._date_range_props(90)['start_date']['description']
+
+
+def test_heartrate_query_echoes_collection():
+    inst = _make_instance()
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch({})):
+        out = inst.heartrate({'start_datetime': '2026-07-01T00:00:00Z', 'end_datetime': '2026-07-01T06:00:00Z'})
+    assert out['query']['collection'] == 'heartrate'
+    assert out['query']['start_datetime'] == '2026-07-01T00:00:00+00:00'
+
+
+def test_ring_battery_level_uses_datetime_window():
+    inst = _make_instance()
+    calls = {}
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch(calls)):
+        out = inst.ring_battery_level(
+            {'start_datetime': '2026-07-01T00:00:00Z', 'end_datetime': '2026-07-02T00:00:00Z'}
+        )
+    assert calls['params'] == {
+        'start_datetime': '2026-07-01T00:00:00+00:00',
+        'end_datetime': '2026-07-02T00:00:00+00:00',
+    }
+    assert out['query']['collection'] == 'ring_battery_level'
+
+
+def test_ring_battery_level_next_token_skips_datetime_validation():
+    inst = _make_instance()
+    calls = {}
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch(calls)):
+        out = inst.ring_battery_level({'next_token': 'abc', 'start_datetime': 'garbage'})
+    assert calls['next_token'] == 'abc'
+    assert out['query'] == {'collection': 'ring_battery_level', 'continued_from_next_token': True}
+
+
+def test_escape_hatches_exclude_ring_battery_level():
+    """ring_battery_level is datetime-windowed and has no per-document endpoint."""
+    inst = _make_instance()
+    with pytest.raises(ValueError, match='dedicated tools'):
+        inst.collection_get({'collection': 'ring_battery_level'})
+    with pytest.raises(ValueError, match='no per-document endpoint'):
+        inst.document_get({'collection': 'ring_battery_level', 'document_id': 'abc'})

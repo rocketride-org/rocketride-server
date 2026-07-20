@@ -39,7 +39,9 @@ pytestmark = pytest.mark.skipif(not TOKEN, reason='OURA_TOKEN must be set')
 
 
 def _last_week() -> dict:
-    end = datetime.now(timezone.utc).date()
+    # Mirror the connector's default window: end at UTC tomorrow so the
+    # wearer's current local day is covered even ahead of UTC.
+    end = datetime.now(timezone.utc).date() + timedelta(days=1)
     start = end - timedelta(days=7)
     return {'start_date': start.isoformat(), 'end_date': end.isoformat()}
 
@@ -120,6 +122,43 @@ class TestDetailedCollections:
     def test_workouts(self):
         try:
             result = fetch_collection(TOKEN, 'workout', params=_last_week())
+        except ValueError as exc:
+            _skip_if_scope_missing(exc)
+        assert isinstance(result['data'], list)
+
+    def test_vo2_max(self):
+        # Covers the one collection whose API name (vO2_max) has unusual casing.
+        try:
+            result = fetch_collection(TOKEN, 'vO2_max', params=_last_week())
+        except ValueError as exc:
+            _skip_if_scope_missing(exc)
+        assert isinstance(result['data'], list)
+
+    def test_ring_battery_level(self):
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(days=3)
+        try:
+            result = fetch_collection(
+                TOKEN,
+                'ring_battery_level',
+                params={'start_datetime': start.isoformat(), 'end_datetime': end.isoformat()},
+                max_pages=1,
+            )
+        except ValueError as exc:
+            _skip_if_scope_missing(exc)
+        assert isinstance(result['data'], list)
+
+
+class TestDateHandling:
+    def test_future_end_date_accepted(self):
+        """The connector's default range ends at UTC tomorrow — Oura must not reject it."""
+        end = datetime.now(timezone.utc).date() + timedelta(days=1)
+        try:
+            result = fetch_collection(
+                TOKEN,
+                'daily_sleep',
+                params={'start_date': (end - timedelta(days=2)).isoformat(), 'end_date': end.isoformat()},
+            )
         except ValueError as exc:
             _skip_if_scope_missing(exc)
         assert isinstance(result['data'], list)

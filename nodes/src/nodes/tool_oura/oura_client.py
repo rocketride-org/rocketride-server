@@ -69,6 +69,7 @@ COLLECTIONS = frozenset(
         'enhanced_tag',
         'heartrate',
         'rest_mode_period',
+        'ring_battery_level',
         'ring_configuration',
         'session',
         'sleep',
@@ -105,7 +106,7 @@ def call(token: str, path: str, *, params: dict | None = None) -> Any:
     try:
         resp = requests.get(
             url,
-            headers={'Authorization': f'Bearer {token}'},
+            headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json'},
             params={k: v for k, v in (params or {}).items() if v is not None},
             timeout=DEFAULT_TIMEOUT,
         )
@@ -123,6 +124,12 @@ def call(token: str, path: str, *, params: dict | None = None) -> Any:
     raise _map_error(resp)
 
 
+# Error details end up in exception messages fed to the LLM; cap them so a
+# non-JSON body (e.g. an HTML 502 page from Oura's edge) can't flood the
+# agent context.
+_MAX_ERROR_DETAIL = 500
+
+
 def _map_error(resp: requests.Response) -> ValueError:
     """Translate an Oura HTTP error into a descriptive ValueError."""
     try:
@@ -133,21 +140,41 @@ def _map_error(resp: requests.Response) -> ValueError:
     except Exception:
         detail = resp.text or resp.reason or 'unknown error'
 
+    # Classify on the full body, then truncate for the message — a scope
+    # mention past the cap must still be recognized.
+    full_detail = str(detail)
+    detail = full_detail
+    if len(detail) > _MAX_ERROR_DETAIL:
+        detail = detail[:_MAX_ERROR_DETAIL] + '… (truncated)'
+
     status = resp.status_code
     if status == status_codes.unauthorized:
         # Oura reports missing scopes as 401 rather than 403 — surface that
         # distinctly so agents don't conclude the token itself is bad.
-        if 'scope' in str(detail).lower():
+        if 'scope' in full_detail.lower():
             return ValueError(f'Oura scope not granted (401) — re-authorize the app with this scope: {detail}')
         return ValueError(f'Oura authentication failed (401) — check the access token: {detail}')
     if status == status_codes.forbidden:
         return ValueError(f'Oura access denied (403) — the token may lack the required scope: {detail}')
+    if status == status_codes.not_found:
+        return ValueError(
+            f'Oura resource not found (404) — the document ID may be wrong, stale, '
+            f'or from a different collection: {detail}'
+        )
     if status == status_codes.unprocessable_entity:
         return ValueError(f'Oura rejected the request parameters (422): {detail}')
     if status == status_codes.upgrade_required:
         return ValueError(f'Oura subscription required (426) — this data needs an active Oura membership: {detail}')
     if status == status_codes.too_many_requests:
-        return ValueError(f'Oura rate limit exceeded (429) — back off and retry later: {detail}')
+        # Retry-After is either delay-seconds or an HTTP-date (RFC 7231).
+        retry_after = resp.headers.get('Retry-After', '')
+        if retry_after.isdigit():
+            wait_hint = f' Retry after {retry_after} seconds.'
+        elif retry_after:
+            wait_hint = f' Retry after {retry_after}.'
+        else:
+            wait_hint = ''
+        return ValueError(f'Oura rate limit exceeded (429) — back off and retry later.{wait_hint} {detail}')
     return ValueError(f'Oura API {status}: {detail}')
 
 
@@ -203,14 +230,19 @@ def _parse_date(value: str, field: str) -> date:
 def resolve_date_range(args: dict, *, default_days: int = 7) -> tuple[str, str]:
     """Resolve start_date / end_date tool args into a validated ISO date pair.
 
-    Missing end_date defaults to today (UTC); missing start_date defaults to
-    ``default_days`` before end_date. Raises ``ValueError`` when the range is
-    inverted or a date is malformed.
+    Missing end_date defaults to tomorrow (UTC); missing start_date defaults
+    to ``default_days`` before end_date. Raises ``ValueError`` when the range
+    is inverted or a date is malformed.
+
+    The default end is UTC today **plus one day** because Oura ``day`` fields
+    use the ring wearer's local timezone: for users ahead of UTC, "today"
+    locally can already be tomorrow in UTC terms, and an end_date of UTC-today
+    would silently exclude it. Oura accepts future end dates.
     """
     end_raw = args.get('end_date')
     start_raw = args.get('start_date')
 
-    end = _parse_date(end_raw, 'end_date') if end_raw else datetime.now(timezone.utc).date()
+    end = _parse_date(end_raw, 'end_date') if end_raw else datetime.now(timezone.utc).date() + timedelta(days=1)
     start = _parse_date(start_raw, 'start_date') if start_raw else end - timedelta(days=default_days)
 
     if start > end:
@@ -255,18 +287,19 @@ def resolve_datetime_range(args: dict, *, default_hours: int = 24) -> tuple[str,
 def compact_document(doc: Any, *, include_detail: bool = False) -> Any:
     """Strip heavy time-series fields from an Oura document.
 
-    Recurses into nested dicts (e.g. ``sleep.readiness``) so detail fields
-    are removed wherever they appear. With ``include_detail=True`` the
+    Recurses into nested dicts and lists (e.g. ``sleep.readiness``) so detail
+    fields are removed wherever they appear. With ``include_detail=True`` the
     document passes through untouched.
     """
-    if include_detail or not isinstance(doc, dict):
+    if include_detail:
         return doc
-    compacted = {}
-    for key, value in doc.items():
-        if key in _DETAIL_FIELDS:
-            continue
-        compacted[key] = compact_document(value, include_detail=False) if isinstance(value, dict) else value
-    return compacted
+    if isinstance(doc, list):
+        return [compact_document(item, include_detail=False) for item in doc]
+    if not isinstance(doc, dict):
+        return doc
+    return {
+        key: compact_document(value, include_detail=False) for key, value in doc.items() if key not in _DETAIL_FIELDS
+    }
 
 
 def compact_result(result: dict, *, include_detail: bool = False) -> dict:
