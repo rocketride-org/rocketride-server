@@ -75,6 +75,12 @@ import { ConnectionManager } from './connection/connection';
 // Connection state enum (re-exported from shared)
 import { ConnectionState } from 'shared';
 
+// Workspace-preferences accessor + provider (re-exported from shared) — the ONE
+// prefs API every app and shared-ui surface reads/writes through (get/set a key
+// in the app's workspace prefs bag). shared-ui sits below shell-ui, so the
+// implementation lives there; the shell surfaces it here as the frozen contract.
+import { usePrefs, PrefsProvider } from 'shared';
+
 // Auth providers
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 import { ApiKeyAuthProvider } from './auth/ApiKeyAuthProvider';
@@ -204,6 +210,9 @@ export type { IVirtualFileSystem } from 'shared/modules/explorer/types';
 export type { DashboardData } from './hooks/useDashboardData';
 export type { ViewMenu, ViewMenuEntry } from 'shared';
 
+// The workspace-prefs accessor shape ({ getPref, setPref }) for usePrefs/PrefsProvider.
+export type { IPrefsApi } from 'shared';
+
 // =============================================================================
 // SHELL API SURFACE
 // =============================================================================
@@ -233,6 +242,7 @@ export const shellApi = {
 	useSidebarContent,
 	useClickOutside,
 	useFixedPopupPosition,
+	usePrefs,
 
 	// Client access + connection manager + connection state
 	getClient,
@@ -243,8 +253,9 @@ export const shellApi = {
 	CloudAuthProvider,
 	ApiKeyAuthProvider,
 
-	// Workspace provider
+	// Workspace provider + prefs provider
 	WorkspaceProvider,
+	PrefsProvider,
 
 	// Document component library
 	Documents,
