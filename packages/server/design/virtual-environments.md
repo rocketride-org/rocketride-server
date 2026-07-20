@@ -355,6 +355,19 @@ variant — so the backstop is a narrow safety net, not the primary mechanism.
   walk without a matching walker change (`ast.walk` still traverses the `TYPE_CHECKING` re-export block,
   or under-includes if that block is removed). Measured effect: `audio_transcribe` **24 → 7** files,
   `anonymize` **23 → 5**, zero cross-family leaks.
+- **Residual: within-family over-inclusion (DEFERRED decision — revisit after the engine call-site).**
+  Cross-family isolation is exact — verified on the **real engine**: the `audio_transcribe` overlay
+  dropped **183 → 114** packages, no `rfdetr`/`gliner`/`easyocr`/`surya`/`timm`. But a node still pulls
+  **siblings within its own model family**, because the walk co-locates every `requirements*.txt` in a
+  reached `ai/` directory — e.g. `audio_transcribe` pulls `kokoro` (TTS, `audio` family), `detect` pulls
+  `rtmlib` (pose, `vision` family). Sound over-approximation, never under-includes; cosmetic (siblings
+  are small). To tighten later, pick one:
+  - **Option 1 (node-local):** the node imports the *specific* submodule
+    (`from ai.common.models.audio.whisper import Whisper`) instead of the family `__init__` → drops the
+    sibling for that node.
+  - **Option 2 (walker):** in `ast_deps`, for `ai/` model dirs collect only files named by
+    `_REQUIREMENTS_FILE` constants instead of blanket directory co-location → drops all siblings
+    globally, but must re-verify it never under-includes.
 - **Blast radius + generalization (whole node-tree sweeps, VERIFIED).** The barrel fix is **small and
   bounded: exactly 4 nodes** import via the barrel — `anonymize`, `audio_transcribe`,
   `embedding_transformer`, `ocr` — vs **9 already on full path** (`detect`, `ner`, `pose_estimation`,
@@ -412,6 +425,33 @@ imports live **exclusively in the local (no-model-server) branch**. Implications
 - `<exe>/cache/models/<name>` — **shared** model weights via `model_cache_dir`, resolved relative to
   `sys.executable`. The venv child runs the **same `engine.exe`, unmoved**, so it resolves the same
   `cache/models` automatically. Models are weights, not packages → not isolated per venv.
+
+**Constraints strategy: per-env, compiled independently of the global (VERIFIED live).** The single
+biggest lever venvs pull is *not sharing one constraint resolution*.
+
+- `<exe>/cache/constraints.txt` (**global**) is compiled from the `nodes/**`+`ai/**` globs and governs
+  **only** the base runtime and the legacy path (`ROCKETRIDE_SERVER_USE_VENV=0` / auto-without-venv).
+- `venvs/<project_id>/<env_id>/constraints.txt` (**per-env**) is compiled from **that env's
+  `combined.txt` alone — no global base** — so it resolves versions solely from the requirement files its
+  nodes reach. The scoped install **and** the runtime `depends()` calls active in that env both resolve
+  against the **env** constraints (never the global), so the overlay is internally consistent and no
+  global pin leaks in.
+- **Granularity is per-env, not per-project.** `venvs/<proj>/main`, `venvs/<proj>/<group>` each get their
+  own `constraints.txt`. This is exactly what lets an env with `torch 2.0` and another with `torch 2.1`
+  coexist — a shared per-project constraints file would collapse them into one resolution and defeat the
+  isolation venvs exist for.
+- **Why `ai` makes this essential:** `ai/**` modules carry their own pins (`torch/requirements.txt` →
+  `torch==2.10.0+cu128`, `requirements_detection.txt` → `rfdetr`, …). Under one global compile every pin
+  meets every other; per-env, only the pins of the `ai` modules an env's nodes actually reach (via the
+  AST walk) enter that env's constraints → fewer pins, fewer false conflicts, real conflicts isolated to
+  their env.
+- **Runtime `depends()` integration (implemented, live-verified):** while an overlay is active,
+  `depends()` installs via `uv --target <overlay>` and `-c <env constraints>` (not `-c cache/…`), so
+  node model-loads and the AST-miss backstop land **in the overlay at the env-resolved versions** (no
+  version churn), keeping base untouched.
+- **Residual (honest):** base *today* still receives `ai/**` at startup bootstrap (legacy behavior), so
+  it is not yet strictly runtime-only. Constraints are already fully per-env; physically stripping the
+  node/model deps out of base is the remaining Phase-2A-step-1 work (§4.7 blast radius).
 
 **Key by stable IDs; name is metadata.**
 
