@@ -53,11 +53,15 @@ def answer_contents(answer: Any) -> List[str]:
         List[str]: Zero or more ``page_content`` strings.
     """
     if answer.isJson():
-        data = answer.getJson()
-        if data is None:
-            return []
-        items = data if isinstance(data, list) else [data]
-        return [item if isinstance(item, str) else json.dumps(item, ensure_ascii=False) for item in items]
+        try:
+            data = answer.getJson()
+        except ValueError:
+            pass
+        else:
+            if data is None:
+                return []
+            items = data if isinstance(data, list) else [data]
+            return [item if isinstance(item, str) else json.dumps(item, ensure_ascii=False) for item in items]
 
     text = (answer.getText() or '').strip()
     return [text] if text else []

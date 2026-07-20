@@ -53,14 +53,14 @@ class IInstance(IInstanceBase):
         self.chunkId = 0
 
     def writeAnswers(self, answer: Answer):
-        """Convert an answer into documents, then forward the answer downstream.
+        """Convert an answer into documents while preserving the answers lane.
 
         - ``documents``: one document per validated fact (a JSON list yields one
           document per item; a JSON object or plain-text answer yields a single
           document). Only built when something downstream consumes ``documents``.
-        - ``answers``: the original answer is always passed through so the same
-          pipeline can both index the answer and keep serving it (for example to
-          a response node).
+        - ``answers``: the engine's default forwarding passes the original answer
+          through so the same pipeline can both index the answer and keep serving
+          it (for example to a response node).
 
         Args:
             answer (Answer): The incoming answer to adapt.
@@ -86,6 +86,3 @@ class IInstance(IInstanceBase):
 
             if documents:
                 self.instance.writeDocuments(documents)
-
-        # Pass the original answer through so it can still reach downstream sinks.
-        self.instance.writeAnswers(answer)
