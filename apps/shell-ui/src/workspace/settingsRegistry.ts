@@ -100,8 +100,8 @@ export function labelFromKey(key: string): string {
 
 /**
  * Returns the app's configuration when it is a valid object-shaped
- * contribution.  Server rows seeded before the configuration migration may
- * still carry the legacy `settings` array — those are ignored.
+ * contribution ({@link AppConfiguration}), or null when the app declares no
+ * settings or the value is malformed.
  *
  * @param app - An app manifest entry.
  * @returns The configuration, or null when absent/invalid.

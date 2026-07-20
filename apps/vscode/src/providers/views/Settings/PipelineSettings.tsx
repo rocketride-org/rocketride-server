@@ -55,10 +55,20 @@ export const PipelineSettings: React.FC<PipelineSettingsProps> = ({ settings, on
 		onSettingsChange({ pipelineRestartBehavior: e.target.value as 'auto' | 'manual' | 'prompt' });
 	};
 
-	/** Update the default idle-timeout (seconds); a blank field resets to the 900s default. */
+	/**
+	 * Update the default idle-timeout (seconds). A blank field resets to the
+	 * 900s default; transient non-numeric input (e.g. "-") is ignored and
+	 * negative values clamp to 0 (the no-timeout sentinel is the floor).
+	 */
 	const handleTtlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const raw = e.target.value;
-		onSettingsChange({ pipelineTtl: raw === '' ? 900 : Number(raw) });
+		if (raw === '') {
+			onSettingsChange({ pipelineTtl: 900 });
+			return;
+		}
+		const parsed = Number(raw);
+		if (Number.isNaN(parsed)) return;
+		onSettingsChange({ pipelineTtl: Math.max(0, Math.floor(parsed)) });
 	};
 
 	/** Update the default trace verbosity for pipeline execution. */

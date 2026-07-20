@@ -221,11 +221,10 @@ function registerApp(appRoot) {
 				}
 			}
 
-			// Legacy flat settings arrays are no longer read by the shell
-			if (Array.isArray(appManifest.settings) && appManifest.settings.length) {
-				task.output = `Warning: "${appManifest.id}" declares legacy appManifest.settings — `
-					+ 'migrate to appManifest.contributes.configuration (VSCode format); the legacy list is ignored.';
-			}
+			// Warnings accumulate here and surface joined with the final success
+			// line — task.output holds a single value, so direct assignments
+			// earlier in the run would be silently overwritten by later ones.
+			const warnings = [];
 
 			// Resolve shells — optional array of compatible shells
 			const shells = appManifest.shells ?? null;
@@ -250,7 +249,7 @@ function registerApp(appRoot) {
 					fs.copyFileSync(iconSrc, path.join(buildDir, 'icon.svg'));
 					icon = `/${APPS_BASE}/${dirName}/icon.svg`;
 				} catch {
-					task.output = `Warning: icon not found at ${appManifest.icon}`;
+					warnings.push(`Warning: icon not found at ${appManifest.icon}`);
 				}
 			}
 
@@ -276,7 +275,7 @@ function registerApp(appRoot) {
 						}
 					}
 				} catch {
-					task.output = `Warning: readme not found at ${appManifest.readme}`;
+					warnings.push(`Warning: readme not found at ${appManifest.readme}`);
 				}
 			}
 
@@ -328,7 +327,9 @@ function registerApp(appRoot) {
 			// Register apps.json for packaging so it's included in release archives
 			await setState(['package', DIST_APPS_JSON], ['static/apps.json']);
 
-			task.output = `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`;
+			// Success line last; accumulated warnings surface above it instead of
+			// being clobbered by it.
+			task.output = [...warnings, `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`].join('\n');
 		},
 	};
 }

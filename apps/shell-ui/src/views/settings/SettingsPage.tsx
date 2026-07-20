@@ -38,9 +38,11 @@
 // - Modified indicator: accent bar when the key is present in the overrides;
 //   per-row gear menu offers Reset to default (deletes the key) and
 //   Copy Setting ID.
-// - Changes apply immediately (no Save button) via updateSetting, which
-//   deletes the override when the value equals the schema default.
-// - A collapsible strip at the bottom previews the raw settings.json deltas.
+// - Edits are BUFFERED in a local draft (the DetailPanel edit-mode pattern):
+//   a bottom Save/Cancel footer appears once the draft diverges from the
+//   committed overrides. Save commits each changed key via updateSetting
+//   (deltas-only — a value equal to the schema default deletes the override);
+//   Cancel discards the draft.
 //
 // =============================================================================
 
