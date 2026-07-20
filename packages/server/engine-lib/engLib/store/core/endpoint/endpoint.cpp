@@ -67,6 +67,31 @@ Error IServiceEndpoint::beginEndpoint(OPEN_MODE _openMode) noexcept {
     // If we are actually starting the endpoint, we need to build
     // the global pipe and the connectoions
     if (!this->m_stackOnly) {
+        // Install this pipeline's dependencies into a per-environment overlay
+        // before buildGlobalPipe imports the node modules. No-op unless
+        // ROCKETRIDE_SERVER_USE_VENV enables scoping; a failure here (a version
+        // conflict between nodes) aborts the run by design.
+        if (ccode = callPython([&]() -> Error {
+                py::list providers;
+                auto &components = config.pipeline.components();
+                for (json::Value::ArrayIndex i = 0; i < components.size(); ++i)
+                    providers.append(
+                        std::string(components[i]["provider"].asString()));
+
+                auto &pipe = config.pipeline.root()["pipeline"];
+                py::object projectId = py::none();
+                if (pipe.isMember("project_id") &&
+                    pipe["project_id"].isString())
+                    projectId =
+                        py::str(std::string(pipe["project_id"].asString()));
+
+                auto mod = engine::python::loadModule("depends");
+                if (!mod) return mod.ccode();
+                (*mod).attr("ensure_env_scoped")(projectId, "main", providers);
+                return {};
+            }))
+            return ccode;
+
         // Build the global pipe
         if (ccode = buildGlobalPipe()) return ccode;
 
