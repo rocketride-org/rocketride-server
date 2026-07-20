@@ -65,6 +65,13 @@ REQUIREMENTS_GLOBS = [
     'ai/**/requirement*.txt',
 ]
 
+# Globs dropped from the startup compile when ROCKETRIDE_SERVER_USE_VENV forces scoping on:
+# node dependencies then come only from each environment's scoped install. Keeping them here
+# would require every node in the installation to be mutually satisfiable, so two nodes with
+# conflicting pins could not coexist at all — the engine would fail to start before any
+# per-environment logic runs.
+_SCOPED_EXCLUDED_GLOBS = frozenset({'nodes/**/requirement*.txt'})
+
 # Bootstrap tools install outside any constraint, so pin them or they float to 'latest' and a
 # later install downgrades them. Lockstep with packages/server/scripts/tasks.js.
 _BOOTSTRAP_TOOL_VERSIONS: dict[str, str] = {
@@ -643,11 +650,19 @@ def bootstrap():
 
 
 def _find_requirement_files() -> list[str]:
-    """Find all requirement files matching the glob patterns."""
+    """Find all requirement files matching the glob patterns.
+
+    With scoping forced on the node globs are skipped (see
+    :data:`_SCOPED_EXCLUDED_GLOBS`); in auto and legacy mode the set is unchanged.
+    """
     executable_dir = _get_executable_dir()
     found = []
 
-    for pattern in REQUIREMENTS_GLOBS:
+    patterns = REQUIREMENTS_GLOBS
+    if venv_env.use_venv_mode() == venv_env.USE_ON:
+        patterns = [p for p in patterns if p not in _SCOPED_EXCLUDED_GLOBS]
+
+    for pattern in patterns:
         full_pattern = os.path.join(executable_dir, pattern)
         matches = glob(full_pattern, recursive=True)
         for path in matches:
@@ -728,8 +743,9 @@ def _compile_constraints(constraints_path: str):
     )
 
     if result.returncode != 0:
-        error(f'Failed to compile constraints: {result.stderr}')
-        raise RuntimeError('Failed to compile constraints')
+        detail = (result.stderr or result.stdout or '').strip()
+        error(f'Failed to compile constraints: {detail}')
+        raise RuntimeError(f'Failed to compile constraints: {detail[:800]}')
 
     debug(f'Constraints compiled: {constraints_path}')
 
