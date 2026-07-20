@@ -11,12 +11,20 @@
  * happens in ONE record surface, a contained DetailPanel sliding from the
  * Account dialog's edge:
  *
- *  - row click            -> the panel in VIEW mode (key facts + Revoke in
- *                            the footer, guarded by a stock ConfirmDialog)
+ *  - row click            -> the panel in VIEW mode: pure inspect plus the
+ *                            record-level [Revoke Key] verb in the footer
+ *                            (ConfirmDialog-guarded; header X / Escape are
+ *                            the exits — keys are immutable, so no [Edit])
  *  - "+ New Key" (header) -> the SAME panel in CREATE mode (name / team
  *                            scope / permissions / expiry), which flips to
- *                            the one-time secret reveal after the server
- *                            returns the key
+ *                            the one-time secret reveal (Present mode, [Done]
+ *                            only) after the server returns the key
+ *
+ * Interaction standard (2026-07-18): [Create Key] MATERIALIZES on the first
+ * change; a dirty Cancel / X / Escape raises the stock "Discard changes?"
+ * confirm (the DetailPanel owns the X / Escape guard via the dirty / editing
+ * props; the footer Cancel routes through its own check); errors render as an
+ * in-panel Banner at the top of the body.
  *
  * The panel owns its whole lifecycle — form state, validation, saving,
  * errors, confirmation — through the two host actions it receives
@@ -27,6 +35,7 @@ import React, { useMemo, useState } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
+import { Banner } from '../../../components/banner/Banner';
 import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
 import { autoFormatter } from '../../../components/data-grid/defaults';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
@@ -114,11 +123,16 @@ const styles = {
 		color: 'var(--rr-color-error)',
 	} as React.CSSProperties,
 
-	/** Inline save/validation error line under the form. */
-	error: {
-		fontSize: 11,
-		color: 'var(--rr-color-error)',
-		marginTop: 8,
+	/** Spacing wrapper for the in-panel error Banner at the top of the body. */
+	errorBanner: {
+		marginBottom: 12,
+	} as React.CSSProperties,
+
+	/** Wrapping pill cluster in the view panel's Permissions section. */
+	permsWrap: {
+		display: 'flex',
+		flexWrap: 'wrap',
+		gap: 6,
 	} as React.CSSProperties,
 
 	/** Left-anchored destructive slot in the panel footer (footer is flex-end). */
@@ -265,10 +279,18 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 	const [copied, setCopied] = useState(false);
 	// Revoke confirmation gate (stacks over the panel via the overlay stack).
 	const [confirmRevoke, setConfirmRevoke] = useState(false);
+	// Footer-Cancel discard confirm (the DetailPanel guards X / Escape itself;
+	// the footer Cancel routes through this local gate per the standard).
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
 
 	// The viewed record resolves LIVE from props so server refreshes (e.g. a
 	// revoke flipping active -> false) update the open panel in place.
 	const viewedKey = panel?.mode === 'view' ? keys.find((k) => k.id === panel.keyId) ?? null : null;
+
+	// Create-form dirty flag: any field differs from its seeded default. It
+	// drives the materializing [Create Key] and arms the discard guard; the
+	// reveal step (Present mode) is never dirty — the record already exists.
+	const createDirty = panel?.mode === 'create' && revealed == null && (formName.trim() !== '' || formTeamId !== '' || formPerms.length > 0 || formExpiry !== 90);
 
 	// ── Table rows ──────────────────────────────────────────────────────────
 	const rows = useMemo<KeyRow[]>(
@@ -369,6 +391,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 		setError(null);
 		setRevealed(null);
 		setConfirmRevoke(false);
+		setConfirmDiscard(false);
 	};
 
 	/** Validate + submit the create form; success flips to the reveal step. */
@@ -447,29 +470,36 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				/>
 			</Card>
 
-			{/* ── Record panel: VIEW mode ─────────────────────────────────── */}
+			{/* ── Record panel: VIEW mode — pure inspect plus the record-level
+			    [Revoke Key] verb; header X / Escape are the exits (no footer
+			    Close, no [Edit] — keys are immutable). No footer at all when
+			    the key cannot be revoked. ─────────────────────────────────── */}
 			{viewedKey != null && (
 				<DetailPanel
+					persistKey="panelDetailApiKeyWidth"
 					contained
 					open
 					onClose={closePanel}
 					title={viewedKey.name}
 					subtitle={keyStatus(viewedKey)}
+					busy={saving}
 					footer={
-						<>
-							{isRevocable && (
-								<div style={styles.footerDanger}>
-									<Button variant="danger" small onClick={() => setConfirmRevoke(true)}>
-										Revoke Key
-									</Button>
-								</div>
-							)}
-							<Button variant="ghost" small onClick={closePanel}>
-								Close
-							</Button>
-						</>
+						isRevocable ? (
+							<div style={styles.footerDanger}>
+								<Button variant="danger" small disabled={saving} onClick={() => setConfirmRevoke(true)}>
+									Revoke Key
+								</Button>
+							</div>
+						) : undefined
 					}
 				>
+					{/* In-panel error surface (interaction standard): a stock Banner
+					    at the top of the body. */}
+					{error && (
+						<div style={styles.errorBanner}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					)}
 					<Section label="Key">
 						<LabelValue label="Status">{keyStatus(viewedKey)}</LabelValue>
 						<LabelValue label="Team Scope">{teamScope(viewedKey) || 'Session'}</LabelValue>
@@ -479,25 +509,34 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 					</Section>
 					{(viewedKey.permissions?.length ?? 0) > 0 && (
 						<Section label="Permissions">
-							<div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+							<div style={styles.permsWrap}>
 								{viewedKey.permissions!.map((perm) => (
 									<PermPill key={perm} perm={perm} />
 								))}
 							</div>
 						</Section>
 					)}
-					{error && <div style={styles.error}>{error}</div>}
 				</DetailPanel>
 			)}
 
-			{/* ── Record panel: CREATE mode (form, then one-time reveal) ───── */}
+			{/* ── Record panel: CREATE mode (form, then one-time reveal).
+			    Footer contract: [Create Key] MATERIALIZES on the first change,
+			    LEFT of the stationary [Cancel]; a dirty Cancel routes through
+			    the discard confirm. The reveal step is Present mode — [Done]
+			    only. dirty/editing arm the component's own X / Escape guard;
+			    onExitMode closes (create-mode panels close on mode exit). ── */}
 			{panel?.mode === 'create' && (
 				<DetailPanel
+					persistKey="panelDetailApiKeyWidth"
 					contained
 					open
 					onClose={closePanel}
 					title={revealed ? 'Key Created' : 'New API Key'}
 					subtitle={revealed ? 'Copy it now — it will not be shown again' : undefined}
+					dirty={createDirty}
+					editing={revealed == null}
+					onExitMode={closePanel}
+					busy={saving}
 					footer={
 						revealed ? (
 							<Button variant="primary" small onClick={closePanel}>
@@ -505,11 +544,13 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 							</Button>
 						) : (
 							<>
-								<Button variant="ghost" small onClick={closePanel}>
+								{createDirty && (
+									<Button variant="primary" small disabled={saving} onClick={() => void handleCreate()}>
+										{saving ? 'Creating…' : 'Create Key'}
+									</Button>
+								)}
+								<Button variant="ghost" small disabled={saving} onClick={() => (createDirty ? setConfirmDiscard(true) : closePanel())}>
 									Cancel
-								</Button>
-								<Button variant="primary" small disabled={saving} onClick={() => void handleCreate()}>
-									{saving ? 'Creating…' : 'Create Key'}
 								</Button>
 							</>
 						)
@@ -542,10 +583,17 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 						</>
 					) : (
 						<>
+							{/* In-panel error surface (interaction standard): a stock
+							    Banner at the top of the body. */}
+							{error && (
+								<div style={styles.errorBanner}>
+									<Banner variant="error">{error}</Banner>
+								</div>
+							)}
 							{/* Create form (ported field-for-field from the retired modal). */}
 							<div style={S.field}>
 								<div style={S.fieldLabel}>Key Name</div>
-								<input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Production Server, CI Pipeline" style={commonStyles.inputField} />
+								<input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Production Server, CI Pipeline" style={commonStyles.inputField} data-rr-autofocus="true" />
 							</div>
 							<div style={S.field}>
 								<div style={S.fieldLabel}>Team Scope</div>
@@ -577,7 +625,6 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 								<div style={S.fieldLabel}>Expiry</div>
 								<ExpiryOpts value={formExpiry} onChange={setFormExpiry} />
 							</div>
-							{error && <div style={styles.error}>{error}</div>}
 						</>
 					)}
 				</DetailPanel>
@@ -601,6 +648,24 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 					}
 					onConfirm={() => void handleRevoke()}
 					onCancel={() => setConfirmRevoke(false)}
+				/>
+			)}
+
+			{/* ── Footer-Cancel discard confirm (stock dialog, same copy as the
+			    DetailPanel's own X / Escape guard) ──────────────────────────── */}
+			{confirmDiscard && (
+				<ConfirmDialog
+					title="Discard changes?"
+					message="Your unsaved changes will be lost."
+					confirmLabel="Discard"
+					cancelLabel="Keep Editing"
+					destructive
+					onConfirm={() => {
+						// The confirmed discard closes the create panel whole.
+						setConfirmDiscard(false);
+						closePanel();
+					}}
+					onCancel={() => setConfirmDiscard(false)}
 				/>
 			)}
 		</section>

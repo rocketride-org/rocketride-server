@@ -265,6 +265,7 @@ export const TaskRecordPanel: React.FC<ITaskRecordPanelProps> = ({ taskId, tasks
 
 	return (
 		<DetailPanel
+			persistKey="panelDetailTaskWidth"
 			open
 			onClose={onClose}
 			avatar={

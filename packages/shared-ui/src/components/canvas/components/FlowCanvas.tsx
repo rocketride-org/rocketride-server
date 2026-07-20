@@ -69,6 +69,7 @@ import TidyIcon from '../../../assets/icons/TidyIcon';
 
 import { INodeType } from '../types';
 import { useFlowProject } from '../context/FlowProjectContext';
+import { usePrefs } from '../../../contexts/PrefsContext';
 import { isInVSCode } from '../../../themes/vscode';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
@@ -202,16 +203,19 @@ export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady, configSnackbar, setConfigSnackbar } = useFlowGraph();
 
-	// --- Preferences from context ------------------------------------------
-	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
+	// --- Canvas state from context -----------------------------------------
+	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout } = useFlowPreferences();
 
-	// --- Floating toolbar position (persisted via workspace state) ----------
-	const toolbarPosition = getPreference('toolbarPosition') as IToolbarPosition | undefined;
+	// The one shared prefs accessor — the same getPref/setPref every app uses.
+	const { getPref, setPref } = usePrefs();
+
+	// --- Floating toolbar position (persisted via workspace prefs) ----------
+	const toolbarPosition = getPref('toolbarPosition') as IToolbarPosition | undefined;
 	const handleToolbarPositionChange = useCallback(
 		(pos: IToolbarPosition) => {
-			setPreference('toolbarPosition', pos);
+			setPref('toolbarPosition', pos);
 		},
-		[setPreference]
+		[setPref]
 	);
 
 	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, onOpenSettings, initialViewport } = useFlowProject();
@@ -429,7 +433,9 @@ export default function Canvas(): ReactElement {
 	);
 
 	return (
-		<div ref={canvasRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+		// `overflow: hidden` makes this the clip/anchor surface for the `contained`
+		// DetailPanel drawers (Add Node, node config) that slide in over the graph.
+		<div ref={canvasRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
 			<FloatingToolbar position={toolbarPosition} onPositionChange={handleToolbarPositionChange}>
 				{canvasToolbar}
 			</FloatingToolbar>

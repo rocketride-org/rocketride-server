@@ -29,6 +29,7 @@ import type { CSSProperties } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
+import { Banner } from '../../../components/banner/Banner';
 import { EmptyState } from '../../../components/empty-state/EmptyState';
 import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
@@ -124,11 +125,9 @@ const styles = {
 		boxShadow: '0 0 4px var(--rr-color-success)',
 	} as Partial<CSSStyleDeclaration>,
 
-	/** Inline cancel-error line under the record panel body. */
-	panelError: {
-		fontSize: 11,
-		color: 'var(--rr-color-error)',
-		marginTop: 8,
+	/** Spacing wrapper for the in-panel error Banner at the top of the body. */
+	errorBanner: {
+		marginBottom: 12,
 	} as CSSProperties,
 
 	/** Left-anchored destructive slot in the panel footer (footer is flex-end). */
@@ -554,34 +553,45 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 				)}
 			</Card>
 
-			{/* ── Record panel: VIEW mode (resolved LIVE from props) ─────────── */}
+			{/* ── Record panel: VIEW mode (resolved LIVE from props). Footer
+			    contract: [Cancel Subscription] left-anchored danger, [Change
+			    Plan] (a flow-modal opener) in the right cluster; header X /
+			    Escape are the exits — no footer Close. With neither verb the
+			    panel is pure inspect (no footer). busy locks dismissal while
+			    the cancel call is in flight. ─────────────────────────────── */}
 			{viewedSub != null && viewedStatus != null && (
 				<DetailPanel
+					persistKey="panelDetailBillingWidth"
 					contained
 					open
 					onClose={closePanel}
 					title={viewedSub.appName ?? viewedSub.appId}
 					subtitle={viewedStatus.label}
+					busy={cancelling}
 					footer={
-						<>
-							{isCancelable && isOrgAdmin && (
+						isCancelable && isOrgAdmin ? (
+							<>
 								<div style={styles.footerDanger}>
-									<Button variant="danger" small onClick={() => setConfirmCancel(true)}>
+									<Button variant="danger" small disabled={cancelling} onClick={() => setConfirmCancel(true)}>
 										Cancel Subscription
 									</Button>
 								</div>
-							)}
-							{isCancelable && isOrgAdmin && onUpgradeSubscription && (
-								<Button variant="ghost" small onClick={() => setUpgradeTarget(viewedSub)}>
-									Change Plan
-								</Button>
-							)}
-							<Button variant="ghost" small onClick={closePanel}>
-								Close
-							</Button>
-						</>
+								{onUpgradeSubscription && (
+									<Button variant="ghost" small disabled={cancelling} onClick={() => setUpgradeTarget(viewedSub)}>
+										Change Plan
+									</Button>
+								)}
+							</>
+						) : undefined
 					}
 				>
+					{/* In-panel error surface (interaction standard): a stock Banner
+					    at the top of the body. */}
+					{panelError && (
+						<div style={styles.errorBanner}>
+							<Banner variant="error">{panelError}</Banner>
+						</div>
+					)}
 					{/* Full subscription detail (the retired row's detail grid). */}
 					<Section label="Subscription">
 						<LabelValue label="Plan">{viewedSub.planNickname ?? '--'}</LabelValue>
@@ -624,8 +634,6 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 							</div>
 						</Section>
 					)}
-
-					{panelError && <div style={styles.panelError}>{panelError}</div>}
 				</DetailPanel>
 			)}
 

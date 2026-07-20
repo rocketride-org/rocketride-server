@@ -11,30 +11,37 @@
  * operation on a member happens in ONE record surface, a contained
  * DetailPanel sliding from the Account dialog's edge:
  *
- *  - row click                -> the panel in VIEW mode (member facts, an
- *                                editable role select for org admins, a
- *                                Resend Invite action on pending invitations,
- *                                and Remove in the footer guarded by a stock
- *                                ConfirmDialog)
+ *  - row click                -> the panel in INSPECT mode (member facts with
+ *                                the role read-only, a Resend Invite BODY
+ *                                verb on pending invitations, and Remove in
+ *                                the footer guarded by a stock ConfirmDialog)
+ *  - footer [Edit]            -> EDIT mode (org admins, never self): the role
+ *                                select is STAGED; [Save] materializes on the
+ *                                first change and commits back to inspect
+ *                                with the panel open; a dirty Cancel / X /
+ *                                Escape raises the stock discard confirm
  *  - "Invite Member" (header) -> the SAME panel in CREATE mode carrying the
  *                                retired invite modal's form field-for-field
  *                                (email, names, org role, per-team access
- *                                with the PermGrid editor)
+ *                                with the PermGrid editor); [Send Invite]
+ *                                materializes on the first change
  *
  * The panel owns its whole lifecycle — form state, validation, saving,
  * errors, confirmation — through the four raw host actions it receives
  * (`onInviteMember`, `onUpdateMemberRole`, `onRemoveMember`,
  * `onResendInvite`). No modals live in AccountView for members.
  *
- * Gating: only org admins get the Invite action, the role editor, the
+ * Gating: only org admins get the Invite action, the [Edit] mode entry, the
  * Resend Invite action, and the Remove footer verb; the viewer's own row
  * never offers self-edit/remove (ported from the old Actions column rules).
+ * Errors render as an in-panel Banner at the top of the body.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
+import { Banner } from '../../../components/banner/Banner';
 import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
 import { autoFormatter, avatarEl, badgeEl, mutedEl } from '../../../components/data-grid/defaults';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
@@ -98,13 +105,6 @@ const styles = {
 	select: {
 		...commonStyles.inputField,
 		cursor: 'pointer',
-	} as React.CSSProperties,
-
-	/** Role editor row in VIEW mode: select beside its Save button. */
-	roleRow: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
 	} as React.CSSProperties,
 
 	/** Invitation row in VIEW mode: explanatory note beside the Resend action. */
@@ -194,11 +194,9 @@ const styles = {
 		color: 'var(--rr-text-primary)',
 	} as React.CSSProperties,
 
-	/** Inline save/validation error line under the form. */
-	error: {
-		fontSize: 11,
-		color: 'var(--rr-color-error)',
-		marginTop: 8,
+	/** Spacing wrapper for the in-panel error Banner at the top of the body. */
+	errorBanner: {
+		marginBottom: 12,
 	} as React.CSSProperties,
 
 	/** Left-anchored destructive slot in the panel footer (footer is flex-end). */
@@ -369,7 +367,9 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	const [formTeams, setFormTeams] = useState<Record<string, string[]>>({});
 	// Which team row's PermGrid editor is expanded, or null for none.
 	const [editPermsTeamId, setEditPermsTeamId] = useState<string | null>(null);
-	// View-mode role editor value (initialized from the record on open).
+	// EDIT mode flag for the view panel: true while the role select is staged.
+	const [editingRole, setEditingRole] = useState(false);
+	// Staged role value while in EDIT mode (seeded from the record on entry).
 	const [roleValue, setRoleValue] = useState('member');
 	// Async lifecycle shared by invite, role save, and remove.
 	const [saving, setSaving] = useState(false);
@@ -379,6 +379,9 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	const [resent, setResent] = useState(false);
 	// Remove confirmation gate (stacks over the panel via the overlay stack).
 	const [confirmRemove, setConfirmRemove] = useState(false);
+	// Footer-Cancel discard confirm (the DetailPanel guards X / Escape itself;
+	// the footer Cancel routes through this local gate per the standard).
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
 
 	// The viewed record resolves LIVE from props so server refreshes (e.g. a
 	// role save flipping role -> admin) update the open panel in place.
@@ -389,6 +392,14 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	const isSelf = viewedMember != null && viewedMember.userId === profile?.userId;
 	const isPending = viewedMember != null && viewedMember.status === 'pending';
 	const canManage = isOrgAdmin && viewedMember != null && !isSelf;
+
+	// EDIT-mode dirty flag: the staged role differs from the record. Drives
+	// the materializing [Save] and arms the discard guard.
+	const roleDirty = editingRole && viewedMember != null && roleValue !== viewedMember.role;
+
+	// CREATE-mode dirty flag: any invite field differs from its seeded
+	// default. Drives the materializing [Send Invite] and the discard guard.
+	const inviteDirty = panel?.mode === 'create' && (formEmail.trim() !== '' || formGivenName.trim() !== '' || formFamilyName.trim() !== '' || formRole !== 'member' || Object.keys(formTeams).length > 0);
 
 	// Mounted flag guarding the async resend flow — the await and the 3s
 	// confirmation timer can both outlive the panel (e.g. the dialog closes).
@@ -497,14 +508,13 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	};
 
 	/**
-	 * Open the record panel in VIEW mode for a clicked row's member, seeding
-	 * the role editor from the record's current role.
+	 * Open the record panel in INSPECT mode for a clicked row's member. Role
+	 * staging happens later, on the explicit [Edit] entry.
 	 *
 	 * @param userId - The clicked member's user id.
 	 */
 	const openView = (userId: string): void => {
-		const record = members.find((m) => m.userId === userId);
-		setRoleValue(record?.role ?? 'member');
+		setEditingRole(false);
 		setError(null);
 		setResent(false);
 		setPanel({ mode: 'view', userId });
@@ -513,8 +523,25 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	/** Close the panel and drop every transient state it owned. */
 	const closePanel = (): void => {
 		setPanel(null);
+		setEditingRole(false);
 		setError(null);
 		setConfirmRemove(false);
+		setConfirmDiscard(false);
+	};
+
+	/** Enter EDIT mode, staging the role select from the record's current role. */
+	const enterRoleEdit = (): void => {
+		if (!viewedMember) return;
+		setRoleValue(viewedMember.role);
+		setError(null);
+		setEditingRole(true);
+	};
+
+	/** Leave EDIT mode back to inspect, dropping the staged role value. Also
+	    the DetailPanel's onExitMode target (Escape-as-Cancel, confirmed discard). */
+	const exitRoleEdit = (): void => {
+		if (viewedMember) setRoleValue(viewedMember.role);
+		setEditingRole(false);
 	};
 
 	/** Validate + submit the invite form; success closes the panel. */
@@ -553,16 +580,18 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 		}
 	};
 
-	/** Persist the role editor's value for the viewed member. */
+	/** Commit the staged role for the viewed member (EDIT mode's Save). */
 	const handleSaveRole = async (): Promise<void> => {
 		if (!viewedMember) return;
 		setSaving(true);
 		setError(null);
 		try {
 			await onUpdateMemberRole(viewedMember.userId, roleValue);
-			// Keep the panel open: the live record resolve shows the new role
-			// immediately and the Save button drops back to disabled/unchanged.
+			// Save returns to INSPECT with the panel open: the live record
+			// resolve shows the new role immediately.
+			setEditingRole(false);
 		} catch (e) {
+			// A failed save stays in EDIT with the staged value intact.
 			setError(e instanceof Error ? e.message : 'Failed to update role');
 		} finally {
 			setSaving(false);
@@ -633,30 +662,61 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 				/>
 			</Card>
 
-			{/* ── Record panel: VIEW mode ─────────────────────────────────── */}
+			{/* ── Record panel: INSPECT / EDIT mode. Footer contract: [Remove]
+			    left-anchored danger; right cluster is mode machinery — [Edit]
+			    in inspect, a materializing [Save] + stationary [Cancel] in
+			    edit. Header X / Escape are the exits (no footer Close); a
+			    viewer who cannot manage gets a pure-inspect panel (no footer).
+			    dirty/editing/busy arm the component's own guards. ──────────── */}
 			{viewedMember != null && (
 				<DetailPanel
+					persistKey="panelDetailMemberWidth"
 					contained
 					open
 					onClose={closePanel}
 					avatar={<Avatar name={viewedMember.displayName} email={viewedMember.email} size={42} />}
 					title={viewedMember.displayName}
 					subtitle={viewedMember.email}
+					dirty={roleDirty}
+					editing={editingRole}
+					onExitMode={exitRoleEdit}
+					busy={saving}
 					footer={
-						<>
-							{canManage && (
+						canManage ? (
+							<>
 								<div style={styles.footerDanger}>
-									<Button variant="danger" small onClick={() => setConfirmRemove(true)}>
+									<Button variant="danger" small disabled={saving} onClick={() => setConfirmRemove(true)}>
 										{isPending ? 'Cancel Invitation' : 'Remove from Organization'}
 									</Button>
 								</div>
-							)}
-							<Button variant="ghost" small onClick={closePanel}>
-								Close
-							</Button>
-						</>
+								{editingRole ? (
+									<>
+										{/* [Save] materializes on the first change, LEFT of Cancel. */}
+										{roleDirty && (
+											<Button variant="primary" small disabled={saving} onClick={() => void handleSaveRole()}>
+												{saving ? 'Saving…' : 'Save'}
+											</Button>
+										)}
+										<Button variant="ghost" small disabled={saving} onClick={() => (roleDirty ? setConfirmDiscard(true) : exitRoleEdit())}>
+											Cancel
+										</Button>
+									</>
+								) : (
+									<Button variant="ghost" small onClick={enterRoleEdit}>
+										Edit
+									</Button>
+								)}
+							</>
+						) : undefined
 					}
 				>
+					{/* In-panel error surface (interaction standard): a stock Banner
+					    at the top of the body. */}
+					{error && (
+						<div style={styles.errorBanner}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					)}
 					<Section label="Member">
 						<LabelValue label="Name">{isSelf ? `${viewedMember.displayName} (you)` : viewedMember.displayName}</LabelValue>
 						<LabelValue label="Email">{viewedMember.email}</LabelValue>
@@ -664,31 +724,22 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 							<Badge variant={statusBadgeVariant(memberStatus(viewedMember.status))}>{memberStatus(viewedMember.status)}</Badge>
 						</LabelValue>
 						<LabelValue label="Teams">{viewedMember.teams?.length ? viewedMember.teams.map((t) => t.name).join(', ') : '--'}</LabelValue>
-						{/* Read-only role row for viewers who cannot manage this member. */}
-						{!canManage && (
-							<LabelValue label="Role">
-								<Badge variant={viewedMember.role === 'admin' ? 'admin' : 'member'}>{viewedMember.role}</Badge>
-							</LabelValue>
-						)}
-					</Section>
-					{/* Editable role (org admins, never self) — ports the retired
-					    change-role modal: a select seeded from the record plus a Save
-					    button disabled while saving or unchanged. */}
-					{canManage && (
-						<Section label="Organization Role">
-							<div style={styles.roleRow}>
+						{/* Role: read-only badge in INSPECT; the STAGED select in EDIT
+						    (nothing commits until the footer Save). */}
+						<LabelValue label="Role">
+							{editingRole ? (
 								<select value={roleValue} onChange={(e) => setRoleValue(e.target.value)} style={styles.select}>
 									<option value="member">Member</option>
 									<option value="admin">Admin</option>
 								</select>
-								<Button variant="primary" small disabled={saving || roleValue === viewedMember.role} onClick={() => void handleSaveRole()}>
-									{saving ? 'Saving…' : 'Save'}
-								</Button>
-							</div>
-						</Section>
-					)}
-					{/* Pending invitation actions (org admins): resend the email,
-					    with the in-flight / "Sent!" states from the old Actions column. */}
+							) : (
+								<Badge variant={viewedMember.role === 'admin' ? 'admin' : 'member'}>{viewedMember.role}</Badge>
+							)}
+						</LabelValue>
+					</Section>
+					{/* Pending invitation BODY verb (org admins): resend commits
+					    immediately — low stakes, unguarded — with the in-flight /
+					    "Sent!" states from the old Actions column. */}
 					{canManage && isPending && (
 						<Section label="Invitation">
 							<div style={styles.inviteRow}>
@@ -703,29 +754,46 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 							</div>
 						</Section>
 					)}
-					{error && <div style={styles.error}>{error}</div>}
 				</DetailPanel>
 			)}
 
-			{/* ── Record panel: CREATE (invite) mode ──────────────────────── */}
+			{/* ── Record panel: CREATE (invite) mode. [Send Invite] MATERIALIZES
+			    on the first change, LEFT of the stationary [Cancel]; a dirty
+			    Cancel routes through the discard confirm; dirty/editing arm
+			    the component's own X / Escape guard; onExitMode closes
+			    (create-mode panels close on mode exit). ────────────────────── */}
 			{panel?.mode === 'create' && (
 				<DetailPanel
+					persistKey="panelDetailMemberWidth"
 					contained
 					open
 					onClose={closePanel}
 					title="Invite Member"
 					subtitle="Send an invitation to join this organization"
+					dirty={inviteDirty}
+					editing
+					onExitMode={closePanel}
+					busy={saving}
 					footer={
 						<>
-							<Button variant="ghost" small onClick={closePanel}>
+							{inviteDirty && (
+								<Button variant="primary" small disabled={saving} onClick={() => void handleInvite()}>
+									{saving ? 'Inviting…' : 'Send Invite'}
+								</Button>
+							)}
+							<Button variant="ghost" small disabled={saving} onClick={() => (inviteDirty ? setConfirmDiscard(true) : closePanel())}>
 								Cancel
-							</Button>
-							<Button variant="primary" small disabled={saving} onClick={() => void handleInvite()}>
-								{saving ? 'Inviting…' : 'Send Invite'}
 							</Button>
 						</>
 					}
 				>
+					{/* In-panel error surface (interaction standard): a stock Banner
+					    at the top of the body. */}
+					{error && (
+						<div style={styles.errorBanner}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					)}
 					{/* Invite form (ported field-for-field from the retired modal). */}
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Email Address</div>
@@ -809,7 +877,6 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 							</div>
 						</div>
 					)}
-					{error && <div style={styles.error}>{error}</div>}
 				</DetailPanel>
 			)}
 
@@ -833,6 +900,26 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 					}
 					onConfirm={() => void handleRemove()}
 					onCancel={() => setConfirmRemove(false)}
+				/>
+			)}
+
+			{/* ── Footer-Cancel discard confirm (stock dialog, same copy as the
+			    DetailPanel's own X / Escape guard) ──────────────────────────── */}
+			{confirmDiscard && (
+				<ConfirmDialog
+					title="Discard changes?"
+					message="Your unsaved changes will be lost."
+					confirmLabel="Discard"
+					cancelLabel="Keep Editing"
+					destructive
+					onConfirm={() => {
+						// Route by the mode that raised it: an invite discard closes
+						// the create panel; a role-edit discard drops to inspect.
+						setConfirmDiscard(false);
+						if (panel?.mode === 'create') closePanel();
+						else exitRoleEdit();
+					}}
+					onCancel={() => setConfirmDiscard(false)}
 				/>
 			)}
 		</section>

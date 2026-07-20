@@ -104,12 +104,6 @@ export interface IFlowContainerProps {
 	/** Opens a URL in the host browser. */
 	onOpenLink?: (url: string, displayName?: string) => void;
 
-	/** Host-provided preference reader. */
-	getPreference?: (key: string) => unknown;
-
-	/** Host-provided preference writer. */
-	setPreference?: (key: string, value: unknown) => void;
-
 	/** Register panel actions with the host (e.g. for guided tour). */
 	onRegisterPanelActions?: (actions: Record<string, unknown>) => void;
 
@@ -168,7 +162,7 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, getPreference, setPreference, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, onOpenSettings, envKeys, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, onOpenSettings, envKeys, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
@@ -195,8 +189,6 @@ export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, 
 					pendingOAuthTokens={pendingOAuthTokens}
 					clearPendingOAuthTokens={clearPendingOAuthTokens}
 					onOpenLink={onOpenLink}
-					getPreference={getPreference}
-					setPreference={setPreference}
 					googlePickerDeveloperKey={googlePickerDeveloperKey}
 					googlePickerClientId={googlePickerClientId}
 					onRunPipeline={onRunPipeline}

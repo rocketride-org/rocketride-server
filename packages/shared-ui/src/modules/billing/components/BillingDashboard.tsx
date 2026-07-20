@@ -821,19 +821,17 @@ const TransactionLog: React.FC<{
 				/>
 			</Card>
 
-			{/* ── Record panel: the FULL transaction (pure inspect + Close) ──── */}
+			{/* ── Record panel: the FULL transaction — an immutable event record,
+			    pure inspect, so NO footer (interaction standard: footer
+			    presence signals editability; header X / Escape close). ─────── */}
 			{viewedTx != null && (
 				<DetailPanel
+					persistKey="panelDetailTransactionWidth"
 					contained
 					open
 					onClose={() => setViewedTx(null)}
 					title={`Transaction #${viewedTx.id}`}
 					subtitle={viewedTx.type}
-					footer={
-						<Button variant="ghost" small onClick={() => setViewedTx(null)}>
-							Close
-						</Button>
-					}
 				>
 					<Section label="Transaction">
 						{/* formatDateValue applies the wire contract (zone-less ISO IS

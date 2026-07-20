@@ -25,6 +25,7 @@ import type { ViewMenu } from '../../types/viewMenu';
 import { useTraceState } from './hooks/useTraceState';
 import { useElapsedTimer } from './hooks/useElapsedTimer';
 import Canvas from '../../components/canvas';
+import { PrefsProvider, type IPrefsApi } from '../../contexts/PrefsContext';
 import Status from '../../components/status/Status';
 import { StatusHeader } from '../../components/status/StatusHeader';
 import { SourceTokensContent } from '../../components/tokens/Tokens';
@@ -287,14 +288,22 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		});
 	}, []);
 
-	const getPreference = useCallback((key: string) => prefs?.[key], [prefs]);
-	const setPreference = useCallback((key: string, value: unknown) => {
-		setPrefs((prev) => {
-			const next = { ...prev, [key]: value };
-			onPrefsChangeRef.current?.(next);
-			return next;
-		});
-	}, []);
+	// The ONE prefs accessor the canvas — and every DetailPanel inside it — reads
+	// and writes through, handed down via <PrefsProvider> below. getPref reads the
+	// local prefs bag; setPref merges a key and threads the whole bag to the host
+	// (onPrefsChange → useWorkspace on web / the extension host in VS Code).
+	const prefsApi = useMemo<IPrefsApi>(
+		() => ({
+			getPref: (key) => prefs?.[key],
+			setPref: (key, value) =>
+				setPrefs((prev) => {
+					const next = { ...prev, [key]: value };
+					onPrefsChangeRef.current?.(next);
+					return next;
+				}),
+		}),
+		[prefs],
+	);
 
 	// --- Idle-timeout (TTL) settings ------------------------------------------
 	// Persisted per-pipeline in prefs (`pipelineTtl` map keyed by project_id),
@@ -472,7 +481,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} onOpenSettings={isReadonly ? undefined : openTtlSettings} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
+			content: <div style={styles.canvasPadding}><PrefsProvider value={prefsApi}>{project && <Canvas oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} onOpenSettings={isReadonly ? undefined : openTtlSettings} isReadonly={isReadonly} envKeys={envKeys} />}</PrefsProvider></div>,
 		},
 		parameters: {
 			content: renderDocPanel('parameters', <ParametersPane value={viewState.pipelineTraceLevel ?? 'summary'} onChange={(level) => updateViewState({ pipelineTraceLevel: level })} disabled={isReadonly} />),

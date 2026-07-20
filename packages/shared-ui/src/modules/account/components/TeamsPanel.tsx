@@ -16,8 +16,14 @@
  *                             per-member permissions editor, member removal
  *                             (ConfirmDialog-guarded), the add-member form,
  *                             and Delete Team in the footer (ConfirmDialog-
- *                             guarded, org-admin only)
- *  - "+ New Team" (header) -> the SAME panel in CREATE mode (team name form)
+ *                             guarded, org-admin only). Header X / Escape are
+ *                             the exits (no footer Close). The per-member
+ *                             body operations stay immediate VERBS — a
+ *                             documented gray zone, deliberately untouched.
+ *  - "+ New Team" (header) -> the SAME panel in CREATE mode (team name form);
+ *                             [Create Team] MATERIALIZES on the first change,
+ *                             and a dirty Cancel / X / Escape raises the
+ *                             stock "Discard changes?" confirm
  *
  * WHY: the previous implementation swapped the whole tab between a list Card
  * and a drill-down members Card, and delegated create / delete / add-member /
@@ -38,6 +44,7 @@ import type { CSSProperties } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
+import { Banner } from '../../../components/banner/Banner';
 import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
@@ -164,11 +171,9 @@ const styles = {
 		padding: '7px 0',
 	} as CSSProperties,
 
-	/** Inline save/validation error line under the active form. */
-	error: {
-		fontSize: 11,
-		color: 'var(--rr-color-error)',
-		marginTop: 8,
+	/** Spacing wrapper for the in-panel error Banner at the top of the body. */
+	errorBanner: {
+		marginBottom: 12,
 	} as CSSProperties,
 
 	/** Left-anchored destructive slot in the panel footer (footer is flex-end). */
@@ -294,6 +299,9 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 	// Confirmation gates (each stacks over the panel via the overlay stack).
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const [confirmRemove, setConfirmRemove] = useState<{ userId: string; displayName: string } | null>(null);
+	// Footer-Cancel discard confirm (the DetailPanel guards X / Escape itself;
+	// the create footer's Cancel routes through this local gate per the standard).
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
 
 	// The panel's mode: create wins (the grid is unreachable under an open
 	// panel, so both can never be user-driven at once); otherwise the host's
@@ -303,6 +311,10 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 	// The viewed record resolves LIVE from props so server refreshes (member
 	// added / removed, permissions changed) update the open panel in place.
 	const viewedTeam = panel?.mode === 'view' ? teams.find((t) => t.id === panel.teamId) ?? null : null;
+
+	// CREATE-mode dirty flag: the name field differs from its seeded default.
+	// Drives the materializing [Create Team] and arms the discard guard.
+	const createDirty = panel?.mode === 'create' && formName.trim() !== '';
 	// Detail must MATCH the viewed team — a stale detail from a previously
 	// viewed team must not render under the wrong title while the load runs.
 	const viewedDetail = panel?.mode === 'view' && teamDetail?.id === panel.teamId ? teamDetail : null;
@@ -391,6 +403,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 		setAddOpen(false);
 		setConfirmDelete(false);
 		setConfirmRemove(null);
+		setConfirmDiscard(false);
 	};
 
 	// ── Create team ─────────────────────────────────────────────────────────
@@ -545,30 +558,39 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 				/>
 			</Card>
 
-			{/* ── Record panel: VIEW mode ─────────────────────────────────── */}
+			{/* ── Record panel: VIEW mode. Footer = the record-level [Delete
+			    Team] verb only (left-anchored danger, org-admin gate); header
+			    X / Escape are the exits — no footer Close, and no [Edit] this
+			    pass (the member-management body is verb-driven). A non-admin
+			    gets no footer at all. busy locks dismissal while any of the
+			    panel's async actions is in flight. ────────────────────────── */}
 			{viewedTeam != null && (
 				<DetailPanel
+					persistKey="panelDetailAccountTeamWidth"
 					contained
 					open
 					onClose={closePanel}
 					avatar={<div style={styles.teamChipAvatar(viewedTeam.name)}>{viewedTeam.name[0] ?? ''}</div>}
 					title={viewedTeam.name}
 					subtitle={`${memberCount} member${memberCount !== 1 ? 's' : ''}`}
+					busy={saving}
 					footer={
-						<>
-							{isOrgAdmin && (
-								<div style={styles.footerDanger}>
-									<Button variant="danger" small onClick={() => setConfirmDelete(true)}>
-										Delete Team
-									</Button>
-								</div>
-							)}
-							<Button variant="ghost" small onClick={closePanel}>
-								Close
-							</Button>
-						</>
+						isOrgAdmin ? (
+							<div style={styles.footerDanger}>
+								<Button variant="danger" small disabled={saving} onClick={() => setConfirmDelete(true)}>
+									Delete Team
+								</Button>
+							</div>
+						) : undefined
 					}
 				>
+					{/* In-panel error surface (interaction standard): a stock Banner
+					    at the top of the body. */}
+					{error && (
+						<div style={styles.errorBanner}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					)}
 					{/* Team facts from the live list record. */}
 					<Section label="Team">
 						<LabelValue label="Name">{viewedTeam.name}</LabelValue>
@@ -689,36 +711,51 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 							</div>
 						)}
 					</Section>
-
-					{error && <div style={styles.error}>{error}</div>}
 				</DetailPanel>
 			)}
 
-			{/* ── Record panel: CREATE mode ───────────────────────────────── */}
+			{/* ── Record panel: CREATE mode. [Create Team] MATERIALIZES on the
+			    first change, LEFT of the stationary [Cancel]; a dirty Cancel
+			    routes through the discard confirm; dirty/editing arm the
+			    component's own X / Escape guard; onExitMode closes
+			    (create-mode panels close on mode exit). ────────────────────── */}
 			{panel?.mode === 'create' && (
 				<DetailPanel
+					persistKey="panelDetailAccountTeamWidth"
 					contained
 					open
 					onClose={closePanel}
 					title="New Team"
+					dirty={createDirty}
+					editing
+					onExitMode={closePanel}
+					busy={saving}
 					footer={
 						<>
-							<Button variant="ghost" small onClick={closePanel}>
+							{createDirty && (
+								<Button variant="primary" small disabled={saving} onClick={() => void handleCreate()}>
+									{saving ? 'Creating…' : 'Create Team'}
+								</Button>
+							)}
+							<Button variant="ghost" small disabled={saving} onClick={() => (createDirty ? setConfirmDiscard(true) : closePanel())}>
 								Cancel
-							</Button>
-							<Button variant="primary" small disabled={saving} onClick={() => void handleCreate()}>
-								{saving ? 'Creating…' : 'Create Team'}
 							</Button>
 						</>
 					}
 				>
+					{/* In-panel error surface (interaction standard): a stock Banner
+					    at the top of the body. */}
+					{error && (
+						<div style={styles.errorBanner}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					)}
 					{/* Create form (ported field-for-field from the retired modal). */}
 					<div style={S.field}>
 						<div style={S.fieldLabel}>Team Name</div>
 						<input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="e.g. Engineering, Data Science, QA" style={commonStyles.inputField} data-rr-autofocus="true" />
 						<div style={commonStyles.textMuted}>You'll be added as admin automatically.</div>
 					</div>
-					{error && <div style={styles.error}>{error}</div>}
 				</DetailPanel>
 			)}
 
@@ -753,6 +790,24 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 					}
 					onConfirm={() => void handleRemoveMember()}
 					onCancel={() => setConfirmRemove(null)}
+				/>
+			)}
+
+			{/* ── Footer-Cancel discard confirm (stock dialog, same copy as the
+			    DetailPanel's own X / Escape guard) ──────────────────────────── */}
+			{confirmDiscard && (
+				<ConfirmDialog
+					title="Discard changes?"
+					message="Your unsaved changes will be lost."
+					confirmLabel="Discard"
+					cancelLabel="Keep Editing"
+					destructive
+					onConfirm={() => {
+						// The confirmed discard closes the create panel whole.
+						setConfirmDiscard(false);
+						closePanel();
+					}}
+					onCancel={() => setConfirmDiscard(false)}
 				/>
 			)}
 		</section>

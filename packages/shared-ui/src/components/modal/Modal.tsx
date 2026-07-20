@@ -62,17 +62,25 @@ const openLayers: object[] = [];
 let originalBodyOverflow: string | null = null;
 
 /**
- * Joins the shared overlay stack as the new topmost layer and locks page
- * scroll (the pre-lock overflow is captured by the first layer only).
+ * Joins the shared overlay stack as the new topmost layer and (by default) locks
+ * page scroll — the pre-lock overflow is captured by the first layer only, so a
+ * later out-of-order close never re-enables scroll behind a still-open layer.
  *
+ * `lockScroll: false` joins the stack (so Escape / focus-trap top-gating still
+ * work) WITHOUT locking scroll — for a MODELESS overlay (e.g. a DetailPanel
+ * palette floating over an interactive canvas) whose host surface must stay
+ * scrollable/pannable behind it. The pre-lock overflow is still captured on the
+ * first layer so the eventual restore is correct regardless of open order.
+ *
+ * @param lockScroll - Whether to lock `document.body` scroll while open (default true).
  * @returns The layer's identity token, for {@link isTopOverlayLayer} and
  *   {@link releaseOverlayLayer}.
  */
-export function acquireOverlayLayer(): object {
+export function acquireOverlayLayer(lockScroll = true): object {
 	if (openLayers.length === 0) originalBodyOverflow = document.body.style.overflow;
 	const layer = {};
 	openLayers.push(layer);
-	document.body.style.overflow = 'hidden';
+	if (lockScroll) document.body.style.overflow = 'hidden';
 	return layer;
 }
 

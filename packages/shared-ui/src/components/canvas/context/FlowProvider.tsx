@@ -61,10 +61,6 @@ export interface IFlowProviderProps {
 	// --- Preferences -------------------------------------------------------
 	/** The current project's ID, used to key per-project layout storage. */
 	projectId: string;
-	/** Host-provided preference reader. */
-	getPreference?: (key: string) => unknown;
-	/** Host-provided preference writer. */
-	setPreference?: (key: string, value: unknown) => void;
 
 	// --- Readonly ----------------------------------------------------------
 	/** When true, the canvas is fully read-only. */
@@ -145,9 +141,9 @@ export interface IFlowProviderProps {
  * </ReactFlowProvider>
  * ```
  */
-export function FlowProvider({ children, project, projectId, getPreference, setPreference, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, onOpenSettings, envKeys }: IFlowProviderProps): ReactElement {
+export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, onOpenSettings, envKeys }: IFlowProviderProps): ReactElement {
 	return (
-		<FlowPreferencesProvider projectId={projectId} getPreference={getPreference} setPreference={setPreference} isReadonly={isReadonly}>
+		<FlowPreferencesProvider projectId={projectId} isReadonly={isReadonly}>
 			<FlowProjectProvider
 				project={project}
 				isReadonly={isReadonly}

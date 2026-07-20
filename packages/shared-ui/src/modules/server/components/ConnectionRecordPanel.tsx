@@ -176,6 +176,7 @@ export const ConnectionRecordPanel: React.FC<IConnectionRecordPanelProps> = ({ c
 
 	return (
 		<DetailPanel
+			persistKey="panelDetailConnectionWidth"
 			open
 			onClose={onClose}
 			avatar={<div style={styles.avatar(AVATAR_COLORS[record.id % AVATAR_COLORS.length])}>#{record.id}</div>}
