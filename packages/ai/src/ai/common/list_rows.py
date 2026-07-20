@@ -280,11 +280,16 @@ def paginate_rows(
     working = list(rows)
     page, page_size = clamp_paging(args, max_size=max_size)
 
-    # Step 1: free-text search over the designated keys.
-    term = str(args.get('search', '') or '').strip().lower()
+    # Step 1: free-text search over the designated keys. Only None/missing
+    # values collapse to '' — valid falsy values (0, False) must stay
+    # searchable, so no `or ''` coercion on either side.
+    term_raw = args.get('search')
+    term = str(term_raw if term_raw is not None else '').strip().lower()
     if term and searchable_keys:
         working = [
-            row for row in working if any(term in str(row.get(key, '') or '').lower() for key in searchable_keys)
+            row
+            for row in working
+            if any(term in ('' if row.get(key) is None else str(row.get(key)).lower()) for key in searchable_keys)
         ]
 
     # Step 2: filters (same key/operator convention as the SQL path).
