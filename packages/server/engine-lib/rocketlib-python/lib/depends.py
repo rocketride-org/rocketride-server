@@ -51,7 +51,7 @@ else:
 # engLib is built into engine.exe, always available
 from engLib import debug, monitorStatus, error
 
-# Sibling pure modules (stdlib-only, no engLib) for per-environment scoped installs (Phase 2A).
+# Sibling stdlib-only modules backing the per-environment scoped install.
 import ast_deps
 import venv_env
 
@@ -82,6 +82,11 @@ def _tool_spec(name: str) -> str:
 
 # Track processed requirements to avoid redundant installs in same session
 _processed: set[str] = set()
+
+# Set while a per-environment overlay is active: runtime depends() then installs into the
+# overlay (uv --target) against the env's own constraints, leaving the base runtime alone.
+_active_overlay_site: Optional[str] = None
+_active_overlay_constraints: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -793,6 +798,23 @@ def _write_excludes_file() -> str:
     return excludes_path
 
 
+def _target_args() -> list[str]:
+    """``uv --target <overlay>`` when scoping is active, else ``[]``.
+
+    uv reads the target directory, so packages the scoped install already placed there
+    are reported as satisfied instead of being reinstalled into the base runtime.
+    """
+    return ['--target', _active_overlay_site] if _active_overlay_site else []
+
+
+def _effective_constraints(constraints_path: str) -> str:
+    """The env's constraints when scoping is active, else the given global one.
+
+    Keeps runtime installs pinned to the versions the scoped compile resolved.
+    """
+    return _active_overlay_constraints or constraints_path
+
+
 def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]:
     """
     Run uv pip install --dry-run and return list of packages that would be installed.
@@ -824,7 +846,8 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
     # See #1256.
     args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
-    args.extend(_constraints_args(constraints_path, exe_dir))
+    args.extend(_constraints_args(_effective_constraints(constraints_path), exe_dir))
+    args.extend(_target_args())
 
     debug(f'Dry-run: {args}')
     result = subprocess.run(
@@ -925,7 +948,8 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     # Relative to cwd (exe_dir) — see the --excludes note in _install_dry_run (#1256).
     uv_args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
-    uv_args.extend(_constraints_args(constraints_path, exe_dir))
+    uv_args.extend(_constraints_args(_effective_constraints(constraints_path), exe_dir))
+    uv_args.extend(_target_args())
 
     # Run uv and stream output (heartbeat is already running from the caller)
     debug(f'Install: {uv_args}')
@@ -957,8 +981,8 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
     # Invalidate import caches so Python can find newly installed packages
     importlib.invalidate_caches()
 
-    # Clear path importer cache for site-packages to force re-scan
-    sys.path_importer_cache.pop(_get_site_packages(), None)
+    # Clear the path importer cache for the install target to force a re-scan
+    sys.path_importer_cache.pop(_active_overlay_site or _get_site_packages(), None)
 
     debug(f'Installed: {requirements_path}')
 
@@ -1034,15 +1058,15 @@ def load_depends(current_file: str, requirements_file: str = 'requirements.txt')
 
 
 # ---------------------------------------------------------------------------
-# Per-environment scoped install (Phase 2A — design 4.7 / 4.9 / 4.15)
+# Per-environment scoped install
 # ---------------------------------------------------------------------------
 
 
 def _compile_constraints_at(combined_path: str, constraints_path: str) -> None:
     """Compile ``combined_path`` -> ``constraints_path`` for one environment.
 
-    Parameterized twin of :func:`_compile_constraints` that takes explicit paths
-    instead of the global cache locations, so each env compiles its own scoped set.
+    Twin of :func:`_compile_constraints` taking explicit paths, so each env compiles
+    its own scoped set rather than the global one.
     """
     if not _uv_available():
         raise RuntimeError('uv executable not found')
@@ -1073,17 +1097,14 @@ def _compile_constraints_at(combined_path: str, constraints_path: str) -> None:
         cwd=exe_dir,
     )
     if result.returncode != 0:
-        error(f'Failed to compile constraints: {result.stderr}')
-        raise RuntimeError('Failed to compile constraints')
+        detail = (result.stderr or result.stdout or '').strip()
+        error(f'Failed to compile constraints: {detail}')
+        raise RuntimeError(f'Failed to compile constraints: {detail[:800]}')
     debug(f'Constraints compiled: {constraints_path}')
 
 
 def _install_target(requirements_path: str, constraints_path: str, target_site: str) -> None:
-    """Install ``requirements_path`` into an overlay ``target_site`` (uv ``--target``).
-
-    Mirrors :func:`_install_requirements_inner` but lands packages in the env's
-    overlay ``site-packages`` instead of the base runtime.
-    """
+    """Install ``requirements_path`` into the overlay ``target_site`` (uv ``--target``)."""
     with open(requirements_path, 'r', encoding='utf-8') as f:
         has_deps = any(line.strip() and not line.strip().startswith('#') for line in f)
     if not has_deps:
@@ -1142,40 +1163,38 @@ def ensure_env_scoped(
 ) -> Optional[str]:
     """Install only what a pipeline environment uses, into its own overlay.
 
-    Discovers the requirement-file set for ``providers`` (``ast_deps``), compiles +
-    installs it into ``venvs/<project_id>/<env_id>/site-packages`` (on drift), and
-    inserts that overlay ahead of the base runtime on ``sys.path``.
-
-    Gated by the ``ROCKETRIDE_SERVER_USE_VENV`` switch (§4.15): returns ``None``
-    when scoping does not apply, in which case the caller keeps today's global-glob
-    behavior (:func:`ensure_constraints` + base site-packages).
+    Discovers the requirement files reachable from ``providers``, compiles and installs
+    them into ``venvs/<project_id>/<env_id>/site-packages`` when they drifted, and puts
+    that overlay ahead of the base runtime on ``sys.path``.
 
     Args:
-        project_id: Pipe id (``config.pipeline.project_id``), or ``None`` -> default env.
+        project_id: Pipe id, or ``None`` for the shared default env.
         env_id: ``'main'`` or a group id.
         providers: The environment's node ``provider`` strings.
         has_isolated_group: Whether the pipeline has an isolated group (auto mode).
 
     Returns:
-        The overlay ``site-packages`` path (now on ``sys.path``), or ``None`` for the
-        legacy path.
+        The overlay ``site-packages`` path, or ``None`` when scoping does not apply —
+        the caller then keeps the global-glob behavior.
     """
     exe_dir = _get_executable_dir()
 
     def _discover(provs):
-        # In the deployed engine both packages sit directly under the exe dir.
+        # In the deployed engine both the nodes and ai packages sit under the exe dir.
         return ast_deps.discover_for_providers(provs, exe_dir, exe_dir).requirement_files
 
     def _compile_and_install(plan):
-        # Per-env lock (design 4.10): one lock per overlay, not the single global lock.
-        with FileLock(plan.paths.lock_file):
+        with FileLock(plan.paths.lock_file):  # one lock per overlay, not the global one
             bootstrap()
             _compile_constraints_at(plan.paths.combined, plan.paths.constraints)
             _install_target(plan.paths.combined, plan.paths.constraints, plan.paths.site_packages)
 
     def _overlay(site):
+        global _active_overlay_site, _active_overlay_constraints
         if site not in sys.path:
-            sys.path.insert(0, site)  # overlay precedence: venv wins over base (§4.11)
+            sys.path.insert(0, site)  # ahead of base so the overlay's versions win
+        _active_overlay_site = site
+        _active_overlay_constraints = venv_env.env_paths(os.path.dirname(site)).constraints
         import importlib
 
         importlib.invalidate_caches()

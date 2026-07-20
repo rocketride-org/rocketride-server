@@ -22,30 +22,24 @@
 # SOFTWARE.
 # =============================================================================
 
-"""AST-based per-environment dependency discovery for RocketRide venvs.
+"""AST-based per-environment dependency discovery.
 
-Given the node providers an environment uses, resolve each provider to its entry
-module (via ``services*.json``'s ``path`` field), then *statically* walk the import
-graph — following nested/in-function imports and relative imports into the
-first-party ``nodes`` and ``ai`` packages — to collect exactly the
-``requirement*.txt`` files that environment needs. This is the pre-resolution
-layer that lets an env install only the deps its nodes actually reach, instead of
-globbing every node/ai requirement into one union.
+Resolves each node ``provider`` to its entry module (via the ``path`` field of
+``services*.json``), then statically walks the import graph into the first-party
+``nodes`` and ``ai`` packages to collect exactly the ``requirement*.txt`` files that
+environment needs, instead of globbing every requirement in the tree.
 
-Design: ``packages/server/design/virtual-environments.md`` §4.8 (Resolution rule,
-Prototype result). Two properties proven necessary and encoded here:
-  1. nested / in-function imports are followed (``ast.walk``, not just module top);
-  2. relative imports resolve against the correct package (``__init__`` vs module).
+Two things the walk must get right: it follows nested/in-function imports, not just
+module-level ones, and resolves relative imports against the right package
+(``__init__`` vs regular module).
 
-The walk is a *sound over-approximation*: within a shared package directory it may
-include sibling requirement files (the documented "barrel ``__init__``" precision
-issue, §4.8) but it never under-includes. It also flags dynamic ``importlib`` /
-``__import__`` calls it cannot resolve statically, so a caller can fall back to the
-runtime ``depends()`` backstop for those.
+The result is a sound over-approximation — within a shared package directory it may
+pick up sibling requirement files, but it never under-includes. Dynamic
+``importlib``/``__import__`` calls that cannot be resolved statically are flagged so
+the caller can fall back to the runtime ``depends()`` backstop.
 
-Pure and self-contained (stdlib only, no engine imports) so it is unit- and
-sandbox-testable in isolation. Deployment-relative root resolution is intentionally
-*not* baked in — callers pass explicit ``nodes_src`` / ``ai_src`` roots.
+Stdlib only, with the package roots passed in explicitly, so it is testable in
+isolation.
 """
 
 from __future__ import annotations
@@ -218,10 +212,10 @@ class NodeEntry:
 class ProviderIndex:
     """Maps a pipeline ``provider`` string to its Python entry module.
 
-    Reproduces the engine loader's mapping (``services*.json`` ``protocol`` ->
-    logical type, ``path`` -> module) rather than the naive ``nodes.<provider>``
-    guess, which is wrong for ~1/3 of providers (aliases, sub-package paths, name
-    != dir, native no-``path`` nodes). See design §4.8 Resolution rule.
+    Reproduces the engine loader's mapping (``protocol`` -> logical type, ``path`` ->
+    module) rather than guessing ``nodes.<provider>``, which is wrong for roughly a
+    third of providers: aliases, sub-package paths, name != directory, and native
+    nodes with no ``path``.
     """
 
     def __init__(self, nodes_src: str):
@@ -445,12 +439,16 @@ def discover_for_providers(providers: Iterable[str], nodes_src: str, ai_src: str
         A merged ``DiscoveryResult`` for the whole environment. Providers unknown
         to the index (or native, no-``path`` nodes with no module) contribute no
         files and, when unknown, are listed in ``unresolved_providers``.
+
+    Duplicate providers (a pipeline may have many nodes of the same type, e.g. two
+    OpenAI or several Frame Grabber nodes) are collapsed up front, so each provider
+    is resolved and walked exactly once.
     """
     index = ProviderIndex(nodes_src)
     roots = {'nodes': os.path.abspath(nodes_src), 'ai': os.path.abspath(ai_src)}
     seeds: list[str] = []
     unresolved: list[str] = []
-    for provider in providers:
+    for provider in dict.fromkeys(providers):  # unique, first-seen order
         entry = index.resolve(provider)
         if entry is None:
             unresolved.append(provider)

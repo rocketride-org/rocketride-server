@@ -3,24 +3,17 @@
 # (full text in depends.py)
 # =============================================================================
 
-"""Per-environment overlay layout and scoped-install planning for RocketRide venvs.
+"""Per-environment overlay layout and scoped-install planning.
 
-Implements the directory model and pre-install planning from design §4.9 / §4.7:
-every environment (``main`` or an isolated group) gets its own overlay under
-``<exe>/venvs/<proj>/<env>/`` holding ``site-packages/`` + a scoped
-``combined.txt`` / ``constraints.txt`` / ``requirements.hash`` + an install lock.
-Paths are keyed by **shortened** stable ids (first 8 chars) to stay under the
-Windows ``MAX_PATH`` limit (a 36-char GUID nested above deep torch/nvidia paths
-overflows 260).
+Every environment (``main`` or an isolated group) gets its own overlay under
+``<exe>/venvs/<proj>/<env>/`` holding ``site-packages/`` plus its own
+``combined.txt`` / ``constraints.txt`` / ``requirements.hash`` and an install lock.
+Ids are shortened to stay under the Windows ``MAX_PATH`` limit.
 
-This module is **pure and engine-free** (stdlib only, no ``engLib``/``uv``, no
-subprocess, no ``sys.path`` mutation), so it is unit-testable in isolation and
-parameterized by explicit roots. The caller (``depends.py``) layers the actual
-``uv`` compile/install and the ``sys.path.insert`` overlay on top.
-
-The tiny hash/combine helpers here mirror ``depends.py`` on purpose to avoid
-importing it (which pulls ``engLib``); keep them in sync until ``depends.py`` is
-refactored to consume this module directly.
+Stdlib only — no engine, ``uv``, subprocess or ``sys.path`` mutation — so it is
+testable in isolation; ``depends.py`` layers the actual compile/install on top.
+The hash/combine helpers mirror ``depends.py`` to avoid importing it (that would
+pull in ``engLib``); keep them in sync.
 """
 
 from __future__ import annotations
@@ -33,14 +26,14 @@ from typing import Optional
 
 # env_id for the always-present base-of-the-pipeline environment.
 MAIN_ENV = 'main'
-# env / project id used when there is no project_id (engtest, CLI, ad-hoc — §4.14).
+# Used when there is no project_id (engtest, CLI, ad-hoc runs).
 DEFAULT_ID = 'default'
 
 _ID_MAX = 8  # chars kept from a long (GUID-like) id segment; short ids kept whole.
 
 
 # ---------------------------------------------------------------------------
-# the ROCKETRIDE_SERVER_USE_VENV master switch (§4.15)
+# the ROCKETRIDE_SERVER_USE_VENV switch
 # ---------------------------------------------------------------------------
 
 # Resolved states of the switch.
@@ -75,7 +68,7 @@ def scoping_enabled(mode: str, has_isolated_group: bool) -> bool:
     """Whether per-environment scoping applies for this run.
 
     ``off`` -> never (legacy global-glob); ``on`` -> always; ``auto`` -> only when
-    the pipeline opts in via an isolated group (§4.15).
+    the pipeline opts in via an isolated group.
     """
     if mode == USE_OFF:
         return False
@@ -85,7 +78,7 @@ def scoping_enabled(mode: str, has_isolated_group: bool) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# id shortening + directory layout (§4.9)
+# id shortening + directory layout
 # ---------------------------------------------------------------------------
 
 
@@ -97,7 +90,7 @@ def short_id(identifier: Optional[str], length: int = _ID_MAX) -> str:
     :data:`DEFAULT_ID`.
 
     Collisions between two long ids sharing a prefix are the accepted MAX_PATH
-    trade-off (design §4.9); short group ids within one project stay distinct.
+    trade-off; short group ids within one project stay distinct.
     """
     if not identifier:
         return DEFAULT_ID
@@ -116,8 +109,8 @@ def env_dir(exe_dir: str, project_id: Optional[str], env_id: Optional[str]) -> s
     """Overlay directory for one environment: ``<exe>/venvs/<proj>/<env>``.
 
     ``project_id`` is the pipe id (``config.pipeline.project_id``); ``env_id`` is
-    ``main`` or a group node id. Both are shortened (§4.9). Missing ``project_id``
-    falls back to a shared ``default`` project (§4.14).
+    ``main`` or a group node id. Both are shortened. Missing ``project_id`` falls
+    back to a shared ``default`` project.
     """
     return os.path.join(venv_root(exe_dir), short_id(project_id), short_id(env_id or MAIN_ENV))
 
@@ -192,12 +185,11 @@ def plan_install(
 ) -> InstallPlan:
     """Plan a scoped install: resolve the overlay, compute drift, write the combined file.
 
-    Does **no** subprocess work — it prepares everything the caller needs to run
-    ``uv`` (or to skip when the env is already up to date).
+    Prepares what the caller needs to run ``uv``, or to skip when already up to date.
 
     Args:
         exe_dir: The engine executable directory (``dirname(sys.executable)``).
-        project_id: Pipe id, or ``None`` -> shared ``default`` project (§4.14).
+        project_id: Pipe id, or ``None`` for the shared ``default`` project.
         env_id: ``main`` or a group id.
         req_files: The environment's requirement-file set (from ``ast_deps``).
         create: Create the overlay directory tree when ``True``.
@@ -286,22 +278,23 @@ def run_scoped_install(
 ) -> Optional[str]:
     """Orchestrate a scoped per-environment install; return the overlay site-packages.
 
-    Pure control flow — every side effect is injected, so this is fully
-    unit-testable without an engine or ``uv``:
+    Control flow only — the side effects are injected, so this is testable without an
+    engine or ``uv``: ``discover(providers)`` yields the env's requirement files,
+    ``compile_and_install(plan)`` runs uv, and the optional ``on_overlay(site)`` applies
+    the overlay.
 
-    * ``discover(providers) -> list[str]`` — the env's requirement files (ast_deps).
-    * ``compile_and_install(plan)`` — run the uv compile + install ``--target``.
-    * ``on_overlay(site_packages)`` — e.g. ``sys.path.insert`` (optional).
-
-    Returns ``None`` when scoping does not apply for this run (the legacy/base
-    path — §4.15), otherwise the overlay ``site-packages`` path. Installs/rebuilds
-    only when the requirement set drifted (§4.9).
+    Installs only when the requirement set drifted. Returns ``None`` when scoping does
+    not apply, leaving the caller on the base runtime.
     """
     if mode is None:
         mode = use_venv_mode()
     if not scoping_enabled(mode, has_isolated_group):
         return None
     req_files = list(discover(providers))
+    if not req_files:
+        # Nothing to scope (source-only endpoint, or all-native nodes): must not try to
+        # compile an absent combined file — leave the base runtime in place.
+        return None
     plan = plan_install(exe_dir, project_id, env_id, req_files)
     if plan.needs_rebuild:
         compile_and_install(plan)
