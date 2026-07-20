@@ -173,8 +173,9 @@
 					]
 				},
 				"rocketride.pipelineTTL": {
-					"type": "number",
+					"type": "integer",
 					"default": 900,
+					"minimum": 0,
 					"description": "Default idle timeout in seconds before a running pipeline is shut down (0 = no timeout)."
 				},
 				"rocketride.pipelineTraceLevel": {
