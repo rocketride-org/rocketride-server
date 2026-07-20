@@ -116,6 +116,7 @@ for _name, _stub in _build_import_stubs().items():
 
 mod = importlib.import_module('nodes.tool_oura.oura_client')
 glb_mod = importlib.import_module('nodes.tool_oura.IGlobal')
+inst_mod = importlib.import_module('nodes.tool_oura.IInstance')
 
 # Drop the stubs we injected so they never leak into the shared pytest session.
 for _name in _added_stubs:
@@ -396,3 +397,51 @@ def test_get_token_whitespace_only_env_yields_empty():
     with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': '   '}):
         token = glb_mod.IGlobal._get_token({}, {})
     assert token == ''
+
+
+# ---------------------------------------------------------------------------
+# IInstance next_token short-circuit
+# ---------------------------------------------------------------------------
+
+
+def _make_instance():
+    inst = inst_mod.IInstance.__new__(inst_mod.IInstance)
+    inst.IGlobal = type('FakeGlobal', (), {'token': 'tok'})()
+    return inst
+
+
+def _fake_fetch(calls):
+    def fetch(token, collection, *, params=None, next_token=None, max_pages=None):
+        calls['params'] = params
+        calls['next_token'] = next_token
+        return {'data': [], 'next_token': None}
+
+    return fetch
+
+
+def test_fetch_range_next_token_skips_date_validation():
+    """A malformed date range must not block a pagination continuation."""
+    inst = _make_instance()
+    calls = {}
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch(calls)):
+        out = inst._fetch_range('daily_sleep', {'next_token': 'abc', 'start_date': 'not-a-date'})
+    assert calls['next_token'] == 'abc'
+    assert calls['params'] is None
+    assert out['query'] == {'collection': 'daily_sleep', 'continued_from_next_token': True}
+
+
+def test_fetch_range_without_next_token_still_validates_dates():
+    inst = _make_instance()
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch({})):
+        with pytest.raises(ValueError, match='ISO date'):
+            inst._fetch_range('daily_sleep', {'start_date': 'not-a-date'})
+
+
+def test_heartrate_next_token_skips_datetime_validation():
+    inst = _make_instance()
+    calls = {}
+    with patch.object(inst_mod, 'fetch_collection', _fake_fetch(calls)):
+        out = inst.heartrate({'next_token': 'abc', 'start_datetime': 'garbage'})
+    assert calls['next_token'] == 'abc'
+    assert calls['params'] is None
+    assert out['query'] == {'collection': 'heartrate', 'continued_from_next_token': True}

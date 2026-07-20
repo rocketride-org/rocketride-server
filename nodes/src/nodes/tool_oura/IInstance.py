@@ -101,21 +101,23 @@ class IInstance(IInstanceBase):
 
     def _fetch_range(self, collection: str, args: dict, *, default_days: int = 7) -> dict:
         """Fetch a date-filtered collection and return a compact result envelope."""
-        start, end = resolve_date_range(args, default_days=default_days)
         next_token = args.get('next_token') or None
+        if next_token:
+            # Oura ignores date filters on continuation requests, so skip date
+            # resolution entirely — a malformed range must not block pagination.
+            result = fetch_collection(self._token(), collection, next_token=next_token)
+            compacted = compact_result(result, include_detail=bool(args.get('include_detail')))
+            compacted['query'] = {'collection': collection, 'continued_from_next_token': True}
+            return compacted
+
+        start, end = resolve_date_range(args, default_days=default_days)
         result = fetch_collection(
             self._token(),
             collection,
             params={'start_date': start, 'end_date': end},
-            next_token=next_token,
         )
         compacted = compact_result(result, include_detail=bool(args.get('include_detail')))
-        if next_token:
-            # Oura ignores date filters when a next_token is present, so echoing
-            # the resolved range here would misdescribe what was fetched.
-            compacted['query'] = {'collection': collection, 'continued_from_next_token': True}
-        else:
-            compacted['query'] = {'collection': collection, 'start_date': start, 'end_date': end}
+        compacted['query'] = {'collection': collection, 'start_date': start, 'end_date': end}
         return compacted
 
     # =======================================================================
@@ -291,20 +293,21 @@ class IInstance(IInstanceBase):
     )
     def heartrate(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
-        start, end = resolve_datetime_range(args, default_hours=24)
         next_token = args.get('next_token') or None
+        if next_token:
+            # Same rationale as _fetch_range: Oura ignores datetime filters on
+            # continuation requests, so skip resolution and don't echo a range.
+            result = fetch_collection(self._token(), 'heartrate', next_token=next_token)
+            result['query'] = {'collection': 'heartrate', 'continued_from_next_token': True}
+            return result
+
+        start, end = resolve_datetime_range(args, default_hours=24)
         result = fetch_collection(
             self._token(),
             'heartrate',
             params={'start_datetime': start, 'end_datetime': end},
-            next_token=next_token,
         )
-        if next_token:
-            # Same rationale as _fetch_range: Oura ignores datetime filters on
-            # continuation requests, so echoing them would misdescribe the fetch.
-            result['query'] = {'collection': 'heartrate', 'continued_from_next_token': True}
-        else:
-            result['query'] = {'start_datetime': start, 'end_datetime': end}
+        result['query'] = {'start_datetime': start, 'end_datetime': end}
         return result
 
     @tool_function(
