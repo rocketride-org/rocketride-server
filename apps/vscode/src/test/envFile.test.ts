@@ -92,7 +92,7 @@ test('removes keys listed in keysToRemove', () => {
 
 // --- resolveConnectionEnv ----------------------------------------------------
 
-for (const mode of ['local', 'docker', 'service', 'onprem']) {
+for (const mode of ['local', 'docker', 'service', 'onprem'] as const) {
 	test(`writes both vars for self-hosted mode: ${mode}`, () => {
 		assert.deepEqual(
 			resolveConnectionEnv({ group: 'development', mode, httpUrl: URI, apiKey: KEY }),

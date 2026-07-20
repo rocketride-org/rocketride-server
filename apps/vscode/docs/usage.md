@@ -65,6 +65,14 @@ The settings (cog) button in the canvas toolbar opens the **Pipeline Settings** 
 
 Internally, the editor webview passes the timeout to the extension host as an optional `ttl` field (in seconds; `0` = no timeout, omitted = server default) on the `status:pipelineAction` message when the action is `run` or `restart`.
 
+## `.env` Auto-Sync
+
+After a successful engine connection, the extension syncs the workspace `.env` only for the **development** connection group using a self-hosted mode (local, Docker, service, or direct/on-prem connection). It writes the resolved `ROCKETRIDE_URI` (including a dynamic local port when applicable) and `ROCKETRIDE_APIKEY`, preserves existing comments and variables, and does not rewrite the file when its contents are already current.
+
+Cloud connections are not synced because their OAuth token is not an SDK API key. Deployment connections, workspaces with no folder open, and unreadable `.env` files are also skipped; a sync failure never affects the connection itself. Keep `.env` gitignored.
+
+The extension never automatically removes these keys: disconnecting, engine exit, or switching to cloud leaves the last-synced values in place. Remove them by hand if you no longer want them. Each self-hosted connection syncs again, so a hand-edited `ROCKETRIDE_APIKEY` is overwritten on the next successful connection.
+
 ## Monitoring Execution
 
 The **Status** page shows:

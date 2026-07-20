@@ -293,7 +293,10 @@ export class ConnectionManager extends EventEmitter {
 			let existing = '';
 			try {
 				existing = Buffer.from(await vscode.workspace.fs.readFile(envUri)).toString('utf8');
-			} catch {
+			} catch (err) {
+				if (!(err instanceof vscode.FileSystemError && err.code === 'FileNotFound')) {
+					throw err;
+				}
 				// .env doesn't exist yet — it will be created.
 			}
 

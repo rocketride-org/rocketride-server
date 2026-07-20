@@ -31,6 +31,7 @@
  * on `vscode`.
  */
 
+import type { ConnectionGroup, ConnectionMode } from '../../config';
 import { connectionModeUsesOAuth } from './connectionModeAuth';
 
 /** The two keys the RocketRide SDK/CLI look up to reach the engine. */
@@ -121,9 +122,9 @@ export function mergeEnvText(
 /** Inputs for {@link resolveConnectionEnv}. */
 export interface ConnectionEnvArgs {
 	/** Connection group — only the `development` group owns the project `.env`. */
-	group: string;
+	group: ConnectionGroup;
 	/** Resolved connection mode (local/docker/service/onprem/cloud). */
-	mode: string;
+	mode: ConnectionMode;
 	/** HTTP(S) base URL of the engine (e.g. `http://localhost:54321`). */
 	httpUrl: string;
 	/** The API key used to authenticate this connection. */
