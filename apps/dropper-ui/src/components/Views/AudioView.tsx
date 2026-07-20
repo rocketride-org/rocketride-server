@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { Music } from 'lucide-react';
-import { ProcessedResults } from '../../types/dropper.types';
+import { ContentBlock, ProcessedResults } from '../../types/dropper.types';
 
 /**
  * Props for the AudioView component.
@@ -64,7 +64,7 @@ export const AudioView: React.FC<AudioViewProps> = ({ audio, compareMode, setRef
 
 						{compareMode && group.contents.length > 1 ? (
 							<div className="compare-grid">
-								{group.contents.map((block: any, contentIndex: number) => (
+								{group.contents.map((block: ContentBlock, contentIndex: number) => (
 									<div key={contentIndex} className="compare-column">
 										{block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
 										<div className="content-item">{renderPlayers(block.content, block.fieldName || 'Audio')}</div>
@@ -72,7 +72,7 @@ export const AudioView: React.FC<AudioViewProps> = ({ audio, compareMode, setRef
 								))}
 							</div>
 						) : (
-							group.contents.map((block: any, contentIndex: number) => (
+							group.contents.map((block: ContentBlock, contentIndex: number) => (
 								<div key={contentIndex} className="content-item-wrapper">
 									{group.contents.length > 1 && block.fieldName && <div className="content-field-label">{block.fieldName}</div>}
 									<div className="content-item">{renderPlayers(block.content, block.fieldName || 'Audio')}</div>
