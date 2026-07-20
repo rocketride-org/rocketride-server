@@ -36,6 +36,7 @@ and personal info — plus a cross-collection daily summary.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from rocketlib import IInstanceBase, tool_function
 
@@ -291,13 +292,19 @@ class IInstance(IInstanceBase):
     def heartrate(self, args):
         args = normalize_tool_input(args, tool_name='tool_oura')
         start, end = resolve_datetime_range(args, default_hours=24)
+        next_token = args.get('next_token') or None
         result = fetch_collection(
             self._token(),
             'heartrate',
             params={'start_datetime': start, 'end_datetime': end},
-            next_token=(args.get('next_token') or None),
+            next_token=next_token,
         )
-        result['query'] = {'start_datetime': start, 'end_datetime': end}
+        if next_token:
+            # Same rationale as _fetch_range: Oura ignores datetime filters on
+            # continuation requests, so echoing them would misdescribe the fetch.
+            result['query'] = {'collection': 'heartrate', 'continued_from_next_token': True}
+        else:
+            result['query'] = {'start_datetime': start, 'end_datetime': end}
         return result
 
     @tool_function(
@@ -416,5 +423,7 @@ class IInstance(IInstanceBase):
             raise ValueError(
                 f'document_get: unknown collection {collection!r}. Valid: {", ".join(sorted(COLLECTIONS))}'
             )
-        doc = call(self._token(), f'/usercollection/{collection}/{document_id}')
+        # URL-escape the ID so a value containing '/' or '..' cannot reach a
+        # different endpoint on the host (path traversal within the API).
+        doc = call(self._token(), f'/usercollection/{collection}/{quote(document_id, safe="")}')
         return compact_document(doc, include_detail=bool(args.get('include_detail')))

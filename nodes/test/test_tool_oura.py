@@ -173,7 +173,7 @@ def test_resolve_datetime_range_naive_treated_as_utc():
     start, _ = mod.resolve_datetime_range(
         {'start_datetime': '2026-07-01T06:30:00', 'end_datetime': '2026-07-02T00:00:00'}
     )
-    assert datetime.fromisoformat(start).tzinfo is not None
+    assert datetime.fromisoformat(start).utcoffset() == timedelta(0)
 
 
 def test_resolve_datetime_range_rejects_inverted_range():
@@ -390,3 +390,9 @@ def test_get_token_strips_whitespace_and_skips_blank_values():
     with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': ''}):
         token = glb_mod.IGlobal._get_token({'token': '   '}, {'token': '  conn-token  '})
     assert token == 'conn-token'
+
+
+def test_get_token_whitespace_only_env_yields_empty():
+    with patch.dict('os.environ', {'ROCKETRIDE_OURA_TOKEN': '   '}):
+        token = glb_mod.IGlobal._get_token({}, {})
+    assert token == ''

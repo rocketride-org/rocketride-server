@@ -34,8 +34,9 @@ requested) so agents receive compact, useful output.
 
 The API surface used here is read-only: every documented v2 usercollection
 endpoint is a GET. The base URL is fixed and only whitelisted collection
-names are ever interpolated into the request path, so no user- or
-agent-supplied value can redirect the request elsewhere.
+names or URL-escaped document IDs are ever interpolated into the request
+path, so no user- or agent-supplied value can redirect the request
+elsewhere.
 """
 
 from __future__ import annotations

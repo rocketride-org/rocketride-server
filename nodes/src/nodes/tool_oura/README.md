@@ -74,7 +74,7 @@ Request only the scopes your pipeline needs. If no source provides a token, the 
 
 Oura HTTP errors are mapped to descriptive failures the agent can act on:
 
-- **401**: `Oura authentication failed` — bad or expired token
+- **401**: `Oura authentication failed` — bad or expired token; when Oura's response mentions a scope, it is surfaced as `Oura scope not granted` instead (Oura reports missing OAuth scopes as 401, not 403), so re-authorize the app with that scope rather than replacing the token
 - **403**: `Oura access denied` — token lacks the required scope
 - **422**: `Oura rejected the request parameters` — malformed dates or filters
 - **426**: `Oura subscription required` — the data needs an active Oura membership
