@@ -429,8 +429,15 @@ imports live **exclusively in the local (no-model-server) branch**. Implications
 **Constraints strategy: per-env, compiled independently of the global (VERIFIED live).** The single
 biggest lever venvs pull is *not sharing one constraint resolution*.
 
-- `<exe>/cache/constraints.txt` (**global**) is compiled from the `nodes/**`+`ai/**` globs and governs
-  **only** the base runtime and the legacy path (`ROCKETRIDE_SERVER_USE_VENV=0` / auto-without-venv).
+- `<exe>/cache/constraints.txt` (**global**) governs **only** the base runtime and the legacy path
+  (`ROCKETRIDE_SERVER_USE_VENV=0` / auto-without-venv). Under `=1` the **`nodes/**` glob is dropped from
+  this startup compile** (`_SCOPED_EXCLUDED_GLOBS`) and it is compiled from `ai/**` + the root
+  requirements alone; node dependencies then arrive exclusively through per-env scoped installs.
+  **This gating is load-bearing, not an optimization (VERIFIED live).** While `nodes/**` stayed in the
+  glob, every node in the installation had to be mutually satisfiable: two nodes pinning incompatible
+  versions made `ensure_constraints()` fail at import of `ai/__init__.py`, so **the engine could not
+  start at all** — before any pipeline, endpoint, or per-env logic ran. Per-env scoping cannot deliver
+  its headline benefit while the startup compile still unions the whole node universe.
 - `venvs/<project_id>/<env_id>/constraints.txt` (**per-env**) is compiled from **that env's
   `combined.txt` alone — no global base** — so it resolves versions solely from the requirement files its
   nodes reach. The scoped install **and** the runtime `depends()` calls active in that env both resolve
@@ -556,9 +563,22 @@ overlay no-ops → use base; `depends.py` tolerates a missing `project_id`/`env_
   partitioner. **Must land before the first incompatible node ships**, else the suite breaks.
 
 ### 4.15 Compatibility & the venv master switch (`ROCKETRIDE_SERVER_USE_VENV`)
-The whole feature (venv runtime **and** per-environment scoping) is gated by one env var, so
-downstream/open-source consumers can pin today's behavior. **This is a permanent supported mode, not a
-migration flag.**
+The whole feature (venv runtime **and** per-environment scoping) is gated by one environment variable,
+so downstream/open-source consumers can pin today's behavior. **This is a permanent supported mode, not
+a migration flag.**
+
+The variable is read by `venv_env.use_venv_mode()` at the moment dependencies are resolved. It is set
+on the **server** process (launch config, systemd unit, container env); the task subprocess inherits it,
+and the whole execution path — startup compile, endpoint hook, per-env install — is therefore
+self-consistent. Clients need nothing: an SDK client does not import `rocketlib` (the import in
+`client-python`'s `dap_base` is guarded by `except ImportError`) and so never enters dependency
+resolution at all.
+
+**Known gap.** `<exe>/.env` is loaded by `ai/web/server.py` inside `WebServer.__init__`, but
+`ai/__init__.py` calls `depends()` at import — so a value placed in `.env` is read **after** the
+resolution it would govern and silently has no effect. Putting the switch there therefore does not work
+today. Closing this properly means moving the engine's `load_dotenv` ahead of dependency resolution, not
+teaching `venv_env` to parse the file.
 
 - **Unset (default) = auto.** The partitioner inspects the *resolved* pipeline: an `isolated` group
   present → venv runtime + per-env scoping; none present → today's single-process / global-glob
@@ -568,7 +588,19 @@ migration flag.**
   `constraints.txt` path**. Byte-for-byte today's behavior; **never an error**, even if the document
   contains isolated groups. This is the escape hatch for downstream consumers.
 - **`=1` = force on.** Enables the venv machinery and per-env scoping (still a no-op partition if the
-  pipeline genuinely has no isolated groups, but per-env `main` scoping applies).
+  pipeline genuinely has no isolated groups, but per-env `main` scoping applies). It **also drops
+  `nodes/**` from the global startup compile** (§4.9), which is what actually lets nodes with
+  conflicting pins coexist in one installation.
+
+**Known limit of `auto` (honest).** The startup compile happens at process init, before any pipeline is
+known, so `auto` cannot decide the node-glob question per pipeline: it keeps the legacy union and
+therefore keeps the conflicting-nodes failure. In Phase 2A **only `=1` delivers conflict isolation**.
+Removing the limit means taking node dependencies out of the startup path entirely (resolving them
+per-env on first use) — the same work as the base-runtime-only residual in §4.9.
+
+A second consequence of `=1`: nodes whose imports the AST walk cannot resolve statically (flagged
+`dynamic_imports`) no longer get their dependencies from the startup glob and fall back to the runtime
+`depends()` backstop, which installs into the active overlay (§4.8).
 
 Open-source/default posture: with the var unset, a consumer who never creates an isolated group gets
 exactly today's engine; `=0` additionally guarantees legacy behavior even for documents authored
@@ -753,21 +785,36 @@ and the conflict is isolated to the venv-scoping mechanism — fast, determinist
 **replace `torch 2.0/2.1`** as the conflict fixture. [created 2A; used by 8.3]
 
 ### 8.3 Integration / acceptance
-- **Conflict → no venv → must NOT start (the core proof).** A pipeline with **both** `vtest_alpha` +
-  `vtest_beta` and **no** venv → the union constraints compile is **unsatisfiable** → the pipeline
-  **fails to start** with a clear error naming the conflicting `requests` pins ("Failed to compile
-  constraints"). [2A — the scoping/compile path alone surfaces this]
+
+- **Conflict → isolated to its environment (the core proof) — VERIFIED live.** A pipeline with **both**
+  `vtest_alpha` + `vtest_beta` under `=1`: the engine **starts normally**, the client connects, and the
+  conflict surfaces only in that environment's compile — `venvs/<proj>/main/combined.txt` is written with
+  both pins and `uv pip compile` reports them unsatisfiable. The run aborts with the pin names in the
+  message; **the server stays up** and cleans the task up. Two properties asserted from artifacts: the
+  env's combined file held **9 sources** (the AST-reachable set — the two fixtures, `nodes/webhook` via
+  the `dropper` alias, and the `ai/**` modules reached) rather than the 101 node requirement files in the
+  installation; and the **global** `cache/combined.txt` contained **no** `tabulate` at all, so the base
+  runtime was never touched. [2A]
+- **The same pipeline before the `nodes/**` gating (§4.9) — the counter-proof.** With node requirements
+  still in the startup glob, the identical setup killed `ai/__init__`'s `depends()` at import: the engine
+  **could not start at all**, in every process including the CLI client. This is what motivated the
+  gating.
 - **Conflict → split across venvs → all good.** The same two nodes in **two separate venvs** → each env
   compiles/install its single pin → the pipeline runs **end-to-end**, both `requests` versions
-  coexisting. Assert each overlay's `site-packages` holds the expected version (alpha-env→2.28.2,
-  beta-env→2.31.0) and the other is **absent**. [2B]
+  coexisting. Assert each overlay's `site-packages` holds the expected version (alpha-env→`0.8.10`,
+  beta-env→`0.9.0`) and the other is **absent**. [2B]
 - **Only-needed-installed (scoping).** (a) A pipeline using `vtest_alpha` only → its env has
-  `requests==2.28.2`, **not** the other pin and **not** `whisper`/`faster-whisper`/`torch`. (b) A
+  `tabulate==0.8.10`, **not** the other pin and **not** `whisper`/`faster-whisper`/`torch`. (b) A
   **no-audio** pipeline → `whisper`/`faster-whisper` **absent** from every env's install set; an audio
   pipeline → **present** (the "if whisper isn't needed it isn't installed" check). (c) Assert the
   **requirement-file set processed equals exactly the AST-reachable set**, not the global glob. [2A]
-- **Compatibility (`=0`).** A pipeline that **does** contain an isolated group still runs single-process
-  via the global-glob path (legacy mode), no error — the permanent opt-out (§4.15). [2B]
+- **Compatibility (`=0` and auto) — VERIFIED live.** Both modes ran a real pipeline end-to-end
+  (`venv-detect`, objectId returned) with **no `venvs/` directory created**, every install carrying
+  `-c cache/constraints.txt` and **no `--target`**. The switch is fully reversible, measured on the
+  startup compile: `=1` → 29 sources, **0** of them node paths; `=0` and auto → **130** sources, **101**
+  of them node paths, i.e. exactly the pre-change set. Auto matches legacy because the pipeline has no
+  isolated group. Still owed for 2B: a pipeline that **does** contain an isolated group must run
+  single-process under `=0`, no error — the permanent opt-out (§4.15).
 - **Lifecycle.** Purge, delete-with-nodes, and pipeline-delete reclaim the right `venvs/...` dirs and are
   **blocked while a run is active**. Image lanes cross a venv boundary (all-lane bridge). [2B]
 - **Embedding invariant.** `server:run-engtest` (`python::config` + `webhook`) and `builder nodes:test`
