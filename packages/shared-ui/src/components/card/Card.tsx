@@ -52,6 +52,14 @@ export interface ICardProps {
 	 * Enter / Space activation). When omitted the card is a static surface.
 	 */
 	onClick?: () => void;
+	/**
+	 * Fill the card's parent height and let the body flex into the remaining
+	 * space below the header (a definite-height body). Pair with `noBodyPadding`
+	 * and a fill-height child — e.g. a DataGrid given `height="100%"` — to host
+	 * an internally-scrolling grid instead of a paginated one. Default: the card
+	 * sizes to its content.
+	 */
+	fill?: boolean;
 }
 
 // =============================================================================
@@ -92,6 +100,22 @@ const styles = {
 	// Body with padding removed (fills the card).
 	bodyNoPad: {
 		padding: 0,
+	} as CSSProperties,
+
+	// Fill mode: the root fills its parent and stacks header over body...
+	fillRoot: {
+		height: '100%',
+		display: 'flex',
+		flexDirection: 'column',
+	} as CSSProperties,
+
+	// ...and the body flexes into the remaining height (a definite-height box a
+	// fill-height child — e.g. a DataGrid with height="100%" — resolves against).
+	fillBody: {
+		flex: 1,
+		minHeight: 0,
+		display: 'flex',
+		flexDirection: 'column',
 	} as CSSProperties,
 
 	// Interactive surface layered onto commonStyles.card when the card is
@@ -140,7 +164,7 @@ export const cardHeaderChrome = {
  * @param props - {@link ICardProps}.
  * @returns The card element.
  */
-export function Card({ header, headerActions, children, noBodyPadding, toolbar, onClick }: ICardProps): React.ReactElement {
+export function Card({ header, headerActions, children, noBodyPadding, toolbar, onClick, fill }: ICardProps): React.ReactElement {
 	// Track hover so a clickable card can raise its border; stays false (and
 	// unused) for a static card, which attaches no mouse handlers.
 	const [hovered, setHovered] = useState(false);
@@ -165,11 +189,22 @@ export function Card({ header, headerActions, children, noBodyPadding, toolbar, 
 		}
 	};
 
+	// Compose the root style: base card, optional fill (parent-height flex
+	// column), then the interactive hover treatment (layered last).
+	const rootStyle: CSSProperties = {
+		...commonStyles.card,
+		...(fill ? styles.fillRoot : undefined),
+		...(interactive ? styles.interactive(hovered) : undefined),
+	};
+	// Body style: padded or bare, plus the fill flex when the card fills.
+	const bodyStyle: CSSProperties = {
+		...(noBodyPadding ? styles.bodyNoPad : commonStyles.cardBody),
+		...(fill ? styles.fillBody : undefined),
+	};
+
 	return (
 		<div
-			// Interactive cards layer the pointer/hover treatment; static cards keep
-			// exactly commonStyles.card so their rendering is unchanged.
-			style={interactive ? { ...commonStyles.card, ...styles.interactive(hovered) } : commonStyles.card}
+			style={rootStyle}
 			onClick={onClick}
 			onKeyDown={interactive ? handleKeyDown : undefined}
 			onMouseEnter={interactive ? () => setHovered(true) : undefined}
@@ -185,7 +220,7 @@ export function Card({ header, headerActions, children, noBodyPadding, toolbar, 
 			)}
 			{/* Optional controls strip between the header and the body. */}
 			{toolbar != null && <div style={styles.toolbar}>{toolbar}</div>}
-			<div style={noBodyPadding ? styles.bodyNoPad : commonStyles.cardBody}>{children}</div>
+			<div style={bodyStyle}>{children}</div>
 		</div>
 	);
 }

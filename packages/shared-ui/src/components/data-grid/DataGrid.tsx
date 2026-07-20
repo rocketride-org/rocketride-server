@@ -1764,8 +1764,13 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		// 'dataFiltered' with the post-filter set on every local pipeline
 		// refresh (verified in tabulator_esm.mjs), including the unfiltered
 		// case, so the count never goes stale.
-		table.on('dataFiltered', () => {
-			setActiveCount(table.getDataCount('active'));
+		table.on('dataFiltered', (_filters, rows) => {
+			// Use the event's freshly-computed active row set, NOT
+			// getDataCount('active'): at dispatch time the RowManager's active
+			// set can lag the just-applied filter, so getDataCount returns a
+			// stale value under live LOCAL replaceData (the "0 of N" count bug
+			// when matches stream in after a search is committed).
+			setActiveCount(rows.length);
 		});
 		table.on('dataLoadError', (error) => {
 			loadErrorRef.current?.(error instanceof Error ? error : new Error(String(error)));
