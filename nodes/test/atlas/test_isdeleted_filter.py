@@ -16,7 +16,6 @@ Usage:
 import importlib
 import importlib.util
 import sys
-import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -63,19 +62,11 @@ class DocFilter:
 
 
 # ---------------------------------------------------------------------------
-# Stub out ai.common.* so atlas.py can import without the full AI package
-# ---------------------------------------------------------------------------
-
-
-# Mock pydantic at module level (atlas.py imports ValidationError)
-mock_pydantic = types.ModuleType('pydantic')
-mock_pydantic.ValidationError = Exception
-sys.modules.setdefault('pydantic', mock_pydantic)
-
-# ---------------------------------------------------------------------------
 # Load atlas.py directly by file path (bypasses atlas/__init__.py)
 # ---------------------------------------------------------------------------
 
+# Do NOT stub pydantic: atlas.py imports ai.common.store -> rocketlib, and
+# rocketlib.types needs the real pydantic (BaseModel, ConfigDict, Field).
 _atlas_path = Path(__file__).parent.parent.parent / 'src' / 'nodes' / 'atlas' / 'atlas.py'
 _spec = importlib.util.spec_from_file_location('_atlas_direct', _atlas_path)
 atlas_mod = importlib.util.module_from_spec(_spec)

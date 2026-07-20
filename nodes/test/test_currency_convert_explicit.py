@@ -10,13 +10,20 @@ import sys
 import types
 
 # convert.py has no rocketlib import, but stub it defensively so importing the
-# node package stays isolated from the native engine.
+# node package stays isolated; restore after so the stub never leaks.
+_saved_rl = sys.modules.get('rocketlib')
 rocketlib = types.ModuleType('rocketlib')
 rocketlib.debug = lambda *a, **kw: None
-sys.modules.setdefault('rocketlib', rocketlib)
+sys.modules['rocketlib'] = rocketlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'currency_convert_explicit'))
-from convert import NODE_OP, convert_fact, convert_payload  # noqa: E402
+try:
+    from convert import NODE_OP, convert_fact, convert_payload  # noqa: E402
+finally:
+    if _saved_rl is not None:
+        sys.modules['rocketlib'] = _saved_rl
+    else:
+        sys.modules.pop('rocketlib', None)
 
 
 CFG = {

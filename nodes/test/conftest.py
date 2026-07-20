@@ -50,6 +50,52 @@ except ImportError:
     pass  # dotenv is optional
 
 
+# ---------------------------------------------------------------------------
+# Regression guard for sys.modules isolation (see #1640).
+# Node tests stub rocketlib/ai/pydantic/etc so a node imports without the
+# engine. If a test installs such a stub and does not restore sys.modules, the
+# stub leaks and breaks unrelated tests under a different collection order.
+# This guard fails the offending test instead of letting the leak spread.
+# ---------------------------------------------------------------------------
+
+_GUARDED_CORE_MODULES = (
+    'rocketlib',
+    'ai',
+    'ai.common',
+    'ai.common.config',
+    'ai.common.utils',
+    'ai.common.schema',
+    'ai.common.store',
+    'pydantic',
+    'requests',
+    'requests.exceptions',
+    'tenacity',
+)
+
+
+def _is_stub_module(mod) -> bool:
+    """True when mod is a hand-built stub/MagicMock, not the real imported module."""
+    if mod is None:
+        return False
+    if type(mod).__name__ in ('MagicMock', 'Mock', 'NonCallableMagicMock'):
+        return True
+    # Real modules and namespace packages carry a __spec__ or __file__; bare
+    # types.ModuleType stubs built in tests carry neither.
+    return getattr(mod, '__spec__', None) is None and getattr(mod, '__file__', None) is None
+
+
+@pytest.fixture(autouse=True)
+def _guard_core_module_stubs(request):
+    """Fail a test that left a stub core module in sys.modules without restoring it."""
+    yield
+    leaked = [name for name in _GUARDED_CORE_MODULES if _is_stub_module(sys.modules.get(name))]
+    if leaked:
+        pytest.fail(
+            f'{request.node.nodeid} left stub core modules in sys.modules: {leaked}. '
+            'Snapshot and restore sys.modules around the node import (save/restore pattern).'
+        )
+
+
 # =============================================================================
 # Test Configuration
 # =============================================================================

@@ -25,7 +25,7 @@ class _FakeDocumentStoreBase:
         return True
 
 
-for _name in (
+_STUB_NAMES = (
     'numpy',
     'qdrant_client',
     'qdrant_client.models',
@@ -38,17 +38,28 @@ for _name in (
     'ai.common',
     'ai.common.schema',
     'ai.common.config',
-):
-    sys.modules.setdefault(_name, MagicMock())
+)
 
-_store_mod = MagicMock()
-_store_mod.DocumentStoreBase = _FakeDocumentStoreBase
-sys.modules['ai.common.store'] = _store_mod
+# Snapshot every name we touch (setdefault set + ai.common.store), then restore
+# in finally so these stubs never leak to sibling tests run in the same process.
+_saved = {_name: sys.modules.get(_name) for _name in (*_STUB_NAMES, 'ai.common.store')}
+try:
+    for _name in _STUB_NAMES:
+        sys.modules.setdefault(_name, MagicMock())
+    _store_mod = MagicMock()
+    _store_mod.DocumentStoreBase = _FakeDocumentStoreBase
+    sys.modules['ai.common.store'] = _store_mod
 
-_spec = importlib.util.spec_from_file_location('_qdrant_store', str(NODES_SRC / 'qdrant' / 'qdrant.py'))
-_qdrant_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_qdrant_mod)
-Store = _qdrant_mod.Store
+    _spec = importlib.util.spec_from_file_location('_qdrant_store', str(NODES_SRC / 'qdrant' / 'qdrant.py'))
+    _qdrant_mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_qdrant_mod)
+    Store = _qdrant_mod.Store
+finally:
+    for _name, _mod in _saved.items():
+        if _mod is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _mod
 
 
 def _make_store(similarity: str) -> Store:
