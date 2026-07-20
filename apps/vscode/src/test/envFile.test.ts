@@ -90,6 +90,23 @@ test('removes keys listed in keysToRemove', () => {
 	);
 });
 
+test('escapes internal quotes and backslashes when a value needs quoting', () => {
+	assert.equal(
+		mergeEnvText('', { ROCKETRIDE_APIKEY: 'has "quote" and \\slash' }),
+		'ROCKETRIDE_APIKEY="has \\"quote\\" and \\\\slash"\n',
+	);
+});
+
+test('preserves CRLF line endings without mixing in LF-only lines', () => {
+	const existing = '# my env\r\nFOO=bar\r\nROCKETRIDE_URI=http://localhost:5565\r\n';
+	const result = mergeEnvText(existing, updates);
+	assert.equal(
+		result,
+		`# my env\r\nFOO=bar\r\nROCKETRIDE_URI=${URI}\r\n\r\nROCKETRIDE_APIKEY=${KEY}`,
+	);
+	assert.ok(!/[^\r]\n/.test(result), 'no bare LF line endings');
+});
+
 // --- resolveConnectionEnv ----------------------------------------------------
 
 for (const mode of ['local', 'docker', 'service', 'onprem'] as const) {

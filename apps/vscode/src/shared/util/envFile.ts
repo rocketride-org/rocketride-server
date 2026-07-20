@@ -40,7 +40,10 @@ export const ROCKETRIDE_APIKEY_KEY = 'ROCKETRIDE_APIKEY';
 
 /** Quote a value only when it contains characters that would break parsing. */
 function quoteIfNeeded(value: string): string {
-	return /[\s#=]/.test(value) ? `"${value}"` : value;
+	if (!/[\s#="]/.test(value)) {
+		return value;
+	}
+	return `"${value.replace(/(["\\])/g, '\\$1')}"`;
 }
 
 /**
@@ -70,7 +73,10 @@ export function mergeEnvText(
 		return keys.map((key) => `${key}=${quoteIfNeeded(updates[key])}`).join('\n') + '\n';
 	}
 
-	const lines = existingText.split('\n');
+	// Match the file's existing line-ending convention so rewritten or appended
+	// lines don't produce a mixed CRLF/LF file.
+	const eol = existingText.includes('\r\n') ? '\r\n' : '\n';
+	const lines = existingText.split(/\r?\n/);
 	const consumedKeys = new Set<string>();
 	const resultLines: string[] = [];
 
@@ -116,7 +122,7 @@ export function mergeEnvText(
 		}
 	}
 
-	return resultLines.join('\n');
+	return resultLines.join(eol);
 }
 
 /** Inputs for {@link resolveConnectionEnv}. */
