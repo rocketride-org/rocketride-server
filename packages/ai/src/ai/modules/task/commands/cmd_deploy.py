@@ -21,11 +21,13 @@
 # SOFTWARE.
 
 # =============================================================================
-# CMD DEPLOY — DAP router for all rrext_deploy_* commands
+# CMD DEPLOY — DAP router for the rrext_deploy command
 #
-# Handles server-side pipeline deployment lifecycle: add, remove, list,
-# status, and update. Deployments are persisted via DeploymentStore and
-# executed autonomously by the server (on-demand or cron-scheduled).
+# Handles server-side pipeline deployment lifecycle via a single ``rrext_deploy``
+# command that dispatches on ``arguments.subcommand`` (add, remove, list,
+# status, update) — mirroring the rrext_store / rrext_account_* pattern.
+# Deployments are persisted via DeploymentStore and executed autonomously by
+# the server (on-demand or cron-scheduled).
 # =============================================================================
 
 import time
@@ -76,7 +78,16 @@ def _validate_schedule(schedule: str) -> None:
 
 
 class DeployCommands(DAPConn):
-    """DAP router for ``rrext_deploy_*`` commands."""
+    """
+    DAP router for the ``rrext_deploy`` command.
+
+    Provides ``on_rrext_deploy`` which dispatches on ``arguments.subcommand``
+    (``add``, ``remove``, ``list``, ``status``, ``update``) to the matching
+    ``_deploy_*`` handler — the same subcommand shape as ``rrext_store``.
+    Unlike ``rrext_store``, permissions differ per subcommand (``task.control``
+    for mutations, ``task.monitor`` for reads), so each handler verifies its own
+    permission rather than the dispatcher hoisting a single check.
+    """
 
     def __init__(
         self,
@@ -85,24 +96,73 @@ class DeployCommands(DAPConn):
         transport: TransportBase,
         **kwargs,
     ) -> None:
-        """No-op — all state lives on TaskConn via the other mixins."""
-        pass
+        """Initialise the deploy subcommand handler lookup table."""
+        # Map of deploy subcommand names to handler methods. All other state
+        # (account info, server, transport) lives on TaskConn via the other
+        # mixins, so nothing else is set up here.
+        self._deploy_subcommand_handlers = {
+            'add': self._deploy_add,
+            'remove': self._deploy_remove,
+            'list': self._deploy_list,
+            'status': self._deploy_status,
+            'update': self._deploy_update,
+        }
 
     @property
     def _scheduler(self) -> 'TaskScheduler':
         """The deployment scheduler, created and stored in server state at module init."""
         return self._server._server.app.state.scheduler
 
-    # ── rrext_deploy_add ─────────────────────────────────────────────────────
+    # =========================================================================
+    # DISPATCHER
+    # =========================================================================
 
-    async def on_rrext_deploy_add(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def on_rrext_deploy(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle the DAP ``rrext_deploy`` command — unified deployment lifecycle.
+
+        Extracts ``arguments.subcommand`` and routes to the matching
+        ``_deploy_*`` handler. Permission checks live in each handler because
+        they differ per subcommand.
+
+        Args:
+            request: DAP request with ``arguments.subcommand`` and
+                subcommand-specific arguments.
+
+        Returns:
+            DAP response (shape depends on the subcommand).
+        """
+        try:
+            # Extract the subcommand selector.
+            args = request.get('arguments') or {}
+            subcommand = args.get('subcommand')
+
+            if not subcommand:
+                raise ValueError('Subcommand is required')
+
+            # Dispatch to the appropriate handler, passing the pre-extracted args.
+            if handler := self._deploy_subcommand_handlers.get(subcommand):
+                return await handler(request, args)
+            else:
+                raise ValueError(f'Unknown subcommand: {subcommand}')
+
+        except Exception as e:
+            self.debug_message(f'Deploy operation failed: {str(e)}')
+            raise
+
+    # =========================================================================
+    # SUBCOMMAND HANDLERS
+    # =========================================================================
+
+    # ── add ──────────────────────────────────────────────────────────────────
+
+    async def _deploy_add(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Accept a pipeline definition, persist it as a deployment, and activate it."""
         if not self._account_info.userToken:
             raise ValueError('Cannot deploy: no user token available for scheduled runs')
 
         self.verify_permission('task.control')
 
-        args = request.get('arguments') or {}
         pipeline = args.get('pipeline')
         if not pipeline:
             raise ValueError('pipeline is required')
@@ -129,13 +189,12 @@ class DeployCommands(DAPConn):
         self._scheduler.schedule(record)
         return self.build_response(request, body=record.to_client_record())
 
-    # ── rrext_deploy_remove ──────────────────────────────────────────────────
+    # ── remove ───────────────────────────────────────────────────────────────
 
-    async def on_rrext_deploy_remove(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _deploy_remove(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Undeploy and remove a pipeline from the server."""
         self.verify_permission('task.control')
 
-        args = request.get('arguments') or {}
         project_id = args.get('projectId')
         if not project_id:
             raise ValueError('projectId is required')
@@ -144,9 +203,9 @@ class DeployCommands(DAPConn):
         self._scheduler.unschedule(project_id)
         return self.build_response(request, body={})
 
-    # ── rrext_deploy_list ────────────────────────────────────────────────────
+    # ── list ─────────────────────────────────────────────────────────────────
 
-    async def on_rrext_deploy_list(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _deploy_list(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Return all deployments for the caller with their status and schedule config."""
         self.verify_permission('task.monitor')
 
@@ -158,13 +217,12 @@ class DeployCommands(DAPConn):
             },
         )
 
-    # ── rrext_deploy_status ──────────────────────────────────────────────────
+    # ── status ───────────────────────────────────────────────────────────────
 
-    async def on_rrext_deploy_status(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _deploy_status(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Get detailed status of a specific deployment."""
         self.verify_permission('task.monitor')
 
-        args = request.get('arguments') or {}
         project_id = args.get('projectId')
         if not project_id:
             raise ValueError('projectId is required')
@@ -172,16 +230,15 @@ class DeployCommands(DAPConn):
         record = await self._server.deployments.get(self._account_info.userId, project_id)
         return self.build_response(request, body=record.to_client_record())
 
-    # ── rrext_deploy_update ──────────────────────────────────────────────────
+    # ── update ───────────────────────────────────────────────────────────────
 
-    async def on_rrext_deploy_update(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def _deploy_update(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Modify schedule or pipeline config for an existing deployment."""
         if not self._account_info.userToken:
             raise ValueError('Cannot deploy: no user token available for scheduled runs')
 
         self.verify_permission('task.control')
 
-        args = request.get('arguments') or {}
         project_id = args.get('projectId')
         if not project_id:
             raise ValueError('projectId is required')

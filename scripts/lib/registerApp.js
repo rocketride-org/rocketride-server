@@ -191,6 +191,42 @@ function registerApp(appRoot) {
 				);
 			}
 
+			// Validate the app's settings contribution — the VSCode
+			// contributes.configuration shape: { title?, properties: { <key>: schema } }.
+			// Keys must be dotted and prefixed with the app id so they are globally
+			// unique, and every schema needs a valid JSON type.
+			const configuration = appManifest.contributes?.configuration ?? null;
+			if (configuration) {
+				if (typeof configuration !== 'object' || Array.isArray(configuration)
+					|| typeof configuration.properties !== 'object' || Array.isArray(configuration.properties)) {
+					throw new Error(
+						`App "${appManifest.id}" has an invalid contributes.configuration. `
+						+ 'Expected { title?, properties: { "<appId>.<setting>": { type, ... } } }.'
+					);
+				}
+				const validTypes = ['string', 'number', 'integer', 'boolean'];
+				for (const [key, schema] of Object.entries(configuration.properties)) {
+					if (!key.startsWith(`${appManifest.id}.`)) {
+						throw new Error(
+							`App "${appManifest.id}" setting "${key}" must be prefixed with the app id `
+							+ `("${appManifest.id}.<settingName>") so setting keys are globally unique.`
+						);
+					}
+					if (!schema || !validTypes.includes(schema.type)) {
+						throw new Error(
+							`App "${appManifest.id}" setting "${key}" has invalid type `
+							+ `"${schema && schema.type}". Must be one of: ${validTypes.join(', ')}.`
+						);
+					}
+				}
+			}
+
+			// Legacy flat settings arrays are no longer read by the shell
+			if (Array.isArray(appManifest.settings) && appManifest.settings.length) {
+				task.output = `Warning: "${appManifest.id}" declares legacy appManifest.settings — `
+					+ 'migrate to appManifest.contributes.configuration (VSCode format); the legacy list is ignored.';
+			}
+
 			// Resolve shells — optional array of compatible shells
 			const shells = appManifest.shells ?? null;
 			if (shells !== null) {
@@ -254,7 +290,8 @@ function registerApp(appRoot) {
 				readme,
 				icon,
 				categories:    appManifest.categories ?? [],
-				settings:      appManifest.settings ?? [],
+				// Settings contribution (VSCode contributes.configuration shape)
+				...(configuration ? { configuration } : {}),
 				entry:         `/${APPS_BASE}/${dirName}/remoteEntry.js`,
 				// Shell contract version this app was built against (for prune analysis).
 				...(shellApiVersion !== null ? { shellApiVersion } : {}),

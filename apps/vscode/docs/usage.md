@@ -51,19 +51,14 @@ The visual editor provides:
 - **Properties panel**: Configure selected component settings (API keys, models, connection strings, etc.).
 - **Lane connections**: Draw lines between component output and input lanes to define data flow.
 
-## Pipeline Parameters
+## Pipeline Execution Defaults
 
-The **Parameters** tab (next to **Design**) holds run-time settings for the open pipeline:
+Trace verbosity and the idle timeout (TTL) for pipeline runs are configured once in **Settings → Pipeline** — they are workspace settings, not per-pipeline options:
 
-- **Trace level**: how much execution-trace data the engine emits — `full`, `summary` (default), `metadata`, or `none`. Higher levels populate the **Flow** and **Trace** tabs, but `full` inlines entire payloads (including images), which can noticeably slow runs that process large images. The selected level is saved per pipeline and applied on the next run.
+- **Pipeline Trace Level** (`rocketride.pipelineTraceLevel`, default `summary`): how much execution-trace data the engine emits — `full`, `summary`, `metadata`, or `none`. Higher levels populate the **Flow** and **Trace** tabs, but `full` inlines entire payloads (including images), which can noticeably slow runs that process large images.
+- **Pipeline TTL** (`rocketride.pipelineTTL`, default `900` seconds): how long the engine keeps a pipeline alive without activity before stopping it (`0` = no timeout).
 
-## Pipeline Settings (Idle Timeout)
-
-The settings (cog) button in the canvas toolbar opens the **Pipeline Settings** dialog:
-
-- **Idle timeout**: how long the engine keeps the pipeline alive without activity before stopping it. Pick a preset, enter a custom number of minutes, or choose **No timeout**. **Default** uses the server default (15 min). The chosen value applies to the next run.
-
-Internally, the editor webview passes the timeout to the extension host as an optional `ttl` field (in seconds; `0` = no timeout, omitted = server default) on the `status:pipelineAction` message when the action is `run` or `restart`.
+The extension host reads both from the workspace settings and passes them to the engine on each `run`/`restart` (the `status:pipelineAction` message carries only the action and source).
 
 ## Monitoring Execution
 

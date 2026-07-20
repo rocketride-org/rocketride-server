@@ -43,11 +43,6 @@ const OAUTH_REDELIVERY_TTL_MS = 5 * 60 * 1000;
 // TYPES
 // =============================================================================
 
-// Defined locally on purpose: the host tsconfig excludes `src/providers/views/**`
-// and does not map the `shared/*` path alias, so it cannot import the canonical
-// TraceLevel from the webview/shared-ui layer. Keep in sync with that union.
-type TraceLevel = 'none' | 'metadata' | 'summary' | 'full';
-
 interface EditorState {
 	document: vscode.TextDocument;
 	webviewPanel: vscode.WebviewPanel;
@@ -516,8 +511,6 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				case 'status:pipelineAction': {
 					const action = data.action as 'run' | 'stop' | 'restart';
 					const source = data.source as string | undefined;
-					const ttl = data.ttl as number | undefined;
-					const traceLevel = data.pipelineTraceLevel as TraceLevel | undefined;
 					if (action === 'run' || action === 'restart') {
 						// Gate: check connection before running
 						const runClient = this.connectionManager.getClient();
@@ -537,7 +530,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							await this.saveDocument(document, document.getText());
 							const parsed = JSON.parse(document.getText());
 							const pipeName = path.basename(document.uri.fsPath, '.pipe');
-							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName, traceLevel, ttl);
+							await this.runPipeline({ pipeline: { ...parsed, source: source ?? parsed.source } }, pipeName);
 						} catch (error: unknown) {
 							const message = error instanceof Error ? error.message : String(error);
 							vscode.window.showErrorMessage(`Failed to run pipeline: ${message}`);
@@ -827,22 +820,25 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// PIPELINE EXECUTION
 	// =========================================================================
 
-	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string, pipelineTraceLevel?: TraceLevel, ttl?: number): Promise<void> {
+	private async runPipeline(document: { pipeline: PipelineConfig }, name?: string): Promise<void> {
 		try {
 			const client = this.connectionManager.getClient();
 			if (!client) throw new Error('Not connected to server');
 
 			const project = document.pipeline;
 
+			// TTL and trace level are workspace settings; the host reads them here and
+			// passes them to the engine. There is no per-pipeline override.
+			const cfg = ConfigManager.getInstance().getConfig();
+
 			await client.use({
 				pipeline: project,
 				source: project.source,
-				pipelineTraceLevel: pipelineTraceLevel ?? 'summary',
+				pipelineTraceLevel: cfg.pipelineTraceLevel,
 				args: ConfigManager.getInstance().getEngineArgs('development'),
 				name,
-				// Only send ttl when the user picked one — otherwise the engine
-				// applies its default. ttl:0 means "no timeout".
-				...(ttl !== undefined ? { ttl } : {}),
+				// ttl comes straight from settings (0 = no timeout).
+				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

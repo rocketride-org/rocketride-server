@@ -96,7 +96,6 @@ const ProjectWebview: React.FC = () => {
 					mode: vs?.mode ?? 'design',
 					flowViewMode: vs?.flowViewMode ?? 'pipeline',
 					viewport: vs?.viewport,
-					pipelineTraceLevel: vs?.pipelineTraceLevel,
 				});
 				setPrefs(msg.prefs ?? {});
 				setTraceEvents([]);
@@ -201,7 +200,6 @@ const ProjectWebview: React.FC = () => {
 					mode: msg.state?.mode ?? 'design',
 					flowViewMode: msg.state?.flowViewMode ?? 'pipeline',
 					viewport: msg.state?.viewport,
-					pipelineTraceLevel: msg.state?.pipelineTraceLevel,
 				});
 				break;
 			case 'project:initialPrefs':
@@ -253,10 +251,10 @@ const ProjectWebview: React.FC = () => {
 	);
 
 	const handlePipelineAction = useCallback(
-		(action: 'run' | 'stop' | 'restart', source?: string, options?: { ttl?: number }) => {
-			sendMessage({ type: 'status:pipelineAction', action, source, ttl: options?.ttl, pipelineTraceLevel: viewState?.pipelineTraceLevel ?? 'summary' });
+		(action: 'run' | 'stop' | 'restart', source?: string) => {
+			sendMessage({ type: 'status:pipelineAction', action, source });
 		},
-		[sendMessage, viewState]
+		[sendMessage]
 	);
 
 	const handleMissingEnvVars = useCallback(
