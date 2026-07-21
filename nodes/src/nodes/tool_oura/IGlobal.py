@@ -65,13 +65,9 @@ class IGlobal(IGlobalBase):
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
 
-        # The node-test framework injects mocks in ROCKETRIDE_MOCK mode; skip
-        # real dependency installation there to keep tests hermetic.
-        if not os.environ.get('ROCKETRIDE_MOCK'):
-            from depends import depends  # type: ignore
+        from depends import load_depends
 
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+        load_depends(__file__)
 
         cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
         self.token = self._get_token(cfg, self.glb.connConfig)

@@ -162,7 +162,15 @@ class IInstance(IInstanceBase):
         return compacted
 
     def _fetch_datetime_range(self, collection: str, args: dict, *, default_hours: int = 24) -> dict:
-        """Fetch a datetime-windowed collection (heartrate, ring_battery_level)."""
+        """Fetch a datetime-windowed collection (heartrate, ring_battery_level).
+
+        Unlike :meth:`_fetch_range` this deliberately does NOT compact: these
+        two collections return flat scalar documents (bpm / battery_level plus
+        a timestamp) with none of the heavy time-series fields compaction
+        strips, so there is nothing to remove and no ``include_detail`` switch
+        is offered. Do not "fix" the asymmetry by compacting here — that would
+        silently drop fields with no way for a caller to get them back.
+        """
         next_token = args.get('next_token') or None
         if next_token:
             # Oura ignores datetime filters on continuation requests, so skip

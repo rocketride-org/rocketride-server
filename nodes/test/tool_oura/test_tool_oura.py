@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -48,7 +49,7 @@ import pytest
 import importlib
 
 # Add nodes/src to sys.path so `nodes.tool_oura.oura_client` is resolvable.
-_NODES_SRC = Path(__file__).resolve().parents[1] / 'src'
+_NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
@@ -66,6 +67,15 @@ def _build_import_stubs():
     requests.Timeout = TimeoutError
     requests.ConnectionError = ConnectionError
     requests.RequestException = Exception
+
+    class _HTTPError(Exception):
+        """Stand-in for requests.HTTPError, which carries the failed response."""
+
+        def __init__(self, *args, response=None):
+            super().__init__(*args)
+            self.response = response
+
+    requests.HTTPError = _HTTPError
 
     # oura_client compares against named HTTP status codes per repo convention
     # (from requests.status_codes import codes); mirror the real values here.
@@ -91,11 +101,14 @@ def _build_import_stubs():
     rocketlib.OPEN_MODE = MagicMock()
 
     depends = MagicMock()
-    depends.depends = lambda *a, **kw: None
+    depends.load_depends = lambda *a, **kw: None
 
     ai_common_utils = MagicMock()
     ai_common_utils.normalize_tool_input = lambda args, **kw: args if isinstance(args, dict) else {}
     ai_common_utils.require_str = lambda args, key, **kw: str(args[key])
+    # Fail loudly rather than silently returning a MagicMock if a test reaches
+    # the network layer without patching it.
+    ai_common_utils.get_with_retry = MagicMock(side_effect=AssertionError('get_with_retry must be patched in tests'))
 
     return {
         'requests': requests,
@@ -664,3 +677,77 @@ def test_escape_hatches_exclude_ring_battery_level():
         inst.collection_get({'collection': 'ring_battery_level'})
     with pytest.raises(ValueError, match='no per-document endpoint'):
         inst.document_get({'collection': 'ring_battery_level', 'document_id': 'abc'})
+
+
+# ---------------------------------------------------------------------------
+# call() transport
+# ---------------------------------------------------------------------------
+
+
+def test_call_returns_parsed_json_on_success():
+    """A successful response is parsed and handed back to the caller."""
+    with patch.object(mod, 'get_with_retry', return_value=_resp(200, {'data': [{'id': '1'}]})):
+        assert mod.call('tok', '/usercollection/daily_sleep') == {'data': [{'id': '1'}]}
+
+
+def test_call_sends_bearer_token_and_drops_none_params():
+    """The bearer header is set and None-valued params are stripped."""
+    fake = MagicMock(return_value=_resp(200, {}))
+    with patch.object(mod, 'get_with_retry', fake):
+        mod.call('tok', '/usercollection/daily_sleep', params={'start_date': '2026-07-01', 'next_token': None})
+    kwargs = fake.call_args.kwargs
+    assert kwargs['headers']['Authorization'] == 'Bearer tok'
+    assert kwargs['params'] == {'start_date': '2026-07-01'}
+
+
+def test_call_maps_http_error_through_map_error():
+    """A non-retryable status still yields the status-specific message."""
+    err = mod.requests.HTTPError('401', response=_resp(401, {'detail': 'invalid token'}))
+    with patch.object(mod, 'get_with_retry', side_effect=err):
+        with pytest.raises(ValueError, match='authentication failed'):
+            mod.call('tok', '/usercollection/daily_sleep')
+
+
+def test_call_timeout_survives_retry_as_timeout_message():
+    """A timeout that outlives the retry policy is reported as a timeout."""
+    with patch.object(mod, 'get_with_retry', side_effect=mod.requests.Timeout()):
+        with pytest.raises(ValueError, match='timed out'):
+            mod.call('tok', '/usercollection/daily_sleep')
+
+
+def test_call_connection_error_survives_retry_as_request_failed():
+    """A connection error that outlives the retry policy is reported clearly."""
+    with patch.object(mod, 'get_with_retry', side_effect=mod.requests.ConnectionError('boom')):
+        with pytest.raises(ValueError, match='request failed'):
+            mod.call('tok', '/usercollection/daily_sleep')
+
+
+def test_call_non_json_success_body_raises():
+    """A 2xx with an unparseable body is reported instead of returned raw."""
+    with patch.object(mod, 'get_with_retry', return_value=_resp(200)):
+        with pytest.raises(ValueError, match='non-JSON'):
+            mod.call('tok', '/usercollection/daily_sleep')
+
+
+# ---------------------------------------------------------------------------
+# IGlobal.beginGlobal
+# ---------------------------------------------------------------------------
+
+
+def test_begin_global_raises_when_no_token_available():
+    """No token from any source fails the pipeline early with a node-specific message."""
+    glb = glb_mod.IGlobal.__new__(glb_mod.IGlobal)
+    glb.IEndpoint = MagicMock()
+    glb.IEndpoint.endpoint.openMode = object()  # anything but OPEN_MODE.CONFIG
+    glb.glb = MagicMock(logicalType='tool_oura', connConfig={})
+
+    # beginGlobal imports `depends` lazily at call time, and the bootstrap
+    # stubs were removed after import — re-inject one just for this call.
+    depends_stub = MagicMock()
+    depends_stub.load_depends = lambda *a, **kw: None
+
+    with patch.dict(sys.modules, {'depends': depends_stub}):
+        with patch.object(glb_mod.Config, 'getNodeConfig', return_value={}):
+            with patch.dict(os.environ, {'ROCKETRIDE_OURA_TOKEN': ''}, clear=False):
+                with pytest.raises(Exception, match='token is required'):
+                    glb.beginGlobal()

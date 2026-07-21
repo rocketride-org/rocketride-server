@@ -47,6 +47,8 @@ from typing import Any
 import requests
 from requests.status_codes import codes as status_codes
 
+from ai.common.utils import get_with_retry
+
 BASE_URL = 'https://api.ouraring.com/v2'
 DEFAULT_TIMEOUT = 30
 
@@ -98,30 +100,37 @@ _DETAIL_FIELDS = frozenset(
 def call(token: str, path: str, *, params: dict | None = None) -> Any:
     """Make an authenticated GET request to the Oura API and return parsed JSON.
 
+    Transport goes through the shared ``get_with_retry`` helper, which retries
+    timeouts, connection errors and 429 / 5xx with exponential backoff and
+    raises other 4xx immediately. This matters most for ``daily_summary``,
+    which fans out four sequential collection calls — without retry a single
+    transient blip fails the whole summary.
+
     Raises ``ValueError`` with a human-readable, status-specific message on
     HTTP errors so agents can self-correct (bad token vs. missing
     subscription vs. rate limit).
     """
     url = BASE_URL + path
     try:
-        resp = requests.get(
+        resp = get_with_retry(
             url,
             headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json'},
             params={k: v for k, v in (params or {}).items() if v is not None},
             timeout=DEFAULT_TIMEOUT,
         )
+    except requests.HTTPError as exc:
+        # Non-retryable status, or retries exhausted on 429 / 5xx. Map the
+        # response so the agent still gets the status-specific message.
+        raise _map_error(exc.response) from exc
     except requests.Timeout as exc:
         raise ValueError('Oura request timed out') from exc
     except requests.RequestException as exc:
         raise ValueError(f'Oura request failed: {exc}') from exc
 
-    if resp.ok:
-        try:
-            return resp.json()
-        except ValueError as exc:
-            raise ValueError('Oura returned a non-JSON response') from exc
-
-    raise _map_error(resp)
+    try:
+        return resp.json()
+    except ValueError as exc:
+        raise ValueError('Oura returned a non-JSON response') from exc
 
 
 # Error details end up in exception messages fed to the LLM; cap them so a

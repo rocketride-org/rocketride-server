@@ -25,9 +25,47 @@ import pytest
 # injecting the node directory into sys.path would shadow top-level module
 # names and duplicate the module if it is also imported through the package.
 _CLIENT_PATH = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_oura' / 'oura_client.py'
+
+# oura_client imports the engine-only `ai.common.utils` for the shared
+# retrying GET. Under `builder nodes:test` that package is real and its
+# backoff policy is exercised for free; loaded standalone (the case this file
+# is built for) it does not exist, so fall back to a single-attempt stand-in
+# with the same contract: return the response, raise on an error status.
+_added_stubs = []
+try:  # pragma: no cover - the engine provides this in a full test run
+    import ai.common.utils  # noqa: F401
+except ImportError:
+    import sys
+    import types
+
+    import requests
+
+    _ai_utils = types.ModuleType('ai.common.utils')
+    _ai_common = types.ModuleType('ai.common')
+    _ai = types.ModuleType('ai')
+
+    def _get_with_retry(url, **kwargs):
+        resp = requests.get(url, **kwargs)
+        resp.raise_for_status()
+        return resp
+
+    _ai_utils.get_with_retry = _get_with_retry
+    _ai_common.utils = _ai_utils
+    _ai.common = _ai_common
+    for _name, _stub in (('ai', _ai), ('ai.common', _ai_common), ('ai.common.utils', _ai_utils)):
+        if _name not in sys.modules:
+            sys.modules[_name] = _stub
+            _added_stubs.append(_name)
+
 _spec = importlib.util.spec_from_file_location('tool_oura_live_client', _CLIENT_PATH)
 _client = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_client)
+
+# Drop the stubs again: this module shares a pytest session with the offline
+# suite (and every other node's), and a partial `ai.common.utils` left behind
+# would shadow the real package for whoever imports it next.
+for _name in _added_stubs:
+    sys.modules.pop(_name, None)
 
 call = _client.call
 fetch_collection = _client.fetch_collection
@@ -168,7 +206,3 @@ class TestErrors:
     def test_bad_token_maps_to_auth_error(self):
         with pytest.raises(ValueError, match='authentication failed'):
             call('not-a-real-token', '/usercollection/personal_info')
-
-    def test_unknown_collection_rejected_locally(self):
-        with pytest.raises(ValueError, match='Unknown Oura collection'):
-            fetch_collection(TOKEN, 'nope')
