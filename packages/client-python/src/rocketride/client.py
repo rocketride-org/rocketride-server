@@ -48,6 +48,7 @@ from .account import AccountApi
 from .billing import BillingApi
 from .database import DatabaseApi
 from .deploy import DeployApi
+from .log import LogApi
 from .mixins.connection import ConnectionMixin
 from .mixins.execution import ExecutionMixin
 from .mixins.data import DataMixin
@@ -378,6 +379,11 @@ class RocketRideClient(
     def deploy(self) -> DeployApi:
         """Deployment management operations (add, remove, list, status, update)."""
         return DeployApi(self)
+
+    @cached_property
+    def log(self) -> LogApi:
+        """Run-log continuum operations (chapters, ranged reads, delete)."""
+        return LogApi(self)
 
     # =========================================================================
     # TASK METHODS

@@ -157,6 +157,17 @@ from .account import (
 # Deploy types: deployment records.
 from .deploy import DeploymentRecord
 
+# Run-log types: the per-task event continuum (chapters, reads, deletes).
+from .log import (
+    LogRunKind,
+    LogChapter,
+    LogActivitySpan,
+    LogChaptersResult,
+    LogEvent,
+    LogReadResult,
+    LogDeleteResult,
+)
+
 # Billing types: subscriptions, Stripe plans, compute credits, promo codes.
 from .billing import (
     AppPrice,
@@ -268,6 +279,14 @@ __all__ = [
     'TeamMemberParams',
     # Deploy types
     'DeploymentRecord',
+    # Run-log types
+    'LogRunKind',
+    'LogChapter',
+    'LogActivitySpan',
+    'LogChaptersResult',
+    'LogEvent',
+    'LogReadResult',
+    'LogDeleteResult',
     # Billing types
     'AppPrice',
     'BillingDetail',

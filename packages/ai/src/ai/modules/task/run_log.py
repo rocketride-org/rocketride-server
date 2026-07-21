@@ -57,6 +57,8 @@ from ai.constants import (
     CONST_LOG_HISTORY_SECONDS_DEV,
     CONST_LOG_HISTORY_SECONDS_DEPLOY,
     CONST_LOG_STATUS_SAMPLE_SECONDS,
+    CONST_LOG_READ_MAX_EVENTS,
+    CONST_LOG_READ_MAX_BYTES,
 )
 
 if TYPE_CHECKING:
@@ -199,6 +201,16 @@ def _try_remove(path: str) -> None:
 
 # Module-wide lease table — shared by the writer's janitor and (L3+) readers.
 LEASES = SegmentLeases()
+
+# Registry of ACTIVE writers by (client_id, stream) — lets rrext_log's delete
+# coordinate with a live stream (route the mutation through the writer's lock)
+# and lets L5 compose reads with a live in-memory tail.
+WRITERS: Dict[str, 'RunLogWriter'] = {}
+
+
+def writer_key(client_id: str, stream: str) -> str:
+    """Registry key for an active writer."""
+    return f'{client_id}/{stream}'
 
 
 # =============================================================================
@@ -427,6 +439,10 @@ class RunLogWriter:
             self._open = True
             await self._write_control()
 
+            # Register as the stream's live writer (delete coordination + L5
+            # live-tail composition).
+            WRITERS[writer_key(self._client_id, self._stream)] = self
+
             # Background worker: backstop seal + upload drain + retention.
             self._worker = asyncio.create_task(self._worker_loop())
 
@@ -461,12 +477,34 @@ class RunLogWriter:
                 'completed': True,
             }
 
-        # Drop segments whose bytes died in a previous process's spool.
-        kept = [seg for seg in control.get('segments', []) if seg.get('state') == 'uploaded']
-        lost = len(control.get('segments', [])) - len(kept)
+        # One rule for same-process reopen AND cross-container recovery:
+        # trust the filesystem. 'uploaded' entries are always kept (the
+        # ordering invariant guarantees the object landed). 'spooled'
+        # entries are kept — and re-queued for upload — when their spool
+        # file still exists (same-process continue); dropped when it died
+        # with a previous container (the accepted loss window). The active
+        # descriptor follows the same rule.
+        kept: List[Dict[str, Any]] = []
+        lost = 0
+        for seg in control.get('segments', []):
+            if seg.get('state') == 'uploaded':
+                kept.append(seg)
+                continue
+            spool_path = os.path.join(self._dir, segment_basename(self._stream, int(seg['id'])))
+            if os.path.exists(spool_path):
+                kept.append(seg)
+                self._upload_queue.append(int(seg['id']))
+            else:
+                lost += 1
         control['segments'] = kept
         if lost:
             self._debug(f'run-log {self._stream}: dropped {lost} spooled segment(s) lost with a previous process')
+
+        active = control.get('active')
+        if active is not None:
+            active_path = os.path.join(self._dir, segment_basename(self._stream, int(active.get('id', 0))))
+            if not os.path.exists(active_path):
+                control.pop('active', None)
         return control
 
     # =========================================================================
@@ -504,14 +542,23 @@ class RunLogWriter:
 
     def _append_line(self, message: Dict[str, Any]) -> None:
         """Serialize one event and append it to the active spool segment."""
-        # Lazily open the active segment on first line.
+        # Lazily open the active segment on first line. Seal-or-continue: a
+        # later run in the SAME process reopens the previous run's unsealed
+        # active file (same id) and restores its descriptor, so the shared
+        # segment keeps one coherent start time/seq across runs.
         if self._active_file is None:
             seg_id = int(self._control.get('nextSegmentId', 0))
             self._active_path = os.path.join(self._dir, segment_basename(self._stream, seg_id))
             self._active_file = open(self._active_path, 'a', encoding='utf-8')
             self._active_bytes = os.path.getsize(self._active_path)
-            self._active_start_time = float(message.get('eventTime') or time.time())
-            self._active_start_seq = int(message.get('seq') or 0)
+            resumed = self._control.get('active') if self._active_bytes > 0 else None
+            if resumed and int(resumed.get('id', -1)) == seg_id:
+                self._active_start_time = resumed.get('startTime')
+                self._active_start_seq = resumed.get('seq')
+                self._active_has_chapter_start = bool(resumed.get('chapterStart'))
+            else:
+                self._active_start_time = float(message.get('eventTime') or time.time())
+                self._active_start_seq = int(message.get('seq') or 0)
 
         line = json.dumps(message, separators=(',', ':'), default=str) + '\n'
         self._active_file.write(line)
@@ -704,8 +751,14 @@ class RunLogWriter:
             self._control['completed'] = True
             self._open = False
 
+            # Close the active file HANDLE but keep the file + its control
+            # descriptor: seal-or-continue means the tail stays readable (the
+            # reader treats 'active' as a virtual segment) and the next run
+            # in this process reopens/continues it.
             if self._active_file is not None:
                 self._active_file.flush()
+                self._active_file.close()
+                self._active_file = None
             await self._drain_uploads()
             await self._write_control()
 
@@ -716,6 +769,9 @@ class RunLogWriter:
             except asyncio.CancelledError:
                 pass
             self._worker = None
+
+        # Deregister as the stream's live writer.
+        WRITERS.pop(writer_key(self._client_id, self._stream), None)
 
     def note_restart(self) -> None:
         """
@@ -734,6 +790,23 @@ class RunLogWriter:
 
     async def _write_control(self) -> None:
         """Persist the control file to the store (single-writer, whole-object)."""
+        # Keep the ACTIVE (unsealed) segment visible to readers: seal-or-
+        # continue means a completed run's tail (incl. its run-end marker)
+        # can live in the active spool file for a long time — the reader
+        # includes this descriptor as a virtual segment so the tail is
+        # readable the moment it is written. The active spool copy still
+        # dies with the container (accepted crash-loss window).
+        if self._active_path is not None:
+            self._control['active'] = {
+                'id': int(self._control.get('nextSegmentId', 0)),
+                'startTime': self._active_start_time,
+                'endTime': self._control.get('endTime'),
+                'chapterStart': self._active_has_chapter_start,
+                'seq': self._active_start_seq,
+            }
+        else:
+            self._control.pop('active', None)
+
         try:
             await self._store.write_file(
                 control_store_path(self._client_id, self._stream),
@@ -741,6 +814,380 @@ class RunLogWriter:
             )
         except Exception as e:
             self._debug(f'run-log {self._stream}: control write failed: {e}')
+
+
+# =============================================================================
+# RUN LOG READER — rrext_log's one code path over the continuum
+# =============================================================================
+
+
+class RunLogReader:
+    """
+    Ranged reader over one stream's continuum (chapters / read / delete).
+
+    Serves EaaS-side reads for `rrext_log`: routes seq/time ranges to
+    segments via the control file, then resolves each segment from the SPOOL
+    (lease-guarded, preferred when present) or the STORE by its ledger
+    state. v1 composes sealed/spooled segments only — the live in-memory
+    tail joins in L5. Works equally for completed streams (no writer) and
+    live ones (sealed history readable while the run continues).
+    """
+
+    def __init__(
+        self,
+        store: 'IStore',
+        client_id: str,
+        project_id: str,
+        source: str,
+        run_kind: str,
+        *,
+        spool_root: Optional[str] = None,
+    ) -> None:
+        """
+        Bind the reader to a stream identity.
+
+        Args:
+            store: Raw IStore backend.
+            client_id: Owning user id (store scoping — caller-authenticated).
+            project_id: Pipeline project id.
+            source: Source component id.
+            run_kind: 'dev' or 'deploy'.
+            spool_root: Override spool root (tests).
+        """
+        self._store = store
+        self._client_id = client_id
+        self._stream = stream_name(project_id, source, run_kind)
+        self._spool_root = spool_root or default_spool_root()
+        self._dir = spool_dir(self._spool_root, client_id, self._stream)
+
+    # -------------------------------------------------------------------------
+    # CONTROL ACCESS
+    # -------------------------------------------------------------------------
+
+    async def _load_control(self) -> Dict[str, Any]:
+        """
+        Load the stream's control state.
+
+        Prefers the LIVE writer's in-memory control when one is registered
+        (fresher than the store copy by up to a seal interval); falls back
+        to the store copy for completed / other-run streams.
+
+        Raises:
+            FileNotFoundError: If the stream has no control (never logged).
+        """
+        writer = WRITERS.get(writer_key(self._client_id, self._stream))
+        if writer is not None:
+            return writer._control
+        try:
+            raw = await self._store.read_file(control_store_path(self._client_id, self._stream))
+        except Exception as exc:
+            raise FileNotFoundError(f'No run log for stream {self._stream}') from exc
+        return json.loads(raw)
+
+    async def chapters(self) -> Dict[str, Any]:
+        """
+        Return the stream's chapters (tracks) + activity-bar metadata.
+
+        Returns:
+            Dict with 'chapters' (beginTime/beginSeq/endTime/outcome each),
+            'segments' (startTime/endTime/chapterStart only — the activity
+            spans), 'startTime', 'endTime', 'horizonSeq', 'completed'.
+        """
+        control = await self._load_control()
+        spans = [
+            {
+                'startTime': seg.get('startTime'),
+                'endTime': seg.get('endTime'),
+                'chapterStart': seg.get('chapterStart', False),
+            }
+            for seg in self._routable_segments(control)
+        ]
+        return {
+            'chapters': control.get('chapters', []),
+            'segments': spans,
+            'startTime': control.get('startTime'),
+            'endTime': control.get('endTime'),
+            'horizonSeq': control.get('horizonSeq', 0),
+            'completed': control.get('completed', True),
+        }
+
+    @staticmethod
+    def _routable_segments(control: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Sealed segments plus the ACTIVE descriptor as a virtual segment.
+
+        Seal-or-continue keeps a completed run's tail in the unsealed active
+        file; including it here makes the tail readable the moment it is
+        written (its endTime rides the stream's endTime).
+        """
+        segments = list(control.get('segments', []))
+        active = control.get('active')
+        if active is not None:
+            segments.append(
+                {
+                    'startTime': active.get('startTime'),
+                    'endTime': control.get('endTime'),
+                    'chapterStart': active.get('chapterStart', False),
+                    'seq': active.get('seq'),
+                    'id': active.get('id'),
+                    'state': 'spooled',
+                }
+            )
+        return segments
+
+    # -------------------------------------------------------------------------
+    # RANGED READ
+    # -------------------------------------------------------------------------
+
+    async def read(
+        self,
+        *,
+        from_seq: Optional[int] = None,
+        to_seq: Optional[int] = None,
+        from_time: Optional[float] = None,
+        to_time: Optional[float] = None,
+        to_segment: Optional[int] = None,
+        cursor: Optional[int] = None,
+        max_events: int = CONST_LOG_READ_MAX_EVENTS,
+        max_bytes: int = CONST_LOG_READ_MAX_BYTES,
+        types: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Read a seq/time range of events from the continuum, paged.
+
+        Query forms (matching the plan): seq range, time range, time-to-now
+        (omit the upper bound), time-to-segment. ``cursor`` (a seq) continues
+        a previous page and overrides ``from_seq``/``from_time``.
+
+        Args:
+            from_seq / to_seq: Inclusive seq bounds.
+            from_time / to_time: Inclusive eventTime bounds (epoch seconds).
+            to_segment: Read up to and including this segment id.
+            cursor: Continuation seq from a previous page's 'nextSeq'.
+            max_events / max_bytes: Page limits (clamped to server defaults).
+            types: Optional event-type filter (server-side, saves bandwidth).
+
+        Returns:
+            Dict with 'events' (list), optional 'nextSeq' (continuation),
+            and optional 'truncatedAtSeq' (the request reached below the
+            retention horizon — the first available seq).
+        """
+        control = await self._load_control()
+        segments: List[Dict[str, Any]] = self._routable_segments(control)
+
+        # Clamp page limits: callers may lower, never raise.
+        max_events = min(int(max_events or CONST_LOG_READ_MAX_EVENTS), CONST_LOG_READ_MAX_EVENTS)
+        max_bytes = min(int(max_bytes or CONST_LOG_READ_MAX_BYTES), CONST_LOG_READ_MAX_BYTES)
+
+        # Effective lower bound: the cursor wins.
+        if cursor is not None:
+            from_seq = int(cursor)
+            from_time = None
+
+        # Horizon honesty: a request reaching below the retained window is
+        # answered from the first available seq, flagged for the timeline.
+        truncated_at: Optional[int] = None
+        horizon_seq = int(control.get('horizonSeq', 0))
+        if horizon_seq and from_seq is not None and from_seq < horizon_seq:
+            truncated_at = horizon_seq
+        first_time = segments[0].get('startTime') if segments else None
+        if first_time is not None and from_time is not None and from_time < first_time:
+            truncated_at = truncated_at or int(segments[0].get('seq') or 0)
+
+        # Route: keep segments that can intersect the requested range.
+        wanted: List[Dict[str, Any]] = []
+        for seg in segments:
+            if to_segment is not None and int(seg['id']) > int(to_segment):
+                continue
+            if (
+                from_seq is not None
+                and (seg.get('endTime') is not None)
+                and self._seg_last_seq(seg, segments) < from_seq
+            ):
+                continue
+            if to_seq is not None and int(seg.get('seq') or 0) > to_seq:
+                continue
+            if from_time is not None and (seg.get('endTime') or 0) < from_time:
+                continue
+            if to_time is not None and (seg.get('startTime') or 0) > to_time:
+                continue
+            wanted.append(seg)
+
+        events: List[Dict[str, Any]] = []
+        used_bytes = 0
+        next_seq: Optional[int] = None
+
+        for seg in wanted:
+            for line in await self._read_segment_lines(int(seg['id'])):
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                seq = int(msg.get('seq') or 0)
+                etime = float(msg.get('eventTime') or 0)
+
+                # Range filters.
+                if from_seq is not None and seq < from_seq:
+                    continue
+                if to_seq is not None and seq > to_seq:
+                    return {'events': events, **({'truncatedAtSeq': truncated_at} if truncated_at else {})}
+                if from_time is not None and etime < from_time:
+                    continue
+                if to_time is not None and etime > to_time:
+                    return {'events': events, **({'truncatedAtSeq': truncated_at} if truncated_at else {})}
+                if types and msg.get('event') not in types:
+                    continue
+
+                # Page limits: report the continuation point and stop.
+                if len(events) >= max_events or used_bytes + len(line) > max_bytes:
+                    next_seq = seq
+                    result: Dict[str, Any] = {'events': events, 'nextSeq': next_seq}
+                    if truncated_at:
+                        result['truncatedAtSeq'] = truncated_at
+                    return result
+
+                events.append(msg)
+                used_bytes += len(line)
+
+        result = {'events': events}
+        if truncated_at:
+            result['truncatedAtSeq'] = truncated_at
+        return result
+
+    @staticmethod
+    def _seg_last_seq(seg: Dict[str, Any], segments: List[Dict[str, Any]]) -> int:
+        """
+        Upper seq bound of a segment: the next segment's first seq (or +inf).
+
+        The control file stores each segment's FIRST seq; a segment's last
+        seq is bounded by its successor's first.
+        """
+        idx = segments.index(seg)
+        if idx + 1 < len(segments):
+            return int(segments[idx + 1].get('seq') or 0) - 1
+        return 2**62
+
+    async def _read_segment_lines(self, seg_id: int) -> List[str]:
+        """
+        Read the JSONL lines of one segment — spool first, store fallback.
+
+        The spool copy is preferred when present (faster, and the only copy
+        while 'spooled'); access is lease-guarded so the uploader's deferred
+        delete can never pull the file mid-read — and the lease is held ONLY
+        for the duration of the file read (deterministic release; a lazy
+        generator would leave releases to garbage-collection timing when a
+        page limit stops iteration mid-segment). Any local failure falls
+        back to the store — the bytes are identical by construction.
+
+        Args:
+            seg_id: Segment number within this stream.
+
+        Returns:
+            The segment's non-empty lines (a segment is bounded at 16 MB,
+            so whole-segment reads are the page ceiling by design).
+        """
+        spool_path = os.path.join(self._dir, segment_basename(self._stream, seg_id))
+        if os.path.exists(spool_path):
+            LEASES.acquire(spool_path)
+            try:
+                with open(spool_path, encoding='utf-8') as f:
+                    return [line for line in f if line.strip()]
+            except OSError:
+                pass  # fall through to the store copy
+            finally:
+                LEASES.release(spool_path)
+
+        try:
+            data = await self._store.read_file(segment_store_path(self._client_id, self._stream, seg_id))
+        except Exception:
+            return []
+        return [line for line in data.splitlines() if line.strip()]
+
+    # -------------------------------------------------------------------------
+    # DELETE
+    # -------------------------------------------------------------------------
+
+    async def delete(self, *, before_time: Optional[float] = None, delete_all: bool = False) -> Dict[str, Any]:
+        """
+        Delete log data for this stream.
+
+        ``before_time``: drop segments wholly older (endTime < before_time),
+        trim chapters, advance the horizon. ``delete_all``: remove every
+        segment and the control file. Both honor the ordering + lease
+        disciplines and delete BOTH locations. When the stream has a LIVE
+        writer, the mutation routes through the writer's lock so it never
+        races the seal/upload path.
+
+        Args:
+            before_time: Epoch-seconds cutoff (exclusive).
+            delete_all: Remove the entire stream.
+
+        Returns:
+            Dict with 'deletedSegments' count.
+        """
+        writer = WRITERS.get(writer_key(self._client_id, self._stream))
+        if writer is not None:
+            async with writer._lock:
+                return await self._delete_locked(writer._control, before_time, delete_all, writer)
+        control = await self._load_control()
+        return await self._delete_locked(control, before_time, delete_all, None)
+
+    async def _delete_locked(
+        self,
+        control: Dict[str, Any],
+        before_time: Optional[float],
+        delete_all: bool,
+        writer: Optional['RunLogWriter'],
+    ) -> Dict[str, Any]:
+        """Perform the delete against a held control state (see delete())."""
+        segments: List[Dict[str, Any]] = control.get('segments', [])
+        to_drop: List[Dict[str, Any]] = []
+
+        if delete_all:
+            to_drop = list(segments)
+        elif before_time is not None:
+            to_drop = [seg for seg in segments if (seg.get('endTime') or 0) < before_time]
+
+        for seg in to_drop:
+            seg_id = int(seg['id'])
+            if seg.get('state') == 'uploaded':
+                try:
+                    await self._store.delete_file(segment_store_path(self._client_id, self._stream, seg_id))
+                except Exception:
+                    pass
+            LEASES.delete(os.path.join(self._dir, segment_basename(self._stream, seg_id)))
+            control['horizonSeq'] = max(int(control.get('horizonSeq', 0)), int(seg.get('seq') or 0))
+
+        control['segments'] = [seg for seg in segments if seg not in to_drop]
+
+        if delete_all:
+            control['chapters'] = []
+            control['startTime'] = None
+            try:
+                await self._store.delete_file(control_store_path(self._client_id, self._stream))
+            except Exception:
+                pass
+            # A live writer keeps running: its next control write recreates a
+            # fresh-but-empty ledger for the ongoing run.
+        else:
+            cutoff = before_time or 0
+            control['chapters'] = [
+                ch for ch in control.get('chapters', []) if (ch.get('endTime') or time.time()) >= cutoff
+            ]
+            control['startTime'] = control['segments'][0].get('startTime') if control['segments'] else None
+            if writer is not None:
+                await writer._write_control()
+            else:
+                try:
+                    await self._store.write_file(
+                        control_store_path(self._client_id, self._stream),
+                        json.dumps(control, separators=(',', ':'), default=str),
+                    )
+                except Exception:
+                    pass
+
+        return {'deletedSegments': len(to_drop)}
 
 
 # =============================================================================
