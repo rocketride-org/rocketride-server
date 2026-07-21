@@ -12,3 +12,22 @@ export type { IProjectViewProps } from './ProjectView';
 export type { IViewProps, ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, TraceLevel } from './types';
 export { parseServerEvent } from './utils';
 export type { ParsedServerEvent } from './utils';
+
+// Run-log continuum delivery + projections (the source-section building
+// blocks: smart-buffer hook, text log projection, efficiency analysis).
+export { useTaskEvents } from './hooks/useTaskEvents';
+export type {
+	LogReadFetcher,
+	PlayerMode,
+	TaskChapter,
+	TaskEventMessage,
+	TaskPlayerController,
+	TaskPlayerState,
+	TaskTimeline,
+	UseTaskEventsOptions,
+	UseTaskEventsResult,
+} from './hooks/useTaskEvents';
+export { LogPane } from './components/LogPane';
+export type { ILogPaneProps } from './components/LogPane';
+export { AnalyzePane } from './components/AnalyzePane';
+export type { IAnalyzePaneProps } from './components/AnalyzePane';

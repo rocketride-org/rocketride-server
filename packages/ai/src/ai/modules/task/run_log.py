@@ -549,7 +549,11 @@ class RunLogWriter:
         if self._active_file is None:
             seg_id = int(self._control.get('nextSegmentId', 0))
             self._active_path = os.path.join(self._dir, segment_basename(self._stream, seg_id))
-            self._active_file = open(self._active_path, 'a', encoding='utf-8')
+            # Line-buffered: every appended event reaches the OS immediately,
+            # so rrext_log reads of the ACTIVE segment are current to the
+            # last event — gap-free live composition (store + spool + active)
+            # without any separate in-memory tail structure.
+            self._active_file = open(self._active_path, 'a', encoding='utf-8', buffering=1)
             self._active_bytes = os.path.getsize(self._active_path)
             resumed = self._control.get('active') if self._active_bytes > 0 else None
             if resumed and int(resumed.get('id', -1)) == seg_id:
