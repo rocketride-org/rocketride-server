@@ -124,7 +124,7 @@ ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** For self-hosted engines the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. Add any additional custom variables as needed.
+> **Note:** For self-hosted engines the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. The TypeScript client reads `process.env`; it does not load `.env` itself, so load the file when starting the process as shown below.
 
 ### Step 2: Install Client
 
@@ -175,7 +175,7 @@ Pipeline files **must** use the `.pipe` extension.
 import { RocketRideClient } from 'rocketride';
 
 async function main() {
-	// Client reads configuration from .env automatically
+	// Client reads ROCKETRIDE_* values from process.env
 	const client = new RocketRideClient();
 
 	try {
@@ -208,7 +208,7 @@ main().catch(console.error);
 ### Step 5: Run
 
 ```bash
-npx tsx main.ts
+npx tsx --env-file=.env main.ts
 ```
 
 ---
