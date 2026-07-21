@@ -197,11 +197,20 @@ class MonitorCommands(DAPConn):
             evt_name = event.get('event', 'unknown')
             body = event.get('body', None)
 
-            # Send the event to the subscribed client using DAP protocol
+            # Send the event to the subscribed client using DAP protocol.
+            # The continuum stamps from the original task message (header
+            # eventTime + seq, stamped at stdio ingress) are carried through:
+            # without them send_event would mint a fresh per-connection seq,
+            # but monitors must see the SAME stamps the run log recorded —
+            # the client's replay folds, live/backfill dedupe, and the
+            # late-joiner protocol (first live seq X -> read toSeq X-1) all
+            # correlate on them.
             await self.send_event(
                 evt_name,
                 id=control.id,
                 body=body,
+                event_time=event.get('eventTime'),
+                seq=event.get('seq'),
             )
 
         # Get the task by token
