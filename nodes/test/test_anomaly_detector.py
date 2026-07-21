@@ -18,7 +18,7 @@ sys.modules['rocketlib'] = rocketlib
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'anomaly_detector'))
 try:
-    from detector import AnomalyDetector
+    from detector import AnomalyDetector  # noqa: E402
 finally:
     if _saved_rl is not None:
         sys.modules['rocketlib'] = _saved_rl

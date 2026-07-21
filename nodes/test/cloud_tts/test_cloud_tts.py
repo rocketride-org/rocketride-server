@@ -44,7 +44,9 @@ def _load_iglobal():
     sys.modules['rocketlib'] = rocketlib
 
     sys.modules['ai'] = types.ModuleType('ai')
+    sys.modules['ai'].__path__ = []  # mark as package so sub-imports resolve
     sys.modules['ai.common'] = types.ModuleType('ai.common')
+    sys.modules['ai.common'].__path__ = []
     ai_cfg = types.ModuleType('ai.common.config')
     ai_cfg.Config = type('Config', (), {})
     sys.modules['ai.common.config'] = ai_cfg

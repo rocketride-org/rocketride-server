@@ -165,14 +165,18 @@ def node():
         'requests',
     ]
     _saved = {name: sys.modules.get(name) for name in _managed}
-    Config = _install_stubs()
-    client_mod, iglobal_mod, iinstance_mod = _load_package()
-    yield SimpleNamespace(Config=Config, client_mod=client_mod, iglobal_mod=iglobal_mod, iinstance_mod=iinstance_mod)
-    for name in _managed:
-        if _saved[name] is not None:
-            sys.modules[name] = _saved[name]
-        else:
-            sys.modules.pop(name, None)
+    try:
+        Config = _install_stubs()
+        client_mod, iglobal_mod, iinstance_mod = _load_package()
+        yield SimpleNamespace(
+            Config=Config, client_mod=client_mod, iglobal_mod=iglobal_mod, iinstance_mod=iinstance_mod
+        )
+    finally:
+        for name in _managed:
+            if _saved[name] is not None:
+                sys.modules[name] = _saved[name]
+            else:
+                sys.modules.pop(name, None)
 
 
 def _make_instance(iinstance_mod, client):

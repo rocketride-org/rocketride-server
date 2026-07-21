@@ -71,6 +71,9 @@ def _ensure_ai_common() -> None:
     """Install fresh ``ai.common.*`` stubs so the node imports without the engine."""
     for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
         sys.modules[name] = types.ModuleType(name)
+    # Mark containers as packages so sub-imports resolve even if not pre-inserted.
+    sys.modules['ai'].__path__ = []
+    sys.modules['ai.common'].__path__ = []
     sys.modules['ai.common.utils'].normalize_tool_input = _passthrough
 
     class _Config:

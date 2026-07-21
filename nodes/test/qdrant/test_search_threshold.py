@@ -45,7 +45,7 @@ _STUB_NAMES = (
 _saved = {_name: sys.modules.get(_name) for _name in (*_STUB_NAMES, 'ai.common.store')}
 try:
     for _name in _STUB_NAMES:
-        sys.modules.setdefault(_name, MagicMock())
+        sys.modules[_name] = MagicMock()
     _store_mod = MagicMock()
     _store_mod.DocumentStoreBase = _FakeDocumentStoreBase
     sys.modules['ai.common.store'] = _store_mod
