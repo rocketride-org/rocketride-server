@@ -84,9 +84,12 @@ def _is_stub_module(mod) -> bool:
     return getattr(mod, '__spec__', None) is None and getattr(mod, '__file__', None) is None
 
 
-@pytest.fixture(autouse=True)
+# Module-scoped: checked once per test module, after its module-scoped fixtures
+# have torn down. A per-test check would false-positive on tests that legitimately
+# stub a core module in a scope='module' fixture and restore it at module teardown.
+@pytest.fixture(scope='module', autouse=True)
 def _guard_core_module_stubs(request):
-    """Fail a test that left a stub core module in sys.modules without restoring it."""
+    """Fail a test module that left a stub core module in sys.modules without restoring it."""
     yield
     leaked = [name for name in _GUARDED_CORE_MODULES if _is_stub_module(sys.modules.get(name))]
     if leaked:
