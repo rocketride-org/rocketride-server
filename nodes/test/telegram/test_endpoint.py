@@ -299,3 +299,46 @@ def test_startup_raises_when_webhook_setup_fails(monkeypatch):
 
     with pytest.raises(RuntimeError, match='webhook'):
         asyncio.run(ep._startup())
+
+
+# ---------------------------------------------------------------------------
+# No shared server: the guard
+# ---------------------------------------------------------------------------
+
+
+def test_run_raises_named_error_when_no_shared_server():
+    """No shared server → an error naming the cause, never a bare AttributeError.
+
+    The shared server exists only when node.py was the process entry point with
+    `--data_port`. Telegram registers `state.target` on it, so without it `_run()`
+    would die on "'NoneType' object has no attribute 'app'" out of scanObjects.
+    """
+    ep = _make_endpoint(mode='polling')
+
+    with patch('ai.node.shared_web_server', None):
+        with pytest.raises(RuntimeError, match='data_port'):
+            ep._run()
+
+
+def test_run_guard_fires_in_webhook_mode_too():
+    """Webhook mode needs the server even more (it registers a POST route)."""
+    ep = _make_endpoint(mode='webhook', webhook_url='https://example.com/telegram/webhook')
+
+    with patch('ai.node.shared_web_server', None):
+        with pytest.raises(RuntimeError, match='telegram'):
+            ep._run()
+
+
+def test_run_does_not_start_waiting_when_guard_fails():
+    """The guard must fire before the shutdown-event wait, or the task hangs forever."""
+    ep = _make_endpoint(mode='polling')
+    never_set = threading.Event()
+
+    with (
+        patch('ai.node.shared_web_server', None),
+        patch('telegram.IEndpoint.threading.Event', return_value=never_set) as event_ctor,
+    ):
+        with pytest.raises(RuntimeError):
+            ep._run()
+
+    event_ctor.assert_not_called()

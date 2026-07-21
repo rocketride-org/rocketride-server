@@ -69,24 +69,42 @@ def _fire_startup_callback_async(on_startup) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_setup_raises_when_data_port_absent(monkeypatch):
-    """No --data_port → raise. EaaS passes it unconditionally; absence is a usage error."""
+def test_setup_returns_none_when_data_port_absent(monkeypatch):
+    """No --data_port → no server, no error.
+
+    Nothing to bind, and a pipeline with no Python source node never needs
+    the DAP channel.
+    """
     monkeypatch.setattr(sys, 'argv', ['node.py'])
 
-    with pytest.raises(RuntimeError, match='data_port'):
-        node._setup_shared_web_server()
+    assert node._setup_shared_web_server() == (None, None)
 
 
-def test_setup_raises_when_only_debug_args_present(monkeypatch):
-    """Debug args alone (no --data_port) still trigger the error — only --data_port matters."""
+def test_setup_returns_none_when_only_debug_args_present(monkeypatch):
+    """Debug args alone don't imply a data channel — only --data_port does."""
     monkeypatch.setattr(
         sys,
         'argv',
         ['node.py', '--debug_port=5555', '--debug_host=localhost', '--wait_for_client'],
     )
 
-    with pytest.raises(RuntimeError, match='data_port'):
-        node._setup_shared_web_server()
+    assert node._setup_shared_web_server() == (None, None)
+
+
+def test_setup_builds_no_server_when_data_port_absent(monkeypatch):
+    """The no-port path must not construct a WebServer at all — not even an unbound one."""
+    constructed = []
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        constructed.append(config)
+        return MagicMock(name='WebServer-instance')
+
+    monkeypatch.setattr(sys, 'argv', ['node.py'])
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+
+    node._setup_shared_web_server()
+
+    assert constructed == []
 
 
 # ---------------------------------------------------------------------------
@@ -356,3 +374,37 @@ def test_teardown_still_calls_stop_when_future_is_None():
     node._teardown_shared_web_server(server, None)
 
     server.stop.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# require_shared_web_server — the guard source nodes call
+# ---------------------------------------------------------------------------
+
+
+def test_require_returns_the_shared_server_when_set(monkeypatch):
+    """Happy path (EaaS): the guard hands back the server untouched."""
+    server = MagicMock(name='server')
+    monkeypatch.setattr(node, 'shared_web_server', server)
+
+    assert node.require_shared_web_server('webhook') is server
+
+
+def test_require_raises_named_error_when_no_shared_server(monkeypatch):
+    """No server → RuntimeError naming the node and --data_port, never AttributeError.
+
+    Without this guard the caller does `node.shared_web_server.app.state.target = ...`
+    and the pipeline dies with "'NoneType' object has no attribute 'app'" raised
+    out of scanObjects, which names neither the cause nor the fix.
+    """
+    monkeypatch.setattr(node, 'shared_web_server', None)
+
+    with pytest.raises(RuntimeError, match='data_port'):
+        node.require_shared_web_server('webhook')
+
+
+def test_require_error_names_the_calling_node(monkeypatch):
+    """The node name reaches the message, so the log says which source failed."""
+    monkeypatch.setattr(node, 'shared_web_server', None)
+
+    with pytest.raises(RuntimeError, match='dropper'):
+        node.require_shared_web_server('dropper')

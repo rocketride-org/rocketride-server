@@ -613,7 +613,9 @@ class IEndpoint(IEndpointBase):
         # imported.
         from ai import node
 
-        shared = node.shared_web_server
+        # Raises a self-explaining error if this process has no shared
+        # server; without the guard the next line dies on `NoneType`.
+        shared = node.require_shared_web_server('telegram')
 
         shared.app.state.target = self.target
 

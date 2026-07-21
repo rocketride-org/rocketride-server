@@ -128,7 +128,11 @@ class IEndpoint(IEndpointBase):
         # the pre-assignment value (None) forever.
         from ai import node
 
-        node.shared_web_server.app.state.target = self.target
+        # Raises a self-explaining error if this process has no shared
+        # server; without the guard the next line dies on `NoneType`.
+        server = node.require_shared_web_server(self.endpoint.logicalType or 'webhook')
+
+        server.app.state.target = self.target
 
         self._startup()
 

@@ -212,3 +212,48 @@ def test_run_startup_failure_propagates():
     ):
         with pytest.raises(RuntimeError, match='startup boom'):
             ep._run()
+
+
+# ---------------------------------------------------------------------------
+# No shared server: the guard
+# ---------------------------------------------------------------------------
+
+
+def test_run_raises_named_error_when_no_shared_server():
+    """No shared server → an error that names the cause, never a bare AttributeError.
+
+    The shared server exists only when node.py was the process entry point with
+    `--data_port`. Webhook cannot serve without it, so it must fail with a
+    message that says so — not with "'NoneType' object has no attribute 'app'"
+    surfacing out of scanObjects.
+    """
+    ep = _make_endpoint()
+
+    with patch('ai.node.shared_web_server', None):
+        with pytest.raises(RuntimeError, match='data_port'):
+            ep._run()
+
+
+def test_run_guard_error_names_the_logical_type():
+    """A dropper pipeline should say "dropper", not a generic "webhook"."""
+    ep = _make_endpoint()
+    ep.endpoint.logicalType = 'dropper'
+
+    with patch('ai.node.shared_web_server', None):
+        with pytest.raises(RuntimeError, match='dropper'):
+            ep._run()
+
+
+def test_run_does_not_start_waiting_when_guard_fails():
+    """The guard must fire before the shutdown-event wait, or the task hangs forever."""
+    ep = _make_endpoint()
+    never_set = threading.Event()
+
+    with (
+        patch('ai.node.shared_web_server', None),
+        patch('webhook.IEndpoint.threading.Event', return_value=never_set) as event_ctor,
+    ):
+        with pytest.raises(RuntimeError):
+            ep._run()
+
+    event_ctor.assert_not_called()

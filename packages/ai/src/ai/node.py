@@ -87,8 +87,8 @@ def _parse_data_host_port() -> Tuple[str, Optional[int]]:
     return args.data_host, args.data_port
 
 
-def _setup_shared_web_server() -> Tuple[Any, Any]:
-    """Bootstrap the shared subprocess WebServer.
+def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
+    """Bootstrap the shared subprocess WebServer, if this process asked for one.
 
     EaaS spawns every subprocess with ``--data_port=N`` so DAP traffic
     (data flow, profiling, future trace control) can reach this process
@@ -102,25 +102,24 @@ def _setup_shared_web_server() -> Tuple[Any, Any]:
     ``_run()`` method, then write ``state.target`` for the ``data``
     module to pick up lazily.
 
-    Raises:
-        RuntimeError: when ``--data_port`` is missing from ``sys.argv``.
-            EaaS passes it unconditionally; a missing flag means the
-            subprocess was invoked outside the supported path (direct
-            developer invocation, broken test setup, etc.).
+    Without ``--data_port`` there is nothing to bind, so no server is
+    created and ``(None, None)`` is returned. That is not an error: a
+    pipeline with no Python source node (a catalog-mode scan, say) never
+    needs the DAP channel. Nodes that DO need it raise their own error
+    when they find ``shared_web_server`` unset — see
+    ``webhook``/``telegram`` ``_run()``.
 
     Returns:
         A tuple ``(server, future)`` — the WebServer instance and the
         concurrent future returned by ``asyncio.run_coroutine_threadsafe``
-        so the caller can clean it up in a ``finally`` block.
+        so the caller can clean it up in a ``finally`` block. Both are
+        ``None`` when ``--data_port`` was not supplied.
     """
     data_host, data_port = _parse_data_host_port()
 
     if data_port is None:
-        raise RuntimeError(
-            'node.py requires `--data_port=N` to be passed in sys.argv. '
-            'EaaS supplies this unconditionally for every subprocess; if you '
-            'see this, the subprocess was invoked outside the supported path.'
-        )
+        debug('no --data_port supplied; skipping the shared WebServer for this subprocess')
+        return None, None
 
     from ai.web import WebServer
 
@@ -160,6 +159,39 @@ def _setup_shared_web_server() -> Tuple[Any, Any]:
         )
 
     return server, future
+
+
+def require_shared_web_server(node_name: str) -> Any:
+    """Return the shared WebServer, or explain why there isn't one.
+
+    For source nodes that cannot work without an HTTP listener (webhook,
+    chat, dropper, telegram-in-webhook-mode). Without this guard the
+    caller dereferences ``None`` and the pipeline fails with a bare
+    ``AttributeError: 'NoneType' object has no attribute 'app'`` raised
+    out of ``scanObjects``, which says nothing about the cause.
+
+    The server only exists when ``node.py`` was the process entry point
+    AND ``--data_port`` was supplied — see :pyfunc:`_setup_shared_web_server`.
+
+    Args:
+        node_name: Node reporting the failure, used in the message.
+
+    Returns:
+        The shared ``WebServer`` instance.
+
+    Raises:
+        RuntimeError: When no shared WebServer was created.
+    """
+    server = shared_web_server
+    if server is None:
+        raise RuntimeError(
+            f'The `{node_name}` node needs the shared web server that `ai/node.py` '
+            f'creates, but none exists in this process. It is created only when '
+            f'`node.py` is the entry point and `--data_port=N` is passed — which is '
+            f'what EaaS does for every pipeline subprocess. A pipeline whose source '
+            f'is `{node_name}` cannot run outside that path.'
+        )
+    return server
 
 
 def _teardown_shared_web_server(server: Optional[Any], future: Optional[Any]) -> None:
