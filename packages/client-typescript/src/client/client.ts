@@ -774,8 +774,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param credential - API key, rr_ token, or PKCE code object.
 	 * @param options - Optional URI override and/or timeout.
 	 * @returns ConnectResult with user identity on success.
-	 * @throws AuthenticationException on auth failure, including when no credential is
-	 * available from the argument or configured environment (transport stays attached).
+	 * @throws AuthenticationException when the server rejects authentication. Credential
+	 * resolution checks the argument, configured environment, and stored client state
+	 * (initialized by `config.auth` and updated after authentication). The transport stays attached.
 	 */
 	async login(
 		credential?: string | { code: string; verifier: string; redirectUri: string },
@@ -859,8 +860,9 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param credential - API key / Zitadel access_token / rr_ user token / PKCE code object.
 	 * @param options - Optional overrides: uri and/or timeout.
-	 * @throws AuthenticationException on auth failure, including when no credential is
-	 * available from the argument or configured environment.
+	 * @throws AuthenticationException when the server rejects authentication. Credential
+	 * resolution checks the argument, configured environment, and stored client state
+	 * (initialized by `config.auth` and updated after authentication).
 	 */
 	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		this._currentReconnectDelay = 250;
