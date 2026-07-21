@@ -38,6 +38,10 @@ export interface TraceEvent {
 	pipelineResult?: Record<string, unknown>;
 	/** Source node ID (e.g. "chat_1") — identifies which pipeline source generated this event. */
 	source?: string;
+	/** Server-stamped emission time (epoch SECONDS, float) — stamped once at engine-stdout ingress; identical live and on run-log replay. */
+	eventTime: number;
+	/** Server-stamped continuum sequence — epoch-us seeded, strictly monotonic per task across runs/restarts. */
+	seq: number;
 }
 
 /** Processed trace row for display in Trace component. */

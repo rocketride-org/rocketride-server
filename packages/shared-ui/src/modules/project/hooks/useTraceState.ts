@@ -149,6 +149,10 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 			const event = traceEvents[i];
 			const { pipelineId, op, pipes, trace, source: eventSource, component } = event;
 			const lane = trace.lane || op;
+			// Row timestamps come from the server-stamped emission time
+			// (epoch seconds -> ms). Never the local wall clock: the same
+			// fold must produce identical rows live and on run-log replay.
+			const eventMs = event.eventTime * 1000;
 
 			switch (op) {
 				case 'begin': {
@@ -192,7 +196,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 						filterName,
 						depth,
 						entryData: trace.data,
-						timestamp: Date.now(),
+						timestamp: eventMs,
 						objectName: doc.objectName,
 						source: eventSource,
 					};
@@ -240,7 +244,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 							exitData: trace.data,
 							result: trace.result,
 							error: trace.error,
-							endTimestamp: Date.now(),
+							endTimestamp: eventMs,
 						};
 					}
 					break;
@@ -265,7 +269,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 											...doc.rows[idx],
 											result: 'error',
 											error: 'missing leave event',
-											endTimestamp: Date.now(),
+											endTimestamp: eventMs,
 										};
 									}
 								}
@@ -280,8 +284,8 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 									lane: '__result__',
 									filterName: '',
 									depth: 0,
-									timestamp: Date.now(),
-									endTimestamp: Date.now(),
+									timestamp: eventMs,
+									endTimestamp: eventMs,
 									objectName: doc.objectName,
 									source: eventSource,
 									pipelineResult: result,

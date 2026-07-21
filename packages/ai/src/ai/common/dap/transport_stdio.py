@@ -964,8 +964,12 @@ class TransportStdio(TransportBase):
                 }
             )
 
-        # Handle regular console output (non-control messages)
+        # Handle regular console output (non-control messages). The originating
+        # channel is preserved as the output category so downstream consumers
+        # (e.g. the run-log Log page) can distinguish engine diagnostics on
+        # stderr from ordinary console prints on stdout.
         else:
+            category = 'stderr' if channel == 'stderr' else 'console'
             await self._transport_receive(
-                {'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'{message}\n'}}
+                {'type': 'event', 'event': 'output', 'body': {'category': category, 'output': f'{message}\n'}}
             )

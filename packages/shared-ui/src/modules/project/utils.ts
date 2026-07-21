@@ -57,6 +57,12 @@ export function parseServerEvent(event: unknown, projectId: string): ParsedServe
 			component: body.component,
 			trace: body.op === 'end' ? {} : body.trace || {},
 			source: body.source,
+			// Continuum headers — stamped by the server at engine-stdout
+			// ingress (header-level, beside the DAP seq). Always present:
+			// server and client ship together, so there is no wall-clock
+			// fallback anywhere in the folds.
+			eventTime: msg.eventTime,
+			seq: msg.seq,
 			...(body.op === 'end' && body.trace && Object.keys(body.trace).length > 0 ? { pipelineResult: body.trace } : {}),
 		};
 		return { traceEvent };

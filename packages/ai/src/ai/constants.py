@@ -56,6 +56,49 @@ CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (1
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 
 # =============================================================================
+# Run Logging (per-task JSONL event continuum) Configuration
+# =============================================================================
+# Continuum seq numbers are epoch-microsecond seeded (see task_engine
+# stamp_log_event): any value at or above this floor is a continuum seq; any
+# value below it is a legacy per-endpoint DAP counter and gets re-stamped.
+# 1e14 sits far above any per-process counter and far below epoch-us (~1.78e15).
+CONST_LOG_SEQ_FLOOR = 10**14
+
+# Sealed-segment size: the active spool segment seals at this many bytes
+# (on a line boundary) and uploads as one immutable store object.
+CONST_LOG_SEGMENT_BYTES = 16 * 1024 * 1024  # 16 MB
+
+# Backstop seal: seal a non-empty active segment older than this many seconds
+# even if under the size threshold (caps host-loss tail + store lag for
+# low-volume long-lived streams at <= 1 object/day).
+CONST_LOG_BACKSTOP_SEAL_SECONDS = 24 * 60 * 60  # 24 hours
+
+# Ring size: fixed length of the control file's segments array; the oldest
+# segment is evicted (store + spool) when the ring is full.
+CONST_LOG_SEGMENTS = 64  # 64 x 16 MB = 1 GB retained per stream
+
+# Chapters cap: newest-N run chapters kept in the control file (in addition
+# to horizon trimming) so the control file stays small under rapid dev runs.
+CONST_LOG_CHAPTERS = 512
+
+# Per-event payload cap: larger event payload fields are truncated with a
+# marker before logging (metadata + timestamps always survive).
+CONST_LOG_EVENT_PAYLOAD_BYTES = 64 * 1024  # 64 KB
+
+# Stream history age per run kind (seconds): segments wholly older than this
+# are evicted even if the ring is not full.
+CONST_LOG_HISTORY_SECONDS_DEV = 7 * 24 * 60 * 60  # 7 days
+CONST_LOG_HISTORY_SECONDS_DEPLOY = 30 * 24 * 60 * 60  # 30 days
+
+# Status-event sampling: at most one apaevt_status_update is logged per this
+# many seconds (coarse post-hoc metrics without bloating the log).
+CONST_LOG_STATUS_SAMPLE_SECONDS = 5.0
+
+# rrext_log read paging defaults (callers may lower, never raise).
+CONST_LOG_READ_MAX_EVENTS = 2000
+CONST_LOG_READ_MAX_BYTES = 4 * 1024 * 1024  # 4 MB
+
+# =============================================================================
 # Task Server Configuration
 # =============================================================================
 CONST_CLEANUP_DELAY_TIME = 5 * 60  # seconds grace period to keep completed tasks (5 minutes)

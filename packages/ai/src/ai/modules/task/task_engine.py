@@ -50,6 +50,7 @@ from ai.constants import (
     CONST_READY_POLL_INTERVAL,
     CONST_SUBPROCESS_BUFFER_LIMIT,
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
+    CONST_LOG_SEQ_FLOOR,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
@@ -123,11 +124,17 @@ class Task(DAPBase):
             """
             Handle DAP events from subprocess.
 
-            Routes events to parent Task for broadcasting to connected clients.
+            Stamps the run-log continuum headers (eventTime + seq) at the
+            ingress point — where raw engine stdout frames have just become
+            JSON events — then routes to the parent Task for broadcasting to
+            connected clients and (L2) appending to the run log.
 
             Args:
                 event: DAP event message from subprocess
             """
+            # Stamp at true ingress so eventTime reflects emission, not
+            # forwarding time. Idempotent — an engine-provided stamp wins.
+            self._parent_task.stamp_log_event(event)
             await self._parent_task.on_event(event)
 
         async def on_disconnected(self, reason=None, has_error=False):
@@ -288,6 +295,14 @@ class Task(DAPBase):
 
         # Synchronization
         self._last_event_time = time.time()
+
+        # Run-log continuum sequencing (see stamp_log_event). Seeded from the
+        # epoch in MICROSECONDS so a fresh process always starts above every
+        # seq a previous run of this task identity could have issued (no run
+        # can out-emit the clock at a sustained 1M events/sec). The run-log
+        # writer (L2) raises this seed further via max(seed, control.lastSeq+1)
+        # when the stream's control file knows a higher value.
+        self._log_seq_next = int(time.time() * 1_000_000)
 
         # Subprocess debugging flag
         self._debug_subprocess = False
@@ -820,6 +835,57 @@ class Task(DAPBase):
         """
         self._status_updated = True
 
+    def raise_log_seq_floor(self, floor: int) -> None:
+        """
+        Raise the continuum seq counter to at least ``floor``.
+
+        Called by the run-log writer after reading the stream's control file so
+        the next issued seq is max(epoch-us seed, control.lastSeq + 1) — the
+        belt-and-suspenders guarantee that a new run never re-issues a seq any
+        client may have seen, even across a backward clock step.
+
+        Args:
+            floor: Minimum value for the next issued seq (exclusive of past).
+        """
+        # Only ever move forward — the counter is strictly monotonic.
+        if floor > self._log_seq_next:
+            self._log_seq_next = floor
+
+    def stamp_log_event(self, message: Dict[str, Any], *, event_time: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Stamp a DAP event message with the run-log continuum headers.
+
+        Adds two header-level fields (decision: header, next to the DAP seq):
+        - ``eventTime``: epoch seconds float — set once at ingress and never
+          overwritten (an engine-provided stamp wins if one ever appears).
+        - ``seq``: the per-task continuum sequence — epoch-us seeded, strictly
+          monotonic across runs and engine restarts. Event messages carrying a
+          legacy per-endpoint DAP counter (small ints from build_event) are
+          re-stamped; a value at/above CONST_LOG_SEQ_FLOOR is already a
+          continuum seq and is left untouched (idempotent).
+
+        Only EVENT messages are ever passed here — request/response seq is
+        DAP-correlation-critical (request_seq) and must never be rewritten.
+
+        Args:
+            message: The event message dict (mutated in place).
+            event_time: Optional explicit emission time — used by derived
+                events (e.g. apaevt_flow) to inherit the source event's time.
+
+        Returns:
+            The same message dict, stamped.
+        """
+        # Emission time: set once; derived events may inherit their source's.
+        if 'eventTime' not in message:
+            message['eventTime'] = event_time if event_time is not None else time.time()
+
+        # Continuum seq: idempotent — re-stamp only legacy/absent seq values.
+        if message.get('seq', 0) < CONST_LOG_SEQ_FLOOR:
+            message['seq'] = self._log_seq_next
+            self._log_seq_next += 1
+
+        return message
+
     async def _send_status_update(self) -> None:
         """
         Send status update to all monitoring clients.
@@ -882,6 +948,13 @@ class Task(DAPBase):
             event_type: Event category for routing
             message: Event payload
         """
+        # Safety net: every broadcast event carries the continuum headers.
+        # Idempotent — events stamped at ingress or at their build site pass
+        # through unchanged; anything constructed on a path that missed a
+        # stamp (e.g. status updates built in _send_status_update) is stamped
+        # here, immediately before the one shared dict fans out to clients.
+        self.stamp_log_event(message)
+
         # Route debug events to debugger
         if type & EVENT_TYPE.DEBUGGER:
             # If we have an attach debugger
@@ -1091,6 +1164,12 @@ class Task(DAPBase):
                 'source': self.source,
             }
             flow = self.build_event('apaevt_flow', body=body)
+
+            # The flow event derives from the trace message: inherit the
+            # source's emission time but take a fresh continuum seq (the
+            # legacy build_event counter is below CONST_LOG_SEQ_FLOOR and is
+            # replaced by stamp_log_event).
+            self.stamp_log_event(flow, event_time=message.get('eventTime'))
 
             # Send out a status update when needed
             self._status_updated = True
