@@ -30,7 +30,7 @@ _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 't
 
 # ---------------------------------------------------------------------------
 # Import scaffolding: build FRESH stubs unconditionally. Never read the object
-# already in sys.modules — the _saved_core save/restore below repones the real
+# already in sys.modules — the _saved_core save/restore below restores the real
 # one, so a fresh stub can't leak even without the engine loaded.
 # ---------------------------------------------------------------------------
 
