@@ -27,6 +27,10 @@ the node. Per-call dataset selection works only when `allow_dataset_override` is
 
 There is no destructive clear/reset tool.
 
+## REST API contract provenance
+
+This node follows Cognee's [Recall API reference](https://docs.cognee.ai/api-reference/recall/recall) and [Get Datasets API reference](https://docs.cognee.ai/api-reference/datasets/get-datasets), checked 2026-07-21. `POST /api/v1/recall` uses the documented camelCase JSON fields `searchType`, `topK`, and `includeReferences`; this node always sends `includeReferences: true`. `GET /api/v1/datasets` is called without pagination parameters and expects Cognee's documented bare JSON list response.
+
 ## Setup
 
 Configure these node settings:
@@ -109,7 +113,7 @@ To test the example sequentially:
 ## Upstream docs
 
 - Cognee docs: https://docs.cognee.ai
-- Cognee REST API: https://docs.cognee.ai/how-to-guides/cognee-sdk/rest-api-server
+- Cognee API reference: https://docs.cognee.ai/api-reference/introduction
 - Cognee Cloud: https://platform.cognee.ai
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->

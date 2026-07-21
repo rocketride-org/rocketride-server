@@ -471,7 +471,7 @@ def test_remember_is_single_attempt_for_ambiguous_write_failures(monkeypatch, fa
     assert 'sentinel-secret' not in str(error.value)
 
 
-def test_recall_posts_include_references_and_is_single_attempt(monkeypatch):
+def test_recall_posts_camel_case_include_references_and_is_single_attempt(monkeypatch):
     """Recall uses the modern JSON contract and does not retry its completion-generating POST."""
     calls = []
 
@@ -502,14 +502,14 @@ def test_recall_posts_include_references_and_is_single_attempt(monkeypatch):
                 'datasets': ['demo'],
                 'searchType': 'GRAPH_COMPLETION_DECOMPOSITION',
                 'topK': 8,
-                'include_references': True,
+                'includeReferences': True,
             },
             'timeout': 23,
         }
     ]
 
 
-def test_recall_always_requests_references_when_caller_passes_false(monkeypatch):
+def test_recall_always_requests_camel_case_references_when_caller_passes_false(monkeypatch):
     """The wire contract keeps references enabled even when a caller attempts to disable them."""
     calls = []
 
@@ -530,7 +530,7 @@ def test_recall_always_requests_references_when_caller_passes_false(monkeypatch)
         timeout=23,
     )
 
-    assert calls[0]['json']['include_references'] is True
+    assert calls[0]['json']['includeReferences'] is True
 
 
 @pytest.mark.parametrize(
@@ -671,10 +671,8 @@ def test_recall_is_single_attempt_for_failures_and_redacts_api_key(monkeypatch, 
 
 
 @pytest.mark.parametrize('payload_shape', ['bare-list', 'datasets-envelope'])
-def test_list_datasets_accepts_supported_response_shapes_and_delegates_to_shared_get_with_retry(
-    monkeypatch, payload_shape
-):
-    """Dataset discovery accepts implementation-supported response shapes and forwards request data."""
+def test_list_datasets_uses_unpaginated_endpoint_and_accepts_supported_response_shapes(monkeypatch, payload_shape):
+    """Dataset discovery follows the documented route while retaining envelope compatibility."""
     calls = []
     rows = [
         {
@@ -696,7 +694,7 @@ def test_list_datasets_accepts_supported_response_shapes_and_delegates_to_shared
     assert client.list_datasets('https://cognee.example', 'sentinel-secret', timeout=11) == rows
     assert calls == [
         {
-            'url': 'https://cognee.example/api/v1/datasets/',
+            'url': 'https://cognee.example/api/v1/datasets',
             'headers': {'accept': 'application/json', 'X-Api-Key': 'sentinel-secret'},
             'timeout': 11,
         }

@@ -31,7 +31,7 @@ from ai.common.utils import get_with_retry
 
 _REMEMBER_PATH = '/api/v1/remember'
 _RECALL_PATH = '/api/v1/recall'
-_DATASETS_PATH = '/api/v1/datasets/'
+_DATASETS_PATH = '/api/v1/datasets'
 _STATUS_PATH = '/api/v1/datasets/status'
 
 
@@ -108,7 +108,7 @@ def recall(
         'datasets': [dataset],
         'searchType': search_type,
         'topK': top_k,
-        'include_references': True,
+        'includeReferences': True,
     }
     try:
         response = requests.post(
