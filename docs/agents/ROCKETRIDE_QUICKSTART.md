@@ -4,7 +4,7 @@
 
 ### Step 1: Set Up the `.env` File
 
-When you connect the extension to a **self-hosted engine** (local, docker, service, or on-prem), it auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
+When you connect to a **self-hosted engine** (local, docker, service, or on-prem) using the extension's **development connection group**, the extension auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
 
 ```env
 # Self-hosted engines: auto-filled on connect (local uses the real dynamic port).
@@ -110,7 +110,7 @@ python main.py
 
 ### Step 1: Set Up the `.env` File
 
-When you connect the extension to a **self-hosted engine** (local, docker, service, or on-prem), it auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
+When you connect to a **self-hosted engine** (local, docker, service, or on-prem) using the extension's **development connection group**, the extension auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
 
 ```env
 # Self-hosted engines: auto-filled on connect (local uses the real dynamic port).
@@ -279,7 +279,7 @@ await client.disconnect();
 ### Always Do This:
 
 1. Configure server URL in extension settings (`rocketride.hostUrl` and API key)
-2. On connect to a self-hosted engine the extension auto-populates `.env` with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` (for cloud, set `ROCKETRIDE_APIKEY` manually)
+2. When the extension's development connection group connects to a self-hosted engine, it auto-populates `.env` with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` (for cloud, set `ROCKETRIDE_APIKEY` manually)
 3. Use empty constructor: `RocketRideClient()` or `new RocketRideClient()`
 4. Use literal GUID for `project_id` - generate a new one per pipeline
 5. Use `${ROCKETRIDE_*}` variables in component `config` fields
@@ -290,7 +290,7 @@ await client.disconnect();
 
 1. Hardcode `uri` or `auth` in constructor (use `.env` instead)
 2. Use variables in `project_id` field (must be literal GUID)
-3. Hand-edit `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` for a self-hosted engine — the extension re-syncs them on connect (change them via extension settings; for cloud, set `ROCKETRIDE_APIKEY` manually)
+3. Hand-edit `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` for a self-hosted engine in the development connection group — the extension re-syncs them on connect (change them via extension settings; for cloud, set `ROCKETRIDE_APIKEY` manually)
 4. Skip `connect()` or `disconnect()`
 5. Use non-ROCKETRIDE\_\* variables in pipelines
 6. Use `.json` extension for pipeline files (use `.pipe`)
