@@ -7,7 +7,7 @@
 When you connect to a **self-hosted engine** (local, docker, service, or on-prem) using the extension's **development connection group**, the extension auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
 
 ```env
-# Self-hosted engines: auto-filled on connect (local uses the real dynamic port).
+# Development-group self-hosted engines: auto-filled on connect (local uses the real dynamic port).
 # live engine address (auto-filled)
 ROCKETRIDE_URI=http://localhost:54123
 # self-hosted default; set your own for cloud
@@ -113,7 +113,7 @@ python main.py
 When you connect to a **self-hosted engine** (local, docker, service, or on-prem) using the extension's **development connection group**, the extension auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
 
 ```env
-# Self-hosted engines: auto-filled on connect (local uses the real dynamic port).
+# Development-group self-hosted engines: auto-filled on connect (local uses the real dynamic port).
 # live engine address (auto-filled)
 ROCKETRIDE_URI=http://localhost:54123
 # self-hosted default; set your own for cloud
@@ -288,7 +288,7 @@ await client.disconnect();
 
 ### Never Do This:
 
-1. Hardcode `uri` or `auth` in constructor (use `.env` instead)
+1. Hardcode `uri` or `auth` in the constructor (load `ROCKETRIDE_*` values into the process environment instead)
 2. Use variables in `project_id` field (must be literal GUID)
 3. Hand-edit `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` for a self-hosted engine in the development connection group — the extension re-syncs them on connect (change them via extension settings; for cloud, set `ROCKETRIDE_APIKEY` manually)
 4. Skip `connect()` or `disconnect()`

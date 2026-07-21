@@ -377,6 +377,9 @@ export class RocketRideClient extends DAPClient {
 	 * 3. Values from the process environment (Node.js only)
 	 * 4. Default values
 	 *
+	 * The client does not load `.env` files; load them into `process.env` before construction
+	 * (for example, start Node with `--env-file=.env`).
+	 *
 	 * @param config - Configuration options for the client
 	 * @param config.auth - API key for authentication (required)
 	 * @param config.uri - Server URI (default: CONST_DEFAULT_SERVICE)
