@@ -71,7 +71,7 @@ After a successful engine connection, the extension syncs the workspace `.env` o
 
 Cloud connections are not synced because their OAuth token is not an SDK API key. Deployment connections, workspaces with no folder open, and unreadable `.env` files are also skipped; a sync failure never affects the connection itself. Keep `.env` gitignored.
 
-The extension never automatically removes these keys: disconnecting, engine exit, or switching to cloud leaves the last-synced values in place. Remove them by hand if you no longer want them. Each self-hosted connection syncs again, so a hand-edited `ROCKETRIDE_APIKEY` is overwritten on the next successful connection.
+The extension never automatically removes these keys: disconnecting, engine exit, or switching to cloud leaves the last-synced values in place. Remove them by hand if you no longer want them. Each development-group self-hosted connection syncs again, so a hand-edited `ROCKETRIDE_APIKEY` is overwritten on the next successful connection.
 
 ## Monitoring Execution
 

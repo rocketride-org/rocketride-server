@@ -18,7 +18,7 @@ ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** For self-hosted engines the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. Add any additional custom variables as needed. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
+> **Note:** For self-hosted engines in the development connection group, the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. Add any additional custom variables as needed. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
 
 ### Step 2: Install Client
 
@@ -124,7 +124,7 @@ ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** For self-hosted engines the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. The TypeScript client reads `process.env`; it does not load `.env` itself, so load the file when starting the process as shown below. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
+> **Note:** For self-hosted engines in the development connection group, the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. The TypeScript client reads `process.env`; it does not load `.env` itself, so load the file when starting the process as shown below. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
 
 ### Step 2: Install Client
 

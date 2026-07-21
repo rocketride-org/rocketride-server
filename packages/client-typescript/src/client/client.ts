@@ -374,7 +374,7 @@ export class RocketRideClient extends DAPClient {
 	 * Configuration priority (highest to lowest):
 	 * 1. Values passed in config parameter (auth, uri)
 	 * 2. Values from env parameter (if provided)
-	 * 3. Values from .env file (Node.js only)
+	 * 3. Values from the process environment (Node.js only)
 	 * 4. Default values
 	 *
 	 * @param config - Configuration options for the client
@@ -389,7 +389,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param config.maxRetryTime - Max total time in ms to keep retrying connections
 	 * @param config.module - Optional module name for client identification
 	 *
-	 * @throws Error if auth is not provided via config, env, or .env file
+	 * @throws Error if auth is not provided via config, env, or the process environment
 	 *
 	 * @example
 	 * ```typescript
@@ -1019,7 +1019,7 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * This method loads and executes a pipeline configuration. It automatically performs
 	 * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
-	 * placeholders with values from the .env file or the `env` dictionary passed to the constructor.
+	 * placeholders with values from the process environment or the `env` dictionary passed to the constructor.
 	 *
 	 * When loading from a file via `filepath`, the client automatically unwraps `.pipe` files
 	 * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
@@ -1135,7 +1135,7 @@ export class RocketRideClient extends DAPClient {
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
-		// Build ROCKETRIDE_* env from client's .env + caller overrides
+		// Build ROCKETRIDE_* env from the client's process environment + caller overrides
 		const rocketEnv: Record<string, string> = {};
 		for (const [k, v] of Object.entries(this._env)) {
 			if (k.startsWith('ROCKETRIDE_')) rocketEnv[k] = v;
