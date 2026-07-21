@@ -79,7 +79,14 @@ export interface ViewState {
 	viewport?: { x: number; y: number; zoom: number };
 }
 
-export type ProjectViewMode = 'design' | 'status' | 'tokens' | 'flow' | 'trace' | 'errors';
+/**
+ * Top-level document pages (UI direction v5): DESIGN edits the canvas,
+ * DEVELOPMENT monitors + replays the dev continuum, DEPLOY the deploy
+ * continuum (plus, when the deploy feature lands, its lifecycle card).
+ * The former per-view modes (status/tokens/flow/trace/errors) became
+ * per-source pills inside each page's SourceSections.
+ */
+export type ProjectViewMode = 'design' | 'development' | 'deploy';
 
 /** Base view props (for ServerView, WelcomeView, etc.). */
 export interface IViewProps {

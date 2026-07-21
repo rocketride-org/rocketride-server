@@ -22,11 +22,26 @@ import type { ThemeTokens } from 'shared/themes/tokens';
 // barrel is the shell's MF share and must stay canvas-free; this webview
 // bundles the project module directly.
 import { ProjectView, parseServerEvent } from 'shared/modules/project';
-import type { TaskStatus, TraceEvent, ViewState } from 'shared/modules/project';
+import type { TaskEventMessage, TaskStatus, ViewState } from 'shared/modules/project';
 import { CheckoutModal } from 'shared';
 import type { CheckoutPlan, PlanAction } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 import type { ProjectHostToWebview, ProjectWebviewToHost } from '../types';
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/**
+ * Live-event feed cap: past this the feed is trimmed to the newest
+ * LIVE_EVENTS_KEEP in one cut (the ProjectView sections detect the shrink
+ * and re-feed their seq-deduped buffers, so nothing in their DVR caps is
+ * lost). VS Code is live-only v1 — no run-log replay bindings yet.
+ */
+const LIVE_EVENTS_MAX = 20000;
+
+/** Post-trim feed length (see {@link LIVE_EVENTS_MAX}). */
+const LIVE_EVENTS_KEEP = 10000;
 
 // =============================================================================
 // COMPONENT
@@ -40,7 +55,9 @@ const ProjectWebview: React.FC = () => {
 	const [servicesJson, setServicesJson] = useState<Record<string, any>>({});
 	const [isConnected, setIsConnected] = useState(false);
 	const [statusMap, setStatusMap] = useState<Record<string, TaskStatus>>({});
-	const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
+	// Raw stamped live events (header eventTime + seq) for this project — the
+	// ProjectView sections' buffers and folds feed from this append-only array.
+	const [liveLogEvents, setLiveLogEvents] = useState<TaskEventMessage[]>([]);
 	const [viewState, setViewState] = useState<ViewState | undefined>(undefined);
 	const [prefs, setPrefs] = useState<Record<string, unknown> | undefined>(undefined);
 	const [serverHost, setServerHost] = useState<string>('');
@@ -68,6 +85,14 @@ const ProjectWebview: React.FC = () => {
 	useEffect(() => {
 		projectIdRef.current = projectId;
 	}, [projectId]);
+
+	// Source component ids — used inside the message handler to route
+	// task-scoped events whose envelope `id` is '<tokenhash8>.<source>'.
+	const sourceIdsRef = useRef<string[]>([]);
+	useEffect(() => {
+		const components = (project?.components ?? []) as Array<{ provider: string; name?: string; id?: string; config?: Record<string, any> }>;
+		sourceIdsRef.current = components.filter((c) => c.config?.mode === 'Source').map((c) => c.id || c.name || c.provider);
+	}, [project]);
 
 	// Pending validate requests (request-ID → Promise resolver)
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
@@ -98,7 +123,7 @@ const ProjectWebview: React.FC = () => {
 					viewport: vs?.viewport,
 				});
 				setPrefs(msg.prefs ?? {});
-				setTraceEvents([]);
+				setLiveLogEvents([]);
 				if (msg.serverHost) setServerHost(msg.serverHost);
 				// Unconditional: a load without a return URL must clear any stale
 				// one, and a reload must not keep tokens from a previous session.
@@ -135,12 +160,30 @@ const ProjectWebview: React.FC = () => {
 			}
 			case 'shell:event': {
 				const pid = projectIdRef.current;
+				// statusMap keeps feeding the canvas (per-node badges + page
+				// error counts); the raw stamped envelope goes to the sections.
 				const parsed = parseServerEvent(msg.event, pid);
 				if (parsed.statusUpdate) {
 					setStatusMap((prev) => ({ ...prev, [parsed.statusUpdate!.source]: parsed.statusUpdate!.status }));
 				}
-				if (parsed.traceEvent) {
-					setTraceEvents((prev) => [...prev, parsed.traceEvent!]);
+
+				// Accumulate this project's STAMPED task events (continuum
+				// header eventTime + seq). Membership: flow/status events
+				// carry the project id in the body; task-scoped events
+				// (output, lifecycle) only carry '<tokenhash8>.<source>' in
+				// the envelope id, so they are routed by source suffix.
+				const raw = msg.event as TaskEventMessage;
+				if (typeof raw?.eventTime === 'number' && typeof raw?.seq === 'number') {
+					const body = (raw.body ?? {}) as Record<string, unknown>;
+					const envelopeId = typeof raw.id === 'string' ? raw.id : '';
+					const isOurs = body.project_id === pid || sourceIdsRef.current.some((sid) => envelopeId.endsWith(`.${sid}`));
+					if (isOurs) {
+						setLiveLogEvents((prev) => {
+							const next = [...prev, raw];
+							// Rare chunky trim; sections re-feed (seq-deduped) on shrink.
+							return next.length > LIVE_EVENTS_MAX ? next.slice(next.length - LIVE_EVENTS_KEEP) : next;
+						});
+					}
 				}
 				break;
 			}
@@ -150,7 +193,7 @@ const ProjectWebview: React.FC = () => {
 			case 'shell:connectionChange':
 				if (msg.isConnected) {
 					setStatusMap({});
-					setTraceEvents([]);
+					setLiveLogEvents([]);
 				}
 				setIsConnected(msg.isConnected);
 				if ((msg as any).isSubscribed !== undefined) setSubscribed((msg as any).isSubscribed);
@@ -305,10 +348,6 @@ const ProjectWebview: React.FC = () => {
 		sendMessage({ type: 'project:requestSave' });
 	}, [sendMessage]);
 
-	const handleTraceClear = useCallback(() => {
-		setTraceEvents([]);
-		sendMessage({ type: 'trace:clear' });
-	}, [sendMessage]);
 
 	// --- Checkout callbacks (bridge to host via postMessage) ------------------
 
@@ -354,7 +393,7 @@ const ProjectWebview: React.FC = () => {
 
 	return (
 		<>
-			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} traceEvents={traceEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} oauthReturnUrl={oauthReturnUrl} onOpenExternal={handleOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} onSave={handleSave} onTraceClear={handleTraceClear} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
+			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} liveLogEvents={liveLogEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} oauthReturnUrl={oauthReturnUrl} onOpenExternal={handleOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} onSave={handleSave} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
 		</>
 	);
