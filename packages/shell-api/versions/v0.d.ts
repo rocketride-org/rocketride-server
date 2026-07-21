@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-20T07:35:05.366Z
-// Source commit: f834366d1d5e463bbd37624d5f0fccd99d808cbf
+// Generated:     2026-07-21T16:26:42.300Z
+// Source commit: 82d4c88d98ca164c225bb8988f1c8ae39b50d92b
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -592,6 +592,80 @@ interface DeploymentRecord {
     createdAt?: number;
     /** Unix timestamp (seconds). */
     updatedAt?: number;
+}
+type LogRunKind = "dev" | "deploy";
+interface LogStreamRef {
+    projectId: string;
+    source: string;
+    runKind: LogRunKind;
+}
+interface LogChapter {
+    /** Run start (epoch seconds). */
+    beginTime: number;
+    /** First continuum seq of the run. */
+    beginSeq: number;
+    /** Run end (epoch seconds); null while the run is live. */
+    endTime?: number | null;
+    /** 'ok' | 'error' | 'cancelled'; null while the run is live. */
+    outcome?: string | null;
+}
+interface LogActivitySpan {
+    startTime?: number | null;
+    endTime?: number | null;
+    /** A run begins within this span. */
+    chapterStart: boolean;
+}
+interface LogChaptersResult {
+    chapters: LogChapter[];
+    segments: LogActivitySpan[];
+    /** Retained-window start (the horizon), epoch seconds. */
+    startTime?: number | null;
+    /** Latest activity, epoch seconds. */
+    endTime?: number | null;
+    /** First seq still retained after ring/age eviction. */
+    horizonSeq: number;
+    /** True when no run is currently writing the stream. */
+    completed: boolean;
+}
+interface LogReadParams {
+    /** Inclusive seq lower bound. */
+    fromSeq?: number;
+    /** Inclusive seq upper bound. */
+    toSeq?: number;
+    /** Inclusive eventTime lower bound (epoch seconds). */
+    fromTime?: number;
+    /** Inclusive eventTime upper bound (epoch seconds); omit for "to now". */
+    toTime?: number;
+    /** Read up to and including this segment id. */
+    toSegment?: number;
+    /** Continuation seq from a previous page's `nextSeq`. */
+    cursor?: number;
+    /** Page limit (server clamps to its maximum). */
+    maxEvents?: number;
+    /** Page byte limit (server clamps to its maximum). */
+    maxBytes?: number;
+    /** Server-side event-type filter (e.g. ['output'] for the Log page). */
+    types?: string[];
+}
+interface LogEvent {
+    type: "event";
+    event: string;
+    /** Server-stamped emission time (epoch seconds, float). */
+    eventTime: number;
+    /** Server-stamped continuum seq (epoch-us seeded, monotonic). */
+    seq: number;
+    body?: Record<string, unknown>;
+    [key: string]: unknown;
+}
+interface LogReadResult {
+    events: LogEvent[];
+    /** Present when paged: pass as `cursor` to continue. */
+    nextSeq?: number;
+    /** Present when the request reached below the retention horizon. */
+    truncatedAtSeq?: number;
+}
+interface LogDeleteResult {
+    deletedSegments: number;
 }
 interface TraceInfo {
     /** File path where the error occurred */
@@ -2094,6 +2168,50 @@ declare class DeployApi {
         schedule?: string;
     }): Promise<void>;
 }
+declare class LogApi {
+    /** @param client - The parent RocketRideClient that owns this namespace. */
+    constructor(client: RocketRideClient);
+    /**
+     * Lists a stream's chapters (tracks) and activity-bar metadata.
+     *
+     * Everything the timeline needs from one small read: per-run begin/end
+     * times + starting seq + outcome, segment activity spans, the stream's
+     * retained window, and the retention horizon.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @returns Chapters, activity spans, and stream timeline metadata.
+     */
+    chapters(stream: LogStreamRef): Promise<LogChaptersResult>;
+    /**
+     * Reads a seq/time range of events from the continuum, paged.
+     *
+     * Range forms: `fromSeq`/`toSeq`, `fromTime`/`toTime` (omit the upper
+     * bound for "to now"), or `fromTime` → `toSegment`. When the response
+     * carries `nextSeq`, pass it back as `cursor` to continue; a
+     * `truncatedAtSeq` flag means the request reached below the retention
+     * horizon.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param params - Range, paging, and filter options.
+     * @returns The page of events plus paging/truncation metadata.
+     */
+    read(stream: LogStreamRef, params?: LogReadParams): Promise<LogReadResult>;
+    /**
+     * Deletes log data for a stream (destructive).
+     *
+     * Provide `beforeTime` to drop segments wholly older than the cutoff
+     * (chapters trimmed, horizon advanced), or `all: true` to remove the
+     * entire stream including its control file.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param options - Cutoff time and/or the delete-all flag.
+     * @returns The number of segments deleted.
+     */
+    delete(stream: LogStreamRef, options: {
+        beforeTime?: number;
+        all?: boolean;
+    }): Promise<LogDeleteResult>;
+}
 declare class DataPipe {
     /**
      * Creates a new DataPipe instance.
@@ -2178,7 +2296,7 @@ type MonitorKey = {
     source: string;
     pipeId?: number;
 };
-declare class RocketRideClient extends DAPClient {
+export declare class RocketRideClient extends DAPClient {
     /** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
     readonly _ssePipeCallbacks: Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>;
     /**
@@ -3064,6 +3182,18 @@ declare class RocketRideClient extends DAPClient {
      * ```
      */
     get deploy(): DeployApi;
+    /**
+     * Run-log API namespace — chapters, ranged reads, and deletion over the
+     * per-task event continuum.
+     *
+     * @example
+     * ```typescript
+     * const stream = { projectId: 'proj', source: 'chat_1', runKind: 'dev' as const };
+     * const { chapters } = await client.log.chapters(stream);
+     * const { events } = await client.log.read(stream, { fromSeq: chapters[0].beginSeq });
+     * ```
+     */
+    get log(): LogApi;
     /**
      * Sends a DAP command, unwraps the response body, and throws on failure.
      *
@@ -4203,6 +4333,34 @@ export interface IWorkspaceContext {
     /** Subscribe to a named event. Returns an unsubscribe function. */
     on: <K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void) => () => void;
 }
+/**
+ * Props for {@link WorkspaceProvider}.
+ *
+ * The connection (client + isConnected) is deliberately NOT a prop: the
+ * provider reads it from {@link useShellConnection} like every other shell
+ * component. Threading the client through props would put the SDK client in
+ * an input (contravariant) position on the frozen shell-api surface, where
+ * every additive SDK member would read as a breaking change.
+ */
+export interface IWorkspaceProviderProps {
+    /** Array of lightweight app manifest entries. */
+    apps: AppManifestEntry$1[];
+    /** Directory for workspace persistence files (default ".workspace"). */
+    workspaceDir?: string;
+    /** Optional app to activate on initial load (overrides saved state). */
+    startupAppId?: string;
+    /** React subtree that will receive the context. */
+    children: React$1.ReactNode;
+    /** Fallback app when no saved state / startup override exists. */
+    defaultAppId?: string;
+    /** Selectable UI themes surfaced in the settings page. */
+    themeOptions?: {
+        id: string;
+        name: string;
+    }[];
+    /** Notifies the host bootstrap when the user switches theme. */
+    onThemeChange?: (themeId: string) => void;
+}
 declare function useWorkspace(): IWorkspaceContext;
 declare function useClient(): RocketRideClient | null;
 declare function useShellEvent<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): void;
@@ -4300,8 +4458,9 @@ declare class ConnectionManager implements IConnectionManager {
      * Delegates to the auth provider's ``signIn()`` method. Falls back to
      * the legacy PKCE flow if no auth provider is configured.
      *
-     * @param register - If true, requests Zitadel's sign-up form (prompt=create)
-     *                   instead of the default sign-in form.
+     * @param register - Retained for compatibility; no longer changes the
+     *                   destination. All flows land on Zitadel's login page
+     *                   (prompt=login), which offers a Register link.
      */
     startOAuth(register?: boolean): Promise<void>;
     /**
@@ -4454,7 +4613,9 @@ declare class CloudAuthProvider implements IAuthProvider {
      * authorize endpoint.
      *
      * @param appId - Optional app ID to activate after sign-in completes.
-     * @param register - If true, shows Zitadel's signup form instead of login.
+     * @param register - Retained for compatibility; no longer changes the
+     *                   destination. All flows land on Zitadel's login page,
+     *                   which offers a Register link for new users.
      */
     signIn(appId?: string, register?: boolean): Promise<void>;
     /**
@@ -5023,20 +5184,7 @@ export declare const shellApi: {
     readonly ConnectionState: typeof ConnectionState;
     readonly CloudAuthProvider: typeof CloudAuthProvider;
     readonly ApiKeyAuthProvider: typeof ApiKeyAuthProvider;
-    readonly WorkspaceProvider: import("react").FC<{
-        client: RocketRideClient | null;
-        isConnected: boolean;
-        apps: AppManifestEntry$1[];
-        workspaceDir?: string;
-        startupAppId?: string;
-        children: import("react").ReactNode;
-        defaultAppId?: string;
-        themeOptions?: {
-            id: string;
-            name: string;
-        }[];
-        onThemeChange?: (themeId: string) => void;
-    }>;
+    readonly WorkspaceProvider: import("react").FC<IWorkspaceProviderProps>;
     readonly PrefsProvider: typeof PrefsProvider;
     readonly Documents: typeof Documents;
     readonly DocTabs: import("react").FC<DocTabsProps>;

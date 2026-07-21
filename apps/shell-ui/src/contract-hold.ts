@@ -49,6 +49,14 @@ import type { ShellApiShape } from './api';
  * `{} as ShellApiShape` (not a fresh object literal) skips excess-property checks,
  * so a newly-added member can be used before it is frozen — only removals and
  * breaking changes fail.
+ *
+ * The RocketRideClient (MF shared singleton) is frozen INLINE in the bundle
+ * with a covariant type floor — append-only: SDK additions pass, removals
+ * fail. For that to hold, the client must NEVER appear in an input position
+ * (function parameter / component prop) on the surface: contravariance there
+ * flips the check and additive SDK growth reads as a break. Components source
+ * the client from useShellConnection()/getClient() instead — see the note in
+ * freeze-shell-api.js.
  */
 const _contractHold: ShellApiLatest = {} as ShellApiShape;
 void _contractHold;
