@@ -55,6 +55,7 @@ from ai.constants import (
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.modules.task.pipeflow import apply_pipeflow_event
+from ai.modules.task.run_log import RunLogWriter
 from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
@@ -303,6 +304,14 @@ class Task(DAPBase):
         # writer (L2) raises this seed further via max(seed, control.lastSeq+1)
         # when the stream's control file knows a higher value.
         self._log_seq_next = int(time.time() * 1_000_000)
+
+        # Run-log writer — the per-task event continuum (created at subprocess
+        # start; None if logging setup failed, which must never break the run).
+        # run_kind separates the dev and deploy continua; the deploy feature's
+        # trusted dispatch path sets 'deploy', everything else logs as 'dev'.
+        self._run_log: Optional[RunLogWriter] = None
+        self._run_kind: str = kwargs.get('run_kind', 'dev')
+        self._run_trigger: str = kwargs.get('trigger', 'manual')
 
         # Subprocess debugging flag
         self._debug_subprocess = False
@@ -620,6 +629,26 @@ class Task(DAPBase):
         if not self._is_restarting:
             self._status.completed = True
             self._status.endTime = time.time()
+
+        # Close out (or annotate) the run-log continuum. A restart is NOT a
+        # new run: the chapter continues and only a restart marker is
+        # recorded; a real termination completes the chapter with its
+        # outcome. Best-effort — never blocks or breaks teardown.
+        if self._run_log is not None:
+            try:
+                if self._is_restarting:
+                    self._run_log.note_restart()
+                else:
+                    if self._status.exitCode == 0:
+                        outcome = 'ok'
+                    elif self._status.state == TASK_STATE.CANCELLED.value:
+                        outcome = 'cancelled'
+                    else:
+                        outcome = 'error'
+                    await self._run_log.end_run(outcome, self._status.exitMessage or '')
+                    self._run_log = None
+            except Exception as e:
+                self.debug_message(f'Run-log close failed: {e}')
 
         self.debug_message('Beginning resource cleanup for task')
 
@@ -954,6 +983,15 @@ class Task(DAPBase):
         # stamp (e.g. status updates built in _send_status_update) is stamped
         # here, immediately before the one shared dict fans out to clients.
         self.stamp_log_event(message)
+
+        # Append to the run-log continuum: what clients see is what replay
+        # reproduces (the writer filters/samples/caps internally; never
+        # blocks on the store).
+        if self._run_log is not None:
+            try:
+                self._run_log.append(message)
+            except Exception as e:
+                self.debug_message(f'Run-log append failed: {e}')
 
         # Route debug events to debugger
         if type & EVENT_TYPE.DEBUGGER:
@@ -1661,6 +1699,32 @@ class Task(DAPBase):
             except Exception as e:
                 self._debug_stdio = None
                 self.debug_message(f'Failed to initialize stdio interface: {e}')
+
+            # Open the run-log continuum for this run. Logging is best-effort
+            # observability: any failure here is logged and the task runs
+            # unlogged rather than failing execution.
+            try:
+                self._run_log = RunLogWriter(
+                    self._server.store._store,
+                    self.client_id,
+                    self.project_id,
+                    self.source,
+                    self._run_kind,
+                    self.stamp_log_event,
+                    self.raise_log_seq_floor,
+                    debug=self.debug_message,
+                )
+                await self._run_log.open(
+                    trigger=self._run_trigger,
+                    user=self.client_id,
+                    pipeline_hash=hashlib.sha256(
+                        json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
+                    ).hexdigest()[:16],
+                    trace_level=self._pipelineTraceLevel,
+                )
+            except Exception as e:
+                self._run_log = None
+                self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:

@@ -3,6 +3,7 @@ from typing import Dict, Any
 from ai.web import WebServer
 from .task_server import TaskServer
 from .task_scheduler import TaskScheduler
+from .run_log import sweep_spool_root
 from .fetch import handle_fetch
 from depends import depends
 
@@ -24,6 +25,12 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         - PUT `/pipe/process`: Calls `pipe_Process` to handle pipe processing requests.
 
     """
+    # Run-log startup hygiene: delete stale spool directories from any
+    # previous process. Recovery is store-side only, so leftover spool state
+    # is never salvaged — this just prevents disk leaks on hosts whose
+    # filesystem (unlike a replaced K8s container) survives restarts.
+    sweep_spool_root()
+
     # Create the TaskServer instance
     task_server = TaskServer(server=server, config=config)
 
