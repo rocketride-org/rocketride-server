@@ -371,18 +371,19 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Creates a new RocketRideClient instance.
 	 *
-	 * Configuration priority (highest to lowest):
-	 * 1. Values passed in config parameter (auth, uri)
-	 * 2. Values from env parameter (if provided)
-	 * 3. Values from the process environment (Node.js only)
-	 * 4. Default values
+	 * `config.env` is copied as the configured environment map when provided;
+	 * otherwise Node.js values are copied from `process.env`. The two maps are not merged.
+	 * `config.uri` overrides `ROCKETRIDE_URI`; `config.auth` supplies the fallback
+	 * credential used when `login()` receives no credential and the configured environment
+	 * has no `ROCKETRIDE_APIKEY`.
 	 *
 	 * The client does not load `.env` files; load them into `process.env` before construction
 	 * (for example, start Node with `--env-file=.env`).
 	 *
 	 * @param config - Configuration options for the client
-	 * @param config.auth - API key for authentication (required)
-	 * @param config.uri - Server URI (default: CONST_DEFAULT_SERVICE)
+	 * @param config.auth - Optional initial API key; `login()` can also use
+	 *   `ROCKETRIDE_APIKEY` from the configured environment
+	 * @param config.uri - Server URI (default: CONST_DEFAULT_WEB_CLOUD)
 	 * @param config.env - Environment variables dictionary for configuration and substitution
 	 * @param config.onEvent - Callback for server events
 	 * @param config.onConnected - Callback when connection is established
@@ -391,8 +392,6 @@ export class RocketRideClient extends DAPClient {
 	 * @param config.requestTimeout - Default timeout in ms for individual requests
 	 * @param config.maxRetryTime - Max total time in ms to keep retrying connections
 	 * @param config.module - Optional module name for client identification
-	 *
-	 * @throws Error if auth is not provided via config, env, or the process environment
 	 *
 	 * @example
 	 * ```typescript
@@ -418,8 +417,7 @@ export class RocketRideClient extends DAPClient {
 		// Check if we're in Node.js or browser environment
 		const isBrowser = typeof window !== 'undefined';
 
-		// Build environment variables dictionary
-		// Priority: provided env > process.env (Node.js only)
+		// Use config.env exclusively when supplied; otherwise copy process.env in Node.js.
 		let clientEnv: Record<string, string> = {};
 
 		if (config.env) {
@@ -776,7 +774,8 @@ export class RocketRideClient extends DAPClient {
 	 * @param credential - API key, rr_ token, or PKCE code object.
 	 * @param options - Optional URI override and/or timeout.
 	 * @returns ConnectResult with user identity on success.
-	 * @throws AuthenticationException on auth failure (transport stays attached).
+	 * @throws AuthenticationException on auth failure, including when no credential is
+	 * available from the argument or configured environment (transport stays attached).
 	 */
 	async login(
 		credential?: string | { code: string; verifier: string; redirectUri: string },
@@ -860,6 +859,8 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param credential - API key / Zitadel access_token / rr_ user token / PKCE code object.
 	 * @param options - Optional overrides: uri and/or timeout.
+	 * @throws AuthenticationException on auth failure, including when no credential is
+	 * available from the argument or configured environment.
 	 */
 	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		this._currentReconnectDelay = 250;
@@ -895,11 +896,10 @@ export class RocketRideClient extends DAPClient {
 	 * Update the environment variables used for pipeline substitution.
 	 *
 	 * Replaces the client's env dictionary (seeded from `config.env` or, in
-	 * Node, from `process.env`) with a copy of the given map. {@link use} and
-	 * {@link validate} read it to build the `ROCKETRIDE_*` substitution env
-	 * sent with the pipeline; `attach()` also consults `ROCKETRIDE_APIKEY`
-	 * from it when no explicit credential is supplied. Mirrors the Python
-	 * SDK's `set_env`.
+	 * Node, from `process.env`) with a copy of the given map. {@link use} reads
+	 * it to build the `ROCKETRIDE_*` substitution env sent with the pipeline.
+	 * `login()` also consults `ROCKETRIDE_APIKEY` from it when no explicit
+	 * credential is supplied. Mirrors the Python SDK's `set_env`.
 	 *
 	 * @param env - The new environment map; copied, so later caller-side
 	 *   mutations have no effect.
@@ -1020,9 +1020,8 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Start an RocketRide pipeline for processing data.
 	 *
-	 * This method loads and executes a pipeline configuration. It automatically performs
-	 * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
-	 * placeholders with values from the process environment or the `env` dictionary passed to the constructor.
+	 * This method loads a pipeline configuration and sends the client's configured
+	 * `ROCKETRIDE_*` values plus any per-use overrides to the server for substitution.
 	 *
 	 * When loading from a file via `filepath`, the client automatically unwraps `.pipe` files
 	 * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
@@ -1074,7 +1073,7 @@ export class RocketRideClient extends DAPClient {
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 			/** Optional display name for the task (e.g. shown in dashboard). */
 			name?: string;
-			/** ROCKETRIDE_* environment overrides merged on top of server-side env. */
+			/** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
 			env?: Record<string, string>;
 			/** Team ID to run the task under. Defaults to the user's default team. */
 			teamId?: string;
@@ -1109,7 +1108,7 @@ export class RocketRideClient extends DAPClient {
 		// Create a deep copy of the pipeline config to avoid modifying the original
 		const processedConfig = JSON.parse(JSON.stringify(pipelineConfig));
 
-		// Override source if specified (after substitution)
+		// Override source if specified before sending the execution request.
 		if (source !== undefined) {
 			processedConfig.source = source;
 		}
@@ -1138,7 +1137,7 @@ export class RocketRideClient extends DAPClient {
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
-		// Build ROCKETRIDE_* env from the client's process environment + caller overrides
+		// Filter _env (seeded by config.env/process.env or replaced by setEnv), then apply per-use overrides.
 		const rocketEnv: Record<string, string> = {};
 		for (const [k, v] of Object.entries(this._env)) {
 			if (k.startsWith('ROCKETRIDE_')) rocketEnv[k] = v;
