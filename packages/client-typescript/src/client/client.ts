@@ -1367,7 +1367,8 @@ export class RocketRideClient extends DAPClient {
 			objinfo?: Record<string, unknown>;
 			mimetype?: string;
 		}>,
-		token: string
+		token: string,
+		maxConcurrent = 5
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
 
@@ -1461,6 +1462,13 @@ export class RocketRideClient extends DAPClient {
 				result = await pipe.close();
 			} catch (err) {
 				error = err instanceof Error ? err.message : String(err);
+				if (pipe?.isOpened) {
+					try {
+						await pipe.close();
+					} catch {
+						// Ignore errors during cleanup
+					}
+				}
 			}
 
 			// Send final status
@@ -1479,16 +1487,32 @@ export class RocketRideClient extends DAPClient {
 			results[index] = finalResult;
 		};
 
-		// Create a promise for every file - let server handle queuing
-		const uploadPromises = files.map((fileData, index) =>
-			uploadFile(fileData, index).catch((err) => {
-				// Ensure errors don't kill the whole batch
-				console.error(`Upload failed for ${fileData.file.name}:`, err);
-			})
-		);
+		// Run uploads through a bounded pool so at most `maxConcurrent` data
+		// pipes are open at once (default 5), rather than opening one pipe per
+		// file. Results are written by index, so ordering is preserved.
+		// Guard against non-finite/invalid values (e.g. NaN from a bad
+		// parseInt upstream), which would otherwise yield zero workers and
+		// silently upload nothing.
+		const requested = Number.isFinite(maxConcurrent) ? Math.floor(maxConcurrent) : 5;
+		const limit = Math.max(1, Math.min(requested, files.length || 1));
+		let nextIndex = 0;
+		const worker = async (): Promise<void> => {
+			while (true) {
+				const index = nextIndex++;
+				if (index >= files.length) break;
+				const fileData = files[index];
+				try {
+					await uploadFile(fileData, index);
+				} catch (err) {
+					// Ensure errors don't kill the whole batch
+					const errorMsg = err instanceof Error ? err.message : String(err);
+					this.debugMessage(`Upload failed for ${fileData.file.name}: ${errorMsg}`);
+				}
+			}
+		};
 
-		// Wait for all uploads to complete
-		await Promise.all(uploadPromises);
+		// Wait for all workers (and therefore all uploads) to complete
+		await Promise.all(Array.from({ length: limit }, () => worker()));
 
 		return results;
 	}

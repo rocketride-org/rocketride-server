@@ -117,7 +117,7 @@ results = await client.send_files(files, token)
 **TypeScript:**
 
 ```typescript
-const results = await client.sendFiles(files, token);
+const results = await client.sendFiles(files, token, maxConcurrent);
 ```
 
 ### Parameters
@@ -140,6 +140,7 @@ Each file entry can be:
 | --- | --- | --- | --- |
 | `files` | `Array<{ file: File, objinfo?, mimetype? }>` | Yes | Array of File objects with optional metadata |
 | `token` | `string` | Yes | Pipeline task token |
+| `maxConcurrent` | `number` | No | Maximum number of concurrent uploads (default `5`). Non-finite values (e.g. `NaN`) fall back to `5`; finite values are floored and clamped to at least `1`. |
 
 ### Returns
 
