@@ -26,17 +26,19 @@
 # ONE continuous log per task identity (projectId.source.runKind): runs are
 # chapters (lifecycle marker events) inside the stream, never separate files.
 # The supervisor appends stamped events to a local SPOOL segment, seals it at
-# a size threshold (plus a slow daily backstop), and uploads each sealed
-# segment as an immutable store object. A small CONTROL FILE per stream is the
-# time/seq -> segment routing table, the spooled/uploaded location ledger, and
-# the chapters (tracks) cache that powers the UI activity bar.
+# a size threshold (plus a slow daily backstop) AND at every run end, and
+# uploads each sealed segment as an immutable store object — so a finished
+# run is fully durable in the store immediately. A small CONTROL FILE per
+# stream is the time/seq -> segment routing table, the spooled/uploaded
+# location ledger, and the chapters (tracks) cache that powers the UI
+# activity bar.
 #
 # Design invariants (see the run-logging plan):
 #   * Every store object is written exactly once and never modified.
 #   * State flips to 'uploaded' BEFORE any spool delete (ordering invariant).
 #   * Spool deletes are lease-deferred so readers never lose a file mid-read.
 #   * Recovery is STORE-SIDE ONLY: the spool is ephemeral (K8s container);
-#     stale spool dirs are deleted at startup, never salvaged.
+#     stale spool files are deleted at startup, never salvaged.
 #   * No tokens in paths or log content — identity is projectId.source.runKind.
 # =============================================================================
 
@@ -62,7 +64,7 @@ from ai.constants import (
 )
 
 if TYPE_CHECKING:
-    from ai.account.store import IStore
+    from ai.account.file_store import FileStore
 
 # =============================================================================
 # CONSTANTS
@@ -71,25 +73,12 @@ if TYPE_CHECKING:
 # Control-file schema version (first field of the control file).
 LOG_SCHEMA_VERSION = 1
 
-# Event types recorded into the log. Everything else is dropped at append.
-# 'apaevt_status_update' is additionally rate-limited (sampled) — see append().
-LOGGED_EVENT_TYPES = frozenset(
-    {
-        'output',
-        'apaevt_flow',
-        'apaevt_status_error',
-        'apaevt_status_warning',
-        'apaevt_status_update',
-        'apaevt_exit',
-        'apaevt_log_lifecycle',
-    }
-)
-
 # How often the background worker checks the backstop seal and drains uploads.
 _WORKER_INTERVAL_SECONDS = 60.0
 
-# Spool root default — under the system temp dir unless overridden via env.
-# K8s deployments get an emptyDir here; local/dev servers a temp folder.
+# Spool root default — the system temp dir itself unless overridden via env
+# (flat spool files directly in $TEMP, no nesting). K8s deployments point
+# the env override at an emptyDir.
 _SPOOL_ROOT_ENV = 'RR_LOG_SPOOL_ROOT'
 
 
@@ -97,12 +86,21 @@ def default_spool_root() -> str:
     """Resolve the spool root directory (env override or system temp)."""
     import tempfile
 
-    return os.environ.get(_SPOOL_ROOT_ENV) or os.path.join(tempfile.gettempdir(), 'rocketride-runlog-spool')
+    return os.environ.get(_SPOOL_ROOT_ENV) or tempfile.gettempdir()
 
 
 # =============================================================================
 # IDENTITY / PATH HELPERS
 # =============================================================================
+#
+# Store paths are RELATIVE — they go through the account FileStore, which
+# scopes everything under users/<clientId>/files/ itself (the userId never
+# appears in log paths; the logs land in the user's visible file area):
+#     .logs/{projectId}/{source}.{runKind}.{segmentId:06d}.jsonl
+#     .logs/{projectId}/{source}.{runKind}.json            (control)
+# Spool files are FLAT in the spool root and DO carry the userId (one shared
+# temp dir serves every user on the host):
+#     {userId}.{projectId}.{source}.{runKind}.{segmentId:06d}.jsonl
 
 
 def _sanitize(part: str) -> str:
@@ -120,24 +118,25 @@ def stream_name(project_id: str, source: str, run_kind: str) -> str:
     return f'{_sanitize(project_id)}.{_sanitize(source)}.{_sanitize(run_kind)}'
 
 
-def control_store_path(client_id: str, stream: str) -> str:
-    """Store path of a stream's control file (user-scoped, token-free)."""
-    return f'users/{client_id}/logs/{stream}.json'
+def control_store_path(project_id: str, source: str, run_kind: str) -> str:
+    """FileStore-relative path of a stream's control file (per stream)."""
+    return f'.logs/{_sanitize(project_id)}/{_sanitize(source)}.{_sanitize(run_kind)}.json'
 
 
-def segment_store_path(client_id: str, stream: str, segment_id: int) -> str:
-    """Store path of one sealed segment object."""
-    return f'users/{client_id}/logs/{stream}.{segment_id:06d}.jsonl'
+def segment_store_path(project_id: str, source: str, run_kind: str, segment_id: int) -> str:
+    """FileStore-relative path of one sealed segment object."""
+    return f'.logs/{_sanitize(project_id)}/{_sanitize(source)}.{_sanitize(run_kind)}.{segment_id:06d}.jsonl'
 
 
-def segment_basename(stream: str, segment_id: int) -> str:
-    """Segment basename — IDENTICAL in spool and store (path-prefix swap)."""
-    return f'{stream}.{segment_id:06d}.jsonl'
+# Spool filename pattern (startup sweep) — 6-digit segment id + our runKind
+# token; anchored so the sweep can NEVER touch anything but our own files in
+# the shared temp dir.
+_SPOOL_FILE_RE = re.compile(r'^[A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+)*\.(?:dev|deploy)\.\d{6}\.jsonl$')
 
 
-def spool_dir(spool_root: str, client_id: str, stream: str) -> str:
-    """Local spool directory for one stream."""
-    return os.path.join(spool_root, _sanitize(client_id), stream)
+def spool_path(spool_root: str, client_id: str, stream: str, segment_id: int) -> str:
+    """Flat local spool file for one segment: '{userId}.{stream}.{id}.jsonl'."""
+    return os.path.join(spool_root, f'{_sanitize(client_id)}.{stream}.{segment_id:06d}.jsonl')
 
 
 def history_seconds(run_kind: str) -> int:
@@ -220,20 +219,34 @@ def writer_key(client_id: str, stream: str) -> str:
 
 def sweep_spool_root(spool_root: Optional[str] = None) -> None:
     """
-    Delete ALL stale spool directories at supervisor startup.
+    Delete stale spool FILES at supervisor startup.
 
     Recovery is store-side only (the spool is ephemeral in K8s and its
     contents are unrecoverable state), so anything left by a previous process
     is deleted, never salvaged. This prevents disk leaks on long-lived dev
     machines where — unlike K8s — the filesystem survives restarts.
 
+    The spool root is the SHARED system temp dir by default, so the sweep is
+    strictly pattern-anchored: only files matching our own
+    '{userId}.{stream}.{segId}.jsonl' naming are ever touched.
+
     Args:
         spool_root: Override root (tests); defaults to default_spool_root().
     """
     root = spool_root or default_spool_root()
-    if os.path.isdir(root):
-        shutil.rmtree(root, ignore_errors=True)
     os.makedirs(root, exist_ok=True)
+    try:
+        for name in os.listdir(root):
+            if _SPOOL_FILE_RE.match(name) and os.path.isfile(os.path.join(root, name)):
+                _try_remove(os.path.join(root, name))
+    except OSError:
+        pass
+
+    # Legacy cleanup: the previous layout nested everything under a
+    # dedicated subdirectory — remove it wholesale if it still exists.
+    legacy = os.path.join(root, 'rocketride-runlog-spool')
+    if os.path.isdir(legacy):
+        shutil.rmtree(legacy, ignore_errors=True)
 
 
 # =============================================================================
@@ -300,7 +313,7 @@ class RunLogWriter:
 
     def __init__(
         self,
-        store: 'IStore',
+        store: 'FileStore',
         client_id: str,
         project_id: str,
         source: str,
@@ -315,8 +328,11 @@ class RunLogWriter:
         Bind the writer to a task identity and its stamping callbacks.
 
         Args:
-            store: Raw IStore backend (fs/S3/Azure/memory).
-            client_id: Owning user id (store scoping only — never in names).
+            store: The account-scoped FileStore (Store.get_file_store) — all
+                store paths here are relative ('.logs/…'); the FileStore puts
+                them under the calling user itself.
+            client_id: Owning user id (spool filenames + writer registry —
+                never in store paths; the FileStore owns that scoping).
             project_id: Pipeline project id.
             source: Source component id.
             run_kind: 'dev' or 'deploy' — separate continua per kind.
@@ -339,7 +355,6 @@ class RunLogWriter:
         # Identity-derived names/paths.
         self._stream = stream_name(project_id, source, run_kind)
         self._spool_root = spool_root or default_spool_root()
-        self._dir = spool_dir(self._spool_root, client_id, self._stream)
 
         # Control state (authoritative in-memory; persisted to the store).
         self._control: Dict[str, Any] = {}
@@ -358,6 +373,22 @@ class RunLogWriter:
         self._lock = asyncio.Lock()
         self._worker: Optional[asyncio.Task] = None
         self._upload_queue: List[int] = []
+
+    # -------------------------------------------------------------------------
+    # PATHS
+    # -------------------------------------------------------------------------
+
+    def _spool_path(self, seg_id: int) -> str:
+        """Flat spool file for one of this stream's segments."""
+        return spool_path(self._spool_root, self._client_id, self._stream, seg_id)
+
+    def _control_path(self) -> str:
+        """FileStore-relative control-file path for this stream."""
+        return control_store_path(self._project_id, self._source, self._run_kind)
+
+    def _segment_path(self, seg_id: int) -> str:
+        """FileStore-relative store path for one sealed segment."""
+        return segment_store_path(self._project_id, self._source, self._run_kind, seg_id)
 
     # =========================================================================
     # OPEN / RECOVERY
@@ -386,8 +417,9 @@ class RunLogWriter:
             trace_level: The run's pipeline trace level.
         """
         async with self._lock:
-            # Fresh spool dir for this process (recovery never reads spool).
-            os.makedirs(self._dir, exist_ok=True)
+            # Ensure the spool root exists (a custom RR_LOG_SPOOL_ROOT may
+            # not; the default system temp dir always does).
+            os.makedirs(self._spool_root, exist_ok=True)
 
             # ---- Load or initialize the control file -----------------------
             self._control = await self._load_control()
@@ -428,8 +460,21 @@ class RunLogWriter:
             self._append_line(begin)
             self._active_has_chapter_start = True
 
-            # Chapter entry: completed at end_run.
+            # Chapter entry: completed at end_run. Before appending, close any
+            # DANGLING chapter (endTime null): a killed/crashed run never wrote
+            # its run-end, and leaving it open would make consumers treat it as
+            # still live and merge it with the next run. Its end is the
+            # stream's last recorded activity (capped at this run's begin) —
+            # the honest completion the dead process never wrote (self-healing
+            # on every open).
             chapters: List[Dict[str, Any]] = self._control.setdefault('chapters', [])
+            stream_last = float(self._control.get('endTime') or begin['eventTime'])
+            for chapter in chapters:
+                if chapter.get('endTime') is None:
+                    dangling_end = min(stream_last, begin['eventTime'])
+                    # Never end a chapter before it began (clock edge cases).
+                    chapter['endTime'] = max(dangling_end, float(chapter.get('beginTime') or 0))
+                    chapter['outcome'] = 'interrupted'
             chapters.append(
                 {'beginTime': begin['eventTime'], 'beginSeq': begin['seq'], 'endTime': None, 'outcome': None}
             )
@@ -456,8 +501,8 @@ class RunLogWriter:
         landed before the state flipped).
         """
         try:
-            raw = await self._store.read_file(control_store_path(self._client_id, self._stream))
-            control = json.loads(raw)
+            raw = await self._store.read(self._control_path())
+            control = json.loads(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw)
         except Exception:
             # First run of this stream (or unreadable control — rebuildable
             # state, so start fresh; segments without a control entry are
@@ -490,8 +535,8 @@ class RunLogWriter:
             if seg.get('state') == 'uploaded':
                 kept.append(seg)
                 continue
-            spool_path = os.path.join(self._dir, segment_basename(self._stream, int(seg['id'])))
-            if os.path.exists(spool_path):
+            seg_spool = self._spool_path(int(seg['id']))
+            if os.path.exists(seg_spool):
                 kept.append(seg)
                 self._upload_queue.append(int(seg['id']))
             else:
@@ -502,8 +547,7 @@ class RunLogWriter:
 
         active = control.get('active')
         if active is not None:
-            active_path = os.path.join(self._dir, segment_basename(self._stream, int(active.get('id', 0))))
-            if not os.path.exists(active_path):
+            if not os.path.exists(self._spool_path(int(active.get('id', 0)))):
                 control.pop('active', None)
         return control
 
@@ -515,10 +559,12 @@ class RunLogWriter:
         """
         Append one stamped event to the active segment (synchronous, cheap).
 
-        Filters to LOGGED_EVENT_TYPES, samples status snapshots, caps payload
-        size, writes one JSONL line to the local spool, and triggers a seal
-        when the size threshold is crossed. Never blocks on the store — all
-        store traffic happens in the background worker.
+        This is a LOG: every event delivered to clients is recorded — there
+        is deliberately NO type filter. Status snapshots are rate-limited
+        (sampled), payloads are capped, one JSONL line goes to the local
+        spool, and a seal triggers when the size threshold is crossed. Never
+        blocks on the store — all store traffic happens in the background
+        worker.
 
         Args:
             message: A stamped DAP event message (header eventTime + seq).
@@ -527,15 +573,16 @@ class RunLogWriter:
             return
 
         event_type = message.get('event', '')
-        if event_type not in LOGGED_EVENT_TYPES:
-            return
 
         # Status snapshots are sampled: at most one per interval keeps coarse
-        # post-hoc metrics without bloating the log.
+        # post-hoc metrics without bloating the log. The task's FINAL zeroed
+        # snapshot (body.final) always lands — it is the stream's last word
+        # on utilization and must never be sampled away.
         if event_type == 'apaevt_status_update':
             now = message.get('eventTime') or time.time()
-            if now - self._last_status_logged < CONST_LOG_STATUS_SAMPLE_SECONDS:
-                return
+            if not message.get('body', {}).get('final'):
+                if now - self._last_status_logged < CONST_LOG_STATUS_SAMPLE_SECONDS:
+                    return
             self._last_status_logged = now
 
         self._append_line(truncate_event(message))
@@ -548,7 +595,7 @@ class RunLogWriter:
         # segment keeps one coherent start time/seq across runs.
         if self._active_file is None:
             seg_id = int(self._control.get('nextSegmentId', 0))
-            self._active_path = os.path.join(self._dir, segment_basename(self._stream, seg_id))
+            self._active_path = self._spool_path(seg_id)
             # Line-buffered: every appended event reaches the OS immediately,
             # so rrext_log reads of the ACTIVE segment are current to the
             # last event — gap-free live composition (store + spool + active)
@@ -598,7 +645,7 @@ class RunLogWriter:
         seg_id = int(self._control.get('nextSegmentId', 0))
         self._control['nextSegmentId'] = seg_id + 1
 
-        # Control entry — Rod's exact shape (+ id/state ledger fields).
+        # Control entry — the agreed shape (+ id/state ledger fields).
         self._control.setdefault('segments', []).append(
             {
                 'startTime': self._active_start_time,
@@ -638,7 +685,7 @@ class RunLogWriter:
                 asyncio.get_event_loop().create_task(self._delete_store_segment(seg_id))
 
             # Spool copy — routed through the lease table (deferred delete).
-            LEASES.delete(os.path.join(self._dir, segment_basename(self._stream, seg_id)))
+            LEASES.delete(self._spool_path(seg_id))
 
             # Horizon bookkeeping + chapter trim.
             self._control['horizonSeq'] = max(int(self._control.get('horizonSeq', 0)), int(evicted.get('seq') or 0))
@@ -651,7 +698,7 @@ class RunLogWriter:
     async def _delete_store_segment(self, seg_id: int) -> None:
         """Delete one evicted segment object from the store (best-effort)."""
         try:
-            await self._store.delete_file(segment_store_path(self._client_id, self._stream, seg_id))
+            await self._store.delete(self._segment_path(seg_id))
         except Exception as e:
             self._debug(f'run-log {self._stream}: failed deleting evicted segment {seg_id}: {e}')
 
@@ -666,11 +713,11 @@ class RunLogWriter:
         """
         while self._upload_queue:
             seg_id = self._upload_queue[0]
-            path = os.path.join(self._dir, segment_basename(self._stream, seg_id))
+            path = self._spool_path(seg_id)
             try:
                 with open(path, 'rb') as f:
                     data = f.read()
-                await self._store.write_bytes(segment_store_path(self._client_id, self._stream, seg_id), data)
+                await self._store.write(self._segment_path(seg_id), data)
             except Exception as e:
                 # Leave it queued — reads still serve from the spool copy.
                 self._debug(f'run-log {self._stream}: upload of segment {seg_id} failed (will retry): {e}')
@@ -727,12 +774,15 @@ class RunLogWriter:
 
     async def end_run(self, outcome: str, exit_message: str = '') -> None:
         """
-        Complete the current run: end marker, chapter completion, flush.
+        Complete the current run: end marker, chapter completion, SEAL, upload.
 
-        Seal-or-continue: the active segment is NOT force-sealed — small runs
-        share segments (that is the point of the continuum). The tail stays
-        spool-only until the next size/backstop seal; its loss window is the
-        accepted crash semantics.
+        The active segment is force-sealed at run end (supersedes the
+        earlier seal-or-continue design): the store then holds
+        the run's complete history the moment the task finishes, and the
+        crash-loss window shrinks to "mid-run only". The cost — one store
+        object per run even for small runs — is accepted; the continuum
+        (chapters over one stream, ring + age retention) is unchanged, runs
+        simply no longer share a segment file.
 
         Args:
             outcome: 'ok' | 'error' | 'cancelled'.
@@ -755,14 +805,10 @@ class RunLogWriter:
             self._control['completed'] = True
             self._open = False
 
-            # Close the active file HANDLE but keep the file + its control
-            # descriptor: seal-or-continue means the tail stays readable (the
-            # reader treats 'active' as a virtual segment) and the next run
-            # in this process reopens/continues it.
-            if self._active_file is not None:
-                self._active_file.flush()
-                self._active_file.close()
-                self._active_file = None
+            # Seal (closes the handle, records the 'spooled' control entry,
+            # queues the upload) and push it to the store NOW — the reader
+            # serves the finished run from durable segments, no active tail.
+            self._seal_active()
             await self._drain_uploads()
             await self._write_control()
 
@@ -794,12 +840,12 @@ class RunLogWriter:
 
     async def _write_control(self) -> None:
         """Persist the control file to the store (single-writer, whole-object)."""
-        # Keep the ACTIVE (unsealed) segment visible to readers: seal-or-
-        # continue means a completed run's tail (incl. its run-end marker)
-        # can live in the active spool file for a long time — the reader
-        # includes this descriptor as a virtual segment so the tail is
-        # readable the moment it is written. The active spool copy still
-        # dies with the container (accepted crash-loss window).
+        # Keep the ACTIVE (unsealed) segment visible to readers while a run
+        # is executing: the reader includes this descriptor as a virtual
+        # segment so the live tail is readable the moment it is written.
+        # Runs force-seal at end_run, so after a run finishes there is no
+        # active descriptor — only mid-run state lives here, and only that
+        # mid-run tail dies with the container (accepted crash-loss window).
         if self._active_path is not None:
             self._control['active'] = {
                 'id': int(self._control.get('nextSegmentId', 0)),
@@ -812,9 +858,9 @@ class RunLogWriter:
             self._control.pop('active', None)
 
         try:
-            await self._store.write_file(
-                control_store_path(self._client_id, self._stream),
-                json.dumps(self._control, separators=(',', ':'), default=str),
+            await self._store.write(
+                self._control_path(),
+                json.dumps(self._control, separators=(',', ':'), default=str).encode('utf-8'),
             )
         except Exception as e:
             self._debug(f'run-log {self._stream}: control write failed: {e}')
@@ -839,7 +885,7 @@ class RunLogReader:
 
     def __init__(
         self,
-        store: 'IStore',
+        store: 'FileStore',
         client_id: str,
         project_id: str,
         source: str,
@@ -851,8 +897,10 @@ class RunLogReader:
         Bind the reader to a stream identity.
 
         Args:
-            store: Raw IStore backend.
-            client_id: Owning user id (store scoping — caller-authenticated).
+            store: The CALLER's account-scoped FileStore — store paths are
+                relative ('.logs/…'); scoping to the authenticated user is
+                the FileStore's job, never built from input here.
+            client_id: Caller's user id (spool filenames + writer registry).
             project_id: Pipeline project id.
             source: Source component id.
             run_kind: 'dev' or 'deploy'.
@@ -860,9 +908,23 @@ class RunLogReader:
         """
         self._store = store
         self._client_id = client_id
+        self._project_id = project_id
+        self._source = source
+        self._run_kind = run_kind
         self._stream = stream_name(project_id, source, run_kind)
         self._spool_root = spool_root or default_spool_root()
-        self._dir = spool_dir(self._spool_root, client_id, self._stream)
+
+    def _spool_path(self, seg_id: int) -> str:
+        """Flat spool file for one of this stream's segments."""
+        return spool_path(self._spool_root, self._client_id, self._stream, seg_id)
+
+    def _control_path(self) -> str:
+        """FileStore-relative control-file path for this stream."""
+        return control_store_path(self._project_id, self._source, self._run_kind)
+
+    def _segment_path(self, seg_id: int) -> str:
+        """FileStore-relative store path for one sealed segment."""
+        return segment_store_path(self._project_id, self._source, self._run_kind, seg_id)
 
     # -------------------------------------------------------------------------
     # CONTROL ACCESS
@@ -883,10 +945,10 @@ class RunLogReader:
         if writer is not None:
             return writer._control
         try:
-            raw = await self._store.read_file(control_store_path(self._client_id, self._stream))
+            raw = await self._store.read(self._control_path())
         except Exception as exc:
             raise FileNotFoundError(f'No run log for stream {self._stream}') from exc
-        return json.loads(raw)
+        return json.loads(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else raw)
 
     async def chapters(self) -> Dict[str, Any]:
         """
@@ -1091,22 +1153,23 @@ class RunLogReader:
             The segment's non-empty lines (a segment is bounded at 16 MB,
             so whole-segment reads are the page ceiling by design).
         """
-        spool_path = os.path.join(self._dir, segment_basename(self._stream, seg_id))
-        if os.path.exists(spool_path):
-            LEASES.acquire(spool_path)
+        local_path = self._spool_path(seg_id)
+        if os.path.exists(local_path):
+            LEASES.acquire(local_path)
             try:
-                with open(spool_path, encoding='utf-8') as f:
+                with open(local_path, encoding='utf-8') as f:
                     return [line for line in f if line.strip()]
             except OSError:
                 pass  # fall through to the store copy
             finally:
-                LEASES.release(spool_path)
+                LEASES.release(local_path)
 
         try:
-            data = await self._store.read_file(segment_store_path(self._client_id, self._stream, seg_id))
+            raw = await self._store.read(self._segment_path(seg_id))
         except Exception:
             return []
-        return [line for line in data.splitlines() if line.strip()]
+        text = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else str(raw)
+        return [line for line in text.splitlines() if line.strip()]
 
     # -------------------------------------------------------------------------
     # DELETE
@@ -1157,10 +1220,10 @@ class RunLogReader:
             seg_id = int(seg['id'])
             if seg.get('state') == 'uploaded':
                 try:
-                    await self._store.delete_file(segment_store_path(self._client_id, self._stream, seg_id))
+                    await self._store.delete(self._segment_path(seg_id))
                 except Exception:
                     pass
-            LEASES.delete(os.path.join(self._dir, segment_basename(self._stream, seg_id)))
+            LEASES.delete(self._spool_path(seg_id))
             control['horizonSeq'] = max(int(control.get('horizonSeq', 0)), int(seg.get('seq') or 0))
 
         control['segments'] = [seg for seg in segments if seg not in to_drop]
@@ -1169,7 +1232,7 @@ class RunLogReader:
             control['chapters'] = []
             control['startTime'] = None
             try:
-                await self._store.delete_file(control_store_path(self._client_id, self._stream))
+                await self._store.delete(self._control_path())
             except Exception:
                 pass
             # A live writer keeps running: its next control write recreates a
@@ -1184,9 +1247,9 @@ class RunLogReader:
                 await writer._write_control()
             else:
                 try:
-                    await self._store.write_file(
-                        control_store_path(self._client_id, self._stream),
-                        json.dumps(control, separators=(',', ':'), default=str),
+                    await self._store.write(
+                        self._control_path(),
+                        json.dumps(control, separators=(',', ':'), default=str).encode('utf-8'),
                     )
                 except Exception:
                     pass

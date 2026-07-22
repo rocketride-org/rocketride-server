@@ -144,9 +144,11 @@ class LogCommands(DAPConn):
             raise ValueError(f'runKind must be one of {sorted(_VALID_RUN_KINDS)}')
 
         # Store scoping comes from the AUTHENTICATED user, never from input:
-        # v1 serves each caller their own streams only.
+        # v1 serves each caller their own streams only. The account-scoped
+        # FileStore owns the users/<id>/files/ prefix (and refuses an empty
+        # user id), so log paths stay relative ('.logs/…').
         return RunLogReader(
-            self._server.store._store,
+            self._server.store.get_file_store(self._account_info.userId),
             self._account_info.userId,
             project_id,
             source,

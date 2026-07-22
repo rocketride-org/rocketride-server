@@ -13,27 +13,32 @@
  * are fully independent — one can replay a past track while another streams
  * live; there is no shared cursor and no cross-source coupling.
  *
- * Live mode renders from the host-fed live state (statusMap + raw events),
- * exactly like today's pages. Replay mode derives everything from the
- * useTaskEvents visible window: status is the LAST status snapshot at the
- * cursor (snapshots are absolute, verified), trace/flow fold from the
- * replayed flow events, and the Log/Analyze projections read the window
- * directly. Seeking into an idle gap shows an explicit gap state whose PLAY
- * auto-skips to the next track (DVD semantics).
+ * Each pane consumes its natural read from the useTaskEvents DVR:
+ * - Snapshot panes (Tokens/Flow/Errors/header) take statusAt() — the last
+ *   absolute status snapshot at the position (live mode prefers the host's
+ *   status map, which also carries endpoint notes).
+ * - Accumulating panes (Trace/Log/Analyze) take trackEvents() — the
+ *   effective track from its begin to the position, so a finished run
+ *   persists through the dead zone and resets only when the next run
+ *   begins; a mid-track seek replays from the track's beginning.
+ * - The chart takes chartSeries() — the ready 1-second grid merging tracks
+ *   and dead zones (zeros) into one continuous timeline.
+ * PLAY from a gap auto-skips to the next track (DVD semantics).
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { commonStyles } from '../../../themes/styles';
-import { Button } from '../../../components/button/Button';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
 import { PlayBar } from '../../../components/play-bar/PlayBar';
+import type { ITimeSelection } from '../../../components/play-bar/PlayBar';
 import Status from '../../../components/status/Status';
 import { StatusHeader } from '../../../components/status/StatusHeader';
 import { SourceTokensContent } from '../../../components/tokens/Tokens';
 import { SourceFlowContent } from '../../../components/flow/Flow';
 import Trace from '../../../components/trace/Trace';
 import Errors from '../../../components/errors/Errors';
+import { EmptyState } from '../../../components/empty-state/EmptyState';
 import PipelineActions from '../../../components/pipeline-actions/PipelineActions';
 
 import { useTaskEvents } from '../hooks/useTaskEvents';
@@ -116,6 +121,13 @@ const styles: Record<string, CSSProperties> = {
 		padding: '10px 14px 0',
 		flexWrap: 'wrap',
 	},
+	// Replay: the live header (state, Run/Stop) is not what the cursor shows —
+	// dim it and drop interactions so it visibly reads as "not live".
+	headerDimmed: {
+		opacity: 0.4,
+		pointerEvents: 'none',
+		userSelect: 'none',
+	},
 	replayContext: {
 		marginLeft: 'auto',
 		display: 'flex',
@@ -130,35 +142,42 @@ const styles: Record<string, CSSProperties> = {
 		backgroundColor: 'var(--rr-color-info)',
 		color: 'var(--rr-fg-button)',
 	},
+	// Fixed-height pane body: every pill renders in the same 450px box (its
+	// content scrolls), so switching pills or data arriving never resizes
+	// the section or shoves the transport around.
 	body: {
+		height: 450,
 		padding: '12px 14px 0',
+		overflowY: 'auto',
+		overflowX: 'hidden',
 	},
-	gapState: {
+	// Full-height pane frame for panes that scroll INTERNALLY (trace): the
+	// pane fills the body exactly, so the body's own scrollbar never engages
+	// and only the pane's inner scroll region scrolls.
+	paneFill: {
+		height: '100%',
 		display: 'flex',
 		flexDirection: 'column',
-		alignItems: 'center',
-		justifyContent: 'center',
-		textAlign: 'center',
-		padding: '40px 24px',
-		border: '1px dashed var(--rr-border-hover)',
-		borderRadius: 10,
-		background: 'var(--rr-bg-surface-alt)',
-		gap: 6,
+		minHeight: 0,
 	},
-	gapTitle: {
-		fontSize: 15,
-		fontWeight: 700,
-		color: 'var(--rr-text-primary)',
+	// The scrolling child inside paneFill (takes whatever the toolbar left).
+	paneScrollHost: {
+		flex: 1,
+		minHeight: 0,
 	},
-	gapDetail: {
-		fontSize: 13,
-		color: 'var(--rr-text-secondary)',
-		maxWidth: 460,
-	},
-	gapActions: {
+	// Analyze-slice header: names the brushed range + the way back to track scope.
+	sliceBar: {
 		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'space-between',
 		gap: 10,
-		marginTop: 10,
+		fontSize: 12.5,
+		color: 'var(--rr-text-secondary)',
+		padding: '6px 10px',
+		marginBottom: 10,
+		background: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 6,
 	},
 };
 
@@ -166,10 +185,10 @@ const styles: Record<string, CSSProperties> = {
 // HELPERS
 // =============================================================================
 
-/** Format an epoch-seconds time for the gap/replay chrome. */
+/** Format an epoch-seconds time for the replay/slice chrome (with seconds — slices can be 5 s wide). */
 function formatTime(time: number | null | undefined): string {
 	if (time == null) return '—';
-	return new Date(time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	return new Date(time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 // =============================================================================
@@ -221,11 +240,20 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 		};
 	}, [source.id, runKind]);
 
-	// --- The smart buffer over this source's continuum -----------------------
-	const { visibleEvents, ingestLive, player, controller, inGap, gapNeighbors } = useTaskEvents({
+	// --- The DVR over this source's continuum --------------------------------
+	const { statusAt, trackEvents, rangeEvents, chartSeries, trackStats, ingestLive, player, controller } = useTaskEvents({
 		readLog,
 		timeline,
 	});
+
+	// Analyze slice (brushed on the PlayBar with Shift+drag). Completing a
+	// brush also switches to the Analyze pill — selecting a slice IS asking
+	// for its analysis.
+	const [selection, setSelection] = useState<ITimeSelection | null>(null);
+	const handleSelectionChange = useCallback((next: ITimeSelection | null) => {
+		setSelection(next);
+		if (next) setPill('analyze');
+	}, []);
 
 	// Feed NEW live events into the buffer (absorb dedupes on seq, so an
 	// idempotent incremental feed over the growing host array is safe).
@@ -241,43 +269,61 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 		fedCountRef.current = liveEvents.length;
 	}, [liveEvents, ingestLive]);
 
-	// --- Replay derivations ---------------------------------------------------
+	// --- Position-shaped reads ------------------------------------------------
 	const isReplay = player.mode === 'replay';
 
-	// Status at the cursor: snapshots are ABSOLUTE (verified), so the last
-	// visible one IS the state at the cursor. Live mode uses the host's map.
-	const replayStatus = useMemo<TaskStatus | undefined>(() => {
-		if (!isReplay) return undefined;
-		for (let i = visibleEvents.length - 1; i >= 0; i--) {
-			const message = visibleEvents[i];
-			if (message.event === 'apaevt_status_update') {
-				return message.body as unknown as TaskStatus;
-			}
-		}
-		return undefined;
-	}, [isReplay, visibleEvents]);
-
+	// Snapshot panes (tokens/flow/errors/header): the last status snapshot
+	// at-or-before the position — absolute, so it fully reconstructs their
+	// state; in a dead zone it is naturally the previous run's final state.
+	// Live mode prefers the host's map (it also carries endpoint notes).
+	const replayStatus = useMemo<TaskStatus | undefined>(
+		() => (isReplay ? ((statusAt() ?? undefined) as TaskStatus | undefined) : undefined),
+		[isReplay, statusAt],
+	);
 	const effectiveStatus = isReplay ? replayStatus : liveTaskStatus;
 
-	// Trace/flow events fold from the SAME parse used live, so replay rows
-	// are identical to what the live view produced (the whole point of the
-	// stamped continuum).
+	// Accumulating panes (trace/log/analyze): the EFFECTIVE track's events —
+	// a finished run persists through the dead zone and resets only when the
+	// next run begins; a mid-track seek replays from the track's beginning.
+	const track = useMemo(() => trackEvents(), [trackEvents]);
+
+	// Trace fold: same parse as live, over the track's flow events; the
+	// track identity keys the fold so a track flip restarts it cleanly.
 	const foldedTraceEvents = useMemo<TraceEvent[]>(() => {
 		const folded: TraceEvent[] = [];
-		for (const message of visibleEvents) {
+		for (const message of track.events) {
+			if (message.event !== 'apaevt_flow') continue;
 			const parsed = parseServerEvent(message, projectId);
 			if (parsed.traceEvent && parsed.traceEvent.source === source.id) {
 				folded.push(parsed.traceEvent);
 			}
 		}
 		return folded;
-	}, [visibleEvents, projectId, source.id]);
+	}, [track, projectId, source.id]);
 
-	const { rows: traceRows, clearTrace } = useTraceState(foldedTraceEvents);
+	const { rows: traceRows, clearTrace } = useTraceState(foldedTraceEvents, track.chapter?.beginSeq ?? -1);
+
+	// Flow pane: rebuild pipeflow.byPipe AT THE POSITION from the track's
+	// flow events — every flow event carries the full post-op stack, and
+	// 'end' retires its pipeline. Status snapshots cannot serve this: the
+	// log samples them every ~5s and documents finish in under a second, so
+	// sampled byPipe is almost always the empty idle instant.
+	const flowStatus = useMemo<TaskStatus | null>(() => {
+		const byPipe: Record<string, string[]> = {};
+		for (const message of track.events) {
+			if (message.event !== 'apaevt_flow') continue;
+			const body = message.body as Record<string, any>;
+			const id = String(body.id ?? 0);
+			if (body.op === 'end') delete byPipe[id];
+			else byPipe[id] = (body.pipes as string[]) ?? [];
+		}
+		const base = effectiveStatus ?? null;
+		if (!base) return null;
+		return { ...base, pipeflow: { ...base.pipeflow, byPipe } } as TaskStatus;
+	}, [track, effectiveStatus]);
 
 	// --- Section chrome -------------------------------------------------------
 	const currentElapsed = useElapsedTimer(effectiveStatus ?? null);
-	const hasLiveRun = Boolean(liveTaskStatus?.serviceUp) || liveTaskStatus?.state === 3;
 
 	// Track number of the cursor's chapter (1-based), for the replay chrome.
 	const trackNumber = useMemo(() => {
@@ -299,59 +345,45 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 
 	/** Render the pane for the active pill. */
 	const renderPane = (): React.ReactNode => {
-		// The idle-gap state replaces every pane while the cursor sits
-		// between tracks — explicit, never a silently blank panel.
-		if (isReplay && inGap) {
-			return (
-				<div style={styles.gapState}>
-					<div style={styles.gapTitle}>No run was active at this time</div>
-					<div style={styles.gapDetail}>
-						{formatTime(player.cursorTime)} sits between
-						{gapNeighbors.previous
-							? ` the run that ended ${formatTime(gapNeighbors.previous.endTime)}`
-							: ' the start of history'}
-						{gapNeighbors.next ? ` and the run starting ${formatTime(gapNeighbors.next.beginTime)}.` : '.'}
-					</div>
-					<div style={styles.gapActions}>
-						{gapNeighbors.previous && (
-							<Button variant="ghost" small onClick={controller.previousTrack}>
-								{'|◀'} Back to previous run
-							</Button>
-						)}
-						{gapNeighbors.next && (
-							<Button variant="secondary" small onClick={controller.nextTrack}>
-								Skip to next run {'▶|'}
-							</Button>
-						)}
-					</div>
-				</div>
-			);
-		}
-
+		// Idle gaps between tracks do NOT replace the panes: the folds render
+		// the state as of the cursor, and the status chart's sliding window
+		// legitimately shows zeros through dead space. The
+		// activity bar is where gaps are visualized; PLAY from a gap still
+		// auto-skips to the next track (DVD transport behavior in the hook).
 		switch (pill) {
 			case 'status':
-				return <Status taskStatus={effectiveStatus ?? null} currentElapsed={currentElapsed} isConnected={isConnected} />;
+				// The chart consumes the DVR's ready-made 1-second grid —
+				// sliding while playing, frozen while paused, zeros through
+				// dead space — and the footer its track-scoped stats.
+				return <Status getSeries={chartSeries} getStats={trackStats} />;
 			case 'tokens':
 				return <SourceTokensContent tokens={effectiveStatus?.tokens} />;
-			case 'flow':
+			case 'flow': {
+				// Both views fold from byPipe — with nothing in flight the
+				// toggle chooses between two empty states, so hide it (same
+				// rule as Trace's Clear button).
+				const hasFlowData = Object.keys(flowStatus?.pipeflow?.byPipe ?? {}).length > 0;
 				return (
 					<>
-						<div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-							<div style={commonStyles.toggleGroup}>
-								<button style={commonStyles.toggleButton(flowViewMode === 'pipeline')} onClick={() => setFlowViewMode('pipeline')}>
-									Pipeline View
-								</button>
-								<button style={commonStyles.toggleButton(flowViewMode === 'component')} onClick={() => setFlowViewMode('component')}>
-									Component View
-								</button>
+						{hasFlowData && (
+							<div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+								<div style={commonStyles.toggleGroup}>
+									<button style={commonStyles.toggleButton(flowViewMode === 'pipeline')} onClick={() => setFlowViewMode('pipeline')}>
+										Pipeline View
+									</button>
+									<button style={commonStyles.toggleButton(flowViewMode === 'component')} onClick={() => setFlowViewMode('component')}>
+										Component View
+									</button>
+								</div>
 							</div>
-						</div>
-						<SourceFlowContent taskStatus={effectiveStatus ?? null} viewMode={flowViewMode} />
+						)}
+						<SourceFlowContent taskStatus={flowStatus} viewMode={flowViewMode} />
 					</>
 				);
+			}
 			case 'trace':
 				return (
-					<>
+					<div style={styles.paneFill}>
 						{traceRows.length > 0 && (
 							<div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
 								<button style={commonStyles.buttonSecondary} onClick={clearTrace}>
@@ -359,12 +391,14 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 								</button>
 							</div>
 						)}
-						<Trace rows={traceRows} componentNames={componentNames} />
-					</>
+						<div style={styles.paneScrollHost}>
+							<Trace rows={traceRows} componentNames={componentNames} />
+						</div>
+					</div>
 				);
 			case 'errors':
 				return errorItems.length === 0 && warningItems.length === 0 ? (
-					<div style={commonStyles.empty}>No errors or warnings</div>
+					<EmptyState title="No errors or warnings" description="Problems raised by the pipeline appear here while it runs or when replaying a recorded run." />
 				) : (
 					<>
 						{errorItems.length > 0 && <Errors title="Errors" items={errorItems} type="error" />}
@@ -372,9 +406,27 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					</>
 				);
 			case 'log':
-				return <LogPane events={visibleEvents} />;
+				return <LogPane events={track.events} downloadBase={`${source.id}.${runKind}`} />;
 			case 'analyze':
-				return <AnalyzePane events={visibleEvents} />;
+				// A brushed slice overrides the track scope; the header row
+				// names the slice and offers the way back.
+				return (
+					<>
+						{selection && (
+							<div style={styles.sliceBar}>
+								<span>
+									Analyzing slice <b>{formatTime(selection.from)}</b> → <b>{formatTime(selection.to)}</b>
+									{' · '}
+									{Math.max(1, Math.round(selection.to - selection.from))} s
+								</span>
+								<button style={commonStyles.buttonSecondary} onClick={() => setSelection(null)}>
+									Clear — back to track
+								</button>
+							</div>
+						)}
+						<AnalyzePane events={selection ? rangeEvents(selection.from, selection.to) : track.events} />
+					</>
+				);
 			default:
 				return null;
 		}
@@ -383,21 +435,25 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 	// --- Render ---------------------------------------------------------------
 	return (
 		<div style={styles.section}>
-			{/* Header: name + live state + run/stop (dev continuum only). */}
-			<StatusHeader
-				name={source.name}
-				taskStatus={(isReplay ? effectiveStatus : liveTaskStatus) ?? null}
-				currentElapsed={currentElapsed}
-				onPipelineAction={
-					runKind === 'dev' && !isReadonly && onPipelineAction
-						? (action, src) => onPipelineAction(action, src ?? source.id)
-						: undefined
-				}
-				extraActions={
-					<PipelineActions notes={liveTaskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />
-				}
-				isSubscribed={isSubscribed}
-			/>
+			{/* Header: name + live state + run/stop (dev continuum only).
+			    Replay dims and disables it — the header is LIVE state, and its
+			    buttons act on the live task, not the replayed moment. */}
+			<div style={isReplay ? styles.headerDimmed : undefined} aria-disabled={isReplay || undefined}>
+				<StatusHeader
+					name={source.name}
+					taskStatus={(isReplay ? effectiveStatus : liveTaskStatus) ?? null}
+					currentElapsed={currentElapsed}
+					onPipelineAction={
+						runKind === 'dev' && !isReadonly && !isReplay && onPipelineAction
+							? (action, src) => onPipelineAction(action, src ?? source.id)
+							: undefined
+					}
+					extraActions={
+						<PipelineActions notes={liveTaskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />
+					}
+					isSubscribed={isSubscribed}
+				/>
+			</div>
 
 			{/* Per-source pill bar + replay context. */}
 			<div style={styles.pillRow}>
@@ -417,7 +473,13 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 			<div style={styles.body}>{renderPane()}</div>
 
 			{/* This source's own transport + activity bar. */}
-			<PlayBar timeline={timeline} player={player} controller={controller} hasLiveRun={hasLiveRun} />
+			<PlayBar
+				timeline={timeline}
+				player={player}
+				controller={controller}
+				selection={selection}
+				onSelectionChange={handleSelectionChange}
+			/>
 		</div>
 	);
 };

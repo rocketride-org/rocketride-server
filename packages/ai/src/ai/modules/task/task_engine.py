@@ -133,9 +133,15 @@ class Task(DAPBase):
             Args:
                 event: DAP event message from subprocess
             """
-            # Stamp at true ingress so eventTime reflects emission, not
-            # forwarding time. Idempotent — an engine-provided stamp wins.
-            self._parent_task.stamp_log_event(event)
+            # Stamp the TIME at true ingress so eventTime reflects emission,
+            # not forwarding time. The seq is deliberately NOT assigned here:
+            # some ingress events are consumed without ever being delivered
+            # (apaevt_trace becomes a derived apaevt_flow), and a seq burned
+            # on an undelivered message leaves gaps in the continuum. Seqs are
+            # assigned exactly once at the delivery point (_forward_task_event
+            # / the run-log writer), which preserves arrival order because the
+            # whole ingress->handler->forward path is synchronous per message.
+            self._parent_task.stamp_log_event(event, assign_seq=False)
             await self._parent_task.on_event(event)
 
         async def on_disconnected(self, reason=None, has_error=False):
@@ -630,25 +636,11 @@ class Task(DAPBase):
             self._status.completed = True
             self._status.endTime = time.time()
 
-        # Close out (or annotate) the run-log continuum. A restart is NOT a
-        # new run: the chapter continues and only a restart marker is
-        # recorded; a real termination completes the chapter with its
-        # outcome. Best-effort — never blocks or breaks teardown.
-        if self._run_log is not None:
-            try:
-                if self._is_restarting:
-                    self._run_log.note_restart()
-                else:
-                    if self._status.exitCode == 0:
-                        outcome = 'ok'
-                    elif self._status.state == TASK_STATE.CANCELLED.value:
-                        outcome = 'cancelled'
-                    else:
-                        outcome = 'error'
-                    await self._run_log.end_run(outcome, self._status.exitMessage or '')
-                    self._run_log = None
-            except Exception as e:
-                self.debug_message(f'Run-log close failed: {e}')
+        # NOTE: the final zeroed status and the run-log close happen at the
+        # END of teardown (after metrics stop + terminal state assignment) —
+        # see below. Emitting them here shipped a bug once: the teardown's
+        # later status broadcast overwrote the zero as "last known" and
+        # charts held a stale residual reading forever.
 
         self.debug_message('Beginning resource cleanup for task')
 
@@ -782,8 +774,53 @@ class Task(DAPBase):
             self._status.state = TASK_STATE.CANCELLED.value
             self.debug_message(f'Task terminated abnormally with exit code {exit_code}')
 
-        # Send final status update
-        await self._send_status_update()
+        # Send final status update — the stream's LAST status. For a real
+        # termination the utilization gauges are explicitly zeroed: the
+        # process is gone, so CPU/RAM/VRAM are zero BY DATA and charts
+        # render generically from status events without
+        # inferring process death. This MUST be the last status-shaped
+        # broadcast of the task: it is emitted after metrics teardown and
+        # the terminal-state assignment, and nothing may send status after
+        # it — a later broadcast becomes the new "last known" reading and
+        # silently undoes the zero (that bug shipped once). body['final']
+        # marks it so the run-log sampler always records it.
+        if self._is_restarting:
+            await self._send_status_update()
+        else:
+            try:
+                self._status.metrics.cpu_percent = 0.0
+                self._status.metrics.cpu_memory_mb = 0.0
+                self._status.metrics.gpu_memory_mb = 0.0
+                final_body = self._status.model_dump()
+                final_body['final'] = True
+                await self._forward_task_event(
+                    EVENT_TYPE.SUMMARY,
+                    self.build_event('apaevt_status_update', id=self.id, body=final_body),
+                )
+            except Exception as e:
+                self.debug_message(f'Final zeroed status emit failed: {e}')
+
+        # Close out (or annotate) the run-log continuum AFTER the final
+        # status, so the log's last status IS the zeroed terminal one and
+        # log + live agree on the stream's last word. A restart is NOT a
+        # new run: the chapter continues and only a restart marker is
+        # recorded; a real termination completes the chapter with its
+        # outcome. Best-effort — never blocks or breaks teardown.
+        if self._run_log is not None:
+            try:
+                if self._is_restarting:
+                    self._run_log.note_restart()
+                else:
+                    if self._status.state == TASK_STATE.CANCELLED.value:
+                        outcome = 'cancelled'
+                    elif self._status.exitCode == 0:
+                        outcome = 'ok'
+                    else:
+                        outcome = 'error'
+                    await self._run_log.end_run(outcome, self._status.exitMessage or '')
+                    self._run_log = None
+            except Exception as e:
+                self.debug_message(f'Run-log close failed: {e}')
 
         # Send out the final events - last you will every here from us...
         if not self._final_events_sent:
@@ -880,7 +917,33 @@ class Task(DAPBase):
         if floor > self._log_seq_next:
             self._log_seq_next = floor
 
-    def stamp_log_event(self, message: Dict[str, Any], *, event_time: Optional[float] = None) -> Dict[str, Any]:
+    def build_event(
+        self, event: str, *, id: str = None, body: Optional[Dict[str, Any]] = None, event_time: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Build a Task event carrying the run-log continuum headers.
+
+        Overrides the DAP base builder: build_event IS the seq assigner for
+        every event the Task itself constructs — the base class's small
+        per-endpoint counter is replaced with the continuum seq right here, so
+        no caller ever assigns a second one (the downstream stamp calls are
+        idempotent no-ops for built events).
+
+        Args:
+            event: The DAP event name.
+            id: Optional correlation identifier.
+            body: Optional event payload.
+            event_time: Optional inherited emission time — derived events
+                (e.g. apaevt_flow) carry their source event's time.
+
+        Returns:
+            The stamped event message.
+        """
+        return self.stamp_log_event(super().build_event(event, id=id, body=body), event_time=event_time)
+
+    def stamp_log_event(
+        self, message: Dict[str, Any], *, event_time: Optional[float] = None, assign_seq: bool = True
+    ) -> Dict[str, Any]:
         """
         Stamp a DAP event message with the run-log continuum headers.
 
@@ -900,6 +963,12 @@ class Task(DAPBase):
             message: The event message dict (mutated in place).
             event_time: Optional explicit emission time — used by derived
                 events (e.g. apaevt_flow) to inherit the source event's time.
+            assign_seq: When False, stamp only ``eventTime``. Used at points
+                where the message may never be delivered (stdout ingress, the
+                trace->flow derivation): seqs are assigned exactly once, at the
+                delivery point (_forward_task_event / the log writer), so a
+                consumed-but-never-forwarded message does not burn a seq and
+                leave gaps in the continuum.
 
         Returns:
             The same message dict, stamped.
@@ -909,7 +978,7 @@ class Task(DAPBase):
             message['eventTime'] = event_time if event_time is not None else time.time()
 
         # Continuum seq: idempotent — re-stamp only legacy/absent seq values.
-        if message.get('seq', 0) < CONST_LOG_SEQ_FLOOR:
+        if assign_seq and message.get('seq', 0) < CONST_LOG_SEQ_FLOOR:
             message['seq'] = self._log_seq_next
             self._log_seq_next += 1
 
@@ -1180,7 +1249,10 @@ class Task(DAPBase):
             component_name = body.get('pipe_id', '')
             trace = body.get('trace', {})
 
-            self._status.pipeflow.totalPipes = total_pipes
+            # total_pipes=0 marks a synthetic trace (tool-call events emit it
+            # as "unknown") — keep the data lane's real pipe count.
+            if total_pipes:
+                self._status.pipeflow.totalPipes = total_pipes
 
             # Update the per-pipe execution stack and get a stable snapshot chain.
             # See pipeflow.apply_pipeflow_event for why leave pops by identity and the
@@ -1201,19 +1273,17 @@ class Task(DAPBase):
                 'project_id': self.project_id,
                 'source': self.source,
             }
-            flow = self.build_event('apaevt_flow', body=body)
-
-            # The flow event derives from the trace message: inherit the
-            # source's emission time but take a fresh continuum seq (the
-            # legacy build_event counter is below CONST_LOG_SEQ_FLOOR and is
-            # replaced by stamp_log_event).
-            self.stamp_log_event(flow, event_time=message.get('eventTime'))
-
             # Send out a status update when needed
             self._status_updated = True
 
             # If this task is started with tracing
             if self._pipelineTraceLevel:
+                # Build the derived flow event only when it will actually be
+                # delivered — build_event assigns its continuum seq, and a
+                # built-but-unsent event would leave a gap. It inherits the
+                # source trace message's emission time.
+                flow = self.build_event('apaevt_flow', body=body, event_time=message.get('eventTime'))
+
                 # Forward off the event
                 await self._forward_task_event(EVENT_TYPE.FLOW, flow)
 
@@ -1704,8 +1774,11 @@ class Task(DAPBase):
             # observability: any failure here is logged and the task runs
             # unlogged rather than failing execution.
             try:
+                # The account-scoped FileStore handles user path scoping (and
+                # REFUSES an empty client_id — such a task runs unlogged and
+                # says so, rather than writing into a collapsed users/ path).
                 self._run_log = RunLogWriter(
-                    self._server.store._store,
+                    self._server.store.get_file_store(self.client_id),
                     self.client_id,
                     self.project_id,
                     self.source,

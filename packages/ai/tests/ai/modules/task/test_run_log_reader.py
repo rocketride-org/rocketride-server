@@ -32,6 +32,7 @@ live-writer control preference (fresh in-memory control while a run is
 active, spooled-only segments still readable).
 """
 
+import os
 import shutil
 import tempfile
 
@@ -47,12 +48,13 @@ from .test_run_log import (
     PROJECT,
     SEED,
     SOURCE,
+    STORE_PREFIX,
     STREAM,
     make_stamp,
     open_writer,
     output_event,
 )
-from ai.modules.task.run_log import spool_dir
+from ai.account.file_store import FileStore
 
 
 # =============================================================================
@@ -84,14 +86,16 @@ async def seed_stream(istore, spool_root, monkeypatch, events=30):
     await writer._drain_uploads()
     await writer.end_run('ok')
 
-    writer2 = run_log.RunLogWriter(istore, CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root)
+    writer2 = run_log.RunLogWriter(
+        FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+    )
     await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='h2', trace_level=None)
     for i in range(5):
         writer2.append(stamp(output_event(f'run2-{i:03d}')))
     await writer2._drain_uploads()
     await writer2.end_run('error', 'boom')
 
-    return run_log.RunLogReader(istore, CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+    return run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
 
 
 # =============================================================================
@@ -114,7 +118,7 @@ class TestChapters:
 
     @pytest.mark.asyncio
     async def test_missing_stream_raises(self, istore, spool_root):
-        reader = run_log.RunLogReader(istore, CLIENT, 'nope', SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, 'nope', SOURCE, KIND, spool_root=spool_root)
         with pytest.raises(FileNotFoundError):
             await reader.chapters()
 
@@ -175,7 +179,9 @@ class TestRead:
         # Evict history through a tiny ring in a third run.
         monkeypatch.setattr(run_log, 'CONST_LOG_SEGMENTS', 1)
         stamp, raise_floor, _ = make_stamp(start=SEED + 10**9)
-        writer = run_log.RunLogWriter(istore, CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root)
+        writer = run_log.RunLogWriter(
+            FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+        )
         await writer.open(trigger='manual', user=CLIENT, pipeline_hash='h3', trace_level=None)
         for _ in range(30):
             writer.append(stamp(output_event('evict-' + 'y' * 60)))
@@ -187,7 +193,9 @@ class TestRead:
     @pytest.mark.asyncio
     async def test_store_fallback_when_spool_gone(self, istore, spool_root, monkeypatch):
         reader = await seed_stream(istore, spool_root, monkeypatch)
-        shutil.rmtree(spool_dir(spool_root, CLIENT, STREAM), ignore_errors=True)
+        for name in os.listdir(spool_root):
+            if name.startswith(f'{CLIENT}.{STREAM}.'):
+                os.remove(os.path.join(spool_root, name))
         body = await reader.read(from_seq=0)
         assert body['events'], 'store fallback must serve the full range'
 
@@ -210,10 +218,9 @@ class TestDelete:
         after = await reader.chapters()
         assert all((ch.get('endTime') or cutoff) >= cutoff for ch in after['chapters'])
 
-        # Deletion is SEGMENT-granular (drop segments wholly older than the
-        # cutoff): run1's sealed bulk is gone, but its tail legitimately
-        # survives inside the boundary segment it shares with run2
-        # (seal-or-continue). Assert the bulk went and run2 stayed intact.
+        # Deletion is SEGMENT-granular (drop segments wholly older than
+        # the cutoff). Runs seal at end_run, so run1's segments all predate
+        # the cutoff and drop; run2 stays intact.
         outputs = [e for e in (await reader.read(from_seq=0))['events'] if e['event'] == 'output']
         run1_after = sum(1 for e in outputs if 'run1-' in e['body']['output'])
         assert run1_after < run1_before
@@ -224,8 +231,10 @@ class TestDelete:
         reader = await seed_stream(istore, spool_root, monkeypatch)
         result = await reader.delete(delete_all=True)
         assert result['deletedSegments'] >= 1
-        files = await istore.list_files(f'users/{CLIENT}/logs/')
-        assert files == [] or all(STREAM not in f for f in files)
+        files = await istore.list_files(f'{STORE_PREFIX}.logs/{PROJECT}')
+        # Ignore the filesystem backend's dot-prefixed lock files.
+        leftovers = [f for f in files if not f.rsplit('/', 1)[-1].startswith('.') and f'{SOURCE}.{KIND}' in f]
+        assert leftovers == []
         with pytest.raises(FileNotFoundError):
             await reader.chapters()
 
@@ -245,7 +254,7 @@ class TestLiveCoordination:
             writer.append(stamp(output_event('live-' + 'z' * 40)))
         # No drain, no end_run: sealed segments exist only as spool copies and
         # the freshest control lives on the writer, not in the store.
-        reader = run_log.RunLogReader(istore, CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
         chapters = await reader.chapters()
         assert chapters['completed'] is False
         body = await reader.read(from_seq=0)

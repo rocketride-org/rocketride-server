@@ -12,6 +12,7 @@ import { isAudio, renderAudio, summaryAudio } from './render_audio';
 import { isImage, renderImage, summaryImage } from './render_image';
 import { isTable, renderTable, summaryTable } from './render_table';
 import { isInvoke, renderInvokeInput, renderInvokeOutput, summaryInvokeInput, summaryInvokeOutput } from './render_invoke';
+import { isTool, renderToolInput, renderToolOutput, summaryToolInput, summaryToolOutput } from './render_tool';
 import { DiffView, diffObjects, summaryDiff } from './utils';
 
 // =============================================================================
@@ -41,6 +42,8 @@ export function summaryTraceInput(data: unknown, lane: string): string {
 			return isTable(data) ? summaryTable(data) : '';
 		case 'invoke':
 			return isInvoke(data) ? summaryInvokeInput(data) : '';
+		case 'tool':
+			return isTool(data) ? summaryToolInput(data) : '';
 		default:
 			return '';
 	}
@@ -57,6 +60,11 @@ export function summaryTraceOutput(data: unknown, lane: string, inputData?: unkn
 	// Invoke has type-specific output summaries
 	if (l === 'invoke' && isInvoke(data)) {
 		return summaryInvokeOutput(data, inputData);
+	}
+
+	// Tool calls summarize as duration + result, not an input/output diff
+	if (l === 'tool' && isTool(data)) {
+		return summaryToolOutput(data);
 	}
 
 	// Default: diff summary
@@ -91,6 +99,8 @@ export function renderTraceInput(data: unknown, lane: string): ReactElement | nu
 			return isTable(data) ? renderTable(data) : null;
 		case 'invoke':
 			return isInvoke(data) ? renderInvokeInput(data) : null;
+		case 'tool':
+			return isTool(data) ? renderToolInput(data) : null;
 		default:
 			return null;
 	}
@@ -107,6 +117,11 @@ export function renderTraceOutput(data: unknown, lane: string, inputData?: unkno
 	// Invoke has type-specific output renderers
 	if (l === 'invoke' && isInvoke(data)) {
 		return renderInvokeOutput(data, inputData);
+	}
+
+	// Tool calls render duration + output tree, not an input/output diff
+	if (l === 'tool' && isTool(data)) {
+		return renderToolOutput(data);
 	}
 
 	// Default: DiffView comparing input to output

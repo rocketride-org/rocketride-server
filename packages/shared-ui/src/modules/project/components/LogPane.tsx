@@ -14,7 +14,9 @@
  * tail; a manual scroll-up detaches until the user returns to the bottom.
  */
 
-import React, { CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
+import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { commonStyles } from '../../../themes/styles';
+import { EmptyState } from '../../../components/empty-state/EmptyState';
 import type { TaskEventMessage } from '../hooks/useTaskEvents';
 
 // =============================================================================
@@ -25,6 +27,8 @@ import type { TaskEventMessage } from '../hooks/useTaskEvents';
 export interface ILogPaneProps {
 	/** The visible event window (from useTaskEvents). */
 	events: TaskEventMessage[];
+	/** Base filename for the Download actions (defaults to run-log). */
+	downloadBase?: string;
 }
 
 // =============================================================================
@@ -42,8 +46,23 @@ const PIN_THRESHOLD_PX = 24;
 // =============================================================================
 
 const styles: Record<string, CSSProperties> = {
-	container: {
+	// Toolbar + terminal stack filling the pane body, with breathing room
+	// beneath the box so it does not sit flush on the pane's bottom edge.
+	pane: {
 		height: '100%',
+		display: 'flex',
+		flexDirection: 'column',
+		paddingBottom: 12,
+		boxSizing: 'border-box',
+	},
+	toolbar: {
+		display: 'flex',
+		justifyContent: 'flex-end',
+		gap: 8,
+		marginBottom: 8,
+	},
+	container: {
+		flex: 1,
 		minHeight: 160,
 		overflow: 'auto',
 		background: 'var(--rr-bg-default)',
@@ -72,10 +91,6 @@ const styles: Record<string, CSSProperties> = {
 	time: {
 		color: 'var(--rr-text-disabled)',
 		marginRight: 8,
-	},
-	empty: {
-		color: 'var(--rr-text-secondary)',
-		fontStyle: 'italic',
 	},
 };
 
@@ -135,7 +150,7 @@ function projectLine(message: TaskEventMessage): LogLine | null {
 /**
  * Text projection of the run log's output/stderr/lifecycle events.
  */
-export const LogPane: React.FC<ILogPaneProps> = ({ events }) => {
+export const LogPane: React.FC<ILogPaneProps> = ({ events, downloadBase }) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [pinned, setPinned] = useState(true);
 
@@ -164,18 +179,52 @@ export const LogPane: React.FC<ILogPaneProps> = ({ events }) => {
 		setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD_PX);
 	};
 
+	/** Trigger a browser download of the given content. */
+	const saveAs = useCallback((content: string, filename: string) => {
+		const url = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
+		const anchor = document.createElement('a');
+		anchor.href = url;
+		anchor.download = filename;
+		anchor.click();
+		URL.revokeObjectURL(url);
+	}, []);
+
+	/** Save the projected text lines as a plain-text log file. */
+	const handleDownloadLog = useCallback(() => {
+		const text = lines.map((line) => `${line.time} ${line.text}`).join('\n');
+		saveAs(text, `${downloadBase ?? 'run-log'}.log.txt`);
+	}, [lines, downloadBase, saveAs]);
+
+	/** Save the run's raw stamped events as JSONL — the log file itself. */
+	const handleDownloadEvents = useCallback(() => {
+		const jsonl = events.map((message) => JSON.stringify(message)).join('\n');
+		saveAs(jsonl, `${downloadBase ?? 'run-log'}.jsonl`);
+	}, [events, downloadBase, saveAs]);
+
+	// The stock placeholder replaces the terminal frame entirely while empty —
+	// a dashed panel inside the log box would nest two frames.
+	if (lines.length === 0) {
+		return <EmptyState title="No log output" description="Run output appears here while the pipeline runs or when replaying a recorded run." />;
+	}
+
 	return (
-		<div ref={containerRef} style={styles.container} onScroll={handleScroll}>
-			{lines.length === 0 ? (
-				<div style={styles.empty}>No log output in this window.</div>
-			) : (
-				lines.map((line) => (
+		<div style={styles.pane}>
+			<div style={styles.toolbar}>
+				<button style={commonStyles.buttonSecondary} onClick={handleDownloadLog}>
+					Download Log
+				</button>
+				<button style={commonStyles.buttonSecondary} onClick={handleDownloadEvents}>
+					Download Events
+				</button>
+			</div>
+			<div ref={containerRef} style={styles.container} onScroll={handleScroll}>
+				{lines.map((line) => (
 					<div key={line.key} style={line.style}>
 						<span style={styles.time}>{line.time}</span>
 						{line.text}
 					</div>
-				))
-			)}
+				))}
+			</div>
 		</div>
 	);
 };

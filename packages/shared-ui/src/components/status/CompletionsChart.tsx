@@ -21,7 +21,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import type { ChartStats, StatusDataPoint, TimeRange } from './types';
+import type { StatusDataPoint, TimeRange } from './types';
 
 import { Chart, ChartDataset, LineController, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 
@@ -40,6 +40,11 @@ const styles: Record<string, CSSProperties> = {
 		position: 'relative',
 		width: '100%',
 		height: 280,
+		// Chart.js writes an explicit pixel width on the canvas; clip it so a
+		// stale (wider) canvas can never overflow the pane while the resize
+		// observer catches up. Hosts must still keep minWidth:0 on their flex
+		// chains so the canvas's min-content width cannot inflate the pane.
+		overflow: 'hidden',
 	},
 };
 
@@ -50,8 +55,6 @@ const styles: Record<string, CSSProperties> = {
 interface CompletionsChartProps {
 	dataPoints: StatusDataPoint[];
 	timeRange: TimeRange;
-	currentElapsed: number;
-	onStatsCalculated: (stats: ChartStats) => void;
 }
 
 // =============================================================================
@@ -106,38 +109,28 @@ const getThemeColors = () => {
 	};
 };
 
+/** Label pitch (seconds) per range. */
+const LABEL_STEP: Record<TimeRange, number> = { '1min': 15, '5min': 60, '15min': 180, all: 120 };
+
 /**
- * Generate fixed labels based on time range.
+ * Generate axis labels from the points' REAL timestamps: clock times at the
+ * range's pitch, and 'Now' only when the right edge actually is now (live).
+ * In replay the right edge is the DVR position, so it labels as its real
+ * clock time instead of pretending to be now.
  */
-const generateLabels = (range: TimeRange, pointCount: number): string[] => {
-	const labels: string[] = [];
-
-	for (let i = 0; i < pointCount; i++) {
-		const secondsAgo = pointCount - 1 - i;
-
-		if (range === '1min') {
-			if (secondsAgo === 0) labels.push('Now');
-			else if (secondsAgo === 15) labels.push('-15s');
-			else if (secondsAgo === 30) labels.push('-30s');
-			else if (secondsAgo === 45) labels.push('-45s');
-			else if (secondsAgo === 60) labels.push('-1m');
-			else labels.push('');
-		} else if (range === '5min') {
-			if (secondsAgo === 0) labels.push('Now');
-			else if (secondsAgo % 60 === 0) labels.push(`-${secondsAgo / 60}m`);
-			else labels.push('');
-		} else if (range === '15min') {
-			if (secondsAgo === 0) labels.push('Now');
-			else if (secondsAgo % 180 === 0) labels.push(`-${secondsAgo / 60}m`);
-			else labels.push('');
-		} else {
-			if (secondsAgo === 0) labels.push('Now');
-			else if (secondsAgo % 120 === 0) labels.push(`-${secondsAgo / 60}m`);
-			else labels.push('');
-		}
-	}
-
-	return labels;
+const generateLabels = (range: TimeRange, points: StatusDataPoint[]): string[] => {
+	const step = LABEL_STEP[range];
+	const count = points.length;
+	return points.map((point, i) => {
+		const fromEnd = count - 1 - i;
+		if (fromEnd % step !== 0) return '';
+		if (fromEnd === 0 && Math.abs(Date.now() - point.timestamp) < 2500) return 'Now';
+		const d = new Date(point.timestamp);
+		return d.toLocaleTimeString(
+			[],
+			step < 60 ? { hour: '2-digit', minute: '2-digit', second: '2-digit' } : { hour: '2-digit', minute: '2-digit' },
+		);
+	});
 };
 
 /**
@@ -146,7 +139,7 @@ const generateLabels = (range: TimeRange, pointCount: number): string[] => {
  * Displays real-time processing rate graph with time range filters.
  * Uses Chart.js LineController for rendering.
  */
-export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, timeRange, currentElapsed, onStatsCalculated }) => {
+export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, timeRange }) => {
 	const chartRef = useRef<HTMLCanvasElement>(null);
 	const chartInstanceRef = useRef<Chart | null>(null);
 	const filteredDataRef = useRef<StatusDataPoint[]>([]);
@@ -175,38 +168,6 @@ export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, 
 	 */
 	const hasFailures = (filtered: StatusDataPoint[]): boolean => {
 		return filtered.some((p) => p.failedDelta > 0);
-	};
-
-	/**
-	 * Calculate statistics from data points.
-	 */
-	const calculateStats = (): ChartStats => {
-		const filtered = getFilteredDataPoints();
-		const totals = filtered.map((p) => p.totalDelta);
-
-		if (totals.length === 0) {
-			return {
-				current: 0,
-				average: 0,
-				peak: 0,
-				minimum: 0,
-				duration: currentElapsed,
-			};
-		}
-
-		const current = totals[totals.length - 1] || 0;
-		const sum = totals.reduce((a, b) => a + b, 0);
-		const average = Math.round(sum / totals.length);
-		const peak = Math.max(...totals);
-		const minimum = Math.min(...totals);
-
-		return {
-			current,
-			average,
-			peak,
-			minimum,
-			duration: currentElapsed,
-		};
 	};
 
 	/**
@@ -320,14 +281,13 @@ export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, 
 							bodyColor: colors.tooltipForeground,
 							callbacks: {
 								title: (context) => {
-									const index = context[0].dataIndex;
-									const filtered = filteredDataRef.current;
-									const totalPoints = filtered.length;
-									const secondsAgo = totalPoints - 1 - index;
-
-									if (secondsAgo === 0) return 'Now';
-									if (secondsAgo < 60) return `${secondsAgo}s ago`;
-									return `${Math.floor(secondsAgo / 60)}m ${secondsAgo % 60}s ago`;
+									const point = filteredDataRef.current[context[0].dataIndex];
+									if (!point) return '';
+									return new Date(point.timestamp).toLocaleTimeString([], {
+										hour: '2-digit',
+										minute: '2-digit',
+										second: '2-digit',
+									});
 								},
 								label: (context) => {
 									const label = context.dataset.label || '';
@@ -461,7 +421,7 @@ export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, 
 
 		const colors = getThemeColors();
 
-		const labels = generateLabels(timeRange, filtered.length);
+		const labels = generateLabels(timeRange, filtered);
 		const totalData = filtered.map((p) => p.totalDelta);
 		const failedData = filtered.map((p) => p.failedDelta);
 		const cpuPercentData = filtered.map((p) => p.cpuPercent || 0);
@@ -554,12 +514,8 @@ export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, 
 		chartInstanceRef.current.data.datasets = datasets;
 		chartInstanceRef.current.update('none');
 
-		// Calculate and pass stats to parent
-		const stats = calculateStats();
-		onStatsCalculated(stats);
-
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [dataPoints, timeRange, currentElapsed]);
+	}, [dataPoints, timeRange]);
 
 	return (
 		<div style={styles.section}>

@@ -56,11 +56,20 @@ interface PendingFrame {
 // Hook
 // =============================================================================
 
-export function useTraceState(traceEvents: TraceEvent[]): {
+export function useTraceState(
+	traceEvents: TraceEvent[],
+	resetKey?: string | number,
+): {
 	rows: TraceRow[];
 	clearTrace: () => void;
 } {
 	const [rows, setRows] = useState<TraceRow[]>([]);
+
+	// Fold-identity key: when it changes (a different track's events are now
+	// being fed), the fold restarts from scratch BEFORE processing — a
+	// shrink-check alone cannot catch switching to a LONGER foreign array,
+	// which would splice two runs' folds together.
+	const resetKeyRef = useRef(resetKey);
 
 	// =========================================================================
 	// Internal refs -- mutable bookkeeping that does not trigger re-renders
@@ -127,10 +136,25 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 	// =========================================================================
 
 	useEffect(() => {
-		const start = processedCountRef.current;
+		// Fold-identity change (new track): full reset, then fall through so
+		// the new array is processed from index 0 in this same pass.
+		if (resetKeyRef.current !== resetKey) {
+			resetKeyRef.current = resetKey;
+			documentsRef.current.clear();
+			docOrderRef.current = [];
+			slotBindingsRef.current.clear();
+			pendingStacksRef.current.clear();
+			rowCounterRef.current = 0;
+			nextDocIdRef.current = 0;
+			processedCountRef.current = 0;
+			setRows([]);
+		}
+
+		let start = processedCountRef.current;
 		const end = traceEvents.length;
 
-		// Handle reset: if events array shrank (host cleared), reset all state
+		// Shrunken input (host cleared / backward seek within a track): reset,
+		// then fall through and refold the whole array in this same pass.
 		if (end < start) {
 			documentsRef.current.clear();
 			docOrderRef.current = [];
@@ -140,7 +164,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 			nextDocIdRef.current = 0;
 			processedCountRef.current = 0;
 			setRows([]);
-			return;
+			start = 0;
 		}
 
 		if (start >= end) return; // nothing new

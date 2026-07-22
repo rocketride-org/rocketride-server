@@ -21,6 +21,7 @@
  */
 
 import React, { CSSProperties, useMemo } from 'react';
+import { EmptyState } from '../../../components/empty-state/EmptyState';
 import type { TaskEventMessage } from '../hooks/useTaskEvents';
 
 // =============================================================================
@@ -194,7 +195,7 @@ export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events }) => {
 	}, [documentDurations]);
 
 	if (events.length === 0) {
-		return <div style={styles.empty}>No events in this window — select a track or go live.</div>;
+		return <EmptyState title="No events to analyze" description="Efficiency metrics appear here while the pipeline runs, when replaying a recorded run, or for a slice brushed on the play bar." />;
 	}
 
 	return (

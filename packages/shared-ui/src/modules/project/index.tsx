@@ -24,6 +24,7 @@ export type {
 	TaskPlayerController,
 	TaskPlayerState,
 	TaskTimeline,
+	TrackWindow,
 	UseTaskEventsOptions,
 	UseTaskEventsResult,
 } from './hooks/useTaskEvents';

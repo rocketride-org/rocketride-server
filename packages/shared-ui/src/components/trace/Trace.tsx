@@ -13,6 +13,7 @@ import { traceDataEqual } from './renderers/utils';
 import { renderFinalSections, resultFieldCount } from './renderers/render_final';
 import type { TraceRow } from '../../modules/project/types';
 import { commonStyles } from '../../themes/styles';
+import { EmptyState } from '../empty-state/EmptyState';
 
 // =============================================================================
 // INTERNAL TYPES
@@ -88,14 +89,14 @@ const S = {
 		fontSize: 13,
 	} as CSSProperties,
 
+	// Flex column so treeScroll's flex sizing actually applies — as a plain
+	// block, tall content was clipped by overflow:hidden instead of scrolling.
 	content: {
 		flex: 1,
+		display: 'flex',
+		flexDirection: 'column',
+		minHeight: 0,
 		overflow: 'hidden',
-	} as CSSProperties,
-
-	noData: {
-		...commonStyles.empty,
-		fontStyle: 'italic',
 	} as CSSProperties,
 
 	treeScroll: {
@@ -384,8 +385,9 @@ function collectAllParentIds(nodes: TraceTreeNode[]): number[] {
 
 function formatElapsed(ms: number | null | undefined): string {
 	if (ms == null || ms < 0) return '\u2014';
-	if (ms < 1000) return `${ms}ms`;
-	return `${(ms / 1000).toFixed(1)}s`;
+	// One unit everywhere: seconds to two decimals \u2014 raw float millisecond
+	// stamps must never reach the screen.
+	return `${(ms / 1000).toFixed(2)}s`;
 }
 
 /** Count total nodes in a tree (including the roots themselves). */
@@ -1051,7 +1053,7 @@ const Trace: React.FC<TraceProps> = ({ rows, componentNames }) => {
 		<section style={S.section}>
 			<div style={S.content}>
 				{objectGroups.length === 0 ? (
-					<div style={S.noData}>No trace data</div>
+					<EmptyState title="No trace data" description="Component calls appear here while the pipeline runs or when replaying a recorded run." />
 				) : (
 					<div style={S.treeScroll}>
 						{objectGroups.map((group) => {

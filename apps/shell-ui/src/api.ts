@@ -181,7 +181,7 @@ export type { IWorkspaceContext, IWorkspaceProviderProps } from './workspace/Wor
 // by name gives it its own per-version floor (Frozen = Current, covariant):
 // SDK additions pass, removals/narrowings of anything ever frozen fail
 // shell-ui's tsc. The client is deliberately kept INLINED in the frozen
-// bundle (design-owner decision, 2026-07-21). It must never appear in an
+// bundle. It must never appear in an
 // input position on this surface — see contract-hold.ts.
 export type { RocketRideClient } from 'rocketride';
 

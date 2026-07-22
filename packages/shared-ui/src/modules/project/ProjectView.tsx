@@ -439,7 +439,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	 * optional {@link ContentHeader} (rendered only when the host supplies a
 	 * `documentTitle`; VS Code omits it) above the 24px-gutter tab-content
 	 * body. Save lives ONLY on the Design page (inside the canvas) — the
-	 * monitoring pages carry no document actions (decision 2026-07-20).
+	 * monitoring pages carry no document actions.
 	 *
 	 * @param subView - The page whose header subtitle to show.
 	 * @param inner   - The page's body content.

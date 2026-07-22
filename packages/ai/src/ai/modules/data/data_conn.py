@@ -39,11 +39,41 @@ from rocketlib import (
     getObject,
     monitorCompleted,
     monitorFailed,
+    monitorOther,
 )
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from .data_server import DataServer
+
+
+# =============================================================================
+# TOOL TRACE CONSTANTS
+# =============================================================================
+
+# Cap on serialized input/output payloads embedded in tool trace events —
+# trace events ride the run-log continuum, so unbounded tool payloads would
+# bloat segments without adding replay value.
+TOOL_TRACE_DATA_CAP = 2048
+
+
+def _trim_tool_data(value: Any) -> Any:
+    """
+    Bound a tool input/output payload for embedding in a trace event.
+
+    Args:
+        value: The raw payload (any JSON-serializable value).
+
+    Returns:
+        The payload unchanged when small, else its truncated JSON text.
+    """
+    try:
+        text = json.dumps(value, default=str)
+    except Exception:
+        return '<unserializable>'
+    if len(text) <= TOOL_TRACE_DATA_CAP:
+        return value
+    return text[:TOOL_TRACE_DATA_CAP] + '...'
 
 
 @dataclass
@@ -765,6 +795,33 @@ class DataConn(DAPConn):
                 self._pipe_sem.release()
                 self.debug_message(f'Released semaphore for pipe {pipe_id}')
 
+    def _emit_tool_trace(self, op: str, pipe_id: int, component: str, trace: Dict[str, Any]) -> None:
+        """
+        Emit one ``>DBG`` trace event for a tool invocation.
+
+        Routed through ``monitorOther('DBG', ...)`` — the SAME monitor channel
+        the C++ Debugger uses for data-lane trace ops — so the supervisor's
+        stdio transport parses it into an ``apaevt_trace`` event and
+        everything downstream follows for free: the derived ``apaevt_flow``
+        events, the live Trace/Flow panes, the run-log continuum, and replay.
+        The ``total_pipes`` field is emitted as 0, which the supervisor treats
+        as "unknown — keep the current count" (getPipeCount is not exposed to
+        Python).
+
+        Args:
+            op: Trace operation (BEGIN / ENTER / LEAVE / END).
+            pipe_id: The REAL pipe id the call runs on (the caller's open
+                pipe or the borrowed pool pipe).
+            component: The component field — the target node id for
+                enter/leave, the call label for begin/end.
+            trace: Trace payload (lane/result/data), JSON-serialized inline.
+        """
+        try:
+            payload = json.dumps(trace, default=str)
+        except Exception:
+            payload = '{}'
+        monitorOther('DBG', f'{op}*{pipe_id:x}*0*{component}*{payload}')
+
     async def _tool(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
         Invoke a @tool_function on a pipeline node.
@@ -816,12 +873,23 @@ class DataConn(DAPConn):
         if borrowed:
             await self._pipe_sem.acquire()
 
+        # The trace label plays the document-name role in BEGIN/END (the same
+        # slot a data-lane BEGIN carries the object name in).
+        call_label = f'{node_id or "*"}.{tool_name}()'
+
         def tool_sync():
             # Use caller's open pipe if provided, otherwise borrow one
             if conn_pipe is not None:
                 pipe = conn_pipe.pipe
+                trace_pipe_id = conn_pipe.pipe_id
             else:
                 pipe = self._target.getPipe()
+                trace_pipe_id = pipe.pipeId
+
+            # Open the trace for this call ON ITS REAL PIPE — a plain nested
+            # BEGIN/ENTER/LEAVE/END sequence, exactly like a document
+            # traversal (the END in the finally below closes it).
+            self._emit_tool_trace('BEGIN', trace_pipe_id, call_label, {})
 
             try:
                 # Walk the filter chain to find candidate node(s).
@@ -848,18 +916,61 @@ class DataConn(DAPConn):
                     py_instance = getattr(node, 'pyInstance', None)
                     if py_instance is None:
                         continue
+                    component = node.pipeType.id
                     param = IInvokeTool.Invoke(tool_name=tool_name, input=tool_input)
+
+                    # Trace the attempt: enter the node with the tool + input,
+                    # leave with the outcome (return / skip / error) + timing.
+                    self._emit_tool_trace(
+                        'ENTER',
+                        trace_pipe_id,
+                        component,
+                        {'lane': 'tool', 'data': {'tool': tool_name, 'input': _trim_tool_data(tool_input)}},
+                    )
+                    started = time.perf_counter()
                     try:
                         py_instance.invoke(param)
+                        self._emit_tool_trace(
+                            'LEAVE',
+                            trace_pipe_id,
+                            component,
+                            {
+                                'lane': 'tool',
+                                'result': 'continue',
+                                'data': {
+                                    'durationMs': round((time.perf_counter() - started) * 1000, 1),
+                                    'output': _trim_tool_data(param.output),
+                                },
+                            },
+                        )
                         return param.output
                     except APERR as e:
                         if e.ec == Ec.PreventDefault:
+                            # This node does not own the tool — record the probe
+                            # and move on to the next candidate.
+                            self._emit_tool_trace('LEAVE', trace_pipe_id, component, {'lane': 'tool', 'result': 'skip'})
                             continue
+                        self._emit_tool_trace(
+                            'LEAVE',
+                            trace_pipe_id,
+                            component,
+                            {
+                                'lane': 'tool',
+                                'result': 'error',
+                                'data': {
+                                    'durationMs': round((time.perf_counter() - started) * 1000, 1),
+                                    'error': str(e),
+                                },
+                            },
+                        )
                         raise
 
                 raise ValueError(f'No handler found for tool "{tool_name}" on node "{node_id}"')
 
             finally:
+                # Retire the synthetic document (removes it from byPipe) and
+                # return a borrowed pipe to the pool.
+                self._emit_tool_trace('END', trace_pipe_id, call_label, {})
                 if borrowed:
                     self._target.putPipe(pipe)
 

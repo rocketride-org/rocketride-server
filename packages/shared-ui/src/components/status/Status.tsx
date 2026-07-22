@@ -4,196 +4,101 @@
 // =============================================================================
 
 /**
- * Status — Completions chart and stats for a running pipeline.
+ * Status — Completions chart and stats for a pipeline source.
  *
- * Ported from vscode StatusSection/StatusSection.tsx.
- * Plain React + inline styles using --rr-* theme tokens. No MUI.
- *
- * Features:
- *   - 1-second sampling interval
- *   - 600 data points (10 minutes of history)
- *   - Automatic reset detection when pipeline restarts
+ * A pure renderer over the DVR's reads: useTaskEvents owns the data model
+ * (buffer, position, resampling) and delivers both a ready 1-second grid —
+ * tracks and dead zones merged into one continuous timeline ending at the
+ * DVR position — and the track-scoped Now/Avg/Peak/Min statistics. The
+ * range is FIXED at one minute (wider spans are the play bar's job); this
+ * component just hands the grid to Chart.js and the stats to the footer.
+ * The getters' identities change once per position-second, so both
+ * re-derive at 1 Hz regardless of the transport tick rate.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
-import type { ITaskStatus } from '../../types/project';
+import React, { CSSProperties, useMemo } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { CompletionsChart } from './CompletionsChart';
 import { StatusFooter } from './StatusFooter';
 import type { ChartStats, StatusDataPoint, TimeRange } from './types';
 
 // =============================================================================
+// STYLES
+// =============================================================================
+
+const styles: Record<string, CSSProperties> = {
+	// Fill the pane's fixed-height body: header on top, stats row pinned to
+	// the bottom, chart vertically centered in whatever remains.
+	fill: {
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+		minHeight: 0,
+	},
+	chartCenter: {
+		flex: 1,
+		display: 'flex',
+		alignItems: 'center',
+		minHeight: 0,
+	},
+	chartWidth: {
+		width: '100%',
+	},
+};
+
+// =============================================================================
 // TYPES
 // =============================================================================
 
 interface StatusProps {
-	taskStatus: ITaskStatus | null | undefined;
-	currentElapsed: number;
-	/** When true, the built-in StatusHeader is hidden (caller renders its own). */
-	hideHeader?: boolean;
-	/** When false, the chart interval is paused and no new data points are appended. */
-	isConnected?: boolean;
+	/**
+	 * The DVR's chart-series read (useTaskEvents.chartSeries): a 1-second
+	 * grid of the last N seconds ending at the position. Identity changes
+	 * with the position-second, driving re-derivation.
+	 */
+	getSeries: (rangeSeconds: number) => StatusDataPoint[];
+	/**
+	 * The DVR's stats read (useTaskEvents.trackStats): Now/Avg/Peak/Min
+	 * scoped to the effective track at the position — NOT the chart's
+	 * visible window, which would zero out whenever the run's activity
+	 * fell outside the fixed minute.
+	 */
+	getStats: () => ChartStats;
 }
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/**
+ * The chart's fixed range: one minute ending at the DVR position. Wider
+ * spans are the play bar's job (zoom + scrub) — a range toggle here was
+ * redundant with it.
+ */
+const CHART_RANGE: TimeRange = '1min';
+const CHART_RANGE_SECONDS = 60;
 
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-/** Maximum number of data points to keep (10 min at 1 s intervals). */
-const MAX_DATA_POINTS = 600;
-
-/**
- * Build an array of `count` zero-valued data points ending at `now`.
- */
-const buildEmptyPoints = (count: number, now: number): StatusDataPoint[] => {
-	const pts: StatusDataPoint[] = [];
-	for (let i = count - 1; i >= 0; i--) {
-		pts.push({
-			timestamp: now - i * 1000,
-			totalDelta: 0,
-			failedDelta: 0,
-			cpuPercent: 0,
-			cpuMemoryMb: 0,
-			gpuMemoryMb: 0,
-		});
-	}
-	return pts;
-};
-
-export const Status: React.FC<StatusProps> = ({ taskStatus, currentElapsed, isConnected = true }) => {
-	// State
-	const [dataPoints, setDataPoints] = useState<StatusDataPoint[]>([]);
-	const [timeRange, setTimeRange] = useState<TimeRange>('1min');
-	const [chartStats, setChartStats] = useState<ChartStats>({
-		current: 0,
-		average: 0,
-		peak: 0,
-		minimum: 0,
-		duration: 0,
-	});
-
-	// Refs
-	const prevTotalRef = useRef<number>(0);
-	const prevFailedRef = useRef<number>(0);
-	const taskStatusRef = useRef<ITaskStatus | null | undefined>(taskStatus);
-
-	// Keep taskStatusRef in sync with taskStatus prop
-	useEffect(() => {
-		taskStatusRef.current = taskStatus;
-	}, [taskStatus]);
-
-	// Initialize data points with zeros
-	useEffect(() => {
-		setDataPoints(buildEmptyPoints(MAX_DATA_POINTS, Date.now()));
-	}, []);
-
-	// Track connected state in a ref so the interval can read it without restarting.
-	const isConnectedRef = useRef(isConnected);
-	useEffect(() => {
-		isConnectedRef.current = isConnected;
-	}, [isConnected]);
-
-	// Reset chart data and counters when connection is re-established.
-	useEffect(() => {
-		if (isConnected) {
-			prevTotalRef.current = 0;
-			prevFailedRef.current = 0;
-			setDataPoints(buildEmptyPoints(MAX_DATA_POINTS, Date.now()));
-		}
-	}, [isConnected]);
-
-	// Set up 1-second sampling interval.
-	// Runs ONCE on mount and continuously samples data.
-	// Uses refs to access latest values without recreating the interval.
-	useEffect(() => {
-		const interval = setInterval(() => {
-			// Pause while disconnected — chart freezes in place.
-			if (!isConnectedRef.current) return;
-
-			const currentTaskStatus = taskStatusRef.current;
-
-			if (!currentTaskStatus) {
-				setDataPoints((prev) => {
-					const newPoint: StatusDataPoint = {
-						timestamp: Date.now(),
-						totalDelta: 0,
-						failedDelta: 0,
-						cpuPercent: 0,
-						cpuMemoryMb: 0,
-						gpuMemoryMb: 0,
-					};
-					const updated = [...prev, newPoint];
-					return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
-				});
-				return;
-			}
-
-			// PIPELINE RESTART DETECTION
-			// If the current count is less than our previous count, the pipeline was restarted.
-			if (currentTaskStatus.totalCount < prevTotalRef.current || currentTaskStatus.failedCount < prevFailedRef.current) {
-				prevTotalRef.current = currentTaskStatus.totalCount;
-				prevFailedRef.current = currentTaskStatus.failedCount;
-				setDataPoints(buildEmptyPoints(MAX_DATA_POINTS, Date.now()));
-				return;
-			}
-
-			// First time initialization - set baseline without creating a spike
-			if (prevTotalRef.current === 0 && prevFailedRef.current === 0) {
-				prevTotalRef.current = currentTaskStatus.totalCount;
-				prevFailedRef.current = currentTaskStatus.failedCount;
-				setDataPoints((prev) => {
-					const newPoint: StatusDataPoint = {
-						timestamp: Date.now(),
-						totalDelta: 0,
-						failedDelta: 0,
-						cpuPercent: currentTaskStatus.metrics?.cpu_percent || 0,
-						cpuMemoryMb: currentTaskStatus.metrics?.cpu_memory_mb || 0,
-						gpuMemoryMb: currentTaskStatus.metrics?.gpu_memory_mb || 0,
-					};
-					const updated = [...prev, newPoint];
-					return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
-				});
-				return;
-			}
-
-			// Normal delta calculation
-			const totalDelta = currentTaskStatus.totalCount - prevTotalRef.current;
-			const failedDelta = currentTaskStatus.failedCount - prevFailedRef.current;
-
-			prevTotalRef.current = currentTaskStatus.totalCount;
-			prevFailedRef.current = currentTaskStatus.failedCount;
-
-			setDataPoints((prev) => {
-				const newPoint: StatusDataPoint = {
-					timestamp: Date.now(),
-					totalDelta,
-					failedDelta,
-					cpuPercent: currentTaskStatus.metrics?.cpu_percent || 0,
-					cpuMemoryMb: currentTaskStatus.metrics?.cpu_memory_mb || 0,
-					gpuMemoryMb: currentTaskStatus.metrics?.gpu_memory_mb || 0,
-				};
-				const updated = [...prev, newPoint];
-				return updated.length > MAX_DATA_POINTS ? updated.slice(updated.length - MAX_DATA_POINTS) : updated;
-			});
-		}, 1000);
-
-		return () => clearInterval(interval);
-	}, []);
+export const Status: React.FC<StatusProps> = ({ getSeries, getStats }) => {
+	// The fixed one-minute grid and the track-scoped stats — re-pulled when
+	// the position-second moves (getter identities).
+	const dataPoints = useMemo(() => getSeries(CHART_RANGE_SECONDS), [getSeries]);
+	const stats = useMemo(() => getStats(), [getStats]);
 
 	return (
-		<section>
+		<section style={styles.fill}>
 			<div style={commonStyles.sectionHeader}>
 				<span style={commonStyles.sectionHeaderLabel}>Performance Metrics</span>
-				<div style={commonStyles.toggleGroup}>
-					{(['1min', '5min', '15min', 'all'] as TimeRange[]).map((range) => (
-						<button key={range} style={commonStyles.toggleButton(timeRange === range)} onClick={() => setTimeRange(range)}>
-							{range === '1min' ? '1 min' : range === '5min' ? '5 min' : range === '15min' ? '15 min' : 'All'}
-						</button>
-					))}
+			</div>
+			<div style={styles.chartCenter}>
+				<div style={styles.chartWidth}>
+					<CompletionsChart dataPoints={dataPoints} timeRange={CHART_RANGE} />
 				</div>
 			</div>
-			<CompletionsChart dataPoints={dataPoints} timeRange={timeRange} currentElapsed={currentElapsed} onStatsCalculated={setChartStats} />
-			<StatusFooter stats={chartStats} />
+			<StatusFooter stats={stats} />
 		</section>
 	);
 };

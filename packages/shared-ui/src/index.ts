@@ -168,7 +168,7 @@ export type { IPanelTabBodyProps } from './components/detail-panel/PanelTabBody'
 export { PageViewControl } from './components/page-view-control/PageViewControl';
 export type { IPageViewControlProps } from './components/page-view-control/PageViewControl';
 export { PlayBar } from './components/play-bar/PlayBar';
-export type { IPlayBarProps } from './components/play-bar/PlayBar';
+export type { IPlayBarProps, ITimeSelection } from './components/play-bar/PlayBar';
 export { Modal, CLOSE_GLYPH } from './components/modal/Modal';
 export type { IModalProps } from './components/modal/Modal';
 export { ConfirmDialog } from './components/modal/ConfirmDialog';

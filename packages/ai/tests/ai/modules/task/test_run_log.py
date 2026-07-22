@@ -24,8 +24,8 @@
 Unit tests for the run-log writer (per-task JSONL event continuum).
 
 Covers the L2 contract from the run-logging plan: seq seeding + floor lift,
-size + backstop sealing at line boundaries, the continuum across multiple
-runs (chapters, chapterStart flags, shared segments), ring + age retention
+size + backstop + run-end sealing at line boundaries, the continuum across
+multiple runs (chapters, chapterStart flags, seq continuity), ring + age retention
 deleting BOTH locations and advancing the horizon, control-file state
 transitions with the flip-before-delete ordering, payload truncation that
 preserves metadata, store-side-only recovery (spooled entries dropped,
@@ -46,13 +46,13 @@ from ai.modules.task.run_log import (
     LEASES,
     RunLogWriter,
     control_store_path,
-    segment_basename,
     segment_store_path,
-    spool_dir,
+    spool_path,
     stream_name,
     sweep_spool_root,
     truncate_event,
 )
+from ai.account.file_store import FileStore
 from ai.account.store_providers.filesystem import FilesystemStore
 
 CLIENT = 'user-1'
@@ -60,6 +60,10 @@ PROJECT = 'proj-1'
 SOURCE = 'chat_1'
 KIND = 'dev'
 STREAM = stream_name(PROJECT, SOURCE, KIND)
+
+# Raw-IStore prefix the account FileStore scopes everything under — tests
+# reach BEHIND the FileStore with the raw istore to verify on-store layout.
+STORE_PREFIX = f'users/{CLIENT}/files/'
 
 # Epoch-us style seed far above CONST_LOG_SEQ_FLOOR, matching production.
 SEED = 1_784_000_000_000_000
@@ -110,18 +114,42 @@ async def open_writer(istore, spool_root, stamp=None, raise_floor=None, kind=KIN
     """Create + open a writer with fake stamping callbacks."""
     if stamp is None:
         stamp, raise_floor, _ = make_stamp()
-    writer = RunLogWriter(istore, CLIENT, PROJECT, SOURCE, kind, stamp, raise_floor, spool_root=spool_root)
+    writer = RunLogWriter(
+        FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, kind, stamp, raise_floor, spool_root=spool_root
+    )
     await writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc123', trace_level='summary')
     return writer
 
 
 def read_spool_lines(spool_root, stream=STREAM):
-    """Read every JSONL line currently in the stream's spool dir, in order."""
-    directory = spool_dir(spool_root, CLIENT, stream)
+    """Read every JSONL line currently spooled for the stream (flat files)."""
+    prefix = f'{CLIENT}.{stream}.'
     lines = []
-    for name in sorted(os.listdir(directory)):
-        with open(os.path.join(directory, name), encoding='utf-8') as f:
+    for name in sorted(os.listdir(spool_root)):
+        if not (name.startswith(prefix) and name.endswith('.jsonl')):
+            continue
+        with open(os.path.join(spool_root, name), encoding='utf-8') as f:
             lines.extend(json.loads(line) for line in f if line.strip())
+    return lines
+
+
+async def read_stream_lines(istore, spool_root, stream=STREAM):
+    """
+    Read the ENTIRE stream's lines: uploaded store segments (by ascending
+    segment id) followed by whatever is still spooled. Runs force-seal and
+    upload at end_run, so post-run assertions must look at the store, not
+    the (already flip-and-deleted) spool copy.
+    """
+    lines = []
+    listing = await istore.list_files(f'{STORE_PREFIX}.logs/{PROJECT}')
+    names = sorted(
+        path for path in (listing or []) if f'{SOURCE}.{KIND}.' in path.rsplit('/', 1)[-1] and path.endswith('.jsonl')
+    )
+    for path in names:
+        raw = await istore.read_file(path)
+        text = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else str(raw)
+        lines.extend(json.loads(line) for line in text.splitlines() if line.strip())
+    lines.extend(read_spool_lines(spool_root, stream))
     return lines
 
 
@@ -155,7 +183,7 @@ class TestAppendAndMarkers:
         writer = await open_writer(istore, spool_root)
         await writer.end_run('ok')
 
-        lines = read_spool_lines(spool_root)
+        lines = await read_stream_lines(istore, spool_root)
         begin = lines[0]
         assert begin['event'] == 'apaevt_log_lifecycle'
         assert begin['body']['action'] == 'run-begin'
@@ -167,11 +195,11 @@ class TestAppendAndMarkers:
         assert 'token' not in json.dumps(begin).lower() or 'tk_' not in json.dumps(begin)
 
     @pytest.mark.asyncio
-    async def test_append_filters_unlogged_types_and_samples_status(self, istore, spool_root):
+    async def test_append_records_all_types_and_samples_status(self, istore, spool_root):
         stamp, raise_floor, _ = make_stamp()
         writer = await open_writer(istore, spool_root, stamp, raise_floor)
 
-        # Unlogged type: dropped.
+        # It is a LOG: every event type delivered to clients is recorded.
         writer.append(stamp({'type': 'event', 'event': 'apaevt_status_object', 'body': {}}))
         # Two status snapshots inside one sample window: only the first lands.
         now = time.time()
@@ -180,8 +208,8 @@ class TestAppendAndMarkers:
         writer.append(stamp(output_event('kept')))
         await writer.end_run('ok')
 
-        events = [ln['event'] for ln in read_spool_lines(spool_root)]
-        assert events.count('apaevt_status_object') == 0
+        events = [ln['event'] for ln in await read_stream_lines(istore, spool_root)]
+        assert events.count('apaevt_status_object') == 1
         assert events.count('apaevt_status_update') == 1
         assert events.count('output') == 1
 
@@ -193,7 +221,7 @@ class TestAppendAndMarkers:
             writer.append(stamp(output_event(f'line {i}')))
         await writer.end_run('ok')
 
-        seqs = [ln['seq'] for ln in read_spool_lines(spool_root)]
+        seqs = [ln['seq'] for ln in await read_stream_lines(istore, spool_root)]
         assert seqs == sorted(seqs)
         assert len(set(seqs)) == len(seqs)
 
@@ -224,7 +252,7 @@ class TestSealing:
         assert first['chapterStart'] is True
 
         # Sealed spool file parses line-by-line (line-boundary cut).
-        path = os.path.join(spool_dir(spool_root, CLIENT, STREAM), segment_basename(STREAM, 0))
+        path = spool_path(spool_root, CLIENT, STREAM, 0)
         with open(path, encoding='utf-8') as f:
             for line in f:
                 json.loads(line)
@@ -270,13 +298,11 @@ class TestUpload:
         assert uploaded, 'expected at least one uploaded segment'
         seg = uploaded[0]
         # Store object exists and matches the JSONL format.
-        data = await istore.read_file(segment_store_path(CLIENT, STREAM, seg['id']))
+        data = await istore.read_file(STORE_PREFIX + segment_store_path(PROJECT, SOURCE, KIND, seg['id']))
         for line in data.splitlines():
             json.loads(line)
         # Spool copy deleted (no lease held).
-        assert not os.path.exists(
-            os.path.join(spool_dir(spool_root, CLIENT, STREAM), segment_basename(STREAM, seg['id']))
-        )
+        assert not os.path.exists(spool_path(spool_root, CLIENT, STREAM, seg['id']))
         await writer.end_run('ok')
 
     @pytest.mark.asyncio
@@ -287,24 +313,25 @@ class TestUpload:
         for _ in range(10):
             writer.append(stamp(output_event('z' * 64)))
 
-        # First drain fails: state stays 'spooled', file stays, queue keeps it.
-        original = istore.write_bytes
+        # First drain fails: state stays 'spooled', file stays, queue keeps
+        # it. FileStore.write rides IStore.open_write — fail it there.
+        original = istore.open_write
 
         async def boom(*args, **kwargs):
             raise RuntimeError('s3 down')
 
-        monkeypatch.setattr(istore, 'write_bytes', boom)
+        monkeypatch.setattr(istore, 'open_write', boom)
         await writer._drain_uploads()
         seg = writer._control['segments'][0]
         assert seg['state'] == 'spooled'
-        spool_path = os.path.join(spool_dir(spool_root, CLIENT, STREAM), segment_basename(STREAM, seg['id']))
-        assert os.path.exists(spool_path)
+        seg_spool = spool_path(spool_root, CLIENT, STREAM, seg['id'])
+        assert os.path.exists(seg_spool)
 
         # Store recovers: retry succeeds and completes the transition.
-        monkeypatch.setattr(istore, 'write_bytes', original)
+        monkeypatch.setattr(istore, 'open_write', original)
         await writer._drain_uploads()
         assert writer._control['segments'][0]['state'] == 'uploaded'
-        assert not os.path.exists(spool_path)
+        assert not os.path.exists(seg_spool)
         await writer.end_run('ok')
 
 
@@ -326,7 +353,9 @@ class TestContinuum:
         # fresh stamp whose epoch seed is BELOW the persisted lastSeq to
         # prove the floor lift (belt and suspenders) wins.
         stamp2, raise_floor2, state2 = make_stamp(start=SEED - 1_000_000)
-        writer2 = RunLogWriter(istore, CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=spool_root)
+        writer2 = RunLogWriter(
+            FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=spool_root
+        )
         await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='abc123', trace_level='summary')
         writer2.append(stamp2(output_event('run2')))
         await writer2.end_run('error', 'boom')
@@ -359,11 +388,17 @@ class TestContinuum:
         await writer._write_control()
 
         stamp2, raise_floor2, state2 = make_stamp()
-        writer2 = RunLogWriter(istore, CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=spool_root)
+        writer2 = RunLogWriter(
+            FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=spool_root
+        )
         await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='abc123', trace_level='summary')
         await writer2.end_run('ok')
 
-        actions = [ln['body']['action'] for ln in read_spool_lines(spool_root) if ln['event'] == 'apaevt_log_lifecycle']
+        actions = [
+            ln['body']['action']
+            for ln in await read_stream_lines(istore, spool_root)
+            if ln['event'] == 'apaevt_log_lifecycle'
+        ]
         assert 'clock-anomaly' in actions
         # The floor fell back to lastSeq + 1 (the belt won over the clock).
         assert state2['floor_calls'] and state2['floor_calls'][0] == future_seq + 1
@@ -377,7 +412,11 @@ class TestContinuum:
 
         control = writer._control
         assert len(control['chapters']) == 1
-        actions = [ln['body']['action'] for ln in read_spool_lines(spool_root) if ln['event'] == 'apaevt_log_lifecycle']
+        actions = [
+            ln['body']['action']
+            for ln in await read_stream_lines(istore, spool_root)
+            if ln['event'] == 'apaevt_log_lifecycle'
+        ]
         assert actions == ['run-begin', 'restart', 'run-end']
 
 
@@ -411,8 +450,10 @@ class TestRetention:
         retained = {s['id'] for s in control['segments']}
         evicted_id = 0
         assert evicted_id not in retained
-        files = await istore.list_files(f'users/{CLIENT}/logs/')
-        assert segment_store_path(CLIENT, STREAM, evicted_id).split('/')[-1] not in [f.split('/')[-1] for f in files]
+        files = await istore.list_files(f'{STORE_PREFIX}.logs/{PROJECT}')
+        assert segment_store_path(PROJECT, SOURCE, KIND, evicted_id).split('/')[-1] not in [
+            f.split('/')[-1] for f in files
+        ]
         await writer.end_run('ok')
 
     @pytest.mark.asyncio
@@ -443,7 +484,9 @@ class TestRetention:
         stamp, raise_floor, _ = make_stamp()
         writer = None
         for i in range(5):
-            writer = RunLogWriter(istore, CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root)
+            writer = RunLogWriter(
+                FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+            )
             await writer.open(trigger='manual', user=CLIENT, pipeline_hash='h', trace_level=None)
             await writer.end_run('ok')
         assert len(writer._control['chapters']) == 3
@@ -482,7 +525,9 @@ class TestRecovery:
         fresh_spool = tempfile.mkdtemp()
         try:
             stamp2, raise_floor2, state2 = make_stamp()
-            writer2 = RunLogWriter(istore, CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=fresh_spool)
+            writer2 = RunLogWriter(
+                FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=fresh_spool
+            )
             await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='h', trace_level=None)
 
             segments = writer2._control['segments']
@@ -502,14 +547,14 @@ class TestRecovery:
     @pytest.mark.asyncio
     async def test_fresh_stream_initializes_control(self, istore, spool_root):
         writer = await open_writer(istore, spool_root)
-        control_raw = await istore.read_file(control_store_path(CLIENT, STREAM))
+        control_raw = await istore.read_file(STORE_PREFIX + control_store_path(PROJECT, SOURCE, KIND))
         control = json.loads(control_raw)
         assert control['schemaVer'] == run_log.LOG_SCHEMA_VERSION
         assert control['projectId'] == PROJECT
         assert control['runKind'] == KIND
         assert control['completed'] is False
         await writer.end_run('ok')
-        control = json.loads(await istore.read_file(control_store_path(CLIENT, STREAM)))
+        control = json.loads(await istore.read_file(STORE_PREFIX + control_store_path(PROJECT, SOURCE, KIND)))
         assert control['completed'] is True
 
 
@@ -560,15 +605,22 @@ class TestLeasesAndSweep:
         LEASES.delete(path)
         assert not os.path.exists(path)
 
-    def test_sweep_spool_root_deletes_stale_dirs(self):
+    def test_sweep_spool_root_deletes_stale_files_only(self):
         root = tempfile.mkdtemp()
         try:
-            stale = os.path.join(root, 'user-x', 'proj.src.dev')
-            os.makedirs(stale)
-            with open(os.path.join(stale, 'leftover.jsonl'), 'w') as f:
+            # Our pattern: deleted. Foreign files in the shared temp: kept.
+            stale = os.path.join(root, 'user-x.proj.src.dev.000003.jsonl')
+            with open(stale, 'w') as f:
                 f.write('{}\n')
+            foreign = os.path.join(root, 'unrelated.txt')
+            with open(foreign, 'w') as f:
+                f.write('keep me')
+            legacy = os.path.join(root, 'rocketride-runlog-spool', 'nested')
+            os.makedirs(legacy)
             sweep_spool_root(root)
             assert os.path.isdir(root)
             assert not os.path.exists(stale)
+            assert os.path.exists(foreign), 'sweep must never touch foreign files'
+            assert not os.path.exists(os.path.join(root, 'rocketride-runlog-spool'))
         finally:
             shutil.rmtree(root, ignore_errors=True)
