@@ -12,7 +12,9 @@ env var injected by the task engine, no account configuration is needed on the n
 If that env var is missing or the account store fails to initialise, a warning is logged
 and **all** tool methods are hidden from the agent.
 
-The node has no pipeline lanes: it is connected to agents via the `tool` invoke channel.
+The node plays two roles. As a **tool** it is connected to agents via the `tool` invoke
+channel (see *Available tools*). As a **pipeline sink** it also accepts data lanes and
+writes whatever flows in to the same store (see *Pipeline sink*).
 
 Every operation is gated by a per-operation allow toggle. Read, write, list, mkdir, and
 stat are **on by default**; **delete is off by default**. Tools whose toggle is disabled
@@ -33,6 +35,9 @@ may touch.
 | `allowMkdir` | boolean | Default true.  |
 | `allowStat` | boolean | Default true.  |
 | `allowDelete` | boolean | Default false. Destructive, enable only when the agent is trusted to delete account files. |
+| `targetDir` | string | Default `output/`. Base directory that sink-lane writes are placed under. |
+| `emitUrl` | boolean | Default false. Also attach a time-limited signed download URL to the emitted document metadata. |
+| `urlExpiresIn` | integer | Default 3600 (max 3600). TTL in seconds for the signed URL when `emitUrl` is on. |
 | `whitelistPattern` | string | Default empty.  |
 | `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |
 
@@ -47,6 +52,33 @@ with `^` and `$` if you need a full-path match (e.g. `^docs/.*$`).
 Invalid regexes are skipped with a logged warning. An empty `path` on `list_directory`
 means the account root and bypasses the whitelist check (an empty string can't match a
 non-trivial regex).
+
+---
+
+## Pipeline sink (lanes)
+
+Besides the agent tools, the node doubles as a **pipeline sink**. Each input lane —
+`documents`, `text`, `table`, `image`, `audio`, `video` — writes whatever flows in to the
+account store, then emits a single `documents` metadata reference on its output lane.
+
+- **Where it writes:** `targetDir` (default `output/`) + the source object's original
+  name. Nameless inputs fall back to the object id; the extension comes from the original
+  name, the mime type (media), or `.md` (text/table). Existing paths are auto-suffixed
+  (`name.md`, `name_1.md`, …).
+- **What it emits:** a document whose `page_content` is the store path, carrying that path
+  (and, when **Emit download URL** is on, a time-limited signed URL) in its metadata —
+  only when a downstream node listens on `documents`.
+- **Guards:** the sink honours the same `allowWrite` toggle and path whitelist as the
+  `write_file` tool.
+
+The signed URL is minted server-side via the store's `get_url` (no agent `task.store`
+permission needed); **URL expiry (seconds)** (default 3600, max 3600) sets its TTL.
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | `documents` | Persist each document's content; emit store-path reference |
+| `text` / `table` | `documents` | Persist as `.md`; emit reference |
+| `image` / `audio` / `video` | `documents` | Accumulate streamed chunks, persist on end; emit reference |
 
 ---
 

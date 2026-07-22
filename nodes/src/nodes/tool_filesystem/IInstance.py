@@ -43,6 +43,8 @@ the path against the configured regex whitelist, and then invokes the
 from __future__ import annotations
 
 import asyncio
+import mimetypes
+import os
 from typing import Any
 
 from rocketlib import IInstanceBase, tool_function
@@ -345,6 +347,134 @@ class IInstance(IInstanceBase):
         patterns = self.IGlobal.path_patterns or []
         if patterns and not any(p.search(path) for p in patterns):
             raise ValueError(f'path {path!r} does not match any allowed path pattern')
+
+    # ------------------------------------------------------------------
+    # Pipeline sink (lanes)
+    # ------------------------------------------------------------------
+
+    def _sink_resolve_name(self, ext_hint: str | None, mime: str | None) -> str:
+        """Build the target filename from the current source object.
+
+        Uses the original object name when present, else the object id. The
+        extension comes from the original name, then the mime type (media),
+        then ``ext_hint``/``.md`` (text/table with no name).
+        """
+        obj = self.instance.currentObject
+        if getattr(obj, 'hasName', False) and getattr(obj, 'name', None):
+            base, orig_ext = os.path.splitext(os.path.basename(obj.name))
+            base = base or str(obj.objectId)
+        else:
+            base, orig_ext = str(obj.objectId), ''
+
+        if orig_ext:
+            ext = orig_ext
+        elif mime:
+            ext = mimetypes.guess_extension(mime.split(';')[0].strip() or '') or ''
+            if not ext and '/' in mime:
+                ext = '.' + mime.split(';')[0].split('/')[-1].strip()
+            ext = ext or ext_hint or '.md'
+        else:
+            ext = ext_hint or '.md'
+        return f'{base}{ext}'
+
+    def _sink_target_path(self, filename: str) -> str:
+        """Join targetDir + filename, auto-suffixing (``_1``, ``_2`` …) on collision."""
+        target_dir = (self.IGlobal.target_dir or '').strip()
+        if target_dir and not target_dir.endswith('/'):
+            target_dir += '/'
+        stem, ext = os.path.splitext(filename)
+        candidate = f'{target_dir}{filename}'
+        n = 0
+        while _run_async(self.IGlobal.file_store.stat(candidate)).get('exists'):
+            n += 1
+            candidate = f'{target_dir}{stem}_{n}{ext}'
+        return candidate
+
+    def _sink_persist(self, data: bytes, *, ext_hint: str | None, mime: str | None) -> dict:
+        """Persist ``data`` under targetDir and return a reference dict.
+
+        Enforces ``allow_write`` and the path whitelist exactly like
+        ``write_file``. Returns ``{storePath, url, name, mime}`` where ``url`` is
+        ``None`` unless ``emitUrl`` is configured.
+        """
+        self._check_ready()
+        if not self.IGlobal.allow_write:
+            raise ValueError('write access is not enabled for this filesystem tool')
+
+        filename = self._sink_resolve_name(ext_hint, mime)
+        path = self._sink_target_path(filename)
+        self._check_path(path)
+
+        _run_async(self.IGlobal.file_store.write(path, data))
+
+        url = None
+        if self.IGlobal.emit_url:
+            url = _run_async(self.IGlobal.file_store.get_url(path, expires_in=self.IGlobal.url_expires_in))
+        return {'storePath': path, 'url': url, 'name': os.path.basename(path), 'mime': mime}
+
+    def _sink_emit(self, refs: list[dict]) -> None:
+        """Emit persisted-file references as ``Doc``s on the documents lane."""
+        if 'documents' not in self.instance.getListeners():
+            return
+        from ai.common.schema import Doc, DocMetadata
+
+        # A fresh ``Doc``'s ``metadata`` is None, and ``DocMetadata`` requires
+        # ``objectId``/``chunkId`` — inherit them from the source object. ``url``
+        # rides as an extra field (DocMetadata allows extras).
+        object_id = str(getattr(self.instance.currentObject, 'objectId', '') or '')
+        docs = []
+        for ref in refs:
+            meta_kwargs = {'objectId': object_id, 'chunkId': 0, 'parent': ref['storePath']}
+            if ref.get('url'):
+                meta_kwargs['url'] = ref['url']
+            docs.append(Doc(page_content=ref['storePath'], metadata=DocMetadata(**meta_kwargs)))
+        self.instance.writeDocuments(docs)
+
+    def writeDocuments(self, documents) -> None:
+        """Sink lane: persist each incoming document's content, emit references."""
+        refs = []
+        for doc in documents or []:
+            content = getattr(doc, 'page_content', None) or ''
+            data = content.encode('utf-8') if isinstance(content, str) else bytes(content)
+            refs.append(self._sink_persist(data, ext_hint='.txt', mime=None))
+        self._sink_emit(refs)
+
+    def writeText(self, text: str) -> None:
+        """Sink lane: persist incoming text as a ``.md`` file, emit a reference."""
+        data = (text or '').encode('utf-8')
+        self._sink_emit([self._sink_persist(data, ext_hint='.md', mime=None)])
+
+    def writeTable(self, table: str) -> None:
+        """Sink lane: persist an incoming markdown table as ``.md``, emit a reference."""
+        data = (table or '').encode('utf-8')
+        self._sink_emit([self._sink_persist(data, ext_hint='.md', mime=None)])
+
+    def _sink_media(self, kind: str, aviAction, mimeType: str, data: bytes) -> None:
+        """Accumulate streamed media chunks; persist + emit a reference on END."""
+        from rocketlib import AVI_ACTION
+
+        buffers = getattr(self, '_media_buffers', None)
+        if buffers is None:
+            buffers = self._media_buffers = {}
+        if aviAction == AVI_ACTION.BEGIN:
+            buffers[kind] = bytearray()
+        elif aviAction == AVI_ACTION.WRITE:
+            buffers.setdefault(kind, bytearray()).extend(data or b'')
+        elif aviAction == AVI_ACTION.END:
+            payload = bytes(buffers.pop(kind, b''))
+            self._sink_emit([self._sink_persist(payload, ext_hint=None, mime=mimeType)])
+
+    def writeImage(self, aviAction, mimeType: str, buffer: bytes) -> None:
+        """Sink lane: persist a streamed image, emit a reference on END."""
+        self._sink_media('image', aviAction, mimeType, buffer)
+
+    def writeAudio(self, aviAction, mimeType: str, data: bytes) -> None:
+        """Sink lane: persist streamed audio, emit a reference on END."""
+        self._sink_media('audio', aviAction, mimeType, data)
+
+    def writeVideo(self, aviAction, mimeType: str, data: bytes) -> None:
+        """Sink lane: persist streamed video, emit a reference on END."""
+        self._sink_media('video', aviAction, mimeType, data)
 
 
 # ----------------------------------------------------------------------
