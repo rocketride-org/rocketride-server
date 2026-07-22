@@ -33,7 +33,8 @@ import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
 import { PlayBar } from '../../../components/play-bar/PlayBar';
 import type { ITimeSelection } from '../../../components/play-bar/PlayBar';
 import Status from '../../../components/status/Status';
-import { StatusHeader } from '../../../components/status/StatusHeader';
+import { StatusActions, StatusElapsed, StatusHeaderInfo } from '../../../components/status/StatusHeader';
+import { Card } from '../../../components/card/Card';
 import { SourceTokensContent } from '../../../components/tokens/Tokens';
 import { SourceFlowContent } from '../../../components/flow/Flow';
 import Trace from '../../../components/trace/Trace';
@@ -108,18 +109,23 @@ const TIMELINE_REFRESH_MS = 30_000;
 // =============================================================================
 
 const styles: Record<string, CSSProperties> = {
-	section: {
-		...commonStyles.card,
-		borderRadius: 6,
+	// The Card owns the section chrome; this wrapper only spaces stacked
+	// source sections apart.
+	sectionSpacing: {
 		marginBottom: 25,
-		overflow: 'hidden',
 	},
-	pillRow: {
+	// headerActions column: action buttons on top, elapsed line beneath —
+	// the right-hand block of the Card header row.
+	headerActionsColumn: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'flex-end',
+		gap: 4,
+	},
+	headerActionsRow: {
 		display: 'flex',
 		alignItems: 'center',
 		gap: 8,
-		padding: '10px 14px 0',
-		flexWrap: 'wrap',
 	},
 	// Replay: the live header (state, Run/Stop) is not what the cursor shows —
 	// dim it and drop interactions so it visibly reads as "not live".
@@ -433,53 +439,62 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 	};
 
 	// --- Render ---------------------------------------------------------------
+	// Stock Card owns the section chrome: StatusHeaderInfo in the header slot,
+	// the action cluster + elapsed in headerActions, the pill bar as the
+	// toolbar, and the pane + transport as an edge-to-edge body.
+	// Replay dims the header content — it is LIVE state, and its buttons act
+	// on the live task, not the replayed moment.
 	return (
-		<div style={styles.section}>
-			{/* Header: name + live state + run/stop (dev continuum only).
-			    Replay dims and disables it — the header is LIVE state, and its
-			    buttons act on the live task, not the replayed moment. */}
-			<div style={isReplay ? styles.headerDimmed : undefined} aria-disabled={isReplay || undefined}>
-				<StatusHeader
-					name={source.name}
-					taskStatus={(isReplay ? effectiveStatus : liveTaskStatus) ?? null}
-					currentElapsed={currentElapsed}
-					onPipelineAction={
-						runKind === 'dev' && !isReadonly && !isReplay && onPipelineAction
-							? (action, src) => onPipelineAction(action, src ?? source.id)
-							: undefined
-					}
-					extraActions={
-						<PipelineActions notes={liveTaskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />
-					}
-					isSubscribed={isSubscribed}
+		<div style={styles.sectionSpacing}>
+			<Card
+				header={
+					<div style={isReplay ? styles.headerDimmed : undefined} aria-disabled={isReplay || undefined}>
+						<StatusHeaderInfo name={source.name} taskStatus={(isReplay ? effectiveStatus : liveTaskStatus) ?? null} />
+					</div>
+				}
+				headerActions={
+					<div style={{ ...styles.headerActionsColumn, ...(isReplay ? styles.headerDimmed : undefined) }} aria-disabled={isReplay || undefined}>
+						<div style={styles.headerActionsRow}>
+							<PipelineActions notes={liveTaskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />
+							{runKind === 'dev' && !isReadonly && !isReplay && onPipelineAction && (
+								<StatusActions
+									taskStatus={(isReplay ? effectiveStatus : liveTaskStatus) ?? null}
+									onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)}
+									isSubscribed={isSubscribed}
+								/>
+							)}
+						</div>
+						<StatusElapsed taskStatus={(isReplay ? effectiveStatus : liveTaskStatus) ?? null} currentElapsed={currentElapsed} />
+					</div>
+				}
+				toolbar={
+					<>
+						<ToggleGroup options={PILLS} value={pill} onChange={handlePillChange} />
+						{isReplay && (
+							<span style={styles.replayContext}>
+								<span style={styles.replayBadge}>Replay</span>
+								<span>
+									{formatTime(player.cursorTime)}
+									{trackNumber !== null ? ` · track ${trackNumber}` : ''} · {player.speed}X
+								</span>
+							</span>
+						)}
+					</>
+				}
+				noBodyPadding
+			>
+				{/* The selected pane (or the idle-gap state). */}
+				<div style={styles.body}>{renderPane()}</div>
+
+				{/* This source's own transport + activity bar. */}
+				<PlayBar
+					timeline={timeline}
+					player={player}
+					controller={controller}
+					selection={selection}
+					onSelectionChange={handleSelectionChange}
 				/>
-			</div>
-
-			{/* Per-source pill bar + replay context. */}
-			<div style={styles.pillRow}>
-				<ToggleGroup options={PILLS} value={pill} onChange={handlePillChange} />
-				{isReplay && (
-					<span style={styles.replayContext}>
-						<span style={styles.replayBadge}>Replay</span>
-						<span>
-							{formatTime(player.cursorTime)}
-							{trackNumber !== null ? ` · track ${trackNumber}` : ''} · {player.speed}X
-						</span>
-					</span>
-				)}
-			</div>
-
-			{/* The selected pane (or the idle-gap state). */}
-			<div style={styles.body}>{renderPane()}</div>
-
-			{/* This source's own transport + activity bar. */}
-			<PlayBar
-				timeline={timeline}
-				player={player}
-				controller={controller}
-				selection={selection}
-				onSelectionChange={handleSelectionChange}
-			/>
+			</Card>
 		</div>
 	);
 };

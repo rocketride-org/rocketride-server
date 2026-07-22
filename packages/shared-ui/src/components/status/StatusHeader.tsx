@@ -5,7 +5,11 @@
 
 /**
  * StatusHeader — State badge and elapsed-time display for a pipeline.
- * StatusActions — Run/Stop button for the tab bar actions slot.
+ * StatusHeaderInfo / StatusElapsed — the header's composable pieces, exported
+ * so hosts that render inside a stock Card's header/headerActions slots reuse
+ * the SAME markup instead of nesting a second header row.
+ * StatusActions — Run/Stop button (stock Button, per the Card-header rule
+ * that header buttons are plain `<Button small>`).
  */
 
 import React from 'react';
@@ -14,6 +18,7 @@ import PadlockIcon from '../../assets/icons/PadlockIcon';
 import type { ITaskStatus } from '../../types/project';
 import { ITaskState } from '../../types/project';
 import { commonStyles } from '../../themes/styles';
+import { Button } from '../button/Button';
 
 // =============================================================================
 // STYLES (component-specific only)
@@ -147,22 +152,16 @@ const getControlButton = (state: number) => {
 // =============================================================================
 
 /**
- * StatusHeader — source name, state, status, elapsed time, and action buttons.
- *
- * Layout:
- *   Row 1: ● Name  StateLabel                          [Run/Stop]
- *   Row 2:   Status message
- *   Row 3:   Started Xs ago (when running)
+ * StatusHeaderInfo — the header's LEFT block: state dot, name, state label,
+ * and the status-message subtitle. Rendered standalone inside a stock Card's
+ * `header` slot (the Card owns the row chrome), or composed by StatusHeader.
  */
-export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, currentElapsed, onPipelineAction, extraActions, isSubscribed }) => {
+export const StatusHeaderInfo: React.FC<Pick<StatusHeaderProps, 'name' | 'taskStatus'>> = ({ name, taskStatus }) => {
 	const state = taskStatus?.state ?? ITaskState.NONE;
 	const hasStatus = !!taskStatus?.status;
-	const showElapsed = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
 
 	return (
-		<div style={commonStyles.cardHeader}>
-			{/* Left column: name, state, status */}
-			<div style={styles.stack}>
+		<div style={styles.stack}>
 				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 					<div style={styles.indicatorBox}>
 						<div style={getIndicator(state)} />
@@ -174,16 +173,47 @@ export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, cu
 					<div style={styles.indicatorBox} />
 					<span>{taskStatus?.status || '\u00A0'}</span>
 				</div>
-			</div>
+		</div>
+	);
+};
+
+/**
+ * StatusElapsed \u2014 the "Started Xs ago" line (hidden while not running).
+ * Rendered under the action buttons in a Card's `headerActions` column.
+ */
+export const StatusElapsed: React.FC<Pick<StatusHeaderProps, 'taskStatus' | 'currentElapsed'>> = ({ taskStatus, currentElapsed }) => {
+	const showElapsed = !!taskStatus && taskStatus.startTime > 0 && !taskStatus.completed;
+
+	return (
+		<div style={{ ...commonStyles.textMuted, fontSize: 'var(--rr-font-size-caption)', visibility: showElapsed ? 'visible' : 'hidden' }}>
+			Started <span style={styles.elapsedValue}>{formatElapsedTime(currentElapsed)}</span> ago
+		</div>
+	);
+};
+
+/**
+ * StatusHeader \u2014 source name, state, status, elapsed time, and action buttons
+ * as one self-contained header row, for hosts NOT composing a stock Card
+ * (Card-based hosts put StatusHeaderInfo / StatusElapsed in the Card's slots
+ * instead, so the Card owns the single header row).
+ *
+ * Layout:
+ *   Row 1: \u25CF Name  StateLabel                          [Run/Stop]
+ *   Row 2:   Status message
+ *   Row 3:   Started Xs ago (when running)
+ */
+export const StatusHeader: React.FC<StatusHeaderProps> = ({ name, taskStatus, currentElapsed, onPipelineAction, extraActions, isSubscribed }) => {
+	return (
+		<div style={commonStyles.cardHeader}>
+			{/* Left column: name, state, status */}
+			<StatusHeaderInfo name={name} taskStatus={taskStatus} />
 			{/* Right column: buttons on top, elapsed below */}
 			<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
 				<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 					{extraActions}
 					{onPipelineAction && <StatusActions taskStatus={taskStatus} onPipelineAction={onPipelineAction} isSubscribed={isSubscribed} />}
 				</div>
-				<div style={{ ...commonStyles.textMuted, fontSize: 'var(--rr-font-size-caption)', visibility: showElapsed ? 'visible' : 'hidden' }}>
-					Started <span style={styles.elapsedValue}>{formatElapsedTime(currentElapsed)}</span> ago
-				</div>
+				<StatusElapsed taskStatus={taskStatus} currentElapsed={currentElapsed} />
 			</div>
 		</div>
 	);
@@ -201,24 +231,17 @@ export const StatusActions: React.FC<StatusActionsProps> = ({ taskStatus, onPipe
 		btn = { ...btn, label: 'Subscribe' };
 	}
 
+	// Stock Button, per the Card-header rule: header buttons are plain
+	// <Button small> — danger for Stop, primary for Run/Subscribe.
 	return (
-		<button
-			style={{
-				...(btn.variant === 'stop' ? commonStyles.buttonDanger : commonStyles.buttonPrimary),
-				...(btn.disabled ? commonStyles.buttonDisabled : {}),
-			}}
-			disabled={btn.disabled}
-			onClick={() => {
-				if (!btn.disabled) onPipelineAction(btn.action, taskStatus?.source);
-			}}
-		>
+		<Button small variant={btn.variant === 'stop' ? 'danger' : 'primary'} disabled={btn.disabled} onClick={() => onPipelineAction(btn.action, taskStatus?.source)}>
 			{btn.label}
 			{isSubscribed === false && btn.action === 'run' && (
 				<span style={{ marginLeft: 6, display: 'inline-flex', verticalAlign: 'middle' }}>
 					<PadlockIcon size={18} />
 				</span>
 			)}
-		</button>
+		</Button>
 	);
 };
 
