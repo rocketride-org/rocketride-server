@@ -125,11 +125,13 @@ class IGlobal(IGlobalBase):
     def _sink_config(cfg: dict) -> tuple[str, bool, int]:
         """Parse the sink lane config into ``(target_dir, emit_url, url_expires_in)``.
 
-        ``url_expires_in`` is clamped to the FileStore ceiling of 3600 seconds.
+        ``url_expires_in`` is clamped to the FileStore range of 1..3600 seconds;
+        non-positive or missing values fall back to the 3600-second default.
         """
         target_dir = str(cfg.get('targetDir', 'output/'))
         emit_url = bool(cfg.get('emitUrl', False))
-        url_expires_in = min(int(cfg.get('urlExpiresIn', 3600) or 3600), 3600)
+        raw_expires = int(cfg.get('urlExpiresIn', 3600) or 3600)
+        url_expires_in = min(raw_expires, 3600) if raw_expires > 0 else 3600
         return target_dir, emit_url, url_expires_in
 
     def validateConfig(self) -> None:

@@ -161,6 +161,11 @@ class TestSinkConfig:
         IG = _load_real_iglobal()
         assert IG._sink_config({'urlExpiresIn': 999999})[2] == 3600
 
+    def test_url_expires_non_positive_falls_back_to_default(self):
+        IG = _load_real_iglobal()
+        assert IG._sink_config({'urlExpiresIn': -5})[2] == 3600
+        assert IG._sink_config({'urlExpiresIn': 0})[2] == 3600
+
 
 # ---------------------------------------------------------------------------
 # IInstance sink harness (shared by test_sink_lanes.py)

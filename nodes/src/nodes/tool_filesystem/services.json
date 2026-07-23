@@ -103,7 +103,9 @@
 			"type": "integer",
 			"title": "URL expiry (seconds)",
 			"description": "TTL for the signed URL when 'Emit download URL' is on. Max 3600.",
-			"default": 3600
+			"default": 3600,
+			"minimum": 1,
+			"maximum": 3600
 		},
 
 		"filesystem.whitelistPattern": {
