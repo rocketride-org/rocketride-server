@@ -47,7 +47,7 @@ import mimetypes
 import os
 from typing import Any
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import Entry, IInstanceBase, tool_function
 
 from ai.common.utils import optional_str, require_dict, require_str
 
@@ -64,6 +64,11 @@ MAX_READ_LIMIT = 4 * 1024 * 1024  # 4 MB
 # caps handles per connection id; a single constant is fine because sink handles
 # are opened and closed within one object's media stream (only a few open at once).
 _SINK_CONNECTION_ID = 0
+
+# Upper bound on the `_1`, `_2`, … collision suffixes the sink will try before
+# giving up. Bounds the probe loop so a store that keeps reporting a path as
+# existing (e.g. a directory, or heavy concurrent writes) can't spin forever.
+MAX_COLLISION_SUFFIX = 100
 
 
 class IInstance(IInstanceBase):
@@ -380,21 +385,36 @@ class IInstance(IInstanceBase):
         return ''
 
     def _sink_target_path(self, filename: str, *, index: int | None = None) -> str:
-        """Deterministic, collision-free store path under targetDir.
+        """Resolve a free store path under targetDir, suffixing on collision.
 
-        Uniqueness comes from the source objectId (a per-object subdirectory)
-        plus an optional ``index`` for objects that emit multiple documents — so
-        there is no stat/probe loop and concurrent writes never race on a key.
+        Keeps the object's own name (``output/report.pdf``) and only falls back
+        to ``_1``, ``_2``, … when that name is already taken. The search is
+        bounded by ``MAX_COLLISION_SUFFIX`` and raises past it, rather than
+        probing forever if the store keeps reporting the path as existing.
+
+        Each candidate is whitelist-checked *before* it is probed, so a path the
+        whitelist would reject never reveals whether files exist in the store.
         """
         target_dir = (self.IGlobal.target_dir or '').strip()
         if target_dir and not target_dir.endswith('/'):
             target_dir += '/'
-        object_id = str(getattr(self.instance.currentObject, 'objectId', '') or '')
         stem, ext = os.path.splitext(filename)
         if index is not None:
             stem = f'{stem}_{index}'
-        prefix = f'{object_id}/' if object_id else ''
-        return f'{target_dir}{prefix}{stem}{ext}'
+
+        candidate = f'{target_dir}{stem}{ext}'
+        self._check_path(candidate)
+        n = 0
+        while _run_async(self.IGlobal.file_store.stat(candidate)).get('exists'):
+            n += 1
+            if n > MAX_COLLISION_SUFFIX:
+                raise ValueError(
+                    f'could not find a free path for {filename!r} under {target_dir!r}: '
+                    f'{MAX_COLLISION_SUFFIX} suffixed variants are already taken'
+                )
+            candidate = f'{target_dir}{stem}_{n}{ext}'
+            self._check_path(candidate)
+        return candidate
 
     def _sink_ref(self, path: str, mime: str | None = None) -> dict:
         """Reference dict for a persisted file, resolving a signed URL if configured."""
@@ -406,14 +426,13 @@ class IInstance(IInstanceBase):
     def _sink_write(self, data: bytes, filename: str, *, index: int | None = None) -> dict:
         """Persist ``data`` in one shot (documents/text/table) and return a ref.
 
-        Enforces ``allow_write`` and validates the path against the whitelist
-        BEFORE touching the store, so a rejected path never probes the store.
+        Enforces ``allow_write``; ``_sink_target_path`` applies the whitelist to
+        every candidate before probing, so a rejected path never touches the store.
         """
         self._check_ready()
         if not self.IGlobal.allow_write:
             raise ValueError('write access is not enabled for this filesystem tool')
         path = self._sink_target_path(filename, index=index)
-        self._check_path(path)
         _run_async(self.IGlobal.file_store.write(path, data))
         return self._sink_ref(path)
 
@@ -444,16 +463,32 @@ class IInstance(IInstanceBase):
 
     # -- lane handlers -------------------------------------------------
 
+    def open(self, object: Entry):
+        """Per-object reset: chunkIds restart at 0 and stale streams are dropped.
+
+        A stream aborted before END (upstream error, dropped object) would
+        otherwise keep its write handle and half-written file alive, and the
+        next object's chunks would land in it.
+        """
+        self._sink_chunk_id = 0
+        for kind in list(getattr(self, '_media_streams', None) or {}):
+            self._media_abort(kind)
+
     def writeDocuments(self, documents):
-        """Documents lane: persist each document (source ext, else .txt); emit refs."""
+        """Documents lane: ``page_content`` is parsed text, so it always stores .txt.
+
+        The source extension never wins here — a parsed ``report.pdf`` stores as
+        ``report.txt``, keeping the stored extension truthful about the bytes
+        (same rule that stores text/table as .md).
+        """
         docs = list(documents or [])
-        base, ext = self._sink_base_name(), self._sink_source_ext() or '.txt'
+        base = self._sink_base_name()
         multi = len(docs) > 1
         refs = []
         for idx, doc in enumerate(docs):
             content = getattr(doc, 'page_content', None) or ''
             data = content.encode('utf-8') if isinstance(content, str) else bytes(content)
-            refs.append(self._sink_write(data, f'{base}{ext}', index=idx if multi else None))
+            refs.append(self._sink_write(data, f'{base}.txt', index=idx if multi else None))
         self._sink_emit(refs)
         return self.preventDefault()
 
@@ -513,7 +548,6 @@ class IInstance(IInstanceBase):
                 if not self.IGlobal.allow_write:
                     raise ValueError('write access is not enabled for this filesystem tool')
                 path = self._sink_target_path(f'{self._sink_base_name()}{self._media_ext(st["mime"])}')
-                self._check_path(path)
                 st['handle'] = _run_async(self.IGlobal.file_store.open_write(path, _SINK_CONNECTION_ID))
                 st['path'] = path
             _run_async(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data), _SINK_CONNECTION_ID))
@@ -562,7 +596,9 @@ def _ext_from_mime(mime: str | None) -> str:
 
     Order: explicit overrides, then ``mimetypes.guess_extension``, then the
     subtype with any structured-syntax suffix stripped (``image/svg+xml`` ->
-    ``.svg``, not the naive ``.svg+xml``).
+    ``.svg``, not the naive ``.svg+xml``). Vendor-tree subtypes (``vnd.*``)
+    with no override are treated as unknown rather than turned into junk
+    extensions like ``.document``.
     """
     if not mime:
         return ''
@@ -573,18 +609,26 @@ def _ext_from_mime(mime: str | None) -> str:
     if ext:
         return ext
     subtype = main.split('/')[-1].split('+')[0] if '/' in main else ''
-    return f'.{subtype}' if subtype else ''
+    if not subtype or subtype.startswith('vnd.'):
+        return ''
+    return f'.{subtype}'
 
 
 def _run_async(coro):
-    """Run an async coroutine from a synchronous ``@tool_function`` method.
+    """Run an async coroutine from a synchronous node method.
 
-    Only safe to call from a thread with no running event loop — the engine's
-    tool dispatcher (``filters.py::_dispatch_tool``) calls ``@tool_function``
-    methods synchronously, which is the supported caller. If invoked from a
-    thread that already has a running loop, ``asyncio.run`` would raise a
-    generic ``RuntimeError``; we pre-check so the failure surfaces with a
-    tool_filesystem-specific message that points at the dispatcher contract.
+    Only safe to call from a thread with no running event loop. Two callers are
+    supported, both synchronous:
+
+      * the engine's tool dispatcher (``filters.py::_dispatch_tool``), which
+        calls ``@tool_function`` methods synchronously; and
+      * the pipeline-sink lane handlers (``writeDocuments``/``writeText``/
+        ``writeTable``/``writeImage``/``writeAudio``/``writeVideo``), which the
+        engine likewise invokes synchronously.
+
+    If invoked from a thread that already has a running loop, ``asyncio.run``
+    would raise a generic ``RuntimeError``; we pre-check so the failure surfaces
+    with a tool_filesystem-specific message that points at that contract.
     """
     try:
         asyncio.get_running_loop()
@@ -592,7 +636,7 @@ def _run_async(coro):
         pass
     else:
         raise RuntimeError(
-            '_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods are designed to be dispatched synchronously by the engine.'
+            '_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods and sink lane handlers are designed to be dispatched synchronously by the engine.'
         )
 
     return asyncio.run(coro)

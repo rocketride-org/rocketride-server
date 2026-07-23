@@ -62,16 +62,19 @@ Besides the agent tools, the node doubles as a **pipeline sink**. Each input lan
 account store, then emits `documents` metadata references on its output lane: one per file
 written, so an object that carries several documents yields one reference per document.
 
-- **Where it writes:** `targetDir` (default `output/`) + a per-source-object subdirectory +
-  the object's original name (nameless inputs fall back to the object id). Scoping the key
-  by object id makes the path deterministic and collision-free in a single write — nothing
-  probes the store for existing paths, and concurrent writes cannot race on the same key.
-  When one object emits several documents they are disambiguated with an index
-  (`report_0.md`, `report_1.md`, …).
-- **How the extension is chosen:** each lane owns its own rule. `text`/`table` carry
-  markdown, so they always store `.md`; `documents` keeps the source file's extension
-  (falling back to `.txt`); media derive it from the stream's mime type, then the source
-  extension, then `.bin`.
+- **Where it writes:** `targetDir` (default `output/`) + the object's original name stem,
+  with the lane's extension rule applied — e.g. `output/report.txt` (nameless inputs fall
+  back to the object id). If that name is already taken the sink appends `_1`, `_2`, …,
+  and gives up with an error after `MAX_COLLISION_SUFFIX` (100) attempts rather than
+  probing indefinitely. When one object emits several documents they also carry an index
+  (`report_0.txt`, `report_1.txt`, …).
+  Every candidate is whitelist-checked *before* it is probed, so a path the whitelist
+  would reject never reveals whether files exist in the store.
+- **How the extension is chosen:** each lane owns its own rule, keyed to what the lane
+  actually carries. `text`/`table` carry markdown, so they always store `.md`;
+  `documents` carries parsed text (`page_content`), so it always stores `.txt` — a parsed
+  `report.pdf` stores as `report.txt`, keeping the extension truthful about the bytes;
+  media derive it from the stream's mime type, then the source extension, then `.bin`.
 - **Media streaming:** image/audio/video chunks stream straight to the store, so memory
   stays bounded regardless of file size. The file is created only once the first non-empty
   chunk arrives — an empty stream writes nothing.

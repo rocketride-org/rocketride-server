@@ -211,15 +211,21 @@ def _install_iinstance_stubs():
         sys.modules['tool_filesystem.IGlobal'] = ig
 
 
-def _fs():
+def _fs(exists_paths=()):
     """AsyncMock FileStore covering the one-shot write API and the streaming
-    write API. Streamed chunks are recorded per handle so lane tests can assert
-    the bytes and final path.
+    write API. ``stat`` reports the paths in ``exists_paths`` as existing so
+    collision handling can be exercised; streamed chunks are recorded per handle
+    so lane tests can assert the bytes and final path.
     """
     fs = AsyncMock()
     fs.write = AsyncMock(return_value=None)
     fs.get_url = AsyncMock(return_value='https://x/task/fetch?token=t')
     fs.delete = AsyncMock(return_value=None)
+
+    async def _stat(path):
+        return {'exists': path in exists_paths}
+
+    fs.stat = AsyncMock(side_effect=_stat)
 
     fs.streams = {}
     counter = {'n': 0}
@@ -295,17 +301,40 @@ class TestNamingHelpers:
         assert inst._sink_base_name() == 'obj-9'
         assert inst._sink_source_ext() == ''
 
-    def test_target_path_is_object_scoped(self):
+    def test_target_path_keeps_clean_name_when_free(self):
         inst = _sink_instance(_fs(), object_id='obj-123')
-        assert inst._sink_target_path('report.pdf') == 'output/obj-123/report.pdf'
+        assert inst._sink_target_path('report.pdf') == 'output/report.pdf'
 
     def test_target_path_index_disambiguates(self):
         inst = _sink_instance(_fs(), object_id='obj-123')
-        assert inst._sink_target_path('report.md', index=2) == 'output/obj-123/report_2.md'
+        assert inst._sink_target_path('report.md', index=2) == 'output/report_2.md'
+
+    def test_target_path_suffixes_on_collision(self):
+        fs = _fs(exists_paths={'output/report.pdf', 'output/report_1.pdf'})
+        inst = _sink_instance(fs, object_id='obj-123')
+        assert inst._sink_target_path('report.pdf') == 'output/report_2.pdf'
+
+    def test_target_path_raises_past_the_cap(self):
+        from tool_filesystem.IInstance import MAX_COLLISION_SUFFIX
+
+        # Every candidate is taken, so the probe must give up rather than spin.
+        taken = {'output/report.pdf'} | {f'output/report_{n}.pdf' for n in range(1, MAX_COLLISION_SUFFIX + 1)}
+        inst = _sink_instance(_fs(exists_paths=taken), object_id='obj-123')
+        with pytest.raises(ValueError, match='could not find a free path'):
+            inst._sink_target_path('report.pdf')
+
+    def test_whitelist_rejects_before_probing_the_store(self):
+        import re
+
+        fs = _fs()
+        inst = _sink_instance(fs, path_patterns=[re.compile(r'^output/allowed')])
+        with pytest.raises(ValueError, match='does not match any allowed path pattern'):
+            inst._sink_target_path('secret.pdf')
+        fs.stat.assert_not_awaited()  # no existence oracle for rejected paths
 
     def test_target_path_honours_target_dir(self):
         inst = _sink_instance(_fs(), object_id='o1', target_dir='exports')
-        assert inst._sink_target_path('a.txt') == 'exports/o1/a.txt'
+        assert inst._sink_target_path('a.txt') == 'exports/a.txt'
 
 
 class TestMimeExtension:
@@ -338,6 +367,13 @@ class TestMimeExtension:
         assert _ext_from_mime(None) == ''
         assert _ext_from_mime('') == ''
 
+    def test_unmapped_vendor_subtype_is_rejected(self):
+        from tool_filesystem.IInstance import _ext_from_mime
+
+        # No override and unknown to mimetypes: report unknown ('') so callers
+        # fall back to the source ext / '.bin', not a junk '.acme.report'.
+        assert _ext_from_mime('application/vnd.acme.report') == ''
+
     def test_media_ext_prefers_mime_then_source_then_bin(self):
         inst = _sink_instance(_fs(), name='clip.mov')
         assert inst._media_ext('image/png') == '.png'  # mime wins
@@ -357,9 +393,9 @@ class TestSinkWrite:
         fs = _fs()
         inst = _sink_instance(fs, name='report.pdf', object_id='obj-123')
         ref = inst._sink_write(b'data', 'report.pdf')
-        assert ref['storePath'] == 'output/obj-123/report.pdf'
+        assert ref['storePath'] == 'output/report.pdf'
         (path_arg, data_arg), _ = fs.write.await_args
-        assert path_arg == 'output/obj-123/report.pdf' and data_arg == b'data'
+        assert path_arg == 'output/report.pdf' and data_arg == b'data'
 
     def test_emit_url_attaches_signed_url(self):
         fs = _fs()

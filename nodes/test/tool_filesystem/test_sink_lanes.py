@@ -16,12 +16,21 @@ from test_sink_naming import _fs, _sink_instance
 # ---------------------------------------------------------------------------
 
 
-def test_documents_lane_keeps_source_extension():
+def test_documents_lane_stores_txt_even_for_named_object():
+    # page_content is parsed text, so a parsed report.pdf stores as report.txt.
     fs = _fs()
     inst = _sink_instance(fs, name='report.pdf', object_id='obj-123')
-    inst.writeDocuments([MagicMock(page_content='bytes')])
+    inst.writeDocuments([MagicMock(page_content='parsed text')])
     (path_arg, data_arg), _ = fs.write.await_args
-    assert path_arg == 'output/obj-123/report.pdf' and data_arg == b'bytes'
+    assert path_arg == 'output/report.txt' and data_arg == b'parsed text'
+
+
+def test_documents_nameless_uses_object_id_txt():
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='d7')
+    inst.writeDocuments([MagicMock(page_content='x')])
+    (path_arg, _d), _ = fs.write.await_args
+    assert path_arg == 'output/d7.txt'
 
 
 def test_documents_multi_doc_index_disambiguates_and_chunkids_increment():
@@ -30,13 +39,13 @@ def test_documents_multi_doc_index_disambiguates_and_chunkids_increment():
     result = inst.writeDocuments([MagicMock(page_content='one'), MagicMock(page_content='two')])
     assert result == 'PREVENT_DEFAULT'
     paths = [c.args[0] for c in fs.write.await_args_list]
-    assert paths == ['output/obj-x/a_0.txt', 'output/obj-x/a_1.txt']
+    assert paths == ['output/a_0.txt', 'output/a_1.txt']
     (emitted,), _ = inst.instance.writeDocuments.call_args
-    assert [d.page_content for d in emitted] == ['output/obj-x/a_0.txt', 'output/obj-x/a_1.txt']
+    assert [d.page_content for d in emitted] == ['output/a_0.txt', 'output/a_1.txt']
     # Distinct chunkIds so vector stores keyed on (objectId, chunkId) don't overwrite.
     assert [d.metadata.chunkId for d in emitted] == [0, 1]
     assert all(d.metadata.objectId == 'obj-x' for d in emitted)
-    assert emitted[0].metadata.parent == 'output/obj-x/a_0.txt'
+    assert emitted[0].metadata.parent == 'output/a_0.txt'
 
 
 def test_documents_single_doc_has_no_index_suffix():
@@ -44,7 +53,7 @@ def test_documents_single_doc_has_no_index_suffix():
     inst = _sink_instance(fs, name='a.txt', object_id='obj-x')
     inst.writeDocuments([MagicMock(page_content='only')])
     (path_arg, _d), _ = fs.write.await_args
-    assert path_arg == 'output/obj-x/a.txt'
+    assert path_arg == 'output/a.txt'
 
 
 def test_documents_persists_without_listener_but_does_not_emit():
@@ -68,7 +77,7 @@ def test_text_lane_forces_md_even_for_named_object():
     result = inst.writeText('# heading')
     assert result == 'PREVENT_DEFAULT'
     (path_arg, data_arg), _ = fs.write.await_args
-    assert path_arg == 'output/obj-123/report.md' and data_arg == b'# heading'
+    assert path_arg == 'output/report.md' and data_arg == b'# heading'
 
 
 def test_table_lane_forces_md_even_for_named_object():
@@ -77,7 +86,7 @@ def test_table_lane_forces_md_even_for_named_object():
     result = inst.writeTable('| a | b |')
     assert result == 'PREVENT_DEFAULT'
     (path_arg, _d), _ = fs.write.await_args
-    assert path_arg == 'output/obj-7/sheet.md'
+    assert path_arg == 'output/sheet.md'
 
 
 def test_text_lane_nameless_uses_object_id():
@@ -85,7 +94,7 @@ def test_text_lane_nameless_uses_object_id():
     inst = _sink_instance(fs, has_name=False, object_id='t1')
     inst.writeText('some text')
     (path_arg, data_arg), _ = fs.write.await_args
-    assert path_arg == 'output/t1/t1.md' and data_arg == b'some text'
+    assert path_arg == 'output/t1.md' and data_arg == b'some text'
 
 
 # ---------------------------------------------------------------------------
@@ -107,10 +116,10 @@ def test_image_streams_to_store_and_emits_on_end():
     assert result == 'PREVENT_DEFAULT'
     fs.close_write.assert_awaited_once()
     ((_handle, stream),) = fs.streams.items()
-    assert stream['path'] == 'output/img1/img1.png'
+    assert stream['path'] == 'output/img1.png'
     assert b''.join(stream['chunks']) == b'\x89PNGrest'
     (emitted,), _ = inst.instance.writeDocuments.call_args
-    assert emitted[0].page_content == 'output/img1/img1.png'
+    assert emitted[0].page_content == 'output/img1.png'
 
 
 def test_audio_uses_mime_extension():
@@ -122,7 +131,7 @@ def test_audio_uses_mime_extension():
     inst.writeAudio(AVI_ACTION.WRITE, 'audio/wav', b'RIFF')
     inst.writeAudio(AVI_ACTION.END, 'audio/wav', b'')
     ((_handle, stream),) = fs.streams.items()
-    assert stream['path'] == 'output/a1/a1.wav'
+    assert stream['path'] == 'output/a1.wav'
     assert b''.join(stream['chunks']) == b'RIFF'
 
 
@@ -136,7 +145,7 @@ def test_video_streams_with_mime_extension():
     result = inst.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
     assert result == 'PREVENT_DEFAULT'
     ((_handle, stream),) = fs.streams.items()
-    assert stream['path'] == 'output/v1/v1.mp4'
+    assert stream['path'] == 'output/v1.mp4'
     assert b''.join(stream['chunks']) == b'ftyp'
 
 
@@ -164,3 +173,79 @@ def test_new_begin_discards_half_written_prior_stream():
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
     fs.close_write.assert_awaited()  # stale handle committed/closed
     fs.delete.assert_awaited()  # partial file removed
+
+
+def test_open_discards_stream_the_previous_object_left_unfinished():
+    fs = _fs()
+    inst = _sink_instance(fs, name='track.wav', object_id='a1')
+    from rocketlib import AVI_ACTION
+
+    inst.writeAudio(AVI_ACTION.BEGIN, 'audio/wav', b'')
+    inst.writeAudio(AVI_ACTION.WRITE, 'audio/wav', b'RIFF')  # aborted: no END
+    inst.open(MagicMock())  # engine opens the next object
+    fs.close_write.assert_awaited_once()  # stale handle released
+    fs.delete.assert_awaited_once_with('output/track.wav')  # partial removed
+    inst.instance.writeDocuments.assert_not_called()
+
+
+def test_open_restarts_chunk_ids_for_the_next_object():
+    fs = _fs()
+    inst = _sink_instance(fs, name='a.txt', object_id='obj-a')
+    inst.writeText('one')
+    inst.open(MagicMock())  # next object: chunkIds must start at 0 again
+    inst.writeText('two')
+    first, second = [c.args[0][0] for c in inst.instance.writeDocuments.call_args_list]
+    assert first.metadata.chunkId == 0
+    assert second.metadata.chunkId == 0
+
+
+def test_media_blank_mime_falls_back_to_source_extension():
+    fs = _fs()
+    inst = _sink_instance(fs, name='clip.mov', object_id='v9')
+    from rocketlib import AVI_ACTION
+
+    inst.writeVideo(AVI_ACTION.BEGIN, '', b'')
+    inst.writeVideo(AVI_ACTION.WRITE, '', b'ftyp')
+    inst.writeVideo(AVI_ACTION.END, '', b'')
+    ((_handle, stream),) = fs.streams.items()
+    assert stream['path'] == 'output/clip.mov'
+
+
+def test_media_unmappable_mime_nameless_falls_back_to_bin():
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='v1')
+    from rocketlib import AVI_ACTION
+
+    mime = 'application/vnd.acme.report'
+    inst.writeVideo(AVI_ACTION.BEGIN, mime, b'')
+    inst.writeVideo(AVI_ACTION.WRITE, mime, b'x')
+    inst.writeVideo(AVI_ACTION.END, mime, b'')
+    ((_handle, stream),) = fs.streams.items()
+    assert stream['path'] == 'output/v1.bin'
+
+
+def test_named_source_with_conflicting_mime_mime_wins():
+    fs = _fs()
+    # Source named photo.jpg but the stream is declared image/png: the stored
+    # extension must match the actual bytes, not the stale source name.
+    inst = _sink_instance(fs, name='photo.jpg', object_id='p1')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'\x89PNG')
+    inst.writeImage(AVI_ACTION.END, 'image/png', b'')
+    ((_handle, stream),) = fs.streams.items()
+    assert stream['path'] == 'output/photo.png'
+
+
+# ---------------------------------------------------------------------------
+# emitUrl end to end
+# ---------------------------------------------------------------------------
+
+
+def test_emit_url_lands_on_emitted_doc_metadata():
+    fs = _fs()
+    inst = _sink_instance(fs, name='report.pdf', object_id='obj-1', emit_url=True)
+    inst.writeText('# heading')
+    (emitted,), _ = inst.instance.writeDocuments.call_args
+    assert emitted[0].metadata.url == 'https://x/task/fetch?token=t'
