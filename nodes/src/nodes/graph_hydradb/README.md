@@ -1,4 +1,4 @@
-# HydraDB
+# graph_hydradb
 
 A `database` + `tool` node for [HydraDB](https://hydradb.com) — a managed graph + memory store. It gives agents four tools to store text into HydraDB (with automatic knowledge-graph extraction), recall graph-enriched context by natural-language query, inspect the extracted relations, and read the database's shape.
 
