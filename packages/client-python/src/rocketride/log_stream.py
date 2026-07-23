@@ -593,6 +593,19 @@ class LogEventStream:
                 if self._timeline is not None and self._timeline.get('completed') is False:
                     self._pinned = True
                     self._base_pos = time.time()
+                    # Drain arrivals that landed in the live bucket during
+                    # the awaits above: ingest_live delivers only events
+                    # arriving AFTER the pin flips, so anything buffered in
+                    # that window must be delivered here or it is lost to
+                    # the seam. Synchronous — no await may interleave an
+                    # arrival mid-drain.
+                    events = self._live.events
+                    idx = _first_seq_above(events, self._watermark)
+                    while idx < len(events) and self._playing and self._callback is not None:
+                        ev = events[idx]
+                        self._watermark = ev.get('seq', self._watermark)
+                        self._callback({'event': ev})
+                        idx += 1
                 else:
                     self._playing = False
                     self._pinned = False
@@ -605,6 +618,11 @@ class LogEventStream:
                 delay = max(0.0, (event_time - self._base_pos) / self._speed)
                 if delay > 0.004:
                     await asyncio.sleep(delay)
+                    # Advance the playback clock past the wait so the
+                    # re-checked delay converges to zero — without this the
+                    # loop recomputes the same delay forever and timed
+                    # playback stalls on the first inter-event gap.
+                    self._base_pos = max(self._base_pos, event_time)
                     continue
 
             self._watermark = nxt.get('seq', self._watermark)

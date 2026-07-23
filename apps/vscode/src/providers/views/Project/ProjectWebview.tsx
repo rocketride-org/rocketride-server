@@ -86,14 +86,6 @@ const ProjectWebview: React.FC = () => {
 		projectIdRef.current = projectId;
 	}, [projectId]);
 
-	// Source component ids — used inside the message handler to route
-	// task-scoped events whose envelope `id` is '<tokenhash8>.<source>'.
-	const sourceIdsRef = useRef<string[]>([]);
-	useEffect(() => {
-		const components = (project?.components ?? []) as Array<{ provider: string; name?: string; id?: string; config?: Record<string, any> }>;
-		sourceIdsRef.current = components.filter((c) => c.config?.mode === 'Source').map((c) => c.id || c.name || c.provider);
-	}, [project]);
-
 	// Pending validate requests (request-ID → Promise resolver)
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
 	const validateCounter = useRef(0);
@@ -168,16 +160,14 @@ const ProjectWebview: React.FC = () => {
 				}
 
 				// Accumulate this project's STAMPED task events (continuum
-				// header eventTime + seq). Membership: flow/status events
-				// carry the project id in the body; task-scoped events
-				// (output, lifecycle) only carry '<tokenhash8>.<source>' in
-				// the envelope id, so they are routed by source suffix.
+				// header eventTime + seq). Membership is a PURE body test:
+				// the server stamps project_id + source into every
+				// task-scoped body at the forward point — no envelope
+				// tricks, no suffix guessing.
 				const raw = msg.event as TaskEventMessage;
 				if (typeof raw?.eventTime === 'number' && typeof raw?.seq === 'number') {
 					const body = (raw.body ?? {}) as Record<string, unknown>;
-					const envelopeId = typeof raw.id === 'string' ? raw.id : '';
-					const isOurs = body.project_id === pid || sourceIdsRef.current.some((sid) => envelopeId.endsWith(`.${sid}`));
-					if (isOurs) {
+					if (body.project_id === pid) {
 						setLiveLogEvents((prev) => {
 							const next = [...prev, raw];
 							// Rare chunky trim; sections re-feed (seq-deduped) on shrink.

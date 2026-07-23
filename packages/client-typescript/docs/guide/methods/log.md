@@ -41,7 +41,7 @@ await session.play(first.beginTime, 10, ({ event }) => fold(event));
 
 // Drill into one trace (a call tree; fetched sparsely from exactly
 // the segments that contain it).
-const detail = await session.getTrace(traces.closed[0].id);
+const detail = await session.getTrace(traces.closed[0].beginSeq);
 
 session.pause();               // freeze the position
 session.closeEventStream();    // dispose
@@ -59,7 +59,7 @@ await session.play(None, 0, lambda item: fold(item['event']))
 chapters = await session.get_chapters()
 await session.play(chapters[0]['beginTime'], 10, lambda item: fold(item['event']))
 
-detail = await session.get_trace(traces['closed'][0]['id'])
+detail = await session.get_trace(traces['closed'][0]['beginSeq'])
 
 session.pause()
 session.close_event_stream()

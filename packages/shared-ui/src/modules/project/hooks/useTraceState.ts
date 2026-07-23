@@ -333,7 +333,7 @@ export function useTraceState(
 
 		processedCountRef.current = end;
 		flush();
-	}, [traceEvents, flush]);
+	}, [traceEvents, flush, resetKey]);
 
 	// =========================================================================
 	// clearTrace — callable by the host to manually reset

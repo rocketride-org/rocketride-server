@@ -528,11 +528,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			if (missing.length > 0) return;
 
 			const pipeName = path.basename(fsPath).replace(/\.pipe(?:\.json)?$/, '');
+			// Same per-task settings as editor launches (ProjectProvider.runPipeline)
+			// — a pipeline must run identically regardless of where it is started.
+			const cfg = ConfigManager.getInstance().getConfig();
 			await client.use({
 				pipeline: pipelineJson,
 				source: sourceId ?? '',
+				pipelineTraceLevel: cfg.pipelineTraceLevel,
 				args: ConfigManager.getInstance().getTaskArgs(),
 				name: pipeName,
+				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
 			});
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);

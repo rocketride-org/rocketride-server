@@ -201,6 +201,13 @@ export class LogEventStream {
 	async seek(pos: LogPosition): Promise<void> {
 		this.assertOpen();
 		this.stopTimer();
+		// Retire any pump still in flight (awaiting a fetch) BEFORE the
+		// repositioning awaits below. stopTimer only kills a scheduled
+		// re-entry; a pump parked on an await would otherwise resume against
+		// the old epoch and mutate watermark/basePos — or fire a stale
+		// callback — interleaved with the new position. A play() following
+		// this seek bumps the epoch again and starts the fresh pump.
+		this.pumpEpoch += 1;
 		await this.refreshTimeline(true);
 
 		if (pos === 'live') {
@@ -521,17 +528,29 @@ export class LogEventStream {
 		for (;;) {
 			if (epoch !== this.pumpEpoch || !this.playing || this.closed) return;
 			const next = await this.nextEvent();
-			if (epoch !== this.pumpEpoch) return;
+			if (epoch !== this.pumpEpoch || !this.playing || this.closed) return;
 			if (next === null) {
 				// The history walk ran out of buckets. A still-writing stream
 				// means we caught the wall clock: flip to LIVE MODE — from
 				// here arrivals deliver directly in ingestLive. A completed
 				// stream simply ran out of disc: pause at the end.
 				await this.refreshTimeline();
-				if (epoch !== this.pumpEpoch) return;
+				if (epoch !== this.pumpEpoch || !this.playing || this.closed) return;
 				if (this.timeline?.completed === false) {
 					this.pinned = true;
 					this.basePos = Date.now() / 1000;
+					// Drain arrivals that landed in the live bucket during the
+					// awaits above: ingestLive delivers only events arriving
+					// AFTER the pin flips, so anything buffered in that window
+					// must be delivered here or it is lost to the seam.
+					// Synchronous — no await may interleave an arrival mid-drain.
+					let idx = firstSeqAbove(this.live.events, this.watermark);
+					while (idx < this.live.events.length && this.playing && this.callback) {
+						const ev = this.live.events[idx];
+						this.watermark = ev.seq ?? this.watermark;
+						this.callback({ event: ev });
+						idx += 1;
+					}
 				} else {
 					this.pause();
 				}
@@ -542,7 +561,17 @@ export class LogEventStream {
 			if (this.speed > 0) {
 				const delayMs = Math.max(0, ((eventTime - this.basePos) / this.speed) * 1000);
 				if (delayMs > 4) {
-					this.timer = setTimeout(() => void this.pump(epoch), delayMs);
+					this.timer = setTimeout(() => {
+						// Advance the playback clock past the wait so the
+						// re-entered pump computes a zero delay and delivers —
+						// without this the same event reschedules the same
+						// wait forever and timed playback stalls. Guarded:
+						// a retired epoch must not touch the live clock.
+						if (epoch === this.pumpEpoch && this.playing) {
+							this.basePos = Math.max(this.basePos, eventTime);
+						}
+						void this.pump(epoch);
+					}, delayMs);
 					return;
 				}
 			}
