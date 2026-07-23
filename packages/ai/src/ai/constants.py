@@ -98,6 +98,21 @@ CONST_LOG_STATUS_SAMPLE_SECONDS = 5.0
 CONST_LOG_READ_MAX_EVENTS = 2000
 CONST_LOG_READ_MAX_BYTES = 4 * 1024 * 1024  # 4 MB
 
+# rrext_log segment raw-fetch chunk ceiling: whole-line-aligned raw JSONL bytes
+# per response. Sized well under the transport's 4 MB message budget because
+# the chunk rides JSON-escaped inside the DAP envelope.
+CONST_LOG_SEGMENT_FETCH_BYTES = 2 * 1024 * 1024  # 2 MB
+
+# Segment keyframe bounds (DVR v2). The keyframe carries accumulated state so
+# every segment folds standalone: recently-closed trace summaries, the console
+# scrollback (terminal semantics — display truth at any position), and a
+# sanity ceiling on open-frame entries (leak armor only; real concurrency is
+# bounded by threadCount).
+CONST_LOG_KF_CLOSED_TRACES = 50
+CONST_LOG_KF_SCROLLBACK_LINES = 2000
+CONST_LOG_KF_SCROLLBACK_LINE_CHARS = 400
+CONST_LOG_KF_OPEN_CEILING = 4096
+
 # =============================================================================
 # Task Server Configuration
 # =============================================================================

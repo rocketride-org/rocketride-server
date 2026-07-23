@@ -6,46 +6,41 @@
 /**
  * useTaskEvents — THE single event-delivery point for one source's continuum.
  *
- * Data model: ONE ascending buffer and ONE position.
+ * Data model: ONE session-fed fold and ONE position.
  *
- * - The BUFFER is a seq-ordered array of raw stamped events — the DVR disc in
- *   memory. Live ingest and fetched log pages merge into it (deduped on seq);
- *   eventTime rides monotonically with seq, so time lookups are binary
- *   searches. A parallel index of just the status snapshots makes the
- *   status-shaped reads O(log n).
+ * - The DATA PLANE is the host-injected DVR SESSION (`openEventStream` in the
+ *   client SDK): segment residency, raw fetches, keyframe/delta decode, seq
+ *   ordering, live/backfill splice — all invisible behind seek/play. The hook
+ *   consumes ONE delivery path (the session's play callback) into a FOLD: an
+ *   append-only, already-ordered event array plus a parallel status index.
+ *   There is no fetch pager, no buffer re-sort, no reuse ladder, and no
+ *   late-joiner backfill here — a seek is `session.seek(anchor)` + replay,
+ *   and the session's segment cache makes a warm seek instant.
  * - The POSITION is an epoch-seconds cursor. "Live" is not a separate mode:
  *   it is the position PINNED to now, riding the wall clock. Unpinned, the
  *   position advances at speed x wall clock; paused, it is frozen. One
  *   ticker owns the clock — event arrival never moves it, so an idle stream
  *   still slides dead space past every consumer.
  *
- * Delivery: three purpose-shaped reads over that one buffer, all
- * binary-search + enumerate — no pushed arrays, no per-tick copies:
+ * Delivery: purpose-shaped reads over the fold, all binary-search +
+ * enumerate — no pushed arrays, no per-tick copies:
  *
  * 1. statusAt()            — the last status snapshot at-or-before the
- *    position. Status bodies are ABSOLUTE (counters, flow tree, errors), so
- *    one snapshot fully feeds the Tokens/Flow/Errors/header panes; in a dead
- *    zone this is naturally the previous run's final state.
+ *    position (falling back to the session's state-at-anchor seed). Status
+ *    bodies are ABSOLUTE, so one snapshot fully feeds the snapshot panes.
  * 2. trackEvents(types?)   — the EFFECTIVE TRACK's events from its begin up
- *    to min(position, track end). The effective track is the run containing
- *    the position, else the last run that ended before it — so accumulating
- *    panes (trace/log/analyze) persist a finished run through the dead zone
- *    and reset only when the next run begins, and a mid-track seek replays
- *    from the track's beginning.
+ *    to min(position, track end); accumulating panes persist a finished run
+ *    through the dead zone and reset only when the next run begins.
  * 3. chartSeries(range)    — the chart's 1-second grid ending at the
- *    position: tracks and dead zones merged into one continuous timeline,
- *    per-second rates from absolute-counter deltas, step-interpolated
- *    gauges, hard zeros through dead space (the engine's final zeroed
- *    snapshot bounds every run).
+ *    position: per-second rates from absolute-counter deltas, step-
+ *    interpolated gauges, hard zeros through dead space.
  * 4. trackStats()          — Now/Avg/Peak/Min completion rates scoped to the
- *    EFFECTIVE TRACK (begin to min(position, track end)), not the chart's
- *    visible window — the fixed one-minute chart would otherwise report
- *    zeros whenever the run's activity happened outside the last 60s.
+ *    EFFECTIVE TRACK (begin to min(position, track end)).
  *
- * Machinery (not model): a prefetching reader over the injected log pager
- * with generation-cancelled seeks, and a fetch anchor at the effective
- * track's begin so a mid-track seek pulls the whole track, not just the
- * window ahead of the cursor.
+ * Fetch policy (the whole of it): the session plays at speed 0 from the
+ * anchor and the hook PAUSES it when delivery runs past the position's
+ * runway, resuming from the transport ticker as the position advances —
+ * prefetch-ahead in two moves, with pacing owned entirely by the cursor.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -85,15 +80,28 @@ export interface TaskTimeline {
 	completed: boolean;
 }
 
-/** Host-injected pager over `client.log.read` for THIS stream. */
-export type LogReadFetcher = (params: {
-	fromSeq?: number;
-	fromTime?: number;
-	toTime?: number;
-	cursor?: number;
-	maxEvents?: number;
-	types?: string[];
-}) => Promise<{ events: TaskEventMessage[]; nextSeq?: number; truncatedAtSeq?: number }>;
+/**
+ * The DVR session surface the hook consumes — structurally satisfied by the
+ * client SDK's `LogEventStream` (`client.log.openEventStream(stream)`). The
+ * host owns creation and disposal; the hook only drives it.
+ */
+export interface TaskEventSession {
+	/** Position the session (epoch seconds | 'live'). */
+	seek(pos: number | 'live'): Promise<void>;
+	/** Full status snapshot as of the session position (delta-resolved). */
+	getStatus(): Promise<Record<string, unknown> | null>;
+	/** Stream reconstructed events after the seed watermark, paced by speed. */
+	play(pos: number | 'live' | undefined, speed: number, cb: (item: { event: TaskEventMessage }) => void): Promise<void>;
+	/** One trace's complete reconstructed event set. The id is the trace's
+	    BEGIN event's continuum seq — its permanent identity. */
+	getTrace(traceId: number): Promise<{ events: TaskEventMessage[] }>;
+	/** Stop delivery (the hook's runway throttle; resumed via play). */
+	pause(): void;
+	/** Feed one live event from the host's subscription. */
+	ingestLive(message: TaskEventMessage): void;
+	/** Dispose (host-owned; called by the session's creator, not the hook). */
+	closeEventStream(): void;
+}
 
 /**
  * Player mode label. NOT two code paths: there is one DVR position and one
@@ -124,8 +132,9 @@ export interface TaskPlayerController {
 	seekToTime: (time: number) => void;
 	/** Skip relative to the cursor (e.g. -30 / +30 seconds). */
 	skip: (deltaSeconds: number) => void;
-	/** Jump to the previous/next chapter (track) begin. */
+	/** |<: current task's begin, or the previous task's just-before-end. */
 	previousTrack: () => void;
+	/** >|: current task's just-before-end, or the next task's begin. */
 	nextTrack: () => void;
 	/** Return to the live edge and resume streaming. */
 	goLive: () => void;
@@ -139,16 +148,20 @@ export interface TrackWindow {
 	active: boolean;
 	/** Events from the track's begin up to min(position, track end), oldest first. */
 	events: TaskEventMessage[];
+	/**
+	 * Coverage honesty: set (to the fold's start time) when the fold does NOT
+	 * reach the track's begin — events before it exist but are not loaded
+	 * (fold cap trim). Panes surface this instead of silently truncating.
+	 */
+	truncatedBefore?: number;
 }
 
 /** Hook inputs. */
 export interface UseTaskEventsOptions {
-	/** Pager over the stream's log (host-injected; null disables replay). */
-	readLog: LogReadFetcher | null;
+	/** The stream's DVR session (host-created; null disables replay). */
+	session: TaskEventSession | null;
 	/** Stream timeline (chapters) — drives track resolution + gap detection. */
 	timeline: TaskTimeline | null;
-	/** DVR/replay buffer cap (messages); oldest dropped beyond it. */
-	bufferCap?: number;
 }
 
 /** Hook outputs. */
@@ -159,8 +172,8 @@ export interface UseTaskEventsResult {
 	trackEvents: (types?: readonly string[]) => TrackWindow;
 	/**
 	 * Events within an arbitrary [from, to] time slice (the Analyze brush).
-	 * Serves from the buffer — a slice brushed on screen is inside the
-	 * fetched window by construction.
+	 * Serves from the fold — a slice brushed on screen is inside the
+	 * delivered window by construction.
 	 */
 	rangeEvents: (fromTime: number, toTime: number, types?: readonly string[]) => TaskEventMessage[];
 	/** The chart's 1-second grid ending at the position (tracks + dead zones merged). */
@@ -182,36 +195,43 @@ export interface UseTaskEventsResult {
 // CONSTANTS
 // =============================================================================
 
-/** Default DVR/replay buffer cap (messages). */
-const DEFAULT_BUFFER_CAP = 20_000;
-
-/** Replay page size requested from the server (server clamps anyway). */
-const REPLAY_PAGE_EVENTS = 1_000;
+/** Fold size cap (messages) — memory backstop, trimmed in chunks. */
+const FOLD_CAP = 50_000;
 
 /** Transport tick (ms) — position advance + consumer re-read cadence. */
 const PLAYBACK_TICK_MS = 120;
 
-/** Prefetch when fewer than this many buffered events remain ahead. */
-const PREFETCH_LOW_WATER = 400;
-
-/** Largest chart range (seconds) — seeks backfill at least this window. */
+/** Largest chart range (seconds) — seeks anchor at least this window back. */
 const MAX_CHART_RANGE_SECONDS = 900;
 
 /**
- * Late-joiner FALLBACK window (seconds): a view opened mid-run backfills the
- * whole open track (same rule as replay seeks — accumulating panes get the
- * run from its begin). Only while the chapters cache has not loaded yet —
- * so the run's begin is unknown — does the backfill anchor this far behind
- * the live edge instead; once the cache reveals an earlier begin, the
- * backfill extends backward to it.
+ * Delivery runway (seconds ahead of the position) before the hook pauses the
+ * session; the ticker resumes it as the position advances. Scaled by speed
+ * so 25X keeps a proportional cushion. While PINNED the runway is infinite —
+ * live delivery follows arrival.
  */
-const LIVE_BACKFILL_FALLBACK_SECONDS = 1_800;
+const RUNWAY_BASE_SECONDS = 120;
+
+/**
+ * Live FALLBACK anchor (seconds): entering live with no open chapter in the
+ * cache yet, the seed anchors this far behind the head; once the chapters
+ * cache reveals the open run's earlier begin, the seed re-anchors there.
+ */
+const LIVE_FALLBACK_SECONDS = 1_800;
+
+/**
+ * Seek offset (seconds) placing the position just BEFORE a track's
+ * termination flurry (final zeroed status + task end + run-end share the
+ * track's end instant) — the |< / >| target that shows the run's final
+ * stats before the live view clears them.
+ */
+const TRACK_END_EPSILON = 0.001;
 
 // =============================================================================
 // BINARY SEARCH HELPERS
 // =============================================================================
 
-/** First index whose eventTime is >= time (buffer is eventTime-ascending). */
+/** First index whose eventTime is >= time (fold is eventTime-ascending). */
 function lowerBound(events: TaskEventMessage[], time: number): number {
 	let lo = 0;
 	let hi = events.length;
@@ -240,13 +260,14 @@ function upperBound(events: TaskEventMessage[], time: number): number {
 // =============================================================================
 
 /**
- * Buffered event delivery + DVD-style transport for one source's continuum.
+ * Session-fed event delivery + DVD-style transport for one source's
+ * continuum.
  *
- * @param options - Injected log pager, timeline, and buffer sizing.
- * @returns The three shaped reads, live ingest, and the player state/controller.
+ * @param options - Injected DVR session and timeline.
+ * @returns The shaped reads, live ingest, and the player state/controller.
  */
 export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResult {
-	const { readLog, timeline: rawTimeline, bufferCap = DEFAULT_BUFFER_CAP } = options;
+	const { session, timeline: rawTimeline } = options;
 
 	// Chapter normalization: only the NEWEST chapter may be open-ended. An
 	// older chapter with a null endTime is a run that died without writing
@@ -265,18 +286,21 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 		return { ...rawTimeline, chapters };
 	}, [rawTimeline]);
 
-	// --- The buffer (refs: mutated on hot paths without re-render) -----------
-	// One contiguous, seq-ordered window of messages (live tail + backfill).
-	const bufferRef = useRef<TaskEventMessage[]>([]);
-	// Seqs present in the buffer — the live/backfill dedupe seam.
-	const seenSeqRef = useRef<Set<number>>(new Set());
+	// --- The fold (refs: mutated on the delivery path without re-render) -----
+	// Append-only, session-ordered window of delivered messages.
+	const foldRef = useRef<TaskEventMessage[]>([]);
 	// Parallel index of ONLY the status snapshots (same ordering) — makes
-	// statusAt and the chart grid O(log n) instead of scanning the buffer.
+	// statusAt and the chart grid O(log n) instead of scanning the fold.
 	const statusIndexRef = useRef<TaskEventMessage[]>([]);
-	// Seek generation — in-flight fetches from older generations are dropped.
+	// The session's state-at-anchor snapshot (statusAt fallback before the
+	// first delivered status).
+	const seedStatusRef = useRef<Record<string, unknown> | null>(null);
+	// The anchor the current fold starts at (coverage check for seeks).
+	const foldAnchorRef = useRef<number | null>(null);
+	// Seek generation — deliveries from a superseded reseed are dropped.
 	const generationRef = useRef(0);
-	// In replay: buffered continuation cursor (server nextSeq) if paged out.
-	const nextSeqRef = useRef<number | undefined>(undefined);
+	// True while the hook has the session delivering (vs runway-paused).
+	const sessionRunningRef = useRef(false);
 	// Wall-clock of the last transport tick.
 	const lastTickRef = useRef<number>(0);
 
@@ -287,9 +311,9 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	const [speed, setSpeed] = useState(1);
 	const [cursorTime, setCursorTime] = useState<number | null>(null);
 	const [buffering, setBuffering] = useState(false);
-	// Bumped when events land AT/BELOW the position (backfill, live-at-head):
-	// readers re-derive. Growth beyond a frozen position is invisible by
-	// design (the recorder records; the paused view does not move).
+	// Bumped when events land AT/BELOW the position: readers re-derive.
+	// Growth beyond a frozen position is invisible by design (the recorder
+	// records; the paused view does not move).
 	const [rebuildTick, setRebuildTick] = useState(0);
 
 	// Externally the pin state reads as the familiar mode label.
@@ -298,152 +322,166 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	// Ref mirrors for the interval closure.
 	const pinnedRef = useRef(pinned);
 	pinnedRef.current = pinned;
-	const bufferingRef = useRef(buffering);
-	bufferingRef.current = buffering;
+	const speedRef = useRef(speed);
+	speedRef.current = speed;
 	const cursorTimeRef = useRef(cursorTime);
 	cursorTimeRef.current = cursorTime;
+	const sessionRef = useRef(session);
+	sessionRef.current = session;
+	const timelineRef = useRef(timeline);
+	timelineRef.current = timeline;
 
 	// =========================================================================
-	// BUFFER PRIMITIVES
+	// DELIVERY (the session's play callback → the fold)
 	// =========================================================================
 
-	/**
-	 * Insert messages into the buffer, seq-ordered and deduped, maintaining
-	 * the status index and the ring cap.
-	 *
-	 * @returns True when anything landed at/below the current position (the
-	 *          visible past changed — readers must re-derive).
-	 */
-	const absorb = useCallback(
-		(messages: TaskEventMessage[]) => {
-			const buffer = bufferRef.current;
-			const seen = seenSeqRef.current;
-			const position = cursorTimeRef.current;
-			let dirty = false;
-			let behind = false;
-			for (const message of messages) {
-				if (typeof message.seq !== 'number' || seen.has(message.seq)) continue;
-				seen.add(message.seq);
-				buffer.push(message);
-				if (message.event === 'apaevt_status_update') statusIndexRef.current.push(message);
-				dirty = true;
-				if (position === null || message.eventTime <= position) behind = true;
-			}
-			if (dirty) {
-				buffer.sort((a, b) => a.seq - b.seq);
-				statusIndexRef.current.sort((a, b) => a.seq - b.seq);
-				// DVR ring: drop oldest beyond the cap (both structures).
-				while (buffer.length > bufferCap) {
-					const dropped = buffer.shift();
-					if (dropped) seen.delete(dropped.seq);
-				}
-				if (buffer.length > 0) {
-					const floorSeq = buffer[0].seq;
-					const statusIndex = statusIndexRef.current;
-					while (statusIndex.length > 0 && statusIndex[0].seq < floorSeq) statusIndex.shift();
-				}
-			}
-			return behind && dirty;
-		},
-		[bufferCap],
-	);
-
-	// The anchor the live late-joiner backfill has fetched back to (null =
-	// none yet). A flush discards the backfilled history, so it re-arms; a
-	// later chapters refresh that reveals an EARLIER run begin re-triggers
-	// with the deeper anchor.
-	const liveBackfillAnchorRef = useRef<number | null>(null);
-
-	/** Reset the buffer entirely (far seek / stream switch). */
-	const flush = useCallback(() => {
-		bufferRef.current = [];
-		seenSeqRef.current = new Set();
-		statusIndexRef.current = [];
-		nextSeqRef.current = undefined;
-		liveBackfillAnchorRef.current = null;
+	/** End of the delivery runway for the current position (epoch seconds). */
+	const runwayEnd = useCallback((): number => {
+		if (pinnedRef.current) return Number.POSITIVE_INFINITY;
+		const cursor = cursorTimeRef.current ?? 0;
+		return cursor + RUNWAY_BASE_SECONDS * Math.max(1, speedRef.current);
 	}, []);
 
 	/**
-	 * Host subscription feed: absorb into the DVR buffer, nothing more.
-	 * Arrival does NOT move the position — the transport ticker owns the
-	 * clock, so an idle stream still slides dead space past every view.
+	 * Fold one delivered event. The session guarantees order and the
+	 * seed/stream splice, so this is a pure append — no sort, no dedupe.
+	 * Past the runway, pause the session; the ticker resumes it.
+	 */
+	const deliver = useCallback(
+		(generation: number, message: TaskEventMessage) => {
+			if (generation !== generationRef.current) return;
+			const fold = foldRef.current;
+			fold.push(message);
+			if (message.event === 'apaevt_status_update') statusIndexRef.current.push(message);
+
+			// Memory backstop: trim the oldest fifth in one splice (amortized;
+			// the session's segment cache makes any deep re-seek cheap).
+			if (fold.length > FOLD_CAP) {
+				fold.splice(0, FOLD_CAP / 5);
+				const floorSeq = fold[0].seq;
+				foldAnchorRef.current = fold[0].eventTime;
+				statusIndexRef.current = statusIndexRef.current.filter((snapshot) => snapshot.seq >= floorSeq);
+			}
+
+			const position = cursorTimeRef.current;
+			if (position === null || message.eventTime <= position) {
+				setRebuildTick((value) => value + 1);
+			}
+			if (message.eventTime > runwayEnd()) {
+				sessionRef.current?.pause();
+				sessionRunningRef.current = false;
+			}
+		},
+		[runwayEnd],
+	);
+
+	/**
+	 * Re-anchor the whole delivery: clear the fold, position the session at
+	 * the anchor, seed state-at-anchor, and play forward at speed 0 (the
+	 * runway throttle bounds how far it actually drains). ONE code path for
+	 * tab-open, seek-and-play, and go-live — only the anchor differs.
+	 */
+	const reseed = useCallback(
+		(anchor: number) => {
+			const generation = ++generationRef.current;
+			foldRef.current = [];
+			statusIndexRef.current = [];
+			seedStatusRef.current = null;
+			foldAnchorRef.current = anchor;
+			const target = sessionRef.current;
+			if (!target) return;
+			setBuffering(true);
+			void (async () => {
+				try {
+					await target.seek(anchor);
+					if (generation !== generationRef.current) return;
+					seedStatusRef.current = await target.getStatus();
+					if (generation !== generationRef.current) return;
+					await target.play(undefined, 0, (item) => deliver(generation, item.event));
+					sessionRunningRef.current = true;
+					setRebuildTick((value) => value + 1);
+				} catch {
+					// A failed seed (e.g. a never-logged stream) leaves the fold
+					// empty; clearing the anchor re-arms the seeding effect so
+					// the next timeline refresh retries.
+					if (generation === generationRef.current) foldAnchorRef.current = null;
+				} finally {
+					if (generation === generationRef.current) setBuffering(false);
+				}
+			})();
+		},
+		[deliver],
+	);
+
+	/** Resume a runway-paused session (position advanced; more disc needed). */
+	const maybeResume = useCallback(() => {
+		const target = sessionRef.current;
+		if (!target || sessionRunningRef.current) return;
+		const fold = foldRef.current;
+		const tail = fold.length > 0 ? fold[fold.length - 1].eventTime : null;
+		if (tail !== null && tail > runwayEnd()) return;
+		const generation = generationRef.current;
+		sessionRunningRef.current = true;
+		void target.play(undefined, 0, (item) => deliver(generation, item.event)).catch(() => {
+			sessionRunningRef.current = false;
+		});
+	}, [runwayEnd, deliver]);
+
+	// Wall-clock of the last arrival-triggered resume (rate limit).
+	const lastNudgeRef = useRef(0);
+
+	/**
+	 * Host subscription feed: hand the event to the SESSION (its live tail /
+	 * watermark splice decides when it reaches the fold). Arrival does NOT
+	 * move the position — the transport ticker owns the clock. While pinned,
+	 * an arrival also nudges a session that idled out at the end of a
+	 * completed stream (its pump pauses there; a new run must wake it) —
+	 * rate-limited, and harmless when delivery is already running (the
+	 * session keeps exactly one delivery loop).
 	 */
 	const ingestLive = useCallback(
 		(message: TaskEventMessage) => {
-			if (absorb([message])) setRebuildTick((value) => value + 1);
-		},
-		[absorb],
-	);
-
-	// =========================================================================
-	// FETCHING (prefetch pipeline, generation-cancelled)
-	// =========================================================================
-
-	/** Fill the buffer around/onward from a time; obeys the generation. */
-	const fetchFrom = useCallback(
-		async (params: { fromTime?: number; cursor?: number }, generation: number) => {
-			if (!readLog) return;
-			setBuffering(true);
-			try {
-				const page = await readLog({ ...params, maxEvents: REPLAY_PAGE_EVENTS });
-				// A newer seek supersedes this fetch: discard stale pages.
-				if (generation !== generationRef.current) return;
-				if (absorb(page.events)) setRebuildTick((value) => value + 1);
-				nextSeqRef.current = page.nextSeq;
-			} catch {
-				// Fetch errors leave the buffer as-is; the next tick retries
-				// via the low-water check.
-			} finally {
-				if (generation === generationRef.current) setBuffering(false);
+			const target = sessionRef.current;
+			if (!target) return;
+			target.ingestLive(message);
+			const now = Date.now();
+			if (pinnedRef.current && now - lastNudgeRef.current > 2_000) {
+				lastNudgeRef.current = now;
+				const generation = generationRef.current;
+				sessionRunningRef.current = true;
+				void target.play(undefined, 0, (item) => deliver(generation, item.event)).catch(() => {
+					sessionRunningRef.current = false;
+				});
 			}
 		},
-		[readLog, absorb],
+		[deliver],
 	);
 
-	/** Prefetch ahead of the playhead when the runway gets short. */
-	const maybePrefetch = useCallback(() => {
-		if (nextSeqRef.current === undefined) return;
-		const buffer = bufferRef.current;
-		const cursor = cursorTimeRef.current ?? 0;
-		const ahead = buffer.length - upperBound(buffer, cursor);
-		// Scale the runway with speed: 25X eats a page in seconds.
-		if (ahead < PREFETCH_LOW_WATER * Math.max(1, speed / 4)) {
-			void fetchFrom({ cursor: nextSeqRef.current }, generationRef.current);
-			nextSeqRef.current = undefined; // one in-flight continuation at a time
-		}
-	}, [speed, fetchFrom]);
-
-	// Late-joiner backfill: a view opened mid-run has NOTHING from before its
-	// subscribe instant — status keeps the chart alive (it streams ~1/s), but
-	// the run's earlier output/flow/trace events already happened and will
-	// never arrive live. On entering live with a log reader available, read
-	// the WHOLE open track (the same track-begin anchor replay seeks use);
-	// while the chapters cache has not revealed the run's begin, fall back to
-	// a bounded window and extend backward once it does. The seq dedupe
-	// splices fetched history under the live tail, and the continuation (if
-	// the track spans multiple pages) drains through maybePrefetch on the
-	// pinned tick.
+	// --- Initial seeding ------------------------------------------------------
+	// A session appearing (or the open track's begin becoming known while the
+	// fold is still shallow) seeds the live view: anchor at the open run's
+	// begin so the accumulating panes have the whole run, with a bounded
+	// fallback until the chapters cache reveals it.
 	useEffect(() => {
-		if (!pinned || readLog === null) return;
+		if (!session || !pinned) return;
 		const now = Date.now() / 1000;
 		const openTrackBegin = timeline?.chapters?.find((chapter) => chapter.endTime == null)?.beginTime;
-		const anchor = openTrackBegin ?? now - LIVE_BACKFILL_FALLBACK_SECONDS;
-		// Already backfilled at least this deep (1s slack absorbs float noise).
-		if (liveBackfillAnchorRef.current !== null && anchor >= liveBackfillAnchorRef.current - 1) return;
-		liveBackfillAnchorRef.current = anchor;
-		void fetchFrom({ fromTime: anchor }, generationRef.current);
-	}, [pinned, readLog, timeline, fetchFrom]);
+		const anchor = openTrackBegin ?? now - LIVE_FALLBACK_SECONDS;
+		// Already anchored at least this deep (1s slack absorbs float noise).
+		const current = foldAnchorRef.current;
+		if (current !== null && anchor >= current - 1) return;
+		reseed(anchor);
+	}, [session, pinned, timeline, reseed]);
 
 	// =========================================================================
 	// TRANSPORT TICKER — the ONE clock that moves the DVR position
 	// =========================================================================
 	// Runs whenever the transport is playing, pinned or not. Pinned: the
-	// position IS now (wall clock, never trailing the newest server-stamped
+	// position IS now (wall clock, never trailing the newest delivered
 	// event — absorbs client/server clock skew). Unpinned: the position
-	// advances at speed x wall clock; when it catches the end of recorded
-	// content with nothing left to page in, it re-pins automatically (the
-	// DVD ran out of disc — hand the transport back to the live head).
-	// Paused: no ticks, the position is frozen wherever it is.
+	// advances at speed x wall clock; when it catches the wall clock it
+	// re-pins automatically (the DVD ran out of disc — hand the transport
+	// back to the live head). Paused: no ticks, the position is frozen.
 
 	useEffect(() => {
 		if (!playing) return;
@@ -453,44 +491,41 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			const elapsed = (nowMs - lastTickRef.current) / 1000;
 			lastTickRef.current = nowMs;
 			const wallNow = nowMs / 1000;
-			const buffer = bufferRef.current;
-			const tail = buffer.length > 0 ? buffer[buffer.length - 1].eventTime : null;
+			const fold = foldRef.current;
+			const tail = fold.length > 0 ? fold[fold.length - 1].eventTime : null;
 
 			let next: number;
 			if (pinnedRef.current) {
 				next = Math.max(wallNow, tail ?? wallNow);
-				// Drain a pending backfill continuation (no-op without one) —
-				// live joins mid-run may need several pages to reach the tail.
-				maybePrefetch();
 			} else {
 				next = (cursorTimeRef.current ?? tail ?? wallNow) + elapsed * speed;
 				if (next >= wallNow) {
 					// Caught the WALL CLOCK — that is what "caught up" means:
-					// the trailing dead space after the last recorded event is
-					// part of the disc and is swept at playback speed like any
-					// other dead zone; only reaching now itself re-pins. (No
-					// event can be stamped in the future, so nothing unfetched
-					// can exist beyond this point.)
-					generationRef.current += 1;
+					// trailing dead space after the last recorded event is part
+					// of the disc and is swept at playback speed like any other
+					// dead zone; only reaching now itself re-pins. (No event can
+					// be stamped in the future, so nothing undelivered can exist
+					// beyond this point.)
 					setPinned(true);
 					next = Math.max(wallNow, tail ?? wallNow);
-				} else {
-					maybePrefetch();
 				}
 			}
 
+			// Advance-ahead: a runway-paused session resumes as the position
+			// eats into its cushion (also drains live catch-up after re-pin).
+			maybeResume();
 			setCursorTime(next);
 		}, PLAYBACK_TICK_MS);
 		return () => clearInterval(timer);
-	}, [playing, speed, maybePrefetch]);
+	}, [playing, speed, maybeResume]);
 
 	// =========================================================================
 	// TRACK RESOLUTION
 	// =========================================================================
 
 	/**
-	 * True when a buffered message marks the start of a run — the writer's
-	 * run-begin lifecycle marker (backfilled from the log) or the task's
+	 * True when a folded message marks the start of a run — the writer's
+	 * run-begin lifecycle marker (replayed from the log) or the task's
 	 * begin announcement (live broadcast).
 	 */
 	const isRunBegin = (message: TaskEventMessage): boolean => {
@@ -501,7 +536,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	/**
 	 * Resolve the EFFECTIVE track for a position: the chapter containing it,
 	 * else the last chapter that ended before it — extended by one rule for
-	 * the live edge: chapters refresh slowly, so events in the buffer AFTER
+	 * the live edge: chapters refresh slowly, so events in the fold AFTER
 	 * the last closed chapter mean a new run is underway and form a
 	 * synthetic open track. The synthetic track begins at the LATEST
 	 * run-begin marker at-or-before the position — several runs can start
@@ -524,18 +559,18 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 
 			// Live-edge rule: events after the last closed chapter = the next
 			// run, not yet in the chapters cache.
-			const buffer = bufferRef.current;
+			const fold = foldRef.current;
 			const afterTime = lastEnded?.endTime ?? Number.NEGATIVE_INFINITY;
-			const firstIdx = lastEnded === null ? (buffer.length > 0 ? 0 : -1) : lowerBound(buffer, afterTime + 0.001);
-			if (firstIdx >= 0 && firstIdx < buffer.length && buffer[firstIdx].eventTime <= position) {
+			const firstIdx = lastEnded === null ? (fold.length > 0 ? 0 : -1) : lowerBound(fold, afterTime + 0.001);
+			if (firstIdx >= 0 && firstIdx < fold.length && fold[firstIdx].eventTime <= position) {
 				// Scan backward from the position for the newest run-begin
 				// marker — that is the synthetic track's true begin. Fall back
 				// to the first post-chapter event only when no marker exists
 				// in the window (marker evicted or pre-marker stream).
-				let first = buffer[firstIdx];
-				for (let i = upperBound(buffer, position) - 1; i >= firstIdx; i--) {
-					if (isRunBegin(buffer[i])) {
-						first = buffer[i];
+				let first = fold[firstIdx];
+				for (let i = upperBound(fold, position) - 1; i >= firstIdx; i--) {
+					if (isRunBegin(fold[i])) {
+						first = fold[i];
 						break;
 					}
 				}
@@ -552,7 +587,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	);
 
 	// =========================================================================
-	// THE THREE READS — binary search + enumerate over the one buffer
+	// THE SHAPED READS — binary search + enumerate over the fold
 	// =========================================================================
 
 	// Whole-second clock: the chart re-derives once per position-second, not
@@ -565,7 +600,10 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 		if (position === null) return null;
 		const statusIndex = statusIndexRef.current;
 		const idx = upperBound(statusIndex, position) - 1;
-		return idx >= 0 ? ((statusIndex[idx].body ?? null) as Record<string, unknown> | null) : null;
+		if (idx >= 0) return (statusIndex[idx].body ?? null) as Record<string, unknown> | null;
+		// Before the first delivered snapshot the session's state-at-anchor
+		// seed answers (it already folded keyframe + interior to the anchor).
+		return seedStatusRef.current;
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [cursorTime, rebuildTick]);
 
@@ -576,15 +614,24 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			if (position === null) return { chapter: null, active: false, events: [] };
 			const resolved = resolveTrack(position);
 			if (resolved === null) return { chapter: null, active: false, events: [] };
+			// DEAD ZONE = CLEARED, at any position: a run's data renders only
+			// INSIDE its track. Final stats are reached by positioning just
+			// before the end (|< / >|), not by dead-zone ghosting — trailing
+			// state was v1's crutch for not having a DVR.
+			if (!resolved.active) return { chapter: null, active: false, events: [] };
 
-			const buffer = bufferRef.current;
+			const fold = foldRef.current;
 			const begin = resolved.chapter.beginTime;
 			const endCap = Math.min(position, resolved.chapter.endTime ?? position);
-			const from = lowerBound(buffer, begin);
-			const to = upperBound(buffer, endCap);
-			const slice = buffer.slice(from, to);
+			const from = lowerBound(fold, begin);
+			const to = upperBound(fold, endCap);
+			const slice = fold.slice(from, to);
 			const events = types ? slice.filter((message) => types.includes(message.event)) : slice;
-			return { chapter: resolved.chapter, active: resolved.active, events };
+			// Coverage honesty: a cap-trimmed fold that no longer reaches the
+			// track's begin must say so (1s slack absorbs float noise).
+			const anchor = foldAnchorRef.current;
+			const truncated = anchor !== null && anchor > begin + 1 ? { truncatedBefore: anchor } : null;
+			return { chapter: resolved.chapter, active: resolved.active, events, ...truncated };
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[resolveTrack, cursorTime, rebuildTick],
@@ -593,8 +640,8 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	/** Events within an arbitrary [from, to] slice — the Analyze brush read. */
 	const rangeEvents = useCallback(
 		(fromTime: number, toTime: number, types?: readonly string[]): TaskEventMessage[] => {
-			const buffer = bufferRef.current;
-			const slice = buffer.slice(lowerBound(buffer, fromTime), upperBound(buffer, toTime));
+			const fold = foldRef.current;
+			const slice = fold.slice(lowerBound(fold, fromTime), upperBound(fold, toTime));
 			return types ? slice.filter((message) => types.includes(message.event)) : slice;
 		},
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -665,6 +712,8 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 		if (position === null) return zero;
 		const resolved = resolveTrack(position);
 		if (resolved === null) return zero;
+		// DEAD ZONE = CLEARED (see trackEvents): stats zero outside a track.
+		if (!resolved.active) return zero;
 
 		const begin = resolved.chapter.beginTime;
 		const effEnd = Math.min(position, resolved.chapter.endTime ?? position);
@@ -730,52 +779,37 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	}, [pinned, cursorTime, timeline]);
 
 	// =========================================================================
-	// TRANSPORT CONTROLLER (generation-cancelled seeks)
+	// TRANSPORT CONTROLLER
 	// =========================================================================
 
 	const seekToTime = useCallback(
 		(time: number) => {
-			generationRef.current += 1;
-			const generation = generationRef.current;
 			setPinned(false);
 			setPlaying(false);
 			setCursorTime(time);
 
-			// Fetch anchor: the effective track's BEGIN (so accumulating panes
-			// replay the whole run) and at least the largest chart window —
-			// clamped to what the stream actually retains, or no buffer could
-			// ever satisfy the check and every small step would flush.
+			// Anchor: the effective track's BEGIN (so accumulating panes replay
+			// the whole run) and at least the largest chart window — clamped to
+			// what the stream actually retains.
 			const resolved = resolveTrack(time);
 			const rawAnchor = Math.min(resolved?.chapter.beginTime ?? time, time - MAX_CHART_RANGE_SECONDS);
-			const streamFloor = timeline?.startTime ?? null;
+			const streamFloor = timelineRef.current?.startTime ?? null;
 			const anchor = streamFloor !== null ? Math.max(rawAnchor, streamFloor) : rawAnchor;
 
-			// Buffer reuse ladder (a flush blanks every pane for a frame — it
-			// is the LAST resort, not the default):
-			// 1. Position inside the buffer with enough left depth: serve as-is.
-			// 2. Inside but shallow on the left: extend backward IN PLACE (the
-			//    fetched range overlaps the buffer start, so it stays one
-			//    contiguous window) — panes keep rendering throughout.
-			// 3. Just past the tail: extend forward in place, same reasoning.
-			// 4. Truly elsewhere: flush and refill from the anchor.
-			const buffer = bufferRef.current;
-			const first = buffer.length > 0 ? buffer[0].eventTime : null;
-			const last = buffer.length > 0 ? buffer[buffer.length - 1].eventTime : null;
+			// Coverage check (the whole seek policy): if the fold already spans
+			// the position from at least the anchor, only the cursor moves —
+			// the session keeps delivering ahead and reads gate by position.
+			// Anything else re-anchors; the session's segment cache makes a
+			// warm reseed instant.
+			const fold = foldRef.current;
+			const first = fold.length > 0 ? fold[0].eventTime : null;
+			const last = fold.length > 0 ? fold[fold.length - 1].eventTime : null;
 			const inWindow = first !== null && last !== null && time >= first && time <= last + 1;
 			const depthOk = first !== null && first <= anchor + 1;
 			if (inWindow && depthOk) return;
-			if (inWindow && !depthOk) {
-				void fetchFrom({ fromTime: anchor }, generation);
-				return;
-			}
-			if (first !== null && last !== null && time > last && depthOk) {
-				void fetchFrom({ fromTime: last }, generation);
-				return;
-			}
-			flush();
-			void fetchFrom({ fromTime: anchor }, generation);
+			reseed(anchor);
 		},
-		[resolveTrack, flush, fetchFrom],
+		[resolveTrack, reseed],
 	);
 
 	const controller = useMemo<TaskPlayerController>(() => {
@@ -805,22 +839,45 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				seekToTime(base + deltaSeconds);
 			},
 			previousTrack: () => {
+				// |<: to the CURRENT task's beginning; already there (or in a
+				// dead zone) -> to the PREVIOUS task's end, just BEFORE its
+				// termination flurry — the run's final stats, still visible.
 				const cursor = cursorTime ?? Number.POSITIVE_INFINITY;
-				const candidates = chapters.filter((chapter) => chapter.beginTime < cursor - 1);
-				const target = candidates[candidates.length - 1] ?? chapters[0];
-				if (target) seekToTime(target.beginTime);
+				const inside = chapters.find((chapter) => chapter.beginTime <= cursor && cursor <= (chapter.endTime ?? Number.POSITIVE_INFINITY));
+				if (inside && cursor > inside.beginTime + 1) {
+					seekToTime(inside.beginTime);
+					return;
+				}
+				const bound = inside ? inside.beginTime : cursor;
+				let previous: TaskChapter | null = null;
+				for (const chapter of chapters) {
+					if (chapter.endTime != null && chapter.endTime <= bound && (previous === null || chapter.endTime > (previous.endTime ?? 0))) {
+						previous = chapter;
+					}
+				}
+				if (previous?.endTime != null) seekToTime(previous.endTime - TRACK_END_EPSILON);
+				else if (chapters[0]) seekToTime(chapters[0].beginTime);
 			},
 			nextTrack: () => {
+				// >|: to the CURRENT task's end, just BEFORE its termination
+				// flurry (final stats); in a dead zone -> the next task's
+				// beginning. At the live edge of an open run there is no end
+				// yet — nothing to do.
 				const cursor = cursorTime ?? 0;
-				const target = chapters.find((chapter) => chapter.beginTime > cursor + 1);
-				if (target) seekToTime(target.beginTime);
+				const inside = chapters.find((chapter) => chapter.beginTime <= cursor && cursor <= (chapter.endTime ?? Number.POSITIVE_INFINITY));
+				if (inside && inside.endTime != null && cursor < inside.endTime - TRACK_END_EPSILON - 0.5) {
+					seekToTime(inside.endTime - TRACK_END_EPSILON);
+					return;
+				}
+				const next = chapters.find((chapter) => chapter.beginTime > cursor + 1);
+				if (next) seekToTime(next.beginTime);
 			},
 			goLive: () => {
 				// GO LIVE = pin the position to now and resume; the ticker
-				// keeps it riding the wall clock from here.
-				generationRef.current += 1;
-				const buffer = bufferRef.current;
-				const tail = buffer.length > 0 ? buffer[buffer.length - 1].eventTime : null;
+				// keeps it riding the wall clock and maybeResume drains the
+				// session up to the head.
+				const fold = foldRef.current;
+				const tail = fold.length > 0 ? fold[fold.length - 1].eventTime : null;
 				const head = Math.max(Date.now() / 1000, tail ?? 0);
 				setPinned(true);
 				setPlaying(true);

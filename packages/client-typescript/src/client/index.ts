@@ -48,3 +48,7 @@ export * from './client.js';
 
 // Export the database API namespace (DatabaseApi class, DatabaseDialect enum)
 export * from './database.js';
+
+// Export the run-log DVR session class (the codec stays internal — only the
+// session and its user-facing types are public surface)
+export { LogEventStream } from './log-stream.js';

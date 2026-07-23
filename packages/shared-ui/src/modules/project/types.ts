@@ -48,6 +48,13 @@ export interface TraceEvent {
 export interface TraceRow {
 	id: number;
 	docId: number;
+	/**
+	 * The trace's PERMANENT identity — its BEGIN event's continuum seq.
+	 * This is the id the log API's getTrace resolves. `docId` is only the
+	 * fold's client-side grouping counter, and the flow events' pipe/slot
+	 * id is reused across documents — neither can name a trace.
+	 */
+	beginSeq?: number;
 	completed: boolean;
 	lane: string;
 	filterName: string;

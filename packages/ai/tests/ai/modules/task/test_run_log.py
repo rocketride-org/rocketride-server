@@ -110,6 +110,21 @@ def flow_event(data=None):
     }
 
 
+def flow_op(op, pid=1, component='x', data=None, pipes=None):
+    """A flow event with an explicit op/component/data (unstamped)."""
+    body = {'id': pid, 'op': op, 'component': component, 'pipes': pipes or ['base', component]}
+    if op in ('enter', 'leave'):
+        body['trace'] = {'lane': 'open', 'data': data}
+    else:
+        body['trace'] = {}
+    return {'type': 'event', 'event': 'apaevt_flow', 'body': body}
+
+
+def status_event(**fields):
+    """A status-update event with the given body fields (unstamped)."""
+    return {'type': 'event', 'event': 'apaevt_status_update', 'body': dict(fields)}
+
+
 async def open_writer(istore, spool_root, stamp=None, raise_floor=None, kind=KIND):
     """Create + open a writer with fake stamping callbacks."""
     if stamp is None:
@@ -121,35 +136,72 @@ async def open_writer(istore, spool_root, stamp=None, raise_floor=None, kind=KIN
     return writer
 
 
-def read_spool_lines(spool_root, stream=STREAM):
-    """Read every JSONL line currently spooled for the stream (flat files)."""
+def read_spool_lines(spool_root, stream=STREAM, *, decode=True, keep_keyframes=False):
+    """
+    Read every JSONL line currently spooled for the stream (flat files).
+
+    Each spool file is one segment: by default its lines are decoded back to
+    full events through a per-segment SegmentDecoder and keyframe preambles
+    are dropped (pass decode=False / keep_keyframes=True for the raw form).
+    """
     prefix = f'{CLIENT}.{stream}.'
     lines = []
     for name in sorted(os.listdir(spool_root)):
         if not (name.startswith(prefix) and name.endswith('.jsonl')):
             continue
+        decoder = run_log.SegmentDecoder()
         with open(os.path.join(spool_root, name), encoding='utf-8') as f:
-            lines.extend(json.loads(line) for line in f if line.strip())
+            for line in f:
+                if not line.strip():
+                    continue
+                msg = json.loads(line)
+                if msg.get('type') == 'keyframe':
+                    if decode:
+                        decoder.seed(msg)
+                    if keep_keyframes:
+                        lines.append(msg)
+                    continue
+                lines.append(decoder.decode(msg) if decode else msg)
     return lines
 
 
-async def read_stream_lines(istore, spool_root, stream=STREAM):
+async def read_stream_lines(istore, spool_root, stream=STREAM, *, decode=True, keep_keyframes=False):
     """
     Read the ENTIRE stream's lines: uploaded store segments (by ascending
     segment id) followed by whatever is still spooled. Runs force-seal and
     upload at end_run, so post-run assertions must look at the store, not
     the (already flip-and-deleted) spool copy.
+
+    v2 segments carry a keyframe preamble and delta bodies: by default the
+    lines are DECODED back to full events (each segment through its own
+    SegmentDecoder — which also exercises the codec round-trip), and
+    keyframe lines are dropped. Pass decode=False for the raw stored form,
+    keep_keyframes=True to receive keyframe lines too.
     """
     lines = []
+
+    def consume(text: str) -> None:
+        decoder = run_log.SegmentDecoder()
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            msg = json.loads(line)
+            if msg.get('type') == 'keyframe':
+                if decode:
+                    decoder.seed(msg)
+                if keep_keyframes:
+                    lines.append(msg)
+                continue
+            lines.append(decoder.decode(msg) if decode else msg)
+
     listing = await istore.list_files(f'{STORE_PREFIX}.logs/{PROJECT}')
     names = sorted(
         path for path in (listing or []) if f'{SOURCE}.{KIND}.' in path.rsplit('/', 1)[-1] and path.endswith('.jsonl')
     )
     for path in names:
         raw = await istore.read_file(path)
-        text = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else str(raw)
-        lines.extend(json.loads(line) for line in text.splitlines() if line.strip())
-    lines.extend(read_spool_lines(spool_root, stream))
+        consume(raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else str(raw))
+    lines.extend(read_spool_lines(spool_root, stream, decode=decode, keep_keyframes=keep_keyframes))
     return lines
 
 
@@ -224,6 +276,140 @@ class TestAppendAndMarkers:
         seqs = [ln['seq'] for ln in await read_stream_lines(istore, spool_root)]
         assert seqs == sorted(seqs)
         assert len(set(seqs)) == len(seqs)
+
+
+# =============================================================================
+# SEGMENT CODEC (keyframes + deltas)
+# =============================================================================
+
+
+class TestSegmentCodec:
+    @pytest.mark.asyncio
+    async def test_every_segment_opens_with_keyframe(self, istore, spool_root, monkeypatch):
+        monkeypatch.setattr(run_log, 'CONST_LOG_SEGMENT_BYTES', 512)
+        stamp, raise_floor, _ = make_stamp()
+        writer = await open_writer(istore, spool_root, stamp, raise_floor)
+        for i in range(20):
+            writer.append(stamp(output_event('x' * 100)))
+        await writer._drain_uploads()
+        await writer.end_run('ok')
+
+        raw = await read_stream_lines(istore, spool_root, decode=False, keep_keyframes=True)
+        # Group by segment: every stored segment file starts with a keyframe.
+        listing = await istore.list_files(f'{STORE_PREFIX}.logs/{PROJECT}')
+        seg_files = [p for p in (listing or []) if p.endswith('.jsonl')]
+        keyframes = [m for m in raw if m.get('type') == 'keyframe']
+        assert len(keyframes) == len(seg_files)
+        for kf in keyframes:
+            assert kf['ver'] == run_log.LOG_SCHEMA_VERSION
+            assert 'status' in kf and 'openFrames' in kf and 'console' in kf
+
+    @pytest.mark.asyncio
+    async def test_golden_round_trip_status_and_leave_deltas(self, istore, spool_root, monkeypatch):
+        """THE writer/reader golden test: reconstruct == exactly what was appended."""
+        monkeypatch.setattr(run_log, 'CONST_LOG_STATUS_SAMPLE_SECONDS', 0.0)
+        stamp, raise_floor, _ = make_stamp()
+        writer = await open_writer(istore, spool_root, stamp, raise_floor)
+
+        appended = []
+
+        def log(msg):
+            appended.append(json.loads(json.dumps(msg)))  # deep copy of the full form
+            writer.append(msg)
+
+        big = {'text': 'T' * 500, 'meta': {'name': 'doc.pdf', 'pages': 3}}
+        log(stamp(status_event(totalCount=0, metrics={'cpu': 1.5, 'mem': 100})))
+        log(stamp(flow_op('begin', pid=7, component='doc.pdf', pipes=['doc.pdf'])))
+        log(stamp(flow_op('enter', pid=7, component='parse_1', data=big)))
+        # Leave with a barely-changed payload => stored as a small delta
+        changed = {'text': big['text'], 'meta': {'name': 'doc.pdf', 'pages': 4}}
+        log(stamp(flow_op('leave', pid=7, component='parse_1', data=changed)))
+        log(stamp(status_event(totalCount=1, metrics={'cpu': 2.0, 'mem': 100})))
+        log(stamp(flow_op('end', pid=7, component='doc.pdf')))
+        await writer.end_run('ok')
+
+        # Raw form proves deltas were actually written (not just passthrough)
+        raw = await read_stream_lines(istore, spool_root, decode=False)
+        raw_leaves = [m for m in raw if m.get('event') == 'apaevt_flow' and m['body'].get('op') == 'leave']
+        assert run_log.DELTA_KEY in raw_leaves[0]['body']['trace']['data']
+        raw_statuses = [m for m in raw if m.get('event') == 'apaevt_status_update']
+        assert run_log.DELTA_KEY in raw_statuses[1]['body']  # second status is a delta
+
+        # Decoded form reconstructs the appended events EXACTLY
+        decoded = await read_stream_lines(istore, spool_root)
+        decoded_by_seq = {m['seq']: m for m in decoded if 'seq' in m}
+        for original in appended:
+            assert decoded_by_seq[original['seq']] == original
+
+    @pytest.mark.asyncio
+    async def test_cross_segment_leave_stored_full(self, istore, spool_root, monkeypatch):
+        monkeypatch.setattr(run_log, 'CONST_LOG_SEGMENT_BYTES', 400)
+        stamp, raise_floor, _ = make_stamp()
+        writer = await open_writer(istore, spool_root, stamp, raise_floor)
+
+        payload = {'text': 'P' * 120, 'k': 1}
+        writer.append(stamp(flow_op('begin', pid=3, component='d.pdf', pipes=['d.pdf'])))
+        writer.append(stamp(flow_op('enter', pid=3, component='parse_1', data=payload)))
+        # Force a seal between enter and leave: the leave's base is now in a
+        # previous segment => it must be stored FULL.
+        for i in range(6):
+            writer.append(stamp(output_event('pad-' + 'z' * 90)))
+        writer.append(stamp(flow_op('leave', pid=3, component='parse_1', data={'text': 'P' * 120, 'k': 2})))
+        await writer.end_run('ok')
+
+        raw = await read_stream_lines(istore, spool_root, decode=False)
+        leaves = [m for m in raw if m.get('event') == 'apaevt_flow' and m['body'].get('op') == 'leave']
+        assert leaves and run_log.DELTA_KEY not in (leaves[0]['body']['trace'].get('data') or {})
+        # And the decoded stream still carries the full leave payload
+        decoded = await read_stream_lines(istore, spool_root)
+        dec_leaves = [m for m in decoded if m.get('event') == 'apaevt_flow' and m['body'].get('op') == 'leave']
+        assert dec_leaves[0]['body']['trace']['data'] == {'text': 'P' * 120, 'k': 2}
+
+    @pytest.mark.asyncio
+    async def test_keyframe_carries_open_frames_and_console(self, istore, spool_root, monkeypatch):
+        monkeypatch.setattr(run_log, 'CONST_LOG_SEGMENT_BYTES', 400)
+        stamp, raise_floor, _ = make_stamp()
+        writer = await open_writer(istore, spool_root, stamp, raise_floor)
+
+        writer.append(stamp(output_event('console-line-1')))
+        writer.append(stamp(flow_op('begin', pid=9, component='open.pdf', pipes=['open.pdf'])))
+        writer.append(stamp(flow_op('enter', pid=9, component='parse_1', data={'a': 1})))
+        # Pad to force a seal while pid 9 is still open
+        for i in range(6):
+            writer.append(stamp(output_event('pad-' + 'w' * 90)))
+        writer.append(stamp(output_event('after-boundary')))
+        await writer.end_run('ok')
+
+        raw = await read_stream_lines(istore, spool_root, decode=False, keep_keyframes=True)
+        keyframes = [m for m in raw if m.get('type') == 'keyframe']
+        # Some later keyframe must list the still-open frame + carried console
+        carried = [kf for kf in keyframes if kf.get('openFrames')]
+        assert carried, 'expected a keyframe carrying the open frame across the boundary'
+        frame = carried[0]['openFrames'][0]
+        assert frame['id'] == 9 and frame['component'] == 'parse_1' and frame['doc'] == 'open.pdf'
+        assert isinstance(frame['touched'], list) and frame['touched']
+        assert any('console-line-1' in line for line in carried[0]['console']['lines'])
+
+    @pytest.mark.asyncio
+    async def test_resumed_stream_marks_first_keyframe_incomplete(self, istore, spool_root):
+        stamp, raise_floor, _ = make_stamp()
+        writer = await open_writer(istore, spool_root, stamp, raise_floor)
+        writer.append(stamp(output_event('run-1')))
+        await writer.end_run('ok')
+
+        # A FRESH process (new writer) resumes the stream: its first keyframe
+        # must be marked incomplete (pre-existing open state is unknown).
+        writer2 = RunLogWriter(
+            FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+        )
+        await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='h2', trace_level=None)
+        writer2.append(stamp(output_event('run-2')))
+        await writer2.end_run('ok')
+
+        raw = await read_stream_lines(istore, spool_root, decode=False, keep_keyframes=True)
+        keyframes = [m for m in raw if m.get('type') == 'keyframe']
+        assert keyframes[0]['complete'] is True
+        assert any(kf['complete'] is False for kf in keyframes[1:])
 
 
 # =============================================================================

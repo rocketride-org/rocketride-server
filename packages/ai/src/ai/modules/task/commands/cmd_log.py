@@ -26,8 +26,8 @@
 # ONE read path over the per-task run-log continuum: EaaS serves every log
 # read (live and completed alike) by composing store segments + local spool
 # via the stream's control file — clients never touch storage directly.
-# Dispatches on ``arguments.subcommand`` (chapters / read / delete), the same
-# shape as rrext_store and rrext_deploy. Streams are addressed by the plain
+# Dispatches on ``arguments.subcommand`` (chapters / read / segment / delete),
+# the same shape as rrext_store and rrext_deploy. Streams are addressed by the plain
 # identity tuple (projectId + source + runKind) — NEVER by token: tokens are
 # credentials and appear nowhere in the log system.
 # =============================================================================
@@ -75,6 +75,7 @@ class LogCommands(DAPConn):
         self._log_subcommand_handlers = {
             'chapters': self._log_chapters,
             'read': self._log_read,
+            'segment': self._log_segment,
             'delete': self._log_delete,
         }
 
@@ -215,6 +216,44 @@ class LogCommands(DAPConn):
             )
         except FileNotFoundError:
             body = {'events': []}
+        return self.build_response(request, body=body)
+
+    # ── segment ──────────────────────────────────────────────────────────────
+
+    async def _log_segment(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Raw JSONL bytes of ONE segment, chunked by byte offset.
+
+        The DVR v2 bulk path: no server-side line scanning, filtering, or
+        parsing — the immutable segment content is handed over as-is in
+        whole-line-aligned chunks (each response ends on a newline, so the
+        client parses every chunk standalone). Repeat with the returned
+        ``nextOffset`` until ``final``. The active segment is served up to
+        its current length; the live subscription covers growth past that.
+        """
+        self.verify_permission('task.monitor')
+
+        segment = args.get('segment')
+        if segment is None:
+            raise ValueError('segment is required')
+
+        try:
+            body = await self._reader_for(args).segment_raw(
+                int(segment),
+                offset=int(args.get('offset') or 0),
+                max_bytes=int(args.get('maxBytes') or 0),
+            )
+        except FileNotFoundError:
+            # A missing segment (evicted / never existed) is an empty final
+            # chunk, not an error — the client's coverage map handles it.
+            body = {
+                'segment': int(segment),
+                'offset': 0,
+                'data': '',
+                'size': 0,
+                'nextOffset': None,
+                'final': True,
+            }
         return self.build_response(request, body=body)
 
     # ── delete ───────────────────────────────────────────────────────────────

@@ -165,7 +165,12 @@ from .log import (
     LogChaptersResult,
     LogEvent,
     LogReadResult,
+    LogSegmentResult,
     LogDeleteResult,
+    LogTraceSummary,
+    LogTracesResult,
+    LogTraceDetail,
+    LogPlayItem,
 )
 
 # Billing types: subscriptions, Stripe plans, compute credits, promo codes.
@@ -286,7 +291,12 @@ __all__ = [
     'LogChaptersResult',
     'LogEvent',
     'LogReadResult',
+    'LogSegmentResult',
     'LogDeleteResult',
+    'LogTraceSummary',
+    'LogTracesResult',
+    'LogTraceDetail',
+    'LogPlayItem',
     # Billing types
     'AppPrice',
     'BillingDetail',

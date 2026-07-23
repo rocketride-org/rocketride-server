@@ -14,13 +14,13 @@ export { parseServerEvent } from './utils';
 export type { ParsedServerEvent } from './utils';
 
 // Run-log continuum delivery + projections (the source-section building
-// blocks: smart-buffer hook, text log projection, efficiency analysis).
+// blocks: session-consumer hook, text log projection, efficiency analysis).
 export { useTaskEvents } from './hooks/useTaskEvents';
 export type {
-	LogReadFetcher,
 	PlayerMode,
 	TaskChapter,
 	TaskEventMessage,
+	TaskEventSession,
 	TaskPlayerController,
 	TaskPlayerState,
 	TaskTimeline,

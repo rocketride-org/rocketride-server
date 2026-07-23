@@ -63,6 +63,9 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t.id = 'task-test'
     t.token = 'tk_test'
     t.source = source
+    # Real tasks always carry their project id; _forward_task_event stamps
+    # it into every forwarded body (identity safety net).
+    t.project_id = 'proj-test'
     t._task_name = task_name
     t._pipeline = pipeline if pipeline is not None else {}
     t._threads = 4

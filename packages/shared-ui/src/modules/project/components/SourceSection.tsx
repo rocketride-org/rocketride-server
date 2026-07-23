@@ -38,12 +38,15 @@ import { Card } from '../../../components/card/Card';
 import { SourceTokensContent } from '../../../components/tokens/Tokens';
 import { SourceFlowContent } from '../../../components/flow/Flow';
 import Trace from '../../../components/trace/Trace';
+import { TraceDetail } from '../../../components/trace/TraceDetail';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { Button } from '../../../components/button/Button';
 import Errors from '../../../components/errors/Errors';
 import { EmptyState } from '../../../components/empty-state/EmptyState';
 import PipelineActions from '../../../components/pipeline-actions/PipelineActions';
 
 import { useTaskEvents } from '../hooks/useTaskEvents';
-import type { LogReadFetcher, TaskEventMessage, TaskTimeline } from '../hooks/useTaskEvents';
+import type { TaskEventMessage, TaskEventSession, TaskTimeline } from '../hooks/useTaskEvents';
 import { useTraceState } from '../hooks/useTraceState';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { parseServerEvent } from '../utils';
@@ -68,8 +71,8 @@ export interface ISourceSectionProps {
 	projectId: string;
 	/** Raw stamped live events already filtered to THIS source by the parent. */
 	liveEvents: TaskEventMessage[];
-	/** Stream-bound log pager (null disables replay — live-only host). */
-	readLog: LogReadFetcher | null;
+	/** Factory for this stream's DVR session (null disables replay). */
+	openSession: (() => TaskEventSession) | null;
 	/** Stream-bound chapters fetch (null disables the timeline). */
 	fetchTimeline: (() => Promise<TaskTimeline>) | null;
 	/** Host-fed live status for this source (live mode renders from it). */
@@ -104,6 +107,14 @@ const PILLS: Array<{ id: SourcePill; label: string }> = [
 /** Timeline refresh cadence (ms) — chapters are one small control-file read. */
 const TIMELINE_REFRESH_MS = 30_000;
 
+/**
+ * Trace recency window (completed documents shown). Matches the session
+ * contract: all in-flight traces plus the last 50 closed — older traces are
+ * reached by scrubbing the DVR back into their lifetime, never by growing
+ * the list.
+ */
+const TRACE_CLOSED_WINDOW = 50;
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -134,8 +145,8 @@ const styles: Record<string, CSSProperties> = {
 		pointerEvents: 'none',
 		userSelect: 'none',
 	},
+	// Replay identity line — sits in the header where "Started X ago" lives.
 	replayContext: {
-		marginLeft: 'auto',
 		display: 'flex',
 		alignItems: 'center',
 		gap: 8,
@@ -170,6 +181,12 @@ const styles: Record<string, CSSProperties> = {
 	paneScrollHost: {
 		flex: 1,
 		minHeight: 0,
+	},
+	// Trace recency-window honesty line above the trace list.
+	traceWindowNote: {
+		color: 'var(--rr-text-secondary)',
+		fontSize: 12,
+		padding: '2px 2px 6px',
 	},
 	// Analyze-slice header: names the brushed range + the way back to track scope.
 	sliceBar: {
@@ -209,7 +226,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 	runKind,
 	projectId,
 	liveEvents,
-	readLog,
+	openSession,
 	fetchTimeline,
 	liveTaskStatus,
 	componentNames,
@@ -224,7 +241,12 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 	const [pill, setPill] = useState<SourcePill>('status');
 	const [timeline, setTimeline] = useState<TaskTimeline | null>(null);
 
-	// --- Timeline (chapters) fetch: mount + slow refresh ---------------------
+	// --- Timeline (chapters) fetch: mount + slow reconciliation --------------
+	// Task begin/end announcements FIX UP the local timeline directly (see
+	// the feed loop); this poll only reconciles with the authoritative
+	// server list — merging keeps any locally synthesized chapter the
+	// server's control file has not caught up to yet (begin-announcement
+	// races the writer).
 	const fetchTimelineRef = useRef(fetchTimeline);
 	fetchTimelineRef.current = fetchTimeline;
 	useEffect(() => {
@@ -233,7 +255,20 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 			if (!fetchTimelineRef.current) return;
 			try {
 				const next = await fetchTimelineRef.current();
-				if (!cancelled) setTimeline(next);
+				if (cancelled) return;
+				setTimeline((prev) => {
+					if (!prev) return next;
+					// A locally synthesized chapter and the server's chapter for
+					// the SAME run carry different begin seqs (task-begin event
+					// vs run-begin marker) — treat a fetched chapter within 2s
+					// of a local begin as the same run, or the bar draws two
+					// overlapping blocks.
+					const localNewer = prev.chapters.filter(
+						(c) => !next.chapters.some((f) => f.beginSeq === c.beginSeq || Math.abs(f.beginTime - c.beginTime) < 2),
+					);
+					if (localNewer.length === 0) return next;
+					return { ...next, completed: false, chapters: [...next.chapters, ...localNewer] };
+				});
 			} catch {
 				// A never-logged stream (or transient error) keeps the last value.
 			}
@@ -246,9 +281,25 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 		};
 	}, [source.id, runKind]);
 
-	// --- The DVR over this source's continuum --------------------------------
+	// --- The DVR session over this source's continuum ------------------------
+	// One session per stream identity, host-created via the factory and
+	// disposed on identity change/unmount. The factory identity churns with
+	// host renders, so it rides a ref — only the stream identity re-creates.
+	const openSessionRef = useRef(openSession);
+	openSessionRef.current = openSession;
+	const [session, setSession] = useState<TaskEventSession | null>(null);
+	useEffect(() => {
+		const next = openSessionRef.current ? openSessionRef.current() : null;
+		setSession(next);
+		return () => {
+			next?.closeEventStream();
+			setSession(null);
+		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [source.id, runKind, projectId, openSession === null]);
+
 	const { statusAt, trackEvents, rangeEvents, chartSeries, trackStats, ingestLive, player, controller } = useTaskEvents({
-		readLog,
+		session,
 		timeline,
 	});
 
@@ -261,16 +312,58 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 		if (next) setPill('analyze');
 	}, []);
 
-	// Feed NEW live events into the buffer (absorb dedupes on seq, so an
+	// Task-active switch, flipped by the host's announcements: apaevt_task
+	// 'begin' arrives -> a task is running (open run renders GREEN);
+	// 'end' arrives -> terminated (renders blue). Null until either is
+	// seen (page opened mid-run) — consumers fall back to the timeline.
+	const [runActive, setRunActive] = useState<boolean | null>(null);
+
+	// Feed NEW live events into the session (it dedupes on seq, so an
 	// idempotent incremental feed over the growing host array is safe).
 	const fedCountRef = useRef(0);
 	useEffect(() => {
 		// A shrunken array means the host cleared/pruned its feed (reconnect):
 		// restart from the top — seq dedupe makes the re-feed a no-op for
-		// anything the buffer already holds.
+		// anything the session already holds.
 		if (liveEvents.length < fedCountRef.current) fedCountRef.current = 0;
 		for (let i = fedCountRef.current; i < liveEvents.length; i++) {
-			ingestLive(liveEvents[i]);
+			const message = liveEvents[i];
+			if (message.event === 'apaevt_task') {
+				const action = (message.body as Record<string, unknown> | undefined)?.action;
+				if (action === 'begin') setRunActive(true);
+				else if (action === 'end') setRunActive(false);
+				// FIX UP the local timeline from the announcement itself —
+				// the event carries the chapter identity (eventTime=begin,
+				// seq=beginSeq), so no server round-trip, no race with the
+				// writer, no thundering herd of chapter fetches. The slow
+				// poll reconciles with authoritative data later.
+				if (action === 'begin') {
+					// The announcement carries the run-begin marker's seq — the
+					// chapter's exact identity — so the local chapter joins the
+					// server's list by equality (announcement seq is the
+					// fallback for older servers).
+					const announced = (message.body as Record<string, unknown> | undefined)?.beginSeq;
+					const begin = {
+						beginTime: message.eventTime,
+						beginSeq: typeof announced === 'number' ? announced : message.seq,
+						endTime: null,
+						outcome: null,
+					};
+					setTimeline((prev) => {
+						const base = prev ?? { chapters: [], segments: [], horizonSeq: 0, completed: false };
+						if (base.chapters.some((c) => c.beginSeq === begin.beginSeq)) return prev;
+						return { ...base, completed: false, chapters: [...base.chapters, begin] };
+					});
+				} else if (action === 'end') {
+					const endTime = message.eventTime;
+					setTimeline((prev) => {
+						if (!prev) return prev;
+						const chapters = prev.chapters.map((c, i) => (i === prev.chapters.length - 1 && c.endTime == null ? { ...c, endTime } : c));
+						return { ...prev, completed: true, chapters };
+					});
+				}
+			}
+			ingestLive(message);
 		}
 		fedCountRef.current = liveEvents.length;
 	}, [liveEvents, ingestLive]);
@@ -278,20 +371,72 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 	// --- Position-shaped reads ------------------------------------------------
 	const isReplay = player.mode === 'replay';
 
-	// Snapshot panes (tokens/flow/errors/header): the last status snapshot
-	// at-or-before the position — absolute, so it fully reconstructs their
-	// state; in a dead zone it is naturally the previous run's final state.
-	// Live mode prefers the host's map (it also carries endpoint notes).
-	const replayStatus = useMemo<TaskStatus | undefined>(
-		() => (isReplay ? ((statusAt() ?? undefined) as TaskStatus | undefined) : undefined),
-		[isReplay, statusAt],
-	);
-	const effectiveStatus = isReplay ? replayStatus : liveTaskStatus;
+	// DEAD ZONE = CLEARED: pane data renders only when the position sits
+	// INSIDE a running track (live: the task is active; replay: the cursor
+	// is within a chapter). The header keeps the last status (name/state)
+	// — only pane DATA clears.
 
-	// Accumulating panes (trace/log/analyze): the EFFECTIVE track's events —
-	// a finished run persists through the dead zone and resets only when the
-	// next run begins; a mid-track seek replays from the track's beginning.
+	// Snapshot panes (tokens/flow/errors): the last status snapshot
+	// at-or-before the position, from the STREAM in both modes — the fold's
+	// last status event is the same wire event the host map holds, so the
+	// panes have one source of truth. The HEADER (name/state/Run-Stop/
+	// notes) deliberately stays on the host's live map: its controls act on
+	// the live task, not the viewed position.
+	const streamStatus = useMemo<TaskStatus | undefined>(
+		() => (statusAt() ?? undefined) as TaskStatus | undefined,
+		[statusAt],
+	);
+	const effectiveStatus = isReplay ? streamStatus : liveTaskStatus;
+	const paneStatus = streamStatus;
+
+	// Accumulating panes (trace/log/analyze): the EFFECTIVE track's events.
+	// DEAD ZONE = CLEARED: outside a running track the window is empty (the
+	// hook enforces it), and the snapshot panes gate on the same fact.
 	const track = useMemo(() => trackEvents(), [trackEvents]);
+	const cleared = !track.active;
+
+	/**
+	 * Full-chapter reconstruction for the Download actions: a THROWAWAY
+	 * session walks EVERY segment of the effective track through the SDK's
+	 * reconstruction layer — the file is the complete run, independent of
+	 * the display fold and its caps. Completion: a sealed chapter ends at
+	 * the first event past its endTime; an open (live) chapter settles on
+	 * delivery silence after the speed-0 drain.
+	 */
+	const fetchChapterEvents = useCallback(async (): Promise<TaskEventMessage[]> => {
+		const factory = openSessionRef.current;
+		const chapter = trackEvents().chapter;
+		if (!factory || !chapter) return [];
+		const walker = factory();
+		try {
+			const collected: TaskEventMessage[] = [];
+			await walker.seek(chapter.beginTime - 0.001);
+			const end = chapter.endTime ?? Number.POSITIVE_INFINITY;
+			await new Promise<void>((resolve) => {
+				let settle: ReturnType<typeof setTimeout> | null = null;
+				const done = () => {
+					if (settle) clearTimeout(settle);
+					resolve();
+				};
+				const arm = () => {
+					if (settle) clearTimeout(settle);
+					settle = setTimeout(done, 700);
+				};
+				arm();
+				void walker.play(undefined, 0, ({ event }) => {
+					if (event.eventTime > end) {
+						done();
+						return;
+					}
+					collected.push(event);
+					arm();
+				});
+			});
+			return collected;
+		} finally {
+			walker.closeEventStream();
+		}
+	}, [trackEvents]);
 
 	// Trace fold: same parse as live, over the track's flow events; the
 	// track identity keys the fold so a track flip restarts it cleanly.
@@ -307,7 +452,55 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 		return folded;
 	}, [track, projectId, source.id]);
 
-	const { rows: traceRows, clearTrace } = useTraceState(foldedTraceEvents, track.chapter?.beginSeq ?? -1);
+	const { rows: traceRows } = useTraceState(foldedTraceEvents, track.chapter?.beginSeq ?? -1);
+
+	// Trace display window (the recency contract): every IN-FLIGHT trace
+	// plus the most recently completed TRACE_CLOSED_WINDOW documents — any
+	// older trace stays reachable by scrubbing the DVR back into its
+	// lifetime. Grouping is by document (a trace is that document's call
+	// tree); hiding drops whole documents, never interior rows.
+	const { rows: windowedTraceRows, hiddenTraces } = useMemo(() => {
+		const byDoc = new Map<number, { open: boolean; end: number }>();
+		for (const row of traceRows) {
+			const group = byDoc.get(row.docId) ?? { open: false, end: 0 };
+			if (!row.completed) group.open = true;
+			group.end = Math.max(group.end, row.endTimestamp ?? row.timestamp);
+			byDoc.set(row.docId, group);
+		}
+		if (byDoc.size <= TRACE_CLOSED_WINDOW) return { rows: traceRows, hiddenTraces: 0 };
+		const closedEnds = [...byDoc.values()].filter((group) => !group.open).map((group) => group.end);
+		closedEnds.sort((a, b) => b - a);
+		const cutoff = closedEnds[TRACE_CLOSED_WINDOW - 1] ?? 0;
+		const keep = new Set([...byDoc.entries()].filter(([, group]) => group.open || group.end >= cutoff).map(([docId]) => docId));
+		if (keep.size === byDoc.size) return { rows: traceRows, hiddenTraces: 0 };
+		return { rows: traceRows.filter((row) => keep.has(row.docId)), hiddenTraces: byDoc.size - keep.size };
+	}, [traceRows]);
+
+	// --- Trace DetailPanel (one request's call tree via session.getTrace) ----
+	const [openTrace, setOpenTrace] = useState<{ traceId: number; name: string } | null>(null);
+
+	// The list's request order — Prev/Next in the panel footer walks it.
+	const traceDocOrder = useMemo(() => {
+		const order: Array<{ traceId: number; name: string }> = [];
+		const seen = new Set<number>();
+		for (const row of windowedTraceRows) {
+			if (!seen.has(row.docId) && row.beginSeq !== undefined) {
+				seen.add(row.docId);
+				order.push({ traceId: row.beginSeq, name: row.objectName });
+			}
+		}
+		return order;
+	}, [windowedTraceRows]);
+	const openTraceIndex = openTrace ? traceDocOrder.findIndex((entry) => entry.traceId === openTrace.traceId) : -1;
+
+	/** Fetch one trace's reconstructed events through the DVR session. */
+	const fetchTrace = useCallback(
+		async (traceId: number) => {
+			if (!session) throw new Error('Trace detail requires a connected session');
+			return session.getTrace(traceId);
+		},
+		[session],
+	);
 
 	// Flow pane: rebuild pipeflow.byPipe AT THE POSITION from the track's
 	// flow events — every flow event carries the full post-op stack, and
@@ -323,30 +516,20 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 			if (body.op === 'end') delete byPipe[id];
 			else byPipe[id] = (body.pipes as string[]) ?? [];
 		}
-		const base = effectiveStatus ?? null;
+		const base = (cleared ? undefined : paneStatus) ?? null;
 		if (!base) return null;
 		return { ...base, pipeflow: { ...base.pipeflow, byPipe } } as TaskStatus;
-	}, [track, effectiveStatus]);
+	}, [track, paneStatus, cleared]);
 
 	// --- Section chrome -------------------------------------------------------
 	const currentElapsed = useElapsedTimer(effectiveStatus ?? null);
-
-	// Track number of the cursor's chapter (1-based), for the replay chrome.
-	const trackNumber = useMemo(() => {
-		if (!isReplay || player.cursorTime === null || !timeline?.chapters) return null;
-		for (let i = timeline.chapters.length - 1; i >= 0; i--) {
-			const chapter = timeline.chapters[i];
-			if (chapter.beginTime <= player.cursorTime) return i + 1;
-		}
-		return null;
-	}, [isReplay, player.cursorTime, timeline]);
 
 	/** Pill selection — plain toggle handler. */
 	const handlePillChange = useCallback((id: string) => setPill(id as SourcePill), []);
 
 	// --- Pane rendering -------------------------------------------------------
-	const errorItems = effectiveStatus?.errors ?? [];
-	const warningItems = effectiveStatus?.warnings ?? [];
+	const errorItems = cleared ? [] : (paneStatus?.errors ?? []);
+	const warningItems = cleared ? [] : (paneStatus?.warnings ?? []);
 	const [flowViewMode, setFlowViewMode] = useState<'pipeline' | 'component'>('pipeline');
 
 	/** Render the pane for the active pill. */
@@ -363,7 +546,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 				// dead space — and the footer its track-scoped stats.
 				return <Status getSeries={chartSeries} getStats={trackStats} />;
 			case 'tokens':
-				return <SourceTokensContent tokens={effectiveStatus?.tokens} />;
+				return <SourceTokensContent tokens={cleared ? undefined : paneStatus?.tokens} />;
 			case 'flow': {
 				// Both views fold from byPipe — with nothing in flight the
 				// toggle chooses between two empty states, so hide it (same
@@ -373,14 +556,14 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					<>
 						{hasFlowData && (
 							<div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-								<div style={commonStyles.toggleGroup}>
-									<button style={commonStyles.toggleButton(flowViewMode === 'pipeline')} onClick={() => setFlowViewMode('pipeline')}>
-										Pipeline View
-									</button>
-									<button style={commonStyles.toggleButton(flowViewMode === 'component')} onClick={() => setFlowViewMode('component')}>
-										Component View
-									</button>
-								</div>
+								<ToggleGroup
+									options={[
+										{ id: 'pipeline', label: 'Pipeline View' },
+										{ id: 'component', label: 'Component View' },
+									]}
+									value={flowViewMode}
+									onChange={(id) => setFlowViewMode(id as 'pipeline' | 'component')}
+								/>
 							</div>
 						)}
 						<SourceFlowContent taskStatus={flowStatus} viewMode={flowViewMode} />
@@ -390,15 +573,13 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 			case 'trace':
 				return (
 					<div style={styles.paneFill}>
-						{traceRows.length > 0 && (
-							<div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-								<button style={commonStyles.buttonSecondary} onClick={clearTrace}>
-									Clear
-								</button>
+						{hiddenTraces > 0 && (
+							<div style={styles.traceWindowNote}>
+								Showing in-flight traces and the last {TRACE_CLOSED_WINDOW} completed — {hiddenTraces} earlier {hiddenTraces === 1 ? 'trace is' : 'traces are'} reachable by scrubbing back.
 							</div>
 						)}
 						<div style={styles.paneScrollHost}>
-							<Trace rows={traceRows} componentNames={componentNames} />
+							<Trace rows={windowedTraceRows} componentNames={componentNames} onOpenTrace={(traceId, name) => setOpenTrace({ traceId, name })} />
 						</div>
 					</div>
 				);
@@ -412,7 +593,14 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					</>
 				);
 			case 'log':
-				return <LogPane events={track.events} downloadBase={`${source.id}.${runKind}`} />;
+				return (
+					<LogPane
+						events={track.events}
+						downloadBase={`${source.id}.${runKind}`}
+						{...(track.truncatedBefore !== undefined ? { truncatedBefore: track.truncatedBefore } : {})}
+						fetchChapterEvents={fetchChapterEvents}
+					/>
+				);
 			case 'analyze':
 				// A brushed slice overrides the track scope; the header row
 				// names the slice and offers the way back.
@@ -425,12 +613,12 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 									{' · '}
 									{Math.max(1, Math.round(selection.to - selection.from))} s
 								</span>
-								<button style={commonStyles.buttonSecondary} onClick={() => setSelection(null)}>
+								<Button variant="secondary" small onClick={() => setSelection(null)}>
 									Clear — back to track
-								</button>
+								</Button>
 							</div>
 						)}
-						<AnalyzePane events={selection ? rangeEvents(selection.from, selection.to) : track.events} />
+						<AnalyzePane events={selection ? rangeEvents(selection.from, selection.to) : track.events} onOpenTrace={(traceId, name) => setOpenTrace({ traceId, name })} />
 					</>
 				);
 			default:
@@ -453,34 +641,31 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					</div>
 				}
 				headerActions={
-					<div style={{ ...styles.headerActionsColumn, ...(isReplay ? styles.headerDimmed : undefined) }} aria-disabled={isReplay || undefined}>
-						<div style={styles.headerActionsRow}>
+					<div style={styles.headerActionsColumn}>
+						<div style={{ ...styles.headerActionsRow, ...(isReplay ? styles.headerDimmed : undefined) }} aria-disabled={isReplay || undefined}>
 							<PipelineActions notes={liveTaskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />
 							{runKind === 'dev' && !isReadonly && !isReplay && onPipelineAction && (
 								<StatusActions
-									taskStatus={(isReplay ? effectiveStatus : liveTaskStatus) ?? null}
+									taskStatus={liveTaskStatus ?? null}
 									onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)}
 									isSubscribed={isSubscribed}
 								/>
 							)}
 						</div>
-						<StatusElapsed taskStatus={(isReplay ? effectiveStatus : liveTaskStatus) ?? null} currentElapsed={currentElapsed} />
-					</div>
-				}
-				toolbar={
-					<>
-						<ToggleGroup options={PILLS} value={pill} onChange={handlePillChange} />
-						{isReplay && (
+						{isReplay ? (
+							// The replayed track's identity replaces the live "Started
+							// X ago" line — NOT dimmed: unlike the live-state controls
+							// above it, this describes exactly what the panes show.
 							<span style={styles.replayContext}>
 								<span style={styles.replayBadge}>Replay</span>
-								<span>
-									{formatTime(player.cursorTime)}
-									{trackNumber !== null ? ` · track ${trackNumber}` : ''} · {player.speed}X
-								</span>
+								<span>of {formatTime(track.chapter?.beginTime ?? player.cursorTime)}</span>
 							</span>
+						) : (
+							<StatusElapsed taskStatus={liveTaskStatus ?? null} currentElapsed={currentElapsed} />
 						)}
-					</>
+					</div>
 				}
+				toolbar={<ToggleGroup options={PILLS} value={pill} onChange={handlePillChange} />}
 				noBodyPadding
 			>
 				{/* The selected pane (or the idle-gap state). */}
@@ -491,10 +676,52 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					timeline={timeline}
 					player={player}
 					controller={controller}
+					runActive={runActive}
 					selection={selection}
 					onSelectionChange={handleSelectionChange}
 				/>
 			</Card>
+
+			{/* One request's full call tree — the stock right-side drawer, fed by
+			    the log API's getTrace; Prev/Next walks the list without closing. */}
+			{openTrace && (
+				<DetailPanel
+					open
+					onClose={() => setOpenTrace(null)}
+					title={openTrace.name}
+					width={640}
+					persistKey="panelTraceDetailWidth"
+					subtitle={openTraceIndex >= 0 ? `Request ${openTraceIndex + 1} of ${traceDocOrder.length} — ${source.name}` : source.name}
+					footer={
+						<div style={{ display: 'flex', gap: 8 }}>
+							<Button
+								variant="secondary"
+								small
+								disabled={openTraceIndex <= 0}
+								onClick={() => {
+									const previous = traceDocOrder[openTraceIndex - 1];
+									if (previous) setOpenTrace(previous);
+								}}
+							>
+								Previous
+							</Button>
+							<Button
+								variant="secondary"
+								small
+								disabled={openTraceIndex < 0 || openTraceIndex >= traceDocOrder.length - 1}
+								onClick={() => {
+									const next = traceDocOrder[openTraceIndex + 1];
+									if (next) setOpenTrace(next);
+								}}
+							>
+								Next
+							</Button>
+						</div>
+					}
+				>
+					<TraceDetail traceId={openTrace.traceId} projectId={projectId} fetchTrace={fetchTrace} componentNames={componentNames} />
+				</DetailPanel>
+			)}
 		</div>
 	);
 };

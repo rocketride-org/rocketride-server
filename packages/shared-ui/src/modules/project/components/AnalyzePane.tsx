@@ -32,6 +32,12 @@ import type { TaskEventMessage } from '../hooks/useTaskEvents';
 export interface IAnalyzePaneProps {
 	/** The visible event window (from useTaskEvents). */
 	events: TaskEventMessage[];
+	/**
+	 * Click-a-row inspection: open the clicked document's full call tree
+	 * (the host's TraceDetail panel). The id is the trace's begin-event
+	 * continuum seq. Absent, rows render inert.
+	 */
+	onOpenTrace?: (traceBeginSeq: number, name: string) => void;
 }
 
 /** Aggregated timing for one pipeline component. */
@@ -40,6 +46,20 @@ interface ComponentStat {
 	count: number;
 	totalSeconds: number;
 	maxSeconds: number;
+}
+
+/** One completed document's span within the window. */
+interface DocumentSpan {
+	/** Pipeline slot id the document ran on. */
+	slot: number;
+	/** Component that opened the document (display label). */
+	component: string;
+	/** The document's begin (epoch seconds). */
+	begin: number;
+	/** Begin-event continuum seq — the trace's permanent identity. */
+	beginSeq: number;
+	/** Begin → end, seconds. */
+	duration: number;
 }
 
 // =============================================================================
@@ -92,11 +112,18 @@ const styles: Record<string, CSSProperties> = {
 		color: 'var(--rr-text-secondary)',
 		fontStyle: 'italic',
 	},
+	// Clickable document rows (click = open the doc's trace panel).
+	rowClickable: {
+		cursor: 'pointer',
+	},
 };
 
 // =============================================================================
 // HELPERS
 // =============================================================================
+
+/** Rows shown in the Slowest-documents table (the trace-open targets). */
+const SLOWEST_DOC_ROWS = 15;
 
 /** Format seconds compactly (ms under 1s, 1 decimal above). */
 function formatSeconds(value: number): string {
@@ -112,16 +139,16 @@ function formatSeconds(value: number): string {
  * Efficiency view over the visible window: component latency, document
  * durations, and idle gaps — all from server-stamped emission times.
  */
-export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events }) => {
+export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events, onOpenTrace }) => {
 	// --- Compute the three fact tables in one pass over the window ----------
-	const { componentStats, documentDurations, idleGaps } = useMemo(() => {
+	const { componentStats, documentSpans, idleGaps } = useMemo(() => {
 		// Open enter frames by component, matched by identity (reentrancy-safe
 		// the same way the trace fold matches leaves).
 		const openEnters = new Map<string, number[]>();
 		const perComponent = new Map<string, ComponentStat>();
 		// Open documents by pipeline slot id.
-		const openDocs = new Map<number, number>();
-		const docDurations: number[] = [];
+		const openDocs = new Map<number, { begin: number; component: string; beginSeq: number }>();
+		const docSpans: DocumentSpan[] = [];
 		// Run activity intervals (chapter begin/end) for idle-gap detection.
 		const activity: Array<{ begin: number; end: number }> = [];
 		let runBegin: number | null = null;
@@ -154,11 +181,17 @@ export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events }) => {
 						perComponent.set(component, stat);
 					}
 				} else if (op === 'begin') {
-					openDocs.set(slot, message.eventTime);
+					openDocs.set(slot, { begin: message.eventTime, component, beginSeq: message.seq });
 				} else if (op === 'end') {
 					const started = openDocs.get(slot);
 					if (started !== undefined) {
-						docDurations.push(Math.max(0, message.eventTime - started));
+						docSpans.push({
+							slot,
+							component: started.component,
+							begin: started.begin,
+							beginSeq: started.beginSeq,
+							duration: Math.max(0, message.eventTime - started.begin),
+						});
 						openDocs.delete(slot);
 					}
 				}
@@ -180,19 +213,21 @@ export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events }) => {
 		}
 
 		const stats = [...perComponent.values()].sort((a, b) => b.totalSeconds - a.totalSeconds);
-		return { componentStats: stats, documentDurations: docDurations, idleGaps: gaps };
+		return { componentStats: stats, documentSpans: docSpans, idleGaps: gaps };
 	}, [events]);
 
-	// --- Document summary ----------------------------------------------------
+	// --- Document summary + the slowest rows (click-to-open targets) ---------
 	const docSummary = useMemo(() => {
-		if (documentDurations.length === 0) return null;
-		const total = documentDurations.reduce((sum, value) => sum + value, 0);
+		if (documentSpans.length === 0) return null;
+		const total = documentSpans.reduce((sum, span) => sum + span.duration, 0);
 		return {
-			count: documentDurations.length,
-			mean: total / documentDurations.length,
-			max: Math.max(...documentDurations),
+			count: documentSpans.length,
+			mean: total / documentSpans.length,
+			max: Math.max(...documentSpans.map((span) => span.duration)),
 		};
-	}, [documentDurations]);
+	}, [documentSpans]);
+
+	const slowestDocs = useMemo(() => [...documentSpans].sort((a, b) => b.duration - a.duration).slice(0, SLOWEST_DOC_ROWS), [documentSpans]);
 
 	if (events.length === 0) {
 		return <EmptyState title="No events to analyze" description="Efficiency metrics appear here while the pipeline runs, when replaying a recorded run, or for a slice brushed on the play bar." />;
@@ -255,6 +290,38 @@ export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events }) => {
 					</table>
 				)}
 			</div>
+
+			{/* Slowest documents — click a row to open its full trace */}
+			{slowestDocs.length > 0 && (
+				<div>
+					<div style={styles.sectionTitle}>Slowest documents (window{onOpenTrace ? ' — click to open' : ''})</div>
+					<table style={styles.table}>
+						<thead>
+							<tr>
+								<th style={styles.th}>Document</th>
+								<th style={styles.th}>Begin</th>
+								<th style={{ ...styles.th, textAlign: 'right' }}>Duration</th>
+							</tr>
+						</thead>
+						<tbody>
+							{slowestDocs.map((span) => (
+								<tr
+									key={`${span.slot}-${span.begin}`}
+									style={onOpenTrace ? styles.rowClickable : undefined}
+									title={onOpenTrace ? 'Open this document’s trace' : undefined}
+									onClick={onOpenTrace ? () => onOpenTrace(span.beginSeq, `${span.component || 'document'} #${span.slot}`) : undefined}
+								>
+									<td style={styles.td}>
+										{span.component || 'document'} #{span.slot}
+									</td>
+									<td style={styles.td}>{new Date(span.begin * 1000).toLocaleTimeString()}</td>
+									<td style={styles.tdNum}>{formatSeconds(span.duration)}</td>
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			)}
 
 			{/* Idle gaps */}
 			<div>

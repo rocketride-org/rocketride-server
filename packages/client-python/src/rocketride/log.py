@@ -40,7 +40,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional
 
-from .types.log import LogChaptersResult, LogDeleteResult, LogReadResult, LogRunKind
+from .log_stream import LogEventStream
+from .types.log import LogChaptersResult, LogDeleteResult, LogReadResult, LogRunKind, LogSegmentResult
 
 if TYPE_CHECKING:
     from .client import RocketRideClient
@@ -67,6 +68,25 @@ class LogApi:
     # =========================================================================
     # RUN LOG
     # =========================================================================
+
+    def open_event_stream(self, project_id: str, source: str, run_kind: LogRunKind) -> LogEventStream:
+        """
+        Open a DVR session over one source continuum.
+
+        The session is the replay/monitoring surface: position-based
+        ``seek``/``get_*``/``play`` over reconstructed events — storage
+        layout (segments, keyframes, deltas) is invisible. Dispose with
+        ``close_event_stream()`` when done.
+
+        Args:
+            project_id: Pipeline project id.
+            source: Source component id.
+            run_kind: 'dev' or 'deploy'.
+
+        Returns:
+            A new, unpositioned session (call ``seek()`` first).
+        """
+        return LogEventStream(self._client, project_id, source, run_kind)
 
     async def chapters(self, project_id: str, source: str, run_kind: LogRunKind) -> LogChaptersResult:
         """
@@ -154,6 +174,50 @@ class LogApi:
         ):
             if value is not None:
                 kwargs[key] = value
+        return await self._client.call('rrext_log', **kwargs)
+
+    async def segment(
+        self,
+        project_id: str,
+        source: str,
+        run_kind: LogRunKind,
+        segment: int,
+        *,
+        offset: int = 0,
+        max_bytes: Optional[int] = None,
+    ) -> LogSegmentResult:
+        """
+        Fetch one segment's raw JSONL bytes, chunked by byte offset.
+
+        The bulk replay path: the server does no line scanning, filtering, or
+        parsing — it hands over the immutable segment content in
+        whole-line-aligned chunks (every chunk ends on a newline, so each
+        parses standalone). Repeat with the returned ``nextOffset`` until
+        ``final``. The active segment is served up to its current length;
+        the live subscription covers growth past that. The segment table
+        (ids + time extents) comes from ``chapters()``.
+
+        Args:
+            project_id: Pipeline project id.
+            source: Source component id.
+            run_kind: 'dev' or 'deploy'.
+            segment: Segment id within the stream.
+            offset: Byte offset to continue from (0 = segment start).
+            max_bytes: Chunk ceiling (server clamps; omit for the default).
+
+        Returns:
+            One raw chunk plus paging metadata.
+        """
+        kwargs: dict = {
+            'subcommand': 'segment',
+            'projectId': project_id,
+            'source': source,
+            'runKind': run_kind,
+            'segment': segment,
+            'offset': offset,
+        }
+        if max_bytes is not None:
+            kwargs['maxBytes'] = max_bytes
         return await self._client.call('rrext_log', **kwargs)
 
     async def delete(

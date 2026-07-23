@@ -16,9 +16,9 @@
  *
  * All data flows in via props; all user actions flow out via callbacks.
  * The host owns the connection: it accumulates raw stamped live events into
- * `liveLogEvents` and binds `readLog`/`fetchTimeline` to `client.log`.
- * Sections are independent — each carries its own pills, player, and buffer
- * (sorted A→Z by source name).
+ * `liveLogEvents` and binds `openEventStream`/`fetchTimeline` to
+ * `client.log`. Sections are independent — each carries its own pills,
+ * player, and DVR session (sorted A→Z by source name).
  */
 
 import React, { useState, useCallback, useRef, useMemo, CSSProperties, ReactNode } from 'react';
@@ -34,7 +34,7 @@ import { OAUTH_ROOT_URL } from '../../config/oauth';
 
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
 import { SourceSection } from './components/SourceSection';
-import type { LogReadFetcher, TaskEventMessage, TaskTimeline } from './hooks/useTaskEvents';
+import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './hooks/useTaskEvents';
 import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent } from './types';
 
 // =============================================================================
@@ -137,10 +137,10 @@ export interface IProjectViewProps {
 	 */
 	liveLogEvents?: TaskEventMessage[];
 	/**
-	 * Stream-bound run-log pager (wraps `client.log.read` for this project).
-	 * Null/omitted disables replay (live-only host).
+	 * Stream-bound DVR session factory (wraps `client.log.openEventStream`
+	 * for this project). Null/omitted disables replay (live-only host).
 	 */
-	readLog?: (stream: { source: string; runKind: 'dev' | 'deploy' }, params: Parameters<LogReadFetcher>[0]) => ReturnType<LogReadFetcher>;
+	openEventStream?: (stream: { source: string; runKind: 'dev' | 'deploy' }) => TaskEventSession;
 	/**
 	 * Stream-bound chapters fetch (wraps `client.log.chapters`). Null/omitted
 	 * disables the activity timeline.
@@ -247,7 +247,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 // COMPONENT
 // =============================================================================
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], readLog, fetchTimeline, deployLifecycle }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, isSubscribed = true, statusMap, serverHost = '', isDirty = false, isNew = false, initialViewState, initialPrefs, onContentChanged, onValidate, onPipelineAction, onViewStateChange, onPrefsChange, onOpenLink, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deployLifecycle }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -463,15 +463,10 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		const bySource = new Map<string, TaskEventMessage[]>();
 		for (const src of sources) bySource.set(src.id, []);
 		for (const message of liveLogEvents) {
+			// Pure body routing: every task-scoped event carries source
+			// (stamped server-side at the forward point).
 			const body = (message.body ?? {}) as Record<string, unknown>;
-			const bodySource = typeof body.source === 'string' ? body.source : undefined;
-			const taskId = typeof message.id === 'string' ? message.id : '';
-			for (const src of sources) {
-				if (bodySource === src.id || (bodySource === undefined && taskId.endsWith(`.${src.id}`))) {
-					bySource.get(src.id)?.push(message);
-					break;
-				}
-			}
+			if (typeof body.source === 'string') bySource.get(body.source)?.push(message);
 		}
 		return bySource;
 	}, [liveLogEvents, sources]);
@@ -486,7 +481,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 					runKind={runKind}
 					projectId={projectId}
 					liveEvents={runKind === 'dev' ? (liveBySource.get(src.id) ?? []) : []}
-					readLog={readLog ? (params) => readLog({ source: src.id, runKind }, params) : null}
+					openSession={openEventStream ? () => openEventStream({ source: src.id, runKind }) : null}
 					fetchTimeline={fetchTimeline ? () => fetchTimeline({ source: src.id, runKind }) : null}
 					liveTaskStatus={runKind === 'dev' ? statusMap[src.id] : undefined}
 					componentNames={componentNames}

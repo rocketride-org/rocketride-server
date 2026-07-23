@@ -15,8 +15,8 @@
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { commonStyles } from '../../../themes/styles';
 import { EmptyState } from '../../../components/empty-state/EmptyState';
+import { Button } from '../../../components/button/Button';
 import type { TaskEventMessage } from '../hooks/useTaskEvents';
 
 // =============================================================================
@@ -29,6 +29,18 @@ export interface ILogPaneProps {
 	events: TaskEventMessage[];
 	/** Base filename for the Download actions (defaults to run-log). */
 	downloadBase?: string;
+	/**
+	 * Coverage honesty from the track window: events before this time exist
+	 * but are not loaded (fold trim) — surfaced above the terminal.
+	 */
+	truncatedBefore?: number;
+	/**
+	 * Full-chapter reconstruction fetch for the Download actions: walks EVERY
+	 * segment of the chapter through the DVR session, uncapped — the file is
+	 * the complete run regardless of what the pane displays. Absent, the
+	 * downloads fall back to the visible window.
+	 */
+	fetchChapterEvents?: () => Promise<TaskEventMessage[]>;
 }
 
 // =============================================================================
@@ -40,6 +52,9 @@ const TEXT_EVENT_TYPES = new Set(['output', 'apaevt_log_lifecycle', 'apaevt_stat
 
 /** Auto-scroll re-pins when the user is within this many px of the bottom. */
 const PIN_THRESHOLD_PX = 24;
+
+/** Display cap (lines) — terminal semantics; downloads are never capped. */
+const DISPLAY_LINE_CAP = 2_000;
 
 // =============================================================================
 // STYLES
@@ -91,6 +106,12 @@ const styles: Record<string, CSSProperties> = {
 	time: {
 		color: 'var(--rr-text-disabled)',
 		marginRight: 8,
+	},
+	// Coverage/cap honesty banner above the terminal box.
+	notice: {
+		color: 'var(--rr-text-secondary)',
+		fontSize: 12,
+		padding: '4px 2px',
 	},
 };
 
@@ -150,18 +171,24 @@ function projectLine(message: TaskEventMessage): LogLine | null {
 /**
  * Text projection of the run log's output/stderr/lifecycle events.
  */
-export const LogPane: React.FC<ILogPaneProps> = ({ events, downloadBase }) => {
+export const LogPane: React.FC<ILogPaneProps> = ({ events, downloadBase, truncatedBefore, fetchChapterEvents }) => {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const [pinned, setPinned] = useState(true);
+	const [downloading, setDownloading] = useState(false);
 
-	// Project the visible window into text lines (memoized on the window).
-	const lines = useMemo(() => {
+	// Project the visible window into text lines (memoized on the window),
+	// then apply the terminal display cap — the cap is display-only; the
+	// Download actions reconstruct the complete run.
+	const { lines, capped } = useMemo(() => {
 		const projected: LogLine[] = [];
 		for (const message of events) {
 			const line = projectLine(message);
 			if (line) projected.push(line);
 		}
-		return projected;
+		if (projected.length > DISPLAY_LINE_CAP) {
+			return { lines: projected.slice(-DISPLAY_LINE_CAP), capped: projected.length - DISPLAY_LINE_CAP };
+		}
+		return { lines: projected, capped: 0 };
 	}, [events]);
 
 	// Tail behavior: follow the bottom while pinned; a manual scroll-up
@@ -189,17 +216,42 @@ export const LogPane: React.FC<ILogPaneProps> = ({ events, downloadBase }) => {
 		URL.revokeObjectURL(url);
 	}, []);
 
-	/** Save the projected text lines as a plain-text log file. */
+	/**
+	 * The download source: the FULL chapter reconstruction when the host
+	 * provides it (every segment walked, uncapped), else the visible window.
+	 */
+	const collectEvents = useCallback(async (): Promise<TaskEventMessage[]> => {
+		if (!fetchChapterEvents) return events;
+		setDownloading(true);
+		try {
+			return await fetchChapterEvents();
+		} catch {
+			// Reconstruction failure falls back to what the pane holds.
+			return events;
+		} finally {
+			setDownloading(false);
+		}
+	}, [fetchChapterEvents, events]);
+
+	/** Save the run's COMPLETE console as a plain-text log file (uncapped). */
 	const handleDownloadLog = useCallback(() => {
-		const text = lines.map((line) => `${line.time} ${line.text}`).join('\n');
-		saveAs(text, `${downloadBase ?? 'run-log'}.log.txt`);
-	}, [lines, downloadBase, saveAs]);
+		void collectEvents().then((all) => {
+			const text = all
+				.map((message) => projectLine(message))
+				.filter((line): line is LogLine => line !== null)
+				.map((line) => `${line.time} ${line.text}`)
+				.join('\n');
+			saveAs(text, `${downloadBase ?? 'run-log'}.log.txt`);
+		});
+	}, [collectEvents, downloadBase, saveAs]);
 
 	/** Save the run's raw stamped events as JSONL — the log file itself. */
 	const handleDownloadEvents = useCallback(() => {
-		const jsonl = events.map((message) => JSON.stringify(message)).join('\n');
-		saveAs(jsonl, `${downloadBase ?? 'run-log'}.jsonl`);
-	}, [events, downloadBase, saveAs]);
+		void collectEvents().then((all) => {
+			const jsonl = all.map((message) => JSON.stringify(message)).join('\n');
+			saveAs(jsonl, `${downloadBase ?? 'run-log'}.jsonl`);
+		});
+	}, [collectEvents, downloadBase, saveAs]);
 
 	// The stock placeholder replaces the terminal frame entirely while empty —
 	// a dashed panel inside the log box would nest two frames.
@@ -207,16 +259,32 @@ export const LogPane: React.FC<ILogPaneProps> = ({ events, downloadBase }) => {
 		return <EmptyState title="No log output" description="Run output appears here while the pipeline runs or when replaying a recorded run." />;
 	}
 
+	// Honesty notices: display cap and fold coverage — the pane never
+	// silently truncates (downloads always reconstruct the complete run).
+	const notices: string[] = [];
+	if (truncatedBefore !== undefined) {
+		const from = new Date(truncatedBefore * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+		notices.push(`Showing events from ${from} — earlier output is not loaded. Download Log for the complete run.`);
+	}
+	if (capped > 0) {
+		notices.push(`Showing the last ${DISPLAY_LINE_CAP.toLocaleString()} lines (${capped.toLocaleString()} earlier hidden). Download Log for the complete run.`);
+	}
+
 	return (
 		<div style={styles.pane}>
 			<div style={styles.toolbar}>
-				<button style={commonStyles.buttonSecondary} onClick={handleDownloadLog}>
-					Download Log
-				</button>
-				<button style={commonStyles.buttonSecondary} onClick={handleDownloadEvents}>
-					Download Events
-				</button>
+				<Button variant="secondary" small onClick={handleDownloadLog} disabled={downloading}>
+					{downloading ? 'Preparing…' : 'Download Log'}
+				</Button>
+				<Button variant="secondary" small onClick={handleDownloadEvents} disabled={downloading}>
+					{downloading ? 'Preparing…' : 'Download Events'}
+				</Button>
 			</div>
+			{notices.map((notice) => (
+				<div key={notice} style={styles.notice}>
+					{notice}
+				</div>
+			))}
 			<div ref={containerRef} style={styles.container} onScroll={handleScroll}>
 				{lines.map((line) => (
 					<div key={line.key} style={line.style}>

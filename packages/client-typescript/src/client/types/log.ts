@@ -59,6 +59,10 @@ export interface LogChapter {
 
 /** One activity span (segment time range) for the activity bar. */
 export interface LogActivitySpan {
+	/** Segment id — the raw segment fetch / DVR cache key. */
+	id?: number;
+	/** First continuum seq recorded in this segment. */
+	seq?: number;
 	startTime?: number | null;
 	endTime?: number | null;
 	/** A run begins within this span. */
@@ -125,4 +129,83 @@ export interface LogReadResult {
 /** Response of `client.log.delete()`. */
 export interface LogDeleteResult {
 	deletedSegments: number;
+}
+
+/** A position on the continuum: epoch seconds, or 'live' (pinned to now). */
+export type LogPosition = number | 'live';
+
+/** One trace (document) summary at the session position. */
+export interface LogTraceSummary {
+	/**
+	 * Display id. For fold summaries this is the pipe SLOT (reused across
+	 * requests); for getTrace results it is the begin seq. Always pass
+	 * {@link beginSeq} (or a begin event's seq) to `getTrace` — that is the
+	 * trace's permanent identity.
+	 */
+	id: number | string;
+	/** The trace's begin-event continuum seq — its PERMANENT identity. */
+	beginSeq?: number;
+	/** Document/object name (the trace's display name). */
+	doc?: string;
+	/** Run start of this trace (epoch seconds). */
+	beginTime?: number;
+	/** Seconds from begin to close (closed traces only). */
+	elapsed?: number;
+	/** Number of component calls seen. */
+	calls?: number;
+	/** True while the trace is still in flight at the position. */
+	open: boolean;
+	/** Segment ids containing this trace's events (sparse expand list). */
+	touched?: number[];
+}
+
+/** Response of `LogEventStream.getTraces()` — state at the position. */
+export interface LogTracesResult {
+	/** ALL in-flight traces at the position (bounded by real concurrency). */
+	open: LogTraceSummary[];
+	/** The most recently completed traces before the position (≤ n). */
+	closed: LogTraceSummary[];
+}
+
+/** Response of `LogEventStream.getTrace()` — one trace's full event set. */
+export interface LogTraceDetail {
+	summary: LogTraceSummary;
+	/** Every event belonging to this trace, seq-ordered, fully reconstructed. */
+	events: LogEvent[];
+}
+
+/** Items delivered to the `play()` callback. */
+export interface LogPlayItem {
+	/** One reconstructed event, delivered in seq order. */
+	event: LogEvent;
+}
+
+/** The `play()` callback. */
+export type LogPlayCallback = (item: LogPlayItem) => void;
+
+/** Options for `client.log.segment()`. */
+export interface LogSegmentParams {
+	/** Byte offset to continue from (0 = segment start). */
+	offset?: number;
+	/** Chunk ceiling in bytes (clamped by the server; 0/omitted = server default). */
+	maxBytes?: number;
+}
+
+/**
+ * Response of `client.log.segment()` — one whole-line-aligned chunk of a
+ * segment's raw JSONL. Repeat with `nextOffset` until `final`.
+ */
+export interface LogSegmentResult {
+	/** Segment id within the stream. */
+	segment: number;
+	/** Byte offset this chunk starts at. */
+	offset: number;
+	/** Raw JSONL text — every chunk ends on a line boundary, parse standalone. */
+	data: string;
+	/** Total segment size in bytes (grows while the segment is active). */
+	size: number;
+	/** Pass back as `offset` to continue; null when exhausted. */
+	nextOffset: number | null;
+	/** True when this chunk reached the end of the segment. */
+	final: boolean;
 }

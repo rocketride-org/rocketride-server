@@ -48,6 +48,7 @@ import json
 import time
 import shutil
 import asyncio
+from collections import deque
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ai.constants import (
@@ -61,6 +62,11 @@ from ai.constants import (
     CONST_LOG_STATUS_SAMPLE_SECONDS,
     CONST_LOG_READ_MAX_EVENTS,
     CONST_LOG_READ_MAX_BYTES,
+    CONST_LOG_SEGMENT_FETCH_BYTES,
+    CONST_LOG_KF_CLOSED_TRACES,
+    CONST_LOG_KF_SCROLLBACK_LINES,
+    CONST_LOG_KF_SCROLLBACK_LINE_CHARS,
+    CONST_LOG_KF_OPEN_CEILING,
 )
 
 if TYPE_CHECKING:
@@ -71,7 +77,9 @@ if TYPE_CHECKING:
 # =============================================================================
 
 # Control-file schema version (first field of the control file).
-LOG_SCHEMA_VERSION = 1
+# v2: segments open with a keyframe preamble and interior events may carry
+# same-segment delta bodies (see SEGMENT CODEC below).
+LOG_SCHEMA_VERSION = 2
 
 # How often the background worker checks the backstop seal and drains uploads.
 _WORKER_INTERVAL_SECONDS = 60.0
@@ -294,6 +302,35 @@ def truncate_event(message: Dict[str, Any], max_bytes: int = CONST_LOG_EVENT_PAY
 
 
 # =============================================================================
+# SEGMENT CODEC (DVR v2: keyframes + same-segment deltas)
+# =============================================================================
+# Segments are self-contained containers (video-codec model): each opens with
+# a `{"type":"keyframe"}` preamble line carrying accumulated state (full
+# status base, byPipe, open-frame summaries with touched-segment lists,
+# recently-closed summaries, console scrollback), and interior events may
+# carry DELTA bodies whose base is guaranteed to live in the SAME segment:
+#   - status deltas reference the previous status (or the keyframe base);
+#   - trace LEAVE deltas reference their paired ENTER — leaves whose enter
+#     landed in an earlier segment are stored FULL (rare; keeps every segment
+#     decodable from its own keyframe alone).
+# The decoder below is the reference implementation shared by the server's
+# ranged read (its "full events" contract) — the SDK sessions mirror it.
+
+# The codec's reference implementation lives in the CLIENT SDK package as an
+# INTERNAL module (rocketride._log_codec — the encoding is storage plumbing,
+# never public SDK surface) so one Python module serves three consumers: this
+# writer, the server's ranged read, and the SDK's event-stream session. The
+# names are re-exported here for ai-side consumers/tests.
+from rocketride._log_codec import (  # noqa: E402  (import placed with its section)
+    DELTA_KEY as DELTA_KEY,
+    DELETED_KEY as DELETED_KEY,
+    SegmentDecoder as SegmentDecoder,
+    apply_shallow_delta as apply_shallow_delta,
+    shallow_delta as shallow_delta,
+)
+
+
+# =============================================================================
 # RUN LOG WRITER
 # =============================================================================
 
@@ -374,6 +411,31 @@ class RunLogWriter:
         self._worker: Optional[asyncio.Task] = None
         self._upload_queue: List[int] = []
 
+        # ---- Keyframe/delta state (DVR v2 codec) ----------------------------
+        # The running accumulated state serialized into each new segment's
+        # keyframe, and the delta bases for interior encoding. Payloads are
+        # kept AS WRITTEN (post-truncation) so every delta base equals the
+        # bytes a reader has in hand.
+        # Last status body as written (delta base). None => next status full.
+        self._kf_prev_status: Optional[Dict[str, Any]] = None
+        # Per pipe id: list of open frames
+        # {'component','doc','enterTime','enterSeq','seg','data'}.
+        self._kf_open: Dict[Any, List[Dict[str, Any]]] = {}
+        # Per pipe id: doc name, call count, touched segment ids, begin time.
+        self._kf_docs: Dict[Any, Dict[str, Any]] = {}
+        # Recently-closed trace summaries (keyframe display seed).
+        self._kf_closed: deque = deque(maxlen=CONST_LOG_KF_CLOSED_TRACES)
+        # Console scrollback (terminal semantics; resets at run begin).
+        self._kf_console: deque = deque(maxlen=CONST_LOG_KF_SCROLLBACK_LINES)
+        # Current pipeflow byPipe map.
+        self._kf_by_pipe: Dict[Any, Any] = {}
+        # Current chapter context {beginSeq, beginTime} (None before first run).
+        self._kf_chapter: Optional[Dict[str, Any]] = None
+        # False when this process resumed an existing stream: the open-frame
+        # state before the crash/restart is unknown, and the FIRST keyframe
+        # this process writes says so.
+        self._kf_complete = True
+
     # -------------------------------------------------------------------------
     # PATHS
     # -------------------------------------------------------------------------
@@ -430,10 +492,14 @@ class RunLogWriter:
             # lastSeq + 1 win and we record the anomaly in the stream itself.
             last_seq = int(self._control.get('lastSeq', 0))
             if last_seq:
+                # This process resumed an existing stream: whatever open-frame
+                # state existed before is unknown, and the first keyframe this
+                # process writes must say so.
+                self._kf_complete = False
                 clock_seed = int(time.time() * 1_000_000)
                 self._raise_seq_floor(last_seq + 1)
                 if clock_seed <= last_seq:
-                    self._append_line(
+                    self._append_event(
                         self._stamp(
                             _lifecycle_event(
                                 'clock-anomaly',
@@ -457,7 +523,7 @@ class RunLogWriter:
                     traceLevel=trace_level,
                 )
             )
-            self._append_line(begin)
+            self._append_event(begin)
             self._active_has_chapter_start = True
 
             # Chapter entry: completed at end_run. Before appending, close any
@@ -555,6 +621,15 @@ class RunLogWriter:
     # APPEND PATH
     # =========================================================================
 
+    @property
+    def chapter_begin_seq(self):
+        """
+        The current chapter's begin seq — the run-begin marker's continuum
+        seq, i.e. the run's PERMANENT chapter identity. None before the
+        first run begins.
+        """
+        return (self._kf_chapter or {}).get('beginSeq')
+
     def append(self, message: Dict[str, Any]) -> None:
         """
         Append one stamped event to the active segment (synchronous, cheap).
@@ -585,32 +660,77 @@ class RunLogWriter:
                     return
             self._last_status_logged = now
 
-        self._append_line(truncate_event(message))
+        self._append_event(truncate_event(message))
+
+    def _append_event(self, message: Dict[str, Any]) -> None:
+        """
+        Encode + write + state-track one full event (the v2 codec pipeline).
+
+        Order matters: the segment (and its keyframe) must exist BEFORE the
+        event is processed — the keyframe is the state at the segment's
+        START, so it must not include this event's own state mutation.
+        """
+        # 1. Ensure the active segment exists; a fresh segment gets its
+        #    keyframe written from the CURRENT (pre-event) state.
+        self._ensure_active(message)
+
+        # 2. Encode against the state (delta bodies where a same-segment base
+        #    exists) and update the state machine. Codec failures must never
+        #    break logging: fall back to the full event.
+        seg_id = int(self._control.get('nextSegmentId', 0))
+        try:
+            encoded = self._kf_process(message, seg_id)
+        except Exception as e:
+            self._debug(f'run-log {self._stream}: codec error ({e}); event stored full')
+            encoded = message
+
+        # 3. Write the (possibly delta-encoded) line.
+        self._append_line(encoded)
+
+    def _ensure_active(self, message: Dict[str, Any]) -> None:
+        """Lazily open the active segment; write its keyframe when fresh."""
+        if self._active_file is not None:
+            return
+
+        # Seal-or-continue: a later run in the SAME process reopens the
+        # previous run's unsealed active file (same id) and restores its
+        # descriptor, so the shared segment keeps one coherent start
+        # time/seq across runs.
+        seg_id = int(self._control.get('nextSegmentId', 0))
+        self._active_path = self._spool_path(seg_id)
+        # Line-buffered: every appended event reaches the OS immediately,
+        # so rrext_log reads of the ACTIVE segment are current to the
+        # last event — gap-free live composition (store + spool + active)
+        # without any separate in-memory tail structure.
+        # newline='\n' pins the on-disk line ending on every platform:
+        # segments are a byte-exact wire/storage format (raw segment
+        # fetch, downloads), so Windows' \r\n translation must not leak
+        # into them.
+        self._active_file = open(self._active_path, 'a', encoding='utf-8', buffering=1, newline='\n')
+        self._active_bytes = os.path.getsize(self._active_path)
+        resumed = self._control.get('active') if self._active_bytes > 0 else None
+        if resumed and int(resumed.get('id', -1)) == seg_id:
+            self._active_start_time = resumed.get('startTime')
+            self._active_start_seq = resumed.get('seq')
+            self._active_has_chapter_start = bool(resumed.get('chapterStart'))
+        else:
+            self._active_start_time = float(message.get('eventTime') or time.time())
+            self._active_start_seq = int(message.get('seq') or 0)
+
+        # A BRAND-NEW segment opens with its keyframe preamble — the
+        # accumulated state at this boundary, making the segment fold
+        # standalone. A resumed active file already has content (its
+        # keyframe was written when it was born).
+        if self._active_bytes == 0:
+            line = json.dumps(self._keyframe_dict(), separators=(',', ':'), default=str) + '\n'
+            self._active_file.write(line)
+            self._active_bytes += len(line)
+            # After the first keyframe this process writes, its state IS the
+            # continuous truth again.
+            self._kf_complete = True
 
     def _append_line(self, message: Dict[str, Any]) -> None:
-        """Serialize one event and append it to the active spool segment."""
-        # Lazily open the active segment on first line. Seal-or-continue: a
-        # later run in the SAME process reopens the previous run's unsealed
-        # active file (same id) and restores its descriptor, so the shared
-        # segment keeps one coherent start time/seq across runs.
-        if self._active_file is None:
-            seg_id = int(self._control.get('nextSegmentId', 0))
-            self._active_path = self._spool_path(seg_id)
-            # Line-buffered: every appended event reaches the OS immediately,
-            # so rrext_log reads of the ACTIVE segment are current to the
-            # last event — gap-free live composition (store + spool + active)
-            # without any separate in-memory tail structure.
-            self._active_file = open(self._active_path, 'a', encoding='utf-8', buffering=1)
-            self._active_bytes = os.path.getsize(self._active_path)
-            resumed = self._control.get('active') if self._active_bytes > 0 else None
-            if resumed and int(resumed.get('id', -1)) == seg_id:
-                self._active_start_time = resumed.get('startTime')
-                self._active_start_seq = resumed.get('seq')
-                self._active_has_chapter_start = bool(resumed.get('chapterStart'))
-            else:
-                self._active_start_time = float(message.get('eventTime') or time.time())
-                self._active_start_seq = int(message.get('seq') or 0)
-
+        """Serialize one encoded line, append it, and run the seal check."""
         line = json.dumps(message, separators=(',', ':'), default=str) + '\n'
         self._active_file.write(line)
         self._active_bytes += len(line)
@@ -623,9 +743,202 @@ class RunLogWriter:
         if message.get('event') == 'apaevt_log_lifecycle' and message.get('body', {}).get('action') == 'run-begin':
             self._active_has_chapter_start = True
 
-        # Size seal: cut at the line boundary just crossed.
+        # Size seal AFTER the write (write-then-check): checking before would
+        # loop forever on any event larger than the segment target — an
+        # oversized event yields an oversized single-event segment instead.
         if self._active_bytes >= CONST_LOG_SEGMENT_BYTES:
             self._seal_active()
+
+    # =========================================================================
+    # KEYFRAME / DELTA STATE MACHINE (the v2 codec, writer side)
+    # =========================================================================
+
+    def _keyframe_dict(self) -> Dict[str, Any]:
+        """
+        Build the keyframe preamble from the current accumulated state.
+
+        Everything in the keyframe is COMPACT (summaries + touched-segment
+        lists); full payloads live only in segment interiors. The console
+        block IS the terminal's scrollback at this boundary.
+        """
+        open_frames: List[Dict[str, Any]] = []
+        partial = False
+        for pid, stack in self._kf_open.items():
+            doc_info = self._kf_docs.get(pid, {})
+            touched = sorted(doc_info.get('touched', ()))
+            for frame in stack:
+                if len(open_frames) >= CONST_LOG_KF_OPEN_CEILING:
+                    partial = True
+                    break
+                open_frames.append(
+                    {
+                        'id': pid,
+                        'component': frame.get('component'),
+                        'doc': doc_info.get('doc'),
+                        'enterTime': frame.get('enterTime'),
+                        'enterSeq': frame.get('enterSeq'),
+                        'touched': touched,
+                    }
+                )
+
+        return {
+            'type': 'keyframe',
+            'ver': LOG_SCHEMA_VERSION,
+            'complete': self._kf_complete,
+            'partial': partial,
+            'chapter': self._kf_chapter,
+            'status': self._kf_prev_status or {},
+            'byPipe': self._kf_by_pipe,
+            'openFrames': open_frames,
+            'closedRecent': list(self._kf_closed),
+            'console': {
+                'lines': list(self._kf_console),
+                'truncated': len(self._kf_console) == self._kf_console.maxlen,
+            },
+        }
+
+    def _kf_process(self, msg: Dict[str, Any], seg_id: int) -> Dict[str, Any]:
+        """
+        Encode one event against the state machine and update the state.
+
+        Deltas are emitted ONLY when the base lives in the SAME segment
+        (status: previous status or the keyframe base; leave: its paired
+        enter written into this segment) — every segment stays decodable
+        from its own keyframe alone. State stores payloads AS WRITTEN so
+        delta bases equal the bytes a reader holds.
+
+        Args:
+            msg: The full (already truncated) event.
+            seg_id: The segment this event is being written into.
+
+        Returns:
+            The event to write — delta-encoded where a base exists.
+        """
+        event = msg.get('event')
+        body = msg.get('body')
+
+        # ---- Lifecycle: run boundaries reset the accumulated state ----------
+        if event == 'apaevt_log_lifecycle' and isinstance(body, dict):
+            if body.get('action') == 'run-begin':
+                self._kf_chapter = {'beginSeq': msg.get('seq'), 'beginTime': msg.get('eventTime')}
+                self._kf_open.clear()
+                self._kf_docs.clear()
+                self._kf_closed.clear()
+                self._kf_console.clear()
+                self._kf_by_pipe = {}
+            return msg
+
+        # ---- Status: delta against the previous snapshot --------------------
+        if event == 'apaevt_status_update' and isinstance(body, dict):
+            prev = self._kf_prev_status
+            self._kf_prev_status = body
+            if prev is None:
+                return msg
+            encoded = dict(msg)
+            encoded['body'] = {DELTA_KEY: shallow_delta(prev, body)}
+            return encoded
+
+        # ---- Flow: open/close frames, leave deltas, touched tracking --------
+        if event == 'apaevt_flow' and isinstance(body, dict):
+            op = body.get('op')
+            pid = body.get('id')
+            component = body.get('component')
+            trace = body.get('trace') or {}
+            data = trace.get('data')
+            etime = float(msg.get('eventTime') or 0)
+
+            doc_info = self._kf_docs.get(pid)
+            if doc_info is not None:
+                doc_info.setdefault('touched', set()).add(seg_id)
+
+            if op == 'begin':
+                self._kf_docs[pid] = {
+                    'doc': component,
+                    'calls': 0,
+                    'beginTime': etime,
+                    # Begin-event continuum seq — the trace's PERMANENT identity
+                    # (slot ids recycle; the seq never does).
+                    'beginSeq': msg.get('seq'),
+                    'touched': {seg_id},
+                }
+                self._kf_open[pid] = []
+                self._kf_by_pipe[pid] = body.get('pipes') or []
+                return msg
+
+            if op == 'enter':
+                self._kf_by_pipe[pid] = body.get('pipes') or []
+                if doc_info is not None:
+                    doc_info['calls'] = int(doc_info.get('calls', 0)) + 1
+                self._kf_open.setdefault(pid, []).append(
+                    {
+                        'component': component,
+                        'enterTime': etime,
+                        'enterSeq': msg.get('seq'),
+                        'seg': seg_id,
+                        'data': data,
+                    }
+                )
+                return msg
+
+            if op == 'leave':
+                self._kf_by_pipe[pid] = body.get('pipes') or []
+                stack = self._kf_open.get(pid) or []
+                match_idx = next(
+                    (i for i in range(len(stack) - 1, -1, -1) if stack[i].get('component') == component), None
+                )
+                frame = stack.pop(match_idx) if match_idx is not None else None
+                # Same-segment base only: a cross-boundary leave stores full.
+                if (
+                    frame is not None
+                    and frame.get('seg') == seg_id
+                    and isinstance(data, dict)
+                    and isinstance(frame.get('data'), dict)
+                ):
+                    encoded = dict(msg)
+                    new_trace = dict(trace)
+                    new_trace['data'] = {DELTA_KEY: shallow_delta(frame['data'], data)}
+                    new_body = dict(body)
+                    new_body['trace'] = new_trace
+                    encoded['body'] = new_body
+                    return encoded
+                return msg
+
+            if op == 'end':
+                info = self._kf_docs.pop(pid, None)
+                self._kf_open.pop(pid, None)
+                self._kf_by_pipe.pop(pid, None)
+                if info is not None:
+                    self._kf_closed.append(
+                        {
+                            'doc': info.get('doc'),
+                            'id': pid,
+                            'beginSeq': info.get('beginSeq'),
+                            'beginTime': info.get('beginTime'),
+                            'elapsed': max(0.0, etime - float(info.get('beginTime') or etime)),
+                            'calls': info.get('calls', 0),
+                            'touched': sorted(info.get('touched', ())),
+                        }
+                    )
+                return msg
+
+            return msg
+
+        # ---- SSE: node narration belongs to its trace — keep the touched
+        # list truthful so a sparse (touched-based) walk never skips a
+        # segment whose only activity for the trace is SSE messages.
+        if event == 'apaevt_sse' and isinstance(body, dict):
+            sse_doc = self._kf_docs.get(body.get('pipe_id'))
+            if sse_doc is not None:
+                sse_doc.setdefault('touched', set()).add(seg_id)
+            return msg
+
+        # ---- Console: roll the scrollback -----------------------------------
+        if event == 'output' and isinstance(body, dict):
+            for line in str(body.get('output', '')).splitlines():
+                self._kf_console.append(line[:CONST_LOG_KF_SCROLLBACK_LINE_CHARS])
+            return msg
+
+        return msg
 
     # =========================================================================
     # SEAL / UPLOAD / RETENTION
@@ -793,7 +1106,7 @@ class RunLogWriter:
                 return
 
             end = self._stamp(_lifecycle_event('run-end', outcome=outcome, detail=exit_message))
-            self._append_line(end)
+            self._append_event(end)
 
             # Complete the newest open chapter.
             for chapter in reversed(self._control.get('chapters', [])):
@@ -832,7 +1145,7 @@ class RunLogWriter:
         just makes the restart visible on replay.
         """
         if self._open:
-            self._append_line(self._stamp(_lifecycle_event('restart')))
+            self._append_event(self._stamp(_lifecycle_event('restart')))
 
     # =========================================================================
     # CONTROL FILE
@@ -962,6 +1275,10 @@ class RunLogReader:
         control = await self._load_control()
         spans = [
             {
+                # id + seq make the spans directly addressable by the raw
+                # segment fetch (the DVR session's cache key + routing).
+                'id': seg.get('id'),
+                'seq': seg.get('seq'),
                 'startTime': seg.get('startTime'),
                 'endTime': seg.get('endTime'),
                 'chapterStart': seg.get('chapterStart', False),
@@ -1084,11 +1401,21 @@ class RunLogReader:
         next_seq: Optional[int] = None
 
         for seg in wanted:
+            # Per-segment decoder: keyframe seeds the delta bases; every line
+            # is decoded (state building needs them all) BEFORE range filters,
+            # so a page that starts mid-segment still reconstructs correctly.
+            decoder = SegmentDecoder()
             for line in await self._read_segment_lines(int(seg['id'])):
                 try:
                     msg = json.loads(line)
                 except json.JSONDecodeError:
                     continue
+
+                # Keyframe preambles are container metadata, not events.
+                if msg.get('type') == 'keyframe':
+                    decoder.seed(msg)
+                    continue
+                msg = decoder.decode(msg)
 
                 seq = int(msg.get('seq') or 0)
                 etime = float(msg.get('eventTime') or 0)
@@ -1170,6 +1497,92 @@ class RunLogReader:
             return []
         text = raw.decode('utf-8') if isinstance(raw, (bytes, bytearray)) else str(raw)
         return [line for line in text.splitlines() if line.strip()]
+
+    # -------------------------------------------------------------------------
+    # RAW SEGMENT FETCH (DVR v2 bulk path)
+    # -------------------------------------------------------------------------
+
+    async def segment_raw(self, seg_id: int, *, offset: int = 0, max_bytes: int = 0) -> Dict[str, Any]:
+        """
+        Fetch one segment's raw JSONL bytes, chunked by byte offset.
+
+        The DVR v2 bulk path: the server does NO line scanning, filtering, or
+        JSON parsing — it hands over the immutable segment content (spool
+        first with the read lease, store fallback; the active segment is
+        served up to its current length, the live subscription covers growth
+        past that). Chunks are WHOLE-LINE ALIGNED: each response ends on a
+        newline boundary so the client can parse every chunk standalone; a
+        single line larger than the chunk ceiling is returned whole (jumbo
+        events yield jumbo chunks rather than split lines).
+
+        Args:
+            seg_id: Segment number within this stream.
+            offset: Byte offset to continue from (0 = start).
+            max_bytes: Caller's chunk ceiling (clamped to the server ceiling;
+                0 = server default).
+
+        Returns:
+            Dict with 'segment', 'offset', 'data' (raw JSONL text), 'size'
+            (total segment bytes), 'nextOffset' (None when exhausted), and
+            'final'.
+
+        Raises:
+            FileNotFoundError: When the segment exists in neither location.
+        """
+        limit = int(max_bytes) if max_bytes else CONST_LOG_SEGMENT_FETCH_BYTES
+        limit = max(1, min(limit, CONST_LOG_SEGMENT_FETCH_BYTES))
+        offset = max(0, int(offset))
+
+        raw = await self._segment_bytes(seg_id)
+        size = len(raw)
+
+        # Slice the requested window, then align the cut to the LAST newline
+        # inside the window (whole-line chunks). If no newline fits, extend
+        # to the line's end — a jumbo line ships whole rather than split.
+        chunk = raw[offset : offset + limit]
+        if offset + len(chunk) < size:
+            cut = chunk.rfind(b'\n')
+            if cut >= 0:
+                chunk = chunk[: cut + 1]
+            else:
+                line_end = raw.find(b'\n', offset + limit)
+                chunk = raw[offset:] if line_end < 0 else raw[offset : line_end + 1]
+
+        next_offset = offset + len(chunk)
+        final = next_offset >= size
+        return {
+            'segment': seg_id,
+            'offset': offset,
+            'data': chunk.decode('utf-8'),
+            'size': size,
+            'nextOffset': None if final else next_offset,
+            'final': final,
+        }
+
+    async def _segment_bytes(self, seg_id: int) -> bytes:
+        """
+        Read one segment's raw bytes — spool first (lease-guarded), store
+        fallback. Mirrors _read_segment_lines but WITHOUT any line handling.
+
+        Raises:
+            FileNotFoundError: When the segment exists in neither location.
+        """
+        local_path = self._spool_path(seg_id)
+        if os.path.exists(local_path):
+            LEASES.acquire(local_path)
+            try:
+                with open(local_path, 'rb') as f:
+                    return f.read()
+            except OSError:
+                pass  # fall through to the store copy
+            finally:
+                LEASES.release(local_path)
+
+        try:
+            raw = await self._store.read(self._segment_path(seg_id))
+        except Exception as e:
+            raise FileNotFoundError(f'segment {seg_id} not found in spool or store') from e
+        return raw if isinstance(raw, (bytes, bytearray)) else str(raw).encode('utf-8')
 
     # -------------------------------------------------------------------------
     # DELETE

@@ -34,11 +34,14 @@
  */
 
 import type { RocketRideClient } from './client.js';
+import { LogEventStream } from './log-stream.js';
 import type {
 	LogChaptersResult,
 	LogDeleteResult,
 	LogReadParams,
 	LogReadResult,
+	LogSegmentParams,
+	LogSegmentResult,
 	LogStreamRef,
 } from './types/log.js';
 
@@ -60,6 +63,21 @@ export class LogApi {
 	// =========================================================================
 	// RUN LOG
 	// =========================================================================
+
+	/**
+	 * Opens a DVR session over one source continuum.
+	 *
+	 * The session is the replay/monitoring surface: position-based
+	 * `seek`/`get*`/`play` over reconstructed events — storage layout
+	 * (segments, keyframes, deltas) is invisible. Dispose with
+	 * {@link LogEventStream.closeEventStream} when done.
+	 *
+	 * @param stream - Identity tuple (projectId + source + runKind).
+	 * @returns A new, unpositioned session (call `seek()` first).
+	 */
+	openEventStream(stream: LogStreamRef): LogEventStream {
+		return new LogEventStream(this.client, stream);
+	}
 
 	/**
 	 * Lists a stream's chapters (tracks) and activity-bar metadata.
@@ -95,6 +113,31 @@ export class LogApi {
 		return this.client.call<LogReadResult>('rrext_log', {
 			subcommand: 'read',
 			...stream,
+			...params,
+		});
+	}
+
+	/**
+	 * Fetches one segment's raw JSONL bytes, chunked by byte offset.
+	 *
+	 * The bulk replay path: the server does no line scanning, filtering, or
+	 * parsing — it hands over the immutable segment content in
+	 * whole-line-aligned chunks (each response ends on a newline, so every
+	 * chunk parses standalone). Repeat with the returned `nextOffset` until
+	 * `final`. The active segment is served up to its current length; the
+	 * live subscription covers growth past that. The segment table (ids +
+	 * time extents) comes from {@link chapters}.
+	 *
+	 * @param stream - Identity tuple (projectId + source + runKind).
+	 * @param segment - Segment id within the stream.
+	 * @param params - Byte offset to continue from + optional chunk ceiling.
+	 * @returns One raw chunk plus paging metadata.
+	 */
+	async segment(stream: LogStreamRef, segment: number, params: LogSegmentParams = {}): Promise<LogSegmentResult> {
+		return this.client.call<LogSegmentResult>('rrext_log', {
+			subcommand: 'segment',
+			...stream,
+			segment,
 			...params,
 		});
 	}

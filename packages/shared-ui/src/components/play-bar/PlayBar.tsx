@@ -58,6 +58,13 @@ export interface ITimeSelection {
 export interface IPlayBarProps {
 	/** Stream timeline (chapters + horizon) from log.chapters. */
 	timeline: TaskTimeline | null;
+	/**
+	 * Host-announced task-active switch: true after apaevt_task 'begin',
+	 * false after 'end', null while unknown (page opened mid-run) — the
+	 * open run renders GREEN only while a task is actually running; the
+	 * timeline's completed flag is the fallback.
+	 */
+	runActive?: boolean | null;
 	/** Transport state from useTaskEvents. */
 	player: TaskPlayerState;
 	/** Transport controller from useTaskEvents. */
@@ -332,7 +339,7 @@ const tickStep = (secPerPx: number): number => {
  * The per-source needle transport + timeline strip. One instance per source
  * section.
  */
-export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller, selection = null, onSelectionChange }) => {
+export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller, runActive = null, selection = null, onSelectionChange }) => {
 	const stripRef = useRef<HTMLDivElement>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
 
@@ -661,7 +668,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 							<React.Fragment key={group.day}>
 								<div style={styles.menuDay}>{group.day}</div>
 								{group.items.map((chapter) => {
-									const liveChapter = chapter.endTime == null && timeline?.completed === false;
+									const liveChapter = chapter.endTime == null && (runActive ?? timeline?.completed === false);
 									const dotColor = liveChapter ? 'var(--rr-color-success)' : chapter.outcome === 'error' ? 'var(--rr-color-error)' : 'var(--rr-brand)';
 									const durationSec = (chapter.endTime ?? Date.now() / 1000) - chapter.beginTime;
 									return (
@@ -705,7 +712,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 			>
 				{/* Run blocks (double-click = play that track). */}
 				{chapters.map((chapter) => {
-					const liveChapter = chapter.endTime == null && timeline?.completed === false;
+					const liveChapter = chapter.endTime == null && (runActive ?? timeline?.completed === false);
 					const x1 = xOf(chapter.beginTime);
 					const x2 = xOf(chapter.endTime ?? nowSec);
 					if (x2 < 0 || x1 > stripWidth) return null;
@@ -717,7 +724,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 					return (
 						<div
 							key={chapter.beginSeq}
-							style={{ ...styles.runBlock, left: x1, width: Math.max(3, x2 - x1), background }}
+							style={{ ...styles.runBlock, left: x1, width: Math.max(3, x2 - x1), background, ...(liveChapter ? { borderRadius: '3px 0 0 3px' } : {}) }}
 							title={title}
 							onDoubleClick={(e) => {
 								e.stopPropagation();

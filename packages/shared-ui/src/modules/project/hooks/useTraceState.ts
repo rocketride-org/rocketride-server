@@ -32,6 +32,8 @@ const MAX_DOCS = 64;
 interface TraceDocument {
 	objectName: string;
 	completed: boolean;
+	/** The document's begin-event continuum seq — its permanent identity. */
+	beginSeq?: number;
 	rows: TraceRow[];
 }
 
@@ -185,6 +187,7 @@ export function useTraceState(
 					documentsRef.current.set(docId, {
 						objectName,
 						completed: false,
+						...(event.seq !== undefined ? { beginSeq: event.seq } : {}),
 						rows: [],
 					});
 					docOrderRef.current.push(docId);
@@ -215,6 +218,7 @@ export function useTraceState(
 					const row: TraceRow = {
 						id: rowCounterRef.current++,
 						docId,
+						...(doc.beginSeq !== undefined ? { beginSeq: doc.beginSeq } : {}),
 						completed: false,
 						lane,
 						filterName,
@@ -304,6 +308,7 @@ export function useTraceState(
 								const resultRow: TraceRow = {
 									id: rowCounterRef.current++,
 									docId,
+									...(doc.beginSeq !== undefined ? { beginSeq: doc.beginSeq } : {}),
 									completed: true,
 									lane: '__result__',
 									filterName: '',

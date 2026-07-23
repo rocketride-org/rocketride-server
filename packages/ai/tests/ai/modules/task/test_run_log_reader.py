@@ -32,6 +32,7 @@ live-writer control preference (fresh in-memory control while a run is
 active, spooled-only segments still readable).
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -121,6 +122,80 @@ class TestChapters:
         reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, 'nope', SOURCE, KIND, spool_root=spool_root)
         with pytest.raises(FileNotFoundError):
             await reader.chapters()
+
+
+# =============================================================================
+# RAW SEGMENT FETCH
+# =============================================================================
+
+
+class TestSegmentRaw:
+    @pytest.mark.asyncio
+    async def test_whole_segment_matches_stored_lines(self, istore, spool_root, monkeypatch):
+        reader = await seed_stream(istore, spool_root, monkeypatch)
+        body = await reader.chapters()
+        seg_id = 0
+        # Fetch every chunk and reassemble
+        text = ''
+        offset = 0
+        while True:
+            chunk = await reader.segment_raw(seg_id, offset=offset)
+            assert chunk['segment'] == seg_id
+            text += chunk['data']
+            if chunk['final']:
+                assert chunk['nextOffset'] is None
+                break
+            offset = chunk['nextOffset']
+        # Reassembly equals the raw stored object BYTE-exactly (segments are
+        # platform-stable: the writer pins newline='\n')
+        raw = await istore.read_bytes(f'{STORE_PREFIX}.logs/{PROJECT}/{SOURCE}.{KIND}.{seg_id:06d}.jsonl')
+        assert text.encode('utf-8') == raw
+        assert body['segments']  # sanity: the timeline knows this segment
+
+    @pytest.mark.asyncio
+    async def test_chunks_are_line_aligned(self, istore, spool_root, monkeypatch):
+        reader = await seed_stream(istore, spool_root, monkeypatch)
+        offset = 0
+        while True:
+            # Tiny ceiling forces multiple chunks; every chunk must end on \n
+            chunk = await reader.segment_raw(0, offset=offset, max_bytes=200)
+            if chunk['data']:
+                assert chunk['data'].endswith('\n')
+                for line in chunk['data'].splitlines():
+                    json.loads(line)  # every chunk parses standalone
+            if chunk['final']:
+                break
+            offset = chunk['nextOffset']
+
+    @pytest.mark.asyncio
+    async def test_jumbo_line_ships_whole(self, istore, spool_root, monkeypatch):
+        monkeypatch.setattr(run_log, 'CONST_LOG_SEGMENT_BYTES', 1 << 20)
+        stamp, raise_floor, _ = make_stamp()
+        writer = await open_writer(istore, spool_root, stamp, raise_floor)
+        writer.append(stamp(output_event('big-' + 'y' * 5000)))
+        await writer._drain_uploads()
+        await writer.end_run('ok')
+        reader = run_log.RunLogReader(FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+        # Ceiling smaller than the line: the line must still arrive whole
+        chunk = await reader.segment_raw(0, offset=0, max_bytes=64)
+        first_line = chunk['data'].splitlines()[0]
+        json.loads(first_line)
+        assert len(first_line) > 64
+
+    @pytest.mark.asyncio
+    async def test_store_fallback_when_spool_gone(self, istore, spool_root, monkeypatch):
+        reader = await seed_stream(istore, spool_root, monkeypatch)
+        # Wipe the spool: uploaded segments must still serve from the store
+        for name in os.listdir(spool_root):
+            os.remove(os.path.join(spool_root, name))
+        chunk = await reader.segment_raw(0, offset=0)
+        assert chunk['size'] > 0 and chunk['data']
+
+    @pytest.mark.asyncio
+    async def test_missing_segment_raises(self, istore, spool_root, monkeypatch):
+        reader = await seed_stream(istore, spool_root, monkeypatch)
+        with pytest.raises(FileNotFoundError):
+            await reader.segment_raw(9999)
 
 
 # =============================================================================

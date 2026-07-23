@@ -800,28 +800,6 @@ class Task(DAPBase):
             except Exception as e:
                 self.debug_message(f'Final zeroed status emit failed: {e}')
 
-        # Close out (or annotate) the run-log continuum AFTER the final
-        # status, so the log's last status IS the zeroed terminal one and
-        # log + live agree on the stream's last word. A restart is NOT a
-        # new run: the chapter continues and only a restart marker is
-        # recorded; a real termination completes the chapter with its
-        # outcome. Best-effort — never blocks or breaks teardown.
-        if self._run_log is not None:
-            try:
-                if self._is_restarting:
-                    self._run_log.note_restart()
-                else:
-                    if self._status.state == TASK_STATE.CANCELLED.value:
-                        outcome = 'cancelled'
-                    elif self._status.exitCode == 0:
-                        outcome = 'ok'
-                    else:
-                        outcome = 'error'
-                    await self._run_log.end_run(outcome, self._status.exitMessage or '')
-                    self._run_log = None
-            except Exception as e:
-                self.debug_message(f'Run-log close failed: {e}')
-
         # Send out the final events - last you will every here from us...
         if not self._final_events_sent:
             # Say we have sent the final events
@@ -890,6 +868,31 @@ class Task(DAPBase):
                         },
                         user_id=task_user_id,
                     )
+
+        # Close out (or annotate) the run-log continuum LAST — after the
+        # final zeroed status AND every terminal task event (exited /
+        # terminated / apaevt_task end) has been forwarded, because
+        # forwarding is what appends them to the log: closing any earlier
+        # loses the task-end from the recorded continuum. The run-end
+        # marker therefore remains the stream's true last line. A restart
+        # is NOT a new run: the chapter continues and only a restart marker
+        # is recorded; a real termination completes the chapter with its
+        # outcome. Best-effort — never blocks or breaks teardown.
+        if self._run_log is not None:
+            try:
+                if self._is_restarting:
+                    self._run_log.note_restart()
+                else:
+                    if self._status.state == TASK_STATE.CANCELLED.value:
+                        outcome = 'cancelled'
+                    elif self._status.exitCode == 0:
+                        outcome = 'ok'
+                    else:
+                        outcome = 'error'
+                    await self._run_log.end_run(outcome, self._status.exitMessage or '')
+                    self._run_log = None
+            except Exception as e:
+                self.debug_message(f'Run-log close failed: {e}')
 
         self.debug_message('Resource cleanup completed successfully')
 
@@ -1052,6 +1055,16 @@ class Task(DAPBase):
         # stamp (e.g. status updates built in _send_status_update) is stamped
         # here, immediately before the one shared dict fans out to clients.
         self.stamp_log_event(message)
+
+        # Safety net #2: every task-scoped event carries its identity in
+        # the body (project_id + source) so clients filter uniformly by
+        # body fields — raw engine events (output, SSE, granular status)
+        # arrive from the child without it. Idempotent: events that already
+        # carry project_id pass through untouched.
+        body = message.get('body') if isinstance(message, dict) else None
+        if isinstance(body, dict) and 'project_id' not in body:
+            body['project_id'] = self.project_id
+            body['source'] = self.source
 
         # Append to the run-log continuum: what clients see is what replay
         # reproduces (the writer filters/samples/caps internally; never
@@ -1264,14 +1277,14 @@ class Task(DAPBase):
             # (for 'leave', the leaving one) so consumers can pair enter/leave by identity
             # rather than assuming strict LIFO order — reentrant agent sub-invocations
             # interleave under one pipe_index. `pipes` remains the current component stack.
+            # Identity (project_id + source) is stamped centrally by
+            # _forward_task_event — not duplicated here.
             body = {
                 'id': pipe_index,
                 'op': operation,
                 'pipes': pipes,
                 'component': component_name,
                 'trace': trace or {},
-                'project_id': self.project_id,
-                'source': self.source,
             }
             # Send out a status update when needed
             self._status_updated = True
@@ -1837,6 +1850,11 @@ class Task(DAPBase):
                         'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
+                        # The run's CHAPTER identity: the run-begin marker's
+                        # seq (the writer opened just above). Lets clients
+                        # synthesize the chapter locally with the exact key
+                        # the server's chapter list will carry.
+                        'beginSeq': self._run_log.chapter_begin_seq if self._run_log is not None else None,
                     },
                     id=self.id,
                 )
