@@ -105,15 +105,34 @@ export interface LogReadParams {
 	types?: string[];
 }
 
-/** One logged event — a stamped DAP event message line. */
+/**
+ * The body of a stamped task event — the COMPLETE task-scoped record.
+ *
+ * The continuum stamps live here, beside the project_id/source identity the
+ * server stamps at its forward choke point. The DAP envelope around this
+ * body is pure protocol (its `seq` is per-connection bookkeeping,
+ * meaningless to the continuum) and carries nothing of ours.
+ */
+export interface LogEventBody {
+	/** Continuum emission time (epoch seconds, float), stamped at engine ingress. */
+	eventTime: number;
+	/** Continuum sequence — catalog-seeded, strictly monotonic per stream. */
+	logSeq: number;
+	[key: string]: unknown;
+}
+
+/**
+ * One logged event — a stamped DAP event message line.
+ *
+ * There is ONE representation of the stamps: the body. Legacy v2 segments
+ * (which carried the stamps at the header) are canonicalized into the body
+ * at decode (see log-codec normalizeStamps), so consumers never read a
+ * top-level stamp.
+ */
 export interface LogEvent {
 	type: 'event';
 	event: string;
-	/** Server-stamped emission time (epoch seconds, float). */
-	eventTime: number;
-	/** Server-stamped continuum seq (epoch-us seeded, monotonic). */
-	seq: number;
-	body?: Record<string, unknown>;
+	body: LogEventBody;
 	[key: string]: unknown;
 }
 

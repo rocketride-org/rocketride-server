@@ -159,21 +159,20 @@ const ProjectWebview: React.FC = () => {
 					setStatusMap((prev) => ({ ...prev, [parsed.statusUpdate!.source]: parsed.statusUpdate!.status }));
 				}
 
-				// Accumulate this project's STAMPED task events (continuum
-				// header eventTime + seq). Membership is a PURE body test:
-				// the server stamps project_id + source into every
-				// task-scoped body at the forward point — no envelope
-				// tricks, no suffix guessing.
+				// Accumulate this project's STAMPED task events. Both the
+				// identity (project_id + source) and the continuum stamps
+				// (eventTime + logSeq) ride in the BODY — the only place
+				// they exist (the DAP envelope is pure protocol; its seq is
+				// per-connection bookkeeping). Membership and stamp presence
+				// are one pure body test; consumers read the body directly.
 				const raw = msg.event as TaskEventMessage;
-				if (typeof raw?.eventTime === 'number' && typeof raw?.seq === 'number') {
-					const body = (raw.body ?? {}) as Record<string, unknown>;
-					if (body.project_id === pid) {
-						setLiveLogEvents((prev) => {
-							const next = [...prev, raw];
-							// Rare chunky trim; sections re-feed (seq-deduped) on shrink.
-							return next.length > LIVE_EVENTS_MAX ? next.slice(next.length - LIVE_EVENTS_KEEP) : next;
-						});
-					}
+				const body = (raw?.body ?? {}) as Record<string, unknown>;
+				if (typeof body.eventTime === 'number' && typeof body.logSeq === 'number' && body.project_id === pid) {
+					setLiveLogEvents((prev) => {
+						const next = [...prev, raw];
+						// Rare chunky trim; sections re-feed (seq-deduped) on shrink.
+						return next.length > LIVE_EVENTS_MAX ? next.slice(next.length - LIVE_EVENTS_KEEP) : next;
+					});
 				}
 				break;
 			}

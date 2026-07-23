@@ -114,15 +114,7 @@ class DAPConn(DAPBase):
         # Send the response via WebSocket
         await self.send(response)
 
-    async def send_event(
-        self,
-        event: str,
-        *,
-        id: str = '',
-        body: Optional[Dict[str, Any]] = None,
-        event_time: Optional[float] = None,
-        seq: Optional[int] = None,
-    ) -> None:
+    async def send_event(self, event: str, *, id: str = '', body: Optional[Dict[str, Any]] = None) -> None:
         """
         Build and send a DAP event message to the client.
 
@@ -133,27 +125,12 @@ class DAPConn(DAPBase):
             event (str): The event name as defined by the DAP specification
             id (str): Optional id for event correlation
             body (Optional[Dict[str, Any]]): Event-specific data payload
-            event_time (Optional[float]): Continuum header stamp (epoch seconds)
-                carried over from a forwarded task message; when set, `seq`
-                also overrides the freshly minted per-connection seq. Forwarded
-                monitor events must show the SAME header eventTime + seq the
-                run log recorded — replay folds, live/backfill dedupe, and the
-                late-joiner protocol all correlate on them.
-            seq (Optional[int]): Continuum seq paired with `event_time`; only
-                applied when `event_time` is present (the stamps travel as a
-                pair — see Task.stamp_log_event).
 
         Example:
             await self.send_event("output", body={"category": "stdout", "output": "Hello, World!"})
         """
         # Build standard DAP event format using base class method
         message = self.build_event(event, id=id, body=body)
-
-        # Restore continuum stamps on forwarded task events (see Args above)
-        if event_time is not None:
-            message['eventTime'] = event_time
-            if seq is not None:
-                message['seq'] = seq
 
         # Send the event via WebSocket
         await self.send(message)

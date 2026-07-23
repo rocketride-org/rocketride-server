@@ -326,17 +326,17 @@ export class LogEventStream {
 		const beginSeg = await this.ensureSegment(beginSegId);
 		if (beginSeg) {
 			const last = beginSeg.events[beginSeg.events.length - 1];
-			if ((last?.seq ?? 0) < traceId) await this.extendSegment(beginSeg);
+			if ((last?.body.logSeq ?? 0) < traceId) await this.extendSegment(beginSeg);
 		}
 		const beginEvent = beginSeg ? beginSeg.events[firstSeqAbove(beginSeg.events, traceId - 1)] : undefined;
 		const beginBody = beginEvent?.body as Record<string, unknown> | undefined;
-		if (!beginSeg || !beginEvent || beginEvent.seq !== traceId || beginEvent.event !== 'apaevt_flow' || beginBody?.op !== 'begin') {
+		if (!beginSeg || !beginEvent || beginEvent.body.logSeq !== traceId || beginEvent.event !== 'apaevt_flow' || beginBody?.op !== 'begin') {
 			// The bucket is the NEWEST segment: a begin not yet on disk (the
 			// fetch raced the broadcast) is found there like anywhere else.
 			const tailIdx = firstSeqAbove(this.live.events, traceId - 1);
 			const tailBegin = this.live.events[tailIdx];
 			const tailBody = tailBegin?.body as Record<string, unknown> | undefined;
-			if (tailBegin && tailBegin.seq === traceId && tailBegin.event === 'apaevt_flow' && tailBody?.op === 'begin') {
+			if (tailBegin && tailBegin.body.logSeq === traceId && tailBegin.event === 'apaevt_flow' && tailBody?.op === 'begin') {
 				return this.collectTrace(traceId, tailBegin, tailBody, this.live.events, tailIdx, []);
 			}
 			throw new Error(`getTrace: no trace begins at seq ${traceId}`);
@@ -368,7 +368,7 @@ export class LogEventStream {
 		const consume = (list: LogEvent[], fromIdx: number): void => {
 			for (let i = fromIdx; i < list.length && !ended; i++) {
 				const ev = list[i];
-				if ((ev.seq ?? 0) < traceId) continue;
+				if (ev.body.logSeq < traceId) continue;
 				const body = ev.body as Record<string, unknown> | undefined;
 				if (!body) continue;
 				// The trace's events: its flow ops (slot = body.id) and the
@@ -377,12 +377,12 @@ export class LogEventStream {
 				const isSse = ev.event === 'apaevt_sse' && body.pipe_id === slot;
 				if (!isFlow && !isSse) continue;
 				// Seq-dedupe across sources (a tail copy may duplicate disk).
-				if (events.length > 0 && (events[events.length - 1].seq ?? 0) >= (ev.seq ?? 0)) continue;
+				if (events.length > 0 && events[events.length - 1].body.logSeq >= ev.body.logSeq) continue;
 				events.push(ev);
 				if (isFlow && body.op === 'enter') calls += 1;
 				if (isFlow && body.op === 'end') {
 					ended = true;
-					endTime = ev.eventTime;
+					endTime = ev.body.eventTime;
 				}
 			}
 		};
@@ -397,10 +397,8 @@ export class LogEventStream {
 		const summary: LogTraceSummary = {
 			id: traceId,
 			doc: (beginBody.component as string | undefined) ?? ((beginBody.pipes as string[] | undefined)?.[0] ?? undefined),
-			beginTime: beginEvent.eventTime,
-			...(endTime !== undefined && beginEvent.eventTime !== undefined
-				? { elapsed: Math.max(0, endTime - beginEvent.eventTime) }
-				: {}),
+			beginTime: beginEvent.body.eventTime,
+			...(endTime !== undefined ? { elapsed: Math.max(0, endTime - beginEvent.body.eventTime) } : {}),
 			calls,
 			open: !ended,
 		};
@@ -449,17 +447,22 @@ export class LogEventStream {
 	 * @param msg - A stamped event message from the live feed.
 	 */
 	ingestLive(msg: LogEvent): void {
-		if (this.closed || typeof msg.seq !== 'number') return;
+		// The continuum stamps live in the BODY — the only place they exist
+		// (the DAP header seq is this connection's protocol counter,
+		// meaningless here). An event without body stamps is not a stamped
+		// task event; drop it.
+		const seq = (msg.body as Record<string, unknown> | undefined)?.logSeq;
+		if (this.closed || typeof seq !== 'number') return;
 		// A duplicate of something already bucketed: nothing new.
 		const last = this.live.events[this.live.events.length - 1];
-		if (msg.seq <= (last?.seq ?? 0)) return;
+		if (seq <= (last?.body.logSeq ?? 0)) return;
 		this.live.events.push(msg);
 		this.liveBytes += JSON.stringify(msg).length;
 		// LIVE MODE: deliver the arrival directly — the wire is ordered, so
 		// arrival order IS delivery order. Disk copies are irrelevant here;
 		// the history walk's cursor skips any overlap on its own.
-		if (this.pinned && this.playing && this.callback && msg.seq > this.watermark) {
-			this.watermark = msg.seq;
+		if (this.pinned && this.playing && this.callback && seq > this.watermark) {
+			this.watermark = seq;
 			this.callback({ event: msg });
 		}
 		// Size backstop: past the threshold, split the bucket against a
@@ -547,7 +550,7 @@ export class LogEventStream {
 					let idx = firstSeqAbove(this.live.events, this.watermark);
 					while (idx < this.live.events.length && this.playing && this.callback) {
 						const ev = this.live.events[idx];
-						this.watermark = ev.seq ?? this.watermark;
+						this.watermark = ev.body.logSeq;
 						this.callback({ event: ev });
 						idx += 1;
 					}
@@ -557,7 +560,7 @@ export class LogEventStream {
 				return;
 			}
 
-			const eventTime = next.eventTime ?? this.basePos;
+			const eventTime = next.body.eventTime;
 			if (this.speed > 0) {
 				const delayMs = Math.max(0, ((eventTime - this.basePos) / this.speed) * 1000);
 				if (delayMs > 4) {
@@ -576,7 +579,7 @@ export class LogEventStream {
 				}
 			}
 
-			this.watermark = next.seq ?? this.watermark;
+			this.watermark = next.body.logSeq;
 			this.basePos = Math.max(this.basePos, eventTime);
 			this.callback({ event: next });
 
@@ -689,7 +692,7 @@ export class LogEventStream {
 				const parsed = parseSegmentChunk(chunk.data, seg.decoder);
 				if (parsed.keyframe) seg.keyframe = parsed.keyframe;
 				for (const ev of parsed.events) {
-					if (typeof ev.seq === 'number' && ev.seq > this.maxDiskSeq) this.maxDiskSeq = ev.seq;
+					if (ev.body.logSeq > this.maxDiskSeq) this.maxDiskSeq = ev.body.logSeq;
 					seg.events.push(ev);
 				}
 			}
@@ -709,13 +712,13 @@ export class LogEventStream {
 
 	/** All events of `seg` plus the live bucket, with eventTime ≤ pos, in order. */
 	private eventsThrough(seg: CachedSegment | null, pos: number): LogEvent[] {
-		const events = seg ? seg.events.filter((e) => (e.eventTime ?? 0) <= pos) : [];
+		const events = seg ? seg.events.filter((e) => e.body.eventTime <= pos) : [];
 		// The bucket is the stream's newest segment — it participates in the
 		// fold exactly like disk events (dedupe is structural: the bucket
 		// holds only seqs beyond maxDiskSeq).
-		const lastDisk = events[events.length - 1]?.seq ?? 0;
+		const lastDisk = events[events.length - 1]?.body.logSeq ?? 0;
 		for (const ev of this.live.events) {
-			if ((ev.eventTime ?? 0) <= pos && (ev.seq ?? 0) > lastDisk) events.push(ev);
+			if (ev.body.eventTime <= pos && ev.body.logSeq > lastDisk) events.push(ev);
 		}
 		return events;
 	}
@@ -769,9 +772,9 @@ export class LogEventStream {
 				open.set(pid, {
 					id: pid,
 					// The trace's PERMANENT identity — what getTrace resolves.
-					beginSeq: ev.seq,
+					beginSeq: ev.body.logSeq,
 					doc: body.component as string | undefined,
-					beginTime: ev.eventTime,
+					beginTime: ev.body.eventTime,
 					calls: 0,
 					open: true,
 					touched: seg ? [seg.id] : [],
@@ -786,7 +789,7 @@ export class LogEventStream {
 					closed.push({
 						...entry,
 						open: false,
-						elapsed: entry.beginTime !== undefined ? Math.max(0, (ev.eventTime ?? 0) - entry.beginTime) : undefined,
+						elapsed: entry.beginTime !== undefined ? Math.max(0, ev.body.eventTime - entry.beginTime) : undefined,
 					});
 				}
 			}
@@ -798,7 +801,7 @@ export class LogEventStream {
 	private lastSeqAtOrBefore(seg: CachedSegment | null, pos: number): number {
 		let last = 0;
 		for (const ev of this.eventsThrough(seg, pos)) {
-			if (typeof ev.seq === 'number' && ev.seq > last) last = ev.seq;
+			if (ev.body.logSeq > last) last = ev.body.logSeq;
 		}
 		return last;
 	}
@@ -819,13 +822,13 @@ export class LogEventStream {
 // HELPERS
 // =============================================================================
 
-/** Index of the first event with seq > `afterSeq` (events seq-ascending). */
+/** Index of the first event with body.logSeq > `afterSeq` (seq-ascending). */
 function firstSeqAbove(events: LogEvent[], afterSeq: number): number {
 	let lo = 0;
 	let hi = events.length;
 	while (lo < hi) {
 		const mid = (lo + hi) >> 1;
-		if ((events[mid].seq ?? 0) <= afterSeq) lo = mid + 1;
+		if (events[mid].body.logSeq <= afterSeq) lo = mid + 1;
 		else hi = mid;
 	}
 	return lo;

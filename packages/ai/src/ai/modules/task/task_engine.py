@@ -50,7 +50,6 @@ from ai.constants import (
     CONST_READY_POLL_INTERVAL,
     CONST_SUBPROCESS_BUFFER_LIMIT,
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
-    CONST_LOG_SEQ_FLOOR,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
@@ -125,7 +124,7 @@ class Task(DAPBase):
             """
             Handle DAP events from subprocess.
 
-            Stamps the run-log continuum headers (eventTime + seq) at the
+            Stamps the run-log continuum fields (body.eventTime) at the
             ingress point — where raw engine stdout frames have just become
             JSON events — then routes to the parent Task for broadcasting to
             connected clients and (L2) appending to the run log.
@@ -134,13 +133,14 @@ class Task(DAPBase):
                 event: DAP event message from subprocess
             """
             # Stamp the TIME at true ingress so eventTime reflects emission,
-            # not forwarding time. The seq is deliberately NOT assigned here:
-            # some ingress events are consumed without ever being delivered
-            # (apaevt_trace becomes a derived apaevt_flow), and a seq burned
-            # on an undelivered message leaves gaps in the continuum. Seqs are
-            # assigned exactly once at the delivery point (_forward_task_event
-            # / the run-log writer), which preserves arrival order because the
-            # whole ingress->handler->forward path is synchronous per message.
+            # not forwarding time. The logSeq is deliberately NOT assigned
+            # here: some ingress events are consumed without ever being
+            # delivered (apaevt_trace becomes a derived apaevt_flow), and a
+            # seq burned on an undelivered message leaves gaps in the
+            # continuum. logSeqs are assigned exactly once at the delivery
+            # point (_forward_task_event / the run-log writer), which
+            # preserves arrival order because the whole
+            # ingress->handler->forward path is synchronous per message.
             self._parent_task.stamp_log_event(event, assign_seq=False)
             await self._parent_task.on_event(event)
 
@@ -303,13 +303,13 @@ class Task(DAPBase):
         # Synchronization
         self._last_event_time = time.time()
 
-        # Run-log continuum sequencing (see stamp_log_event). Seeded from the
-        # epoch in MICROSECONDS so a fresh process always starts above every
-        # seq a previous run of this task identity could have issued (no run
-        # can out-emit the clock at a sustained 1M events/sec). The run-log
-        # writer (L2) raises this seed further via max(seed, control.lastSeq+1)
-        # when the stream's control file knows a higher value.
-        self._log_seq_next = int(time.time() * 1_000_000)
+        # Run-log continuum sequencing (see stamp_log_event). A fresh stream
+        # starts at 1; the run-log writer (L2) raises the floor to
+        # control.lastSeq + 1 after reading the stream's catalog, so the
+        # continuum always continues where the recorded stream left off.
+        # Header `seq` is NOT this counter — seq belongs to the DAP
+        # per-connection message stream; the continuum rides in `logSeq`.
+        self._log_seq_next = 1
 
         # Run-log writer — the per-task event continuum (created at subprocess
         # start; None if logging setup failed, which must never break the run).
@@ -909,9 +909,10 @@ class Task(DAPBase):
         Raise the continuum seq counter to at least ``floor``.
 
         Called by the run-log writer after reading the stream's control file so
-        the next issued seq is max(epoch-us seed, control.lastSeq + 1) — the
-        belt-and-suspenders guarantee that a new run never re-issues a seq any
-        client may have seen, even across a backward clock step.
+        the next issued logSeq is control.lastSeq + 1 — the continuum continues
+        exactly where the recorded stream left off. (A crash's unpersisted tail
+        may re-issue values, accepted: the crash also drops every websocket, so
+        clients reconnect with fresh sessions and fresh live buckets.)
 
         Args:
             floor: Minimum value for the next issued seq (exclusive of past).
@@ -926,11 +927,11 @@ class Task(DAPBase):
         """
         Build a Task event carrying the run-log continuum headers.
 
-        Overrides the DAP base builder: build_event IS the seq assigner for
-        every event the Task itself constructs — the base class's small
-        per-endpoint counter is replaced with the continuum seq right here, so
-        no caller ever assigns a second one (the downstream stamp calls are
-        idempotent no-ops for built events).
+        Overrides the DAP base builder: build_event IS the logSeq assigner for
+        every event the Task itself constructs, so no caller ever assigns a
+        second one (the downstream stamp calls are idempotent no-ops for built
+        events). The base class's per-endpoint DAP seq is left untouched —
+        each forwarding connection mints its own on send.
 
         Args:
             event: The DAP event name.
@@ -948,19 +949,21 @@ class Task(DAPBase):
         self, message: Dict[str, Any], *, event_time: Optional[float] = None, assign_seq: bool = True
     ) -> Dict[str, Any]:
         """
-        Stamp a DAP event message with the run-log continuum headers.
+        Stamp a DAP event message with the run-log continuum fields.
 
-        Adds two header-level fields (decision: header, next to the DAP seq):
-        - ``eventTime``: epoch seconds float — set once at ingress and never
-          overwritten (an engine-provided stamp wins if one ever appears).
-        - ``seq``: the per-task continuum sequence — epoch-us seeded, strictly
-          monotonic across runs and engine restarts. Event messages carrying a
-          legacy per-endpoint DAP counter (small ints from build_event) are
-          re-stamped; a value at/above CONST_LOG_SEQ_FLOOR is already a
-          continuum seq and is left untouched (idempotent).
+        Adds two fields to the event BODY (never the DAP envelope — the
+        envelope is pure protocol: seq belongs to each connection's own
+        message stream, and overloading it with the continuum broke DAP
+        sequencing the moment one connection monitored two tasks):
+        - ``body.eventTime``: epoch seconds float — set once at ingress and
+          never overwritten (an engine-provided stamp wins if one appears).
+        - ``body.logSeq``: the per-task continuum sequence — catalog-seeded
+          (control.lastSeq + 1; a fresh stream starts at 1), strictly
+          monotonic across runs and engine restarts. Idempotent: a body
+          already carrying logSeq passes through untouched.
 
-        Only EVENT messages are ever passed here — request/response seq is
-        DAP-correlation-critical (request_seq) and must never be rewritten.
+        The stamps ride beside the body's project_id + source identity — the
+        body is the complete task-scoped record; the envelope is transport.
 
         Args:
             message: The event message dict (mutated in place).
@@ -976,13 +979,20 @@ class Task(DAPBase):
         Returns:
             The same message dict, stamped.
         """
-        # Emission time: set once; derived events may inherit their source's.
-        if 'eventTime' not in message:
-            message['eventTime'] = event_time if event_time is not None else time.time()
+        # The stamps live in the body; an event without one gets an empty
+        # body to carry them (DAP treats body as event-specific payload).
+        body = message.get('body')
+        if not isinstance(body, dict):
+            body = {}
+            message['body'] = body
 
-        # Continuum seq: idempotent — re-stamp only legacy/absent seq values.
-        if assign_seq and message.get('seq', 0) < CONST_LOG_SEQ_FLOOR:
-            message['seq'] = self._log_seq_next
+        # Emission time: set once; derived events may inherit their source's.
+        if 'eventTime' not in body:
+            body['eventTime'] = event_time if event_time is not None else time.time()
+
+        # Continuum seq: idempotent — assign once, never rewrite.
+        if assign_seq and 'logSeq' not in body:
+            body['logSeq'] = self._log_seq_next
             self._log_seq_next += 1
 
         return message
@@ -1295,7 +1305,9 @@ class Task(DAPBase):
                 # delivered — build_event assigns its continuum seq, and a
                 # built-but-unsent event would leave a gap. It inherits the
                 # source trace message's emission time.
-                flow = self.build_event('apaevt_flow', body=body, event_time=message.get('eventTime'))
+                flow = self.build_event(
+                    'apaevt_flow', body=body, event_time=(message.get('body') or {}).get('eventTime')
+                )
 
                 # Forward off the event
                 await self._forward_task_event(EVENT_TYPE.FLOW, flow)

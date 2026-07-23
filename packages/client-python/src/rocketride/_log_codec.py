@@ -189,3 +189,30 @@ class SegmentDecoder:
                 return msg
 
         return msg
+
+
+def normalize_stamps(msg):
+    """
+    Canonicalize the continuum stamps INTO the body — the single place they
+    live. Current recordings (and the live wire) already carry
+    ``body.eventTime`` + ``body.logSeq``; legacy v2 segments carried the
+    stamps at the header with the continuum under ``seq``, so decode moves
+    those into the body once and old data reads identically to new. The DAP
+    envelope is never a source of truth (its ``seq`` is per-connection
+    bookkeeping).
+
+    Args:
+        msg: A decoded event dict (mutated in place).
+
+    Returns:
+        The same event with body.eventTime/body.logSeq guaranteed.
+    """
+    body = msg.get('body')
+    if not isinstance(body, dict):
+        body = {}
+        msg['body'] = body
+    if not isinstance(body.get('eventTime'), (int, float)) and isinstance(msg.get('eventTime'), (int, float)):
+        body['eventTime'] = msg['eventTime']
+    if not isinstance(body.get('logSeq'), int) and isinstance(msg.get('seq'), int):
+        body['logSeq'] = msg['seq']
+    return msg

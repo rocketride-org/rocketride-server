@@ -128,9 +128,14 @@ while True:
         break
 ```
 
-Every event carries the server-stamped headers `eventTime` (epoch seconds,
-stamped once at engine ingress) and `seq` (epoch-microsecond-seeded, strictly
-monotonic across runs and restarts) — identical live and on replay.
+Every event carries the continuum stamps in its **body** — the only place
+they exist: `body.eventTime` (epoch seconds, stamped once at engine
+ingress) and `body.logSeq` (catalog-seeded — a fresh stream starts at 1
+and continues from the recorded `lastSeq + 1` across runs and restarts;
+strictly monotonic) — identical live and on replay. The DAP envelope's own
+`seq` is per-connection protocol bookkeeping and says nothing about the
+continuum. Legacy segments that carried the stamps at the header are
+canonicalized into the body at decode, so consumers read one shape.
 
 ## **segment()**
 

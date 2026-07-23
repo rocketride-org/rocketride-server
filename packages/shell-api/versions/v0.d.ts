@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-21T16:26:42.300Z
-// Source commit: 82d4c88d98ca164c225bb8988f1c8ae39b50d92b
+// Generated:     2026-07-23T17:45:41.228Z
+// Source commit: 41334c9fd3e82c646d10bf55a5454052aa9205d1
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -610,6 +610,10 @@ interface LogChapter {
     outcome?: string | null;
 }
 interface LogActivitySpan {
+    /** Segment id — the raw segment fetch / DVR cache key. */
+    id?: number;
+    /** First continuum seq recorded in this segment. */
+    seq?: number;
     startTime?: number | null;
     endTime?: number | null;
     /** A run begins within this span. */
@@ -647,14 +651,17 @@ interface LogReadParams {
     /** Server-side event-type filter (e.g. ['output'] for the Log page). */
     types?: string[];
 }
+interface LogEventBody {
+    /** Continuum emission time (epoch seconds, float), stamped at engine ingress. */
+    eventTime: number;
+    /** Continuum sequence — catalog-seeded, strictly monotonic per stream. */
+    logSeq: number;
+    [key: string]: unknown;
+}
 interface LogEvent {
     type: "event";
     event: string;
-    /** Server-stamped emission time (epoch seconds, float). */
-    eventTime: number;
-    /** Server-stamped continuum seq (epoch-us seeded, monotonic). */
-    seq: number;
-    body?: Record<string, unknown>;
+    body: LogEventBody;
     [key: string]: unknown;
 }
 interface LogReadResult {
@@ -666,6 +673,66 @@ interface LogReadResult {
 }
 interface LogDeleteResult {
     deletedSegments: number;
+}
+type LogPosition = number | "live";
+interface LogTraceSummary {
+    /**
+     * Display id. For fold summaries this is the pipe SLOT (reused across
+     * requests); for getTrace results it is the begin seq. Always pass
+     * {@link beginSeq} (or a begin event's seq) to `getTrace` — that is the
+     * trace's permanent identity.
+     */
+    id: number | string;
+    /** The trace's begin-event continuum seq — its PERMANENT identity. */
+    beginSeq?: number;
+    /** Document/object name (the trace's display name). */
+    doc?: string;
+    /** Run start of this trace (epoch seconds). */
+    beginTime?: number;
+    /** Seconds from begin to close (closed traces only). */
+    elapsed?: number;
+    /** Number of component calls seen. */
+    calls?: number;
+    /** True while the trace is still in flight at the position. */
+    open: boolean;
+    /** Segment ids containing this trace's events (sparse expand list). */
+    touched?: number[];
+}
+interface LogTracesResult {
+    /** ALL in-flight traces at the position (bounded by real concurrency). */
+    open: LogTraceSummary[];
+    /** The most recently completed traces before the position (≤ n). */
+    closed: LogTraceSummary[];
+}
+interface LogTraceDetail {
+    summary: LogTraceSummary;
+    /** Every event belonging to this trace, seq-ordered, fully reconstructed. */
+    events: LogEvent[];
+}
+interface LogPlayItem {
+    /** One reconstructed event, delivered in seq order. */
+    event: LogEvent;
+}
+type LogPlayCallback = (item: LogPlayItem) => void;
+interface LogSegmentParams {
+    /** Byte offset to continue from (0 = segment start). */
+    offset?: number;
+    /** Chunk ceiling in bytes (clamped by the server; 0/omitted = server default). */
+    maxBytes?: number;
+}
+interface LogSegmentResult {
+    /** Segment id within the stream. */
+    segment: number;
+    /** Byte offset this chunk starts at. */
+    offset: number;
+    /** Raw JSONL text — every chunk ends on a line boundary, parse standalone. */
+    data: string;
+    /** Total segment size in bytes (grows while the segment is active). */
+    size: number;
+    /** Pass back as `offset` to continue; null when exhausted. */
+    nextOffset: number | null;
+    /** True when this chunk reached the end of the segment. */
+    final: boolean;
 }
 interface TraceInfo {
     /** File path where the error occurred */
@@ -2168,9 +2235,100 @@ declare class DeployApi {
         schedule?: string;
     }): Promise<void>;
 }
+declare class LogEventStream {
+    /** @param client - Owning client. @param stream - Identity tuple. */
+    constructor(client: RocketRideClient, stream: LogStreamRef);
+    /**
+     * The stream's chapters (runs) — begin/end/outcome per run.
+     *
+     * @returns The chapters list (freshly fetched when the cache aged out).
+     */
+    getChapters(): Promise<LogChaptersResult["chapters"]>;
+    /**
+     * Position the session. Subsequent `get*()` calls answer as of this
+     * position; `play()` continues from it.
+     *
+     * @param pos - Epoch seconds, or 'live' to pin to now.
+     */
+    seek(pos: LogPosition): Promise<void>;
+    /** The current position (epoch seconds); rides the wall clock when live. */
+    position(): number;
+    /**
+     * The full status snapshot at the position (pipeflow byPipe included).
+     *
+     * @returns The reconstructed status body, or null before the first status.
+     */
+    getStatus(): Promise<Record<string, unknown> | null>;
+    /**
+     * The console exactly as it read at the position (terminal semantics:
+     * the keyframe scrollback + everything printed since, last `n` lines).
+     *
+     * @param n - Number of trailing lines wanted.
+     * @returns The last `n` console lines as of the position.
+     */
+    getConsole(n: number): Promise<string[]>;
+    /**
+     * Trace state at the position: ALL in-flight traces plus the `n` most
+     * recently completed (the sliding recency window).
+     *
+     * @param n - Closed-window size; must be ≤ 50.
+     * @returns Open + recently-closed trace summaries.
+     */
+    getTraces(n: number): Promise<LogTracesResult>;
+    /**
+     * One trace's complete event set (its call tree's raw material).
+     *
+     * IDENTITY CONTRACT: a trace is identified by its BEGIN event's continuum
+     * seq — the only key that is unique forever. The flow events' `body.id`
+     * is a pipe SLOT, reused across requests, and cannot name a trace.
+     * Resolution is deterministic and position-independent: locate the
+     * segment containing the seq (the span table carries each segment's
+     * first seq), find the begin event, then collect that slot's events
+     * forward until its matching `end`, crossing segments and the live tail
+     * as needed. Fails only below the retention horizon.
+     *
+     * @param traceId - The trace's begin-event continuum seq.
+     * @returns Summary + every event of the trace, seq-ordered.
+     */
+    getTrace(traceId: number): Promise<LogTraceDetail>;
+    /**
+     * Stream reconstructed events to `cb`, in order, strictly after the seed
+     * watermark, paced by `speed`. Auto-pins to live on catching the wall
+     * clock; while pinned, delivery follows event arrival.
+     *
+     * @param pos - Optional position to seek first (number | 'live').
+     * @param speed - 0 = as fast as possible; 0.25/1/10 = time-scaled.
+     * @param cb - Receives `{ event }` items.
+     */
+    play(pos: LogPosition | undefined, speed: number, cb: LogPlayCallback): Promise<void>;
+    /** Freeze the position (unpins live; a later play resumes from here). */
+    pause(): void;
+    /**
+     * Feed one live event from the host's subscription. While pinned and
+     * playing, it is delivered to the callback immediately (arrival paces
+     * live delivery); otherwise it is retained for later catch-up.
+     *
+     * @param msg - A stamped event message from the live feed.
+     */
+    ingestLive(msg: LogEvent): void;
+    /** Dispose the session (stops playback, clears caches). */
+    closeEventStream(): void;
+}
 declare class LogApi {
     /** @param client - The parent RocketRideClient that owns this namespace. */
     constructor(client: RocketRideClient);
+    /**
+     * Opens a DVR session over one source continuum.
+     *
+     * The session is the replay/monitoring surface: position-based
+     * `seek`/`get*`/`play` over reconstructed events — storage layout
+     * (segments, keyframes, deltas) is invisible. Dispose with
+     * {@link LogEventStream.closeEventStream} when done.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @returns A new, unpositioned session (call `seek()` first).
+     */
+    openEventStream(stream: LogStreamRef): LogEventStream;
     /**
      * Lists a stream's chapters (tracks) and activity-bar metadata.
      *
@@ -2196,6 +2354,23 @@ declare class LogApi {
      * @returns The page of events plus paging/truncation metadata.
      */
     read(stream: LogStreamRef, params?: LogReadParams): Promise<LogReadResult>;
+    /**
+     * Fetches one segment's raw JSONL bytes, chunked by byte offset.
+     *
+     * The bulk replay path: the server does no line scanning, filtering, or
+     * parsing — it hands over the immutable segment content in
+     * whole-line-aligned chunks (each response ends on a newline, so every
+     * chunk parses standalone). Repeat with the returned `nextOffset` until
+     * `final`. The active segment is served up to its current length; the
+     * live subscription covers growth past that. The segment table (ids +
+     * time extents) comes from {@link chapters}.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param segment - Segment id within the stream.
+     * @param params - Byte offset to continue from + optional chunk ceiling.
+     * @returns One raw chunk plus paging metadata.
+     */
+    segment(stream: LogStreamRef, segment: number, params?: LogSegmentParams): Promise<LogSegmentResult>;
     /**
      * Deletes log data for a stream (destructive).
      *
@@ -3349,7 +3524,12 @@ export interface SettingSchema {
     description?: string;
     /** Markdown variant of the description (preferred when both are present). */
     markdownDescription?: string;
-    /** Fixed value choices — renders as a dropdown. */
+    /**
+     * Fixed value choices — renders as a dropdown. Typed string[] per the
+     * frozen v0 contract; integer/number schemas may carry numeric entries in
+     * the manifest JSON at runtime, so render through String() and coerce the
+     * selected value back via `type`.
+     */
     enum?: string[];
     /** Per-choice descriptions aligned with `enum`. */
     enumDescriptions?: string[];

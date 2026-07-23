@@ -26,9 +26,13 @@ import { ToggleGroup } from '../toggle-group/ToggleGroup';
 // INTERNAL TYPES
 // =============================================================================
 
-/** One trace's reconstructed event set (the session.getTrace result shape). */
+/**
+ * One trace's reconstructed event set (the session.getTrace result shape).
+ * The continuum stamps live in each event's BODY (body.eventTime +
+ * body.logSeq) — the only place they exist.
+ */
 export interface ITraceFetchResult {
-	events: Array<{ event: string; eventTime: number; seq: number; body?: Record<string, unknown>; [key: string]: unknown }>;
+	events: Array<{ event: string; body: Record<string, unknown> & { eventTime: number; logSeq: number }; [key: string]: unknown }>;
 }
 
 /** Props for {@link TraceDetail}. */
@@ -1058,13 +1062,13 @@ export const TraceDetail: React.FC<ITraceDetailProps> = ({ traceId, projectId, f
 			const node = group.nodes[nodeIdx];
 			const sse = sseEvents[sseIdx];
 			const nodeMs = node ? node.row.timestamp : Number.POSITIVE_INFINITY;
-			const sseMs = sse ? sse.eventTime * 1000 : Number.POSITIVE_INFINITY;
+			const sseMs = sse ? sse.body.eventTime * 1000 : Number.POSITIVE_INFINITY;
 			if (sseMs < nodeMs) {
 				flushRun();
 				const body = (sse.body ?? {}) as Record<string, unknown>;
 				const text = typeof body.message === 'string' && body.message ? body.message : JSON.stringify(body.data ?? body);
 				interleaved.push(
-					<div key={`sse-${sse.seq}`} style={S.sseRow}>
+					<div key={`sse-${sse.body.logSeq}`} style={S.sseRow}>
 						<span style={S.sseTime}>{new Date(sseMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
 						{text}
 					</div>,

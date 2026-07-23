@@ -267,9 +267,9 @@ def truncate_event(message: Dict[str, Any], max_bytes: int = CONST_LOG_EVENT_PAY
     Cap an event's serialized size, preserving metadata + timestamps.
 
     Oversized payload carriers (trace data, output text) are replaced with a
-    truncation marker; the event's identity fields (event, seq, eventTime,
-    op/component/ids) always survive so timing analysis works on truncated
-    bodies. The original is never mutated.
+    truncation marker; the event's identity fields (event, body.logSeq,
+    body.eventTime, op/component/ids) always survive so timing analysis
+    works on truncated bodies. The original is never mutated.
 
     Args:
         message: Stamped event message.
@@ -468,9 +468,10 @@ class RunLogWriter:
         Open (or re-open) the stream for a new run.
 
         Store-side recovery: load the control file if it exists, verify its
-        'uploaded' entries against the store, lift the task's seq floor to
-        lastSeq + 1 (belt-and-suspenders over the epoch-us seed), then append
-        the run-begin lifecycle marker and its chapter entry.
+        'uploaded' entries against the store, lift the task's logSeq floor to
+        lastSeq + 1 (the continuum continues exactly where the recorded
+        stream left off; a fresh stream starts at 1), then append the
+        run-begin lifecycle marker and its chapter entry.
 
         Args:
             trigger: What started the run ('manual', 'scheduled', ...).
@@ -486,28 +487,19 @@ class RunLogWriter:
             # ---- Load or initialize the control file -----------------------
             self._control = await self._load_control()
 
-            # Belt-and-suspenders: the next issued seq must exceed anything
-            # this stream has ever recorded. The epoch-us seed normally wins;
-            # if it does not (backward clock step), raise_seq_floor makes
-            # lastSeq + 1 win and we record the anomaly in the stream itself.
+            # Seed the continuum from the catalog: the next issued logSeq is
+            # control.lastSeq + 1 (a fresh stream starts at 1 — the task's
+            # counter initializes there). A crash's unpersisted tail may
+            # re-issue values; accepted — the crash also drops every
+            # websocket, so clients reconnect with fresh sessions and fresh
+            # live buckets, and nothing stale survives to collide.
             last_seq = int(self._control.get('lastSeq', 0))
             if last_seq:
                 # This process resumed an existing stream: whatever open-frame
                 # state existed before is unknown, and the first keyframe this
                 # process writes must say so.
                 self._kf_complete = False
-                clock_seed = int(time.time() * 1_000_000)
                 self._raise_seq_floor(last_seq + 1)
-                if clock_seed <= last_seq:
-                    self._append_event(
-                        self._stamp(
-                            _lifecycle_event(
-                                'clock-anomaly',
-                                detail=f'epoch-us seed {clock_seed} <= persisted lastSeq {last_seq}; '
-                                f'continuing from lastSeq + 1',
-                            )
-                        )
-                    )
 
             # ---- Run-begin marker (doubles as chapter header) --------------
             begin = self._stamp(
@@ -534,15 +526,20 @@ class RunLogWriter:
             # the honest completion the dead process never wrote (self-healing
             # on every open).
             chapters: List[Dict[str, Any]] = self._control.setdefault('chapters', [])
-            stream_last = float(self._control.get('endTime') or begin['eventTime'])
+            stream_last = float(self._control.get('endTime') or begin['body']['eventTime'])
             for chapter in chapters:
                 if chapter.get('endTime') is None:
-                    dangling_end = min(stream_last, begin['eventTime'])
+                    dangling_end = min(stream_last, begin['body']['eventTime'])
                     # Never end a chapter before it began (clock edge cases).
                     chapter['endTime'] = max(dangling_end, float(chapter.get('beginTime') or 0))
                     chapter['outcome'] = 'interrupted'
             chapters.append(
-                {'beginTime': begin['eventTime'], 'beginSeq': begin['seq'], 'endTime': None, 'outcome': None}
+                {
+                    'beginTime': begin['body']['eventTime'],
+                    'beginSeq': begin['body']['logSeq'],
+                    'endTime': None,
+                    'outcome': None,
+                }
             )
             del chapters[:-CONST_LOG_CHAPTERS]
 
@@ -642,7 +639,7 @@ class RunLogWriter:
         worker.
 
         Args:
-            message: A stamped DAP event message (header eventTime + seq).
+            message: A stamped DAP event message (body eventTime + logSeq).
         """
         if not self._open:
             return
@@ -654,7 +651,7 @@ class RunLogWriter:
         # snapshot (body.final) always lands — it is the stream's last word
         # on utilization and must never be sampled away.
         if event_type == 'apaevt_status_update':
-            now = message.get('eventTime') or time.time()
+            now = (message.get('body') or {}).get('eventTime') or time.time()
             if not message.get('body', {}).get('final'):
                 if now - self._last_status_logged < CONST_LOG_STATUS_SAMPLE_SECONDS:
                     return
@@ -714,8 +711,8 @@ class RunLogWriter:
             self._active_start_seq = resumed.get('seq')
             self._active_has_chapter_start = bool(resumed.get('chapterStart'))
         else:
-            self._active_start_time = float(message.get('eventTime') or time.time())
-            self._active_start_seq = int(message.get('seq') or 0)
+            self._active_start_time = float((message.get('body') or {}).get('eventTime') or time.time())
+            self._active_start_seq = int((message.get('body') or {}).get('logSeq') or 0)
 
         # A BRAND-NEW segment opens with its keyframe preamble — the
         # accumulated state at this boundary, making the segment fold
@@ -736,8 +733,9 @@ class RunLogWriter:
         self._active_bytes += len(line)
 
         # Track stream bookkeeping.
-        self._control['lastSeq'] = max(int(self._control.get('lastSeq', 0)), int(message.get('seq') or 0))
-        self._control['endTime'] = float(message.get('eventTime') or time.time())
+        body_stamps = message.get('body') or {}
+        self._control['lastSeq'] = max(int(self._control.get('lastSeq', 0)), int(body_stamps.get('logSeq') or 0))
+        self._control['endTime'] = float(body_stamps.get('eventTime') or time.time())
         if self._control.get('startTime') is None:
             self._control['startTime'] = self._control['endTime']
         if message.get('event') == 'apaevt_log_lifecycle' and message.get('body', {}).get('action') == 'run-begin':
@@ -820,7 +818,7 @@ class RunLogWriter:
         # ---- Lifecycle: run boundaries reset the accumulated state ----------
         if event == 'apaevt_log_lifecycle' and isinstance(body, dict):
             if body.get('action') == 'run-begin':
-                self._kf_chapter = {'beginSeq': msg.get('seq'), 'beginTime': msg.get('eventTime')}
+                self._kf_chapter = {'beginSeq': body.get('logSeq'), 'beginTime': body.get('eventTime')}
                 self._kf_open.clear()
                 self._kf_docs.clear()
                 self._kf_closed.clear()
@@ -845,7 +843,7 @@ class RunLogWriter:
             component = body.get('component')
             trace = body.get('trace') or {}
             data = trace.get('data')
-            etime = float(msg.get('eventTime') or 0)
+            etime = float(body.get('eventTime') or 0)
 
             doc_info = self._kf_docs.get(pid)
             if doc_info is not None:
@@ -858,7 +856,7 @@ class RunLogWriter:
                     'beginTime': etime,
                     # Begin-event continuum seq — the trace's PERMANENT identity
                     # (slot ids recycle; the seq never does).
-                    'beginSeq': msg.get('seq'),
+                    'beginSeq': body.get('logSeq'),
                     'touched': {seg_id},
                 }
                 self._kf_open[pid] = []
@@ -873,7 +871,7 @@ class RunLogWriter:
                     {
                         'component': component,
                         'enterTime': etime,
-                        'enterSeq': msg.get('seq'),
+                        'enterSeq': body.get('logSeq'),
                         'seg': seg_id,
                         'data': data,
                     }
@@ -1111,7 +1109,7 @@ class RunLogWriter:
             # Complete the newest open chapter.
             for chapter in reversed(self._control.get('chapters', [])):
                 if chapter.get('endTime') is None:
-                    chapter['endTime'] = end['eventTime']
+                    chapter['endTime'] = end['body']['eventTime']
                     chapter['outcome'] = outcome
                     break
 
@@ -1417,8 +1415,13 @@ class RunLogReader:
                     continue
                 msg = decoder.decode(msg)
 
-                seq = int(msg.get('seq') or 0)
-                etime = float(msg.get('eventTime') or 0)
+                # Continuum stamps: in the body on current recordings;
+                # legacy v2 segments carried them at the header (and the
+                # continuum under the header name 'seq', pre-DAP-fix) —
+                # fall back so old data keeps reading.
+                mbody = msg.get('body') if isinstance(msg.get('body'), dict) else {}
+                seq = int(mbody.get('logSeq') or msg.get('seq') or 0)
+                etime = float(mbody.get('eventTime') or msg.get('eventTime') or 0)
 
                 # Range filters.
                 if from_seq is not None and seq < from_seq:

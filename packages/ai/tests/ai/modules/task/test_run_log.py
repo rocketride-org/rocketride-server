@@ -65,8 +65,9 @@ STREAM = stream_name(PROJECT, SOURCE, KIND)
 # reach BEHIND the FileStore with the raw istore to verify on-store layout.
 STORE_PREFIX = f'users/{CLIENT}/files/'
 
-# Epoch-us style seed far above CONST_LOG_SEQ_FLOOR, matching production.
-SEED = 1_784_000_000_000_000
+# The continuum starts at 1 on a fresh stream (catalog-seeded thereafter:
+# control.lastSeq + 1), matching production.
+SEED = 1
 
 
 # =============================================================================
@@ -75,15 +76,20 @@ SEED = 1_784_000_000_000_000
 
 
 def make_stamp(start: int = SEED):
-    """Build a fake task-side stamp: counter + eventTime, floor-aware."""
+    """Build a fake task-side stamp: body eventTime + logSeq, floor-aware."""
     state = {'next': start, 'floor_calls': []}
 
     def stamp(message, *, event_time=None):
-        # Mirror Task.stamp_log_event: eventTime once; re-stamp small seqs.
-        if 'eventTime' not in message:
-            message['eventTime'] = event_time if event_time is not None else time.time()
-        if message.get('seq', 0) < 10**14:
-            message['seq'] = state['next']
+        # Mirror Task.stamp_log_event: the stamps ride in the BODY (the DAP
+        # envelope is pure protocol); eventTime once; logSeq assigned once.
+        body = message.get('body')
+        if not isinstance(body, dict):
+            body = {}
+            message['body'] = body
+        if 'eventTime' not in body:
+            body['eventTime'] = event_time if event_time is not None else time.time()
+        if 'logSeq' not in body:
+            body['logSeq'] = state['next']
             state['next'] += 1
         return message
 
@@ -241,9 +247,9 @@ class TestAppendAndMarkers:
         assert begin['body']['action'] == 'run-begin'
         assert begin['body']['projectId'] == PROJECT
         assert begin['body']['runKind'] == KIND
-        # Header stamps present; no token anywhere in the marker.
-        assert begin['seq'] >= SEED
-        assert begin['eventTime'] > 0
+        # Body stamps present; no token anywhere in the marker.
+        assert begin['body']['logSeq'] >= SEED
+        assert begin['body']['eventTime'] > 0
         assert 'token' not in json.dumps(begin).lower() or 'tk_' not in json.dumps(begin)
 
     @pytest.mark.asyncio
@@ -273,7 +279,7 @@ class TestAppendAndMarkers:
             writer.append(stamp(output_event(f'line {i}')))
         await writer.end_run('ok')
 
-        seqs = [ln['seq'] for ln in await read_stream_lines(istore, spool_root)]
+        seqs = [ln['body']['logSeq'] for ln in await read_stream_lines(istore, spool_root)]
         assert seqs == sorted(seqs)
         assert len(set(seqs)) == len(seqs)
 
@@ -337,9 +343,11 @@ class TestSegmentCodec:
 
         # Decoded form reconstructs the appended events EXACTLY
         decoded = await read_stream_lines(istore, spool_root)
-        decoded_by_seq = {m['seq']: m for m in decoded if 'seq' in m}
+        decoded_by_seq = {
+            m['body']['logSeq']: m for m in decoded if isinstance(m.get('body'), dict) and 'logSeq' in m['body']
+        }
         for original in appended:
-            assert decoded_by_seq[original['seq']] == original
+            assert decoded_by_seq[original['body']['logSeq']] == original
 
     @pytest.mark.asyncio
     async def test_cross_segment_leave_stored_full(self, istore, spool_root, monkeypatch):
@@ -535,10 +543,10 @@ class TestContinuum:
         await writer.end_run('ok')
         run1_last = int(writer._control['lastSeq'])
 
-        # Second run: same identity, new writer instance (fresh process),
-        # fresh stamp whose epoch seed is BELOW the persisted lastSeq to
-        # prove the floor lift (belt and suspenders) wins.
-        stamp2, raise_floor2, state2 = make_stamp(start=SEED - 1_000_000)
+        # Second run: same identity, new writer instance (fresh process).
+        # A fresh counter always starts at 1 — below the persisted lastSeq —
+        # so the catalog floor lift is what carries the continuum forward.
+        stamp2, raise_floor2, state2 = make_stamp()
         writer2 = RunLogWriter(
             FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=spool_root
         )
@@ -553,41 +561,10 @@ class TestContinuum:
         assert chapters[0]['outcome'] == 'ok'
         assert chapters[1]['outcome'] == 'error'
         assert chapters[1]['beginSeq'] > chapters[0]['beginSeq']
-        # Seq continued past run 1 despite the lower clock seed.
+        # Seq continued past run 1 via the catalog floor lift.
         assert raise_floor2 is not None
         assert state2['floor_calls'] and state2['floor_calls'][0] == run1_last + 1
         assert int(control['lastSeq']) > run1_last
-
-    @pytest.mark.asyncio
-    async def test_clock_anomaly_marker_written_when_clock_below_last_seq(self, istore, spool_root):
-        stamp, raise_floor, _ = make_stamp()
-        writer = await open_writer(istore, spool_root, stamp, raise_floor)
-        writer.append(stamp(output_event('run1')))
-        await writer.end_run('ok')
-
-        # Simulate a stream whose lastSeq sits ABOVE the real epoch-us clock
-        # (i.e. the clock stepped backward since those seqs were issued): the
-        # reopen must fall back to lastSeq + 1 AND record the anomaly in the
-        # stream itself, never absorb it silently.
-        future_seq = int(time.time() * 1_000_000) + 10**12
-        writer._control['lastSeq'] = future_seq
-        await writer._write_control()
-
-        stamp2, raise_floor2, state2 = make_stamp()
-        writer2 = RunLogWriter(
-            FileStore(istore, CLIENT), CLIENT, PROJECT, SOURCE, KIND, stamp2, raise_floor2, spool_root=spool_root
-        )
-        await writer2.open(trigger='manual', user=CLIENT, pipeline_hash='abc123', trace_level='summary')
-        await writer2.end_run('ok')
-
-        actions = [
-            ln['body']['action']
-            for ln in await read_stream_lines(istore, spool_root)
-            if ln['event'] == 'apaevt_log_lifecycle'
-        ]
-        assert 'clock-anomaly' in actions
-        # The floor fell back to lastSeq + 1 (the belt won over the clock).
-        assert state2['floor_calls'] and state2['floor_calls'][0] == future_seq + 1
 
     @pytest.mark.asyncio
     async def test_restart_marker_does_not_open_new_chapter(self, istore, spool_root):
@@ -752,13 +729,13 @@ class TestRecovery:
 class TestTruncation:
     def test_oversized_trace_data_truncated_metadata_survives(self):
         msg = flow_event(data={'blob': 'x' * 200_000})
-        msg['eventTime'] = 123.456
-        msg['seq'] = SEED
+        msg['body']['eventTime'] = 123.456
+        msg['body']['logSeq'] = SEED
         clipped = truncate_event(msg, max_bytes=1024)
         assert clipped is not msg
         assert clipped['__truncated'] is True
-        assert clipped['eventTime'] == 123.456
-        assert clipped['seq'] == SEED
+        assert clipped['body']['eventTime'] == 123.456
+        assert clipped['body']['logSeq'] == SEED
         assert clipped['body']['op'] == 'enter'
         assert clipped['body']['trace']['data']['__truncated'] is True
 

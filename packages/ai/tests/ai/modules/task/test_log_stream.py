@@ -44,6 +44,7 @@ import ai.modules.task.run_log as run_log
 from ai.account.file_store import FileStore
 from ai.account.store_providers.filesystem import FilesystemStore
 from rocketride import log_stream as rr_log_stream
+from rocketride._log_codec import normalize_stamps
 from rocketride.log_stream import LogEventStream
 
 # Shared helpers from the writer test module.
@@ -173,7 +174,7 @@ def golden_trace_windows(golden):
             window.append(later)
             if is_flow and body.get('op') == 'end':
                 break
-        windows.append((ev['seq'], window))
+        windows.append((seq_of(ev), window))
     return windows
 
 
@@ -183,6 +184,21 @@ async def wait_until(condition, timeout=5.0):
     while not condition():
         assert time.time() < deadline, 'condition not met in time'
         await asyncio.sleep(0.02)
+
+
+def seq_of(ev):
+    """The event's continuum seq — body.logSeq, the only place it lives."""
+    return ev['body']['logSeq']
+
+
+def time_of(ev):
+    """The event's continuum emission time — body.eventTime."""
+    return ev['body']['eventTime']
+
+
+async def read_golden(reader, **kwargs):
+    """Server read + client-side stamp normalization (what a session yields)."""
+    return [normalize_stamps(e) for e in (await reader.read(**kwargs))['events']]
 
 
 async def play_to_end(session, pos):
@@ -203,13 +219,13 @@ class TestGoldenPlayback:
     @pytest.mark.asyncio
     async def test_play_from_start_reconstructs_stream(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
-        golden = (await reader.read(from_seq=0))['events']
+        golden = await read_golden(reader, from_seq=0)
         # Sanity: the scenario really produced multiple segments.
         timeline = await reader.chapters()
         assert len(timeline['segments']) >= 3
 
         session = open_session(reader)
-        played = await play_to_end(session, golden[0]['eventTime'] - 1.0)
+        played = await play_to_end(session, time_of(golden[0]) - 1.0)
         # The hard contract: play() reproduces the server read() exactly —
         # every event, fully reconstructed, in seq order.
         assert played == golden
@@ -218,10 +234,10 @@ class TestGoldenPlayback:
     @pytest.mark.asyncio
     async def test_seek_splice_no_gap_no_duplicate(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
-        golden = (await reader.read(from_seq=0))['events']
+        golden = await read_golden(reader, from_seq=0)
 
         session = open_session(reader)
-        mid_pos = golden[len(golden) // 2]['eventTime']
+        mid_pos = time_of(golden[len(golden) // 2])
         await session.seek(mid_pos)
         # Capture the SEED watermark before play advances it.
         watermark = session._watermark
@@ -230,32 +246,32 @@ class TestGoldenPlayback:
         await session._pump_task
 
         # The watermark must actually sit inside the stream (not trivial).
-        assert golden[0]['seq'] <= watermark < golden[-1]['seq']
+        assert seq_of(golden[0]) <= watermark < seq_of(golden[-1])
         # Everything after the watermark arrives exactly once, in order.
-        assert played == [e for e in golden if e['seq'] > watermark]
+        assert played == [e for e in golden if seq_of(e) > watermark]
         # And nothing below it is replayed: seed + played tile the stream.
-        seeded = [e for e in golden if e['seq'] <= watermark]
+        seeded = [e for e in golden if seq_of(e) <= watermark]
         assert len(seeded) + len(played) == len(golden)
         session.close_event_stream()
 
     @pytest.mark.asyncio
     async def test_lru_cap_evicts_and_still_reconstructs(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
-        golden = (await reader.read(from_seq=0))['events']
+        golden = await read_golden(reader, from_seq=0)
         timeline = await reader.chapters()
         assert len(timeline['segments']) > 2, 'scenario must exceed the test cap'
 
         # Cap below the segment count forces evictions DURING playback.
         monkeypatch.setattr(rr_log_stream, '_MAX_RESIDENT_SEGMENTS', 2)
         session = open_session(reader)
-        played = await play_to_end(session, golden[0]['eventTime'] - 1.0)
+        played = await play_to_end(session, time_of(golden[0]) - 1.0)
         # Reconstruction is unharmed by eviction (re-fetch on demand)...
         assert played == golden
         # ...and residency respected the cap throughout (checked at the end;
         # the cap is enforced on every insert).
         assert len(session._cache) <= 2
         # Seeded reads after eviction re-materialize the covering segment.
-        await session.seek(golden[-1]['eventTime'])
+        await session.seek(time_of(golden[-1]))
         expected = [e['body'] for e in golden if e['event'] == 'apaevt_status_update'][-1]
         assert await session.get_status() == expected
         assert len(session._cache) <= 2
@@ -285,9 +301,9 @@ class TestSeededReads:
     @pytest.mark.asyncio
     async def test_get_status_at_end_is_last_status(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
-        golden = (await reader.read(from_seq=0))['events']
+        golden = await read_golden(reader, from_seq=0)
         session = open_session(reader)
-        await session.seek(golden[-1]['eventTime'])
+        await session.seek(time_of(golden[-1]))
         status = await session.get_status()
         expected = [e['body'] for e in golden if e['event'] == 'apaevt_status_update'][-1]
         assert status == expected
@@ -295,9 +311,9 @@ class TestSeededReads:
     @pytest.mark.asyncio
     async def test_get_console_exact_at_position(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
-        golden = (await reader.read(from_seq=0))['events']
+        golden = await read_golden(reader, from_seq=0)
         session = open_session(reader)
-        await session.seek(golden[-1]['eventTime'])
+        await session.seek(time_of(golden[-1]))
         lines = await session.get_console(2000)
         # Terminal semantics: exactly what the console printed, in order —
         # the keyframe scrollback folds seamlessly into interior output.
@@ -307,9 +323,9 @@ class TestSeededReads:
     @pytest.mark.asyncio
     async def test_get_traces_window_and_limit(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
-        golden = (await reader.read(from_seq=0))['events']
+        golden = await read_golden(reader, from_seq=0)
         session = open_session(reader)
-        await session.seek(golden[-1]['eventTime'])
+        await session.seek(time_of(golden[-1]))
         with pytest.raises(ValueError):
             await session.get_traces(51)
         result = await session.get_traces(50)
@@ -321,7 +337,7 @@ class TestSeededReads:
     @pytest.mark.asyncio
     async def test_get_trace_by_begin_seq(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
-        golden = (await reader.read(from_seq=0))['events']
+        golden = await read_golden(reader, from_seq=0)
         session = open_session(reader)
         # Identity contract: EVERY request resolves by its begin seq to
         # exactly its own begin..end window — including the two requests
@@ -339,7 +355,7 @@ class TestSeededReads:
             assert detail['summary']['open'] is False
         # A seq where nothing begins, and one below the horizon: both fail.
         with pytest.raises(KeyError):
-            await session.get_trace(golden[-1]['seq'] + 999)
+            await session.get_trace(seq_of(golden[-1]) + 999)
         with pytest.raises(KeyError):
             await session.get_trace(1)
 
@@ -403,16 +419,19 @@ class TestLiveIngest:
         event = {
             'type': 'event',
             'event': 'output',
-            'eventTime': time.time(),
-            'seq': state['next'] + 100,
-            'body': {'category': 'console', 'output': 'live-line'},
+            'body': {
+                'category': 'console',
+                'output': 'live-line',
+                'eventTime': time.time(),
+                'logSeq': state['next'] + 100,
+            },
         }
         # LIVE MODE: bucket append + direct, synchronous delivery.
         session.ingest_live(event)
         assert delivered[base:] == [event]
         session.ingest_live(event)  # duplicate seq must be dropped silently
         assert delivered[base:] == [event]
-        assert session._watermark == event['seq']
+        assert session._watermark == event['body']['logSeq']
         session.close_event_stream()
 
     @pytest.mark.asyncio
@@ -448,7 +467,7 @@ class TestLiveIngest:
         # The wire copies arrive as they always do — disk copies are
         # IRRELEVANT to live delivery: each arrival delivers directly,
         # exactly once, in order.
-        golden = (await reader.read(from_seq=begin_seq))['events']
+        golden = await read_golden(reader, from_seq=begin_seq)
         for wire_copy in golden:
             session.ingest_live(wire_copy)
         assert [e['body']['op'] for e in delivered[base:]] == ['begin', 'enter', 'leave', 'end']
@@ -459,20 +478,20 @@ class TestLiveIngest:
         await session.seek(0.0)
         await session.play(None, 0, lambda item: replayed.append(item['event']))
         await session._pump_task
-        seqs = [e['seq'] for e in replayed]
+        seqs = [seq_of(e) for e in replayed]
         assert seqs == sorted(set(seqs)), 'no duplicates, strict order'
-        assert [e['seq'] for e in golden] == seqs[-len(golden) :]
+        assert [seq_of(e) for e in golden] == seqs[-len(golden) :]
         session.close_event_stream()
 
     @pytest.mark.asyncio
     async def test_size_trigger_reconciles_tail_against_catalog(self, istore, spool_root, monkeypatch):
         reader = await seed_rich(istore, spool_root, monkeypatch)
-        golden = (await reader.read(from_seq=0))['events']
+        golden = await read_golden(reader, from_seq=0)
         timeline = await reader.chapters()
         # Catalog coverage cutoff: the newest segment's first seq — anything
         # below it lives in a sealed, cataloged segment.
         cutoff = timeline['segments'][-1]['seq']
-        sealed = [e for e in golden if e['seq'] < cutoff]
+        sealed = [e for e in golden if seq_of(e) < cutoff]
         assert sealed, 'scenario must span multiple segments'
 
         session = open_session(reader)
@@ -482,14 +501,15 @@ class TestLiveIngest:
             session.ingest_live(event)
         # One event beyond the catalog must SURVIVE the reconcile.
         fresh = dict(golden[-1])
-        fresh['seq'] = golden[-1]['seq'] + 999
+        fresh['body'] = dict(fresh['body'])
+        fresh['body']['logSeq'] = seq_of(golden[-1]) + 999
         session.ingest_live(fresh)
         # Await the reconcile task itself (yield loops cannot cover its
         # real file I/O deterministically).
         assert session._reconcile_task is not None
         await session._reconcile_task
-        assert all(e['seq'] >= cutoff for e in session._live.events)
-        assert any(e['seq'] == fresh['seq'] for e in session._live.events)
+        assert all(seq_of(e) >= cutoff for e in session._live.events)
+        assert any(seq_of(e) == seq_of(fresh) for e in session._live.events)
         # Byte accounting matches what is actually retained.
         assert session._live_bytes > 0
         assert not session._reconciling

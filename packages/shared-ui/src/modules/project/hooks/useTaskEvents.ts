@@ -51,14 +51,29 @@ import type { ChartStats, StatusDataPoint } from '../../../components/status/typ
 // =============================================================================
 
 /** A stamped DAP event message (header eventTime + continuum seq). */
+/**
+ * The body of a stamped task event — the COMPLETE task-scoped record: the
+ * project_id/source identity, the continuum stamps, and the event payload.
+ * The DAP envelope around it is pure protocol (its `seq` is per-connection
+ * bookkeeping) and carries nothing of ours.
+ */
+export interface TaskEventBody {
+	/** Continuum emission time (epoch seconds), stamped at engine ingress. */
+	eventTime: number;
+	/** Continuum sequence — catalog-seeded, strictly monotonic per stream. */
+	logSeq: number;
+	[key: string]: unknown;
+}
+
+/**
+ * One stamped task event. There is ONE representation of the stamps: the
+ * body. The host gate admits only events whose body carries them, so every
+ * consumer reads body.eventTime / body.logSeq directly.
+ */
 export interface TaskEventMessage {
 	type?: string;
 	event: string;
-	/** Server-stamped emission time (epoch seconds, float). */
-	eventTime: number;
-	/** Server-stamped continuum seq (epoch-us seeded, monotonic). */
-	seq: number;
-	body?: Record<string, unknown>;
+	body: TaskEventBody;
 	[key: string]: unknown;
 }
 
@@ -237,7 +252,7 @@ function lowerBound(events: TaskEventMessage[], time: number): number {
 	let hi = events.length;
 	while (lo < hi) {
 		const mid = (lo + hi) >> 1;
-		if (events[mid].eventTime < time) lo = mid + 1;
+		if (events[mid].body.eventTime < time) lo = mid + 1;
 		else hi = mid;
 	}
 	return lo;
@@ -249,7 +264,7 @@ function upperBound(events: TaskEventMessage[], time: number): number {
 	let hi = events.length;
 	while (lo < hi) {
 		const mid = (lo + hi) >> 1;
-		if (events[mid].eventTime <= time) lo = mid + 1;
+		if (events[mid].body.eventTime <= time) lo = mid + 1;
 		else hi = mid;
 	}
 	return lo;
@@ -358,16 +373,16 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			// the session's segment cache makes any deep re-seek cheap).
 			if (fold.length > FOLD_CAP) {
 				fold.splice(0, FOLD_CAP / 5);
-				const floorSeq = fold[0].seq;
-				foldAnchorRef.current = fold[0].eventTime;
-				statusIndexRef.current = statusIndexRef.current.filter((snapshot) => snapshot.seq >= floorSeq);
+				const floorSeq = fold[0].body.logSeq;
+				foldAnchorRef.current = fold[0].body.eventTime;
+				statusIndexRef.current = statusIndexRef.current.filter((snapshot) => snapshot.body.logSeq >= floorSeq);
 			}
 
 			const position = cursorTimeRef.current;
-			if (position === null || message.eventTime <= position) {
+			if (position === null || message.body.eventTime <= position) {
 				setRebuildTick((value) => value + 1);
 			}
-			if (message.eventTime > runwayEnd()) {
+			if (message.body.eventTime > runwayEnd()) {
 				sessionRef.current?.pause();
 				sessionRunningRef.current = false;
 			}
@@ -418,7 +433,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 		const target = sessionRef.current;
 		if (!target || sessionRunningRef.current) return;
 		const fold = foldRef.current;
-		const tail = fold.length > 0 ? fold[fold.length - 1].eventTime : null;
+		const tail = fold.length > 0 ? fold[fold.length - 1].body.eventTime : null;
 		if (tail !== null && tail > runwayEnd()) return;
 		const generation = generationRef.current;
 		sessionRunningRef.current = true;
@@ -492,7 +507,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			lastTickRef.current = nowMs;
 			const wallNow = nowMs / 1000;
 			const fold = foldRef.current;
-			const tail = fold.length > 0 ? fold[fold.length - 1].eventTime : null;
+			const tail = fold.length > 0 ? fold[fold.length - 1].body.eventTime : null;
 
 			let next: number;
 			if (pinnedRef.current) {
@@ -562,7 +577,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			const fold = foldRef.current;
 			const afterTime = lastEnded?.endTime ?? Number.NEGATIVE_INFINITY;
 			const firstIdx = lastEnded === null ? (fold.length > 0 ? 0 : -1) : lowerBound(fold, afterTime + 0.001);
-			if (firstIdx >= 0 && firstIdx < fold.length && fold[firstIdx].eventTime <= position) {
+			if (firstIdx >= 0 && firstIdx < fold.length && fold[firstIdx].body.eventTime <= position) {
 				// Scan backward from the position for the newest run-begin
 				// marker — that is the synthetic track's true begin. Fall back
 				// to the first post-chapter event only when no marker exists
@@ -575,7 +590,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 					}
 				}
 				return {
-					chapter: { beginTime: first.eventTime, beginSeq: first.seq, endTime: null, outcome: null },
+					chapter: { beginTime: first.body.eventTime, beginSeq: first.body.logSeq, endTime: null, outcome: null },
 					active: true,
 				};
 			}
@@ -667,7 +682,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			let index = upperBound(statusIndex, start);
 			const points: StatusDataPoint[] = [];
 			for (let t = start; t <= clockSecond; t++) {
-				while (index < statusIndex.length && statusIndex[index].eventTime <= t) index++;
+				while (index < statusIndex.length && statusIndex[index].body.eventTime <= t) index++;
 				const at = index > 0 ? statusIndex[index - 1] : null;
 				const next = index < statusIndex.length ? statusIndex[index] : null;
 				const atBody = (at?.body ?? null) as Record<string, any> | null;
@@ -675,8 +690,8 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 
 				let totalDelta = 0;
 				let failedDelta = 0;
-				if (at && next && nextBody && atBody && next.eventTime > at.eventTime) {
-					const span = next.eventTime - at.eventTime;
+				if (at && next && nextBody && atBody && next.body.eventTime > at.body.eventTime) {
+					const span = next.body.eventTime - at.body.eventTime;
 					totalDelta = Math.max(0, Number(nextBody.totalCount ?? 0) - Number(atBody.totalCount ?? 0)) / span;
 					failedDelta = Math.max(0, Number(nextBody.failedCount ?? 0) - Number(atBody.failedCount ?? 0)) / span;
 				}
@@ -734,7 +749,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 		for (let i = from; i < to; i++) {
 			const body = statusIndex[i].body as Record<string, any> | null;
 			const total = Number(body?.totalCount ?? 0);
-			const span = statusIndex[i].eventTime - prevTime;
+			const span = statusIndex[i].body.eventTime - prevTime;
 			if (span > 0) {
 				const rate = Math.max(0, total - prevTotal) / span;
 				processed += Math.max(0, total - prevTotal);
@@ -743,7 +758,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				current = rate;
 				intervals++;
 			}
-			prevTime = statusIndex[i].eventTime;
+			prevTime = statusIndex[i].body.eventTime;
 			prevTotal = total;
 		}
 
@@ -802,8 +817,8 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			// Anything else re-anchors; the session's segment cache makes a
 			// warm reseed instant.
 			const fold = foldRef.current;
-			const first = fold.length > 0 ? fold[0].eventTime : null;
-			const last = fold.length > 0 ? fold[fold.length - 1].eventTime : null;
+			const first = fold.length > 0 ? fold[0].body.eventTime : null;
+			const last = fold.length > 0 ? fold[fold.length - 1].body.eventTime : null;
 			const inWindow = first !== null && last !== null && time >= first && time <= last + 1;
 			const depthOk = first !== null && first <= anchor + 1;
 			if (inWindow && depthOk) return;
@@ -877,7 +892,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				// keeps it riding the wall clock and maybeResume drains the
 				// session up to the head.
 				const fold = foldRef.current;
-				const tail = fold.length > 0 ? fold[fold.length - 1].eventTime : null;
+				const tail = fold.length > 0 ? fold[fold.length - 1].body.eventTime : null;
 				const head = Math.max(Date.now() / 1000, tail ?? 0);
 				setPinned(true);
 				setPlaying(true);

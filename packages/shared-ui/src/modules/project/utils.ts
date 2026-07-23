@@ -50,12 +50,15 @@ export function parseServerEvent(event: unknown, projectId: string): ParsedServe
 
 	// --- Flow / trace event (apaevt_flow) ------------------------------------
 	if (msg.event === 'apaevt_flow' && body.project_id === projectId) {
-		// Continuum headers are stamped by the server at engine-stdout ingress
-		// (header-level, beside the DAP seq). The folds have NO wall-clock
-		// fallback, so an un-stamped event (a host connected to a pre-continuum
-		// server) must be skipped — passing it through would seed NaN
-		// timestamps and unstable ordering downstream.
-		if (typeof msg.eventTime !== 'number' || typeof msg.seq !== 'number') return {};
+		// Continuum stamps live in the BODY — the only place they exist (the
+		// DAP envelope is pure protocol; session decode canonicalizes legacy
+		// recordings into the body too). The folds have NO wall-clock
+		// fallback, so an event with no body stamps (a pre-continuum server)
+		// is skipped — passing it through would seed NaN timestamps and
+		// unstable ordering downstream.
+		const eventTime = body.eventTime;
+		const seq = body.logSeq;
+		if (typeof eventTime !== 'number' || typeof seq !== 'number') return {};
 		const traceEvent: TraceEvent = {
 			pipelineId: body.id ?? 0,
 			op: body.op || 'enter',
@@ -63,8 +66,8 @@ export function parseServerEvent(event: unknown, projectId: string): ParsedServe
 			component: body.component,
 			trace: body.op === 'end' ? {} : body.trace || {},
 			source: body.source,
-			eventTime: msg.eventTime,
-			seq: msg.seq,
+			eventTime,
+			seq,
 			...(body.op === 'end' && body.trace && Object.keys(body.trace).length > 0 ? { pipelineResult: body.trace } : {}),
 		};
 		return { traceEvent };

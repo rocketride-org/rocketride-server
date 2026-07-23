@@ -78,8 +78,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t.public_auth = 'pk_test'
     t.info = {}
     # Run-log continuum state consulted by _forward_task_event's stamping
-    # safety net (see Task.stamp_log_event): epoch-us-style seed + no writer.
-    t._log_seq_next = 1_784_000_000_000_000
+    # safety net (see Task.stamp_log_event): fresh-stream counter + no writer.
+    t._log_seq_next = 1
     t._run_log = None
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.

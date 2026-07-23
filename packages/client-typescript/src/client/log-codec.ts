@@ -166,7 +166,7 @@ export class SegmentDecoder {
 			if (DELTA_KEY in body) {
 				const full = applyShallowDelta(this.prevStatus ?? {}, body[DELTA_KEY]) as Record<string, unknown>;
 				this.prevStatus = full;
-				return { ...msg, body: full };
+				return { ...msg, body: full as LogEvent['body'] };
 			}
 			this.prevStatus = body;
 			return msg;
@@ -206,7 +206,7 @@ export class SegmentDecoder {
 						base !== null && typeof base === 'object' ? base : {},
 						(data as Record<string, unknown>)[DELTA_KEY],
 					);
-					return { ...msg, body: { ...body, trace: { ...trace, data: fullData } } };
+					return { ...msg, body: { ...body, trace: { ...trace, data: fullData } } as unknown as LogEvent['body'] };
 				}
 				return msg;
 			}
@@ -214,6 +214,32 @@ export class SegmentDecoder {
 
 		return msg;
 	}
+}
+
+/**
+ * Canonicalize the continuum stamps INTO the body — the single place they
+ * live. Current recordings (and the live wire) already carry
+ * `body.eventTime` + `body.logSeq`; legacy v2 segments carried the stamps
+ * at the header with the continuum under `seq`, so decode moves those into
+ * the body once and old data reads identically to new. The DAP envelope is
+ * never a source of truth (its `seq` is per-connection bookkeeping).
+ *
+ * @param msg - A decoded event (mutated in place).
+ * @returns The same event with body.eventTime/body.logSeq guaranteed.
+ */
+export function normalizeStamps(msg: LogEvent): LogEvent {
+	let body = msg.body as Record<string, unknown> | undefined;
+	if (!body || typeof body !== 'object') {
+		body = {};
+		(msg as Record<string, unknown>).body = body;
+	}
+	if (typeof body.eventTime !== 'number' && typeof (msg as Record<string, unknown>).eventTime === 'number') {
+		body.eventTime = (msg as Record<string, unknown>).eventTime;
+	}
+	if (typeof body.logSeq !== 'number' && typeof (msg as Record<string, unknown>).seq === 'number') {
+		body.logSeq = (msg as Record<string, unknown>).seq;
+	}
+	return msg;
 }
 
 /**
@@ -243,7 +269,7 @@ export function parseSegmentChunk(
 			decoder.seed(keyframe);
 			continue;
 		}
-		events.push(decoder.decode(msg as unknown as LogEvent));
+		events.push(normalizeStamps(decoder.decode(msg as unknown as LogEvent)));
 	}
 	return { keyframe, events };
 }

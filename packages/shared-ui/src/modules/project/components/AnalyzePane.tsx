@@ -162,13 +162,13 @@ export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events, onOpenTrace }
 				const slot = Number(body.id ?? 0);
 				if (op === 'enter' && component) {
 					const stack = openEnters.get(component) ?? [];
-					stack.push(message.eventTime);
+					stack.push(message.body.eventTime);
 					openEnters.set(component, stack);
 				} else if (op === 'leave' && component) {
 					const stack = openEnters.get(component);
 					const started = stack?.pop();
 					if (started !== undefined) {
-						const delta = Math.max(0, message.eventTime - started);
+						const delta = Math.max(0, message.body.eventTime - started);
 						const stat = perComponent.get(component) ?? {
 							component,
 							count: 0,
@@ -181,7 +181,7 @@ export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events, onOpenTrace }
 						perComponent.set(component, stat);
 					}
 				} else if (op === 'begin') {
-					openDocs.set(slot, { begin: message.eventTime, component, beginSeq: message.seq });
+					openDocs.set(slot, { begin: message.body.eventTime, component, beginSeq: message.body.logSeq });
 				} else if (op === 'end') {
 					const started = openDocs.get(slot);
 					if (started !== undefined) {
@@ -190,16 +190,16 @@ export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events, onOpenTrace }
 							component: started.component,
 							begin: started.begin,
 							beginSeq: started.beginSeq,
-							duration: Math.max(0, message.eventTime - started.begin),
+							duration: Math.max(0, message.body.eventTime - started.begin),
 						});
 						openDocs.delete(slot);
 					}
 				}
 			} else if (message.event === 'apaevt_log_lifecycle') {
 				const action = String(body.action ?? '');
-				if (action === 'run-begin') runBegin = message.eventTime;
+				if (action === 'run-begin') runBegin = message.body.eventTime;
 				if (action === 'run-end' && runBegin !== null) {
-					activity.push({ begin: runBegin, end: message.eventTime });
+					activity.push({ begin: runBegin, end: message.body.eventTime });
 					runBegin = null;
 				}
 			}

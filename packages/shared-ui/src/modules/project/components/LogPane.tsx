@@ -136,7 +136,7 @@ interface LogLine {
 function projectLine(message: TaskEventMessage): LogLine | null {
 	if (!TEXT_EVENT_TYPES.has(message.event)) return null;
 	const body = (message.body ?? {}) as Record<string, unknown>;
-	const time = new Date(message.eventTime * 1000).toLocaleTimeString([], {
+	const time = new Date(message.body.eventTime * 1000).toLocaleTimeString([], {
 		hour: '2-digit',
 		minute: '2-digit',
 		second: '2-digit',
@@ -147,21 +147,21 @@ function projectLine(message: TaskEventMessage): LogLine | null {
 		const text = String(body.output ?? '').replace(/\n$/, '');
 		if (!text) return null;
 		const style = body.category === 'stderr' ? styles.stderr : styles.line;
-		return { key: message.seq, time, text, style };
+		return { key: message.body.logSeq, time, text, style };
 	}
 
 	// Errors / warnings from the engine protocol.
 	if (message.event === 'apaevt_status_error') {
-		return { key: message.seq, time, text: `ERROR: ${String(body.message ?? '')}`, style: styles.error };
+		return { key: message.body.logSeq, time, text: `ERROR: ${String(body.message ?? '')}`, style: styles.error };
 	}
 	if (message.event === 'apaevt_status_warning') {
-		return { key: message.seq, time, text: `WARN: ${String(body.message ?? '')}`, style: styles.stderr };
+		return { key: message.body.logSeq, time, text: `WARN: ${String(body.message ?? '')}`, style: styles.stderr };
 	}
 
 	// Lifecycle markers — run boundaries, restarts, clock anomalies.
 	const action = String(body.action ?? '');
 	const detail = body.outcome ? ` (${String(body.outcome)})` : body.detail ? ` — ${String(body.detail)}` : '';
-	return { key: message.seq, time, text: `── ${action}${detail} ──`, style: styles.lifecycle };
+	return { key: message.body.logSeq, time, text: `── ${action}${detail} ──`, style: styles.lifecycle };
 }
 
 // =============================================================================

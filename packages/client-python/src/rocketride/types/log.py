@@ -90,14 +90,20 @@ class LogChaptersResult(TypedDict, total=False):
 
 
 class LogEvent(TypedDict, total=False):
-    """One logged event — a stamped DAP event message line."""
+    """
+    One logged event — a stamped DAP event message line.
+
+    There is ONE representation of the continuum stamps: the BODY —
+    ``body['eventTime']`` (epoch seconds, stamped at engine ingress) and
+    ``body['logSeq']`` (catalog-seeded, strictly monotonic per stream),
+    beside the ``project_id``/``source`` identity. The DAP envelope is pure
+    protocol (its ``seq`` is per-connection bookkeeping); legacy v2
+    segments that carried the stamps at the header are canonicalized into
+    the body at decode.
+    """
 
     type: str
     event: str
-    # Server-stamped emission time (epoch seconds, float).
-    eventTime: float
-    # Server-stamped continuum seq (epoch-us seeded, monotonic).
-    seq: int
     body: Dict[str, Any]
 
 

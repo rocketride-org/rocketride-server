@@ -344,8 +344,8 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					// fallback for older servers).
 					const announced = (message.body as Record<string, unknown> | undefined)?.beginSeq;
 					const begin = {
-						beginTime: message.eventTime,
-						beginSeq: typeof announced === 'number' ? announced : message.seq,
+						beginTime: message.body.eventTime,
+						beginSeq: typeof announced === 'number' ? announced : message.body.logSeq,
 						endTime: null,
 						outcome: null,
 					};
@@ -355,7 +355,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 						return { ...base, completed: false, chapters: [...base.chapters, begin] };
 					});
 				} else if (action === 'end') {
-					const endTime = message.eventTime;
+					const endTime = message.body.eventTime;
 					setTimeline((prev) => {
 						if (!prev) return prev;
 						const chapters = prev.chapters.map((c, i) => (i === prev.chapters.length - 1 && c.endTime == null ? { ...c, endTime } : c));
@@ -424,7 +424,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 				};
 				arm();
 				void walker.play(undefined, 0, ({ event }) => {
-					if (event.eventTime > end) {
+					if (event.body.eventTime > end) {
 						done();
 						return;
 					}

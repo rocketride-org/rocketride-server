@@ -54,7 +54,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
-from ._log_codec import SegmentDecoder
+from ._log_codec import SegmentDecoder, normalize_stamps
 from .types.log import (
     LogEvent,
     LogPlayItem,
@@ -69,6 +69,17 @@ if TYPE_CHECKING:
 
 # A position on the continuum: epoch seconds, or 'live' (pinned to now).
 LogPosition = Union[float, str]
+
+
+def _seq_of(ev: LogEvent) -> int:
+    """The event's continuum seq — body.logSeq, the only place it lives."""
+    return int((ev.get('body') or {}).get('logSeq') or 0)
+
+
+def _time_of(ev: LogEvent) -> float:
+    """The event's continuum emission time — body.eventTime."""
+    return float((ev.get('body') or {}).get('eventTime') or 0.0)
+
 
 # Timeline cache lifetime — chapters/segments are one small server read.
 _TIMELINE_TTL_S = 5.0
@@ -366,7 +377,7 @@ class LogEventStream:
         # stored offset: the writer spools every line before broadcasting,
         # so the disk always has it.
         begin_seg = await self._ensure_segment(begin_seg_id)
-        if begin_seg is not None and begin_seg.events and begin_seg.events[-1].get('seq', 0) < trace_id:
+        if begin_seg is not None and begin_seg.events and _seq_of(begin_seg.events[-1]) < trace_id:
             await self._extend_segment(begin_seg)
         begin_event: Optional[LogEvent] = None
         if begin_seg is not None:
@@ -377,7 +388,7 @@ class LogEventStream:
         if (
             begin_seg is None
             or begin_event is None
-            or begin_event.get('seq') != trace_id
+            or _seq_of(begin_event) != trace_id
             or begin_event.get('event') != 'apaevt_flow'
             or begin_body.get('op') != 'begin'
         ):
@@ -388,7 +399,7 @@ class LogEventStream:
             tail_body = (tail_begin or {}).get('body') or {}
             if (
                 tail_begin is not None
-                and tail_begin.get('seq') == trace_id
+                and _seq_of(tail_begin) == trace_id
                 and tail_begin.get('event') == 'apaevt_flow'
                 and tail_body.get('op') == 'begin'
             ):
@@ -425,7 +436,7 @@ class LogEventStream:
                 if state['ended']:
                     return
                 ev = source[i]
-                if ev.get('seq', 0) < trace_id:
+                if _seq_of(ev) < trace_id:
                     continue
                 body = ev.get('body') or {}
                 # The trace's events: its flow ops (slot = body.id) and the
@@ -435,14 +446,14 @@ class LogEventStream:
                 if not is_flow and not is_sse:
                     continue
                 # Seq-dedupe across sources (a tail copy may duplicate disk).
-                if events and events[-1].get('seq', 0) >= ev.get('seq', 0):
+                if events and _seq_of(events[-1]) >= _seq_of(ev):
                     continue
                 events.append(ev)
                 if is_flow and body.get('op') == 'enter':
                     state['calls'] += 1
                 if is_flow and body.get('op') == 'end':
                     state['ended'] = True
-                    state['end_time'] = ev.get('eventTime')
+                    state['end_time'] = _time_of(ev)
 
         consume(begin_list, begin_idx)
         for seg_id in later_seg_ids:
@@ -454,7 +465,7 @@ class LogEventStream:
         if not state['ended']:
             consume(self._live.events, 0)
 
-        begin_time = begin_event.get('eventTime')
+        begin_time = _time_of(begin_event)
         summary: LogTraceSummary = {
             'id': trace_id,
             'doc': begin_body.get('component') or ((begin_body.get('pipes') or [None])[0]),
@@ -508,11 +519,15 @@ class LogEventStream:
         Args:
             msg: A stamped event message from the live feed.
         """
-        seq = msg.get('seq')
-        if self._closed or not isinstance(seq, int):
+        # The continuum stamps ride in the BODY (the DAP header seq is the
+        # connection's protocol counter — meaningless here). An event without
+        # body stamps is not a stamped task event; drop it.
+        body = msg.get('body')
+        if self._closed or not isinstance(body, dict) or not isinstance(body.get('logSeq'), int):
             return
+        seq = body['logSeq']
         # A duplicate of something already bucketed: nothing new.
-        last = self._live.events[-1].get('seq', 0) if self._live.events else 0
+        last = _seq_of(self._live.events[-1]) if self._live.events else 0
         if seq <= last:
             return
         self._live.events.append(msg)
@@ -603,7 +618,7 @@ class LogEventStream:
                     idx = _first_seq_above(events, self._watermark)
                     while idx < len(events) and self._playing and self._callback is not None:
                         ev = events[idx]
-                        self._watermark = ev.get('seq', self._watermark)
+                        self._watermark = _seq_of(ev)
                         self._callback({'event': ev})
                         idx += 1
                 else:
@@ -611,7 +626,7 @@ class LogEventStream:
                     self._pinned = False
                 return
 
-            event_time = nxt.get('eventTime', self._base_pos)
+            event_time = _time_of(nxt)
             if self._speed > 0:
                 # Pace by event-time delta scaled by speed; re-check state
                 # after any real sleep (a pause may land mid-wait).
@@ -625,7 +640,7 @@ class LogEventStream:
                     self._base_pos = max(self._base_pos, event_time)
                     continue
 
-            self._watermark = nxt.get('seq', self._watermark)
+            self._watermark = _seq_of(nxt)
             self._base_pos = max(self._base_pos, event_time)
             self._callback({'event': nxt})
 
@@ -739,9 +754,9 @@ class LogEventStream:
                     seg.keyframe = msg
                     seg.decoder.seed(msg)
                     continue
-                decoded = seg.decoder.decode(msg)
-                seq = decoded.get('seq')
-                if isinstance(seq, int) and seq > self._max_disk_seq:
+                decoded = normalize_stamps(seg.decoder.decode(msg))
+                seq = _seq_of(decoded)
+                if seq > self._max_disk_seq:
                     self._max_disk_seq = seq
                 seg.events.append(decoded)
             seg.final = bool(chunk.get('final'))
@@ -762,13 +777,13 @@ class LogEventStream:
 
     def _events_through(self, seg: Optional[_CachedSegment], pos: float) -> List[LogEvent]:
         """All events of ``seg`` plus the live bucket, eventTime <= pos, ordered."""
-        events = [e for e in seg.events if (e.get('eventTime') or 0) <= pos] if seg else []
+        events = [e for e in seg.events if _time_of(e) <= pos] if seg else []
         # The bucket is the stream's newest segment — it participates in the
         # fold exactly like disk events (dedupe is structural: the bucket
         # holds only seqs beyond _max_disk_seq).
-        last_disk = events[-1].get('seq', 0) if events else 0
+        last_disk = _seq_of(events[-1]) if events else 0
         for ev in self._live.events:
-            if (ev.get('eventTime') or 0) <= pos and ev.get('seq', 0) > last_disk:
+            if _time_of(ev) <= pos and _seq_of(ev) > last_disk:
                 events.append(ev)
         return events
 
@@ -822,9 +837,9 @@ class LogEventStream:
                 open_map[pid] = {
                     'id': pid,
                     # The trace's PERMANENT identity — what get_trace resolves.
-                    'beginSeq': ev.get('seq'),
+                    'beginSeq': _seq_of(ev),
                     'doc': body.get('component'),
-                    'beginTime': ev.get('eventTime'),
+                    'beginTime': _time_of(ev),
                     'calls': 0,
                     'open': True,
                     'touched': [seg.id] if seg else [],
@@ -839,7 +854,7 @@ class LogEventStream:
                     done_entry = dict(entry)
                     done_entry['open'] = False
                     if entry.get('beginTime') is not None:
-                        done_entry['elapsed'] = max(0.0, (ev.get('eventTime') or 0) - entry['beginTime'])
+                        done_entry['elapsed'] = max(0.0, _time_of(ev) - entry['beginTime'])
                     closed.append(done_entry)
         return open_map, closed
 
@@ -847,8 +862,8 @@ class LogEventStream:
         """Highest seq at-or-before ``pos`` in the segment (0 when none)."""
         last = 0
         for ev in self._events_through(seg, pos):
-            seq = ev.get('seq')
-            if isinstance(seq, int) and seq > last:
+            seq = _seq_of(ev)
+            if seq > last:
                 last = seq
         return last
 
@@ -865,12 +880,12 @@ class LogEventStream:
 
 
 def _first_seq_above(events: List[LogEvent], after_seq: int) -> int:
-    """Index of the first event with seq > ``after_seq`` (seq-ascending list)."""
+    """Index of the first event with body.logSeq > ``after_seq`` (ascending)."""
     # Manual binary search — avoids materializing a seq list on every call.
     lo, hi = 0, len(events)
     while lo < hi:
         mid = (lo + hi) // 2
-        if events[mid].get('seq', 0) <= after_seq:
+        if _seq_of(events[mid]) <= after_seq:
             lo = mid + 1
         else:
             hi = mid

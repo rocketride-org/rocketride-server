@@ -208,7 +208,7 @@ class TestRead:
     async def test_full_range_ordered_and_complete(self, istore, spool_root, monkeypatch):
         reader = await seed_stream(istore, spool_root, monkeypatch)
         body = await reader.read(from_seq=0)
-        seqs = [e['seq'] for e in body['events']]
+        seqs = [e['body']['logSeq'] for e in body['events']]
         assert seqs == sorted(seqs)
         outputs = [e for e in body['events'] if e['event'] == 'output']
         assert any('run1-000' in e['body']['output'] for e in outputs)
@@ -221,7 +221,7 @@ class TestRead:
         body = await reader.read(from_seq=run2_begin, types=['output'])
         assert body['events']
         assert all(e['event'] == 'output' for e in body['events'])
-        assert all(e['seq'] >= run2_begin for e in body['events'])
+        assert all(e['body']['logSeq'] >= run2_begin for e in body['events'])
         assert all('run2-' in e['body']['output'] for e in body['events'])
 
     @pytest.mark.asyncio
@@ -246,7 +246,7 @@ class TestRead:
             assert pages < 50, 'paging must terminate'
         assert pages > 1
         full = await reader.read(from_seq=0)
-        assert [e['seq'] for e in collected] == [e['seq'] for e in full['events']]
+        assert [e['body']['logSeq'] for e in collected] == [e['body']['logSeq'] for e in full['events']]
 
     @pytest.mark.asyncio
     async def test_below_horizon_flags_truncation(self, istore, spool_root, monkeypatch):

@@ -58,12 +58,6 @@ CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 # =============================================================================
 # Run Logging (per-task JSONL event continuum) Configuration
 # =============================================================================
-# Continuum seq numbers are epoch-microsecond seeded (see task_engine
-# stamp_log_event): any value at or above this floor is a continuum seq; any
-# value below it is a legacy per-endpoint DAP counter and gets re-stamped.
-# 1e14 sits far above any per-process counter and far below epoch-us (~1.78e15).
-CONST_LOG_SEQ_FLOOR = 10**14
-
 # Sealed-segment size: the active spool segment seals at this many bytes
 # (on a line boundary) and uploads as one immutable store object.
 CONST_LOG_SEGMENT_BYTES = 16 * 1024 * 1024  # 16 MB
