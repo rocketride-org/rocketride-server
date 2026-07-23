@@ -357,7 +357,7 @@ export class EngineLocal extends EngineBackend {
 				for (const line of data.toString().split('\n')) {
 					const msg = line.trim();
 					if (msg) {
-						this.logger.console(msg);
+						this.logger.output(msg);
 						if (msg.includes('Uvicorn running')) tryResolveReady(msg);
 						else if (!processReady && engineLineRegex.test(msg)) {
 							this.emitStatus({ phase: 'working', message: 'Starting server...', logLine: msg.replace(engineLineRegex, '') });

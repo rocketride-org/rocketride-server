@@ -284,7 +284,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			// Subscribe to task lifecycle events
 			const client = this.connectionManager.getClient();
 			if (client) {
-				client.addMonitor({ token: '*' }, ['task', 'output']).catch((err) => {
+				// 'task' only: the wildcard 'output' subscription existed to feed
+				// the removed Rocket Ride: Console mirror — per-editor monitors
+				// subscribe to output themselves for the Log pane.
+				client.addMonitor({ token: '*' }, ['task']).catch((err) => {
 					console.error('[SidebarProvider] Failed to subscribe to task events:', err);
 				});
 			}
@@ -676,7 +679,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	public dispose(): void {
 		const client = this.connectionManager.getClient();
 		if (client) {
-			client.removeMonitor({ token: '*' }, ['task', 'output']).catch(() => {});
+			client.removeMonitor({ token: '*' }, ['task']).catch(() => {});
 		}
 		for (const d of this.disposables) d.dispose();
 		this.disposables = [];
