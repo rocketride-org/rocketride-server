@@ -24,49 +24,35 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from rocketlib import OPEN_MODE
-from ai.common.transform import IGlobalTransform
+from typing import Any, Dict
+
+from ai.common.store import StoreGlobalBase
 
 
-class IGlobal(IGlobalTransform):
-    def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
+class IGlobal(StoreGlobalBase):
+    serverName: str = 'astra'
+
+    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
+        # Import store definition lazily so config mode never loads the driver.
+        from .astra_db import Store
+
+        return Store(logical_type, conn_config, bag)
+
+    def _sub_key(self) -> str:
+        store = self.store
+        collection = getattr(store, 'collection_name', getattr(store, 'collection', ''))
+
+        # Prefer cloud endpoint if present; otherwise fall back to host[:port]; otherwise logical type
+        if getattr(store, 'api_endpoint', ''):
+            identifier = store.api_endpoint.rstrip('/')
+        elif getattr(store, 'host', ''):
+            port = getattr(store, 'port', None)
+            identifier = f'{store.host}:{port}' if port else store.host
         else:
-            # Import store definition - even though
-            from .astra_db import Store
+            identifier = self.glb.logicalType
 
-            # Declare store
-            self.store: Store | None = None
+        return f'{identifier}/{collection}'
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
-
-            # Get the passed configuration
-            connConfig = self.getConnConfig()
-
-            # Get the configuration
-            self.store = Store(self.glb.logicalType, connConfig, bag)
-            collection = getattr(self.store, 'collection_name', getattr(self.store, 'collection', ''))
-
-            # Prefer cloud endpoint if present; otherwise fall back to host[:port]; otherwise logical type
-            if hasattr(self.store, 'api_endpoint') and self.store.api_endpoint:
-                identifier = self.store.api_endpoint.rstrip('/')
-            elif hasattr(self.store, 'host') and getattr(self.store, 'host', ''):
-                port = getattr(self.store, 'port', None)
-                identifier = f'{self.store.host}:{port}' if port else self.store.host
-            else:
-                identifier = self.glb.logicalType
-
-            subKey = f'{identifier}/{collection}'
-
-            # Call the base
-            super().beginGlobal(subKey)
-            return
-
-    def endGlobal(self):
-        # Release the index and embeddings
-        self.store = None
+    def _probe_connection(self, config: Dict[str, Any]) -> None:
+        # Astra validates the collection name inside Store.__init__; no save-time probe here.
+        return

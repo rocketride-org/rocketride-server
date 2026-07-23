@@ -24,57 +24,35 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from rocketlib import OPEN_MODE
-from ai.common.transform import IGlobalTransform
+import re
+from typing import Any, Dict
+
+from ai.common.store import StoreGlobalBase
 from rocketlib import warning
-from ai.common.config import Config
 
 
-class IGlobal(IGlobalTransform):
-    def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            # Validate configuration only during config mode
-            self.validateConfig()
-            pass
-        else:
-            # Declare store
-            from . import getStore
+class IGlobal(StoreGlobalBase):
+    serverName: str = 'atlas'
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
+    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
+        # Store is resolved lazily via the package hook so config mode never loads the driver.
+        from . import getStore
 
-            # Get the passed configuration
-            connConfig = self.getConnConfig()
+        Store = getStore()
+        return Store(logical_type, conn_config, bag)
 
-            # Get the configuration
-            Store = getStore()
-            self.store = Store(self.glb.logicalType, connConfig, bag)
+    def _sub_key(self) -> str:
+        return f'{self.store.host}/{self.store.database}/{self.store.collection}'
 
-            # Get the info about our store
-            database = self.store.database
-            collection = self.store.collection
-            host = self.store.host
-
-            # Format it into a subKey
-            subKey = f'{host}/{database}/{collection}'
-
-            # Call the base
-            super().beginGlobal(subKey)
-            return
-
-    def validateConfig(self):
+    def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
-        Validate MongoDB config at save-time with optional connection testing.
+        Validate MongoDB config at save-time with lightweight format checks.
 
-        Performs lightweight format validation by default.
-        No syntaxOnly arg per engine expectations.
+        Performs format validation only (no network call): API key present,
+        host matches the Atlas ``mongodb+srv`` URI shape, and database/collection
+        names respect MongoDB naming restrictions.
         """
         try:
-            # Get config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             host = config.get('host')
             api_key = config.get('apikey')
             database = config.get('database')
@@ -93,8 +71,6 @@ class IGlobal(IGlobalTransform):
             host = host.strip()
 
             # Basic MongoDB URI format validation using regex
-            import re
-
             mongodb_uri_pattern = r'^mongodb\+srv://[^:]+:[^@]+@[a-zA-Z0-9\-]+\.[a-zA-Z0-9]+\.mongodb\.net/\?.*'
             if not re.match(mongodb_uri_pattern, host):
                 warning("Host must be a valid MongoDB URI (e.g., 'mongodb+srv://cluster.example.mongodb.net')")
@@ -140,7 +116,3 @@ class IGlobal(IGlobalTransform):
         except Exception as e:
             msg = str(e)
             warning(msg)
-
-    def endGlobal(self):
-        # Release the database connection
-        self.store = None

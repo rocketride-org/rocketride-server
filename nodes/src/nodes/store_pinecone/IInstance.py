@@ -24,54 +24,9 @@
 # ------------------------------------------------------------------------------
 # This class controls the data for each thread of the task
 # ------------------------------------------------------------------------------
-from rocketlib import Entry
-from typing import List
 from .IGlobal import IGlobal
-from ai.common.schema import Doc, Question
-from ai.common.store import VectorStoreToolMixin
-from ai.common.transform import IInstanceTransform
+from ai.common.store import StoreInstanceBase
 
 
-class IInstance(VectorStoreToolMixin, IInstanceTransform):
+class IInstance(StoreInstanceBase):
     IGlobal: IGlobal
-
-    def writeQuestions(self, question: Question):
-        """
-        Take a question, performs a search, and writes the results as documents.
-        """
-        # Dispatch to the search handler
-        self.IGlobal.store.dispatchSearch(self, question)
-
-    def writeDocuments(self, documents: List[Doc]):
-        """
-        Take a list of documents and adds them to the vector store.
-
-        Any chunks in the database that have the same object id will
-        be removed
-        """
-        # Add the document chunks
-        self.IGlobal.store.addChunks(documents)
-
-    def renderObject(self, object: Entry):
-        """
-        Output all the document text to the writeText lane.
-        """
-
-        def callback(text: str) -> None:
-            self.instance.sendText(text)
-
-        # Check it
-        if self.IGlobal.store is None:
-            raise Exception('No document store')
-
-        # If we do not have a vectorize flag, or we have not vectorized
-        # it, allow the next driver to render
-        if not object.hasVectorBatchId or not object.vectorBatchId:
-            return
-
-        # Render the data on this object from the store and
-        # send it to the renderData function
-        self.IGlobal.store.render(objectId=object.objectId, callback=callback)
-
-        # Stop right here
-        self.preventDefault()

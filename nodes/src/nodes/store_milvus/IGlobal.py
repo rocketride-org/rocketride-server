@@ -26,19 +26,31 @@
 # ------------------------------------------------------------------------------
 import os
 import re
-from rocketlib import OPEN_MODE, warning
-from ai.common.config import Config
-from ai.common.transform import IGlobalTransform
+from typing import Any, Dict
+
+from ai.common.store import StoreGlobalBase
+from rocketlib import warning
 
 
-class IGlobal(IGlobalTransform):
+class IGlobal(StoreGlobalBase):
     """Global interface for the Milvus node."""
+
+    serverName: str = 'milvus'
 
     # Precompiled rules for Milvus collection names
     NAME_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,254}$')
     RULES_TEXT = 'Rules: 1) length 1–255, 2) Letters (A–Z, a–z), digits (0–9), and underscores only, 3) start with a letter or underscore, 4) subsequent characters may be letters, digits, or underscores.'
 
-    def validateConfig(self):
+    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
+        # Import store definition lazily so config mode never loads the driver.
+        from .milvus import Store
+
+        return Store(logical_type, conn_config, bag)
+
+    def _sub_key(self) -> str:
+        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
+
+    def _probe_connection(self, config: Dict[str, Any]) -> None:
         """Validate Milvus configuration at save-time with a minimal probe."""
         try:
             from depends import depends  # type: ignore
@@ -50,7 +62,6 @@ class IGlobal(IGlobalTransform):
             from pymilvus import connections, utility, exceptions as milvus_exc
 
             # Read config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             host_raw = config.get('host', '').strip()
             token = (config.get('apikey') or '').strip()  # cloud
             # Use port exactly as provided by UI (let SDK validate)
@@ -92,48 +103,6 @@ class IGlobal(IGlobalTransform):
         except Exception as e:
             warning(str(e))
             return
-
-    def beginGlobal(self):
-        """Initialize global resources for the Milvus node."""
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Import store definition - even though
-            from .milvus import Store
-
-            # Declare store
-            self.store: Store | None = None
-
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
-
-            # The parameters are in different places based on whether we
-            # are a filter or an endpoint. If we are a filter, they are in
-            # glb.connConfig, otherwise the are in IEndpoint.endpoint.parameters
-            connConfig = self.getConnConfig()
-
-            # Get the configuration
-            self.store = Store(self.glb.logicalType, connConfig, bag)
-
-            # Get the info about our store
-            collection = self.store.collection
-            host = self.store.host
-            port = self.store.port
-
-            # Format it into a subKey
-            subKey = f'{host}/{port}/{collection}'
-
-            # Call the base
-            super().beginGlobal(subKey)
-            return
-
-    def endGlobal(self):
-        """Release global resources for the Milvus node."""
-        # Release the index and embeddings
-        self.store = None
 
     def _format_error(self, exc: Exception) -> str:
         """Return concise error string for Milvus/driver exceptions."""

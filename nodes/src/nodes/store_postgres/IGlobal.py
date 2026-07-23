@@ -26,50 +26,28 @@
 # ------------------------------------------------------------------------------
 import os
 import re
-from rocketlib import OPEN_MODE, warning
-from ai.common.transform import IGlobalTransform
-from ai.common.config import Config
+from typing import Any, Dict
+
+from ai.common.store import StoreGlobalBase
+from rocketlib import warning
 
 # Valid unquoted PostgreSQL identifier: letter/underscore start, alphanumeric/underscore body, max 63 chars
 VALID_TABLE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
 
 
-class IGlobal(IGlobalTransform):
-    def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Import store definition - even though
-            from .postgres import Store
+class IGlobal(StoreGlobalBase):
+    serverName: str = 'postgres'
 
-            # Declare store
-            self.store: Store | None = None
+    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
+        # Import store definition lazily so config mode never loads the driver.
+        from .postgres import Store
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
+        return Store(logical_type, conn_config, bag)
 
-            # Get the passed configuration
-            connConfig = self.getConnConfig()
+    def _sub_key(self) -> str:
+        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
 
-            # Get the configuration
-            self.store = Store(self.glb.logicalType, connConfig, bag)
-
-            # Get the info about our store
-            collection = self.store.collection
-            host = self.store.host
-            port = self.store.port
-
-            # Format it into a subKey
-            subKey = f'{host}/{port}/{collection}'
-
-            # Call the base
-            super().beginGlobal(subKey)
-            return
-
-    def validateConfig(self):
+    def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate PostgreSQL vector store config with fast, read-only probes.
 
@@ -79,14 +57,13 @@ class IGlobal(IGlobalTransform):
         - Surface raw provider errors without truncation
         """
         try:
-            cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
-            host = (cfg.get('host') or '').strip()
-            port = cfg.get('port')
-            user = cfg.get('user')
-            password = cfg.get('password')
-            database = (cfg.get('database') or 'postgres').strip()
+            host = (config.get('host') or '').strip()
+            port = config.get('port')
+            user = config.get('user')
+            password = config.get('password')
+            database = (config.get('database') or 'postgres').strip()
             # Support legacy key 'collection' if UI still sends it
-            table = ((cfg.get('table') or cfg.get('collection')) or '').strip()
+            table = ((config.get('table') or config.get('collection')) or '').strip()
 
             # Table name validation: unquoted identifier rules, total ≤63 chars
             if not VALID_TABLE.fullmatch(table or ''):
@@ -128,10 +105,6 @@ class IGlobal(IGlobalTransform):
                     pass
         except Exception as e:
             warning(_format_error(e))
-
-    def endGlobal(self):
-        # Release the index and embeddings
-        self.store = None
 
 
 def _format_error(e: Exception) -> str:

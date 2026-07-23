@@ -21,11 +21,14 @@
 # SOFTWARE.
 # =============================================================================
 
+# ------------------------------------------------------------------------------
+# This class controls the data shared between all threads for the task
+# ------------------------------------------------------------------------------
 import os
 import re
-from ai.common.config import Config
-from ai.common.transform import IGlobalTransform
-from rocketlib import OPEN_MODE
+from typing import Any, Dict
+
+from ai.common.store import StoreGlobalBase
 from rocketlib import warning
 
 
@@ -33,42 +36,19 @@ from rocketlib import warning
 WEAVIATE_COLLECTION_RE = re.compile(r'^[A-Z][_0-9A-Za-z]*$')
 
 
-class IGlobal(IGlobalTransform):
-    def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Import store definition - even though
-            from .weaviate import Store
+class IGlobal(StoreGlobalBase):
+    serverName: str = 'weaviate'
 
-            # Declare store
-            self.store: Store | None = None
+    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
+        # Import store definition lazily so config mode never loads the driver.
+        from .weaviate import Store
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
+        return Store(logical_type, conn_config, bag)
 
-            # Get the passed configuration
-            connConfig = self.getConnConfig()
+    def _sub_key(self) -> str:
+        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
 
-            # Get the configuration
-            self.store = Store(self.glb.logicalType, connConfig, bag)
-
-            # Get the info about our store
-            collection = self.store.collection
-            host = self.store.host
-            port = self.store.port
-
-            # Format it into a subKey
-            subKey = f'{host}/{port}/{collection}'
-
-            # Call the base
-            super().beginGlobal(subKey)
-            return
-
-    def validateConfig(self):
+    def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate Weaviate config at save-time with a fast, SDK-driven probe.
 
@@ -78,8 +58,6 @@ class IGlobal(IGlobalTransform):
         - Minimal timeouts; SDK/HTTP exceptions surfaced without truncation
         """
         try:
-            # Get config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             host = (config.get('host', '')).strip()
             port = config.get('port')
             grpc_port = config.get('grpc_port')
@@ -152,10 +130,6 @@ class IGlobal(IGlobalTransform):
 
         except Exception as e:
             warning(_format_error(e))
-
-    def endGlobal(self):
-        # Release the index and embeddings
-        self.store = None
 
 
 def _format_error(e: Exception) -> str:

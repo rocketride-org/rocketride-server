@@ -27,99 +27,27 @@
 
 import os
 import re
+from typing import Any, Dict
 
-from .pinecone import Store
-
-from rocketlib import OPEN_MODE, warning
-from ai.common.transform import IGlobalTransform
-from ai.common.config import Config
+from ai.common.store import StoreGlobalBase
+from rocketlib import warning
 
 HTTP_BODY_MARKER = 'http response body:'
 
 
-class IGlobal(IGlobalTransform):
-    # Class attributes - properly defined for IDE support
-    store: 'Store | None' = None
+class IGlobal(StoreGlobalBase):
     serverName: str = 'pinecone'
 
-    def beginGlobal(self):
-        """
-        Initialize Pinecone store connection and set up global resources.
+    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
+        # Import store definition lazily so config mode never loads the driver.
+        from .pinecone import Store
 
-        Creates store instance and configures subkey for the base transform.
-        """
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Import store definition - even though
-            from .pinecone import Store
+        return Store(logical_type, conn_config, bag)
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
+    def _sub_key(self) -> str:
+        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
 
-            # Get the passed configuration
-            connConfig = self.getConnConfig()
-
-            # Resolve the namespace used for agent-facing tool names
-            # (pinecone.search/upsert/delete). Read from the merged config
-            # so it honors both profile defaults and user overrides.
-            cfg = Config.getNodeConfig(self.glb.logicalType, connConfig)
-            resolved_name = cfg.get('serverName') if isinstance(cfg, dict) or hasattr(cfg, 'get') else None
-            if isinstance(resolved_name, str) and resolved_name.strip():
-                self.serverName = resolved_name.strip()
-
-            # Get the configuration
-            self.store = Store(self.glb.logicalType, connConfig, bag)
-
-            # Wire an embedder for the control-plane tool path (search/upsert).
-            # Mirrors autopipe pattern: only instantiate when embedding config present.
-            self._tool_embedding = None
-            self.embed_query = None
-            self.embed_model_name = None
-
-            try:
-                embed_provider, embed_config = Config.getMultiProviderConfig('embedding', connConfig)
-            except Exception:
-                embed_provider, embed_config = None, None
-
-            if embed_provider:
-                try:
-                    from ai.common.embedding import getEmbedding as _getEmbedding
-
-                    self._tool_embedding = _getEmbedding(embed_provider, embed_config, bag)
-                except Exception as exc:  # noqa: BLE001
-                    warning(f'{self.glb.logicalType}: tool path embedder unavailable: {exc}')
-                    self._tool_embedding = None
-
-            if self._tool_embedding is not None:
-                from ai.common.schema import Question as _Question, QuestionText as _QuestionText
-
-                def _embed_query(text: str, _emb=self._tool_embedding) -> list:
-                    qt = _QuestionText(text=text)
-                    q = _Question()
-                    q.questions = [qt]
-                    _emb.encodeQuestion(q)
-                    return list(qt.embedding or [])
-
-                self.embed_query = _embed_query
-                self.embed_model_name = getattr(self._tool_embedding, '_model', None)
-
-            # Get the info about our store
-            collection = self.store.collection
-            host = self.store.host
-            port = self.store.port
-
-            # Format it into a subKey
-            subKey = f'{host}/{port}/{collection}'
-
-            # Call the base
-            super().beginGlobal(subKey)
-            return
-
-    def validateConfig(self):
+    def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate the configuration for Pinecone vector store.
 
@@ -136,8 +64,6 @@ class IGlobal(IGlobalTransform):
             # Use HTTP client for validation to surface structured ApiException with status/body
             from pinecone import Pinecone
 
-            # Get config
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             apikey = config.get('apikey')
             collection = config.get('collection')
             mode = config.get('mode')  # pod-based or serverless-dense
@@ -225,12 +151,3 @@ class IGlobal(IGlobalTransform):
             else:
                 warning(error_str.strip())
             return
-
-    def endGlobal(self):
-        """
-        Clean up global resources and release Pinecone store connection.
-        """
-        self._tool_embedding = None
-        self.embed_query = None
-        self.embed_model_name = None
-        self.store = None
