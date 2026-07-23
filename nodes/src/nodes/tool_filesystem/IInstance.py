@@ -60,6 +60,11 @@ from .IGlobal import IGlobal
 DEFAULT_READ_LIMIT = 256 * 1024  # 256 KB
 MAX_READ_LIMIT = 4 * 1024 * 1024  # 4 MB
 
+# Connection id used for the sink's streaming-media write handles. The FileStore
+# caps handles per connection id; a single constant is fine because sink handles
+# are opened and closed within one object's media stream (only a few open at once).
+_SINK_CONNECTION_ID = 0
+
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
@@ -350,136 +355,225 @@ class IInstance(IInstanceBase):
 
     # ------------------------------------------------------------------
     # Pipeline sink (lanes)
+    #
+    # The node doubles as a pipeline sink: data arriving on a lane is written to
+    # the account-scoped FileStore and a reference Doc is emitted downstream.
+    # Each lane owns its own filename rule — text/table are markdown, documents
+    # keep the source extension, media derive from the mime — instead of one
+    # tangled precedence chain.
     # ------------------------------------------------------------------
 
-    def _sink_resolve_name(self, ext_hint: str | None, mime: str | None) -> str:
-        """Build the target filename from the current source object.
-
-        Uses the original object name when present, else the object id. The
-        extension comes from the original name, then the mime type (media),
-        then ``ext_hint``/``.md`` (text/table with no name).
-        """
+    def _sink_base_name(self) -> str:
+        """Filename stem from the source object's name, else its objectId."""
         obj = self.instance.currentObject
-        if getattr(obj, 'hasName', False) and getattr(obj, 'name', None):
-            base, orig_ext = os.path.splitext(os.path.basename(obj.name))
-            base = base or str(obj.objectId)
-        else:
-            base, orig_ext = str(obj.objectId), ''
+        name = getattr(obj, 'name', None)
+        if getattr(obj, 'hasName', False) and name:
+            return os.path.splitext(os.path.basename(name))[0] or str(obj.objectId)
+        return str(obj.objectId)
 
-        if orig_ext:
-            ext = orig_ext
-        elif mime:
-            ext = mimetypes.guess_extension(mime.split(';')[0].strip() or '') or ''
-            if not ext and '/' in mime:
-                ext = '.' + mime.split(';')[0].split('/')[-1].strip()
-            ext = ext or ext_hint or '.md'
-        else:
-            ext = ext_hint or '.md'
-        return f'{base}{ext}'
+    def _sink_source_ext(self) -> str:
+        """Extension from the source object's name, or '' when nameless."""
+        obj = self.instance.currentObject
+        name = getattr(obj, 'name', None)
+        if getattr(obj, 'hasName', False) and name:
+            return os.path.splitext(os.path.basename(name))[1]
+        return ''
 
-    def _sink_target_path(self, filename: str) -> str:
-        """Join targetDir + filename, auto-suffixing (``_1``, ``_2`` …) on collision."""
+    def _sink_target_path(self, filename: str, *, index: int | None = None) -> str:
+        """Deterministic, collision-free store path under targetDir.
+
+        Uniqueness comes from the source objectId (a per-object subdirectory)
+        plus an optional ``index`` for objects that emit multiple documents — so
+        there is no stat/probe loop and concurrent writes never race on a key.
+        """
         target_dir = (self.IGlobal.target_dir or '').strip()
         if target_dir and not target_dir.endswith('/'):
             target_dir += '/'
+        object_id = str(getattr(self.instance.currentObject, 'objectId', '') or '')
         stem, ext = os.path.splitext(filename)
-        candidate = f'{target_dir}{filename}'
-        n = 0
-        while _run_async(self.IGlobal.file_store.stat(candidate)).get('exists'):
-            n += 1
-            candidate = f'{target_dir}{stem}_{n}{ext}'
-        return candidate
+        if index is not None:
+            stem = f'{stem}_{index}'
+        prefix = f'{object_id}/' if object_id else ''
+        return f'{target_dir}{prefix}{stem}{ext}'
 
-    def _sink_persist(self, data: bytes, *, ext_hint: str | None, mime: str | None) -> dict:
-        """Persist ``data`` under targetDir and return a reference dict.
-
-        Enforces ``allow_write`` and the path whitelist exactly like
-        ``write_file``. Returns ``{storePath, url, name, mime}`` where ``url`` is
-        ``None`` unless ``emitUrl`` is configured.
-        """
-        self._check_ready()
-        if not self.IGlobal.allow_write:
-            raise ValueError('write access is not enabled for this filesystem tool')
-
-        filename = self._sink_resolve_name(ext_hint, mime)
-        path = self._sink_target_path(filename)
-        self._check_path(path)
-
-        _run_async(self.IGlobal.file_store.write(path, data))
-
+    def _sink_ref(self, path: str, mime: str | None = None) -> dict:
+        """Reference dict for a persisted file, resolving a signed URL if configured."""
         url = None
         if self.IGlobal.emit_url:
             url = _run_async(self.IGlobal.file_store.get_url(path, expires_in=self.IGlobal.url_expires_in))
         return {'storePath': path, 'url': url, 'name': os.path.basename(path), 'mime': mime}
 
+    def _sink_write(self, data: bytes, filename: str, *, index: int | None = None) -> dict:
+        """Persist ``data`` in one shot (documents/text/table) and return a ref.
+
+        Enforces ``allow_write`` and validates the path against the whitelist
+        BEFORE touching the store, so a rejected path never probes the store.
+        """
+        self._check_ready()
+        if not self.IGlobal.allow_write:
+            raise ValueError('write access is not enabled for this filesystem tool')
+        path = self._sink_target_path(filename, index=index)
+        self._check_path(path)
+        _run_async(self.IGlobal.file_store.write(path, data))
+        return self._sink_ref(path)
+
     def _sink_emit(self, refs: list[dict]) -> None:
-        """Emit persisted-file references as ``Doc``s on the documents lane."""
+        """Emit persisted-file references as ``Doc``s on the documents lane.
+
+        Metadata is built via ``DocMetadata(self, ...)`` so objectId, nodeId,
+        permissionId, and signature are inherited from the current object. Each
+        ref gets a distinct, monotonically increasing chunkId so downstream
+        vector stores (keyed on objectId+chunkId) never overwrite one another.
+        """
+        if not refs:
+            return
         if 'documents' not in self.instance.getListeners():
             return
         from ai.common.schema import Doc, DocMetadata
 
-        # A fresh ``Doc``'s ``metadata`` is None, and ``DocMetadata`` requires
-        # ``objectId``/``chunkId`` — inherit them from the source object. ``url``
-        # rides as an extra field (DocMetadata allows extras).
-        object_id = str(getattr(self.instance.currentObject, 'objectId', '') or '')
+        if not hasattr(self, '_sink_chunk_id'):
+            self._sink_chunk_id = 0
         docs = []
         for ref in refs:
-            meta_kwargs = {'objectId': object_id, 'chunkId': 0, 'parent': ref['storePath']}
+            overrides = {'chunkId': self._sink_chunk_id, 'parent': ref['storePath']}
             if ref.get('url'):
-                meta_kwargs['url'] = ref['url']
-            docs.append(Doc(page_content=ref['storePath'], metadata=DocMetadata(**meta_kwargs)))
+                overrides['url'] = ref['url']
+            docs.append(Doc(page_content=ref['storePath'], metadata=DocMetadata(self, **overrides)))
+            self._sink_chunk_id += 1
         self.instance.writeDocuments(docs)
 
-    def writeDocuments(self, documents) -> None:
-        """Sink lane: persist each incoming document's content, emit references."""
+    # -- lane handlers -------------------------------------------------
+
+    def writeDocuments(self, documents):
+        """Documents lane: persist each document (source ext, else .txt); emit refs."""
+        docs = list(documents or [])
+        base, ext = self._sink_base_name(), self._sink_source_ext() or '.txt'
+        multi = len(docs) > 1
         refs = []
-        for doc in documents or []:
+        for idx, doc in enumerate(docs):
             content = getattr(doc, 'page_content', None) or ''
             data = content.encode('utf-8') if isinstance(content, str) else bytes(content)
-            refs.append(self._sink_persist(data, ext_hint='.txt', mime=None))
+            refs.append(self._sink_write(data, f'{base}{ext}', index=idx if multi else None))
         self._sink_emit(refs)
+        return self.preventDefault()
 
-    def writeText(self, text: str) -> None:
-        """Sink lane: persist incoming text as a ``.md`` file, emit a reference."""
+    def writeText(self, text: str):
+        """Text lane: content is markdown, so it is always stored as .md."""
         data = (text or '').encode('utf-8')
-        self._sink_emit([self._sink_persist(data, ext_hint='.md', mime=None)])
+        self._sink_emit([self._sink_write(data, f'{self._sink_base_name()}.md')])
+        return self.preventDefault()
 
-    def writeTable(self, table: str) -> None:
-        """Sink lane: persist an incoming markdown table as ``.md``, emit a reference."""
+    def writeTable(self, table: str):
+        """Table lane: content is a markdown table, so it is always stored as .md."""
         data = (table or '').encode('utf-8')
-        self._sink_emit([self._sink_persist(data, ext_hint='.md', mime=None)])
+        self._sink_emit([self._sink_write(data, f'{self._sink_base_name()}.md')])
+        return self.preventDefault()
+
+    # -- streamed media ------------------------------------------------
+
+    def _media_ext(self, mime: str | None) -> str:
+        """Extension for streamed media: mime first, then source ext, then .bin."""
+        return _ext_from_mime(mime) or self._sink_source_ext() or '.bin'
+
+    def _media_abort(self, kind: str) -> None:
+        """Discard an in-flight stream (e.g. a fresh BEGIN before the previous END)."""
+        streams = getattr(self, '_media_streams', None)
+        if not streams:
+            return
+        st = streams.pop(kind, None)
+        if st and st.get('handle') is not None:
+            try:
+                _run_async(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+                _run_async(self.IGlobal.file_store.delete(st['path']))
+            except Exception:
+                pass
 
     def _sink_media(self, kind: str, aviAction, mimeType: str, data: bytes) -> None:
-        """Accumulate streamed media chunks; persist + emit a reference on END."""
+        """Stream media chunks straight to the store with bounded memory.
+
+        The write handle is opened lazily on the first non-empty chunk, so an
+        empty stream never creates a file. On END the file is committed and a
+        reference emitted; a fresh BEGIN discards any half-written prior stream.
+        """
         from rocketlib import AVI_ACTION
 
-        buffers = getattr(self, '_media_buffers', None)
-        if buffers is None:
-            buffers = self._media_buffers = {}
+        streams = getattr(self, '_media_streams', None)
+        if streams is None:
+            streams = self._media_streams = {}
+
         if aviAction == AVI_ACTION.BEGIN:
-            buffers[kind] = bytearray()
+            self._media_abort(kind)
+            streams[kind] = {'handle': None, 'path': None, 'mime': mimeType}
         elif aviAction == AVI_ACTION.WRITE:
-            buffers.setdefault(kind, bytearray()).extend(data or b'')
+            st = streams.get(kind)
+            if st is None or not data:
+                return
+            if st['handle'] is None:
+                self._check_ready()
+                if not self.IGlobal.allow_write:
+                    raise ValueError('write access is not enabled for this filesystem tool')
+                path = self._sink_target_path(f'{self._sink_base_name()}{self._media_ext(st["mime"])}')
+                self._check_path(path)
+                st['handle'] = _run_async(self.IGlobal.file_store.open_write(path, _SINK_CONNECTION_ID))
+                st['path'] = path
+            _run_async(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data), _SINK_CONNECTION_ID))
         elif aviAction == AVI_ACTION.END:
-            payload = bytes(buffers.pop(kind, b''))
-            self._sink_emit([self._sink_persist(payload, ext_hint=None, mime=mimeType)])
+            st = streams.pop(kind, None)
+            if st is None or st['handle'] is None:
+                return
+            _run_async(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+            self._sink_emit([self._sink_ref(st['path'], st['mime'])])
 
-    def writeImage(self, aviAction, mimeType: str, buffer: bytes) -> None:
-        """Sink lane: persist a streamed image, emit a reference on END."""
+    def writeImage(self, aviAction, mimeType: str, buffer: bytes):
+        """Image lane: stream to store, emit a reference on END."""
         self._sink_media('image', aviAction, mimeType, buffer)
+        return self.preventDefault()
 
-    def writeAudio(self, aviAction, mimeType: str, data: bytes) -> None:
-        """Sink lane: persist streamed audio, emit a reference on END."""
+    def writeAudio(self, aviAction, mimeType: str, data: bytes):
+        """Audio lane: stream to store, emit a reference on END."""
         self._sink_media('audio', aviAction, mimeType, data)
+        return self.preventDefault()
 
-    def writeVideo(self, aviAction, mimeType: str, data: bytes) -> None:
-        """Sink lane: persist streamed video, emit a reference on END."""
+    def writeVideo(self, aviAction, mimeType: str, data: bytes):
+        """Video lane: stream to store, emit a reference on END."""
         self._sink_media('video', aviAction, mimeType, data)
+        return self.preventDefault()
 
 
 # ----------------------------------------------------------------------
 # Module-level helpers
 # ----------------------------------------------------------------------
+
+# MIME types the stdlib ``mimetypes`` module maps inconsistently (or not at all)
+# across platforms. Checked before the generic subtype fallback so results are
+# deterministic regardless of the host's /etc/mime.types or Windows registry.
+_MIME_EXT_OVERRIDES = {
+    'image/svg+xml': '.svg',
+    'audio/wav': '.wav',
+    'audio/x-wav': '.wav',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+}
+
+
+def _ext_from_mime(mime: str | None) -> str:
+    """Best-effort file extension for a MIME type; '' when unknown.
+
+    Order: explicit overrides, then ``mimetypes.guess_extension``, then the
+    subtype with any structured-syntax suffix stripped (``image/svg+xml`` ->
+    ``.svg``, not the naive ``.svg+xml``).
+    """
+    if not mime:
+        return ''
+    main = mime.split(';')[0].strip().lower()
+    if main in _MIME_EXT_OVERRIDES:
+        return _MIME_EXT_OVERRIDES[main]
+    ext = mimetypes.guess_extension(main) or ''
+    if ext:
+        return ext
+    subtype = main.split('/')[-1].split('+')[0] if '/' in main else ''
+    return f'.{subtype}' if subtype else ''
 
 
 def _run_async(coro):
@@ -490,7 +584,7 @@ def _run_async(coro):
     methods synchronously, which is the supported caller. If invoked from a
     thread that already has a running loop, ``asyncio.run`` would raise a
     generic ``RuntimeError``; we pre-check so the failure surfaces with a
-    filesystem-specific message that points at the dispatcher contract.
+    tool_filesystem-specific message that points at the dispatcher contract.
     """
     try:
         asyncio.get_running_loop()
@@ -498,7 +592,7 @@ def _run_async(coro):
         pass
     else:
         raise RuntimeError(
-            '_run_async must not be called from a thread with a running event loop; the filesystem @tool_function methods are designed to be dispatched synchronously by the engine.'
+            '_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods are designed to be dispatched synchronously by the engine.'
         )
 
     return asyncio.run(coro)

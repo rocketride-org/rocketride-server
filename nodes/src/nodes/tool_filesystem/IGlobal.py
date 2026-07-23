@@ -46,7 +46,7 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 
 class IGlobal(IGlobalBase):
-    """Global state for filesystem."""
+    """Global state for tool_filesystem."""
 
     client_id: str | None = None
     file_store: object | None = None  # ai.account.file_store.FileStore
@@ -79,7 +79,7 @@ class IGlobal(IGlobalBase):
         client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
         if not client_id:
             warning(
-                'filesystem: ROCKETRIDE_CLIENT_ID env var is missing; tool methods will be disabled. This usually means the node is running outside the task engine.'
+                'tool_filesystem: ROCKETRIDE_CLIENT_ID env var is missing; tool methods will be disabled. This usually means the node is running outside the task engine.'
             )
             self.client_id = None
             self.file_store = None
@@ -90,7 +90,7 @@ class IGlobal(IGlobalBase):
             self.file_store = store.get_file_store(client_id)
             self.client_id = client_id
         except Exception as e:
-            warning(f'filesystem: failed to initialise FileStore: {e}')
+            warning(f'tool_filesystem: failed to initialise FileStore: {e}')
             self.client_id = None
             self.file_store = None
 
@@ -117,7 +117,7 @@ class IGlobal(IGlobalBase):
                 try:
                     patterns.append(re.compile(pat_str))
                 except re.error as e:
-                    warning(f'filesystem: invalid path whitelist regex {pat_str!r}: {e}')
+                    warning(f'tool_filesystem: invalid path whitelist regex {pat_str!r}: {e}')
 
         return patterns
 
@@ -130,7 +130,10 @@ class IGlobal(IGlobalBase):
         """
         target_dir = str(cfg.get('targetDir', 'output/'))
         emit_url = bool(cfg.get('emitUrl', False))
-        raw_expires = int(cfg.get('urlExpiresIn', 3600) or 3600)
+        try:
+            raw_expires = int(cfg.get('urlExpiresIn', 3600) or 3600)
+        except (TypeError, ValueError):
+            raw_expires = 3600
         url_expires_in = min(raw_expires, 3600) if raw_expires > 0 else 3600
         return target_dir, emit_url, url_expires_in
 
@@ -145,4 +148,6 @@ class IGlobal(IGlobalBase):
         self.client_id = None
         self.file_store = None
         self.path_patterns = []
+        self.target_dir = 'output/'
         self.emit_url = False
+        self.url_expires_in = 3600

@@ -1,4 +1,4 @@
-# filesystem
+# tool_filesystem
 
 A RocketRide tool node that gives an AI agent read/write access to the account-scoped RocketRide file store.
 
@@ -59,32 +59,46 @@ non-trivial regex).
 
 Besides the agent tools, the node doubles as a **pipeline sink**. Each input lane —
 `documents`, `text`, `table`, `image`, `audio`, `video` — writes whatever flows in to the
-account store, then emits a single `documents` metadata reference on its output lane.
+account store, then emits `documents` metadata references on its output lane: one per file
+written, so an object that carries several documents yields one reference per document.
 
-- **Where it writes:** `targetDir` (default `output/`) + the source object's original
-  name. Nameless inputs fall back to the object id; the extension comes from the original
-  name, the mime type (media), or `.md` (text/table). Existing paths are auto-suffixed
-  (`name.md`, `name_1.md`, …).
+- **Where it writes:** `targetDir` (default `output/`) + a per-source-object subdirectory +
+  the object's original name (nameless inputs fall back to the object id). Scoping the key
+  by object id makes the path deterministic and collision-free in a single write — nothing
+  probes the store for existing paths, and concurrent writes cannot race on the same key.
+  When one object emits several documents they are disambiguated with an index
+  (`report_0.md`, `report_1.md`, …).
+- **How the extension is chosen:** each lane owns its own rule. `text`/`table` carry
+  markdown, so they always store `.md`; `documents` keeps the source file's extension
+  (falling back to `.txt`); media derive it from the stream's mime type, then the source
+  extension, then `.bin`.
+- **Media streaming:** image/audio/video chunks stream straight to the store, so memory
+  stays bounded regardless of file size. The file is created only once the first non-empty
+  chunk arrives — an empty stream writes nothing.
 - **What it emits:** a document whose `page_content` is the store path, carrying that path
   (and, when **Emit download URL** is on, a time-limited signed URL) in its metadata —
-  only when a downstream node listens on `documents`.
+  only when a downstream node listens on `documents`. Each reference gets a distinct
+  `chunkId`, so downstream vector stores keyed on object id + chunk id never overwrite
+  one another.
 - **Guards:** the sink honours the same `allowWrite` toggle and path whitelist as the
-  `write_file` tool.
+  `write_file` tool; the whitelist is checked before anything touches the store. The sink
+  also suppresses default routing, so downstream nodes receive the emitted references
+  rather than the original payload as well.
 
 The signed URL is minted server-side via the store's `get_url` (no agent `task.store`
 permission needed); **URL expiry (seconds)** (default 3600, max 3600) sets its TTL.
 
 | Lane in | Lane out | Description |
 | --- | --- | --- |
-| `documents` | `documents` | Persist each document's content; emit store-path reference |
+| `documents` | `documents` | Persist each document (source extension, else `.txt`); emit one reference per document |
 | `text` / `table` | `documents` | Persist as `.md`; emit reference |
-| `image` / `audio` / `video` | `documents` | Accumulate streamed chunks, persist on end; emit reference |
+| `image` / `audio` / `video` | `documents` | Stream chunks to the store, commit on end; emit reference |
 
 ---
 
 ## Available tools
 
-Each tool is namespaced by the node id: e.g. an agent sees `filesystem_1.read_file`.
+Each tool is namespaced by the node id: e.g. an agent sees `tool_filesystem_1.read_file`.
 Disabled tools are filtered out of discovery, and the allow-flag is re-checked at
 invocation as defence-in-depth.
 
@@ -141,7 +155,7 @@ account automatically, no configuration needed.
 ## Running the tests
 
 ```bash
-pytest nodes/test/filesystem/test_read_size_cap.py -v
+pytest nodes/test/tool_filesystem/test_read_size_cap.py -v
 ```
 
 ---
@@ -164,5 +178,5 @@ pytest nodes/test/filesystem/test_read_size_cap.py -v
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/filesystem)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_filesystem)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

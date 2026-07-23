@@ -2,7 +2,9 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""Tests for the filesystem sink: services.json contract + naming helper."""
+"""Tests for the tool_filesystem sink: services.json contract, config, and the
+per-lane naming/path helpers.
+"""
 
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-_NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'filesystem'
+_NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_filesystem'
 
 
 def _load_services():
@@ -23,9 +25,10 @@ def _load_services():
 
 
 class TestServicesContract:
-    def test_classtype_is_tool_and_store(self):
+    def test_classtype_is_store_and_tool(self):
+        # Convention across the codebase is domain-first, "tool" last.
         d = _load_services()
-        assert d['classType'] == ['tool', 'store']
+        assert d['classType'] == ['store', 'tool']
 
     def test_all_input_lanes_emit_documents(self):
         d = _load_services()
@@ -46,6 +49,8 @@ class TestServicesContract:
         assert f['filesystem.emitUrl']['default'] is False
         assert f['filesystem.urlExpiresIn']['type'] == 'integer'
         assert f['filesystem.urlExpiresIn']['default'] == 3600
+        assert f['filesystem.urlExpiresIn']['minimum'] == 1
+        assert f['filesystem.urlExpiresIn']['maximum'] == 3600
 
 
 def _install_stubs():
@@ -53,12 +58,18 @@ def _install_stubs():
 
     The real ``ai`` package needs the engine-only ``depends`` module, so these
     unit tests stub the tree. ``setdefault``/``getattr`` guards ensure a real
-    module (present under ``./builder nodes:test``) is never clobbered, and the
-    ``ai.common.utils`` shims are faithful so the sibling ``test_read_size_cap``
-    still works if it inherits them.
+    module (present under ``./builder nodes:test``) is never clobbered.
     """
     rl = sys.modules.get('rocketlib') or types.ModuleType('rocketlib')
-    rl.IInstanceBase = getattr(rl, 'IInstanceBase', type('IInstanceBase', (), {}))
+    if not hasattr(rl, 'IInstanceBase'):
+
+        class _IInstanceBase:
+            def preventDefault(self):
+                # Sentinel so lane-handler tests can assert default routing is
+                # suppressed. The real engine base returns its own control value.
+                return 'PREVENT_DEFAULT'
+
+        rl.IInstanceBase = _IInstanceBase
     rl.IGlobalBase = getattr(rl, 'IGlobalBase', type('IGlobalBase', (), {}))
     if not hasattr(rl, 'tool_function'):
 
@@ -115,15 +126,16 @@ def _install_stubs():
         m = types.ModuleType('ai.common.schema')
 
         class _DocMetadata:
-            # Mirror the real DocMetadata: objectId and chunkId are REQUIRED.
-            def __init__(self, *, objectId, chunkId, **kwargs):
-                self.objectId = objectId
-                self.chunkId = chunkId
-                self.__dict__.update(kwargs)
+            # Mirror the real DocMetadata: first positional arg is the pInstance,
+            # from which objectId/nodeId/etc are auto-filled; kwargs override.
+            def __init__(self, pInstance=None, **data):
+                if pInstance is not None:
+                    obj = pInstance.instance.currentObject
+                    self.objectId = getattr(obj, 'objectId', None)
+                    self.chunkId = 0
+                self.__dict__.update(data)
 
         class _Doc:
-            # Mirror the real Doc: ``metadata`` is None unless explicitly passed
-            # (a fresh Doc does NOT auto-create a metadata object).
             def __init__(self, page_content=None, metadata=None):
                 self.page_content = page_content
                 self.metadata = metadata
@@ -134,9 +146,7 @@ def _install_stubs():
 
 
 def _load_real_iglobal():
-    """Load the real ``IGlobal`` under a unique module name (deps stubbed) so
-    ``_sink_config`` can be unit-tested without the engine.
-    """
+    """Load the real ``IGlobal`` under a unique module name (deps stubbed)."""
     _install_stubs()
     spec = importlib.util.spec_from_file_location('tfs_iglobal_real', str(_NODE_DIR / 'IGlobal.py'))
     mod = importlib.util.module_from_spec(spec)
@@ -166,6 +176,11 @@ class TestSinkConfig:
         assert IG._sink_config({'urlExpiresIn': -5})[2] == 3600
         assert IG._sink_config({'urlExpiresIn': 0})[2] == 3600
 
+    def test_url_expires_non_numeric_falls_back_to_default(self):
+        # A bad config value must not raise out of beginGlobal.
+        IG = _load_real_iglobal()
+        assert IG._sink_config({'urlExpiresIn': 'not-a-number'})[2] == 3600
+
 
 # ---------------------------------------------------------------------------
 # IInstance sink harness (shared by test_sink_lanes.py)
@@ -174,15 +189,15 @@ class TestSinkConfig:
 
 def _install_iinstance_stubs():
     """Stubs for importing the real IInstance: engine/ai stubs + a stub
-    ``filesystem`` package whose ``__path__`` points at the node dir.
+    ``tool_filesystem`` package whose ``__path__`` points at the node dir.
     """
     _install_stubs()
-    if 'filesystem' not in sys.modules:
-        pkg = types.ModuleType('filesystem')
+    if 'tool_filesystem' not in sys.modules:
+        pkg = types.ModuleType('tool_filesystem')
         pkg.__path__ = [str(_NODE_DIR)]
-        sys.modules['filesystem'] = pkg
-    if 'filesystem.IGlobal' not in sys.modules:
-        ig = types.ModuleType('filesystem.IGlobal')
+        sys.modules['tool_filesystem'] = pkg
+    if 'tool_filesystem.IGlobal' not in sys.modules:
+        ig = types.ModuleType('tool_filesystem.IGlobal')
 
         class _IGlobalStub:
             file_store = None
@@ -193,19 +208,38 @@ def _install_iinstance_stubs():
             url_expires_in = 3600
 
         ig.IGlobal = _IGlobalStub
-        sys.modules['filesystem.IGlobal'] = ig
+        sys.modules['tool_filesystem.IGlobal'] = ig
 
 
-def _fs(exists_paths=()):
-    """AsyncMock FileStore: write/stat/get_url. ``stat`` reports existence."""
+def _fs():
+    """AsyncMock FileStore covering the one-shot write API and the streaming
+    write API. Streamed chunks are recorded per handle so lane tests can assert
+    the bytes and final path.
+    """
     fs = AsyncMock()
     fs.write = AsyncMock(return_value=None)
-
-    async def _stat(p):
-        return {'exists': p in exists_paths}
-
-    fs.stat = AsyncMock(side_effect=_stat)
     fs.get_url = AsyncMock(return_value='https://x/task/fetch?token=t')
+    fs.delete = AsyncMock(return_value=None)
+
+    fs.streams = {}
+    counter = {'n': 0}
+
+    async def _open_write(path, connection_id):
+        counter['n'] += 1
+        handle = f'h{counter["n"]}'
+        fs.streams[handle] = {'path': path, 'chunks': []}
+        return handle
+
+    async def _write_chunk(handle, data, connection_id=0):
+        fs.streams[handle]['chunks'].append(bytes(data))
+        return len(data)
+
+    async def _close_write(handle, connection_id=0):
+        return None
+
+    fs.open_write = AsyncMock(side_effect=_open_write)
+    fs.write_chunk = AsyncMock(side_effect=_write_chunk)
+    fs.close_write = AsyncMock(side_effect=_close_write)
     return fs
 
 
@@ -220,11 +254,12 @@ def _sink_instance(
     url_expires_in=3600,
     allow_write=True,
     path_patterns=None,
+    listeners=('documents',),
 ):
     """Build an IInstance wired to a stub IGlobal + mocked engine ``instance``."""
     _install_iinstance_stubs()
-    from filesystem.IGlobal import IGlobal
-    from filesystem.IInstance import IInstance
+    from tool_filesystem.IGlobal import IGlobal
+    from tool_filesystem.IInstance import IInstance
 
     inst = IInstance()
     g = IGlobal()
@@ -236,45 +271,100 @@ def _sink_instance(
     g.url_expires_in = url_expires_in
     inst.IGlobal = g
     inst.instance = MagicMock()
-    # NB: ``name`` is a reserved MagicMock constructor kwarg (sets the mock's
-    # repr, not a ``.name`` attribute), so assign it after construction.
+    inst.instance.getListeners.return_value = list(listeners)
+    # NB: ``name`` is a reserved MagicMock constructor kwarg, so assign after.
     current = MagicMock(hasName=has_name, objectId=object_id)
     current.name = name
     inst.instance.currentObject = current
     return inst
 
 
-class TestSinkPersist:
-    def test_uses_object_name_and_target_dir(self):
+# ---------------------------------------------------------------------------
+# Naming / path helpers
+# ---------------------------------------------------------------------------
+
+
+class TestNamingHelpers:
+    def test_base_name_from_object_name(self):
+        inst = _sink_instance(_fs(), name='report.pdf')
+        assert inst._sink_base_name() == 'report'
+        assert inst._sink_source_ext() == '.pdf'
+
+    def test_base_name_falls_back_to_object_id(self):
+        inst = _sink_instance(_fs(), has_name=False, object_id='obj-9')
+        assert inst._sink_base_name() == 'obj-9'
+        assert inst._sink_source_ext() == ''
+
+    def test_target_path_is_object_scoped(self):
+        inst = _sink_instance(_fs(), object_id='obj-123')
+        assert inst._sink_target_path('report.pdf') == 'output/obj-123/report.pdf'
+
+    def test_target_path_index_disambiguates(self):
+        inst = _sink_instance(_fs(), object_id='obj-123')
+        assert inst._sink_target_path('report.md', index=2) == 'output/obj-123/report_2.md'
+
+    def test_target_path_honours_target_dir(self):
+        inst = _sink_instance(_fs(), object_id='o1', target_dir='exports')
+        assert inst._sink_target_path('a.txt') == 'exports/o1/a.txt'
+
+
+class TestMimeExtension:
+    def test_common_types(self):
+        from tool_filesystem.IInstance import _ext_from_mime
+
+        assert _ext_from_mime('image/png') == '.png'
+        assert _ext_from_mime('image/jpeg') == '.jpg'
+
+    def test_compound_subtype_is_stripped(self):
+        from tool_filesystem.IInstance import _ext_from_mime
+
+        # The old naive split produced '.svg+xml'; overrides/strip fix it.
+        assert _ext_from_mime('image/svg+xml') == '.svg'
+
+    def test_override_types(self):
+        from tool_filesystem.IInstance import _ext_from_mime
+
+        assert _ext_from_mime('audio/wav') == '.wav'
+        assert _ext_from_mime('application/vnd.openxmlformats-officedocument.wordprocessingml.document') == '.docx'
+
+    def test_params_and_case_ignored(self):
+        from tool_filesystem.IInstance import _ext_from_mime
+
+        assert _ext_from_mime('IMAGE/PNG; charset=binary') == '.png'
+
+    def test_empty_and_unknown(self):
+        from tool_filesystem.IInstance import _ext_from_mime
+
+        assert _ext_from_mime(None) == ''
+        assert _ext_from_mime('') == ''
+
+    def test_media_ext_prefers_mime_then_source_then_bin(self):
+        inst = _sink_instance(_fs(), name='clip.mov')
+        assert inst._media_ext('image/png') == '.png'  # mime wins
+        inst2 = _sink_instance(_fs(), name='clip.mov')
+        assert inst2._media_ext(None) == '.mov'  # falls back to source ext
+        inst3 = _sink_instance(_fs(), has_name=False, object_id='m1')
+        assert inst3._media_ext(None) == '.bin'  # last resort
+
+
+# ---------------------------------------------------------------------------
+# One-shot write path (_sink_write)
+# ---------------------------------------------------------------------------
+
+
+class TestSinkWrite:
+    def test_writes_data_to_object_scoped_path(self):
         fs = _fs()
-        inst = _sink_instance(fs, name='report.pdf', target_dir='output/')
-        ref = inst._sink_persist(b'data', ext_hint=None, mime=None)
-        assert ref['storePath'] == 'output/report.pdf'
+        inst = _sink_instance(fs, name='report.pdf', object_id='obj-123')
+        ref = inst._sink_write(b'data', 'report.pdf')
+        assert ref['storePath'] == 'output/obj-123/report.pdf'
         (path_arg, data_arg), _ = fs.write.await_args
-        assert path_arg == 'output/report.pdf' and data_arg == b'data'
-
-    def test_fallback_to_object_id_and_md_ext(self):
-        fs = _fs()
-        inst = _sink_instance(fs, has_name=False, object_id='obj-9')
-        ref = inst._sink_persist(b'# hi', ext_hint='.md', mime=None)
-        assert ref['storePath'] == 'output/obj-9.md'
-
-    def test_media_extension_from_mime(self):
-        fs = _fs()
-        inst = _sink_instance(fs, has_name=False, object_id='m1')
-        ref = inst._sink_persist(b'\x00', ext_hint=None, mime='image/png')
-        assert ref['storePath'] == 'output/m1.png'
-
-    def test_collision_autosuffix(self):
-        fs = _fs(exists_paths={'output/report.pdf', 'output/report_1.pdf'})
-        inst = _sink_instance(fs, name='report.pdf')
-        ref = inst._sink_persist(b'd', ext_hint=None, mime=None)
-        assert ref['storePath'] == 'output/report_2.pdf'
+        assert path_arg == 'output/obj-123/report.pdf' and data_arg == b'data'
 
     def test_emit_url_attaches_signed_url(self):
         fs = _fs()
         inst = _sink_instance(fs, emit_url=True, url_expires_in=120)
-        ref = inst._sink_persist(b'd', ext_hint=None, mime=None)
+        ref = inst._sink_write(b'd', 'report.pdf')
         assert ref['url'] == 'https://x/task/fetch?token=t'
         _, kwargs = fs.get_url.await_args
         assert kwargs.get('expires_in') == 120
@@ -282,7 +372,7 @@ class TestSinkPersist:
     def test_no_url_when_emit_disabled(self):
         fs = _fs()
         inst = _sink_instance(fs, emit_url=False)
-        ref = inst._sink_persist(b'd', ext_hint=None, mime=None)
+        ref = inst._sink_write(b'd', 'report.pdf')
         assert ref['url'] is None
         fs.get_url.assert_not_awaited()
 
@@ -290,13 +380,14 @@ class TestSinkPersist:
         fs = _fs()
         inst = _sink_instance(fs, allow_write=False)
         with pytest.raises(ValueError, match='write access is not enabled'):
-            inst._sink_persist(b'd', ext_hint=None, mime=None)
+            inst._sink_write(b'd', 'report.pdf')
         fs.write.assert_not_awaited()
 
-    def test_path_whitelist_enforced(self):
+    def test_path_whitelist_enforced_before_write(self):
         import re
 
         fs = _fs()
         inst = _sink_instance(fs, name='secret.pdf', path_patterns=[re.compile(r'^output/allowed')])
         with pytest.raises(ValueError, match='does not match any allowed path pattern'):
-            inst._sink_persist(b'd', ext_hint=None, mime=None)
+            inst._sink_write(b'd', 'secret.pdf')
+        fs.write.assert_not_awaited()
