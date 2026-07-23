@@ -167,7 +167,7 @@ const ProjectWebview: React.FC = () => {
 				// are one pure body test; consumers read the body directly.
 				const raw = msg.event as TaskEventMessage;
 				const body = (raw?.body ?? {}) as Record<string, unknown>;
-				if (typeof body.eventTime === 'number' && typeof body.logSeq === 'number' && body.project_id === pid) {
+				if (Number.isFinite(body.eventTime) && Number.isFinite(body.logSeq) && body.project_id === pid) {
 					setLiveLogEvents((prev) => {
 						const next = [...prev, raw];
 						// Rare chunky trim; sections re-feed (seq-deduped) on shrink.

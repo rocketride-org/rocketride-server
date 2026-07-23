@@ -1417,11 +1417,20 @@ class RunLogReader:
 
                 # Continuum stamps: in the body on current recordings;
                 # legacy v2 segments carried them at the header (and the
-                # continuum under the header name 'seq', pre-DAP-fix) —
-                # fall back so old data keeps reading.
-                mbody = msg.get('body') if isinstance(msg.get('body'), dict) else {}
-                seq = int(mbody.get('logSeq') or msg.get('seq') or 0)
-                etime = float(mbody.get('eventTime') or msg.get('eventTime') or 0)
+                # continuum under the header name 'seq', pre-DAP-fix). The
+                # legacy values are CANONICALIZED INTO the body here, so every
+                # event read() returns satisfies the body-stamp contract —
+                # consumers never carry a header fallback of their own.
+                mbody = msg.get('body')
+                if not isinstance(mbody, dict):
+                    mbody = {}
+                    msg['body'] = mbody
+                if 'logSeq' not in mbody and isinstance(msg.get('seq'), int):
+                    mbody['logSeq'] = msg['seq']
+                if 'eventTime' not in mbody and isinstance(msg.get('eventTime'), (int, float)):
+                    mbody['eventTime'] = msg['eventTime']
+                seq = int(mbody.get('logSeq') or 0)
+                etime = float(mbody.get('eventTime') or 0)
 
                 # Range filters.
                 if from_seq is not None and seq < from_seq:

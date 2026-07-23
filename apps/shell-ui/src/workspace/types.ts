@@ -153,7 +153,7 @@ export interface SettingSchema {
 	 * the manifest JSON at runtime, so render through String() and coerce the
 	 * selected value back via `type`.
 	 */
-	enum?: string[];
+	enum?: Array<string | number>;
 	/** Per-choice descriptions aligned with `enum`. */
 	enumDescriptions?: string[];
 	/** Ordering hint within the section (lower renders first). */

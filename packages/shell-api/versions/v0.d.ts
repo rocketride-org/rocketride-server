@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-23T17:45:41.228Z
-// Source commit: 41334c9fd3e82c646d10bf55a5454052aa9205d1
+// Generated:     2026-07-23T18:39:00.513Z
+// Source commit: 6fc82b1bfc6c4b38c0e03658281f9ca491aa3b4e
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -2285,7 +2285,9 @@ declare class LogEventStream {
      * segment containing the seq (the span table carries each segment's
      * first seq), find the begin event, then collect that slot's events
      * forward until its matching `end`, crossing segments and the live tail
-     * as needed. Fails only below the retention horizon.
+     * as needed. Fails when the seq has fallen below the retention horizon,
+     * or when no trace-begin event exists at that seq (a recycled slot id
+     * or a fold docId is NOT a trace identity).
      *
      * @param traceId - The trace's begin-event continuum seq.
      * @returns Summary + every event of the trace, seq-ordered.
@@ -3530,7 +3532,7 @@ export interface SettingSchema {
      * the manifest JSON at runtime, so render through String() and coerce the
      * selected value back via `type`.
      */
-    enum?: string[];
+    enum?: Array<string | number>;
     /** Per-choice descriptions aligned with `enum`. */
     enumDescriptions?: string[];
     /** Ordering hint within the section (lower renders first). */

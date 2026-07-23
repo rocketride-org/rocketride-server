@@ -106,6 +106,29 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 			['deploy.local.engineVersion', 'deployment.local.engineVersion'],
 		];
 
+		// Legacy per-connection debug-output flags fold into the ONE per-task
+		// setting: any scope that had debug output on keeps it on (OR of the
+		// old keys — same intent, wider scope). engineArgs is deliberately
+		// NOT migrated: engine PROCESS flags are not per-task arguments, and
+		// silently injecting them into every .use call could break runs.
+		const legacyDebugKeys = ['local.debugOutput', 'deploy.local.debugOutput', 'development.local.debugOutput', 'deployment.local.debugOutput'];
+		for (const target of [vscode.ConfigurationTarget.Global, vscode.ConfigurationTarget.Workspace] as const) {
+			const scope = target === vscode.ConfigurationTarget.Global ? 'globalValue' : 'workspaceValue';
+			let anyOn = false;
+			let anySet = false;
+			for (const key of legacyDebugKeys) {
+				const value = config.inspect<unknown>(key)?.[scope];
+				if (value !== undefined) {
+					anySet = true;
+					if (value === true) anyOn = true;
+					await config.update(key, undefined, target);
+				}
+			}
+			if (anySet && anyOn && config.inspect<unknown>('pipelineDebugOutput')?.[scope] === undefined) {
+				await config.update('pipelineDebugOutput', true, target);
+			}
+		}
+
 		for (const [oldKey, newKey] of keyMap) {
 			const inspected = config.inspect<unknown>(oldKey);
 			const migrated = config.inspect<unknown>(newKey);

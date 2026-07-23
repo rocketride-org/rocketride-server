@@ -40,7 +40,7 @@ export interface TraceEvent {
 	source?: string;
 	/** Server-stamped emission time (epoch SECONDS, float) — stamped once at engine-stdout ingress; identical live and on run-log replay. */
 	eventTime: number;
-	/** Server-stamped continuum sequence — epoch-us seeded, strictly monotonic per task across runs/restarts. */
+	/** Server-stamped continuum sequence — catalog-seeded (fresh stream starts at 1, reopen continues at lastSeq + 1), strictly monotonic per task across runs/restarts. */
 	seq: number;
 }
 

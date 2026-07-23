@@ -135,7 +135,7 @@ export interface SettingSchema {
 	/** Markdown variant of the description. */
 	markdownDescription?: string;
 	/** Fixed value choices — renders as a dropdown. */
-	enum?: string[];
+	enum?: Array<string | number>;
 	/** Per-choice descriptions aligned with `enum`. */
 	enumDescriptions?: string[];
 	/** Ordering hint within the section (lower renders first). */

@@ -299,7 +299,9 @@ export class LogEventStream {
 	 * segment containing the seq (the span table carries each segment's
 	 * first seq), find the begin event, then collect that slot's events
 	 * forward until its matching `end`, crossing segments and the live tail
-	 * as needed. Fails only below the retention horizon.
+	 * as needed. Fails when the seq has fallen below the retention horizon,
+	 * or when no trace-begin event exists at that seq (a recycled slot id
+	 * or a fold docId is NOT a trace identity).
 	 *
 	 * @param traceId - The trace's begin-event continuum seq.
 	 * @returns Summary + every event of the trace, seq-ordered.
@@ -451,8 +453,10 @@ export class LogEventStream {
 		// (the DAP header seq is this connection's protocol counter,
 		// meaningless here). An event without body stamps is not a stamped
 		// task event; drop it.
-		const seq = (msg.body as Record<string, unknown> | undefined)?.logSeq;
-		if (this.closed || typeof seq !== 'number') return;
+		const stamps = msg.body as Record<string, unknown> | undefined;
+		const seq = stamps?.logSeq;
+		const eventTime = stamps?.eventTime;
+		if (this.closed || typeof seq !== 'number' || !Number.isFinite(seq) || typeof eventTime !== 'number' || !Number.isFinite(eventTime)) return;
 		// A duplicate of something already bucketed: nothing new.
 		const last = this.live.events[this.live.events.length - 1];
 		if (seq <= (last?.body.logSeq ?? 0)) return;

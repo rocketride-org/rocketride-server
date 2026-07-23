@@ -820,6 +820,12 @@ class DataConn(DAPConn):
             payload = json.dumps(trace, default=str)
         except Exception:
             payload = '{}'
+        # '*' is the DBG format's field delimiter; only the FINAL field (the
+        # JSON payload) tolerates it (the supervisor splits with a maxsplit).
+        # The component field cannot carry it — strip defensively so an odd
+        # node/tool name degrades to a readable label instead of shifting
+        # every field after it.
+        component = component.replace('*', '')
         monitorOther('DBG', f'{op}*{pipe_id:x}*0*{component}*{payload}')
 
     async def _tool(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -874,8 +880,11 @@ class DataConn(DAPConn):
             await self._pipe_sem.acquire()
 
         # The trace label plays the document-name role in BEGIN/END (the same
-        # slot a data-lane BEGIN carries the object name in).
-        call_label = f'{node_id or "*"}.{tool_name}()'
+        # slot a data-lane BEGIN carries the object name in). No node targeted
+        # (broadcast, first handler wins) = just the call itself — a bare
+        # 'tool()' reads naturally in the trace tree, and the DBG wire cannot
+        # carry '*' in this field (it is the format's delimiter).
+        call_label = f'{node_id}.{tool_name}()' if node_id else f'{tool_name}()'
 
         def tool_sync():
             # Use caller's open pipe if provided, otherwise borrow one

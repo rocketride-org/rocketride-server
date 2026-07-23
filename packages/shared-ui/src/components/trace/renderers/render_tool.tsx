@@ -72,7 +72,11 @@ function short(value: unknown, maxLen: number = 120): string {
  */
 export function summaryToolInput(data: unknown): string {
 	const d = data as ToolInputData;
-	const args = d.input && Object.keys(d.input as object).length > 0 ? short(d.input) : '';
+	// Only ABSENT input (or an empty object) renders as no-args — falsy
+	// scalars (0, false, '') are real arguments and must show as such.
+	const input = d.input;
+	const isEmptyObject = input !== null && typeof input === 'object' && !Array.isArray(input) && Object.keys(input as object).length === 0;
+	const args = input === undefined || input === null || isEmptyObject ? '' : short(input);
 	return `${d.tool ?? 'tool'}(${args})`;
 }
 

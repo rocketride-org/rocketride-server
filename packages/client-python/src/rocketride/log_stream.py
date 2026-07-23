@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
@@ -344,8 +345,10 @@ class LogEventStream:
         position-independent: locate the segment containing the seq (the
         span table carries each segment's first seq), find the begin
         event, then collect that slot's events forward until its matching
-        ``end``, crossing segments and the live tail as needed. Fails only
-        below the retention horizon.
+        ``end``, crossing segments and the live tail as needed. Fails when
+        the seq has fallen below the retention horizon, or when no
+        trace-begin event exists at that seq (a recycled slot id or a fold
+        docId is NOT a trace identity).
 
         Args:
             trace_id: The trace's begin-event continuum seq.
@@ -523,7 +526,13 @@ class LogEventStream:
         # connection's protocol counter — meaningless here). An event without
         # body stamps is not a stamped task event; drop it.
         body = msg.get('body')
-        if self._closed or not isinstance(body, dict) or not isinstance(body.get('logSeq'), int):
+        if (
+            self._closed
+            or not isinstance(body, dict)
+            or not isinstance(body.get('logSeq'), int)
+            or not isinstance(body.get('eventTime'), (int, float))
+            or not math.isfinite(body['eventTime'])
+        ):
             return
         seq = body['logSeq']
         # A duplicate of something already bucketed: nothing new.

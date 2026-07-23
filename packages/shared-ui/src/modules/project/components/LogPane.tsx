@@ -214,8 +214,14 @@ export const LogPane: React.FC<ILogPaneProps> = ({ events, downloadBase, truncat
 		const anchor = document.createElement('a');
 		anchor.href = url;
 		anchor.download = filename;
+		// In-document click + deferred revoke: some browsers only reliably
+		// start a download for an attached anchor, and revoking synchronously
+		// can cancel a download that has not begun fetching the blob yet
+		// (same pattern as the data-grid export helper).
+		document.body.appendChild(anchor);
 		anchor.click();
-		setTimeout(() => URL.revokeObjectURL(url), 0);
+		document.body.removeChild(anchor);
+		setTimeout(() => URL.revokeObjectURL(url), 10_000);
 	}, []);
 
 	/**

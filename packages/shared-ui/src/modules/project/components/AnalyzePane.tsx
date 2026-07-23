@@ -142,8 +142,10 @@ function formatSeconds(value: number): string {
 export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events, onOpenTrace }) => {
 	// --- Compute the three fact tables in one pass over the window ----------
 	const { componentStats, documentSpans, idleGaps } = useMemo(() => {
-		// Open enter frames by component, matched by identity (reentrancy-safe
-		// the same way the trace fold matches leaves).
+		// Open enter frames keyed by SLOT + component: concurrent documents
+		// run the same components on different slots, and a shared stack would
+		// pair one document's enter with another's leave (reentrancy within
+		// one slot still stacks, same as the trace fold).
 		const openEnters = new Map<string, number[]>();
 		const perComponent = new Map<string, ComponentStat>();
 		// Open documents by pipeline slot id.
@@ -160,12 +162,13 @@ export const AnalyzePane: React.FC<IAnalyzePaneProps> = ({ events, onOpenTrace }
 				const op = String(body.op ?? '');
 				const component = String(body.component ?? body.pipes?.[body.pipes.length - 1] ?? '');
 				const slot = Number(body.id ?? 0);
+				const spanKey = `${slot}:${component}`;
 				if (op === 'enter' && component) {
-					const stack = openEnters.get(component) ?? [];
+					const stack = openEnters.get(spanKey) ?? [];
 					stack.push(message.body.eventTime);
-					openEnters.set(component, stack);
+					openEnters.set(spanKey, stack);
 				} else if (op === 'leave' && component) {
-					const stack = openEnters.get(component);
+					const stack = openEnters.get(spanKey);
 					const started = stack?.pop();
 					if (started !== undefined) {
 						const delta = Math.max(0, message.body.eventTime - started);

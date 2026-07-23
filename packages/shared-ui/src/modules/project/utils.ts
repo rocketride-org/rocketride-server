@@ -58,7 +58,7 @@ export function parseServerEvent(event: unknown, projectId: string): ParsedServe
 		// unstable ordering downstream.
 		const eventTime = body.eventTime;
 		const seq = body.logSeq;
-		if (typeof eventTime !== 'number' || typeof seq !== 'number') return {};
+		if (!Number.isFinite(eventTime) || !Number.isFinite(seq)) return {};
 		const traceEvent: TraceEvent = {
 			pipelineId: body.id ?? 0,
 			op: body.op || 'enter',
