@@ -2,7 +2,7 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""Lane-handler tests for the tool_filesystem sink."""
+"""Lane-handler tests for the filesystem sink."""
 
 from __future__ import annotations
 

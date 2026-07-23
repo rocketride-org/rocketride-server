@@ -2,7 +2,7 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""Tests for the tool_filesystem sink: services.json contract + naming helper."""
+"""Tests for the filesystem sink: services.json contract + naming helper."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-_NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_filesystem'
+_NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'filesystem'
 
 
 def _load_services():
@@ -174,15 +174,15 @@ class TestSinkConfig:
 
 def _install_iinstance_stubs():
     """Stubs for importing the real IInstance: engine/ai stubs + a stub
-    ``tool_filesystem`` package whose ``__path__`` points at the node dir.
+    ``filesystem`` package whose ``__path__`` points at the node dir.
     """
     _install_stubs()
-    if 'tool_filesystem' not in sys.modules:
-        pkg = types.ModuleType('tool_filesystem')
+    if 'filesystem' not in sys.modules:
+        pkg = types.ModuleType('filesystem')
         pkg.__path__ = [str(_NODE_DIR)]
-        sys.modules['tool_filesystem'] = pkg
-    if 'tool_filesystem.IGlobal' not in sys.modules:
-        ig = types.ModuleType('tool_filesystem.IGlobal')
+        sys.modules['filesystem'] = pkg
+    if 'filesystem.IGlobal' not in sys.modules:
+        ig = types.ModuleType('filesystem.IGlobal')
 
         class _IGlobalStub:
             file_store = None
@@ -193,7 +193,7 @@ def _install_iinstance_stubs():
             url_expires_in = 3600
 
         ig.IGlobal = _IGlobalStub
-        sys.modules['tool_filesystem.IGlobal'] = ig
+        sys.modules['filesystem.IGlobal'] = ig
 
 
 def _fs(exists_paths=()):
@@ -223,8 +223,8 @@ def _sink_instance(
 ):
     """Build an IInstance wired to a stub IGlobal + mocked engine ``instance``."""
     _install_iinstance_stubs()
-    from tool_filesystem.IGlobal import IGlobal
-    from tool_filesystem.IInstance import IInstance
+    from filesystem.IGlobal import IGlobal
+    from filesystem.IInstance import IInstance
 
     inst = IInstance()
     g = IGlobal()

@@ -490,7 +490,7 @@ def _run_async(coro):
     methods synchronously, which is the supported caller. If invoked from a
     thread that already has a running loop, ``asyncio.run`` would raise a
     generic ``RuntimeError``; we pre-check so the failure surfaces with a
-    tool_filesystem-specific message that points at the dispatcher contract.
+    filesystem-specific message that points at the dispatcher contract.
     """
     try:
         asyncio.get_running_loop()
@@ -498,7 +498,7 @@ def _run_async(coro):
         pass
     else:
         raise RuntimeError(
-            '_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods are designed to be dispatched synchronously by the engine.'
+            '_run_async must not be called from a thread with a running event loop; the filesystem @tool_function methods are designed to be dispatched synchronously by the engine.'
         )
 
     return asyncio.run(coro)

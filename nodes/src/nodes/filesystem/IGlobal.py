@@ -46,7 +46,7 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 
 class IGlobal(IGlobalBase):
-    """Global state for tool_filesystem."""
+    """Global state for filesystem."""
 
     client_id: str | None = None
     file_store: object | None = None  # ai.account.file_store.FileStore
@@ -79,7 +79,7 @@ class IGlobal(IGlobalBase):
         client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
         if not client_id:
             warning(
-                'tool_filesystem: ROCKETRIDE_CLIENT_ID env var is missing; tool methods will be disabled. This usually means the node is running outside the task engine.'
+                'filesystem: ROCKETRIDE_CLIENT_ID env var is missing; tool methods will be disabled. This usually means the node is running outside the task engine.'
             )
             self.client_id = None
             self.file_store = None
@@ -90,7 +90,7 @@ class IGlobal(IGlobalBase):
             self.file_store = store.get_file_store(client_id)
             self.client_id = client_id
         except Exception as e:
-            warning(f'tool_filesystem: failed to initialise FileStore: {e}')
+            warning(f'filesystem: failed to initialise FileStore: {e}')
             self.client_id = None
             self.file_store = None
 
@@ -117,7 +117,7 @@ class IGlobal(IGlobalBase):
                 try:
                     patterns.append(re.compile(pat_str))
                 except re.error as e:
-                    warning(f'tool_filesystem: invalid path whitelist regex {pat_str!r}: {e}')
+                    warning(f'filesystem: invalid path whitelist regex {pat_str!r}: {e}')
 
         return patterns
 

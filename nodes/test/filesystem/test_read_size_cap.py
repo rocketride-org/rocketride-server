@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Unit tests for the tool_filesystem ``read_file`` size cap.
+"""Unit tests for the filesystem ``read_file`` size cap.
 
 Covers the per-call ``maxBytes`` cap added on top of ``FileStore.read``:
 * default applied when the field is omitted,
@@ -13,7 +13,7 @@ Covers the per-call ``maxBytes`` cap added on top of ``FileStore.read``:
 
 These are pure-Python unit tests — no server, no engine, no real FileStore.
 The node module is imported under a stubbed ``rocketlib`` and a stubbed
-``tool_filesystem`` package so the relative ``from .IGlobal import IGlobal``
+``filesystem`` package so the relative ``from .IGlobal import IGlobal``
 resolves without dragging in the engine runtime.
 """
 
@@ -32,7 +32,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-_NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_filesystem'
+_NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'filesystem'
 
 
 def _install_rocketlib_stub() -> None:
@@ -72,27 +72,27 @@ def _install_rocketlib_stub() -> None:
     sys.modules['rocketlib'] = stub
 
 
-def _install_tool_filesystem_pkg_stub() -> None:
-    """Install a synthetic ``tool_filesystem`` package with a stub ``IGlobal``.
+def _install_filesystem_pkg_stub() -> None:
+    """Install a synthetic ``filesystem`` package with a stub ``IGlobal``.
 
-    Importing the production ``tool_filesystem.IGlobal`` would pull in
+    Importing the production ``filesystem.IGlobal`` would pull in
     ``ai.account.store`` and friends. We replace the submodule with a tiny
     stand-in that mirrors the attribute surface ``IInstance`` reads
     (``file_store``, ``allow_*``, ``path_patterns``).
 
     The synthesised package's ``__path__`` points at the real node directory,
-    so a subsequent ``import tool_filesystem.IInstance`` finds the production
+    so a subsequent ``import filesystem.IInstance`` finds the production
     ``IInstance.py`` while the relative ``from .IGlobal`` lookup resolves to
     our stub.
     """
-    if 'tool_filesystem' in sys.modules:
+    if 'filesystem' in sys.modules:
         return
 
-    pkg = types.ModuleType('tool_filesystem')
+    pkg = types.ModuleType('filesystem')
     pkg.__path__ = [str(_NODE_DIR)]
-    sys.modules['tool_filesystem'] = pkg
+    sys.modules['filesystem'] = pkg
 
-    iglobal_mod = types.ModuleType('tool_filesystem.IGlobal')
+    iglobal_mod = types.ModuleType('filesystem.IGlobal')
 
     class _IGlobalStub:
         """Mirror of the production ``IGlobal`` attribute surface for tests."""
@@ -108,18 +108,18 @@ def _install_tool_filesystem_pkg_stub() -> None:
         path_patterns: list | None = None
 
     iglobal_mod.IGlobal = _IGlobalStub
-    sys.modules['tool_filesystem.IGlobal'] = iglobal_mod
+    sys.modules['filesystem.IGlobal'] = iglobal_mod
 
 
 _install_rocketlib_stub()
-_install_tool_filesystem_pkg_stub()
+_install_filesystem_pkg_stub()
 
-from tool_filesystem.IInstance import (  # noqa: E402  — must follow sys.modules setup
+from filesystem.IInstance import (  # noqa: E402  — must follow sys.modules setup
     DEFAULT_READ_LIMIT,
     MAX_READ_LIMIT,
     IInstance,
 )
-from tool_filesystem.IGlobal import IGlobal  # noqa: E402
+from filesystem.IGlobal import IGlobal  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
