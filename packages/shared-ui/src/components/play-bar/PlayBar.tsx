@@ -95,6 +95,12 @@ const MAX_SEC_PER_PX = 7200;
 /** Strip heights (px): resting ribbon vs unfolded lane. */
 const STRIP_COLLAPSED = 10;
 const STRIP_EXPANDED = 62;
+/**
+ * Collapsed height while pinned LIVE — a little taller than the replay
+ * ribbon: with the chrome row hidden at the live edge, the bar itself is
+ * the only presence, so it gets more of one.
+ */
+const STRIP_LIVE = 16;
 
 /** Ruler steps (seconds) — the first that yields >= ~88px between labels wins. */
 const TICK_STEPS = [1, 5, 10, 30, 60, 300, 600, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 3 * 86400, 7 * 86400];
@@ -582,8 +588,12 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
 		>
-			{/* Chrome row — dimmed until the bar is engaged. */}
-			<div style={{ ...styles.chrome, opacity: expanded ? 1 : 0.45 }}>
+			{/* Chrome row — replay shows it always (pinned => expanded); at the
+			    live edge it appears only on hover: pinned-live-and-hands-off is
+			    just the bar, with the pause button, the LIVE clock, and the
+			    zoom scale all folded into the hover. */}
+			{expanded && (
+			<div style={styles.chrome}>
 				{/* Live means playing by definition — the button is simply Pause
 				    (pressing it freezes the position and drops out of live). */}
 				<Button
@@ -703,11 +713,12 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 					{secPerPx < 60 ? `1px = ${secPerPx.toFixed(1)}s` : `1px = ${(secPerPx / 60).toFixed(1)}m`}
 				</span>
 			</div>
+			)}
 
 			{/* The strip: thin ribbon at rest, full lane when engaged. */}
 			<div
 				ref={stripRef}
-				style={{ ...styles.strip, height: expanded ? STRIP_EXPANDED : STRIP_COLLAPSED, cursor: dragging ? 'grabbing' : 'grab' }}
+				style={{ ...styles.strip, height: expanded ? STRIP_EXPANDED : isLive ? STRIP_LIVE : STRIP_COLLAPSED, cursor: dragging ? 'grabbing' : 'grab' }}
 				onMouseDown={handleStripMouseDown}
 			>
 				{/* Run blocks (double-click = play that track). */}

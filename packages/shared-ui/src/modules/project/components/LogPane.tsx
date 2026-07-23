@@ -86,7 +86,9 @@ const styles: Record<string, CSSProperties> = {
 		padding: '8px 12px',
 		fontFamily: 'Consolas, "Courier New", monospace',
 		fontSize: 12,
-		lineHeight: 1.55,
+		// Terminal-tight: log output (and the startup ASCII art) reads as a
+		// console, not prose.
+		lineHeight: 1.25,
 		whiteSpace: 'pre-wrap',
 		wordBreak: 'break-word',
 	},
