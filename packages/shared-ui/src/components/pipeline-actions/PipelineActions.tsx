@@ -106,18 +106,18 @@ export default function PipelineActions({ notes, host, onOpenLink, displayName }
 	const buttonLink = processLink(endpointInfo['button-link'], host);
 	const hasButton = endpointInfo['button-text'] && buttonLink;
 
-	// Stock Buttons only — any smaller size would be a Button prop, never a
-	// bespoke style tier. Clicks stop at the container so a press never
+	// Stock Buttons only, at the mini (canvas-node) size — the 26px small tier
+	// overflows the node card. Clicks stop at the container so a press never
 	// bubbles into canvas node selection/drag.
 	return (
 		<>
 			<div style={styles.container} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
 				{hasButton && (
-					<Button small variant="primary" onClick={() => onOpenLink?.(buttonLink, displayName)}>
+					<Button mini variant="primary" onClick={() => onOpenLink?.(buttonLink, displayName)}>
 						{endpointInfo['button-text']}
 					</Button>
 				)}
-				<Button small variant="secondary" onClick={() => setIsModalOpen(true)}>
+				<Button mini variant="secondary" onClick={() => setIsModalOpen(true)}>
 					Endpoint Info
 				</Button>
 			</div>
