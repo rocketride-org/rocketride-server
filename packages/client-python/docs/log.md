@@ -40,8 +40,10 @@ async def main():
     await session.play(None, 0, lambda item: print(item['event']['event']))
 
     # Drill into one trace by its PERMANENT identity — the begin event's
-    # continuum seq (slot ids recycle; beginSeq never does).
-    detail = await session.get_trace(traces['closed'][0]['beginSeq'])
+    # continuum seq (slot ids recycle; beginSeq never does). A fresh or
+    # all-in-flight stream may have no closed traces yet.
+    if traces['closed']:
+        detail = await session.get_trace(traces['closed'][0]['beginSeq'])
 
     session.pause()
     session.close_event_stream()

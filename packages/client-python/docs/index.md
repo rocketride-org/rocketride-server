@@ -146,10 +146,20 @@ client = RocketRideClient(
 **Example:**
 
 ```python
-async with RocketRideClient(uri='wss://cloud.rocketride.ai', auth=os.environ['ROCKETRIDE_APIKEY']) as client:
-    result = await client.use(filepath='pipeline.json')
-    token = result['token']
-    await client.send(token, 'Hello, pipeline!')
+import asyncio
+import os
+
+from rocketride import RocketRideClient
+
+
+async def main():
+    async with RocketRideClient(uri='wss://cloud.rocketride.ai', auth=os.environ['ROCKETRIDE_APIKEY']) as client:
+        result = await client.use(filepath='pipeline.json')
+        token = result['token']
+        await client.send(token, 'Hello, pipeline!')
+
+
+asyncio.run(main())
 ```
 
 ### Connection
