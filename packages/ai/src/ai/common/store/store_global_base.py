@@ -159,11 +159,14 @@ class StoreGlobalBase(IGlobalTransform, ABC):
             self.embed_model_name = getattr(self._tool_embedding, '_model', None)
 
     def endGlobal(self) -> None:
-        """Drop the store and the tool-path embedder."""
+        """Drop the store and the tool-path embedder, then clear the transform key."""
         self._tool_embedding = None
         self.embed_query = None
         self.embed_model_name = None
         self.store = None
+
+        # Let the transform layer clear TRANFORM_KEY_TAG_NAME on teardown.
+        super().endGlobal()
 
     def validateConfig(self) -> None:
         """Save-time validation: probe the server so the user sees errors immediately."""

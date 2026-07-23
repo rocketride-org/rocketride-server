@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Unit tests for the VectorStoreToolMixin (packages/ai/src/ai/common/store.py).
+"""Unit tests for the VectorStoreToolMixin (packages/ai/src/ai/common/store/document_store.py).
 
 These tests load ``store.py`` in isolation by stubbing its heavy imports
 (``rocketlib``, ``ai.common.schema``) so the module can be exercised without
@@ -214,9 +214,9 @@ def _scoped_stubs() -> Iterator[None]:
 
 def _load_store_module() -> types.ModuleType:
     with _scoped_stubs():
-        # Load store.py as a submodule of the stubbed ``ai.common`` package so
-        # its ``from .schema import ...`` relative import resolves against the
-        # stub already installed in sys.modules.
+        # Load store/document_store.py as a submodule of the stubbed
+        # ``ai.common`` package so its ``from ..schema import ...`` relative
+        # import resolves against the stub already installed in sys.modules.
         spec = importlib.util.spec_from_file_location('ai.common.store.document_store', _STORE_PY)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)

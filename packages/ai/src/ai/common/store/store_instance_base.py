@@ -55,6 +55,10 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
 
     def writeQuestions(self, question: Question) -> None:
         """Take a question, perform a search, and write the results as documents."""
+        # Check it
+        if self.IGlobal.store is None:
+            raise Exception('No document store')
+
         # Dispatch to the search handler
         self.IGlobal.store.dispatchSearch(self, question)
 
@@ -63,6 +67,10 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
 
         Any chunks in the database that have the same object id will be removed.
         """
+        # Check it
+        if self.IGlobal.store is None:
+            raise Exception('No document store')
+
         # Add the document chunks
         self.IGlobal.store.addChunks(documents)
 
