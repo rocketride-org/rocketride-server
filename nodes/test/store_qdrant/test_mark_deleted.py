@@ -11,7 +11,7 @@ path (matching the query filter and payload index) instead of a top-level
 ``isDeleted`` field.
 
 Usage:
-    python -m pytest nodes/test/test_qdrant_mark_deleted.py -v
+    python -m pytest nodes/test/store_qdrant/test_mark_deleted.py -v
 """
 
 import sys

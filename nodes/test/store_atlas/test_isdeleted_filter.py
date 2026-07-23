@@ -10,7 +10,7 @@ These tests validate the filter-building logic without requiring a MongoDB
 connection. They mock pymongo to isolate the Store class's filter construction.
 
 Usage:
-    python -m pytest nodes/test/test_atlas_isdeleted_filter.py -v
+    python -m pytest nodes/test/store_atlas/test_isdeleted_filter.py -v
 """
 
 import importlib
