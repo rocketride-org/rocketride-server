@@ -31,7 +31,7 @@
 //   2. Full-page redirect to Zitadel authorize endpoint
 //   3. Browser redirects back with ?code= parameter
 //   4. handleCallback() exchanges code for token via the ConnectionManager
-//   5. Token stored in sessionStorage (browser equivalent of SecretStorage)
+//   5. Token stored in localStorage (browser equivalent of SecretStorage)
 //
 // The stored token is picked up by ConnectionManager.connect() — auth is
 // decoupled from connection, same as VSCode.
@@ -175,7 +175,7 @@ export class CloudAuthProvider implements IAuthProvider {
 	}
 
 	// =========================================================================
-	// TOKEN STORAGE (sessionStorage — browser equivalent of SecretStorage)
+	// TOKEN STORAGE (localStorage — browser equivalent of SecretStorage)
 	// =========================================================================
 
 	/**
@@ -185,7 +185,7 @@ export class CloudAuthProvider implements IAuthProvider {
 	 */
 	public async storeToken(token: string): Promise<void> {
 		try {
-			sessionStorage.setItem(LS_TOKEN, token);
+			localStorage.setItem(LS_TOKEN, token);
 		} catch (e) {
 			console.error('[CloudAuthProvider] Failed to store token:', e);
 		}
@@ -198,7 +198,7 @@ export class CloudAuthProvider implements IAuthProvider {
 	 */
 	public async getToken(): Promise<string | null> {
 		try {
-			const token = sessionStorage.getItem(LS_TOKEN);
+			const token = localStorage.getItem(LS_TOKEN);
 			return token || null;
 		} catch {
 			return null;
@@ -222,7 +222,7 @@ export class CloudAuthProvider implements IAuthProvider {
 	 */
 	public async signOut(): Promise<void> {
 		try {
-			sessionStorage.removeItem(LS_TOKEN);
+			localStorage.removeItem(LS_TOKEN);
 		} catch (e) {
 			console.error('[CloudAuthProvider] Failed to clear token:', e);
 		}
