@@ -172,6 +172,23 @@
 						"Prompt the user to restart the pipeline"
 					]
 				},
+				"rocketride.pipelineTTL": {
+					"type": "integer",
+					"default": 900,
+					"minimum": 0,
+					"description": "Default idle timeout in seconds before a running pipeline is shut down (0 = no timeout)."
+				},
+				"rocketride.pipelineTraceLevel": {
+					"type": "string",
+					"enum": [
+						"none",
+						"metadata",
+						"summary",
+						"full"
+					],
+					"default": "summary",
+					"description": "Controls tracing verbosity for pipeline execution."
+				},
 				"rocketride.integrations.autoAgentIntegration": {
 					"type": "boolean",
 					"default": true,

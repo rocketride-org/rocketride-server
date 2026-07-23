@@ -303,6 +303,8 @@ export class SettingsProvider {
 			// Top-level settings
 			defaultPipelinePath: config.defaultPipelinePath,
 			pipelineRestartBehavior: config.pipelineRestartBehavior,
+			pipelineTtl: config.pipelineTtl,
+			pipelineTraceLevel: config.pipelineTraceLevel,
 
 			// Integration settings
 			autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),

@@ -134,59 +134,13 @@ const ts = require(require.resolve('typescript', { paths: [APP_ROOT] }));
 // BUNDLE POST-PROCESSING
 // =============================================================================
 
-/**
- * Remove `private`/`protected` members from every class declaration in the
- * generated bundle.
- *
- * dts-bundle-generator inlines classes (RocketRideClient, ConnectionManager,
- * Documents, ...) as fresh declarations. A class with private/protected members
- * is compared NOMINALLY, so the inlined copy would never match the live class
- * and the conformance assertion would always fail. Stripping the non-public
- * members makes the frozen classes purely structural: the live classes stay
- * assignable to them, while removing a PUBLIC member still breaks conformance.
- *
- * @param {string} dtsText - The generated declaration bundle.
- * @returns {string} The bundle with all non-public class members removed.
- */
-function stripNonPublicMembers(dtsText) {
-	const sourceFile = ts.createSourceFile('bundle.d.ts', dtsText, ts.ScriptTarget.Latest, true);
-	const printer = ts.createPrinter({ removeComments: false, newLine: ts.NewLineKind.LineFeed });
-
-	// True when a class member carries a private or protected modifier.
-	const isNonPublic = (member) => {
-		const mods = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
-		return (
-			!!mods &&
-			mods.some(
-				(m) => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword,
-			)
-		);
-	};
-
-	const transformer = (context) => (root) => {
-		const visit = (node) => {
-			if (ts.isClassDeclaration(node)) {
-				// Drop non-public members so the class is compared structurally.
-				const members = node.members.filter((m) => !isNonPublic(m));
-				return ts.factory.updateClassDeclaration(
-					node,
-					node.modifiers,
-					node.name,
-					node.typeParameters,
-					node.heritageClauses,
-					members,
-				);
-			}
-			return ts.visitEachChild(node, visit, context);
-		};
-		return ts.visitNode(root, visit);
-	};
-
-	const result = ts.transform(sourceFile, [transformer]);
-	const printed = printer.printFile(result.transformed[0]);
-	result.dispose();
-	return printed;
-}
+// Strip non-public class members from the generated bundle so inlined classes
+// compare STRUCTURALLY rather than nominally. This still matters even with the
+// SDK's dist/types now trimmed at build time: dts-bundle-generator also inlines
+// shell-ui's OWN classes (ConnectionManager, the auth providers) from source,
+// which keep their privates. Shared with the SDK trim so both agree on "not
+// public" — see scripts/lib/stripDts.js.
+const { stripNonPublicMembers } = require('../../../scripts/lib/stripDts');
 
 // =============================================================================
 // PROCESS HELPERS
@@ -293,7 +247,7 @@ function generateCandidate() {
 	}
 	// Strip non-public class members so inlined classes compare structurally,
 	// then normalize trailing whitespace so the no-op comparison is stable.
-	const stripped = stripNonPublicMembers(fs.readFileSync(candidatePath, 'utf8'));
+	const stripped = stripNonPublicMembers(fs.readFileSync(candidatePath, 'utf8'), ts);
 	return `${stripped.replace(/\s+$/, '')}\n`;
 }
 

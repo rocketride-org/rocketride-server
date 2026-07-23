@@ -22,8 +22,9 @@
 # =============================================================================
 
 from typing import List, Tuple
-from rocketlib import IInstanceBase, Entry
+from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from ai.common.schema import Doc, DocMetadata
+from ai.common.avi.descriptor import descriptor_from_payload, attach_source, attach_name
 from .IGlobal import IGlobal
 
 
@@ -68,6 +69,10 @@ class IInstance(IInstanceBase):
                 metadata.chunkId = self.chunkId
                 metadata.time_stamp = time_stamp
 
+                # Source provenance + name (<audio-stem>.segment<N>.txt) from the descriptor.
+                attach_source(metadata, self._source_descriptor)
+                attach_name(metadata, self._source_descriptor, index=metadata.chunkId, marker='segment', ext='txt')
+
                 # Create the document object and save the base64 encoded image
                 doc = Doc(page_content=text, metadata=metadata)
                 docs.append(doc)
@@ -108,13 +113,28 @@ class IInstance(IInstanceBase):
         Args:
             object (Entry): The object to be opened.
         """
-        # New stream - reset the chunkId
+        # New stream - reset the chunkId + source descriptor
         self.chunkId = 0
+        self._source_descriptor = None
+
+    def _consume_media(self, action: int, mimeType: str, buffer: bytes):
+        """Parse the stream descriptor on BEGIN, then delegate to the transcriber.
+
+        The descriptor is peeled off (empty BEGIN buffer) so its bytes never reach
+        the transcriber's ffmpeg; media bytes on WRITE/END pass through unchanged.
+
+        Args:
+            action (int): The AVI action (BEGIN, WRITE, END).
+            mimeType (str): The MIME type of the media data.
+            buffer (bytes): The media/descriptor buffer for this action.
+        """
+        if action == AVI_ACTION.BEGIN:
+            self._source_descriptor = descriptor_from_payload(buffer)
+            buffer = b''
+        self._transcribe.writeAVI(action, mimeType, buffer)
 
     def writeAudio(self, action: int, mimeType: str, buffer: bytes):
-        # Use the standard AVI write method for audio
-        self._transcribe.writeAVI(action, mimeType, buffer)
+        self._consume_media(action, mimeType, buffer)
 
     def writeVideo(self, action: int, mimeType: str, buffer: bytes):
-        # Use the standard AVI write method for video
-        self._transcribe.writeAVI(action, mimeType, buffer)
+        self._consume_media(action, mimeType, buffer)

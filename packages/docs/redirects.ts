@@ -117,73 +117,94 @@ const redirects: RedirectItem[] = [
     ]
   },
   {
-    "to": "/nodes/astra_db",
+    "to": "/nodes/store_astra",
     "from": [
+      "/nodes/astra_db",
       "/store/astra-db-vector-store",
       "/store/astra-db-vector-store/astra-db-vector-store"
     ]
   },
   {
-    "to": "/nodes/atlas",
+    "to": "/nodes/store_atlas",
     "from": [
+      "/nodes/atlas",
       "/store/atlas-vector-store",
       "/store/atlas-vector-store/atlas-vector-store"
     ]
   },
   {
-    "to": "/nodes/chroma",
+    "to": "/nodes/store_chroma",
     "from": [
+      "/nodes/chroma",
       "/store/chroma-vector-store",
       "/store/chroma-vector-store/chroma-vector-store"
     ]
   },
   {
-    "to": "/nodes/milvus",
+    "to": "/nodes/store_milvus",
     "from": [
+      "/nodes/milvus",
       "/store/milvus-vector-store",
       "/store/milvus-vector-store/milvus-vector-store"
     ]
   },
   {
-    "to": "/nodes/pinecone",
+    "to": "/nodes/store_pinecone",
     "from": [
+      "/nodes/pinecone",
       "/store/pinecone-vector-store",
       "/store/pinecone-vector-store/pinecone-vector-store"
     ]
   },
   {
-    "to": "/nodes/qdrant",
+    "to": "/nodes/store_qdrant",
     "from": [
+      "/nodes/qdrant",
       "/store/qdrant-vector-store",
       "/store/qdrant-vector-store/qdrant-vector-store"
     ]
   },
   {
-    "to": "/nodes/weaviate",
+    "to": "/nodes/store_weaviate",
     "from": [
+      "/nodes/weaviate",
       "/store/weaviate-vector-store",
       "/store/weaviate-vector-store/weaviate-vector-store"
     ]
   },
   {
-    "to": "/nodes/vectordb_postgres",
+    "to": "/nodes/store_postgres",
     "from": [
+      "/nodes/vectordb_postgres",
       "/store/postgres-pgvector",
       "/store/postgres-pgvector/postgres-pgvector"
     ]
   },
   {
-    "to": "/nodes/index_search",
+    "to": "/nodes/store_elasticsearch",
     "from": [
+      "/nodes/index_search",
       "/store/elasticsearch",
       "/store/elasticsearch/elasticsearch"
     ]
   },
   {
-    "to": "/nodes/index_search",
+    "to": "/nodes/store_elasticsearch",
     "from": [
       "/store/opensearch",
       "/store/opensearch/opensearch"
+    ]
+  },
+  {
+    "to": "/nodes/graph_arango",
+    "from": [
+      "/nodes/db_arango"
+    ]
+  },
+  {
+    "to": "/nodes/graph_hydradb",
+    "from": [
+      "/nodes/db_hydradb"
     ]
   },
   {

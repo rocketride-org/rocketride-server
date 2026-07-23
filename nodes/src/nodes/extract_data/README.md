@@ -24,12 +24,16 @@ No third-party Python dependencies (requirements.txt is empty).
 
 ### Lanes
 
-| Lane in | Lane out    | Description                                                      |
-| ------- | ----------- | ---------------------------------------------------------------- |
-| `text`  | `answers`   | Extract fields from text, emit as JSON                           |
-| `text`  | `documents` | Extract fields from text, emit one document per row              |
-| `table` | `answers`   | Extract/transform fields from a table, emit as JSON              |
-| `table` | `documents` | Extract/transform fields from a table, emit one document per row |
+| Lane in     | Lane out    | Description                                                          |
+| ----------- | ----------- | ------------------------------------------------------------------- |
+| `text`      | `answers`   | Extract fields from text, emit as JSON                              |
+| `text`      | `documents` | Extract fields from text, emit one document per row                 |
+| `table`     | `answers`   | Extract/transform fields from a table, emit as JSON                 |
+| `table`     | `documents` | Extract/transform fields from a table, emit one document per row    |
+| `documents` | `answers`   | Extract fields from a document's content, emit as JSON              |
+| `documents` | `documents` | Extract fields from a document's content, emit one document per row |
+
+The `documents` input lane lets a `documents`-producing node (e.g. a preprocessor or an embeddings node) feed extraction directly, without an intermediate conversion to text.
 
 On close, the `answers` lane (if connected) receives one JSON answer containing the full table. The `documents` lane (if connected) receives one document per extracted row, with the row serialized as JSON in the document content.
 

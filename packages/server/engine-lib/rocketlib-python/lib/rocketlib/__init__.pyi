@@ -854,6 +854,22 @@ def outputException() -> None:
     """Log the current exception in human-readable form."""
     ...
 
+# ---- paths.py ----
+
+DEFAULT_MAX_COMPONENT: int
+
+def extended_length_path(path: str) -> str:
+    r"""Return *path* usable beyond the Windows 260-char MAX_PATH (\\?\ prefix)."""
+    ...
+
+def shorten_path_component(name: str, max_len: int = ...) -> str:
+    """Hash-truncate a single path component that exceeds *max_len* characters."""
+    ...
+
+def shorten_path_components(path: str, max_len: int = ...) -> str:
+    """Apply shorten_path_component to every component of *path*."""
+    ...
+
 # ---- C++ engLib classes (imported directly in __init__.py) ----
 
 class IPipeType:

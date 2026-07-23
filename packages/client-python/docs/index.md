@@ -73,6 +73,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **Project storage** - Save, retrieve, and version-control pipelines on the server
 - **Async-first** - Built on `asyncio` and `websockets`; supports `async with` context manager
 - **CLI included** - Manage pipelines from the command line
+- **Telemetry reporting** - The shared loose `report()` core via `rocketride.analytics`; each app owns its own event taxonomy ([Analytics / Telemetry Reporting](/develop/python/analytics))
 
 ---
 

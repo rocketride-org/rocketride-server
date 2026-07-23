@@ -273,19 +273,52 @@ export class BillingApi {
 	/**
 	 * Fetches paginated transaction detail from the credit ledger.
 	 *
+	 * Sort / filters / search follow the platform list-API convention: sorters
+	 * name camelCase row keys; filter values are a string (type-driven match)
+	 * or an array (set membership), with `field__gte` / `field__lte` string
+	 * entries for ranges; search matches case-insensitively across the
+	 * ledger's string columns. Unknown keys are dropped server-side, and the
+	 * caller's org/scope restriction always applies first.
+	 *
 	 * @param orgId    - Organisation UUID.
-	 * @param options  - Pagination and scope options.
+	 * @param options  - Pagination, scope, and list-convention query options.
 	 * @returns Paginated transaction result.
 	 */
 	async getTransactions(
 		orgId: string,
-		options: { scope?: 'org' | 'team' | 'user'; scopeId?: string; page?: number; pageSize?: number; since?: string } = {},
+		options: {
+			scope?: 'org' | 'team' | 'user';
+			scopeId?: string;
+			page?: number;
+			pageSize?: number;
+			since?: string;
+			sort?: { field: string; dir: 'asc' | 'desc' }[];
+			filters?: Record<string, string | string[]>;
+			search?: string;
+		} = {},
 	): Promise<TransactionsResult> {
 		return this.client.call<TransactionsResult>('rrext_account_billing', {
 			subcommand: 'transactions',
 			orgId,
 			...options,
 		});
+	}
+
+	/**
+	 * Fetches distinct values of one ledger column (org-scoped server-side)
+	 * for the transaction grid's enum checklist filters.
+	 *
+	 * @param orgId - Organisation UUID.
+	 * @param field - camelCase wire key (e.g. 'type', 'resource').
+	 * @returns Sorted distinct values ([] for unknown/excluded fields).
+	 */
+	async getTransactionDistinct(orgId: string, field: string): Promise<(string | number | boolean)[]> {
+		const body = await this.client.call('rrext_account_billing', {
+			subcommand: 'transactions_distinct',
+			orgId,
+			field,
+		});
+		return body.values ?? [];
 	}
 
 	/**

@@ -21,6 +21,11 @@
 			"types": "./dist/types/app-sdk/index.d.ts",
 			"import": "./dist/esm/app-sdk/index.js",
 			"require": "./dist/cjs/app-sdk/index.js"
+		},
+		"./analytics": {
+			"types": "./dist/types/analytics/index.d.ts",
+			"import": "./dist/esm/analytics/index.js",
+			"require": "./dist/cjs/analytics/index.js"
 		}
 	},
 	"files": [

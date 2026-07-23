@@ -38,7 +38,7 @@ from types import SimpleNamespace
 
 import pytest
 
-NODE_DIR = os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'db_hydradb')
+NODE_DIR = os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'graph_hydradb')
 NODE_DIR = os.path.abspath(NODE_DIR)
 
 # ---------------------------------------------------------------------------
@@ -150,10 +150,9 @@ def node():
     _GET.bodies_by_path = None
     _GET.side_effect = None
     _WARNINGS.clear()
-    Config = _install_stubs()
-    client_mod, iglobal_mod, iinstance_mod = _load_package()
-    yield SimpleNamespace(Config=Config, client_mod=client_mod, iglobal_mod=iglobal_mod, iinstance_mod=iinstance_mod)
-    for name in [
+    # Snapshot the modules we stub so teardown restores the prior state, not just
+    # pops it — a real rocketlib/requests already loaded is put back, not deleted.
+    _managed = [
         'db_hydradb',
         'db_hydradb.hydradb_client',
         'db_hydradb.IGlobal',
@@ -164,8 +163,20 @@ def node():
         'ai.common.config',
         'ai.common.utils',
         'requests',
-    ]:
-        sys.modules.pop(name, None)
+    ]
+    _saved = {name: sys.modules.get(name) for name in _managed}
+    try:
+        Config = _install_stubs()
+        client_mod, iglobal_mod, iinstance_mod = _load_package()
+        yield SimpleNamespace(
+            Config=Config, client_mod=client_mod, iglobal_mod=iglobal_mod, iinstance_mod=iinstance_mod
+        )
+    finally:
+        for name in _managed:
+            if _saved[name] is not None:
+                sys.modules[name] = _saved[name]
+            else:
+                sys.modules.pop(name, None)
 
 
 def _make_instance(iinstance_mod, client):

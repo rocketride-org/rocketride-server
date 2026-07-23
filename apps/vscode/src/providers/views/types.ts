@@ -10,7 +10,7 @@
  * webview (browser) for the project editor and server monitor views.
  */
 
-import type { ViewState, TaskStatus, TraceLevel } from 'shared/modules/project';
+import type { ViewState, TaskStatus } from 'shared/modules/project';
 import type { DashboardResponse } from 'shared/modules/server';
 import type { PromoRedemption, PromoValidation } from 'shared/modules/checkout';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from 'rocketride';
@@ -24,17 +24,27 @@ export type ProjectHostToWebview = { type: 'project:load'; project: any; viewSta
 	| { type: 'project:envKeysUpdate'; envKeys: string[] };
 
 /** All messages the ProjectWebview can send to the extension host. */
-export type ProjectWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'project:contentChanged'; project: any } | { type: 'project:validate'; requestId: number; pipeline: any } | { type: 'project:requestSave' } | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string; browser?: boolean } | { type: 'project:openExternal'; url: string } | { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string; pipelineTraceLevel?: TraceLevel; ttl?: number } | { type: 'status:missingEnvVars'; keys: string[] } | { type: 'trace:clear' };
+export type ProjectWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'project:contentChanged'; project: any } | { type: 'project:validate'; requestId: number; pipeline: any } | { type: 'project:requestSave' } | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string; browser?: boolean } | { type: 'project:openExternal'; url: string } | { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string } | { type: 'status:missingEnvVars'; keys: string[] } | { type: 'trace:clear' };
 
 // =============================================================================
 // SERVER MONITOR PROTOCOL
 // =============================================================================
 
 /** All messages the extension host can send to the MonitorWebview. */
-export type MonitorHostToWebview = { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:event'; event: unknown } | { type: 'monitor:dashboard'; data: DashboardResponse };
+export type MonitorHostToWebview = { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:event'; event: unknown } | { type: 'monitor:dashboard'; data: DashboardResponse }
+	// Grid config channel seed: the stored per-table layout map (tableId ->
+	// { persistence type -> blob }) from the extension's workspaceState, sent
+	// with the view:ready reply BEFORE the first dashboard snapshot so the
+	// webview bridge cache is primed before any grid reads its layout.
+	| { type: 'grid:config:init'; layouts: Record<string, Record<string, unknown>> };
 
 /** All messages the MonitorWebview can send to the extension host. */
-export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'monitor:refresh' };
+export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'monitor:refresh' }
+	// Grid config channel writes: persist / drop one table's layout blobs in
+	// the extension's workspaceState (blobType is the Tabulator persistence
+	// type — 'sort' | 'columns' | 'page' | the RR-private 'display'/'format').
+	| { type: 'grid:config:set'; tableId: string; blobType: string; blob: unknown }
+	| { type: 'grid:config:clear'; tableId: string };
 
 // =============================================================================
 // ACCOUNT PAGE PROTOCOL

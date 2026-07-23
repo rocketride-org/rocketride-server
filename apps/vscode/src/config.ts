@@ -71,6 +71,12 @@ export interface ConfigManagerInfo {
 
 	/** Pipeline restart behavior when .pipe files change */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+
+	/** Default idle-timeout (seconds) for runs without a per-pipeline override; 0 = no timeout. */
+	pipelineTtl: number;
+
+	/** Default trace verbosity for runs without a per-pipeline override. */
+	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
 }
 
 /** Per-group settings sent from the Settings UI on save. */
@@ -96,6 +102,8 @@ export interface SettingsSnapshot {
 	deployment: ConnectionGroupSnapshot;
 	defaultPipelinePath: string;
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	pipelineTtl: number;
+	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
 	integrationClaudeCode: boolean;
@@ -133,6 +141,8 @@ export class ConfigManager {
 		deployment: { ...ConfigManager.DEFAULT_GROUP, connectionMode: null },
 		defaultPipelinePath: '',
 		pipelineRestartBehavior: 'prompt',
+		pipelineTtl: 900,
+		pipelineTraceLevel: 'summary',
 	};
 
 	private constructor() {}
@@ -213,7 +223,7 @@ export class ConfigManager {
 		};
 	}
 
-/**
+	/**
 	 * Refreshes the cached configuration from all sources (VS Code settings
 	 * and secure storage). Public so that callers like applyAllSettings() and
 	 * EngineRegistry can force a cache refresh after external writes.
@@ -226,6 +236,8 @@ export class ConfigManager {
 			deployment: await this.refreshGroupConfig('deployment'),
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
+			pipelineTtl: config.get('pipelineTTL', 900),
+			pipelineTraceLevel: config.get('pipelineTraceLevel', 'summary'),
 		};
 	}
 
@@ -258,6 +270,8 @@ export class ConfigManager {
 			deployment: { ...this.config.deployment, local: { ...this.config.deployment.local } },
 			defaultPipelinePath: this.config.defaultPipelinePath,
 			pipelineRestartBehavior: this.config.pipelineRestartBehavior,
+			pipelineTtl: this.config.pipelineTtl,
+			pipelineTraceLevel: this.config.pipelineTraceLevel,
 		};
 	}
 
@@ -451,6 +465,10 @@ export class ConfigManager {
 			// --- Global settings ---
 			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
 			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
+
+			// --- Pipeline execution defaults ---
+			await wc.update('pipelineTTL', s.pipelineTtl, vscode.ConfigurationTarget.Global);
+			await wc.update('pipelineTraceLevel', s.pipelineTraceLevel, vscode.ConfigurationTarget.Global);
 
 			// --- Integration settings ---
 			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);

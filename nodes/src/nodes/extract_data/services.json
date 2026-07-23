@@ -68,7 +68,8 @@
 	},
 	"lanes": {
 		"table": ["answers", "documents"],
-		"text": ["answers", "documents"]
+		"text": ["answers", "documents"],
+		"documents": ["answers", "documents"]
 	},
 	//
 	//	Optional:

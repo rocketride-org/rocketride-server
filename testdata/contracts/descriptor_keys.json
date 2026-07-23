@@ -1,0 +1,15 @@
+{
+	"_comment": "Canonical key list for the audio/video stream-descriptor wire contract. The C++ engine (buildStreamDescriptor at Binder::writeX) is the authoritative builder; the Python parser (ai.common.avi.descriptor) must accept every key here. model_dump(exclude_none=True) means optional keys are OMITTED (never null) when unset, so the per-stream key set varies. A conformance test on each side references this file, so adding/renaming a key without updating both sides fails CI.",
+	"doc": {
+		"required": ["type"],
+		"type_values": ["VideoStream", "AudioStream", "ImageStream"]
+	},
+	"metadata": {
+		"required": ["objectId", "parent", "permissionId", "signature", "nodeId", "source_mime", "size", "stream_index"],
+		"optional_common": ["start_offset", "duration", "container_mime", "resource_name"],
+		"optional_video": ["fps", "width", "height"],
+		"optional_audio": ["sample_rate", "channels", "format"],
+		"parser_defaulted": ["chunkId"]
+	},
+	"origin_values": ["ingested", "extracted", "generated"]
+}

@@ -191,6 +191,41 @@ function registerApp(appRoot) {
 				);
 			}
 
+			// Validate the app's settings contribution — the VSCode
+			// contributes.configuration shape: { title?, properties: { <key>: schema } }.
+			// Keys must be dotted and prefixed with the app id so they are globally
+			// unique, and every schema needs a valid JSON type.
+			const configuration = appManifest.contributes?.configuration ?? null;
+			if (configuration) {
+				if (typeof configuration !== 'object' || Array.isArray(configuration)
+					|| typeof configuration.properties !== 'object' || Array.isArray(configuration.properties)) {
+					throw new Error(
+						`App "${appManifest.id}" has an invalid contributes.configuration. `
+						+ 'Expected { title?, properties: { "<appId>.<setting>": { type, ... } } }.'
+					);
+				}
+				const validTypes = ['string', 'number', 'integer', 'boolean'];
+				for (const [key, schema] of Object.entries(configuration.properties)) {
+					if (!key.startsWith(`${appManifest.id}.`)) {
+						throw new Error(
+							`App "${appManifest.id}" setting "${key}" must be prefixed with the app id `
+							+ `("${appManifest.id}.<settingName>") so setting keys are globally unique.`
+						);
+					}
+					if (!schema || !validTypes.includes(schema.type)) {
+						throw new Error(
+							`App "${appManifest.id}" setting "${key}" has invalid type `
+							+ `"${schema && schema.type}". Must be one of: ${validTypes.join(', ')}.`
+						);
+					}
+				}
+			}
+
+			// Warnings accumulate here and surface joined with the final success
+			// line — task.output holds a single value, so direct assignments
+			// earlier in the run would be silently overwritten by later ones.
+			const warnings = [];
+
 			// Resolve shells — optional array of compatible shells
 			const shells = appManifest.shells ?? null;
 			if (shells !== null) {
@@ -214,7 +249,7 @@ function registerApp(appRoot) {
 					fs.copyFileSync(iconSrc, path.join(buildDir, 'icon.svg'));
 					icon = `/${APPS_BASE}/${dirName}/icon.svg`;
 				} catch {
-					task.output = `Warning: icon not found at ${appManifest.icon}`;
+					warnings.push(`Warning: icon not found at ${appManifest.icon}`);
 				}
 			}
 
@@ -240,7 +275,7 @@ function registerApp(appRoot) {
 						}
 					}
 				} catch {
-					task.output = `Warning: readme not found at ${appManifest.readme}`;
+					warnings.push(`Warning: readme not found at ${appManifest.readme}`);
 				}
 			}
 
@@ -254,7 +289,8 @@ function registerApp(appRoot) {
 				readme,
 				icon,
 				categories:    appManifest.categories ?? [],
-				settings:      appManifest.settings ?? [],
+				// Settings contribution (VSCode contributes.configuration shape)
+				...(configuration ? { configuration } : {}),
 				entry:         `/${APPS_BASE}/${dirName}/remoteEntry.js`,
 				// Shell contract version this app was built against (for prune analysis).
 				...(shellApiVersion !== null ? { shellApiVersion } : {}),
@@ -291,7 +327,9 @@ function registerApp(appRoot) {
 			// Register apps.json for packaging so it's included in release archives
 			await setState(['package', DIST_APPS_JSON], ['static/apps.json']);
 
-			task.output = `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`;
+			// Success line last; accumulated warnings surface above it instead of
+			// being clobbered by it.
+			task.output = [...warnings, `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`].join('\n');
 		},
 	};
 }

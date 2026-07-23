@@ -24,11 +24,15 @@
 // WORKSPACE CONTEXT — state management + event bus
 // =============================================================================
 
-import React, { createContext, useContext, useCallback, useRef, useState, useEffect } from 'react';
+import React, { createContext, useContext, useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { RocketRideClient } from 'rocketride';
 import { useWorkspaceState } from './useWorkspaceState';
-import type { WorkspacePrefs, AppDescriptor, AppManifestEntry } from './types';
+import { buildSettingsRegistry, effectiveSettings } from './settingsRegistry';
+import type { SettingsRegistry } from './settingsRegistry';
+import type { WorkspacePrefs, AppDescriptor, AppManifestEntry, SettingValue } from './types';
 import type { ShellConnectionEventMap } from 'shared';
+import { GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from 'shared';
+import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail, DataGridLayout } from 'shared';
 import { ConnectionManager } from '../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../constants';
 import { resetRemote } from '../lib/appLoader';
@@ -121,10 +125,28 @@ export interface IWorkspaceContext {
 	loadFailure: { appId: string; name: string } | null;
 	/** Dismisses the pending load-failure modal. */
 	dismissLoadFailure: () => void;
-	/** Persisted settings — keyed by setting key (e.g. 'ROCKETRIDE_OPENAI_KEY'). */
-	settings: Record<string, string>;
-	/** Persist a single setting value. */
-	updateSetting: (key: string, value: string) => void;
+	/**
+	 * EFFECTIVE settings — every declared default overlaid with the user's
+	 * stored overrides, keyed by dotted appId-prefixed key
+	 * (e.g. 'rocketride.models.serverHost').  Each value keeps its declared JSON
+	 * type (string | number | boolean).  Reading a setting is a plain lookup —
+	 * the default-merge already happened here.
+	 */
+	settings: Record<string, SettingValue>;
+	/**
+	 * RAW overrides as stored in settings.json (deltas only).  A key present
+	 * here means "modified from default" — this is what the settings page's
+	 * modified indicator and reset action read.
+	 */
+	settingsOverrides: Record<string, SettingValue>;
+	/** Flattened declarations from all desktop apps' configurations. */
+	settingsRegistry: SettingsRegistry;
+	/**
+	 * Persist a single setting value.  Writing a value equal to the schema
+	 * default DELETES the override (deltas-only storage); passing `undefined`
+	 * resets the key to its default explicitly.
+	 */
+	updateSetting: (key: string, value: SettingValue | undefined) => void;
 	/** Update the active app's workspace preferences. */
 	updatePrefs: (patch: Partial<WorkspacePrefs>) => void;
 	/** Available theme options (id + display name). */
@@ -180,9 +202,79 @@ export const WorkspaceProvider: React.FC<{
 
 	// Destructure all state and mutation helpers from the persistence hook
 	const {
-		loaded, seeded, activeAppId, prefs, appState, settings,
-		switchApp, updatePrefs, updateAppState, updateSetting,
+		loaded, seeded, activeAppId, prefs, appState, settings: settingsOverrides,
+		switchApp, updatePrefs, updateAppState, updateSetting: writeSettingOverride,
 	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
+
+	// ── Settings registry + effective values ───────────────────────────────
+	// The registry flattens every desktop app's configuration (VSCode
+	// contributes.configuration shape) into one declaration index.  It rebuilds
+	// whenever the manifest changes (connect / shell:accountUpdate deliver a new
+	// `apps` array).  Effective settings = declared defaults + stored overrides.
+	const settingsRegistry = useMemo(() => buildSettingsRegistry(apps), [apps]);
+	// Effective values keep their declared JSON type (string | number | boolean).
+	// The settings page reads settingsOverrides + registry defaults for its
+	// controls; every other app reads this merged effective map.
+	const settings = useMemo(
+		() => effectiveSettings(settingsRegistry, settingsOverrides),
+		[settingsRegistry, settingsOverrides],
+	);
+
+	/**
+	 * Persists a setting change with deltas-only semantics: a value equal to
+	 * the schema default deletes the override instead of storing it, so
+	 * settings.json only ever contains deviations from the defaults.
+	 *
+	 * @param key   - The dotted setting key.
+	 * @param value - The new value, or undefined to reset to default.
+	 */
+	const updateSetting = useCallback((key: string, value: SettingValue | undefined) => {
+		const def = settingsRegistry.defaults[key];
+		// Equal to the declared default → remove the override entirely
+		writeSettingOverride(key, value !== undefined && value === def ? undefined : value);
+	}, [settingsRegistry, writeSettingOverride]);
+
+	// ── Grid config channel bridge (web host) ──────────────────────────────
+	// Answers shared-ui DataGrid persistence over the document CustomEvent
+	// channel from THIS app's workspace prefs (`prefs.tableLayouts`). The
+	// bridge is what lets shared components persist layouts WITHOUT importing
+	// shell-ui: grids dispatch, the active app's provider answers. `get` must
+	// reply synchronously (Tabulator's reader is sync) — hence the live ref;
+	// `set`/`clear` merge over the freshest map so several grids in one view
+	// never clobber each other's entries.
+	const gridPrefsRef = useRef(prefs);
+	gridPrefsRef.current = prefs;
+	useEffect(() => {
+		/** The current per-table layout map from the live prefs. */
+		const layoutMap = (): Record<string, DataGridLayout> => {
+			const stored = gridPrefsRef.current.tableLayouts;
+			return stored && typeof stored === 'object' ? { ...(stored as Record<string, DataGridLayout>) } : {};
+		};
+		const onGet = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigGetDetail>).detail;
+			detail.reply(layoutMap()[detail.tableId]);
+		};
+		const onSet = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigSetDetail>).detail;
+			const map = layoutMap();
+			map[detail.tableId] = { ...map[detail.tableId], [detail.type]: detail.blob };
+			updatePrefs({ tableLayouts: map });
+		};
+		const onClear = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigClearDetail>).detail;
+			const map = layoutMap();
+			delete map[detail.tableId];
+			updatePrefs({ tableLayouts: map });
+		};
+		document.addEventListener(GRID_CONFIG_GET, onGet);
+		document.addEventListener(GRID_CONFIG_SET, onSet);
+		document.addEventListener(GRID_CONFIG_CLEAR, onClear);
+		return () => {
+			document.removeEventListener(GRID_CONFIG_GET, onGet);
+			document.removeEventListener(GRID_CONFIG_SET, onSet);
+			document.removeEventListener(GRID_CONFIG_CLEAR, onClear);
+		};
+	}, [updatePrefs]);
 
 	// --- Lazy descriptor loading -----------------------------------------------
 
@@ -442,7 +534,7 @@ export const WorkspaceProvider: React.FC<{
 			loadApp: loadDescriptor,
 			appLoadErrors, retryApp,
 			loadFailure, dismissLoadFailure,
-			settings, updateSetting,
+			settings, settingsOverrides, settingsRegistry, updateSetting,
 			updatePrefs, themeOptions, setTheme, dispatch, emit, on,
 		}}>
 			{children}

@@ -418,6 +418,17 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
+    ///		Per-object stream_index counters for the stream descriptor
+    ///		(stream_descriptor.hpp); reset in open(). Plain (non-atomic) is
+    ///		safe: an instance is owned by one thread for its open->close
+    ///		lifecycle (pooled via `busy`).
+    //-----------------------------------------------------------------
+    uint32_t videoStreamIndex = 0;
+    uint32_t audioStreamIndex = 0;
+    uint32_t imageStreamIndex = 0;
+
+    //-----------------------------------------------------------------
+    /// @details
     ///		The currently opened entry from Python code to keep
     ///		a python reference and avoid it being garbage collected
     //-----------------------------------------------------------------

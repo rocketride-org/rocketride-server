@@ -27,8 +27,9 @@
 // and async callbacks down to the host-agnostic AccountView.
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, useMemo, CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
 import { AccountView } from 'shared';
+import type { IDataGridPageRequest } from 'shared';
 import type {
 	ConnectResult,
 	AccountSection,
@@ -216,11 +217,40 @@ const AccountPage: React.FC = () => {
 		}
 	}, [client, isConnected, orgId]);
 
-	/** Fetches just the transactions page (for pagination). */
+	/** Fetches just the transactions page (legacy pagination callback). */
 	const handleTransactionPage = useCallback(async (page: number) => {
 		if (!client || !orgId) return;
 		const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
 		if (tx) { setTransactions(tx); }
+	}, [client, orgId]);
+
+	/**
+	 * Direct ledger query for the transaction log grid: the grid's full
+	 * list-convention request — page, size, sorters, header-filter values,
+	 * search — forwards to the server verbatim, so filtering / sorting /
+	 * search work against the WHOLE ledger, not just the loaded page. A
+	 * failure resolves null and the grid keeps its prior rows.
+	 */
+	const fetchTransactions = useCallback(async (req: IDataGridPageRequest): Promise<TransactionsResult | null> => {
+		if (!client || !orgId) return null;
+		return client.billing
+			.getTransactions(orgId, {
+				page: req.page,
+				pageSize: req.size,
+				sort: req.sort,
+				filters: req.filters,
+				search: req.search,
+			})
+			.catch(() => null);
+	}, [client, orgId]);
+
+	/**
+	 * Org-scoped distinct ledger values for the transaction grid's enum
+	 * checklists (Type / Resource). A failure surfaces as an empty checklist.
+	 */
+	const fetchTransactionDistinct = useCallback(async (field: string): Promise<(string | number | boolean)[]> => {
+		if (!client || !orgId) return [];
+		return client.billing.getTransactionDistinct(orgId, field).catch(() => []);
 	}, [client, orgId]);
 
 	/** Purchase a top-up pack by charging the card on file. */
@@ -325,8 +355,10 @@ const AccountPage: React.FC = () => {
 	}, [client, orgId]);
 
 	/** Creates a new API key and returns the raw key string. */
-	const handleCreateKey = useCallback(async (params: { name: string; permissions: string[]; expiresAt?: string }) => {
+	const handleCreateKey = useCallback(async (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => {
 		if (!client) throw new Error('Not connected');
+		// Forward the full params (incl. teamId) so a team-scoped key is created
+		// team-scoped rather than silently falling back to org-wide.
 		const { key } = await client.account.createKey(params);
 		await loadKeys();
 		return { key };
@@ -429,16 +461,6 @@ const AccountPage: React.FC = () => {
 		window.open(url, '_blank', 'noopener');
 	}, [client, orgId]);
 
-	// ── Memoized lookups ────────────────────────────────────────────────────
-	const memberNames = useMemo(
-		() => Object.fromEntries(members.map((m: any) => [m.userId, m.displayName || m.email || m.userId])),
-		[members],
-	);
-	const teamNames = useMemo(
-		() => Object.fromEntries(teams.map((t: any) => [t.id, t.name || t.id])),
-		[teams],
-	);
-
 	// ── Render ──────────────────────────────────────────────────────────────
 	return (
 		<div style={accountStyles.root}>
@@ -469,8 +491,8 @@ const AccountPage: React.FC = () => {
 			onUpgradeSubscription={handleUpgradeSubscription}
 			dashboardLoading={dashboardLoading}
 			onTransactionPage={handleTransactionPage}
-			memberNames={memberNames}
-			teamNames={teamNames}
+			fetchTransactions={fetchTransactions}
+			fetchTransactionDistinct={fetchTransactionDistinct}
 			section={section}
 			onSectionChange={setSection}
 			activeTeamId={activeTeamId}

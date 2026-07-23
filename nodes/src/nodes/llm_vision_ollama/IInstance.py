@@ -25,6 +25,7 @@ from .IGlobal import IGlobal
 from ai.common.llm_base import LLMBase
 from rocketlib import AVI_ACTION, warning
 from ai.common.schema import Doc
+from ai.common.avi.descriptor import rename_ext
 
 
 class IInstance(LLMBase):
@@ -115,7 +116,9 @@ class IInstance(LLMBase):
                 continue
 
             # Emit a text Doc preserving the original metadata (chunkId, time_stamp, etc.)
-            self.instance.writeDocuments([Doc(type='Text', page_content=answer.getText(), metadata=doc.metadata)])
+            self.instance.writeDocuments(
+                [Doc(type='Text', page_content=answer.getText(), metadata=rename_ext(doc.metadata, 'txt'))]
+            )
 
         # Prevent the original image documents from flowing downstream
         self.preventDefault()

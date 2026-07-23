@@ -15,29 +15,30 @@
     "mode": "free",
     "authenticated": true,
     "showStatusBar": true,
-    "settings": [
-      {
-        "key": "ROCKETRIDE_APARAVI_URL",
-        "label": "Aparavi Server URL",
-        "description": "Base URL of the Aparavi platform API (e.g. https://app.aparavi.com)",
-        "type": "text",
-        "required": true
-      },
-      {
-        "key": "ROCKETRIDE_APARAVI_USER",
-        "label": "Aparavi User ID",
-        "description": "User ID for authenticating with the Aparavi API",
-        "type": "text",
-        "required": true
-      },
-      {
-        "key": "ROCKETRIDE_APARAVI_PASSWORD",
-        "label": "Aparavi Password",
-        "description": "Password for authenticating with the Aparavi API",
-        "type": "envkey",
-        "required": true
+    "contributes": {
+      "configuration": {
+        "title": "Aparavi AQL",
+        "properties": {
+          "rocketride.aparavi.url": {
+            "type": "string",
+            "required": true,
+            "placeholder": "https://app.aparavi.com",
+            "description": "Base URL of the Aparavi platform API (e.g. https://app.aparavi.com)."
+          },
+          "rocketride.aparavi.user": {
+            "type": "string",
+            "required": true,
+            "description": "User ID for authenticating with the Aparavi API."
+          },
+          "rocketride.aparavi.password": {
+            "type": "string",
+            "format": "rocketride.envkey",
+            "required": true,
+            "description": "Variable holding the Aparavi password. The value is the name of a Variable; the secret itself is stored encrypted on the server."
+          }
+        }
       }
-    ]
+    }
   },
   "scripts": {
     "build": "pnpm rsbuild build"

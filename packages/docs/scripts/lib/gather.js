@@ -91,12 +91,17 @@ async function readNodeMeta(nodeDir) {
 	return { classType, title, description: extractDescription(text) };
 }
 
-/** Extract a first-sentence description from a raw services*.json text string. */
+/**
+ * Extract a first-sentence description from a raw services*.json text string.
+ * The JSON `description` is an array of complete lines, so they join with a
+ * space — joining bare runs them together ("a node.Can be invoked"), which also
+ * defeats the '. ' sentence split below and returns the whole blob.
+ */
 function extractDescription(text) {
 	const m = /"description"\s*:\s*\[([^\]]*)\]/.exec(text);
 	if (!m) return '';
 	const parts = m[1].match(/"((?:[^"\\]|\\.)*)"/g) || [];
-	const full = parts.map((s) => s.slice(1, -1)).join('').trim();
+	const full = parts.map((s) => s.slice(1, -1)).join(' ').replace(/\s+/g, ' ').trim();
 	const dot = full.indexOf('. ');
 	return dot >= 0 ? full.slice(0, dot + 1) : full;
 }
@@ -213,6 +218,62 @@ function frontMatterTitle(content) {
 	return t ? t[2].replace(/^['"]|['"]$/g, '') : null;
 }
 
+/**
+ * First-sentence description for a markdown/MDX page, mirroring what Docusaurus
+ * derives for its meta description. A front-matter `description:` wins when the
+ * page declares one; otherwise the first prose paragraph is used, skipping MDX
+ * imports, JSX, headings, code fences, tables and admonitions. Node pages get
+ * their description from services*.json instead (see extractDescription).
+ * @param {string} content - raw page content (md/mdx).
+ * @return {string} description, or '' when the page has no leading prose.
+ */
+function pageDescription(content) {
+	const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+	if (fm) {
+		const d = /(^|\n)description:[ \t]*(.*)/.exec(fm[1]);
+		if (d) {
+			const inline = d[2].trim();
+			if (/^[>|][-+\d]*$/.test(inline)) {
+				// YAML block scalar (`description: >`, `|`, `>-`, …). The text is the
+				// indented run that follows; the indicator itself is not the value.
+				const block = [];
+				for (const line of fm[1].slice(d.index + d[0].length).split(/\r?\n/).slice(1)) {
+					if (!/^[ \t]+\S/.test(line)) break;
+					block.push(line.trim());
+				}
+				if (block.length) return block.join(' ');
+			} else if (inline) {
+				return inline.replace(/^['"]|['"]$/g, '');
+			}
+		}
+	}
+	const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
+	const para = [];
+	let inFence = false;
+	for (const line of body.split(/\r?\n/)) {
+		const t = line.trim();
+		// Skip fenced blocks wholesale — the fence delimiters AND their contents.
+		if (/^(```|~~~)/.test(t)) {
+			if (para.length) break;
+			inFence = !inFence;
+			continue;
+		}
+		if (inFence) continue;
+		if (!t) {
+			if (para.length) break;
+			continue;
+		}
+		if (/^(#{1,6}\s|:::|<!--|\||[<{]|import\s|export\s|-{3,})/.test(t)) {
+			if (para.length) break;
+			continue;
+		}
+		para.push(t);
+	}
+	const prose = para.join(' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*`_]/g, '').trim();
+	const m = /^(.+?[.!?])(\s|$)/.exec(prose);
+	return (m ? m[1] : prose).slice(0, 200).trim();
+}
+
 /** First markdown heading, as a title fallback. */
 function headingTitle(content) {
 	const m = /^#\s+(.+?)\s*$/m.exec(content);
@@ -261,13 +322,66 @@ function discoverContributors() {
 	return contributors;
 }
 
-/** Remove generated artifacts from static/ (keep .gitkeep and img/). */
+/** Remove generated artifacts from static/ (keep .gitkeep, img/, and committed files). */
 async function clearGeneratedStatic(staticDir) {
 	if (!(await exists(staticDir))) return;
+	const KEEP = new Set(['.gitkeep', 'img', 'robots.txt']);
 	for (const name of await readDir(staticDir)) {
-		if (name === '.gitkeep' || name === 'img') continue;
+		if (KEEP.has(name)) continue;
 		await rm(path.join(staticDir, name));
 	}
+}
+
+// --- last_update stamping ----------------------------------------------------
+// The assembled content tree under BUILD_ROOT is not git-tracked, so Docusaurus
+// cannot infer page dates there (`showLastUpdateTime` finds nothing and the
+// sitemap emits no <lastmod>). Stamp each staged page's front matter with the
+// SOURCE file's last git commit date instead — Docusaurus prefers a
+// `last_update` front-matter entry over git when present.
+const { execFileSync } = require('node:child_process');
+const _gitDateCache = new Map();
+
+/**
+ * Last commit date (YYYY-MM-DD) of a source file, or null outside a git
+ * checkout / for untracked files. Cached per path. Requires git history at
+ * build time — a shallow CI clone collapses every date to the clone day, so
+ * the docs job should use fetch-depth: 0.
+ * @param {string} srcAbs - absolute path of the git-tracked source file.
+ * @return {string|null}
+ */
+function gitLastUpdate(srcAbs) {
+	if (_gitDateCache.has(srcAbs)) return _gitDateCache.get(srcAbs);
+	let date = null;
+	try {
+		date = execFileSync('git', ['log', '-1', '--format=%cs', '--', srcAbs], {
+			cwd: path.dirname(srcAbs), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+		}).trim() || null;
+	} catch {
+		/* not a git checkout — leave null; the page simply carries no date */
+	}
+	_gitDateCache.set(srcAbs, date);
+	return date;
+}
+
+/**
+ * Merge `last_update: {date}` into a page's front matter (creating the block
+ * when absent). No-op when date is null or the page already declares one.
+ * @param {string} content - staged page content (md/mdx).
+ * @param {string|null} date - YYYY-MM-DD from gitLastUpdate().
+ * @return {string}
+ */
+function stampLastUpdate(content, date) {
+	if (!date) return content;
+	// Scope the check to the front matter — a `last_update:` line in the body
+	// (a YAML sample, say) must not silently cost the page its sitemap date.
+	const declared = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+	if (declared && /(^|\n)last_update\s*:/.test(declared[1])) return content;
+	if (/^---\r?\n/.test(content)) {
+		const end = content.indexOf('\n---', 4);
+		if (end !== -1) return `${content.slice(0, end)}\nlast_update:\n  date: ${date}${content.slice(end)}`;
+		return content;
+	}
+	return `---\nlast_update:\n  date: ${date}\n---\n\n${content}`;
 }
 
 /**
@@ -291,7 +405,9 @@ async function stageFile({ srcAbs, destAbs, siblingAbs, content, mode }) {
 			await copyFile(srcAbs, destAbs); // Windows symlink may need privilege
 		}
 	} else {
-		await copyFile(srcAbs, destAbs);
+		// Real write instead of a byte copy so the staged page carries the source
+		// file's git date (the assembled content tree itself is not git-tracked).
+		await writeFileEnsure(destAbs, stampLastUpdate(content, gitLastUpdate(srcAbs)));
 	}
 	// Raw pre-MDX sibling for the LLM surface.
 	await writeFileEnsure(siblingAbs, content);
@@ -334,7 +450,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 			const destAbs = path.join(contentDir, `${docId || 'index'}${ext}`);
 			const siblingAbs = path.join(staticDir, `${docId || 'index'}.md`);
 			await stageFile({ srcAbs, destAbs, siblingAbs, content, mode });
-			manifest.push({ id: docId || 'index', route: docId ? `/${docId}` : '/', title: frontMatterTitle(content) || headingTitle(content) || docId || 'Home', mdSibling: `/${docId || 'index'}.md`, source: srcAbs });
+			manifest.push({ id: docId || 'index', route: docId ? `/${docId}` : '/', title: frontMatterTitle(content) || headingTitle(content) || docId || 'Home', mdSibling: `/${docId || 'index'}.md`, source: srcAbs, description: pageDescription(content) });
 		}
 	}
 
@@ -393,7 +509,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 			// index so the parent label is clickable.
 			const folderRel = toPosix(path.join(NODES_DIR, cat.slug, name));
 			await writeFileEnsure(path.join(contentDir, folderRel, '_category_.json'), JSON.stringify({ label, collapsed: true, link: { type: 'doc', id: `${folderRel}/index` } }, null, 2));
-			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }));
+			await writeFileEnsure(path.join(contentDir, folderRel, 'index.md'), stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }), gitLastUpdate(srcAbs)));
 			await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
 			manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
 			const serviceDescriptions = await readServiceDescriptions(nodeDir);
@@ -406,7 +522,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 				const vExistingTitle = frontMatterTitle(vcontent);
 				const vlabel = vExistingTitle || nodeLabel(variant, '');
 				const vdescription = variantDescription(variant, serviceDescriptions);
-				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel }));
+				await writeFileEnsure(path.join(contentDir, folderRel, `${variant}.md`), stampLastUpdate(stageNodeMarkdown(vcontent, { slug: `/${vroute}`, title: vExistingTitle ? null : vlabel }), gitLastUpdate(vsrcAbs)));
 				await writeFileEnsure(path.join(staticDir, `${vroute}.md`), vcontent);
 				manifest.push({ id: vroute, route: `/${vroute}`, title: vlabel, mdSibling: `/${vroute}.md`, source: vsrcAbs, node: name, variant, category: cat.label, categoryOrder: cat.position, description: vdescription });
 			}
@@ -416,7 +532,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		// fills in when missing, and the body H1 is dropped to avoid a duplicate
 		// heading. Always a real write — a symlink can't carry the edits.
 		const destAbs = path.join(contentDir, NODES_DIR, cat.slug, `${name}.md`);
-		await writeFileEnsure(destAbs, stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }));
+		await writeFileEnsure(destAbs, stampLastUpdate(stageNodeMarkdown(content, { slug: `/${route}`, title: existingTitle ? null : label }), gitLastUpdate(srcAbs)));
 		await writeFileEnsure(path.join(staticDir, `${route}.md`), content);
 		manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
 	}
@@ -438,7 +554,7 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		const destAbs = path.join(contentDir, `${docId}${ext}`);
 		const siblingAbs = path.join(staticDir, `${docId}.md`);
 		await stageFile({ srcAbs: abs, destAbs, siblingAbs, content, mode });
-		manifest.push({ id: docId, route: `/${docId}`, title: frontMatterTitle(content) || headingTitle(content) || docId, mdSibling: `/${docId}.md`, source: abs, module: owner.module });
+		manifest.push({ id: docId, route: `/${docId}`, title: frontMatterTitle(content) || headingTitle(content) || docId, mdSibling: `/${docId}.md`, source: abs, module: owner.module, description: pageDescription(content) });
 	}
 
 	// 4. Placeholders for spine slots still lacking content (keeps the build green).
@@ -502,4 +618,4 @@ async function ensurePlaceholders({ contentDir, staticDir, routes, manifest }) {
 	}
 }
 
-module.exports = { gather, docIdFor };
+module.exports = { gather, docIdFor, pageDescription, stampLastUpdate };

@@ -1,0 +1,815 @@
+/* =============================================================================
+   MIT License
+   Copyright (c) 2026 Aparavi Software AG
+   =============================================================================
+
+   DataGrid token theme — overrides Tabulator's `tabulator_simple` base so the
+   grid renders in the platform design system. Every colour / font value below
+   references an existing --rr-* token (annotated with its source component),
+   so light and dark themes track automatically. No raw hex anywhere.
+
+   Also defines the in-cell primitive classes (.rr-cell-*) used by the DOM
+   formatters in defaults.ts. These replicate the VALUES of StatusBadge,
+   Button (small variants), and commonStyles from the same tokens — a
+   deliberate mirror, since Tabulator formatters build DOM outside React.
+   ========================================================================== */
+
+/* ── Container ─────────────────────────────────────────────────────────────
+   Plain block, no outer border — drops into a Card (noBodyPadding) exactly
+   like the old DataTable's styles.container. */
+.rr-grid.tabulator {
+	background: transparent;
+	border: none;
+	font-family: var(--rr-font-family); /* platform font (commonStyles) */
+	font-size: 13px;                    /* old bodyCell font size */
+}
+
+/* Clickable rows advertise themselves (DataGrid adds the modifier class). */
+.rr-grid--clickable.tabulator .tabulator-row {
+	cursor: pointer;
+}
+
+/* ── Header ────────────────────────────────────────────────────────────────
+   Old headerCell spec: 11px/700, 0.08em tracking, uppercase,
+   --rr-text-secondary, 9px 12px padding, --rr-border separator. */
+.rr-grid.tabulator .tabulator-header {
+	background: transparent;
+	border-bottom: 1px solid var(--rr-border); /* header separator (tableHeader) */
+}
+.rr-grid.tabulator .tabulator-header .tabulator-col {
+	background: transparent;
+	border-right: none;
+}
+.rr-grid.tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+	padding: 9px 12px;
+}
+.rr-grid.tabulator .tabulator-header .tabulator-col .tabulator-col-title {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--rr-text-secondary); /* header text (old headerCell) */
+	white-space: nowrap;
+}
+/* Sort arrows: rendered ONLY on actively sorted columns (decision
+   2026-07-15). Tabulator stamps aria-sort on the .tabulator-col element
+   ("ascending" / "descending" on the sorted column, "none" otherwise —
+   tabulator_esm.mjs Sort.setColumnHeader / clearColumnHeaders), and the
+   base theme forces
+   the sorter box visible with a FIVE-class display:flex rule
+   (.tabulator .tabulator-header .tabulator-col .tabulator-col-content
+   .tabulator-col-sorter), so the hide/restore pair below repeats that full
+   chain under .rr-grid to out-specify it — a shorter selector loses the
+   cascade and leaves gray idle arrows visible. Headers stay fully clickable:
+   the sorter is just an indicator; the click target is the header itself. */
+.rr-grid.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-sorter {
+	display: none;
+}
+.rr-grid.tabulator .tabulator-header .tabulator-col[aria-sort='ascending'] .tabulator-col-content .tabulator-col-sorter,
+.rr-grid.tabulator .tabulator-header .tabulator-col[aria-sort='descending'] .tabulator-col-content .tabulator-col-sorter {
+	display: flex; /* restore the base theme's flex sorter box */
+}
+/* Active direction renders in brand (old sortArrow used --rr-brand); the
+   full base-theme chain again, to out-specify the base #666 shorthand. */
+.rr-grid.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort='ascending'] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
+	border-bottom-color: var(--rr-brand); /* active asc arrow (old sortArrow) */
+}
+.rr-grid.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort='descending'] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
+	border-top-color: var(--rr-brand); /* active desc arrow (old sortArrow) */
+}
+/* Column resize handle: invisible until hovered, then a brand hairline. */
+.rr-grid.tabulator .tabulator-col-resize-handle:hover {
+	background: color-mix(in srgb, var(--rr-brand) 45%, transparent);
+}
+/* Column being dragged to a new position. */
+.rr-grid.tabulator .tabulator-col.tabulator-moving {
+	background: var(--rr-bg-surface-alt); /* drag ghost (commonStyles surface) */
+	border: 1px solid var(--rr-border);
+}
+
+/* ── Rows and cells ────────────────────────────────────────────────────────
+   Old bodyCell spec: 13px, 10px 12px padding, 30%-opacity border-bottom
+   (commonStyles.tableCell), hover --rr-bg-list-hover. */
+.rr-grid.tabulator .tabulator-tableholder .tabulator-table {
+	background: transparent;
+	color: var(--rr-text-primary); /* cell text (tableCell) */
+}
+.rr-grid.tabulator .tabulator-row {
+	background: transparent;
+	border-bottom: 1px solid color-mix(in srgb, var(--rr-border) 30%, transparent); /* row separator (tableCell) */
+	min-height: 0;
+}
+.rr-grid.tabulator .tabulator-row:hover {
+	background: var(--rr-bg-list-hover); /* row hover (listRow) */
+}
+.rr-grid.tabulator .tabulator-row .tabulator-cell {
+	padding: 10px 12px;
+	border-right: none;
+	font-size: 13px;
+	vertical-align: middle;
+}
+
+/* Even-row striping from the base theme is retired — platform rows are
+   uniform with separator hairlines only. */
+.rr-grid.tabulator .tabulator-row.tabulator-row-even {
+	background: transparent;
+}
+.rr-grid.tabulator .tabulator-row.tabulator-row-even:hover {
+	background: var(--rr-bg-list-hover); /* row hover (listRow) */
+}
+/* Scroll region behind the rows stays surface-transparent. */
+.rr-grid.tabulator .tabulator-tableholder {
+	background: transparent;
+}
+
+/* ── Header popup button (filter + column show/hide + reset) ───────────────
+   The per-column popup affordance (Tabulator renders the same
+   .tabulator-header-popup-button for headerMenu and headerPopup) stays
+   invisible until the header is hovered, then reads as a quiet secondary
+   control. */
+.rr-grid.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-header-popup-button {
+	padding: 0 5px;
+	color: var(--rr-text-secondary); /* quiet affordance (secondary text) */
+	font-size: 12px;
+	opacity: 0;
+	transition: opacity 0.12s;
+}
+.rr-grid.tabulator .tabulator-header .tabulator-col:hover .tabulator-col-content .tabulator-header-popup-button {
+	opacity: 0.7;
+}
+.rr-grid.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-header-popup-button:hover {
+	opacity: 1;
+	cursor: pointer;
+}
+
+/* ── Footer (count + page-size + pager) ────────────────────────────────────
+   Old footer spec: 12.5px --rr-text-secondary, --rr-border top separator;
+   pgBtn: 26px, radius 6, --rr-bg-default; active page solid --rr-brand with
+   --rr-fg-button text at 700. */
+.rr-grid.tabulator .tabulator-footer {
+	background: transparent;
+	border-top: 1px solid var(--rr-border); /* footer separator (old footer) */
+	color: var(--rr-text-secondary);
+	font-size: 12.5px;
+	padding: 4px 8px;
+}
+.rr-grid.tabulator .tabulator-footer .tabulator-footer-contents {
+	padding: 6px 8px;
+}
+.rr-grid.tabulator .tabulator-footer .tabulator-page-counter {
+	color: var(--rr-text-secondary); /* count text (old count) */
+	font-size: 12.5px;
+}
+.rr-grid.tabulator .tabulator-footer .tabulator-paginator {
+	color: var(--rr-text-secondary);
+}
+.rr-grid.tabulator .tabulator-footer .tabulator-page-size {
+	height: 26px;
+	padding: 0 6px;
+	font-family: inherit;
+	font-size: 12.5px;
+	color: var(--rr-text-secondary);    /* select text (old pageSizeSelect) */
+	background: var(--rr-bg-default);   /* select fill (old pageSizeSelect) */
+	border: 1px solid var(--rr-border);
+	border-radius: 6px;
+	cursor: pointer;
+	/* The select's drop-down OPTION LIST is native browser chrome (same
+	   situation as the header popup's date-input calendar panel — see the
+	   popup container rule): color-scheme is the only reachable lever,
+	   flipping the list surface to the active theme instead of a stark white
+	   panel on dark themes. */
+	color-scheme: var(--rr-palette-mode, light dark); /* native option list (theme mode token) */
+}
+.rr-grid.tabulator .tabulator-footer .tabulator-page {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 26px;
+	height: 26px;
+	padding: 0 8px;
+	margin: 0 2px;
+	border: 1px solid var(--rr-border);
+	border-radius: 6px;
+	font-size: 12px;
+	background: var(--rr-bg-default);   /* page button fill (old pgBtn) */
+	color: var(--rr-text-primary);
+	cursor: pointer;
+}
+.rr-grid.tabulator .tabulator-footer .tabulator-page.active {
+	background: var(--rr-brand);        /* current page (old pgBtn on) */
+	border-color: var(--rr-brand);
+	color: var(--rr-fg-button);
+	font-weight: 700;
+}
+.rr-grid.tabulator .tabulator-footer .tabulator-page:disabled {
+	opacity: 0.5;
+	pointer-events: none;
+}
+/* Footer contract: hidden entirely when the set fits one page (decision
+   2026-07-08 "DataTable footer only when multi-page"); DataGrid toggles the
+   modifier from getPageMax(). */
+.rr-grid--single-page.tabulator .tabulator-footer {
+	display: none;
+}
+
+/* ── Placeholder (empty state) ─────────────────────────────────────────────
+   Styled like the stock EmptyState card: dashed --rr-border-hover border,
+   radius 10, --rr-bg-surface-alt fill, 15px/700 title + 13px secondary text.
+
+   DOM note (verified in tabulator_esm.mjs 6.5.2 initializePlaceholder):
+   Tabulator wraps only STRING placeholders in a .tabulator-placeholder-
+   contents element — a custom HTMLElement placeholder (ours) is appended to
+   .tabulator-placeholder as-is, so DataGrid.buildPlaceholder stamps the
+   class onto its own wrapper; the same single element shows in EVERY empty
+   render (initial empty AND filtered-to-zero both go through the row
+   manager's one _showPlaceholder path). */
+.rr-grid.tabulator .tabulator-placeholder {
+	background: transparent;
+}
+.rr-grid.tabulator .tabulator-placeholder .tabulator-placeholder-contents {
+	margin: 16px;
+	padding: 48px 24px;
+	border: 1px dashed var(--rr-border-hover); /* EmptyState container */
+	border-radius: 10px;
+	background: var(--rr-bg-surface-alt);      /* EmptyState container */
+	color: var(--rr-text-secondary);
+	font-size: 13px;
+	font-weight: 400; /* neutralize the base theme's bold contents rule */
+	white-space: normal;
+}
+/* Title / description spans: the base theme forces every placeholder span
+   to #000 with a 3-class + element selector (.tabulator .tabulator-
+   tableholder .tabulator-placeholder span), so both rules below repeat the
+   placeholder class AND the span type to out-specify it — a bare class
+   chain loses and the text goes black (invisible in dark themes). */
+.rr-grid.tabulator .tabulator-placeholder span.rr-grid-empty-title {
+	display: block;
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--rr-text-primary); /* EmptyState title */
+	margin-bottom: 6px;
+	text-align: center;
+}
+.rr-grid.tabulator .tabulator-placeholder span.rr-grid-empty-desc {
+	display: block;
+	font-size: 13px;
+	color: var(--rr-text-secondary); /* EmptyState description */
+	max-width: 380px;
+	margin: 0 auto;
+	text-align: center;
+}
+
+/* ── Loading / error overlays ──────────────────────────────────────────────
+   Data-loader alert: translucent paper veil, 13px message; error text in
+   --rr-color-error (mirrors the old stale-error banner colour). */
+.rr-grid.tabulator .tabulator-alert {
+	background: color-mix(in srgb, var(--rr-bg-paper) 60%, transparent); /* veil (bg-paper) */
+}
+.rr-grid.tabulator .tabulator-alert .tabulator-alert-msg {
+	border-radius: 8px;
+	border: 1px solid var(--rr-border);
+	background: var(--rr-bg-paper);
+	font-size: 13px;
+	font-weight: 500;
+	padding: 10px 16px;
+}
+.rr-grid.tabulator .tabulator-alert .tabulator-alert-msg.tabulator-alert-state-msg {
+	color: var(--rr-text-secondary); /* "Loading" message */
+}
+.rr-grid.tabulator .tabulator-alert .tabulator-alert-msg.tabulator-alert-state-error {
+	color: var(--rr-color-error); /* load-failure message (old staleErrorBanner) */
+	border-color: color-mix(in srgb, var(--rr-color-error) 40%, transparent);
+}
+
+/* ── Header menu / popup surface ───────────────────────────────────────────
+   Themed to the platform popup-menu look: paper surface, --rr-border edge,
+   list-hover rows. Both containers are appended to <body>, outside .rr-grid,
+   so these rules key off Tabulator's own classes only. Menus render as
+   .tabulator-menu.tabulator-popup-container; headerPopup panels render as
+   .tabulator-popup.tabulator-popup-container — same surface treatment. */
+.tabulator-menu.tabulator-popup-container,
+.tabulator-popup.tabulator-popup-container {
+	background: var(--rr-bg-paper);      /* popup surface (popupMenu) */
+	border: 1px solid var(--rr-border);
+	border-radius: 8px;
+	box-shadow: 0 4px 12px var(--rr-shadow-widget); /* popup shadow (popupMenu, exact value) */
+	font-family: var(--rr-font-family);
+	font-size: 12.5px;
+	color: var(--rr-text-primary);
+	padding: 4px;
+	/* Native-widget chrome inside the popup — the calendar PANEL opened by
+	   the date filter input (and the values-checklist scrollbar and number
+	   spinners) is browser-rendered and unreachable by CSS selectors.
+	   Chromium honours exactly two inherited levers, so both are set once
+	   here and inherit to every control in the panel. (The time bound is a
+	   plain TEXT input by design — Chromium's time-picker drop-down ignores
+	   accent-color entirely, so it was replaced with a tokenized text box in
+	   defaults.buildDateFilterControls; only the calendar panel remains.)
+	   - color-scheme flips the native panel surface / text to the active
+	     theme. --rr-palette-mode is the platform's CSS-visible light/dark
+	     signal ("light" | "dark", set on :root by applyTheme from every
+	     theme JSON and defaulted in rocketride-default.css) — the same token
+	     buildMuiTheme keys palette.mode on. The `light dark` fallback covers
+	     documents where the token is absent (e.g. the VS Code webview theme
+	     sheet, which computes mode at runtime instead): the browser then
+	     picks by OS preference — best available without the token.
+	   - accent-color brands the panel's selection highlights (today ring,
+	     selected date cell) in place of the UA default blue. */
+	color-scheme: var(--rr-palette-mode, light dark); /* native panel surface (theme mode token) */
+	accent-color: var(--rr-brand);                    /* native panel highlights (brand) */
+}
+.tabulator-menu .tabulator-menu-item {
+	padding: 6px 10px;
+	border-radius: 6px;
+}
+.tabulator-menu .tabulator-menu-item:not(.tabulator-menu-item-disabled):hover {
+	background: var(--rr-bg-list-hover); /* row hover (menuRow) */
+}
+.tabulator-menu .tabulator-menu-separator {
+	border-top: 1px solid var(--rr-border);
+	margin: 4px 2px;
+}
+/* Check box of the column-toggle / checklist rows: 13px square, brand fill
+   when on (kept in both container scopes — a caller-provided headerMenu can
+   reuse it). Vertical centring comes from the flex .rr-grid-hp-item row. */
+.tabulator-menu .rr-menu-check,
+.tabulator-popup .rr-menu-check,
+.rr-grid-gear .rr-menu-check {
+	display: inline-block;
+	width: 13px;
+	height: 13px;
+	border: 1px solid var(--rr-border-hover);
+	border-radius: 3px;
+	background: var(--rr-bg-default);
+	flex-shrink: 0;
+}
+.tabulator-menu .rr-menu-check--on,
+.tabulator-popup .rr-menu-check--on,
+.rr-grid-gear .rr-menu-check--on {
+	background: var(--rr-brand);        /* checked fill (checkbox brand) */
+	border-color: var(--rr-brand);
+	box-shadow: inset 0 0 0 2px var(--rr-bg-paper); /* inner tick well */
+}
+
+/* ── Header popup panel (filter + columns + reset sections) ────────────────
+   The combined per-column panel built by defaults.buildHeaderPopup. The
+   returned panel IS the .tabulator-popup.tabulator-popup-container element
+   (Tabulator's loadPopup stamps both classes onto it), so the surface rule
+   above already paints it; the override below re-shapes the box — a fixed
+   comfortable width and vertical-only padding (sections own the horizontal
+   inset, letting dividers span edge to edge). The container classes are
+   repeated to out-specify the two-class surface rule. */
+.tabulator-popup.tabulator-popup-container.rr-grid-hp {
+	width: 248px;    /* consistent panel width (240-260 spec) */
+	padding: 4px 0;  /* vertical only — sections carry the 12px sides */
+	box-sizing: border-box;
+}
+/* One section (Filter / Columns / Reset): comfortable inner padding. */
+.rr-grid-hp-section {
+	padding: 6px 12px 8px; /* section inset (10-12px spec; 12px sides) */
+}
+/* Section label: matches the filter-strip label spec (10.5px uppercase). */
+.rr-grid-hp-label {
+	font-size: 10.5px;
+	font-weight: 600;
+	letter-spacing: 0.6px;
+	text-transform: uppercase;
+	color: var(--rr-text-secondary); /* section label (filter-strip label) */
+	padding: 2px 0 6px;              /* breathing room before the controls */
+}
+/* Filter inputs: full-width 30px controls mirroring commonStyles.inputField
+   (the section's side padding aligns them with the rows below). */
+.rr-grid-hp-input {
+	display: block;
+	width: 100%;
+	height: 30px;
+	margin: 0 0 6px;
+	padding: 0 10px;
+	font-size: 13px;
+	font-family: inherit;
+	border: 1px solid var(--rr-border-input); /* input edge (inputField) */
+	border-radius: 5px;
+	background: var(--rr-bg-input);           /* input fill (inputField) */
+	color: var(--rr-text-primary);            /* input text (inputField) */
+	outline: none;
+	box-sizing: border-box;
+}
+/* Placeholder text ("Contains...", the time box's "HH:MM" format hint):
+   disabled-text token, matching InputField's placeholder treatment. */
+.rr-grid-hp-input::placeholder {
+	color: var(--rr-text-disabled); /* placeholder (InputField placeholder) */
+}
+/* Invalid pending text (the time box's unparsable 24-hour input): a quiet
+   error-token edge only — Apply degrades the bound to date-only rather than
+   blocking, so the flag advises instead of alarms. */
+.rr-grid-hp-input--invalid {
+	border-color: var(--rr-color-error); /* invalid edge (error token) */
+}
+/* Calendar indicator glyph on the date inputs (the only native picker left —
+   the time bound is a plain text box). The glyph is a UA-rendered image: its
+   base colour comes from the inherited color-scheme (dark scheme renders it
+   near-white, light near-black — always legible), and no filter chain can
+   retarget it to an arbitrary token, so the secondary-text "quiet control"
+   weight is approximated with opacity instead, matching the header popup
+   button's rest/hover treatment. */
+.rr-grid-hp-input::-webkit-calendar-picker-indicator {
+	opacity: 0.7;              /* rest weight (header popup button hover value) */
+	cursor: pointer;           /* opens the native panel — advertise the click */
+	transition: opacity 0.12s; /* fade timing (header popup button) */
+}
+.rr-grid-hp-input::-webkit-calendar-picker-indicator:hover {
+	opacity: 1;                /* full strength on hover (header popup button) */
+}
+/* Number spinners (Min / Max inputs): surface and arrows already flip with
+   the inherited color-scheme and fit the 30px control at their default
+   size; they only need to read as the clickable steppers they are. */
+.rr-grid-hp-input::-webkit-inner-spin-button {
+	cursor: pointer; /* steppers are clickable (same affordance as above) */
+}
+/* Clickable row (column toggles, checklist values, Reset layout): 28px flex
+   row with the check box vertically centred — menuRow's 13px text and
+   list-hover feedback at a fixed comfortable height. */
+.rr-grid-hp-item {
+	display: flex;
+	align-items: center;          /* centres the .rr-menu-check box */
+	gap: 8px;                     /* box-to-label gap (menuRow gap) */
+	height: 28px;
+	padding: 0 8px;
+	border-radius: 6px;
+	font-size: 13px;              /* row text (menuRow) */
+	color: var(--rr-text-primary);
+	cursor: pointer;
+	user-select: none;            /* rapid toggling must not select text */
+}
+.rr-grid-hp-item:hover {
+	background: var(--rr-bg-list-hover); /* row hover (menuRow) */
+}
+/* Row label: long column titles / values truncate with an ellipsis. */
+.rr-grid-hp-item-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* Scroll cap shared by the values checklist and the columns toggle list —
+   exactly eight 28px rows before scrolling, so huge sets stay usable. */
+.rr-grid-hp-list {
+	max-height: 224px; /* 8 x 28px .rr-grid-hp-item rows */
+	overflow-y: auto;
+}
+/* Loading / empty checklist placeholder row — same rhythm as a real row. */
+.rr-grid-hp-empty {
+	display: flex;
+	align-items: center;
+	height: 28px;                    /* matches .rr-grid-hp-item */
+	padding: 0 8px;
+	font-size: 12px;
+	color: var(--rr-text-secondary); /* placeholder text (secondary) */
+}
+/* Range-bound caption (Start / End / Min / Max) above each bound input —
+   quieter than the section label (no uppercase). */
+.rr-grid-hp-sublabel {
+	font-size: 11px;
+	color: var(--rr-text-secondary); /* bound caption (secondary text) */
+	padding: 2px 0 3px;
+}
+/* One date bound's date + optional-time input pair, on a single compact
+   flex row (date filter section). */
+.rr-grid-hp-range-row {
+	display: flex;
+	gap: 6px;
+	margin: 0 0 6px;
+}
+/* Inputs inside the pair drop the standalone input's block margins/width
+   and share the row: the date flexes into the remainder, the time stays a
+   fixed compact box. */
+.rr-grid-hp-range-row .rr-grid-hp-input {
+	margin: 0;
+	width: auto;
+	min-width: 0;
+}
+.rr-grid-hp-range-row .rr-grid-hp-input--date {
+	flex: 1 1 auto;
+}
+/* The time bound's plain-text box ("HH:MM"): compact fixed width — narrower
+   than the old native time input, which needed room for its picker chrome. */
+.rr-grid-hp-range-row .rr-grid-hp-input--time {
+	flex: 0 0 auto;
+	width: 76px;
+	padding: 0 8px;
+}
+/* Filter footer: right-aligned Clear / Apply pair closing the section. */
+.rr-grid-hp-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding-top: 6px;
+}
+/* Footer button base: buttonSecondarySmall values (quiet outline). */
+.rr-grid-hp-btn {
+	padding: 3px 10px;
+	font-size: 11px;                     /* small button text (buttonSmall) */
+	line-height: 1.4;
+	font-weight: 500;
+	font-family: inherit;
+	border-radius: 6px;
+	border: 1px solid var(--rr-border);  /* outline (buttonSecondarySmall) */
+	background: var(--rr-bg-paper);      /* fill (buttonSecondarySmall) */
+	color: var(--rr-text-secondary);     /* text (buttonSecondarySmall) */
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+.rr-grid-hp-btn:hover {
+	opacity: 0.85;
+}
+/* Primary Apply: buttonPrimarySmall values; the border stays (in brand) so
+   both footer buttons share identical box metrics. */
+.rr-grid-hp-btn--primary {
+	background: var(--rr-brand);         /* fill (buttonPrimarySmall) */
+	border-color: var(--rr-brand);
+	color: var(--rr-fg-button);          /* on-brand text (buttonPrimarySmall) */
+}
+/* Section divider — a real full-width rule between Filter / Format / Columns
+   / Reset (the panel has no horizontal padding, so it spans edge to edge). */
+.rr-grid-hp-divider {
+	border-top: 1px solid var(--rr-border);
+	margin: 4px 0;
+}
+
+/* ── Format section (alignment + type-specific display picks) ──────────────
+   Rows of small toggle buttons; wrap so the five date picks fit the panel. */
+.rr-grid-hp-fmt-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: 0 0 6px;
+}
+.rr-grid-hp-fmt-row:last-child {
+	margin-bottom: 0;
+}
+/* Option button — the hp-btn quiet outline at toggle-chip scale. */
+.rr-grid-hp-fmt-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 24px;
+	height: 22px;
+	padding: 0 6px;
+	font-size: 10.5px;                   /* chip text (below buttonSmall) */
+	font-weight: 500;
+	font-family: inherit;
+	border-radius: 5px;
+	border: 1px solid var(--rr-border);  /* outline (buttonSecondarySmall) */
+	background: var(--rr-bg-paper);      /* fill (buttonSecondarySmall) */
+	color: var(--rr-text-secondary);     /* text (buttonSecondarySmall) */
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+.rr-grid-hp-fmt-btn:hover {
+	opacity: 0.85;
+}
+/* Active pick — filled like the primary Apply so state reads at a glance. */
+.rr-grid-hp-fmt-btn--on {
+	background: var(--rr-brand);         /* fill (buttonPrimarySmall) */
+	border-color: var(--rr-brand);
+	color: var(--rr-fg-button);          /* on-brand text (buttonPrimarySmall) */
+}
+/* Alignment icons inherit the button's currentColor. */
+.rr-grid-hp-fmt-btn svg {
+	display: block;
+}
+
+/* ── Active-filter indicator ───────────────────────────────────────────────
+   DataGrid toggles .rr-col-filtered on a column's header element whenever
+   that field has a committed (non-empty) filter; the dot marks it. */
+.rr-grid.tabulator .tabulator-col.rr-col-filtered .tabulator-col-title::after {
+	content: '';
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	margin-left: 6px;
+	border-radius: 50%;
+	background: var(--rr-brand);   /* active-filter dot (brand) */
+	vertical-align: middle;
+}
+
+/* =============================================================================
+   IN-CELL PRIMITIVES — value clones of StatusBadge / Button / commonStyles.
+   Source-of-truth components noted per block; both read the same tokens.
+   ========================================================================== */
+
+/* StatusBadge clone: 22px pill, 11.5px/600, 7px state dot via ::before. */
+.rr-cell-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 22px;
+	padding: 0 10px;
+	border-radius: 20px;
+	font-size: 11.5px;
+	font-weight: 600;
+	border: 1px solid transparent;
+	white-space: nowrap;
+}
+.rr-cell-badge::before {
+	content: '';
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: currentcolor; /* dot follows the variant text colour */
+	flex-shrink: 0;
+}
+.rr-cell-badge--success {
+	color: var(--rr-color-success);                                          /* StatusBadge success text */
+	border-color: color-mix(in srgb, var(--rr-color-success) 40%, transparent);
+	background: color-mix(in srgb, var(--rr-color-success) 7%, transparent);
+}
+.rr-cell-badge--info {
+	color: var(--rr-color-info);                                             /* StatusBadge info text */
+	border-color: color-mix(in srgb, var(--rr-color-info) 40%, transparent);
+	background: color-mix(in srgb, var(--rr-color-info) 6%, transparent);
+}
+.rr-cell-badge--warning {
+	color: var(--rr-color-warning);                                          /* StatusBadge warning text */
+	border-color: color-mix(in srgb, var(--rr-color-warning) 55%, transparent);
+	background: color-mix(in srgb, var(--rr-color-warning) 10%, transparent);
+}
+.rr-cell-badge--error {
+	color: var(--rr-color-error);                                            /* StatusBadge error text */
+	border-color: color-mix(in srgb, var(--rr-color-error) 40%, transparent);
+	background: color-mix(in srgb, var(--rr-color-error) 6%, transparent);
+}
+.rr-cell-badge--muted {
+	color: var(--rr-text-secondary);   /* StatusBadge muted text */
+	border-color: var(--rr-border);
+	background: var(--rr-bg-surface-alt);
+}
+/* Muted dot uses the disabled tone like StatusDot's muted variant. */
+.rr-cell-badge--muted::before {
+	background: var(--rr-text-disabled);
+}
+
+/* Small Button clone (buttonSmall modifier: 3px 9px, 11px). */
+.rr-cell-btn {
+	display: inline-flex;
+	align-items: center;
+	padding: 3px 9px;
+	font-size: 11px;
+	line-height: 1.4;
+	font-weight: 500;
+	font-family: inherit;
+	border-radius: 6px;
+	border: 1px solid var(--rr-border);
+	cursor: pointer;
+	transition: opacity 0.15s;
+}
+.rr-cell-btn:hover {
+	opacity: 0.85;
+}
+.rr-cell-btn--ghost {
+	background: transparent;           /* ghost row action */
+	color: var(--rr-text-primary);
+}
+.rr-cell-btn--secondary {
+	background: var(--rr-bg-paper);    /* buttonSecondarySmall fill */
+	color: var(--rr-text-secondary);
+}
+.rr-cell-btn--danger {
+	background: var(--rr-color-error); /* buttonDangerSmall fill */
+	border-color: var(--rr-color-error);
+	color: var(--rr-fg-button);
+}
+
+/* Actions cell wrapper: right-aligned button row. */
+.rr-cell-actions {
+	display: inline-flex;
+	gap: 6px;
+	justify-content: flex-end;
+}
+
+/* Multi-badge cell wrapper: wrapping badge row (e.g. permission lists). */
+.rr-cell-badges {
+	display: inline-flex;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+/* Monospace value (commonStyles.fontMono at table scale). */
+.rr-cell-mono {
+	font-family: var(--rr-font-mono, 'Ubuntu Mono', monospace); /* fontMono */
+	font-size: 12px;
+}
+
+/* De-emphasised value (dates, secondary columns). */
+.rr-cell-muted {
+	font-size: 12px;
+	color: var(--rr-text-secondary); /* secondary text token */
+}
+
+/* 32px initials avatar (UsersView avatar cell); background set inline from
+   a --rr-chart-* token by the formatter. Tabulator cells are flex containers
+   (vertAlign), so the circle must refuse to flex-shrink or it renders as an
+   ellipse in tight columns. */
+.rr-cell-avatar {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 32px;
+	min-width: 32px;
+	height: 32px;
+	border-radius: 50%;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--rr-fg-button); /* on-colour text token */
+}
+
+/* Trend arrows (models list): tiny mono glyphs in state colours. */
+.rr-cell-trend-up {
+	font-size: 10px;
+	color: var(--rr-color-success); /* improving metric */
+}
+.rr-cell-trend-down {
+	font-size: 10px;
+	color: var(--rr-color-error);   /* degrading metric */
+}
+
+/* Truncating cell content with hover tooltip left to Tabulator (tooltip
+   module); this class just constrains the box. */
+.rr-cell-truncate {
+	display: inline-block;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	vertical-align: bottom;
+}
+
+/* =============================================================================
+   ROW GROUPS — declared rrGroup grouping (Tabulator groupBy)
+   ============================================================================= */
+
+/* Group header row: header-strip treatment (same fill/typography family as
+   the column header) so groups read as section dividers, not data rows. */
+.rr-grid.tabulator .tabulator-group {
+	background: var(--rr-bg-surface-alt);   /* header fill (tableHeader) */
+	border-bottom: 1px solid var(--rr-border); /* section separator */
+	padding: 7px 12px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--rr-text-primary);
+}
+
+/* Group open/close arrow inherits the secondary tone, brand when open. */
+.rr-grid.tabulator .tabulator-group .tabulator-arrow {
+	border-left-color: var(--rr-text-secondary);
+}
+.rr-grid.tabulator .tabulator-group.tabulator-group-visible .tabulator-arrow {
+	border-top-color: var(--rr-brand);
+	border-left-color: transparent;
+}
+
+/* The per-group row count Tabulator appends after the group key. */
+.rr-grid.tabulator .tabulator-group span {
+	margin-left: 6px;
+	font-weight: 400;
+	color: var(--rr-text-secondary);
+}
+
+/* =============================================================================
+   GEAR-MENU DISPLAY SETTINGS — per-grid, per-user (persisted with the layout)
+   ============================================================================= */
+
+/* The gear panel itself: the header popup's EXACT base. The panel renders
+   inside the card-header actions cluster, whose typography would otherwise
+   cascade in (bold compact header text) — reset to the popup's font here,
+   and match the popup's fixed width so the two surfaces are twins. */
+.rr-grid-gear {
+	width: 248px;              /* header popup panel width (.rr-grid-hp) */
+	font-family: var(--rr-font-family);
+	font-size: 13px;           /* popup row text (menuRow) */
+	font-weight: 400;
+	letter-spacing: normal;
+	text-transform: none;
+	color: var(--rr-text-primary);
+	text-align: left;
+}
+
+/* Grid lines OFF: the row separator hairline disappears; the header's own
+   bottom border stays (it separates chrome from data, not row from row). */
+.rr-grid--no-lines.tabulator .tabulator-row {
+	border-bottom-color: transparent;
+}
+
+/* Alternating rows ON: even rows carry a faint wash mixed from the TEXT
+   token, not a surface token — surface tokens can equal the table's own
+   background in embedded themes (VSCode maps --rr-bg-surface-alt to the
+   editor background), which makes the stripe invisible; a 4% text mix
+   contrasts in every theme. Hover still wins on both parities. */
+.rr-grid--zebra.tabulator .tabulator-row.tabulator-row-even {
+	background: color-mix(in srgb, var(--rr-text-primary) 4%, transparent);
+}
+.rr-grid--zebra.tabulator .tabulator-row.tabulator-row-even:hover {
+	background: var(--rr-bg-list-hover);
+}

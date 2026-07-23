@@ -11,7 +11,7 @@ Sits between an image source and a downstream OCR node and rewrites every image 
 3. **Deskew**: inverts the grayscale image to make text white on black, locates all non-zero pixels, fits a minimum-area bounding rectangle to compute the text angle, then rotates the image back to horizontal using cubic interpolation with replicated borders.
 4. **Morphological cleanup**: applies morphological closing with a 2x2 square kernel to fill small holes inside character shapes (such as the interior of an `o`) and remove speckle noise.
 
-The output is always `image/png` regardless of the input format. There are no configuration fields and no agent-callable tools; the cleanup pipeline runs automatically on every image.
+The output is always `image/png` regardless of the input format. When the incoming image carried a stream descriptor, the forwarded image keeps the source-provenance chain (`source`) and inherited `name` on its `BEGIN`, so downstream consumers still know where the image came from. There are no configuration fields and no agent-callable tools; the cleanup pipeline runs automatically on every image.
 
 ---
 

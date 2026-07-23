@@ -43,9 +43,6 @@ def _install_rocketlib_stub() -> None:
     decorator that stamps ``__tool_meta__`` on the wrapped method) — both
     are surface used by ``IInstance.py`` at import time.
     """
-    if 'rocketlib' in sys.modules:
-        return
-
     stub = types.ModuleType('rocketlib')
 
     class _IInstanceBase:
@@ -111,15 +108,23 @@ def _install_filesystem_pkg_stub() -> None:
     sys.modules['filesystem.IGlobal'] = iglobal_mod
 
 
+# Stub rocketlib only while importing the node, then restore so it never leaks.
+_saved_rl = sys.modules.get('rocketlib')
 _install_rocketlib_stub()
 _install_filesystem_pkg_stub()
 
-from filesystem.IInstance import (  # noqa: E402  — must follow sys.modules setup
-    DEFAULT_READ_LIMIT,
-    MAX_READ_LIMIT,
-    IInstance,
-)
-from filesystem.IGlobal import IGlobal  # noqa: E402
+try:
+    from filesystem.IInstance import (  # noqa: E402  — must follow sys.modules setup
+        DEFAULT_READ_LIMIT,
+        MAX_READ_LIMIT,
+        IInstance,
+    )
+    from filesystem.IGlobal import IGlobal  # noqa: E402
+finally:
+    if _saved_rl is not None:
+        sys.modules['rocketlib'] = _saved_rl
+    else:
+        sys.modules.pop('rocketlib', None)
 
 
 # ---------------------------------------------------------------------------

@@ -153,7 +153,13 @@ export class EngineLocal extends EngineBackend {
 		const args = [
 			'--autoterm',        // Exit when VS Code closes (stdin monitoring)
 			'./ai/eaas.py',
-			'--host=localhost',
+			// Bind an explicit address, never the name 'localhost'. Where it resolves
+			// to both ::1 and 127.0.0.1, asyncio binds one socket per address family
+			// and --port=0 gives each its own ephemeral port, but only the first
+			// socket's port is reported — so the engine can advertise a port nothing
+			// accepts over IPv4 and look dead while being healthy. The service
+			// launchers already pass 127.0.0.1 for this reason.
+			'--host=127.0.0.1',
 			'--port=0',          // Dynamic port assignment
 			...effectiveArgs,
 		];

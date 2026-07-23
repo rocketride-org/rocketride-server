@@ -14,6 +14,10 @@ const { sections, sectionFor } = require('./spine');
 
 const SITE_TITLE = 'RocketRide Documentation';
 const SITE_DESC = 'Build, run, and ship data + AI pipelines with the RocketRide toolchain.';
+// Absolute base for llms.txt links. The llms.txt format specifies URLs, and an
+// agent that fetched the file on its own has no base to resolve against.
+// Mirrors `url` in docusaurus.config.ts.
+const SITE_URL = 'https://docs.rocketride.org';
 
 // One-line description per node type (category label from gather.js
 // NODE_CATEGORIES). Used to annotate each heading in the catalog. A label with
@@ -190,7 +194,7 @@ function llmsIndex(manifest) {
 		if (!entries || !entries.length) continue;
 		lines.push(`## ${label}`, '');
 		for (const e of entries.sort((a, b) => a.route.localeCompare(b.route))) {
-			lines.push(`- [${e.title}](${e.mdSibling})`);
+			lines.push(`- [${e.title}](${SITE_URL}${e.mdSibling})${e.description ? `: ${e.description}` : ''}`);
 		}
 		lines.push('');
 	}

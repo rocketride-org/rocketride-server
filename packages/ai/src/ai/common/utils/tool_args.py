@@ -449,3 +449,98 @@ def optional_str(
         prefix = f'{tool_name}: ' if tool_name else ''
         raise ValueError(f'{prefix}"{key}" must be a string')
     return val
+
+
+def int_arg(
+    args: Dict[str, Any],
+    key: str,
+    *,
+    default: int,
+    lo: int,
+    hi: int,
+    tool_name: str = '',
+) -> int:
+    """Return ``args[key]`` clamped to ``[lo, hi]``, defaulting only on absent/None.
+
+    The clamping companion to :func:`require_int` / :func:`optional_int`,
+    for page-size-style knobs (``maxResults``, ``pageSize``) where an agent
+    asking for 9999 should get the API maximum rather than an error
+    round-trip. Two deliberate differences from those helpers:
+
+    * Out-of-range values are **clamped**, not rejected.
+    * Numeric strings are **rejected**, not coerced — ``require_int`` accepts
+      ``"5"``, but silently clamping a stringly-typed value defeats the whole
+      point of a strict reader for schema-declared integer knobs.
+
+    ``args.get(key) or default`` would silently turn an explicit 0 into the
+    default, bypassing the clamp — so only absent/``None`` defaults. ``bool``
+    is rejected (``maxResults: true`` almost never means ``1``).
+
+    Args:
+        args: The (already-normalised) tool arguments dict.
+        key: The optional argument name.
+        default: Value used when ``key`` is missing or None. Clamped like any
+            other value — an out-of-range default is an author-side bug the
+            clamp papers over identically in every call.
+        lo: Inclusive lower bound to clamp to.
+        hi: Inclusive upper bound to clamp to.
+        tool_name: Short identifier prefixed onto error messages.
+
+    Raises:
+        ValueError: If ``key`` is present with a bool or non-int value.
+    """
+    value = args.get(key)
+    if value is None:
+        value = default
+    if isinstance(value, bool) or not isinstance(value, int):
+        prefix = f'{tool_name}: ' if tool_name else ''
+        raise ValueError(f'{prefix}"{key}" must be an integer')
+    return max(lo, min(value, hi))
+
+
+def require_str_list(args: Dict[str, Any], key: str, *, tool_name: str = '') -> list:
+    """Return ``args[key]`` as a non-empty list of non-empty strings, or raise.
+
+    The list-shaped sibling of :func:`require_str`, for id/range list args
+    (``calendarIds``, A1 ``ranges``, ``sheetTitles``). The list must be
+    present, non-empty, and every element a non-blank string; elements are
+    returned as-is (not stripped), matching :func:`optional_str`'s
+    leave-the-value-alone convention.
+
+    Raises:
+        ValueError: If ``key`` is missing, not a list, empty, or contains a
+            non-string / blank element.
+    """
+    prefix = f'{tool_name}: ' if tool_name else ''
+    value = args.get(key)
+    if not isinstance(value, list) or not value:
+        raise ValueError(f'{prefix}"{key}" must be a non-empty list')
+    if not all(isinstance(i, str) and i.strip() for i in value):
+        raise ValueError(f'{prefix}"{key}" must contain only non-empty strings')
+    return value
+
+
+def optional_str_list(
+    args: Dict[str, Any],
+    key: str,
+    *,
+    default: Any = None,
+    tool_name: str = '',
+) -> Any:
+    """Return ``args[key]`` as a non-empty list of non-empty strings, or ``default``.
+
+    Validation rules mirror :func:`require_str_list` exactly when the key is
+    present; the only difference is the absent/``None`` path, which returns
+    ``default`` (untouched, per :func:`optional_str`'s convention).
+
+    Raises:
+        ValueError: If ``key`` is present with anything other than a
+            non-empty list of non-blank strings.
+    """
+    if key not in args:
+        return default
+    if args[key] is None:
+        return default
+    # Reuse require_str_list so the validation rules stay in sync between
+    # the required and optional variants (same pattern as optional_int).
+    return require_str_list(args, key, tool_name=tool_name)

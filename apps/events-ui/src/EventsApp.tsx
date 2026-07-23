@@ -1,176 +1,142 @@
 // =============================================================================
-// EVENTS-UI — Main App Component
+// MIT License
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// =============================================================================
+// EVENTS-UI — MAIN APP (Archetype A: Dashboard)
 // =============================================================================
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState } from 'react';
 import type { ShellAppProps } from 'shell-ui';
-import { useClient, useShellEvent } from 'shell-ui';
-import { commonStyles } from 'shared/themes/styles';
-import type { CapturedEvent, MonitorConfig } from './types';
-import { MAX_EVENTS } from './types';
+import { ContentHeader, MiniCard, MiniContainer, StatusBadge } from 'shared';
+import type { StatusVariant } from 'shared';
+import type { EventRow } from './types';
 import { styles } from './styles';
-import Toolbar from './components/Toolbar';
-import EventList from './components/EventList';
+import { useEventCapture } from './hooks/useEventCapture';
+import { CaptureCard } from './components/CaptureCard';
+import { EventsGrid } from './components/EventsGrid';
+import { EventDetailPanel } from './components/EventDetailPanel';
 
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/** Run-state badge descriptor (variant + label) for the header. */
+interface IRunBadge {
+	/** Semantic badge variant. */
+	variant: StatusVariant;
+	/** Badge label. */
+	label: string;
+}
+
+/**
+ * Resolve the run-state badge: a missing client outranks the run flag (nothing
+ * can stream without a connection), then active vs stopped.
+ *
+ * @param connected - Whether a shell client is available.
+ * @param active - Whether monitoring is running.
+ * @returns The badge variant + label.
+ */
+function runBadge(connected: boolean, active: boolean): IRunBadge {
+	if (!connected) return { variant: 'error', label: 'Not connected' };
+	if (active) return { variant: 'success', label: 'Monitoring' };
+	return { variant: 'muted', label: 'Stopped' };
+}
+
+// =============================================================================
+// COMPONENT
+// =============================================================================
+
+/**
+ * Event Monitor — client area. A thin composition over {@link useEventCapture}:
+ * the standard page header (run badge + Start/Stop + Clear), the capture
+ * metrics as MiniCards, the subscription controls, and the live event grid,
+ * with a row click opening the record detail panel.
+ */
 const EventsApp: React.FC<ShellAppProps> = (_props) => {
-	const client = useClient();
+	const {
+		config,
+		snapshot,
+		connected,
+		toggleActive,
+		clear,
+		setToken,
+		toggleType,
+		selectAllTypes,
+		clearTypes,
+	} = useEventCapture();
 
-	// Event storage: mutable ref + tick counter to trigger re-renders
-	const eventsRef = useRef<CapturedEvent[]>([]);
-	const [tick, setTick] = useState(0);
-	const rafRef = useRef<number | null>(null);
-	const nextIdRef = useRef(1);
+	// The event whose body is open in the detail drawer (null = closed).
+	const [selected, setSelected] = useState<EventRow | null>(null);
 
-	// Monitor configuration
-	const [config, setConfig] = useState<MonitorConfig>({
-		token: '*',
-		types: ['SUMMARY', 'TASK', 'FLOW'],
-		active: false,
-	});
-
-	// Display filter (separate from subscription types)
-	const [filterType, setFilterType] = useState('ALL');
-
-	// Stats
-	const totalRef = useRef(0);
-	const rateWindowRef = useRef<number[]>([]);
-
-	// Schedule a re-render via rAF (throttled to ~60fps)
-	const scheduleUpdate = useCallback(() => {
-		if (rafRef.current !== null) return;
-		rafRef.current = requestAnimationFrame(() => {
-			rafRef.current = null;
-			setTick((t) => t + 1);
-		});
-	}, []);
-
-	// Cancel pending rAF on unmount
-	useEffect(() => {
-		return () => {
-			if (rafRef.current !== null) {
-				cancelAnimationFrame(rafRef.current);
-				rafRef.current = null;
-			}
-		};
-	}, []);
-
-	// Handle incoming shell events.
-	// useShellEvent already stores the handler in a ref and calls the latest
-	// version on every event, so useCallback is unnecessary here.
-	useShellEvent('shell:event', ({ event }) => {
-		if (!config.active) return;
-
-		// Only capture DAP events
-		if (event.type !== 'event') return;
-
-		// Token filter: if config.token is not '*', check it matches
-		if (config.token !== '*' && event.token !== config.token) return;
-
-		const captured: CapturedEvent = {
-			id: nextIdRef.current++,
-			time: Date.now(),
-			eventName: event.event ?? 'unknown',
-			body: (event.body ?? {}) as Record<string, unknown>,
-			token: (event.token ?? '') as string,
-			seq: event.seq ?? 0,
-		};
-
-		eventsRef.current.push(captured);
-		totalRef.current++;
-		rateWindowRef.current.push(Date.now());
-
-		// Cap memory — trim in batches to amortize the cost
-		if (eventsRef.current.length > MAX_EVENTS * 1.2) {
-			eventsRef.current = eventsRef.current.slice(-MAX_EVENTS);
-		}
-
-		scheduleUpdate();
-	});
-
-	// Clean up rate window periodically
-	useEffect(() => {
-		const interval = setInterval(() => {
-			const now = Date.now();
-			rateWindowRef.current = rateWindowRef.current.filter((t) => now - t < 1000);
-		}, 500);
-		return () => clearInterval(interval);
-	}, []);
-
-	// Subscribe/unsubscribe when monitoring starts/stops
-	useEffect(() => {
-		if (!client) return;
-		if (!config.active) return;
-
-		const key = { token: config.token };
-
-		client.addMonitor(key, config.types).catch((err) => {
-			console.error('[events-ui] addMonitor failed', err);
-			setConfig((c) => ({ ...c, active: false }));
-		});
-
-		return () => {
-			client.removeMonitor(key, config.types).catch((err) => {
-				console.error('[events-ui] removeMonitor failed', err);
-			});
-		};
-	}, [client, config.active, config.token, config.types]);
-
-	const handleToggle = () => {
-		setConfig((c) => ({ ...c, active: !c.active }));
-	};
-
-	const handleClear = () => {
-		eventsRef.current = [];
-		totalRef.current = 0;
-		rateWindowRef.current = [];
-		nextIdRef.current = 1;
-		setTick((t) => t + 1);
-	};
-
-	const events = eventsRef.current;
-	const eventsPerSec = rateWindowRef.current.filter((t) => Date.now() - t < 1000).length;
-
-	// Force lint to see tick is used (it drives re-renders)
-	void tick;
+	// Header run-state badge, and whether Start is currently permitted.
+	const badge = runBadge(connected, config.active);
+	const canStart = config.types.length > 0;
 
 	return (
 		<div style={styles.root}>
-			<Toolbar
-				config={config}
-				onConfigChange={setConfig}
-				onToggle={handleToggle}
-				onClear={handleClear}
-				events={events}
-				filterType={filterType}
-				onFilterChange={setFilterType}
+			<ContentHeader
+				title="Event Monitor"
+				subtitle="Capture and inspect live DAP events from the connected engine."
+				actions={<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>}
 			/>
 
-			{/* Stats bar */}
-			<div style={styles.statsBar}>
-				<span>
-					Total: <span style={styles.statValue}>{totalRef.current.toLocaleString()}</span>
-				</span>
-				<span>
-					In memory: <span style={styles.statValue}>{events.length.toLocaleString()}</span>
-				</span>
-				<span>
-					Rate: <span style={styles.statValue}>{eventsPerSec}/s</span>
-				</span>
-				<span style={styles.statusItem}>
-					<span
-						style={config.active ? commonStyles.indicatorSuccess : commonStyles.indicatorMuted}
+			<div style={styles.content}>
+				{/* Capture metrics (natural height). */}
+				<div style={styles.staticRow}>
+					<MiniContainer columns={3}>
+						<MiniCard value={snapshot.total.toLocaleString()} label="Captured" />
+						<MiniCard value={snapshot.inMemory.toLocaleString()} label="In memory" />
+						<MiniCard value={`${snapshot.rate}/s`} label="Event rate" />
+					</MiniContainer>
+				</div>
+
+				{/* Capture controls + subscription (natural height); Start/Stop/Clear
+				    live in this card's header. */}
+				<div style={styles.staticRow}>
+					<CaptureCard
+						config={config}
+						canStart={canStart}
+						onToggleActive={toggleActive}
+						onClear={() => {
+							// Clearing the buffer must also dismiss the detail drawer:
+							// the selected row no longer exists in the (now-empty) capture.
+							clear();
+							setSelected(null);
+						}}
+						onSetToken={setToken}
+						onToggleType={toggleType}
+						onSelectAllTypes={selectAllTypes}
+						onClearTypes={clearTypes}
 					/>
-					{config.active ? 'Monitoring' : 'Stopped'}
-				</span>
-				{!client && (
-					<span style={styles.statusItem}>
-						<span style={commonStyles.indicatorError} />
-						Not connected
-					</span>
-				)}
+				</div>
+
+				{/* The live event stream fills the remaining height and scrolls. */}
+				<div style={styles.gridFill}>
+					<EventsGrid rows={snapshot.rows} onRowClick={setSelected} />
+				</div>
 			</div>
 
-			<EventList events={events} filterType={filterType} />
+			{/* Record slide-over for the selected event's body. */}
+			<EventDetailPanel event={selected} onClose={() => setSelected(null)} />
 		</div>
 	);
 };

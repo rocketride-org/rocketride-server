@@ -23,8 +23,9 @@
 """
 Deploy API namespace for the RocketRide Python SDK.
 
-Provides typed methods for managing server-side pipeline deployments via
-``rrext_deploy_*`` DAP commands over the existing WebSocket connection.
+Provides typed methods for managing server-side pipeline deployments via the
+``rrext_deploy`` DAP command (dispatched by ``subcommand``) over the existing
+WebSocket connection.
 
 Usage:
     deployment = await client.deploy.add(pipeline=my_pipeline)
@@ -83,10 +84,10 @@ class DeployApi:
         Returns:
             The created deployment record.
         """
-        kwargs: dict = {'pipeline': pipeline}
+        kwargs: dict = {'subcommand': 'add', 'pipeline': pipeline}
         if schedule is not None:
             kwargs['schedule'] = schedule
-        return await self._client.call('rrext_deploy_add', **kwargs)
+        return await self._client.call('rrext_deploy', **kwargs)
 
     async def remove(self, project_id: str) -> None:
         """
@@ -95,7 +96,7 @@ class DeployApi:
         Args:
             project_id: Project ID of the deployment to remove.
         """
-        await self._client.call('rrext_deploy_remove', projectId=project_id)
+        await self._client.call('rrext_deploy', subcommand='remove', projectId=project_id)
 
     async def list(self) -> list[DeploymentRecord]:
         """
@@ -104,7 +105,7 @@ class DeployApi:
         Returns:
             List of deployment summary records.
         """
-        body = await self._client.call('rrext_deploy_list')
+        body = await self._client.call('rrext_deploy', subcommand='list')
         return body.get('deployments', [])
 
     async def status(self, project_id: str) -> DeploymentRecord:
@@ -117,7 +118,7 @@ class DeployApi:
         Returns:
             The deployment record including pipeline, state, schedule, and timestamps.
         """
-        return await self._client.call('rrext_deploy_status', projectId=project_id)
+        return await self._client.call('rrext_deploy', subcommand='status', projectId=project_id)
 
     async def update(
         self,
@@ -136,9 +137,9 @@ class DeployApi:
             pipeline: Replacement pipeline definition, or None to leave unchanged.
             schedule: Replacement schedule configuration, or None to leave unchanged.
         """
-        kwargs: dict = {'projectId': project_id}
+        kwargs: dict = {'subcommand': 'update', 'projectId': project_id}
         if pipeline is not None:
             kwargs['pipeline'] = pipeline
         if schedule is not None:
             kwargs['schedule'] = schedule
-        await self._client.call('rrext_deploy_update', **kwargs)
+        await self._client.call('rrext_deploy', **kwargs)

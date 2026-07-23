@@ -228,7 +228,7 @@ class IGlobal(IGlobalBase):
     def list_namespaced_tools(self) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
         for namespaced, tool in (self._tools_by_namespaced or {}).items():
-            out.append({'name': namespaced, 'description': tool.description, 'input_schema': tool.inputSchema})
+            out.append({'name': namespaced, 'description': tool.description, 'inputSchema': tool.inputSchema})
         return out
 
     def get_tool(self, *, server_name: str, tool_name: str) -> Optional[McpToolDef]:

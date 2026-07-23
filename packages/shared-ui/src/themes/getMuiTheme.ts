@@ -137,6 +137,20 @@ export function getMuiTheme(): Theme {
 	// --- Build theme --------------------------------------------------------
 
 	return createTheme({
+		// MUI's portaled popups (Select/Autocomplete menus, tooltips) default to
+		// zIndex.modal 1300 / tooltip 1500 — at or below the stock DetailPanel
+		// overlay (1500). A record panel whose body is an RJSF/MUI form (the node
+		// config panel) would then open its select dropdowns BEHIND the drawer,
+		// and because a MUI menu is itself a focus-trapping modal, that invisible
+		// menu makes the whole form feel non-interactive. Lift MUI's popup layer
+		// above the drawer while staying below the stock Modal / ConfirmDialog
+		// (commonStyles.modalOverlay, zIndex 2000) so confirmations still win.
+		zIndex: {
+			modal: 1600,
+			snackbar: 1600,
+			tooltip: 1650,
+		},
+
 		palette: {
 			mode: isDark ? 'dark' : 'light',
 			primary: { main: brand },

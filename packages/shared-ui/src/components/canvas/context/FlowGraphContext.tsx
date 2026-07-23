@@ -52,8 +52,8 @@ import { Connection, Edge, EdgeChange, Node, NodeChange, useEdgesState, useNodes
 
 import { INode, INodeData, IProject, IProjectLayout, INodeType, PIPELINE_SCHEMA_VERSION } from '../types';
 
-/** ReactFlow Node with strongly-typed data. Used throughout this context. */
-type FlowNode = Node<INodeData>;
+/** ReactFlow Node with strongly-typed data. Used throughout the canvas. */
+export type FlowNode = Node<INodeData>;
 
 import { getNodesFromProject, getEdgesFromNodes, getProjectComponents, generateNodeId, DEFAULT_EDGE } from '../util/graph';
 import { useFlowPreferences } from './FlowPreferencesContext';

@@ -6,6 +6,13 @@
 /**
  * UpgradeModal -- modal dialog for changing a subscription plan.
  *
+ * Rendered through the stock {@link Modal} (one
+ * stock Modal for every dialog). The Modal owns the backdrop, box, header,
+ * and footer chrome -- including the zIndex 2000 overlay layer that stacks
+ * above record panels (DetailPanel, zIndex 1500) and the shared
+ * Escape-closes-topmost-layer behavior. This file supplies only the body
+ * content and the footer actions.
+ *
  * Reuses the PlanPicker card grid to display available plans for the
  * current app. The user's current plan is highlighted and disabled.
  * On confirmation, calls the host's upgrade callback which swaps the
@@ -14,6 +21,7 @@
 
 import React, { useState, useMemo, type CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
+import { Modal } from '../../../components/modal/Modal';
 import { PlanPicker, planAmount } from '../../checkout/PlanPicker';
 import type { CheckoutPlan } from '../../checkout/types';
 
@@ -22,47 +30,18 @@ import type { CheckoutPlan } from '../../checkout/types';
 // =============================================================================
 
 const S = {
-	/** Modal overlay -- full-screen backdrop. */
-	overlay: {
-		position: 'fixed' as const,
-		top: 0,
-		left: 0,
-		right: 0,
-		bottom: 0,
-		background: 'rgba(0, 0, 0, 0.5)',
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		zIndex: 1000,
-	} as CSSProperties,
-
-	/** Modal dialog container. */
-	dialog: {
-		background: 'var(--rr-bg-paper)',
-		borderRadius: 12,
-		padding: 24,
-		width: '90%',
-		maxWidth: 600,
-		maxHeight: '80vh',
-		overflow: 'auto',
-		boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+	/**
+	 * Scrollable body region. The hand-rolled dialog capped the whole box at
+	 * 80vh and scrolled it; the stock Modal owns the box chrome, so the cap
+	 * moves onto the body content instead (header and footer stay in view).
+	 */
+	body: {
+		maxHeight: '60vh',
+		overflowY: 'auto' as const,
 		scrollbarWidth: 'thin' as const,
-		scrollbarColor: 'var(--rr-scrollbar-thumb, rgba(128,128,128,0.3)) transparent',
-	} as CSSProperties,
-
-	/** Dialog header row. */
-	header: {
-		display: 'flex',
-		justifyContent: 'space-between',
-		alignItems: 'center',
-		marginBottom: 16,
-	} as CSSProperties,
-
-	/** Dialog title. */
-	title: {
-		fontSize: 18,
-		fontWeight: 700,
-		color: 'var(--rr-text-primary)',
+		// The REAL token is --rr-bg-scrollbar-thumb (the old --rr-scrollbar-thumb
+		// name never existed, so this always fell back to the hardcoded grey).
+		scrollbarColor: 'var(--rr-bg-scrollbar-thumb, rgba(121, 121, 121, 0.4)) transparent',
 	} as CSSProperties,
 
 	/** Current plan info banner. */
@@ -90,12 +69,18 @@ const S = {
 		flexShrink: 0,
 	} as CSSProperties,
 
-	/** Footer row with confirm button. */
-	footer: {
-		display: 'flex',
-		justifyContent: 'flex-end',
-		gap: 10,
-		marginTop: 16,
+	/** Emphasised plan name inside the info banner. */
+	planName: {
+		color: 'var(--rr-text-primary)',
+		fontWeight: 600,
+	} as CSSProperties,
+
+	/** Proration explanation note shown under the picker for a valid selection. */
+	prorationNote: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		lineHeight: 1.5,
+		marginTop: 8,
 	} as CSSProperties,
 
 	/** Success message. */
@@ -147,13 +132,6 @@ export interface UpgradeModalProps {
 // =============================================================================
 
 /**
- * Modal dialog for upgrading or downgrading a subscription plan.
- *
- * Displays the PlanPicker grid with the current plan disabled. The user
- * selects a new plan and clicks Confirm to trigger the server-side
- * Stripe subscription modification with proration.
- */
-/**
  * Whether a plan may appear in the upgrade picker: not a top-up pack, not a
  * hidden promo-base plan, not action-only, and not deactivated. Applied to
  * both the picker grid and preselected plans so a hidden plan can never be
@@ -165,6 +143,13 @@ const isVisibleSubscriptionPlan = (p: CheckoutPlan): boolean =>
 	!p.metadata?.action &&
 	p.isActive !== false;
 
+/**
+ * Modal dialog for upgrading or downgrading a subscription plan.
+ *
+ * Displays the PlanPicker grid with the current plan disabled. The user
+ * selects a new plan and clicks Confirm to trigger the server-side
+ * Stripe subscription modification with proration.
+ */
 export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 	plans,
 	currentPriceId,
@@ -246,95 +231,104 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 		return `${verb} to ${selectedPlan.nickname} (${planAmount(selectedPlan)})`;
 	};
 
-	return (
-		/* Backdrop is inert: dismissal is deliberate-only (footer Cancel, or the
-		   auto-close after a successful plan change) per the 2026-07-08 design
-		   decision — clicking outside must NOT close, and there is no corner ✕. */
-		<div style={S.overlay}>
-			<div style={S.dialog}>
-				{/* Header — no top-right ✕: this dialog dismisses via footer Cancel and
-				    auto-closes after a successful change (refined popup policy
-				    2026-07-08: no redundant ✕ when an explicit close or auto-dismiss exists). */}
-				<div style={S.header}>
-					<div style={S.title}>Change Plan</div>
-				</div>
+	// Confirm button style: primary, dimmed and non-interactive unless a valid
+	// selection exists and no plan change is in flight.
+	const confirmStyle: CSSProperties = {
+		...commonStyles.buttonPrimary,
+		...(isValidSelection && !upgrading ? null : { opacity: 0.5, cursor: 'default' }),
+	};
 
-				{success ? (
-					<div style={S.success}>
-						{changeDirection === 'downgrade'
-							? 'Downgrade scheduled! Your current plan stays active until the end of this billing period.'
-							: 'Plan upgraded! Your new features and prorated token credits are available now.'}
-					</div>
-				) : (
-					<>
-						{compact && selectedPlan ? (
-							/* Focused confirmation: caller preselected the plan, so summarise
-							   it instead of re-showing the picker. */
+	return (
+		/* Stock Modal: inert backdrop (clicking outside never closes), Escape
+		   closes only the topmost overlay layer. No corner ✕ (showClose false):
+		   dismissal is the footer Cancel, Escape, or the success auto-close timer
+		   (refined popup policy 2026-07-08 — no redundant ✕ when an explicit
+		   close or auto-dismiss exists). Escape is suppressed while the plan
+		   change is in flight, mirroring the disabled Cancel button. */
+		<Modal
+			title="Change Plan"
+			onClose={onClose}
+			width={600}
+			showClose={false}
+			closeOnEscape={!upgrading}
+			footer={success ? undefined : (
+				<>
+					{/* Cancel — the dialog's explicit dismiss control. */}
+					<button
+						type="button"
+						style={commonStyles.buttonSecondary}
+						onClick={onClose}
+						disabled={upgrading}
+					>
+						Cancel
+					</button>
+					{/* Confirm — label reflects selection and in-flight state. */}
+					<button
+						type="button"
+						style={confirmStyle}
+						onClick={handleConfirm}
+						disabled={!isValidSelection || upgrading}
+					>
+						{buttonLabel()}
+					</button>
+				</>
+			)}
+		>
+			{success ? (
+				/* Success confirmation — shown briefly until the auto-close timer
+				   dismisses the dialog (the footer is dropped in this state). */
+				<div style={S.success}>
+					{changeDirection === 'downgrade'
+						? 'Downgrade scheduled! Your current plan stays active until the end of this billing period.'
+						: 'Plan upgraded! Your new features and prorated token credits are available now.'}
+				</div>
+			) : (
+				<div style={S.body}>
+					{compact && selectedPlan ? (
+						/* Focused confirmation: caller preselected the plan, so summarise
+						   it instead of re-showing the picker. */
+						<div style={S.currentPlan}>
+							<span style={S.currentLabel}>Switch to</span>
+							<span style={S.planName}>
+								{selectedPlan.nickname} &middot; {planAmount(selectedPlan)}
+							</span>
+						</div>
+					) : (
+						<>
+							{/* Current plan info */}
 							<div style={S.currentPlan}>
-								<span style={S.currentLabel}>Switch to</span>
-								<span style={{ color: 'var(--rr-text-primary)', fontWeight: 600 }}>
-									{selectedPlan.nickname} &middot; {planAmount(selectedPlan)}
+								<span style={S.currentLabel}>Current</span>
+								<span style={S.planName}>
+									{currentPlanName ?? 'Unknown plan'}
 								</span>
 							</div>
-						) : (
-							<>
-								{/* Current plan info */}
-								<div style={S.currentPlan}>
-									<span style={S.currentLabel}>Current</span>
-									<span style={{ color: 'var(--rr-text-primary)', fontWeight: 600 }}>
-										{currentPlanName ?? 'Unknown plan'}
-									</span>
-								</div>
 
-								{/* Plan picker -- reuses the same card grid */}
-								<PlanPicker
-									plans={subscriptionPlans}
-									selectedPlan={selectedPlan}
-									onSelectPlan={handleSelect}
-									currentPriceId={currentPriceId}
-								/>
-							</>
-						)}
+							{/* Plan picker -- reuses the same card grid */}
+							<PlanPicker
+								plans={subscriptionPlans}
+								selectedPlan={selectedPlan}
+								onSelectPlan={handleSelect}
+								currentPriceId={currentPriceId}
+							/>
+						</>
+					)}
 
-						{/* Proration info -- explains what happens on upgrade vs downgrade */}
-						{isValidSelection && changeDirection === 'upgrade' && (
-							<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.5, marginTop: 8 }}>
-								You will be charged the prorated difference for the remainder of your current billing period. Token credits will be adjusted accordingly.
-							</div>
-						)}
-						{isValidSelection && changeDirection === 'downgrade' && (
-							<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', lineHeight: 1.5, marginTop: 8 }}>
-								Your current plan will remain active until the end of your billing period. The new plan takes effect at your next renewal.
-							</div>
-						)}
-
-						{/* Error banner */}
-						{error && <div style={S.error}>{error}</div>}
-
-						{/* Footer with confirm button */}
-						<div style={S.footer}>
-							<button
-								style={commonStyles.buttonSecondary as CSSProperties}
-								onClick={onClose}
-								disabled={upgrading}
-							>
-								Cancel
-							</button>
-							<button
-								style={{
-									...(isValidSelection && !upgrading
-										? commonStyles.buttonPrimary
-										: { ...commonStyles.buttonPrimary, opacity: 0.5, cursor: 'default' }),
-								} as CSSProperties}
-								onClick={handleConfirm}
-								disabled={!isValidSelection || upgrading}
-							>
-								{buttonLabel()}
-							</button>
+					{/* Proration info -- explains what happens on upgrade vs downgrade */}
+					{isValidSelection && changeDirection === 'upgrade' && (
+						<div style={S.prorationNote}>
+							You will be charged the prorated difference for the remainder of your current billing period. Token credits will be adjusted accordingly.
 						</div>
-					</>
-				)}
-			</div>
-		</div>
+					)}
+					{isValidSelection && changeDirection === 'downgrade' && (
+						<div style={S.prorationNote}>
+							Your current plan will remain active until the end of your billing period. The new plan takes effect at your next renewal.
+						</div>
+					)}
+
+					{/* Error banner */}
+					{error && <div style={S.error}>{error}</div>}
+				</div>
+			)}
+		</Modal>
 	);
 };

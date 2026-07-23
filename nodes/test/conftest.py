@@ -50,6 +50,18 @@ except ImportError:
     pass  # dotenv is optional
 
 
+# The sys.modules isolation guard (see #1640) lives in _sys_modules_guard so it is
+# unit-testable in isolation. conftest is imported before pytest puts its own dir
+# on sys.path, so add it here; importing the hooks registers them with pytest.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _sys_modules_guard import (  # noqa: E402,F401
+    pytest_collectreport,
+    pytest_collectstart,
+    pytest_sessionfinish,
+    pytest_terminal_summary,
+)
+
+
 # =============================================================================
 # Test Configuration
 # =============================================================================
@@ -306,7 +318,7 @@ def pytest_generate_tests(metafunc):
             'pose_estimation',
             'face_detection',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
-            'index_search',
+            'store_elasticsearch',
             # Require live third-party API credentials (no live calls in default CI):
             'tool_xtrace_memory',
             'tool_mem0',

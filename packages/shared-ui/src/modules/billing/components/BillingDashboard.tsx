@@ -6,28 +6,38 @@
 /**
  * BillingDashboard -- admin billing insights rendered below the credits panel.
  *
- * Five sections, each a stock Card:
+ * Five sections. The non-tabular ones (1, 2) are classic Cards; every table
+ * follows the DataGrid standard (docs/README-app-styles.html#ref-datagrid):
+ * a CardDataGrid whose two-row header IS the card header, inside a headerless
+ * Card shell — never a Card header stacked on a grid bar.
  *   1. Balance breakdown -- purchased vs consumed per resource with bars
  *   2. Spending velocity -- burn rate + days remaining as MiniCard tiles
- *   3. Usage leaderboard -- top consumers by user or team (stock DataTable)
- *   4. Transaction log   -- paginated ledger detail (stock DataTable over a
- *      prop-fed query adapter; see TransactionLog)
- *   5. Active tasks      -- live running tasks (placeholder for live data)
+ *   3. Usage leaderboard -- top consumers (CardDataGrid, LOCAL mode; the
+ *      By User / By Team ToggleGroup rides the header as `actions`)
+ *   4. Transaction log   -- paginated ledger detail (CardDataGrid in REMOTE
+ *      mode over a prop-fed page bridge; see TransactionLog). Row click opens
+ *      the transaction record panel (a contained DetailPanel) with the FULL
+ *      transaction, per the record-panel standard.
+ *   5. Active tasks      -- live running tasks (CardDataGrid, LOCAL mode —
+ *      poll-fed rows apply silently)
  *
  * All data is received as props; the host (AccountPage) is responsible for
  * fetching via the BillingApi.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import type { CellComponent } from 'tabulator-tables';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
 import { MiniCard, MiniContainer } from '../../../components/mini-card/MiniCard';
-import { DataTable } from '../../../components/data-table/DataTable';
-import type { DataTableColumn } from '../../../components/data-table/DataTable';
-import { createArrayDataSource, createQueryDataSource } from '../../../components/data-table/dataSource';
-import type { DataPage } from '../../../components/data-table/dataSource';
+import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
+import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
+import { formatDateValue, mutedEl } from '../../../components/data-grid/defaults';
+import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { Section, LabelValue } from '../../../components/section/Section';
 import type { CreditBalance, LedgerTransaction, TransactionsResult, UsageRollup } from '../types';
 
 // =============================================================================
@@ -131,79 +141,57 @@ const styles = {
 	} as CSSProperties,
 
 	/**
-	 * Transaction type badge — success tint for credits, brand tint for usage.
-	 *
-	 * @param type - Ledger transaction type string.
+	 * Transaction type badge shape — DOM style applied by {@link typeBadgeEl};
+	 * per-type tint colors are set there (success / brand / neutral).
 	 */
-	typeBadge: (type: string): CSSProperties => ({
+	typeBadgeBase: {
 		display: 'inline-block',
 		padding: '1px 6px',
-		borderRadius: 3,
-		fontSize: 10,
-		fontWeight: 600,
-		background:
-			type === 'purchase' || type === 'credit'
-				? 'color-mix(in srgb, var(--rr-color-success) 15%, transparent)'
-				: type === 'usage'
-				? 'color-mix(in srgb, var(--rr-brand) 15%, transparent)'
-				: 'var(--rr-bg-surface-alt)',
-		color: type === 'purchase' || type === 'credit' ? 'var(--rr-color-success)' : type === 'usage' ? 'var(--rr-brand)' : 'var(--rr-text-secondary)',
-	}),
+		borderRadius: '3px',
+		fontSize: '10px',
+		fontWeight: '600',
+	} as Partial<CSSStyleDeclaration>,
 
-	/** Secondary small-print table cell (descriptions, context). */
-	cellMuted: {
-		fontSize: 11,
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
-
-	/** Context cell with ellipsis truncation. */
-	cellContext: {
-		fontSize: 11,
-		color: 'var(--rr-text-secondary)',
-		display: 'inline-block',
-		maxWidth: 200,
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap' as const,
-		verticalAlign: 'bottom',
-	} as CSSProperties,
-
-	/** Uppercase resource cell in the transaction log. */
+	/** Uppercase resource cell in the transaction log (DOM style for the grid formatter). */
 	cellUppercase: {
-		textTransform: 'uppercase' as const,
-	} as CSSProperties,
+		textTransform: 'uppercase',
+	} as Partial<CSSStyleDeclaration>,
 
-	/** Positive (credit) amount cell. */
+	/** Positive (credit) amount cell (DOM style for the grid formatter). */
 	amountPositive: {
 		color: 'var(--rr-color-success)',
-	} as CSSProperties,
+	} as Partial<CSSStyleDeclaration>,
 
-	/** Active task row. */
-	taskRow: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		padding: '8px 0',
-		borderBottom: '1px solid var(--rr-border)',
-		fontSize: 12,
-	} as CSSProperties,
-
-	/** Task name. */
-	taskName: {
-		fontWeight: 500,
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-
-	/** Task duration line beneath the name. */
-	taskDuration: {
-		fontSize: 11,
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
-
-	/** Task token count. */
+	/** Task token count cell (DOM style for the grid formatter). */
 	taskTokens: {
-		fontWeight: 600,
+		fontWeight: '600',
 		color: 'var(--rr-brand)',
+	} as Partial<CSSStyleDeclaration>,
+
+	/**
+	 * Signed amount value in the transaction record panel — success color for
+	 * credits, default text for debits (React twin of the amount cell render).
+	 *
+	 * @param positive - Whether the amount is a credit (>= 0).
+	 */
+	panelAmount: (positive: boolean): CSSProperties => ({
+		color: positive ? 'var(--rr-color-success)' : 'var(--rr-text-primary)',
+	}),
+
+	/** Pretty-printed context JSON block in the transaction record panel. */
+	contextPre: {
+		margin: '8px 0 0',
+		padding: '10px 12px',
+		background: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 7,
+		fontFamily: "Consolas, 'Courier New', monospace",
+		fontSize: 11.5,
+		lineHeight: 1.5,
+		color: 'var(--rr-text-primary)',
+		// Wrap long values instead of forcing the panel body to scroll sideways.
+		whiteSpace: 'pre-wrap' as const,
+		wordBreak: 'break-word' as const,
 	} as CSSProperties,
 
 	/** Loading placeholder while dashboard data is fetched. */
@@ -226,6 +214,33 @@ function fmt(n: number): string {
 /** Formats a number with no decimals. */
 function fmtInt(n: number): string {
 	return Math.round(n).toLocaleString();
+}
+
+/**
+ * Builds the transaction-type badge element for a grid cell — success tint
+ * for credits/purchases, brand tint for usage, neutral otherwise (DOM clone
+ * of the old typeBadge cell render).
+ *
+ * @param type - Ledger transaction type string.
+ * @returns The badge element.
+ */
+function typeBadgeEl(type: string): HTMLElement {
+	const el = document.createElement('span');
+	// Shape and typography from the shared base style.
+	Object.assign(el.style, styles.typeBadgeBase);
+	// Tint by type: credits green, usage brand, anything else neutral.
+	if (type === 'purchase' || type === 'credit') {
+		el.style.background = 'color-mix(in srgb, var(--rr-color-success) 15%, transparent)';
+		el.style.color = 'var(--rr-color-success)';
+	} else if (type === 'usage') {
+		el.style.background = 'color-mix(in srgb, var(--rr-brand) 15%, transparent)';
+		el.style.color = 'var(--rr-brand)';
+	} else {
+		el.style.background = 'var(--rr-bg-surface-alt)';
+		el.style.color = 'var(--rr-text-secondary)';
+	}
+	el.textContent = type;
+	return el;
 }
 
 // =============================================================================
@@ -276,16 +291,21 @@ export interface BillingDashboardProps {
 	topupPlans: TopupPlan[];
 	/** Whether data is still loading. */
 	loading: boolean;
-	/** Callback to change the transaction page. */
+	/** Callback to change the transaction page (legacy prop bridge). */
 	onTransactionPage: (page: number) => void;
+	/**
+	 * Direct ledger query (preferred): the full list-convention request —
+	 * page, size, sorters, header-filter values, search — forwards to the
+	 * server. When absent, the transaction log falls back to the page-only
+	 * prop bridge (search suppressed).
+	 */
+	fetchTransactions?: (req: IDataGridPageRequest) => Promise<TransactionsResult | null>;
+	/** Org-scoped distinct ledger values for the enum checklist filters. */
+	fetchTransactionDistinct?: (field: string) => Promise<(string | number | boolean)[]>;
 	/** Callback when user clicks a top-up pack to purchase. */
 	onBuyTopup?: (plan: TopupPlan) => void;
 	/** Called when the user clicks "Add more capacity" in the velocity card. */
 	onAddCapacity?: () => void;
-	/** Member lookup: userId -> display name. */
-	memberNames?: Record<string, string>;
-	/** Team lookup: teamId -> display name. */
-	teamNames?: Record<string, string>;
 }
 
 // =============================================================================
@@ -413,11 +433,11 @@ const SpendingVelocity: React.FC<{
 // USAGE LEADERBOARD
 // =============================================================================
 
-/** Flattened row shape fed to the leaderboard DataTable. */
+/** Flattened row shape fed to the leaderboard DataGrid. */
 interface LeaderRow extends Record<string, unknown> {
 	/** User or team id. */
 	id: string;
-	/** Resolved display name. */
+	/** Server-resolved display name ('--' when unresolved). */
 	name: string;
 	/** Total tokens consumed across all resources. */
 	total: number;
@@ -426,60 +446,78 @@ interface LeaderRow extends Record<string, unknown> {
 }
 
 /** Usage leaderboard -- top consumers by user or team. */
-const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[]; memberNames?: Record<string, string>; teamNames?: Record<string, string> }> = ({
+const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[] }> = ({
 	usageByUser,
 	usageByTeam,
-	memberNames,
-	teamNames,
 }) => {
 	const [mode, setMode] = useState<'user' | 'team'>('user');
 	const data = mode === 'user' ? usageByUser : usageByTeam;
-	const names = mode === 'user' ? memberNames : teamNames;
 
-	// Flatten rollups into table rows with resolved names and computed totals.
+	// Flatten rollups into table rows with computed totals; the display name
+	// arrives resolved on the rollup row itself.
 	const rows = useMemo<LeaderRow[]>(
 		() =>
 			data.map((row) => ({
 				id: row.id,
-				name: row.id === '__none__' ? '(unassigned)' : names?.[row.id] ?? row.id.slice(0, 8),
+				name: row.id === '__none__' ? '(unassigned)' : row.name ?? '--',
 				total: Object.values(row.credits).reduce((s, v) => s + v, 0),
 				resources: Object.keys(row.credits).length,
 			})),
-		[data, names]
+		[data]
 	);
 
-	// Client-side data source over the leaderboard rows.
-	const source = useMemo(() => createArrayDataSource<LeaderRow>(rows), [rows]);
-
 	// Column definitions — first column label follows the active mode.
-	const columns = useMemo<DataTableColumn<LeaderRow>[]>(
+	// Declared rrTypes per the DataGrid standard: the number columns get the
+	// Min/Max filter and the decimals / thousands FORMAT picks. The contract
+	// indexes declare the default layout; total desc mirrors the server's
+	// top-consumers-first rollup order.
+	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ key: 'name', label: mode === 'user' ? 'User' : 'Team', sortable: true },
-			{ key: 'total', label: 'Total Tokens', align: 'right', sortable: true, render: (row) => fmt(row.total) },
-			{ key: 'resources', label: 'Resources', align: 'right', sortable: true },
+			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Consumer display name resolved server-side — user display name with email fallback, or team name; "(unassigned)" pools usage rows carrying no user/team id.', headerSort: true },
+			{
+				title: 'Total Tokens',
+				field: 'total',
+				rrType: 'number',
+				rrDefault: true,
+				rrDefaultSort: 'desc',
+				rrDescription: 'Credits consumed by this consumer: the sum of absolute usage-ledger debits across every metered resource (not only tokens).',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => fmt(cell.getValue() as number),
+			},
+			{ title: 'Resources', field: 'resources', rrType: 'number', rrDefault: true, rrDescription: 'Count of distinct metered resources this consumer drew from (tokens, GPU seconds, storage, ...).', hozAlign: 'right', headerHozAlign: 'right', headerSort: true, sorter: 'number' },
 		],
 		[mode]
 	);
 
 	if (!usageByUser.length && !usageByTeam.length) return null;
 
+	// The grid IS the card: its two-row header carries the title and the
+	// By User / By Team toggle (`actions`); the headerless Card is only the
+	// bordered shell. noSearch: a short leaderboard needs no search box (the
+	// tool row collapses to a plain card header); Export still covers the set.
 	return (
-		<Card
-			header="Usage Leaderboard"
-			headerActions={
-				<ToggleGroup<'user' | 'team'>
-					options={[
-						{ id: 'user', label: 'By User' },
-						{ id: 'team', label: 'By Team' },
-					]}
-					value={mode}
-					onChange={setMode}
-					small
-				/>
-			}
-			noBodyPadding
-		>
-			<DataTable<LeaderRow> columns={columns} source={source} emptyState={{ title: 'No usage data' }} />
+		<Card noBodyPadding>
+			<CardDataGrid<LeaderRow>
+				title="Usage Leaderboard"
+				actions={
+					<ToggleGroup<'user' | 'team'>
+						options={[
+							{ id: 'user', label: 'By User' },
+							{ id: 'team', label: 'By Team' },
+						]}
+						value={mode}
+						onChange={setMode}
+						small
+					/>
+				}
+				columns={columns}
+				data={rows}
+				noSearch
+				emptyTitle="No usage data"
+			/>
 		</Card>
 	);
 };
@@ -491,83 +529,115 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 /**
  * Watchdog for a parked page request: if the host never feeds the requested
  * page (e.g. its fetch errored and it never updates `transactions`), the parked
- * promise is rejected after this long so the DataTable clears its loading row
- * instead of spinning forever.
+ * promise is rejected after this long so the DataGrid clears its loading
+ * overlay (it keeps the previous rows) instead of spinning forever.
  */
 const PAGE_FETCH_TIMEOUT_MS = 15000;
 
 /**
- * Paginated transaction log with user name resolution.
- *
- * The data is server-paged THROUGH PROPS: the host owns the fetch and hands
- * down one TransactionsResult page plus an `onPageChange(page)` callback. To
- * drive the stock DataTable, a query adapter bridges the prop flow: when the
- * table asks for a page already held in props it resolves synchronously; when
- * it asks for a different page the adapter calls `onPageChange` and parks the
- * promise in a ref until the matching TransactionsResult prop arrives. Sort
- * and search are declared unsupported (the host API does not accept them), so
- * the table hides those affordances.
+ * Ledger row shape fed to the transaction DataGrid — the SDK interface plus
+ * the index signature the grid's Row constraint requires.
  */
-const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPageChange: (page: number) => void; memberNames?: Record<string, string> }> = ({
-	transactions,
-	onPageChange,
-	memberNames,
-}) => {
+type TxRow = LedgerTransaction & Record<string, unknown>;
+
+/**
+ * Paginated transaction log.
+ *
+ * Two remote wirings, best first:
+ *
+ *  - DIRECT (`fetchTransactions` provided): the host exposes the ledger
+ *    query itself, so the grid's full list-convention request — page, size,
+ *    sorters, header-filter values, search term — forwards to the server
+ *    verbatim and header filtering / sorting / search genuinely work.
+ *
+ *  - LEGACY PROP BRIDGE (no `fetchTransactions`; the VSCode host until it is
+ *    wired): the host only pages via `onPageChange(page)` and hands down one
+ *    TransactionsResult prop. `fetchPage` bridges the prop flow — resolving
+ *    immediately when the wanted page is already in props, otherwise parking
+ *    the promise until the matching prop arrives (see the prop-arrival
+ *    effect). Search is suppressed in this mode (the bridge cannot honor
+ *    req.search, and a no-op search box is worse than none).
+ *
+ * Both the grid and the host API page 1-based, so pages pass untranslated.
+ *
+ * Row click opens the transaction record panel (record-panel standard): a
+ * contained DetailPanel showing the FULL transaction — every ledger field
+ * plus the raw context JSON. The clicked row is held whole in local state
+ * (REMOTE rows are transient; paging / filtering replaces them, so there is
+ * no stable list to resolve the record from live).
+ */
+const TransactionLog: React.FC<{
+	transactions: TransactionsResult | null;
+	onPageChange: (page: number) => void;
+	fetchTransactions?: (req: IDataGridPageRequest) => Promise<TransactionsResult | null>;
+	fetchTransactionDistinct?: (field: string) => Promise<(string | number | boolean)[]>;
+}> = ({ transactions, onPageChange, fetchTransactions, fetchTransactionDistinct }) => {
 	// --- Prop bridge refs ------------------------------------------------------
-	// Latest props, readable from inside the memoized source's fetcher.
+	// Latest props, readable from inside the stable fetchPage callback.
 	const txRef = useRef(transactions);
 	txRef.current = transactions;
 	const onPageRef = useRef(onPageChange);
 	onPageRef.current = onPageChange;
-	// The one in-flight page request the table is waiting on, if any, plus its
-	// watchdog timer so a never-arriving page can't hang the table.
+	const directRef = useRef(fetchTransactions);
+	directRef.current = fetchTransactions;
+	// Imperative grid handle — used to re-run the query on host-initiated
+	// refreshes (a new TransactionsResult with no request parked).
+	const gridRef = useRef<IDataGridHandle>(null);
+	// --- Record panel state ------------------------------------------------------
+	// The clicked row, held WHOLE: remote pages replace the row set, so the
+	// panel keeps its own copy instead of resolving live from a list.
+	const [viewedTx, setViewedTx] = useState<TxRow | null>(null);
+	// The one in-flight page request the grid is waiting on, if any, plus its
+	// watchdog timer so a never-arriving page can't hang the grid.
 	const pendingRef = useRef<{
 		page: number;
-		// Page size of the parked query — needed to recognise a clamped response
+		// Page size of the parked request — needed to recognise a clamped response
 		// (the host answering an out-of-range request with its own last page).
 		pageSize: number;
-		resolve: (p: DataPage<LedgerTransaction>) => void;
+		resolve: (p: IDataGridPage<TxRow>) => void;
 		reject: (e: unknown) => void;
 		timer: ReturnType<typeof setTimeout>;
 	} | null>(null);
 
-	// --- Query adapter -----------------------------------------------------------
-	// Stable source: resolves from props when possible, otherwise asks the host
-	// for the page and resolves once the prop catches up (see effect below).
-	const source = useMemo(
-		() =>
-			createQueryDataSource<LedgerTransaction>(
-				(q) => {
-					// The table pages 0-based; the host API pages 1-based.
-					const wanted = q.page + 1;
-					const current = txRef.current;
-					// Already holding the wanted page: answer synchronously from props.
-					if (current && current.page === wanted) {
-						return Promise.resolve({ rows: current.transactions, total: current.total });
-					}
-					// Ask the host to fetch; park the promise until the prop arrives, with
-					// a watchdog so a failed/never-arriving fetch rejects instead of
-					// spinning forever.
-					return new Promise<DataPage<LedgerTransaction>>((resolve, reject) => {
-						// Supersede any earlier parked request (only the newest matters).
-						if (pendingRef.current) clearTimeout(pendingRef.current.timer);
-						const timer = setTimeout(() => {
-							// Still parked on THIS page after the timeout: give up so the
-							// table clears its loading row (it keeps the previous rows).
-							if (pendingRef.current && pendingRef.current.page === wanted) {
-								pendingRef.current = null;
-								reject(new Error(`Transaction page ${wanted} fetch timed out`));
-							}
-						}, PAGE_FETCH_TIMEOUT_MS);
-						pendingRef.current = { page: wanted, pageSize: q.pageSize, resolve, reject, timer };
-						onPageRef.current(wanted);
-					});
-				},
-				// The host API honors pagination only — no sort or search params.
-				{ sort: false, search: false, paginate: true }
-			),
-		[]
-	);
+	// --- REMOTE-mode fetcher -----------------------------------------------------
+	// Stable bridge: DIRECT mode forwards the full request to the host's
+	// ledger query; otherwise resolves from props when possible and asks the
+	// host for the page, resolving once the prop catches up (effect below).
+	const fetchPage = useCallback((req: IDataGridPageRequest): Promise<IDataGridPage<TxRow>> => {
+		// DIRECT mode: the whole list-convention request reaches the server.
+		const direct = directRef.current;
+		if (direct) {
+			return direct(req).then((result) => {
+				if (!result) throw new Error('Transaction fetch failed');
+				return { rows: result.transactions as TxRow[], total: result.total };
+			});
+		}
+		// DataGrid pages 1-based, exactly like the host API — no translation
+		// (the old 0-based stock-table adapter added 1 here).
+		const wanted = req.page;
+		const current = txRef.current;
+		// Already holding the wanted page: answer immediately from props.
+		if (current && current.page === wanted) {
+			return Promise.resolve({ rows: current.transactions as TxRow[], total: current.total });
+		}
+		// Ask the host to fetch; park the promise until the prop arrives, with
+		// a watchdog so a failed/never-arriving fetch rejects instead of
+		// spinning forever.
+		return new Promise<IDataGridPage<TxRow>>((resolve, reject) => {
+			// Supersede any earlier parked request (only the newest matters).
+			if (pendingRef.current) clearTimeout(pendingRef.current.timer);
+			const timer = setTimeout(() => {
+				// Still parked on THIS page after the timeout: give up so the
+				// grid clears its loading overlay (it keeps the previous rows).
+				if (pendingRef.current && pendingRef.current.page === wanted) {
+					pendingRef.current = null;
+					reject(new Error(`Transaction page ${wanted} fetch timed out`));
+				}
+			}, PAGE_FETCH_TIMEOUT_MS);
+			pendingRef.current = { page: wanted, pageSize: req.size, resolve, reject, timer };
+			onPageRef.current(wanted);
+		});
+	}, []);
 
 	// --- Prop-arrival effect ------------------------------------------------------
 	// When a new TransactionsResult lands, settle a parked request or handle a
@@ -583,21 +653,21 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 			// total, so a stale lower page from a superseded request can NOT
 			// settle a newer parked one and briefly show the wrong rows. Any
 			// other page is ignored (leave it parked; the watchdog covers a
-			// genuinely missing page), and DataTable's page-clamp effect snaps
-			// the index back into range after a clamp.
+			// genuinely missing page), and Tabulator snaps its pager back into
+			// range from the returned total after a clamp.
 			const lastPage = Math.max(1, Math.ceil(transactions.total / pending.pageSize));
 			const isClamped = pending.page > lastPage && transactions.page === lastPage;
 			if (transactions.page === pending.page || isClamped) {
 				clearTimeout(pending.timer);
 				pendingRef.current = null;
-				pending.resolve({ rows: transactions.transactions, total: transactions.total });
+				pending.resolve({ rows: transactions.transactions as TxRow[], total: transactions.total });
 			}
 		} else if (transactions) {
-			// No parked request: a host-initiated refresh. Nudge the table to re-run
-			// its current query (it resolves synchronously from the new props).
-			source.refresh();
+			// No parked request: a host-initiated refresh. Nudge the grid to re-run
+			// its current page (fetchPage resolves immediately from the new props).
+			gridRef.current?.refetch();
 		}
-	}, [transactions, source]);
+	}, [transactions]);
 
 	// --- Unmount cleanup ---------------------------------------------------------
 	// Clear any parked watchdog so it can't fire after the component is gone.
@@ -609,51 +679,193 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 	);
 
 	// --- Columns -------------------------------------------------------------------
-	// Cell renderings keep the existing badge / mono / muted treatments.
-	const columns = useMemo<DataTableColumn<LedgerTransaction>[]>(
+	// Cell renderings keep the existing badge / muted / uppercase treatments,
+	// with declared rrTypes per the DataGrid standard (date/number columns get
+	// their typed FORMAT picks; the popup's display formatting works even
+	// though this grid's filters cannot reach the prop bridge). Contract
+	// indexes declare the default layout; createdAt desc is the ledger's
+	// newest-first server default. The raw userId stays declared (unindexed,
+	// hidden) so it remains toggleable and filterable.
+	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ key: 'createdAt', label: 'Date', render: (tx) => (tx.createdAt ? new Date(tx.createdAt).toLocaleString() : '--') },
-			{ key: 'userId', label: 'User', render: (tx) => (tx.userId ? memberNames?.[tx.userId] ?? tx.userId.slice(0, 8) : '--') },
-			{ key: 'type', label: 'Type', render: (tx) => <span style={styles.typeBadge(tx.type)}>{tx.type}</span> },
-			{ key: 'resource', label: 'Resource', render: (tx) => <span style={styles.cellUppercase}>{tx.resource}</span> },
-			{ key: 'description', label: 'Description', render: (tx) => <span style={styles.cellMuted}>{tx.description || '--'}</span> },
 			{
-				key: 'amount',
-				label: 'Amount',
-				align: 'right',
-				render: (tx) => (
-					<span style={tx.amount >= 0 ? styles.amountPositive : undefined}>
-						{tx.amount >= 0 ? '+' : ''}
-						{fmt(tx.amount)}
-					</span>
-				),
+				title: 'Date',
+				field: 'createdAt',
+				rrType: 'date',
+				rrDefault: true,
+				rrDefaultSort: 'desc',
+				rrDescription: 'When the ledger entry was written — UTC on the wire, rendered in your local time; newest-first is the default sort.',
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					// formatDateValue applies the platform wire contract — a
+					// zone-less ISO string IS UTC — then renders in the viewer's
+					// local time. `new Date(iso).toLocaleString()` would misparse
+					// the zone-less wire value as ALREADY-local and show it
+					// unshifted.
+					const iso = cell.getValue() as string | null;
+					const text = iso ? formatDateValue(iso, { dateFormat: 'MM/DD/YY', timeFormat: 'HH:MM:SS' }) : null;
+					return text ?? '--';
+				},
 			},
 			{
-				key: 'context',
-				label: 'Context',
-				render: (tx) => (
-					<span style={styles.cellContext} title={tx.context?.source || tx.context?.task_id || ''}>
-						{tx.context?.pipeline || tx.context?.source || tx.context?.pack_id || tx.context?.subscription_id || '--'}
-					</span>
-				),
+				title: 'User',
+				field: 'userName',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Actor display name resolved server-side from the ledger user id, falling back to email; system-generated entries carry none.',
+				headerSort: true,
+				// Server-resolved display name; system events carry none.
+				formatter: (cell: CellComponent) => (cell.getValue() as string | null) ?? '--',
 			},
+			{
+				title: 'Type',
+				field: 'type',
+				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Ledger entry kind: purchase and credit grant credits, usage consumes them — determines the sign of Amount.',
+				headerSort: true,
+				formatter: (cell: CellComponent) => typeBadgeEl(cell.getValue() as string),
+			},
+			{
+				title: 'Resource',
+				field: 'resource',
+				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Metered resource the credits applied to (tokens, GPU seconds, storage, ...).',
+				headerSort: true,
+				// Uppercase resource span (DOM clone of the old cell render).
+				formatter: (cell: CellComponent) => {
+					const el = document.createElement('span');
+					Object.assign(el.style, styles.cellUppercase);
+					el.textContent = String(cell.getValue() ?? '');
+					return el;
+				},
+			},
+			{
+				title: 'Description',
+				field: 'description',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Free-text note recorded with the entry by the ledger writer (e.g. the pack purchased or the task metered).',
+				headerSort: true,
+				formatter: (cell: CellComponent) => mutedEl((cell.getValue() as string | null) || '--'),
+			},
+			{
+				title: 'Amount',
+				field: 'amount',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Signed credit delta: positive = credits granted (purchase, promo, refund), negative = consumption.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				// SIGNED display: credits '+' in the success color, usage '-'.
+				// The sign must show — the server sorts/filters the true signed
+				// values, and an unsigned render made Min/Max bounds look wrong.
+				formatter: (cell: CellComponent) => {
+					const amount = cell.getValue() as number;
+					const el = document.createElement('span');
+					if (amount >= 0) Object.assign(el.style, styles.amountPositive);
+					el.textContent = `${amount >= 0 ? '+' : '-'}${fmt(amount)}`;
+					return el;
+				},
+			},
+			{
+				title: 'Context',
+				field: 'context',
+				rrType: 'json',
+				rrDefault: true,
+				rrDescription: 'Structured JSON attached to the entry (task id, pipeline, source, pack id); the cell shows one salient field — click the row for the full payload.',
+				// Muted, ellipsis-truncated context with the full value as a tooltip.
+				formatter: (cell: CellComponent) => {
+					const tx = cell.getRow().getData() as TxRow;
+					const el = mutedEl(tx.context?.pipeline || tx.context?.source || tx.context?.pack_id || tx.context?.subscription_id || '--');
+					el.classList.add('rr-cell-truncate');
+					el.style.maxWidth = '200px';
+					el.title = tx.context?.source || tx.context?.task_id || '';
+					return el;
+				},
+			},
+			{ title: 'User ID', field: 'userId', rrType: 'string', rrDescription: 'Raw internal user UUID on the ledger row (empty for system entries); the User column shows the resolved display name.', headerSort: true },
 		],
-		[memberNames]
+		[]
 	);
 
 	if (!transactions) return null;
 
+	// The grid IS the card. DIRECT mode is the full standard: server-side
+	// search / header filters / remote sort all reach the ledger query, and
+	// the bar's own live count replaces the static total. LEGACY bridge mode
+	// suppresses search (the page-only bridge cannot honor req.search — a
+	// no-op search box is worse than none) and shows the prop total as
+	// `actions` instead; Export walks every page through either wiring.
 	return (
-		<Card header="Transaction Log" headerActions={<span style={styles.headerCount}>{transactions.total} total</span>} noBodyPadding>
-			<DataTable<LedgerTransaction>
-				columns={columns}
-				source={source}
-				// The host controls the page size; offer exactly that one option so
-				// the pager math matches the server's pages.
-				pageSizes={[transactions.pageSize]}
-				emptyState={{ title: 'No transactions yet' }}
-			/>
-		</Card>
+		<>
+			<Card noBodyPadding>
+				<CardDataGrid<TxRow>
+					title="Transaction Log"
+					actions={fetchTransactions ? undefined : <span style={styles.headerCount}>{transactions.total} total</span>}
+					ref={gridRef}
+					columns={columns}
+					fetchPage={fetchPage}
+					fetchDistinct={fetchTransactionDistinct}
+					noSearch={!fetchTransactions}
+					remoteSort={!!fetchTransactions}
+					// LEGACY bridge: the host controls the page size; offer exactly
+					// that one option so the pager math matches the server's pages.
+					// DIRECT mode sizes freely with the grid defaults.
+					{...(fetchTransactions ? {} : { pageSizes: [transactions.pageSize] })}
+					onRowClick={(row) => setViewedTx(row)}
+					emptyTitle="No transactions yet"
+				/>
+			</Card>
+
+			{/* ── Record panel: the FULL transaction — an immutable event record,
+			    pure inspect, so NO footer (interaction standard: footer
+			    presence signals editability; header X / Escape close). ─────── */}
+			{viewedTx != null && (
+				<DetailPanel
+					persistKey="panelDetailTransactionWidth"
+					contained
+					open
+					onClose={() => setViewedTx(null)}
+					title={`Transaction #${viewedTx.id}`}
+					subtitle={viewedTx.type}
+				>
+					<Section label="Transaction">
+						{/* formatDateValue applies the wire contract (zone-less ISO IS
+						    UTC) and renders exactly like the Date column. */}
+						<LabelValue label="Date">{(viewedTx.createdAt ? formatDateValue(viewedTx.createdAt, { dateFormat: 'MM/DD/YY', timeFormat: 'HH:MM:SS' }) : null) ?? '--'}</LabelValue>
+						<LabelValue label="User">{viewedTx.userName ?? '--'}</LabelValue>
+						<LabelValue label="Type">{viewedTx.type}</LabelValue>
+						<LabelValue label="Resource">{viewedTx.resource}</LabelValue>
+						<LabelValue label="Description">{viewedTx.description || '--'}</LabelValue>
+						<LabelValue label="Amount">
+							{/* Signed render matching the Amount column treatment. */}
+							<span style={styles.panelAmount(viewedTx.amount >= 0)}>{`${viewedTx.amount >= 0 ? '+' : '-'}${fmt(viewedTx.amount)}`}</span>
+						</LabelValue>
+						<LabelValue label="Idempotency Key" mono>
+							{viewedTx.idempotencyKey}
+						</LabelValue>
+					</Section>
+
+					{/* Context: well-known fields as rows, then the raw JSON whole. */}
+					{viewedTx.context != null && (
+						<Section label="Context">
+							{viewedTx.context.task_id != null && (
+								<LabelValue label="Task" mono>
+									{String(viewedTx.context.task_id)}
+								</LabelValue>
+							)}
+							{viewedTx.context.source != null && <LabelValue label="Source">{String(viewedTx.context.source)}</LabelValue>}
+							{viewedTx.context.pipeline != null && <LabelValue label="Pipeline">{String(viewedTx.context.pipeline)}</LabelValue>}
+							<pre style={styles.contextPre}>{JSON.stringify(viewedTx.context, null, 2)}</pre>
+						</Section>
+					)}
+				</DetailPanel>
+			)}
+		</>
 	);
 };
 
@@ -661,23 +873,96 @@ const TransactionLog: React.FC<{ transactions: TransactionsResult | null; onPage
 // ACTIVE TASKS
 // =============================================================================
 
-/** Active tasks with live token burn. */
+/** Row shape fed to the active-tasks CardDataGrid. */
+interface TaskRow extends Record<string, unknown> {
+	/** Task identifier (stable row key). */
+	taskId: string;
+	/** Pipeline or source name (falls back to the task id). */
+	name: string;
+	/** Duration in seconds (raw; the formatter renders "Xm Ys"). */
+	durationSeconds: number;
+	/** Current cumulative token total. */
+	tokensTotal: number;
+}
+
+/**
+ * Active tasks with live token burn — a LOCAL CardDataGrid: each poll hands
+ * down a new `activeTasks` array, and a new data identity applies silently
+ * (scroll / sort preserved), so the live counts tick without flicker.
+ */
 const ActiveTasksView: React.FC<{ activeTasks: ActiveTask[] }> = ({ activeTasks }) => {
+	// Flatten props into grid rows (name falls back to the task id).
+	const rows = useMemo<TaskRow[]>(
+		() =>
+			activeTasks.map((task) => ({
+				taskId: task.taskId,
+				name: task.name || task.taskId,
+				durationSeconds: task.durationSeconds,
+				tokensTotal: task.tokensTotal,
+			})),
+		[activeTasks]
+	);
+
+	// Declared typed columns per the DataGrid standard — the number columns
+	// get Min/Max filters and the number FORMAT picks. Contract flags
+	// declare the default layout; no default sort — the live poll order holds.
+	const columns = useMemo<GridColumnDefinition[]>(
+		() => [
+			{ title: 'Task', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Pipeline or source name of the running task; falls back to the task id when unnamed.', headerSort: true },
+			{
+				title: 'Duration',
+				field: 'durationSeconds',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Elapsed run time of the task in seconds (rendered as minutes and seconds), refreshed by the live poll.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				// Human duration from the raw seconds (sorting stays numeric).
+				formatter: (cell: CellComponent) => {
+					const secs = cell.getValue() as number;
+					return `${Math.floor(secs / 60)}m ${Math.floor(secs % 60)}s`;
+				},
+			},
+			{
+				title: 'Tokens',
+				field: 'tokensTotal',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Cumulative tokens the task has consumed so far; ticks upward with each poll while the task runs.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				// Brand-colored token count (DOM clone of the old row render).
+				formatter: (cell: CellComponent) => {
+					const el = document.createElement('span');
+					Object.assign(el.style, styles.taskTokens);
+					el.textContent = `${fmt(cell.getValue() as number)} tokens`;
+					return el;
+				},
+			},
+		],
+		[]
+	);
+
 	if (!activeTasks.length) return null;
 
+	// The grid IS the card; the live "N running" count rides as `actions`.
+	// noSearch + noExport: a handful of live rows needs no grid chrome — with
+	// both set the grid contributes no buttons, while `actions` still renders.
 	return (
-		<Card header="Active Tasks" headerActions={<span style={styles.runningCount}>{activeTasks.length} running</span>}>
-			{activeTasks.map((task) => (
-				<div key={task.taskId} style={styles.taskRow}>
-					<div>
-						<div style={styles.taskName}>{task.name || task.taskId}</div>
-						<div style={styles.taskDuration}>
-							{Math.floor(task.durationSeconds / 60)}m {Math.floor(task.durationSeconds % 60)}s
-						</div>
-					</div>
-					<div style={styles.taskTokens}>{fmt(task.tokensTotal)} tokens</div>
-				</div>
-			))}
+		<Card noBodyPadding>
+			<CardDataGrid<TaskRow>
+				title="Active Tasks"
+				actions={<span style={styles.runningCount}>{activeTasks.length} running</span>}
+				columns={columns}
+				data={rows}
+				noSearch
+				noExport
+				emptyTitle="No active tasks"
+			/>
 		</Card>
 	);
 };
@@ -695,9 +980,9 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 	activeTasks,
 	loading,
 	onTransactionPage,
+	fetchTransactions,
+	fetchTransactionDistinct,
 	onAddCapacity,
-	memberNames,
-	teamNames,
 }) => {
 	if (loading) {
 		return <div style={styles.loading}>Loading billing data...</div>;
@@ -707,9 +992,9 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 		<div style={styles.stack}>
 			<BalanceBreakdown balance={balance} transactions={transactions} />
 			<SpendingVelocity balance={balance} transactions={transactions} onAddCapacity={onAddCapacity} />
-			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} memberNames={memberNames} teamNames={teamNames} />
+			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} />
 			<ActiveTasksView activeTasks={activeTasks} />
-			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} memberNames={memberNames} />
+			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} />
 		</div>
 	);
 };

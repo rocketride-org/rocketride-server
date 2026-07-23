@@ -68,16 +68,14 @@ export interface TraceRow {
 /** Pipeline trace level passed to the engine on run (matches the SDK `client.use` option). */
 export type TraceLevel = 'none' | 'metadata' | 'summary' | 'full';
 
-/** View state — per-view UI state (mode, flowViewMode, viewport, trace level). */
+/** View state — per-view UI state (mode, flowViewMode, viewport). */
 export interface ViewState {
 	mode: ProjectViewMode;
 	flowViewMode?: 'pipeline' | 'component';
 	viewport?: { x: number; y: number; zoom: number };
-	/** Pipeline trace level for the next run. Persisted per-document; defaults to 'summary' when unset. */
-	pipelineTraceLevel?: TraceLevel;
 }
 
-export type ProjectViewMode = 'design' | 'parameters' | 'status' | 'tokens' | 'flow' | 'trace' | 'errors';
+export type ProjectViewMode = 'design' | 'status' | 'tokens' | 'flow' | 'trace' | 'errors';
 
 /** Base view props (for ServerView, WelcomeView, etc.). */
 export interface IViewProps {

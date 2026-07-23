@@ -12,15 +12,25 @@
  * it likes. The active entry is drawn as a selection-tinted pill; count
  * badges are right-aligned via the shared {@link ViewMenuBadge}.
  *
+ * Multi-level (2026-07-18): an entry that declares `children` renders as an
+ * expandable SECTION — a bolder row with a right-aligned chevron that
+ * toggles its indented children. Sections never navigate, and at most ONE
+ * section is open at a time (accordion): opening one closes the other, and
+ * an `activeId` landing inside a closed section opens it. The section
+ * containing the active entry starts open.
+ *
  * Collapse-aware: while the shell sidebar is collapsed to its icon rail
  * (read from {@link useSidebarCollapsed}, or forced via the `collapsed`
  * prop) entries iconify automatically — icon-only squares with the label as
- * a tooltip and the count badge as a compact overlay.
+ * a tooltip and the count badge as a compact overlay. Sections flatten in
+ * the rail: their children render as icon squares directly, so every
+ * navigable entry keeps a one-click target.
  */
 
-import React, { CSSProperties, useState } from 'react';
-import { ViewMenu } from '../../types/viewMenu';
+import React, { CSSProperties, useEffect, useState } from 'react';
+import { ViewMenu, ViewMenuEntry } from '../../types/viewMenu';
 import { ViewMenuBadge } from '../page-view-control/ViewMenuBadge';
+import { BxChevronDown, BxChevronRight } from '../BoxIcon';
 import { useSidebarCollapsed } from './SidebarCollapsedContext';
 
 // =============================================================================
@@ -154,6 +164,43 @@ const styles = {
 		...(!disabled && !active && hovered ? { background: 'var(--rr-bg-list-hover)' } : null),
 	}),
 
+	// Section header row — an expandable group, not a navigation target: the
+	// item geometry with a bolder label and a right-aligned chevron. Never
+	// takes the active pill (sections do not navigate), only the hover fill.
+	sectionRow: (hovered: boolean): CSSProperties => ({
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+		margin: '1px 0',
+		padding: '7px 10px',
+		borderRadius: 7,
+		fontSize: 13,
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+		cursor: 'pointer',
+		// Longhands only — see styles.item for why the shorthand is avoided.
+		borderWidth: 1,
+		borderStyle: 'solid',
+		borderColor: 'transparent',
+		...(hovered ? { background: 'var(--rr-bg-list-hover)' } : null),
+	}),
+
+	// The section chevron — quiet secondary tone at the row's trailing edge
+	// (open: down, closed: right).
+	sectionChevron: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		color: 'var(--rr-text-secondary)',
+		flexShrink: 0,
+	} as CSSProperties,
+
+	// Child rows indent under their section: the extra left padding equals
+	// the parent's icon column (17px) + gap (10px), so a child's icon lines
+	// up with its section's label.
+	childIndent: {
+		paddingLeft: 37,
+	} as CSSProperties,
+
 	// First-letter fallback glyph for entries that declare no icon.
 	letterGlyph: {
 		fontSize: 13,
@@ -176,7 +223,8 @@ const styles = {
 // =============================================================================
 
 /**
- * Renders a ViewMenu as a vertical sidebar list.
+ * Renders a ViewMenu as a vertical sidebar list, with entries declaring
+ * `children` rendered as expandable accordion sections (at most one open).
  *
  * @param props - {@link ISidebarMenuProps}.
  * @returns The sidebar menu element.
@@ -189,6 +237,35 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 	// shell-provided context (false outside a provider).
 	const ctxCollapsed = useSidebarCollapsed();
 	const isCollapsed = collapsed ?? ctxCollapsed;
+
+	/**
+	 * Resolve the section (top-level entry with children) containing an
+	 * entry id, or null when the id is a top-level entry / unknown.
+	 *
+	 * @param id - The entry id to locate.
+	 * @returns The owning section's id, or null.
+	 */
+	const sectionOf = (id: string): string | null =>
+		menu.entries.find((e) => e.children?.some((c) => c.id === id))?.id ?? null;
+
+	// Accordion state: the ONE open section (null = all closed). Seeded with
+	// the section containing the active entry so the current view is visible
+	// on mount.
+	const [openSectionId, setOpenSectionId] = useState<string | null>(() => sectionOf(activeId));
+
+	// Follow navigation: an activeId landing inside a closed section opens
+	// that section (and closes any other — the accordion invariant). Manual
+	// toggles are otherwise left alone.
+	useEffect(() => {
+		const section = sectionOf(activeId);
+		if (section) setOpenSectionId(section);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [activeId]);
+
+	/** Toggle a section open/closed; opening one closes the other. */
+	const toggleSection = (id: string): void => {
+		setOpenSectionId((current) => (current === id ? null : id));
+	};
 
 	/**
 	 * Enter / Space activation for a row, matching native button semantics. A
@@ -206,20 +283,67 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 		}
 	};
 
-	return (
-		<div style={styles.container}>
-			{/* Optional section header naming the owning section (expanded only). */}
-			{!isCollapsed && sectionLabel && <div style={styles.sectionLabel}>{sectionLabel}</div>}
-			{menu.entries.map((entry) => {
-				// Resolve per-row state for the composed style. A disabled entry
-				// renders muted, takes no hover/active treatment, and its click
-				// is swallowed (never calls onSelect).
-				const isActive = entry.id === activeId;
-				const isHovered = entry.id === hoveredId;
-				const isDisabled = entry.disabled === true;
+	/**
+	 * Enter / Space on a section row toggles it, mirroring its click.
+	 *
+	 * @param e - The keydown event.
+	 * @param id - The section entry id to toggle.
+	 */
+	const onSectionKeyDown = (e: React.KeyboardEvent, id: string): void => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			toggleSection(id);
+		}
+	};
 
-				// Collapsed icon rail: icon-only square with tooltip + badge overlay.
-				if (isCollapsed) {
+	/**
+	 * One navigable row (top-level entry or a section child). Children
+	 * indent so their icon column lines up with the section label.
+	 *
+	 * @param entry - The entry to render.
+	 * @param indented - True for section children.
+	 * @returns The row element.
+	 */
+	const renderItem = (entry: ViewMenuEntry, indented: boolean): React.ReactElement => {
+		// Resolve per-row state for the composed style. A disabled entry
+		// renders muted, takes no hover/active treatment, and its click
+		// is swallowed (never calls onSelect).
+		const isActive = entry.id === activeId;
+		const isHovered = entry.id === hoveredId;
+		const isDisabled = entry.disabled === true;
+		return (
+			<div
+				key={entry.id}
+				role="button"
+				aria-current={isActive || undefined}
+				aria-disabled={isDisabled || undefined}
+				tabIndex={isDisabled ? -1 : 0}
+				style={indented ? { ...styles.item(isActive, isHovered, isDisabled), ...styles.childIndent } : styles.item(isActive, isHovered, isDisabled)}
+				onClick={() => { if (!isDisabled) onSelect(entry.id); }}
+				onKeyDown={(e) => onItemKeyDown(e, entry.id, isDisabled)}
+				onMouseEnter={() => setHoveredId(entry.id)}
+				onMouseLeave={() => setHoveredId(null)}
+			>
+				{/* Optional leading icon — same glyph the collapsed rail shows. */}
+				{entry.icon && <span style={styles.itemIcon(isActive, isDisabled)}>{entry.icon}</span>}
+				<span style={styles.label}>{entry.label}</span>
+				{/* Right-aligned count badge when the entry declares a count. */}
+				{entry.count != null && <ViewMenuBadge count={entry.count} severity={entry.severity} />}
+			</div>
+		);
+	};
+
+	// Collapsed icon rail: sections flatten — their children render as icon
+	// squares directly, so every navigable entry keeps a one-click target
+	// (a closed/open distinction has nothing to show at rail width).
+	if (isCollapsed) {
+		const railEntries = menu.entries.flatMap((entry) => entry.children ?? [entry]);
+		return (
+			<div style={styles.container}>
+				{railEntries.map((entry) => {
+					const isActive = entry.id === activeId;
+					const isHovered = entry.id === hoveredId;
+					const isDisabled = entry.disabled === true;
 					return (
 						<div
 							key={entry.id}
@@ -244,27 +368,44 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 							)}
 						</div>
 					);
-				}
+				})}
+			</div>
+		);
+	}
 
+	return (
+		<div style={styles.container}>
+			{/* Optional section header naming the owning section (expanded only). */}
+			{sectionLabel && <div style={styles.sectionLabel}>{sectionLabel}</div>}
+			{menu.entries.map((entry) => {
+				// Plain entries render as navigable rows; entries with children
+				// render as an accordion section row plus, while open, their
+				// indented children.
+				if (!entry.children) return renderItem(entry, false);
+				const isOpen = entry.id === openSectionId;
+				const isHovered = entry.id === hoveredId;
 				return (
-					<div
-						key={entry.id}
-						role="button"
-						aria-current={isActive || undefined}
-						aria-disabled={isDisabled || undefined}
-						tabIndex={isDisabled ? -1 : 0}
-						style={styles.item(isActive, isHovered, isDisabled)}
-						onClick={() => { if (!isDisabled) onSelect(entry.id); }}
-						onKeyDown={(e) => onItemKeyDown(e, entry.id, isDisabled)}
-						onMouseEnter={() => setHoveredId(entry.id)}
-						onMouseLeave={() => setHoveredId(null)}
-					>
-						{/* Optional leading icon — same glyph the collapsed rail shows. */}
-						{entry.icon && <span style={styles.itemIcon(isActive, isDisabled)}>{entry.icon}</span>}
-						<span style={styles.label}>{entry.label}</span>
-						{/* Right-aligned count badge when the entry declares a count. */}
-						{entry.count != null && <ViewMenuBadge count={entry.count} severity={entry.severity} />}
-					</div>
+					<React.Fragment key={entry.id}>
+						<div
+							role="button"
+							aria-expanded={isOpen}
+							tabIndex={0}
+							style={styles.sectionRow(isHovered)}
+							onClick={() => toggleSection(entry.id)}
+							onKeyDown={(e) => onSectionKeyDown(e, entry.id)}
+							onMouseEnter={() => setHoveredId(entry.id)}
+							onMouseLeave={() => setHoveredId(null)}
+						>
+							{/* Section icon shares the item icon slot (never active-tinted). */}
+							{entry.icon && <span style={styles.itemIcon(false, false)}>{entry.icon}</span>}
+							<span style={styles.label}>{entry.label}</span>
+							{/* Open/closed chevron at the trailing edge. */}
+							<span style={styles.sectionChevron}>
+								{isOpen ? <BxChevronDown size={15} /> : <BxChevronRight size={15} />}
+							</span>
+						</div>
+						{isOpen && entry.children.map((child) => renderItem(child, true))}
+					</React.Fragment>
 				);
 			})}
 		</div>

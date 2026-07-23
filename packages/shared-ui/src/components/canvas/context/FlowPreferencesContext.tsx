@@ -41,6 +41,7 @@
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { IProjectLayout, ICanvasPreferences } from '../types';
+import { usePrefs } from '../../../contexts/PrefsContext';
 
 // =============================================================================
 // Constants
@@ -100,14 +101,6 @@ export interface IFlowPreferencesContext {
 	 * Updates both local state and persisted preferences.
 	 */
 	updateProjectLayout: (patch: Partial<IProjectLayout>) => void;
-
-	// --- Raw preference access (pass-through to host) ----------------------
-
-	/** Reads a preference value by key. Returns undefined when host doesn't provide storage. */
-	getPreference: (key: string) => unknown;
-
-	/** Writes a preference value by key. No-op when host doesn't provide storage. */
-	setPreference: (key: string, value: unknown) => void;
 }
 
 const FlowPreferencesContext = createContext<IFlowPreferencesContext | null>(null);
@@ -121,12 +114,6 @@ export interface IFlowPreferencesProviderProps {
 
 	/** The current project's ID, used to key per-project layout storage. */
 	projectId: string;
-
-	/** Host-provided preference reader. When absent, defaults are used. */
-	getPreference?: (key: string) => unknown;
-
-	/** Host-provided preference writer. When absent, preferences are not persisted. */
-	setPreference?: (key: string, value: unknown) => void;
 
 	/** When true, the canvas was opened in externally-readonly mode. The toolbar lock button is hidden. */
 	isReadonly?: boolean;
@@ -143,20 +130,21 @@ export interface IFlowPreferencesProviderProps {
  * All mutations are immediately reflected in local state and
  * asynchronously persisted via the host callbacks.
  */
-export function FlowPreferencesProvider({ children, projectId, getPreference: hostGetPreference, setPreference: hostSetPreference, isReadonly = false }: IFlowPreferencesProviderProps): ReactElement {
-	// --- Preference helpers (safe even when host callbacks are absent) ------
-
-	const getPreference = useCallback((key: string): unknown => hostGetPreference?.(key), [hostGetPreference]);
-
-	const setPreference = useCallback((key: string, value: unknown): void => hostSetPreference?.(key, value), [hostSetPreference]);
+export function FlowPreferencesProvider({ children, projectId, isReadonly = false }: IFlowPreferencesProviderProps): ReactElement {
+	// --- Preferences: the ONE shared workspace-prefs accessor (usePrefs) -----
+	// FlowPreferences derives lock / nav / layout FROM prefs; it no longer owns a
+	// parallel getPreference/setPreference API — the canvas reads and writes prefs
+	// the same way every app does. The provider above (ProjectView) wires getPref/
+	// setPref to the host store (useWorkspace on web, the message channel in VS Code).
+	const { getPref, setPref } = usePrefs();
 
 	// --- Per-project layout ------------------------------------------------
 
 	/** Reads the stored layout for the current project, merging with defaults. */
 	const readStoredLayout = useCallback((): IProjectLayout => {
-		const layouts = getPreference('projectLayouts') as Record<string, IProjectLayout> | null;
+		const layouts = getPref('projectLayouts') as Record<string, IProjectLayout> | null;
 		return { ...DEFAULT_PROJECT_LAYOUT, ...(layouts?.[projectId] ?? {}) };
-	}, [projectId, getPreference]);
+	}, [projectId, getPref]);
 
 	const [projectLayout, setProjectLayout] = useState<IProjectLayout>(readStoredLayout);
 
@@ -171,10 +159,10 @@ export function FlowPreferencesProvider({ children, projectId, getPreference: ho
 			setProjectLayout((prev) => {
 				const next = { ...prev, ...patch };
 
-				// Persist the full layout map back to host preferences
-				if (hostSetPreference && projectId) {
-					const layouts = (getPreference('projectLayouts') as Record<string, IProjectLayout> | null) ?? {};
-					hostSetPreference('projectLayouts', {
+				// Persist the full layout map back to workspace prefs
+				if (projectId) {
+					const layouts = (getPref('projectLayouts') as Record<string, IProjectLayout> | null) ?? {};
+					setPref('projectLayouts', {
 						...layouts,
 						[projectId]: next,
 					});
@@ -183,22 +171,22 @@ export function FlowPreferencesProvider({ children, projectId, getPreference: ho
 				return next;
 			});
 		},
-		[projectId, getPreference, hostSetPreference]
+		[projectId, getPref, setPref]
 	);
 
 	// --- Navigation mode ---------------------------------------------------
 
 	const [navigationMode, setNavigationModeState] = useState<NavigationMode>(() => {
-		const stored = getPreference('navigationMode') as NavigationMode | undefined;
+		const stored = getPref('navigationMode') as NavigationMode | undefined;
 		return stored ?? (DEFAULT_CANVAS_PREFERENCES.navigationMode as NavigationMode) ?? NavigationMode.DRAG;
 	});
 
 	const setNavigationMode = useCallback(
 		(mode: NavigationMode) => {
 			setNavigationModeState(mode);
-			setPreference('navigationMode', mode);
+			setPref('navigationMode', mode);
 		},
-		[setPreference]
+		[setPref]
 	);
 
 	// --- Canvas lock -------------------------------------------------------
@@ -226,10 +214,8 @@ export function FlowPreferencesProvider({ children, projectId, getPreference: ho
 			toggleLock,
 			projectLayout,
 			updateProjectLayout,
-			getPreference,
-			setPreference,
 		}),
-		[navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, updateProjectLayout, getPreference, setPreference]
+		[navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, updateProjectLayout]
 	);
 
 	return <FlowPreferencesContext.Provider value={value}>{children}</FlowPreferencesContext.Provider>;

@@ -143,15 +143,15 @@ except RuntimeError as e:
 
 ## **API Endpoints**
 
-These methods communicate via the RocketRide DAP protocol over WebSocket using the `rrext_deploy_*` commands:
+These methods communicate via the RocketRide DAP protocol over WebSocket using the single `rrext_deploy` command, dispatched by a `subcommand` argument:
 
-| Method | DAP Command |
-| --- | --- |
-| `add()` | `rrext_deploy_add` |
-| `remove()` | `rrext_deploy_remove` |
-| `list()` | `rrext_deploy_list` |
-| `status()` | `rrext_deploy_status` |
-| `update()` | `rrext_deploy_update` |
+| Method | DAP Command | `subcommand` |
+| --- | --- | --- |
+| `add()` | `rrext_deploy` | `add` |
+| `remove()` | `rrext_deploy` | `remove` |
+| `list()` | `rrext_deploy` | `list` |
+| `status()` | `rrext_deploy` | `status` |
+| `update()` | `rrext_deploy` | `update` |
 
 ## **Related Methods**
 

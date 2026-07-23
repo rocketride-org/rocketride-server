@@ -98,28 +98,39 @@ const processTableData = (data: any): string[] => {
 };
 
 /**
- * Processes image content
+ * Processes media content (image/audio/video) into data URLs.
+ *
+ * The response node emits one entry per lane shaped `{mime_type, <lane>}`, where
+ * `<lane>` is the base64 payload. Also accepts a bare data-URL string.
+ *
+ * @param data - The lane field value (array of entries, one entry, or a string).
+ * @param lane - The lane key holding the base64 payload: 'image' | 'audio' | 'video'.
+ * @returns Data URLs, one per media item.
  */
-const processImageData = (data: any): string[] => {
-	const imageUrls: string[] = [];
+const processMediaData = (data: any, lane: 'image' | 'audio' | 'video'): string[] => {
+	const urls: string[] = [];
+
+	const fromEntry = (item: any): string | null => {
+		if (typeof item === 'object' && item && item[lane] && item.mime_type) {
+			return `data:${item.mime_type};base64,${item[lane]}`;
+		}
+		if (typeof item === 'string' && item.trim()) {
+			return item;
+		}
+		return null;
+	};
 
 	if (Array.isArray(data)) {
 		data.forEach(item => {
-			if (typeof item === 'object' && item.image && item.mime_type) {
-				const dataUrl = `data:${item.mime_type};base64,${item.image}`;
-				imageUrls.push(dataUrl);
-			} else if (typeof item === 'string' && item.trim()) {
-				imageUrls.push(item);
-			}
+			const url = fromEntry(item);
+			if (url) urls.push(url);
 		});
-	} else if (typeof data === 'object' && data.image && data.mime_type) {
-		const dataUrl = `data:${data.mime_type};base64,${data.image}`;
-		imageUrls.push(dataUrl);
-	} else if (typeof data === 'string' && data.trim()) {
-		imageUrls.push(data);
+	} else {
+		const url = fromEntry(data);
+		if (url) urls.push(url);
 	}
 
-	return imageUrls;
+	return urls;
 };
 
 // ============================================================================
@@ -158,6 +169,8 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 	const documentItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const tableItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const imageItems: Array<{ filename: string; content: any; fieldName: string }> = [];
+	const audioItems: Array<{ filename: string; content: any; fieldName: string }> = [];
+	const videoItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const questionItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const answerItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 
@@ -202,12 +215,38 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 				case 'image':
 				case 'images':
 					// Process image content (data URLs)
-					const imageUrls = processImageData(fieldData);
+					const imageUrls = processMediaData(fieldData, 'image');
 					if (imageUrls.length > 0) {
 						// Join multiple images with delimiter for later splitting
 						imageItems.push({
 							filename,
 							content: imageUrls.join('|||'),
+							fieldName
+						});
+					}
+					break;
+
+				case 'audio':
+				case 'audios':
+					// Process produced audio (data URLs)
+					const audioUrls = processMediaData(fieldData, 'audio');
+					if (audioUrls.length > 0) {
+						audioItems.push({
+							filename,
+							content: audioUrls.join('|||'),
+							fieldName
+						});
+					}
+					break;
+
+				case 'video':
+				case 'videos':
+					// Process produced video (data URLs)
+					const videoUrls = processMediaData(fieldData, 'video');
+					if (videoUrls.length > 0) {
+						videoItems.push({
+							filename,
+							content: videoUrls.join('|||'),
 							fieldName
 						});
 					}
@@ -243,6 +282,8 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 		documents: groupByFilename(documentItems),
 		tables: groupByFilename(tableItems),
 		images: groupByFilename(imageItems),
+		audio: groupByFilename(audioItems),
+		video: groupByFilename(videoItems),
 		questions: groupByFilename(questionItems),
 		answers: groupByFilename(answerItems)
 	};

@@ -25,6 +25,7 @@ import type { ViewMenu } from '../../types/viewMenu';
 import { useTraceState } from './hooks/useTraceState';
 import { useElapsedTimer } from './hooks/useElapsedTimer';
 import Canvas from '../../components/canvas';
+import { PrefsProvider, type IPrefsApi } from '../../contexts/PrefsContext';
 import Status from '../../components/status/Status';
 import { StatusHeader } from '../../components/status/StatusHeader';
 import { SourceTokensContent } from '../../components/tokens/Tokens';
@@ -35,9 +36,8 @@ import { commonStyles } from '../../themes/styles';
 import { OAUTH_ROOT_URL } from '../../config/oauth';
 
 import PipelineActions from '../../components/pipeline-actions/PipelineActions';
-import TtlSettingsDialog from './TtlSettingsDialog';
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
-import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, TraceLevel } from './types';
+import type { ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow } from './types';
 
 // =============================================================================
 // PROPS
@@ -83,8 +83,8 @@ export interface IProjectViewProps {
 	onContentChanged?: (project: any) => void;
 	/** Called to validate a pipeline. Host returns validation result as a Promise. */
 	onValidate?: (pipeline: any) => Promise<any>;
-	/** Called for pipeline run/stop/restart actions. `options.ttl` carries the idle-timeout (seconds) for run/restart when the user set one. */
-	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string, options?: { ttl?: number }) => void;
+	/** Called for pipeline run/stop/restart actions. Trace level and idle-timeout (TTL) are resolved host-side from the pipeline-builder settings. */
+	onPipelineAction?: (action: 'run' | 'stop' | 'restart', source?: string) => void;
 	/** Called when view state changes (mode, flowViewMode, viewport). */
 	onViewStateChange?: (viewState: ViewState) => void;
 	/** Called when user preferences change (e.g. panel widths, toggles). */
@@ -214,16 +214,13 @@ interface SourceInfo {
 // =============================================================================
 
 /** Non-canvas sub-views that render the document {@link ContentHeader}. */
-type DocSubView = 'parameters' | 'status' | 'tokens' | 'flow' | 'trace' | 'errors';
+type DocSubView = 'status' | 'tokens' | 'flow' | 'trace' | 'errors';
 
 /**
- * Per-sub-view header subtitles — "{Sub-view} — {short descriptor}", matching
- * the approved mockup's wording style. Only the Parameters line is specified by
- * the mockup; the rest use neutral, factual descriptors pending design sign-off
- * (see OPEN STYLE QUESTIONS in the task report).
+ * Per-sub-view header subtitles — "{Sub-view} — {short descriptor}", using
+ * neutral, factual descriptors pending design sign-off.
  */
 const DOC_SUBVIEW_SUBTITLES: Record<DocSubView, string> = {
-	parameters: 'Parameters — runtime configuration for this pipeline.',
 	status: 'Status — execution status for each source.',
 	tokens: 'Tokens — token usage for each source.',
 	flow: 'Flow — data flow through the pipeline.',
@@ -242,7 +239,6 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		mode: initialViewState?.mode ?? 'design',
 		flowViewMode: initialViewState?.flowViewMode ?? 'pipeline',
 		viewport: initialViewState?.viewport,
-		pipelineTraceLevel: initialViewState?.pipelineTraceLevel,
 	}));
 
 	const [prefs, setPrefs] = useState<Record<string, unknown>>(() => initialPrefs ?? {});
@@ -287,37 +283,30 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		});
 	}, []);
 
-	const getPreference = useCallback((key: string) => prefs?.[key], [prefs]);
-	const setPreference = useCallback((key: string, value: unknown) => {
-		setPrefs((prev) => {
-			const next = { ...prev, [key]: value };
-			onPrefsChangeRef.current?.(next);
-			return next;
-		});
-	}, []);
-
-	// --- Idle-timeout (TTL) settings ------------------------------------------
-	// Persisted per-pipeline in prefs (`pipelineTtl` map keyed by project_id),
-	// riding the host's existing prefs persistence. undefined = server default.
-
-	const [ttlDialogOpen, setTtlDialogOpen] = useState(false);
-	const ttlProjectId: string = project?.project_id ?? '';
-	const ttlByProject = (prefs?.pipelineTtl as Record<string, number> | undefined) ?? {};
-	const projectTtl: number | undefined = ttlProjectId ? ttlByProject[ttlProjectId] : undefined;
-
-	const openTtlSettings = useCallback(() => setTtlDialogOpen(true), []);
-	const handleTtlConfirm = useCallback((ttl: number | undefined) => {
-		setTtlDialogOpen(false);
-		if (!ttlProjectId) return;
-		setPrefs((prev) => {
-			const map = { ...((prev?.pipelineTtl as Record<string, number> | undefined) ?? {}) };
-			if (ttl === undefined) delete map[ttlProjectId];
-			else map[ttlProjectId] = ttl;
-			const next = { ...prev, pipelineTtl: map };
-			onPrefsChangeRef.current?.(next);
-			return next;
-		});
-	}, [ttlProjectId]);
+	// The ONE prefs accessor the canvas — and every DetailPanel inside it — reads
+	// and writes through, handed down via <PrefsProvider> below. getPref reads the
+	// local prefs bag; setPref merges a key and threads the whole bag to the host
+	// (onPrefsChange → useWorkspace on web / the extension host in VS Code).
+	//
+	// getPref reads through a ref so prefsApi keeps a STABLE identity across pref
+	// writes: memoizing on [prefs] would hand FlowPreferences a fresh getPref on
+	// every toolbar/view/width write, re-running its layout-read effect and
+	// churning the canvas. The ref always holds the latest prefs, so reactivity is
+	// preserved (prefs state lives here and re-renders the subtree).
+	const prefsRef = useRef(prefs);
+	prefsRef.current = prefs;
+	const prefsApi = useMemo<IPrefsApi>(
+		() => ({
+			getPref: (key) => prefsRef.current?.[key],
+			setPref: (key, value) =>
+				setPrefs((prev) => {
+					const next = { ...prev, [key]: value };
+					onPrefsChangeRef.current?.(next);
+					return next;
+				}),
+		}),
+		[],
+	);
 
 	const { rows: traceRows, clearTrace } = useTraceState(traceEvents);
 
@@ -364,9 +353,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 					return;
 				}
 			}
-			onPipelineAction?.('run', source, projectTtl !== undefined ? { ttl: projectTtl } : undefined);
+			onPipelineAction?.('run', source);
 		},
-		[onPipelineAction, onMissingEnvVars, envKeys, projectTtl]
+		[onPipelineAction, onMissingEnvVars, envKeys]
 	);
 
 	const handleStopPipeline = useCallback(
@@ -411,7 +400,6 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		() => ({
 			entries: [
 				{ id: 'design', label: isReadonly ? 'Design (Readonly)' : 'Design' },
-				{ id: 'parameters', label: 'Parameters' },
 				{ id: 'status', label: 'Status' },
 				{ id: 'tokens', label: 'Tokens' },
 				{ id: 'flow', label: 'Flow' },
@@ -426,9 +414,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 
 	const handlePipelineAction = useCallback(
 		(action: 'run' | 'stop' | 'restart', source?: string) => {
-			onPipelineAction?.(action, source, action !== 'stop' && projectTtl !== undefined ? { ttl: projectTtl } : undefined);
+			onPipelineAction?.(action, source);
 		},
-		[onPipelineAction, projectTtl]
+		[onPipelineAction]
 	);
 
 	// --- Viewport change -----------------------------------------------------
@@ -472,10 +460,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 
 	const panels = {
 		design: {
-			content: <div style={styles.canvasPadding}>{project && <Canvas oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} getPreference={getPreference} setPreference={setPreference} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} onOpenSettings={isReadonly ? undefined : openTtlSettings} isReadonly={isReadonly} envKeys={envKeys} />}</div>,
-		},
-		parameters: {
-			content: renderDocPanel('parameters', <ParametersPane value={viewState.pipelineTraceLevel ?? 'summary'} onChange={(level) => updateViewState({ pipelineTraceLevel: level })} disabled={isReadonly} />),
+			content: <div style={styles.canvasPadding}><PrefsProvider value={prefsApi}>{project && <Canvas oauth2RootUrl={oauth2RootUrl} oauthReturnUrl={oauthReturnUrl} onOpenExternal={onOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} project={project} servicesJson={servicesJson} taskStatuses={statusMap} handleValidatePipeline={handleValidate} onContentChanged={isReadonly ? undefined : handleContentChanged} onViewportChange={handleViewportChange} onRunPipeline={isReadonly ? undefined : handleRunPipeline} onStopPipeline={isReadonly ? undefined : handleStopPipeline} onOpenLink={handleOpenLink} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={viewState.viewport} isDirty={isReadonly ? false : isDirty} isNew={isReadonly ? false : isNew} onSave={isReadonly ? undefined : handleSave} onExport={isReadonly ? undefined : onExport} isReadonly={isReadonly} envKeys={envKeys} />}</PrefsProvider></div>,
 		},
 		status: {
 			content: renderDocPanel('status', sources.length > 0 ? sources.map((src) => <SourceStatusPane key={src.id} source={src} taskStatus={statusMap[src.id]} isConnected={isConnected} isSubscribed={isSubscribed} onPipelineAction={isReadonly ? undefined : handlePipelineAction} onOpenLink={handleOpenLink} serverHost={serverHost} />) : <div style={commonStyles.empty}>No source components found</div>),
@@ -538,8 +523,6 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			<div style={styles.pageBody}>
 				<TabPanelContent panels={panels} activeId={viewState.mode} />
 			</div>
-			{/* Pipeline TTL settings (RR-309) — modal overlays the page body */}
-			{ttlDialogOpen && <TtlSettingsDialog ttlSeconds={projectTtl} onConfirm={handleTtlConfirm} onCancel={() => setTtlDialogOpen(false)} />}
 			{!isConnected && (
 				<div style={styles.disconnectOverlay}>
 					<button type="button" style={styles.disconnectButton} disabled>
@@ -552,44 +535,6 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 };
 
 ProjectView.displayName = 'ProjectView';
-
-// =============================================================================
-// PARAMETERS PANE
-// =============================================================================
-
-const TRACE_LEVELS: { value: TraceLevel; label: string }[] = [
-	{ value: 'full', label: 'Full — every lane write & invoke, including full payload data' },
-	{ value: 'summary', label: 'Summary — structure + result summaries (no large/binary payloads)' },
-	{ value: 'metadata', label: 'Metadata — lane/node structure only' },
-	{ value: 'none', label: 'None — tracing disabled' },
-];
-
-const ParametersPane: React.FC<{
-	value: TraceLevel;
-	onChange: (value: TraceLevel) => void;
-	disabled?: boolean;
-}> = ({ value, onChange, disabled }) => {
-	return (
-		<div style={{ ...commonStyles.card, borderRadius: 6, maxWidth: 640 }}>
-			<div style={commonStyles.cardHeader}>
-				<span style={styles.sourceName}>Pipeline parameters</span>
-			</div>
-			<div style={commonStyles.cardBody}>
-				<label htmlFor="rr-trace-level" style={{ display: 'block', fontSize: 12, color: 'var(--rr-text-secondary)', marginBottom: 6 }}>
-					Trace level
-				</label>
-				<select id="rr-trace-level" style={commonStyles.inputField} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as TraceLevel)}>
-					{TRACE_LEVELS.map((lvl) => (
-						<option key={lvl.value} value={lvl.value}>
-							{lvl.label}
-						</option>
-					))}
-				</select>
-				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginTop: 8 }}>Controls how much trace data the engine emits for this pipeline. Higher levels feed the Flow and Trace tabs, but Full inlines entire payloads (including images) and can stall large-image runs. Defaults to Summary.</div>
-			</div>
-		</div>
-	);
-};
 
 // =============================================================================
 // SOURCE STATUS PANE

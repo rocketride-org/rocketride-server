@@ -104,7 +104,9 @@ export class CloudAuthProvider implements IAuthProvider {
 	 * authorize endpoint.
 	 *
 	 * @param appId - Optional app ID to activate after sign-in completes.
-	 * @param register - If true, shows Zitadel's signup form instead of login.
+	 * @param register - Retained for compatibility; no longer changes the
+	 *                   destination. All flows land on Zitadel's login page,
+	 *                   which offers a Register link for new users.
 	 */
 	public async signIn(appId?: string, register?: boolean): Promise<void> {
 		if (!this.zitadelUrl || !this.clientId) {
