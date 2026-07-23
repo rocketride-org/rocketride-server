@@ -215,7 +215,7 @@ export const LogPane: React.FC<ILogPaneProps> = ({ events, downloadBase, truncat
 		anchor.href = url;
 		anchor.download = filename;
 		anchor.click();
-		URL.revokeObjectURL(url);
+		setTimeout(() => URL.revokeObjectURL(url), 0);
 	}, []);
 
 	/**
