@@ -4,7 +4,7 @@ import threading
 from abc import abstractmethod, ABC
 from typing import List, Callable, Dict, Any, Optional, Tuple
 from rocketlib import IInstanceBase, tool_function, warning
-from .schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
+from ..schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
 
 
 class DocumentStoreBase(ABC):

@@ -26,9 +26,9 @@
 # ------------------------------------------------------------------------------
 import os
 import re
-from ai.common.config import Config
-from ai.common.transform import IGlobalTransform
-from rocketlib import OPEN_MODE
+from typing import Any, Dict
+
+from ai.common.store import StoreGlobalBase
 from rocketlib import warning
 
 
@@ -36,85 +36,23 @@ from rocketlib import warning
 QDRANT_COLLECTION_RE = re.compile(r'^[A-Za-z0-9._-]{1,255}$')
 
 
-class IGlobal(IGlobalTransform):
+class IGlobal(StoreGlobalBase):
     serverName: str = 'qdrant'
 
-    def beginGlobal(self):
-        # Are we in config mode or some other mode?
-        if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
-            # We are going to get a call to configureService but
-            # we don't actually need to load the driver for that
-            pass
-        else:
-            # Import store definition - even though
-            from .qdrant import Store
+    def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
+        # Import store definition lazily so config mode never loads the driver.
+        from .qdrant import Store
 
-            # Declare store
-            self.store: Store | None = None
+        return Store(logical_type, conn_config, bag)
 
-            # Get our bag
-            bag = self.IEndpoint.endpoint.bag
+    def _sub_key(self) -> str:
+        # Build the transform sub-key from the live store's endpoint info.
+        collection = self.store.collection
+        host = self.store.host
+        port = self.store.port
+        return f'{host}/{port}/{collection}'
 
-            # Get the passed configuration
-            connConfig = self.getConnConfig()
-
-            # Resolve the namespace used for agent-facing tool names
-            # (qdrant.search/upsert/delete). Read from the merged config
-            # so it honors both profile defaults and user overrides.
-            cfg = Config.getNodeConfig(self.glb.logicalType, connConfig)
-            resolved_name = cfg.get('serverName') if isinstance(cfg, dict) or hasattr(cfg, 'get') else None
-            if isinstance(resolved_name, str) and resolved_name.strip():
-                self.serverName = resolved_name.strip()
-
-            # Get the configuration
-            self.store = Store(self.glb.logicalType, connConfig, bag)
-
-            # Wire an embedder for the control-plane tool path (search/upsert).
-            # Mirrors autopipe pattern: only instantiate when embedding config present.
-            self._tool_embedding = None
-            self.embed_query = None
-            self.embed_model_name = None
-
-            try:
-                embed_provider, embed_config = Config.getMultiProviderConfig('embedding', connConfig)
-            except Exception:
-                embed_provider, embed_config = None, None
-
-            if embed_provider:
-                try:
-                    from ai.common.embedding import getEmbedding as _getEmbedding
-
-                    self._tool_embedding = _getEmbedding(embed_provider, embed_config, bag)
-                except Exception as exc:  # noqa: BLE001
-                    warning(f'{self.glb.logicalType}: tool path embedder unavailable: {exc}')
-                    self._tool_embedding = None
-
-            if self._tool_embedding is not None:
-                from ai.common.schema import Question as _Question, QuestionText as _QuestionText
-
-                def _embed_query(text: str, _emb=self._tool_embedding) -> list:
-                    qt = _QuestionText(text=text)
-                    q = _Question()
-                    q.questions = [qt]
-                    _emb.encodeQuestion(q)
-                    return list(qt.embedding or [])
-
-                self.embed_query = _embed_query
-                self.embed_model_name = getattr(self._tool_embedding, '_model', None)
-
-            # Get the info about our store
-            collection = self.store.collection
-            host = self.store.host
-            port = self.store.port
-
-            # Format it into a subKey
-            subKey = f'{host}/{port}/{collection}'
-
-            # Call the base
-            super().beginGlobal(subKey)
-            return
-
-    def validateConfig(self):
+    def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
         Validate Qdrant config at save-time with a fast SDK probe.
 
@@ -124,8 +62,6 @@ class IGlobal(IGlobalTransform):
         - Surface concise SDK/HTTP errors via a unified formatter
         """
         try:
-            # Load configuration
-            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             host = (config.get('host', '')).strip()
             port = config.get('port')
             apikey = (config.get('apikey', '')).strip()
@@ -177,12 +113,6 @@ class IGlobal(IGlobalTransform):
 
         except Exception as e:
             warning(_format_error(e))
-
-    def endGlobal(self):
-        self._tool_embedding = None
-        self.embed_query = None
-        self.embed_model_name = None
-        self.store = None
 
 
 def _format_error(e: Exception) -> str:

@@ -1,4 +1,6 @@
 # =============================================================================
+# RocketRide Engine
+# =============================================================================
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 #
@@ -21,12 +23,31 @@
 # SOFTWARE.
 # =============================================================================
 
-# ------------------------------------------------------------------------------
-# This class controls the data for each thread of the task
-# ------------------------------------------------------------------------------
-from .IGlobal import IGlobal
-from ai.common.store import StoreInstanceBase
+"""Base classes and driver interface for vector store nodes.
 
+``store_qdrant`` is the reference the IGlobal/IInstance abstraction was
+extracted from; the other ``store_*`` drivers still carry their own copies and
+migrate onto these bases one at a time. The store interface itself
+(``DocumentStoreBase``, ``getStore``) and the agent-tool mixin
+(``VectorStoreToolMixin``) live in ``document_store`` and are re-exported here so
+``from ai.common.store import ...`` keeps working after the module became a
+package.
+"""
 
-class IInstance(StoreInstanceBase):
-    IGlobal: IGlobal
+from .document_store import (
+    DocumentStoreBase,
+    VectorStoreToolMixin,
+    _normalize_vectordb_tool_input,
+    getStore,
+)
+from .store_global_base import StoreGlobalBase
+from .store_instance_base import StoreInstanceBase
+
+__all__ = [
+    'DocumentStoreBase',
+    'StoreGlobalBase',
+    'StoreInstanceBase',
+    'VectorStoreToolMixin',
+    '_normalize_vectordb_tool_input',
+    'getStore',
+]
