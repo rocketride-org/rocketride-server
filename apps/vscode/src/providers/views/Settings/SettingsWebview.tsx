@@ -64,8 +64,6 @@ export interface ConnectionGroupSettings {
 	/** Local engine settings (applies to local mode only). */
 	local: {
 		engineVersion: string;
-		debugOutput: boolean;
-		engineArgs: string;
 	};
 }
 
@@ -81,6 +79,10 @@ export interface SettingsData {
 	pipelineTtl: number;
 	/** Default trace verbosity for runs without a per-pipeline override. */
 	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
+	/** Additional command-line arguments passed to each pipeline task via `.use`. */
+	taskArguments: string;
+	/** Enable full debug output for pipeline tasks (--trace=debugOut via `.use` args). */
+	pipelineDebugOutput: boolean;
 	envVars?: Record<string, string>;
 	/** Auto-install RocketRide docs for detected coding agents. */
 	autoAgentIntegration: boolean;
@@ -461,7 +463,7 @@ export const Settings: React.FC = () => {
 			hasApiKey: false,
 			apiKey: '',
 			teamId: '',
-			local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+			local: { engineVersion: 'latest' },
 		},
 		deployment: {
 			connectionMode: null,
@@ -469,12 +471,14 @@ export const Settings: React.FC = () => {
 			hasApiKey: false,
 			apiKey: '',
 			teamId: '',
-			local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+			local: { engineVersion: 'latest' },
 		},
 		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
 		pipelineTtl: 900,
 		pipelineTraceLevel: 'summary',
+		taskArguments: '',
+		pipelineDebugOutput: false,
 		envVars: {},
 		autoAgentIntegration: true,
 		integrationCopilot: false,

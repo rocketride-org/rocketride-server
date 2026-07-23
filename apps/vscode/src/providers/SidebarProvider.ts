@@ -531,7 +531,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			await client.use({
 				pipeline: pipelineJson,
 				source: sourceId ?? '',
-				args: ConfigManager.getInstance().getEngineArgs('development'),
+				args: ConfigManager.getInstance().getTaskArgs(),
 				name: pipeName,
 			});
 		} catch (error) {

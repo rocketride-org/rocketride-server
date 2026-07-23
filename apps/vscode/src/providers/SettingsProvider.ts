@@ -283,8 +283,6 @@ export class SettingsProvider {
 				teamId: config.development.teamId,
 				local: {
 					engineVersion: config.development.local.engineVersion,
-					debugOutput: config.development.local.debugOutput,
-					engineArgs: config.development.local.engineArgs,
 				},
 			},
 			deployment: {
@@ -295,8 +293,6 @@ export class SettingsProvider {
 				teamId: config.deployment.teamId,
 				local: {
 					engineVersion: config.deployment.local.engineVersion,
-					debugOutput: config.deployment.local.debugOutput,
-					engineArgs: config.deployment.local.engineArgs,
 				},
 			},
 
@@ -305,6 +301,8 @@ export class SettingsProvider {
 			pipelineRestartBehavior: config.pipelineRestartBehavior,
 			pipelineTtl: config.pipelineTtl,
 			pipelineTraceLevel: config.pipelineTraceLevel,
+			taskArguments: config.taskArguments,
+			pipelineDebugOutput: config.pipelineDebugOutput,
 
 			// Integration settings
 			autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),

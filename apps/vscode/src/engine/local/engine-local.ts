@@ -139,23 +139,15 @@ export class EngineLocal extends EngineBackend {
 			await this.stopProcess();
 		}
 
-		// Build engine args from config — passed as a single string intentionally.
-		// The engine server handles OS-appropriate argument parsing on its side.
-		// DO NOT split/tokenize rawArgs into separate argv entries here.
-		const rawArgs = String(config.local.engineArgs || '').trim();
-		const effectiveArgs: string[] = [];
-		if (rawArgs) effectiveArgs.push(rawArgs);
-		if (config.local.debugOutput && !rawArgs.includes('--trace=')) {
-			effectiveArgs.push('--trace=debugOut');
-		}
-
+		// The engine process spawns with base args only. Task arguments and debug
+		// output are per-task settings passed via `.use` at execution time, not
+		// engine process flags.
 		const executablePath = this.installer.getExecutablePath();
 		const args = [
 			'--autoterm',        // Exit when VS Code closes (stdin monitoring)
 			'./ai/eaas.py',
 			'--host=localhost',
 			'--port=0',          // Dynamic port assignment
-			...effectiveArgs,
 		];
 
 		await this.spawnProcess(executablePath, args);

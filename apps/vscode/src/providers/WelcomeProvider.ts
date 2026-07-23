@@ -185,8 +185,6 @@ export class WelcomeProvider {
 					teamId: config.development.teamId,
 					local: {
 						engineVersion: config.development.local.engineVersion,
-						debugOutput: config.development.local.debugOutput,
-						engineArgs: config.development.local.engineArgs,
 					},
 				},
 				deployment: {
@@ -197,8 +195,6 @@ export class WelcomeProvider {
 					teamId: config.deployment.teamId,
 					local: {
 						engineVersion: config.deployment.local.engineVersion,
-						debugOutput: config.deployment.local.debugOutput,
-						engineArgs: config.deployment.local.engineArgs,
 					},
 				},
 				defaultPipelinePath: config.defaultPipelinePath,

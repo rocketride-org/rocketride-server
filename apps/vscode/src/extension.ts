@@ -81,18 +81,6 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 	const logger = getLogger();
 	const config = vscode.workspace.getConfiguration('rocketride');
 
-	// Migration 1: engineArgs array → string (v1.0.0 → v1.0.2)
-	const engineArgs = config.inspect<unknown>('engineArgs');
-	const migrateArgs = async (scope: vscode.ConfigurationTarget, value: unknown) => {
-		if (Array.isArray(value)) {
-			const joined = (value as string[]).join(' ');
-			await config.update('engineArgs', joined, scope);
-			logger.output(`${icons.info} Migrated rocketride.engineArgs from array to string (${scope === vscode.ConfigurationTarget.Global ? 'global' : 'workspace'})`);
-		}
-	};
-	if (engineArgs?.globalValue !== undefined) await migrateArgs(vscode.ConfigurationTarget.Global, engineArgs.globalValue);
-	if (engineArgs?.workspaceValue !== undefined) await migrateArgs(vscode.ConfigurationTarget.Workspace, engineArgs.workspaceValue);
-
 	// Migration 2: Remove old engine directory from extensionPath (v1.0.0 stored engine inside the extension folder)
 	const oldEngineDir = path.join(context.extensionPath, 'engine');
 	try {
@@ -111,15 +99,11 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 			['hostUrl', 'development.hostUrl'],
 			['developmentTeamId', 'development.teamId'],
 			['local.engineVersion', 'development.local.engineVersion'],
-			['local.debugOutput', 'development.local.debugOutput'],
-			['engineArgs', 'development.local.engineArgs'],
 			// Deployment
 			['deployTargetMode', 'deployment.connectionMode'],
 			['deployHostUrl', 'deployment.hostUrl'],
 			['deployTargetTeamId', 'deployment.teamId'],
 			['deploy.local.engineVersion', 'deployment.local.engineVersion'],
-			['deploy.local.debugOutput', 'deployment.local.debugOutput'],
-			['deployEngineArgs', 'deployment.local.engineArgs'],
 		];
 
 		for (const [oldKey, newKey] of keyMap) {

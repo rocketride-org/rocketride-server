@@ -294,7 +294,10 @@ const SettingRow: React.FC<{
 	}, []);
 
 	// ── Default hint appended to the description ──────────────────────────
-	const defaultHint = schema.default !== undefined && schema.default !== '' ? <span style={styles.rowDefaultHint}> Default: {String(schema.default)}</span> : null;
+	// Enum defaults show their friendly enumDescriptions label when declared
+	const defaultEnumIndex = schema.enum && schema.default !== undefined ? schema.enum.findIndex((opt) => String(opt) === String(schema.default)) : -1;
+	const defaultText = defaultEnumIndex >= 0 ? (schema.enumDescriptions?.[defaultEnumIndex] ?? String(schema.default)) : String(schema.default);
+	const defaultHint = schema.default !== undefined && schema.default !== '' ? <span style={styles.rowDefaultHint}> Default: {defaultText}</span> : null;
 
 	// ── Header: "<Section>: <Label>" + required badge ─────────────────────
 	const header = (
@@ -363,12 +366,15 @@ const SettingRow: React.FC<{
 			</div>
 		);
 	} else if (schema.enum) {
-		// Enum: dropdown of fixed choices
+		// Enum: dropdown of fixed choices — option text prefers the aligned
+		// enumDescriptions entry (friendly label) over the raw value. Numeric
+		// schemas store the selected value as a number, not its string form.
+		const coerceEnum = (raw: string): SettingValue => (schema.type === 'integer' || schema.type === 'number' ? Number(raw) : raw);
 		control = (
-			<select value={String(value ?? '')} onChange={(e) => onChange(key, e.target.value)} style={{ ...styles.control, cursor: 'pointer' }}>
-				{schema.enum.map((opt) => (
-					<option key={opt} value={opt}>
-						{opt}
+			<select value={String(value ?? '')} onChange={(e) => onChange(key, coerceEnum(e.target.value))} style={{ ...styles.control, cursor: 'pointer' }}>
+				{schema.enum.map((opt, i) => (
+					<option key={String(opt)} value={String(opt)}>
+						{schema.enumDescriptions?.[i] ?? String(opt)}
 					</option>
 				))}
 			</select>

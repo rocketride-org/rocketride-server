@@ -827,15 +827,16 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 			const project = document.pipeline;
 
-			// TTL and trace level are workspace settings; the host reads them here and
-			// passes them to the engine. There is no per-pipeline override.
+			// TTL, trace level, task arguments, and debug output are workspace
+			// settings; the host reads them here and passes them per task to the
+			// engine. There is no per-pipeline override.
 			const cfg = ConfigManager.getInstance().getConfig();
 
 			await client.use({
 				pipeline: project,
 				source: project.source,
 				pipelineTraceLevel: cfg.pipelineTraceLevel,
-				args: ConfigManager.getInstance().getEngineArgs('development'),
+				args: ConfigManager.getInstance().getTaskArgs(),
 				name,
 				// ttl comes straight from settings (0 = no timeout).
 				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
