@@ -23,13 +23,15 @@ pip install rocketride
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
-    async with RocketRideClient(uri="https://api.rocketride.ai", auth="my-key") as client:
-        result = await client.use(filepath="pipeline.pipe")
-        token = result["token"]
-        out = await client.send(token, "Hello, pipeline!", objinfo={"name": "input.txt"}, mimetype="text/plain")
+    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
+        result = await client.use(filepath='pipeline.pipe')
+        token = result['token']
+        out = await client.send(token, 'Hello, pipeline!', objinfo={'name': 'input.txt'}, mimetype='text/plain')
         print(out)
         await client.terminate(token)
+
 
 asyncio.run(main())
 ```
@@ -132,11 +134,11 @@ Raises `ValueError` if both `uri` and `ROCKETRIDE_URI` are empty or if `auth` is
 
 ```python
 client = RocketRideClient(
-    uri="https://api.rocketride.ai",
-    auth="my-key",
+    uri='https://api.rocketride.ai',
+    auth='my-key',
     persist=True,
     max_retry_time=300000,
-    on_connect_error=lambda msg: print("Connect error:", msg),
+    on_connect_error=lambda msg: print('Connect error:', msg),
     on_event=handle_event,
 )
 ```
@@ -153,10 +155,10 @@ client = RocketRideClient(
 **Example:**
 
 ```python
-async with RocketRideClient(uri="wss://api.rocketride.ai", auth=os.environ["ROCKETRIDE_APIKEY"]) as client:
-    result = await client.use(filepath="pipeline.pipe")
-    token = result["token"]
-    await client.send(token, "Hello, pipeline!")
+async with RocketRideClient(uri='wss://api.rocketride.ai', auth=os.environ['ROCKETRIDE_APIKEY']) as client:
+    result = await client.use(filepath='pipeline.pipe')
+    token = result['token']
+    await client.send(token, 'Hello, pipeline!')
 ```
 
 ### Connection
@@ -182,14 +184,14 @@ async with RocketRideClient(uri="wss://api.rocketride.ai", auth=os.environ["ROCK
 
 ```python
 # Two-step (build then request)
-req = client.build_request("rrext_monitor", token=token, arguments={"types": ["apaevt_status_upload"]})
+req = client.build_request('rrext_monitor', token=token, arguments={'types': ['apaevt_status_upload']})
 res = await client.request(req, timeout=5000)
 
 # One-step with dap_request
-res = await client.dap_request("rrext_services", {}, timeout=5000)
+res = await client.dap_request('rrext_services', {}, timeout=5000)
 
 if client.did_fail(res):
-    raise RuntimeError(res.get("message", "Request failed"))
+    raise RuntimeError(res.get('message', 'Request failed'))
 ```
 
 ### Pipeline execution
@@ -215,13 +217,13 @@ if client.did_fail(res):
 **Example - send a string:**
 
 ```python
-result = await client.send(token, "Hello, pipeline!", objinfo={"name": "greeting.txt"}, mimetype="text/plain")
+result = await client.send(token, 'Hello, pipeline!', objinfo={'name': 'greeting.txt'}, mimetype='text/plain')
 ```
 
 **Example - stream with a pipe:**
 
 ```python
-pipe = await client.pipe(token, mime_type="application/json")
+pipe = await client.pipe(token, mime_type='application/json')
 await pipe.open()
 await pipe.write(b'{"key": "value1"}')
 await pipe.write(b'{"key": "value2"}')
@@ -356,14 +358,14 @@ from rocketride.core.exceptions import PipeException, ExecutionException
 
 try:
     async with RocketRideClient(uri=uri, auth=auth) as client:
-        result = await client.use(filepath="pipeline.pipe")
-        await client.send(result["token"], data)
+        result = await client.use(filepath='pipeline.pipe')
+        await client.send(result['token'], data)
 except AuthenticationException:
-    print("Bad credentials")
+    print('Bad credentials')
 except ExecutionException as e:
-    print(f"Pipeline failed: {e}")
+    print(f'Pipeline failed: {e}')
 except PipeException as e:
-    print(f"Data transfer error: {e}")
+    print(f'Data transfer error: {e}')
 ```
 
 ---
@@ -376,15 +378,17 @@ except PipeException as e:
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
-    client = RocketRideClient(uri="https://api.rocketride.ai", auth="my-key")
+    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
     await client.connect()
-    result = await client.use(filepath="pipeline.pipe")
-    token = result["token"]
-    out = await client.send(token, "Hello, pipeline!", objinfo={"name": "input.txt"}, mimetype="text/plain")
+    result = await client.use(filepath='pipeline.pipe')
+    token = result['token']
+    out = await client.send(token, 'Hello, pipeline!', objinfo={'name': 'input.txt'}, mimetype='text/plain')
     print(out)
     await client.terminate(token)
     await client.disconnect()
+
 
 asyncio.run(main())
 ```
@@ -395,14 +399,16 @@ asyncio.run(main())
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
-    async with RocketRideClient(uri="wss://api.rocketride.ai", auth="my-key") as client:
-        result = await client.use(pipeline={"pipeline": my_pipeline_config})
-        token = result["token"]
+    async with RocketRideClient(uri='wss://api.rocketride.ai', auth='my-key') as client:
+        result = await client.use(pipeline={'pipeline': my_pipeline_config})
+        token = result['token']
         await client.send(token, '{"data": 1}')
         status = await client.get_task_status(token)
         print(status)
         await client.terminate(token)
+
 
 asyncio.run(main())
 ```
@@ -413,19 +419,21 @@ asyncio.run(main())
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
     client = RocketRideClient(
-        uri="https://api.rocketride.ai",
-        auth="my-key",
+        uri='https://api.rocketride.ai',
+        auth='my-key',
         persist=True,
         max_retry_time=300000,
-        on_connected=lambda info: print("Connected:", info),
-        on_disconnected=lambda reason, has_error: print("Disconnected:", reason, has_error),
-        on_connect_error=lambda msg: print("Connect error:", msg),
-        on_event=lambda e: print(e.get("event"), e.get("body")),
+        on_connected=lambda info: print('Connected:', info),
+        on_disconnected=lambda reason, has_error: print('Disconnected:', reason, has_error),
+        on_connect_error=lambda msg: print('Connect error:', msg),
+        on_event=lambda e: print(e.get('event'), e.get('body')),
     )
     await client.connect()
     # Later: use(), send_files(), etc. If connection drops, client retries; do not call disconnect() in on_disconnected.
+
 
 asyncio.run(main())
 ```
@@ -437,29 +445,31 @@ import asyncio
 from pathlib import Path
 from rocketride import RocketRideClient
 
-async def main():
-    client = RocketRideClient(uri="https://api.rocketride.ai", auth="my-key")
-    await client.connect()
-    result = await client.use(filepath="vectorize.pipe")
-    token = result["token"]
-    await client.set_events(token, ["apaevt_status_upload", "apaevt_status_processing"])
 
-    files = ["doc1.md", "doc2.md", ("doc3.json", {"tag": "export"}, "application/json")]
+async def main():
+    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
+    await client.connect()
+    result = await client.use(filepath='vectorize.pipe')
+    token = result['token']
+    await client.set_events(token, ['apaevt_status_upload', 'apaevt_status_processing'])
+
+    files = ['doc1.md', 'doc2.md', ('doc3.json', {'tag': 'export'}, 'application/json')]
     upload_results = await client.send_files(files, token)
     for r in upload_results:
-        if r["action"] == "complete":
-            print("OK", r["filepath"])
+        if r['action'] == 'complete':
+            print('OK', r['filepath'])
         else:
-            print("Failed", r["filepath"], r.get("error"))
+            print('Failed', r['filepath'], r.get('error'))
 
     while True:
         status = await client.get_task_status(token)
-        print(f"Progress: {status.get('completedCount', 0)}/{status.get('totalCount', 0)}")
-        if status.get("completed"):
+        print(f'Progress: {status.get("completedCount", 0)}/{status.get("totalCount", 0)}')
+        if status.get('completed'):
             break
         await asyncio.sleep(2)
     await client.terminate(token)
     await client.disconnect()
+
 
 asyncio.run(main())
 ```
@@ -470,13 +480,14 @@ asyncio.run(main())
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
-    async with RocketRideClient(uri="https://api.rocketride.ai", auth="my-key") as client:
-        result = await client.use(filepath="ingest.pipe")
-        token = result["token"]
-        pipe = await client.pipe(token, objinfo={"name": "large.csv"}, mime_type="text/csv")
+    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
+        result = await client.use(filepath='ingest.pipe')
+        token = result['token']
+        pipe = await client.pipe(token, objinfo={'name': 'large.csv'}, mime_type='text/csv')
         await pipe.open()
-        with open("large.csv", "rb") as f:
+        with open('large.csv', 'rb') as f:
             while True:
                 chunk = f.read(64 * 1024)
                 if not chunk:
@@ -485,6 +496,7 @@ async def main():
         result = await pipe.close()
         print(result)
         await client.terminate(token)
+
 
 asyncio.run(main())
 ```
@@ -496,24 +508,26 @@ import asyncio
 from rocketride import RocketRideClient
 from rocketride.schema import Question, Answer
 
+
 async def main():
-    async with RocketRideClient(uri="https://api.rocketride.ai", auth="my-key") as client:
-        result = await client.use(filepath="chat_pipeline.pipe")
-        token = result["token"]
+    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
+        result = await client.use(filepath='chat_pipeline.pipe')
+        token = result['token']
         question = Question(expectJson=True)
-        question.addInstruction("Format", "Return a JSON object with keys: summary, keywords.")
-        question.addExample("Summarize X", {"summary": "...", "keywords": ["a", "b"]})
-        question.addQuestion("Summarize the main points and list keywords.")
+        question.addInstruction('Format', 'Return a JSON object with keys: summary, keywords.')
+        question.addExample('Summarize X', {'summary': '...', 'keywords': ['a', 'b']})
+        question.addQuestion('Summarize the main points and list keywords.')
         response = await client.chat(token=token, question=question)
-        answer_text = response.get("data", {}).get("answer") or (response.get("answers") or [None])[0]
+        answer_text = response.get('data', {}).get('answer') or (response.get('answers') or [None])[0]
         answer = Answer(expectJson=True)
-        answer.setAnswer(answer_text or "")
+        answer.setAnswer(answer_text or '')
         if answer.isJson():
             structured = answer.getJson()
         else:
             structured = answer.getText()
         print(structured)
         await client.terminate(token)
+
 
 asyncio.run(main())
 ```
@@ -524,19 +538,21 @@ asyncio.run(main())
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
-    client = RocketRideClient(uri="https://api.rocketride.ai", auth="my-key")
+    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
     await client.connect()
     services = await client.get_services()
-    print("Available:", list(services.keys()))
-    ocr = await client.get_service("ocr")
+    print('Available:', list(services.keys()))
+    ocr = await client.get_service('ocr')
     if ocr:
-        print("OCR schema:", ocr.get("schema"))
-    req = client.build_request("rrext_ping", token=my_token)
+        print('OCR schema:', ocr.get('schema'))
+    req = client.build_request('rrext_ping', token=my_token)
     res = await client.request(req, timeout=5000)
     if client.did_fail(res):
-        raise RuntimeError(res.get("message", "Ping failed"))
+        raise RuntimeError(res.get('message', 'Ping failed'))
     await client.disconnect()
+
 
 asyncio.run(main())
 ```

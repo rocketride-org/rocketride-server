@@ -71,6 +71,7 @@ async with RocketRideClient(auth='your-api-key') as client:
 
     # Send JSON data
     import json
+
     response = await client.send(
         token,
         json.dumps({'name': 'John', 'age': 30}),
@@ -172,9 +173,9 @@ async with RocketRideClient(auth='your-api-key') as client:
 
     for r in results:
         if r['action'] == 'complete':
-            print(f"Uploaded {r['filepath']} in {r['upload_time']:.2f}s")
+            print(f'Uploaded {r["filepath"]} in {r["upload_time"]:.2f}s')
         else:
-            print(f"Failed {r['filepath']}: {r['error']}")
+            print(f'Failed {r["filepath"]}: {r["error"]}')
 
     # With metadata and MIME types
     files = [
@@ -202,7 +203,8 @@ async def handle_events(event):
         body = event['body']
         if body['action'] == 'write':
             pct = (body['bytes_sent'] / body['file_size']) * 100
-            print(f"{body['filepath']}: {pct:.1f}%")
+            print(f'{body["filepath"]}: {pct:.1f}%')
+
 
 client = RocketRideClient(auth='your-api-key', on_event=handle_events)
 ```

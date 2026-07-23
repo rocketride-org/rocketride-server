@@ -282,6 +282,7 @@ standalone catalog nodes.
    from .IInstance import IInstance
    from .IGlobal import IGlobal
 
+
    # nodes/src/nodes/my_node/my_node.py
    class MyNode:
        def __init__(self, config):

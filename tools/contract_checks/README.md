@@ -139,19 +139,25 @@ Real examples from this repo:
 # nodes/src/nodes/llm_anthropic/anthropic.py — optional monkey-patch
 try:
     import langchain_core.utils.tokenization as _tok  # contract-check: ignore  optional monkey-patch path; outer except handles absence
+
     ...
 except Exception:
     pass
 
 # nodes/src/nodes/llm_mistral/IGlobal.py — falls back to built-in Exception
 try:
-    from mistralai.exceptions import MistralException  # contract-check: ignore  optional, falls back to built-in Exception
+    from mistralai.exceptions import (
+        MistralException,
+    )  # contract-check: ignore  optional, falls back to built-in Exception
 except Exception:
     MistralException = Exception
 
 # nodes/src/nodes/pinecone/IGlobal.py — moved between pinecone versions
 try:
-    from pinecone.core.client.exceptions import ApiException as _ApiException  # contract-check: ignore  optional, path moved between pinecone versions; outer handler covers absence
+    from pinecone.core.client.exceptions import (
+        ApiException as _ApiException,
+    )  # contract-check: ignore  optional, path moved between pinecone versions; outer handler covers absence
+
     ...
 except Exception:
     pass
@@ -282,7 +288,7 @@ MANIFEST = ComponentManifest(
     heavy_classes=(
         HeavyClass(
             qualname='somesdk.Client',
-            construct='Client(api_key="x")',     # MUST be side-effect-free
+            construct='Client(api_key="x")',  # MUST be side-effect-free
             attr_chains=(
                 'users.list',
                 'users.get',
@@ -372,11 +378,13 @@ For single imports, the inline `# contract-check: ignore` comment is usually a b
 Edit [`tools/contract_checks/src/contract_checks/trees.py`](src/contract_checks/trees.py) and append one `Tree` entry to `SCANNED_TREES`:
 
 ```python
-Tree(
-    name='my-new-tree',
-    root=REPO_ROOT / 'path' / 'to' / 'python' / 'source',
-    internal_packages=frozenset({'my_internal_package'}),
-),
+(
+    Tree(
+        name='my-new-tree',
+        root=REPO_ROOT / 'path' / 'to' / 'python' / 'source',
+        internal_packages=frozenset({'my_internal_package'}),
+    ),
+)
 ```
 
 No other change is needed, the CLI's tree iteration loop picks up the new entry automatically on the next run, and the install hook recursively finds every `requirement*.txt` under `root` on its own (no per-tree requirements config).

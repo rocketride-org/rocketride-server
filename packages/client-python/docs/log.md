@@ -34,9 +34,9 @@ async def main():
     # The DVR session — live + replay through one surface.
     session = client.log.open_event_stream('proj-1', 'chat_1', 'dev')
     await session.seek('live')
-    status = await session.get_status()          # state as of the position
-    console = await session.get_console(500)     # exactly what the console showed
-    traces = await session.get_traces(50)        # in-flight + last 50 closed
+    status = await session.get_status()  # state as of the position
+    console = await session.get_console(500)  # exactly what the console showed
+    traces = await session.get_traces(50)  # in-flight + last 50 closed
     await session.play(None, 0, lambda item: print(item['event']['event']))
 
     # Drill into one trace by its PERMANENT identity — the begin event's
