@@ -85,6 +85,139 @@ Error IServiceEndpoint::getPipeFilters(IPipeFilters &filters) noexcept {
 }
 
 //-------------------------------------------------------------------------
+/// @details
+///		Compute the deterministic order in which the pipeline's
+///		source-reachable components receive their lifecycle callbacks
+///		(open / closing / close).
+///
+///		The returned order is topological: every node appears after all of
+///		its upstream data parents. bindFilters walks closing/close in this
+///		order (upstream-first, so a node flushes only after ALL of its
+///		upstream parents have flushed) and open in the reverse.
+///
+///		Two phases, which MUST stay separate:
+///		  1. Reachability. BFS from the source (-1) over data edges to
+///		     collect the reachable set R. Control/invoke nodes, and any node
+///		     reachable ONLY through one, are deliberately absent from R:
+///		     those sub-pipelines are driven by their invoke node (e.g.
+///		     tool_pipe calling self.instance.open()/close()) through their
+///		     existing per-parent bindings, so they must NOT be relocated onto
+///		     the pipe head.
+///		  2. Kahn topological sort over R only. A node's in-degree counts
+///		     only parents that are themselves in R, so a node fed by BOTH a
+///		     source-reachable parent and a control node is ordered after its
+///		     reachable parent while the control edge is ignored. Ties are
+///		     broken by strict first-seen order, which pins the result so it
+///		     does not depend on hash-map iteration order.
+///
+///		Reachability is computed independently of the topo walk on purpose:
+///		a cycle inside R would leave its nodes un-emitted, and a "mark
+///		reachable as you emit" shortcut could not tell a real (reachable)
+///		cycle from a harmless unreachable one. Hence a cycle within R is an
+///		error, while a cycle confined to an unreachable region is out of
+///		scope and left alone (matching today's behavior for such graphs).
+///	@param[in]	connections
+///		The (fromIndex, toIndex, lane) data-connection table; fromIndex == -1
+///		is the pipeline source (the pipe head).
+///	@returns
+///		The reachable pipeStack indices in topological order, or
+///		Ec::InvalidParam if the source-reachable region contains a cycle.
+//-------------------------------------------------------------------------
+ErrorOr<std::vector<int>> computeLifecycleOrder(
+    const std::vector<std::tuple<int, int, std::string>> &connections) noexcept {
+    const int SOURCE = -1;
+
+    // Collect the graph once. nodeOrder keeps real node indices in first-seen
+    // order - that is the deterministic tie-break used by the Kahn walk below.
+    // adj/edges are deduped so multiple lanes between the same pair count as a
+    // single dependency (and so a node is emitted exactly once).
+    std::vector<int> nodeOrder;
+    std::unordered_set<int> nodeSeen;
+    std::unordered_map<int, std::vector<int>> adj;
+    std::set<std::pair<int, int>> edgeSeen;
+    std::vector<std::pair<int, int>> edges;
+
+    // The source (-1) is the walk driver, not a walked node, so never record it
+    auto seeNode = localfcn(int id) {
+        if (id == SOURCE) return;
+        if (nodeSeen.insert(id).second) nodeOrder.push_back(id);
+    };
+
+    for (const auto &conn : connections) {
+        int from = std::get<0>(conn);
+        int to = std::get<1>(conn);
+        seeNode(from);
+        seeNode(to);
+
+        // Multiple lanes between the same pair are a single dependency
+        if (!edgeSeen.insert({from, to}).second) continue;
+        adj[from].push_back(to);
+        edges.push_back({from, to});
+    }
+
+    // Phase 1: reachability from the source over data edges. This set is
+    // exactly the nodes whose lifecycle bindFilters will relocate onto the
+    // pipe head; everything else keeps its per-parent binding untouched.
+    std::unordered_set<int> reachable;
+    std::vector<int> pending(adj[SOURCE].begin(), adj[SOURCE].end());
+    while (!pending.empty()) {
+        int node = pending.back();
+        pending.pop_back();
+        if (!reachable.insert(node).second) continue;
+        for (int to : adj[node]) pending.push_back(to);
+    }
+
+    // Phase 2: Kahn's topological sort over the reachable subgraph only.
+    // Seed the in-degree table with the reachable nodes, then count incoming
+    // edges - but skip edges from the source (a pre-satisfied root that is
+    // never emitted to decrement it) and edges from a non-reachable parent
+    // (a control node feeding a reachable join: that edge must not hold the
+    // join back, since the control node is never walked here).
+    std::unordered_map<int, int> inDegree;
+    for (int node : nodeOrder)
+        if (reachable.count(node)) inDegree[node] = 0;
+    for (const auto &edge : edges) {
+        if (edge.first == SOURCE) continue;
+        if (!reachable.count(edge.second)) continue;
+        if (!reachable.count(edge.first)) continue;
+        inDegree[edge.second]++;
+    }
+
+    std::vector<int> order;
+    std::unordered_set<int> emitted;
+    while (order.size() < reachable.size()) {
+        bool progressed = false;
+
+        // Emit the FIRST-SEEN node whose parents are all already emitted, then
+        // restart the scan. Scanning nodeOrder (not a hash set) is what makes
+        // the output deterministic for a given input.
+        for (int node : nodeOrder) {
+            if (!reachable.count(node) || emitted.count(node) || inDegree[node])
+                continue;
+
+            emitted.insert(node);
+            order.push_back(node);
+            for (int to : adj[node]) {
+                if (!reachable.count(to)) continue;
+                if (inDegree[to] > 0) inDegree[to]--;
+            }
+            progressed = true;
+            break;
+        }
+
+        // No emittable node but R not exhausted => a cycle among reachable
+        // nodes (a cycle in an unreachable region never entered R, so it does
+        // not trip this).
+        if (!progressed)
+            return APERR(Ec::InvalidParam,
+                         "Cycle detected in the source-reachable pipeline "
+                         "connections");
+    }
+
+    return order;
+}
+
+//-------------------------------------------------------------------------
 /// @brief Creates a connection table mapping indices of components in the list
 /// to their
 ///        dependencies and associated lanes.
@@ -92,7 +225,9 @@ Error IServiceEndpoint::getPipeFilters(IPipeFilters &filters) noexcept {
 /// This function processes the connections array, looks up the "from" and "to"
 /// IDs in the components list to determine their indices, and stores a mapping
 /// of these indices along with the connection lane. It enables quick access to
-/// dependency relationships.
+/// dependency relationships. It also derives the lifecycle walk order from the
+/// finished connection table (see computeLifecycleOrder) so that a cycle in the
+/// reachable graph is reported here, at beginEndpoint, rather than later.
 ///
 /// std::vector<std::tuple<int, int, std::string>> A vector of tuples, where
 /// each tuple
@@ -108,8 +243,10 @@ Error IServiceEndpoint::buildConnections() noexcept {
     // If we are not in pipeline mode, done
     if (!isPipeline()) return {};
 
-    // Reset our connections list
+    // Reset the connection table and the derived lifecycle order (recomputed
+    // from the fresh connections at the end of this function)
     connections.clear();
+    lifecycleOrder.clear();
 
     // If no connections are provided, return early
     auto &components = config.pipeline.components();
@@ -215,6 +352,13 @@ Error IServiceEndpoint::buildConnections() noexcept {
             }
         }
     }
+
+    // Compute the deterministic lifecycle walk order (upstream-first over the
+    // source-reachable data DAG). Done here so a cycle surfaces at
+    // beginEndpoint, and bindFilters stays allocation-free per pipe.
+    auto order = computeLifecycleOrder(connections);
+    if (!order) return order.ccode();
+    lifecycleOrder = _mv(*order);
 
     // And done
     return {};

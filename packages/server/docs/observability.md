@@ -167,6 +167,13 @@ component's entry and exit with its lane data and any error.
 `trace` is free-form and varies by node and trace level, store it as JSON, don't
 flatten it.
 
+The lifecycle lanes (`open`, `closing`, `close`) are dispatched from the pipe head in
+dependency order — `closing`/`close` upstream-first, `open` downstream-first — so their
+`enter`/`leave` frames appear as siblings under the head rather than nested per branch.
+`enter`/`leave` pairs still balance; pair them by `component` identity, not by nesting
+depth. Data-lane writes emitted while a component flushes still nest inside that
+component's `closing` frame.
+
 ### `apaevt_sse`: node-to-UI messages
 
 Nodes call `monitorSSE(pipe_id, type, data)` to broadcast custom updates

@@ -430,6 +430,20 @@ Example:
 }
 ```
 
+#### Lifecycle guarantee (open / flush / close)
+
+Each component runs its lifecycle exactly once per object, in dependency order:
+
+- A component is **opened before any upstream component may emit to it** (including data
+  emitted during an upstream's own open).
+- A component is **flushed (`closing`) only after ALL of its upstream inputs have
+  flushed**, and closed after they close.
+
+This matters for a **merging (join)** component that buffers its inputs and emits on flush
+(for example an embedder or chunker that accumulates and writes on `closing`): it is
+guaranteed to receive every upstream branch's flush-time output before it flushes itself,
+so no branch is dropped regardless of the order components were added on the canvas.
+
 ### Rule 5: Lane Compatibility
 
 - The output lane type of one component must match the input lane type of the next

@@ -59,6 +59,25 @@ using IPipeFilters = std::vector<IPipeFilterType>;
 
 //-------------------------------------------------------------------------
 /// @details
+///		Compute the deterministic lifecycle (open/closing/close) walk order
+///		for a pipeline's data connections. `connections` is a list of
+///		(fromIndex, toIndex, lane) tuples where fromIndex == -1 is the
+///		pipeline source (the pipe head). Returns the pipeStack indices of
+///		every node reachable from the source via data edges, in topological
+///		order (upstream-first, deterministic first-seen tie-break). Nodes
+///		reachable only through a control/invoke node are excluded (they are
+///		driven by that node, e.g. tool_pipe, and keep their own binding).
+///	@param[in]	connections
+///		The endpoint's data connection table.
+///	@returns
+///		The ordered pipeStack indices, or Ec::InvalidParam if a cycle exists
+///		in the source-reachable region.
+//-------------------------------------------------------------------------
+ErrorOr<std::vector<int>> computeLifecycleOrder(
+    const std::vector<std::tuple<int, int, std::string>> &connections) noexcept;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Define the pipe stack we build
 //-------------------------------------------------------------------------
 struct IPipeType {
@@ -273,6 +292,19 @@ public:
     //		for the control/invoke function
     //-----------------------------------------------------------------
     std::vector<std::tuple<int, int, std::string>> controls;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The deterministic order in which the source-reachable
+    ///		components receive their lifecycle (open/closing/close). Each
+    ///		entry is a pipeStack index, ordered upstream-first (topological)
+    ///		so a node is flushed/closed only after all of its upstream data
+    ///		parents. `bindFilters` binds these onto the pipe head:
+    ///		closing/close forward, open reversed. Computed once in
+    ///		`buildConnections`; nodes reachable only through a control node
+    ///		are intentionally excluded (they keep their per-parent binding).
+    //-----------------------------------------------------------------
+    std::vector<int> lifecycleOrder;
 
     //-----------------------------------------------------------------
     /// @details
