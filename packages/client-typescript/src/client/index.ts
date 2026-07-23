@@ -48,3 +48,7 @@ export * from './client.js';
 
 // Export the database API namespace (DatabaseApi class, DatabaseDialect enum)
 export * from './database.js';
+
+// Export shared product telemetry — report(), the `telemetry` singleton, and
+// canonical events. Used by both the web shell and the VS Code extension.
+export * from './telemetry.js';

@@ -25,6 +25,7 @@ import Shell from './components/layout/Shell';
 import type { AppManifestEntry } from './workspace/types';
 import { buildShellConfig } from './createShellConfig';
 import { registerAndMapApps } from './lib/appLoader';
+import { initTelemetry } from './lib/telemetry';
 
 // =============================================================================
 // BOOTSTRAP
@@ -40,6 +41,10 @@ import { registerAndMapApps } from './lib/appLoader';
  * 5. Renders the Shell React tree.
  */
 async function main() {
+	// Initialise product telemetry early. No-op unless the public PostHog project
+	// key is provided via the build env (unset for OSS/local builds → disabled).
+	initTelemetry(process.env.ROCKETRIDE_POSTHOG_KEY);
+
 	// Read the server URI from the build-time env define
 	const serverUri = process.env.ROCKETRIDE_URI || 'localhost:5565';
 
