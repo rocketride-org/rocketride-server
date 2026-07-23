@@ -38,6 +38,32 @@ def _stop_kwargs() -> dict:
     return {'stop': stop} if stop else {}
 
 
+def _flatten_content(content: Any) -> str:
+    """Normalize an LLM response's ``content`` to plain answer text.
+
+    OpenAI-style providers return a ``str``; Anthropic (and LangChain v1) return a list
+    of typed blocks, where ``text`` blocks are the visible answer and ``thinking`` /
+    ``reasoning`` blocks are internal and must not leak into the answer. The non-streaming
+    path returned this list verbatim, so ``expectJson`` agent calls hit
+    ``parseJson(list)`` → ``.strip()`` and crashed; other agents surfaced the raw blocks.
+    This mirrors the block handling already applied on the streaming path in
+    ``chat_string`` and always yields a ``str``.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get('type') == 'text':
+                parts.append(block.get('text', '') or '')
+        return ''.join(parts)
+    if content is None:
+        return ''
+    return str(content)
+
+
 def _make_think_tag_splitter():
     """Split ``<think>...</think>`` CoT out of the content stream (Ollama, Perplexity).
 
@@ -242,8 +268,10 @@ class ChatBase:
         # so non-agent callers (and backends/mocks without a stop param) are unaffected.
         results = self._llm.invoke(prompt, **_stop_kwargs())
 
-        # Return the results
-        return results.content
+        # Return the results. Flatten typed-block content (Anthropic / LangChain v1) to a
+        # str — this path feeds parseJson() for expectJson agent calls, which would crash
+        # on a raw list.
+        return _flatten_content(results.content)
 
     def getTokens(self, value: str) -> int:
         """
@@ -497,8 +525,7 @@ class ChatBase:
             # the full fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
                 results = self._llm.invoke(prompt, **_stop_kwargs())
-                content = getattr(results, 'content', '') or ''
-                content_text = content if isinstance(content, str) else str(content)
+                content_text = _flatten_content(getattr(results, 'content', ''))
                 text_parts = [content_text]
                 # Push the fallback answer through on_chunk so the open UI bubble
                 # gets the visible text (the caller dedupes the final pipeline result).
@@ -717,8 +744,9 @@ class ChatBase:
                     answer.setAnswer(parsed_response)
                     return answer
 
-                except (json.JSONDecodeError, ValueError):
-                    # JSON parsing failed
+                except (json.JSONDecodeError, ValueError, AttributeError, TypeError):
+                    # JSON parsing failed (AttributeError/TypeError guard against a
+                    # non-str response reaching parseJson) — retry instead of killing the wave
                     if retry_count < max_retries - 1:
                         debug(f'JSON validation failed on attempt {retry_count + 1}, retrying...')
 
