@@ -40,13 +40,13 @@ class IGlobal(StoreGlobalBase):
     serverName: str = 'qdrant'
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
-        # Import store definition lazily so config mode never loads the driver.
+        """Return the driver's Store, imported lazily so config mode never loads the driver."""
         from .qdrant import Store
 
         return Store(logical_type, conn_config, bag)
 
     def _sub_key(self) -> str:
-        # Build the transform sub-key from the live store's endpoint info.
+        """Return the transform sub-key: host/port/collection."""
         collection = self.store.collection
         host = self.store.host
         port = self.store.port

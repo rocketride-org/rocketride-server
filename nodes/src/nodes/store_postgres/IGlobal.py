@@ -39,12 +39,13 @@ class IGlobal(StoreGlobalBase):
     serverName: str = 'postgres'
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
-        # Import store definition lazily so config mode never loads the driver.
+        """Return the driver's Store, imported lazily so config mode never loads the driver."""
         from .postgres import Store
 
         return Store(logical_type, conn_config, bag)
 
     def _sub_key(self) -> str:
+        """Return the transform sub-key: host/port/collection."""
         return f'{self.store.host}/{self.store.port}/{self.store.collection}'
 
     def _probe_connection(self, config: Dict[str, Any]) -> None:

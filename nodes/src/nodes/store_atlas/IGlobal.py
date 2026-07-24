@@ -35,13 +35,14 @@ class IGlobal(StoreGlobalBase):
     serverName: str = 'atlas'
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
-        # Store is resolved lazily via the package hook so config mode never loads the driver.
+        """Return the driver's Store, resolved lazily via the package hook so config mode never loads the driver."""
         from . import getStore
 
         Store = getStore()
         return Store(logical_type, conn_config, bag)
 
     def _sub_key(self) -> str:
+        """Return the transform sub-key: host/database/collection."""
         return f'{self.store.host}/{self.store.database}/{self.store.collection}'
 
     def _probe_connection(self, config: Dict[str, Any]) -> None:
@@ -73,7 +74,10 @@ class IGlobal(StoreGlobalBase):
             # Basic MongoDB URI format validation using regex
             mongodb_uri_pattern = r'^mongodb\+srv://[^:]+:[^@]+@[a-zA-Z0-9\-]+\.[a-zA-Z0-9]+\.mongodb\.net/\?.*'
             if not re.match(mongodb_uri_pattern, host):
-                warning("Host must be a valid MongoDB URI (e.g., 'mongodb+srv://cluster.example.mongodb.net')")
+                warning(
+                    'Host must be a valid MongoDB SRV URI '
+                    "(e.g., 'mongodb+srv://user:pass@cluster.abc12.mongodb.net/?retryWrites=true')"
+                )
                 return
 
             # Database name validation - format check only

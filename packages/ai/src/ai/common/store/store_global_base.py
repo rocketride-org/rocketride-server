@@ -113,6 +113,8 @@ class StoreGlobalBase(IGlobalTransform, ABC):
             self.serverName = resolved_name.strip()
 
         # Open the driver's store, then wire an optional embedder for the tool path.
+        # Pass the raw connConfig, not the merged cfg above: each driver's Store
+        # re-resolves it via Config.getNodeConfig, so the profile merge stays in one place.
         self.store = self._open_store(self.glb.logicalType, connConfig, bag)
         self._wire_embedding(connConfig, bag)
 

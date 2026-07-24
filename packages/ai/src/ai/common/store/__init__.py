@@ -37,7 +37,6 @@ package.
 from .document_store import (
     DocumentStoreBase,
     VectorStoreToolMixin,
-    _normalize_vectordb_tool_input,
     getStore,
 )
 from .store_global_base import StoreGlobalBase
@@ -48,6 +47,5 @@ __all__ = [
     'StoreGlobalBase',
     'StoreInstanceBase',
     'VectorStoreToolMixin',
-    '_normalize_vectordb_tool_input',
     'getStore',
 ]
