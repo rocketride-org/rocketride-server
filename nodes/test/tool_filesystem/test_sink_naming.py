@@ -61,7 +61,11 @@ def _install_stubs():
     module (present under ``./builder nodes:test``) is never clobbered.
     """
     rl = sys.modules.get('rocketlib') or types.ModuleType('rocketlib')
-    if not hasattr(rl, 'IInstanceBase'):
+    # Other node suites install their own bare ``rocketlib`` stubs (e.g. an
+    # empty ``IInstanceBase``); under xdist whichever ran first in the worker
+    # wins. Judge the base by capability, not presence: the real class and our
+    # stub both have ``preventDefault``, a foreign empty stub does not.
+    if not hasattr(getattr(rl, 'IInstanceBase', None), 'preventDefault'):
 
         class _IInstanceBase:
             def preventDefault(self):
@@ -281,7 +285,19 @@ def _sink_instance(
     # NB: ``name`` is a reserved MagicMock constructor kwarg, so assign after.
     current = MagicMock(hasName=has_name, objectId=object_id)
     current.name = name
+    # Concrete values for the fields the REAL pydantic DocMetadata pulls from
+    # the instance context (under ``./builder nodes:test`` the real
+    # ``ai.common.schema`` is importable and the stub steps aside).
+    current.path = name if has_name else str(object_id)
+    current.permissionId = 1
+    current.componentId = 'comp-test'
     inst.instance.currentObject = current
+    inst.IEndpoint = MagicMock()
+    inst.IEndpoint.endpoint.jobConfig = {'nodeId': 'test-node'}
+    # Pin the sentinel at instance level: the real base's preventDefault raises
+    # the engine control-flow exception, the stub returns the sentinel — tests
+    # must behave identically regardless of which base class won the import.
+    inst.preventDefault = lambda: 'PREVENT_DEFAULT'
     return inst
 
 
