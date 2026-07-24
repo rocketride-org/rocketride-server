@@ -61,6 +61,7 @@ of concerns through specialized command handler classes.
 
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
+from rocketlib import debug
 from rocketride import EVENT_TYPE
 from ai.common.dap import DAPConn, TransportBase
 from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
@@ -381,7 +382,16 @@ class TaskConn(
             return False
         try:
             perms = resolve_team_permissions(self._account_info, self._account_info.defaultTeam)
-        except PermissionError:
+        except PermissionError as exc:
+            # The session's defaultTeam is not resolvable inside account_info.organization
+            # (AccountInfo carries a single org). Deny — but never silently: without this
+            # line the caller sees a bare "Permission 'x' denied" and the real cause, an
+            # unresolvable default team, is invisible in the logs.
+            debug(
+                f'[auth] has_permission: cannot resolve defaultTeam '
+                f'{self._account_info.defaultTeam!r} for user {self._account_info.userId!r} '
+                f'-> denying {perm!r} ({exc})'
+            )
             return False
         if isinstance(perm, str):
             perm = [perm]
