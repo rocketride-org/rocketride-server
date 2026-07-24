@@ -218,9 +218,10 @@ channel; they have no data lanes and **bind to an agent** (see
 | ---------- | ------------------------------------------------- | -------------------------------------------- |
 | `webhook`  | _source → questions / tags / audio, image, text, video … | HTTP intake: chat, dropper, and ADS variants |
 | `telegram` | _source → audio, image, tags, text, video         | Telegram Bot message source                  |
+| `confluence` | _source → text, table                           | Confluence Cloud space page source           |
 
 > Filesystem and cloud connector sources (Google Drive, OneDrive, SharePoint,
-> Slack, Confluence, SMB, S3, Azure Blob, GCS, …) are provided by the **`core`**
+> Slack, SMB, S3, Azure Blob, GCS, …) are provided by the **`core`**
 > module (see [Core module](#core-module)).
 
 ### Memory
