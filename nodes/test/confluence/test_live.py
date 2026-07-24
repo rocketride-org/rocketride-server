@@ -13,8 +13,8 @@ modified, or deleted in the target space.
     export CONFLUENCE_LIVE_TESTS=1
     export CONFLUENCE_BASE_URL=https://yoursite.atlassian.net/wiki
     export CONFLUENCE_EMAIL=you@yoursite.com
-    export CONFLUENCE_API_TOKEN=<your API token>
-    export CONFLUENCE_SPACE_KEY=<a space key you can read, e.g. ENG>
+    export CONFLUENCE_API_TOKEN='your-api-token'
+    export CONFLUENCE_SPACE_KEY='ENG'  # a space key you can read
     pytest nodes/test/confluence/test_live.py -v
 
 CONFLUENCE_LIVE_TESTS=1 is a deliberate second gate on top of the connection
