@@ -45,9 +45,14 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from rocketlib import Entry, IInstanceBase, tool_function
+from rocketlib import IInstanceBase, tool_function
+
+if TYPE_CHECKING:
+    # Annotation-only (PEP 563 lazy annotations): keeps minimal test stubs of
+    # ``rocketlib`` (which predate ``Entry``) importable at runtime.
+    from rocketlib import Entry
 
 from ai.common.utils import optional_str, require_dict, require_str
 
