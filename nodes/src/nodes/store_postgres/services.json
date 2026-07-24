@@ -13,13 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["store"],
+	"classType": ["store", "tool"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
 	//     engine
 	//
-	"capabilities": [],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -142,7 +142,8 @@
 				"database": "rocketride",
 				"collection": "rocketride",
 				"score": 0.5,
-				"similarity": "cosine"
+				"similarity": "cosine",
+				"serverName": "postgres"
 			}
 		}
 	},
@@ -195,9 +196,16 @@
 			"default": "cosine",
 			"enum": ["cosine", "l2", "inner_product"]
 		},
+		"postgres.serverName": {
+			"type": "string",
+			"title": "Tool Server Name",
+			"description": "Namespace for agent-facing tool names, e.g. 'postgres' exposes tools as postgres.search / postgres.upsert / postgres.delete. Change this when running multiple Postgres nodes in the same pipeline so their tool names do not collide.",
+			"default": "postgres",
+			"minLength": 1
+		},
 		"postgres.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.local.user", "vector.local.password", "vector.local.database", "vector.collection", "vector.score", "vector.similarity"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.local.user", "vector.local.password", "vector.local.database", "vector.collection", "vector.score", "vector.similarity", "postgres.serverName"]
 		},
 		"postgres.profile": {
 			"hidden": true,

@@ -1,6 +1,6 @@
 # store_milvus
 
-A RocketRide store node that persists embedded documents in a Milvus vector database and retrieves them by semantic or keyword similarity search.
+A RocketRide store node that persists embedded documents in a Milvus vector database and retrieves them by semantic or keyword similarity search, and exposes search/upsert/delete as agent-callable tools.
 
 ## What it does
 
@@ -79,6 +79,20 @@ The auto-created collection has four fields:
 
 Indexes: an `IVF_FLAT` vector index (`nlist: 1024`) using the configured `similarity`
 metric, and an `STL_SORT` scalar index on `id`.
+
+---
+
+## Agent tools
+
+When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `milvus.search`, `milvus.upsert`, `milvus.delete`).
+
+| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
+| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
+| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
+
+Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
 
 ---
 

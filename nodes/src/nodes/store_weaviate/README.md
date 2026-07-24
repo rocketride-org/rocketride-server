@@ -1,6 +1,6 @@
 # store_weaviate
 
-A RocketRide store node that persists embedded document chunks in a Weaviate instance and retrieves them by semantic or keyword search.
+A RocketRide store node that persists embedded document chunks in a Weaviate instance and retrieves them by semantic or keyword search, and exposes search/upsert/delete as agent-callable tools.
 
 ## What it does
 
@@ -57,6 +57,20 @@ Each ingested chunk is stored with these properties alongside its vector: `conte
 | Your own Weaviate server   | `local` | `localhost`                      | `8080` |
 
 The preconfig default profile is `cloud`. The cloud profile exposes host, API key, score, and collection; the local profile exposes host, port, gRPC port, score, and collection.
+
+---
+
+## Agent tools
+
+When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `weaviate.search`, `weaviate.upsert`, `weaviate.delete`).
+
+| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
+| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
+| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
+
+Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
 
 ---
 

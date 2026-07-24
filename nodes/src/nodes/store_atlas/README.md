@@ -1,6 +1,6 @@
 # store_atlas
 
-A RocketRide vector store node that stores embedded document chunks in MongoDB Atlas and retrieves them by semantic or keyword search.
+A RocketRide vector store node that stores embedded document chunks in MongoDB Atlas and retrieves them by semantic or keyword search, and exposes search/upsert/delete as agent-callable tools.
 
 ## What it does
 
@@ -50,6 +50,20 @@ Raw scores are normalized to a `0-1` range before being returned. Cosine scores 
 Before inserting, any existing documents whose `meta.objectId` matches an incoming top-level chunk (chunkId of 0) are deleted, so re-ingesting a document replaces it rather than duplicating it. Inserts are batched: a batch is flushed at 500 documents or when its accumulated size exceeds `payloadLimit`. Each stored document gets a generated UUID `_id` and carries `embedding`, `content`, and the chunk metadata under `meta`.
 
 Documents can be marked deleted or active in place via `meta.isDeleted`. Filters exclude deleted documents by default. The node can also reassemble a full document from its chunks in `chunkId` order and stream the text to the `renderData` lane.
+
+---
+
+## Agent tools
+
+When wired to an agent, the node exposes three tools via `VectorStoreToolMixin`. Each tool is named `<serverName>.<tool>` (defaults: `atlas.search`, `atlas.upsert`, `atlas.delete`).
+
+| Tool     | Key inputs                                                                                                                            | Description                                                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `search` | `query` (required); `top_k` (default 10, max 100); `filter` (optional dict, keys `objectId`/`nodeId`/`parent` are honored)           | Semantic search over stored documents; returns content, metadata, and score per result. Falls back to keyword search if semantic search fails. |
+| `upsert` | `documents` array, each with `content` and `object_id`; optional `metadata`, `embedding`, and `embedding_model`                      | Add or update documents. Embeddings are computed automatically via the bound embedding provider, or pre-computed vectors can be supplied. |
+| `delete` | `object_ids` (non-empty string array)                                                                                                 | Hard-delete documents by object ID. Returns `deleted_count`.                                                             |
+
+Tool calls run on the control plane and do not flow through the pipeline's embedding lanes. Semantic search in the `search` tool and automatic embedding in `upsert` require an embedding provider bound to the node (the `all.embedding` block in its parameters). Without one, those calls return `{"success": false, "error": ...}`.
 
 ---
 
