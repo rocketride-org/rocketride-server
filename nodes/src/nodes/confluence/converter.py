@@ -74,11 +74,18 @@ def _table_to_markdown(table_tag) -> str:
         return ''
 
     header, *body = rows
-    width = len(header)
+    # Size columns from the widest row, not just the header — a body row with
+    # extra cells would otherwise be silently truncated with no way to
+    # recover that data (the source table is already removed from the text
+    # lane by the time this runs).
+    width = max(len(row) for row in rows)
+
+    def _escape(cell: str) -> str:
+        return cell.replace('\\', '\\\\').replace('|', '\\|').replace('\n', '<br>')
 
     def _render_row(cells: List[str]) -> str:
         padded = (cells + [''] * width)[:width]
-        return '| ' + ' | '.join(padded) + ' |'
+        return '| ' + ' | '.join(_escape(cell) for cell in padded) + ' |'
 
     lines = [_render_row(header), '| ' + ' | '.join(['---'] * width) + ' |']
     lines.extend(_render_row(row) for row in body)

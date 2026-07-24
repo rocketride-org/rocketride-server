@@ -162,16 +162,24 @@ class IEndpoint(IEndpointBase):
 
         entry = getObject(obj={'url': f'confluence://{space_key}/{page_id}', 'name': title})
         pipe = self.target.getPipe()
+        pipe_open = False
         try:
             pipe.open(entry)
+            pipe_open = True
             if text:
                 pipe.writeText(text)
             for table in tables:
                 pipe.writeTable(table)
             pipe.close()
+            pipe_open = False
             monitorCompleted(len(text.encode('utf-8')) if text else 0)
         except Exception as e:
             debug(f'Confluence: error emitting page {page_id} ({title!r}): {e}')
             monitorFailed(len(body_html.encode('utf-8')) if body_html else 0)
         finally:
+            if pipe_open:
+                try:
+                    pipe.close()
+                except Exception as close_error:
+                    debug(f'Confluence: failed to close pipe for page {page_id}: {close_error}')
             self.target.putPipe(pipe)

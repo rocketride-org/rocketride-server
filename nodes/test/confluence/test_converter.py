@@ -100,6 +100,26 @@ def test_ragged_row_is_padded_to_header_width():
     assert body_line == '| 1 |  |  |'
 
 
+def test_wider_body_row_is_not_truncated():
+    # A body row with MORE cells than the header must not silently lose data —
+    # the source table is already gone from the text lane by this point.
+    html = '<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td><td>3</td></tr></table>'
+    _, tables = converter.convert_storage_html(html)
+
+    lines = tables[0].splitlines()
+    # Width comes from the widest row (3), so the header pads out to match
+    # rather than the body row getting truncated down to the header's width.
+    assert lines[0] == '| A | B |  |'
+    assert lines[2] == '| 1 | 2 | 3 |'
+
+
+def test_pipe_and_backslash_in_cell_are_escaped():
+    html = '<table><tr><th>Note</th></tr><tr><td>a | b \\ c</td></tr></table>'
+    _, tables = converter.convert_storage_html(html)
+
+    assert '| a \\| b \\\\ c |' in tables[0]
+
+
 def test_table_with_no_rows_is_skipped():
     html = '<p>Text</p><table></table>'
     text, tables = converter.convert_storage_html(html)

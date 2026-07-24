@@ -10,11 +10,16 @@ Calls the real Confluence Cloud REST API v2 with an email + API token
 (Basic auth). Read-only: only GET requests are made, nothing is created,
 modified, or deleted in the target space.
 
+    export CONFLUENCE_LIVE_TESTS=1
     export CONFLUENCE_BASE_URL=https://yoursite.atlassian.net/wiki
     export CONFLUENCE_EMAIL=you@yoursite.com
     export CONFLUENCE_API_TOKEN=<your API token>
     export CONFLUENCE_SPACE_KEY=<a space key you can read, e.g. ENG>
     pytest nodes/test/confluence/test_live.py -v
+
+CONFLUENCE_LIVE_TESTS=1 is a deliberate second gate on top of the connection
+vars, so a shell that happens to have CONFLUENCE_* set for an unrelated
+reason doesn't silently make real API calls during a normal pytest run.
 """
 
 from __future__ import annotations
@@ -47,14 +52,15 @@ def _load(module_name: str, filename: str):
 client = _load('confluence_client_live', 'confluence_client.py')
 converter = _load('confluence_converter_live', 'converter.py')
 
+RUN_LIVE = os.getenv('CONFLUENCE_LIVE_TESTS') == '1'
 BASE_URL = os.getenv('CONFLUENCE_BASE_URL', '').rstrip('/')
 EMAIL = os.getenv('CONFLUENCE_EMAIL', '')
 API_TOKEN = os.getenv('CONFLUENCE_API_TOKEN', '')
 SPACE_KEY = os.getenv('CONFLUENCE_SPACE_KEY', '')
 
 pytestmark = pytest.mark.skipif(
-    not (BASE_URL and EMAIL and API_TOKEN and SPACE_KEY),
-    reason='CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN, and CONFLUENCE_SPACE_KEY must all be set',
+    not (RUN_LIVE and BASE_URL and EMAIL and API_TOKEN and SPACE_KEY),
+    reason='Set CONFLUENCE_LIVE_TESTS=1 plus CONFLUENCE_BASE_URL, CONFLUENCE_EMAIL, CONFLUENCE_API_TOKEN, and CONFLUENCE_SPACE_KEY to run',
 )
 
 

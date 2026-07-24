@@ -25,4 +25,10 @@ from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
+    """Global configuration for the Confluence node.
+
+    No shared state to initialize — IEndpoint reads its config directly from
+    serviceConfig per run, matching the telegram/webhook source nodes.
+    """
+
     pass

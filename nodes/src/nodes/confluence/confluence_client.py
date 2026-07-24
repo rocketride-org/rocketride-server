@@ -56,13 +56,33 @@ def extract_cursor(next_link: str) -> str:
     return values[0] if values else ''
 
 
+def resolve_space_id(session: requests.Session, base_url: str, space_key: str) -> str:
+    """Resolve a Confluence space key to its numeric space ID.
+
+    Confluence REST API v2 has no ``space-key`` filter on ``/api/v2/pages`` —
+    only the v1 API supported that. v2 requires the numeric space ID, so the
+    key must first be resolved via ``GET /api/v2/spaces?keys=<key>``.
+
+    Raises:
+        requests.RequestException: on a network failure or non-2xx response.
+        ValueError: if no space with that key is visible to this account.
+    """
+    response = session.get(f'{base_url}/api/v2/spaces', params={'keys': space_key}, timeout=REQUEST_TIMEOUT_SECONDS)
+    response.raise_for_status()
+    results = response.json().get('results', [])
+    if not results:
+        raise ValueError(f'no Confluence space found for key {space_key!r}')
+    return str(results[0]['id'])
+
+
 def iter_space_pages(session: requests.Session, base_url: str, space_key: str, limit: int) -> Iterator[Dict[str, Any]]:
     """Yield every page dict in the space, following cursor pagination.
 
-    Calls Confluence REST API v2's ``GET /api/v2/pages`` filtered by space
-    key, requesting storage-format bodies inline so no second request per
-    page is needed. Follows the ``_links.next`` cursor until the API stops
-    returning one.
+    Resolves the space key to a numeric space ID (see resolve_space_id), then
+    calls Confluence REST API v2's ``GET /api/v2/spaces/{id}/pages``,
+    requesting storage-format bodies inline so no second request per page is
+    needed. Follows the ``_links.next`` cursor until the API stops returning
+    one.
 
     Args:
         session: Pre-authenticated HTTP session (see build_session).
@@ -75,16 +95,21 @@ def iter_space_pages(session: requests.Session, base_url: str, space_key: str, l
 
     Raises:
         requests.RequestException: on a network failure or non-2xx response.
+        ValueError: if space_key doesn't resolve to a real space.
             Callers that need a run to continue past one bad page/request
             should catch around the loop, not inside this generator.
     """
+    space_id = resolve_space_id(session, base_url, space_key)
+
     cursor: Optional[str] = None
     while True:
-        params: Dict[str, Any] = {'space-key': space_key, 'limit': limit, 'body-format': 'storage'}
+        params: Dict[str, Any] = {'limit': limit, 'body-format': 'storage'}
         if cursor:
             params['cursor'] = cursor
 
-        response = session.get(f'{base_url}/api/v2/pages', params=params, timeout=REQUEST_TIMEOUT_SECONDS)
+        response = session.get(
+            f'{base_url}/api/v2/spaces/{space_id}/pages', params=params, timeout=REQUEST_TIMEOUT_SECONDS
+        )
         response.raise_for_status()
         payload = response.json()
 

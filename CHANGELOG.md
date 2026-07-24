@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### New Nodes
+
 - **Confluence**: source node that pulls every page from a configured Confluence Cloud space via the REST API v2, converting each page's storage-format body into text and table lanes for KB/wiki ingestion into pipelines (#1652)
 
 ## [3.3.0] - 2026-06-08

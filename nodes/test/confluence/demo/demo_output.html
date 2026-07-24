@@ -75,7 +75,7 @@
 <body>
 <div class="wrap">
   <h1>Confluence source node — demo output</h1>
-  <p class="sub">Real output from the RocketRide Confluence node, pulled from a live Confluence Cloud space (3 demo pages).</p>
+  <p class="sub">Real conversion output from the RocketRide Confluence node, run against a live Confluence Cloud space. The page content itself is synthetic fixture text written for this demo (fictional services, people, and channels) — no real organizational data.</p>
 
   <div class="flow">
     <div class="step">Confluence space</div>
@@ -100,11 +100,15 @@
     <div class="tables-wrap">
       <span class="lane-label">table lane</span>
       <table>
-        <tr><th>Service</th><th>Owner</th><th>Escalation</th></tr>
-        <tr><td>checkout-api</td><td>Priya Nair</td><td>#checkout-oncall</td></tr>
-        <tr><td>payments-gateway</td><td>Alex Chen</td><td>#payments-oncall</td></tr>
-        <tr><td>inventory-sync</td><td>Jordan Blake</td><td>#inventory-oncall</td></tr>
-        <tr><td>notifications</td><td>Sam Okafor</td><td>#platform-oncall</td></tr>
+        <thead>
+          <tr><th scope="col">Service</th><th scope="col">Owner</th><th scope="col">Escalation</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>checkout-api</td><td>Priya Nair</td><td>#checkout-oncall</td></tr>
+          <tr><td>payments-gateway</td><td>Alex Chen</td><td>#payments-oncall</td></tr>
+          <tr><td>inventory-sync</td><td>Jordan Blake</td><td>#inventory-oncall</td></tr>
+          <tr><td>notifications</td><td>Sam Okafor</td><td>#platform-oncall</td></tr>
+        </tbody>
       </table>
     </div>
   </div>
@@ -121,12 +125,16 @@
     <div class="tables-wrap">
       <span class="lane-label">table lane</span>
       <table>
-        <tr><th>Service</th><th>Language</th><th>Data store</th><th>Status</th></tr>
-        <tr><td>checkout-api</td><td>Go</td><td>Postgres</td><td>Active</td></tr>
-        <tr><td>payments-gateway</td><td>Java</td><td>Postgres</td><td>Active</td></tr>
-        <tr><td>inventory-sync</td><td>Python</td><td>Redis</td><td>Active</td></tr>
-        <tr><td>notifications</td><td>Node.js</td><td>DynamoDB</td><td>Active</td></tr>
-        <tr><td>legacy-billing</td><td>Python</td><td>MySQL</td><td>Deprecated</td></tr>
+        <thead>
+          <tr><th scope="col">Service</th><th scope="col">Language</th><th scope="col">Data store</th><th scope="col">Status</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>checkout-api</td><td>Go</td><td>Postgres</td><td>Active</td></tr>
+          <tr><td>payments-gateway</td><td>Java</td><td>Postgres</td><td>Active</td></tr>
+          <tr><td>inventory-sync</td><td>Python</td><td>Redis</td><td>Active</td></tr>
+          <tr><td>notifications</td><td>Node.js</td><td>DynamoDB</td><td>Active</td></tr>
+          <tr><td>legacy-billing</td><td>Python</td><td>MySQL</td><td>Deprecated</td></tr>
+        </tbody>
       </table>
     </div>
   </div>
@@ -144,11 +152,15 @@
     <div class="tables-wrap">
       <span class="lane-label">table lane</span>
       <table>
-        <tr><th>Severity</th><th>Definition</th><th>Response time</th></tr>
-        <tr><td>SEV-1</td><td>Full outage or data loss</td><td>Immediate</td></tr>
-        <tr><td>SEV-2</td><td>Major feature degraded</td><td>15 minutes</td></tr>
-        <tr><td>SEV-3</td><td>Minor feature degraded</td><td>1 business day</td></tr>
-        <tr><td>SEV-4</td><td>Cosmetic or low impact</td><td>Best effort</td></tr>
+        <thead>
+          <tr><th scope="col">Severity</th><th scope="col">Definition</th><th scope="col">Response time</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>SEV-1</td><td>Full outage or data loss</td><td>Immediate</td></tr>
+          <tr><td>SEV-2</td><td>Major feature degraded</td><td>15 minutes</td></tr>
+          <tr><td>SEV-3</td><td>Minor feature degraded</td><td>1 business day</td></tr>
+          <tr><td>SEV-4</td><td>Cosmetic or low impact</td><td>Best effort</td></tr>
+        </tbody>
       </table>
     </div>
   </div>

@@ -155,7 +155,21 @@ def test_emit_page_puts_pipe_back_even_on_write_failure():
     page = {'id': '9', 'title': 'Flaky', 'body': {'storage': {'value': '<p>content</p>'}}}
     ep._emit_page(page, 'ENG')
 
+    # A failed write must not leave the pipe open — close() is called in the
+    # cleanup path even though the happy-path pipe.close() was never reached.
+    pipe.close.assert_called_once()
     ep.target.putPipe.assert_called_once_with(pipe)
+
+
+def test_emit_page_does_not_double_close_on_success():
+    ep = _make_endpoint({})
+    pipe = MagicMock()
+    ep.target.getPipe.return_value = pipe
+
+    page = {'id': '10', 'title': 'Fine', 'body': {'storage': {'value': '<p>content</p>'}}}
+    ep._emit_page(page, 'ENG')
+
+    pipe.close.assert_called_once()
 
 
 if __name__ == '__main__':
