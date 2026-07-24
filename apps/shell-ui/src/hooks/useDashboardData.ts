@@ -54,6 +54,7 @@ const MAX_EVENTS = 200;
 
 let _data: DashboardResponse | null = null;
 let _events: ActivityEvent[] = [];
+let _error: string | null = null;
 let _refCount = 0;
 let _intervalId: ReturnType<typeof setInterval> | null = null;
 let _eventUnsub: (() => void) | null = null;
@@ -76,6 +77,8 @@ interface DashboardSnapshot {
 	data: DashboardResponse | null;
 	/** Activity events (newest first). */
 	events: ActivityEvent[];
+	/** Last fetch failure, or null when healthy. */
+	error: string | null;
 }
 
 // Explicitly annotated so control-flow analysis does not narrow the initial
@@ -83,11 +86,11 @@ interface DashboardSnapshot {
 // defined further down); without the annotation, the reassignment in `_emit`
 // below would not type-check. Runtime behavior is unchanged.
 /** Stable snapshot object — only replaced when data or events change. */
-let _snapshot: DashboardSnapshot = { data: _data, events: _events };
+let _snapshot: DashboardSnapshot = { data: _data, events: _events, error: _error };
 
 /** Notify all subscribed React components that data changed. */
 function _emit(): void {
-	_snapshot = { data: _data, events: _events };
+	_snapshot = { data: _data, events: _events, error: _error };
 	_listeners.forEach(fn => fn());
 }
 
@@ -111,10 +114,20 @@ function _fetchDashboard(): Promise<void> {
 			const dashboard = await client.getDashboard();
 			if (dashboard?.overview) {
 				_data = dashboard;
+				_error = null;
 				_emit();
 			}
 		} catch (err) {
+			// Surface the failure rather than only logging it. Swallowing it left
+			// `_data` null, and consumers render their loading state whenever data
+			// is null — so a permission denial was indistinguishable from a slow
+			// load and the view sat on "Loading..." forever (saas #373).
 			console.log('[useDashboardData] Dashboard fetch failed:', err);
+			const message = err instanceof Error ? err.message : String(err);
+			_error = /denied|permission|forbidden|403/i.test(message)
+				? `You do not have permission to view the dashboard. ${message}`
+				: message;
+			_emit();
 		} finally {
 			_fetchPromise = null;
 		}
@@ -182,6 +195,8 @@ export interface DashboardData {
 	data: DashboardResponse | null;
 	/** Activity events (newest first). */
 	events: ActivityEvent[];
+	/** Last fetch failure (e.g. a permission denial), or null when healthy. */
+	error: string | null;
 	/** Trigger a manual refresh. */
 	refresh: () => void;
 }
@@ -237,6 +252,7 @@ export function useDashboardData(): DashboardData {
 	return {
 		data: snapshot.data,
 		events: snapshot.events,
+		error: snapshot.error,
 		refresh,
 	};
 }
