@@ -36,6 +36,14 @@ from ai.common.llm_native_stream import build_anthropic_thinking_kwargs, gate_mo
 from langchain_anthropic import ChatAnthropic
 
 
+# Interim: extended thinking is disabled at the node until the normalized provider adapter
+# lands (RFC #1679). With thinking on, Anthropic returns typed content blocks (thinking + text)
+# that the agent / expectJson path cannot consume (incident #1658; flatten defense-in-depth in
+# #1659). We gate activation here rather than flipping capabilities.reasoning, because that flag
+# is stamped by tools/sync_models and re-stamps to true on the next sync. Flip back to re-enable.
+_EXTENDED_THINKING_ENABLED = False
+
+
 def _estimate_token_ids(text: str) -> list:
     """Estimate token ids at ~4 chars/token."""
     return [0] * max(1, (len(text) + 3) // 4)
@@ -77,7 +85,7 @@ class Chat(ChatBase):
             'max_tokens': self._modelOutputTokens,
             'custom_get_token_ids': _estimate_token_ids,
         }
-        if self._is_reasoning:
+        if self._is_reasoning and _EXTENDED_THINKING_ENABLED:
             kwargs.update(build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens))
 
         self._extended_thinking = bool(kwargs.get('thinking'))
