@@ -322,7 +322,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 						</div>
 						<div>
 							<div style={styles.sectionTitle}>
-								Slowest completions <span style={styles.sectionHint}>&mdash; server-tracked</span>
+								Slowest completions
 							</div>
 							<div style={styles.emptyHint}>The run&rsquo;s slowest completions land here, each opening its trace.</div>
 						</div>
@@ -432,7 +432,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 				</div>
 				<div>
 					<div style={styles.sectionTitle}>
-						Slowest completions <span style={styles.sectionHint}>&mdash; server-tracked</span>
+						Slowest completions
 					</div>
 					{slowest.length === 0 ? (
 						<div style={styles.emptyHint}>No completions recorded yet{componentRows.length === 0 ? ' — requires pipeline tracing' : ''}.</div>
