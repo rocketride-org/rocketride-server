@@ -617,17 +617,19 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					/>
 				);
 			case 'status':
-				// The landing report card. A brushed slice overrides the
-				// window the event-folded pieces (idle gaps) see; the header
-				// row names the slice and offers the way back.
+				// The landing report card. The card's numbers are the
+				// server-computed run analytics — ALWAYS run-scoped, never
+				// sliced — so a brushed selection only gets an honest label
+				// here (its real consumers are the chart/utilization views).
 				return (
 					<>
 						{selection && (
 							<div style={styles.sliceBar}>
 								<span>
-									Analyzing slice <b>{formatTime(selection.from)}</b> → <b>{formatTime(selection.to)}</b>
+									Slice <b>{formatTime(selection.from)}</b> → <b>{formatTime(selection.to)}</b>
 									{' · '}
 									{Math.max(1, Math.round(selection.to - selection.from))} s
+									{' — report card stays run-scoped'}
 								</span>
 								<Button variant="secondary" small onClick={() => setSelection(null)}>
 									Clear — back to track

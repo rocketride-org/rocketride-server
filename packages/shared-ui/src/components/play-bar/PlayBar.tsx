@@ -462,9 +462,6 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 	/** Strip x (px) -> epoch seconds. */
 	const timeAt = useCallback((x: number): number => position - (needleX - x) * secPerPx, [needleX, position, secPerPx]);
 
-	// The DVR is central chrome — always fully unfolded, never a hover-reveal.
-	const expanded = true;
-
 	// --- Interactions ---------------------------------------------------------
 
 	// Wheel zoom around the needle (non-passive listener: we preventDefault).
@@ -535,9 +532,8 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 		[timeAt, position, secPerPx, controller, onSelectionChange],
 	);
 
-	// ±30 s on arrow keys while the bar is open; Esc clears the selection.
+	// ±30 s on arrow keys; Esc clears the selection.
 	useEffect(() => {
-		if (!expanded) return;
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key === 'ArrowLeft') controller.skip(-SKIP_SECONDS);
 			else if (e.key === 'ArrowRight') controller.skip(SKIP_SECONDS);
@@ -545,7 +541,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 		};
 		window.addEventListener('keydown', onKey);
 		return () => window.removeEventListener('keydown', onKey);
-	}, [expanded, controller, selection, onSelectionChange]);
+	}, [controller, selection, onSelectionChange]);
 
 	/** Jump to a chapter from the menu and frame it at a comfortable zoom. */
 	const jumpToChapter = useCallback(
@@ -570,7 +566,6 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 
 	// Ruler ticks for the visible span.
 	const ticks = useMemo(() => {
-		if (!expanded) return [];
 		const step = tickStep(secPerPx);
 		const leftTime = timeAt(0);
 		const rightTime = Math.min(nowSec, timeAt(stripWidth));
@@ -584,7 +579,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 			out.push({ x, label, isDate });
 		}
 		return out;
-	}, [expanded, secPerPx, timeAt, xOf, stripWidth, nowSec]);
+	}, [secPerPx, timeAt, xOf, stripWidth, nowSec]);
 
 	// Chapter menu entries, newest first, grouped by day.
 	// Chapters normalized for display: only the NEWEST chapter may be
@@ -636,7 +631,6 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 			{/* Chrome row — always visible: the DVR is central chrome, live
 			    and replay alike (live still slims the row to pause + clock,
 			    since stepping means nothing at the live head). */}
-			{expanded && (
 			<div style={styles.chrome}>
 				{/* Live means playing by definition — the button is simply Pause
 				    (pressing it freezes the position and drops out of live). */}
@@ -700,29 +694,50 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 					{'<<'}
 				</Button>
 				<div ref={jumpRef} style={{ position: 'relative', display: 'inline-flex' }}>
-					<Button variant="ghost" small onClick={() => setJumpOpen((open) => !open)} title="Jump amount for << and >>">
+					<Button
+						variant="ghost"
+						small
+						onClick={() => setJumpOpen((open) => !open)}
+						title="Jump amount for << and >>"
+						ariaExpanded={jumpOpen}
+					>
 						<span style={styles.timeButton}>
 							{jumpLabel}
 							<span style={styles.timeCaret}>▼</span>
 						</span>
 					</Button>
 					{jumpOpen && jumpPos && (
-						<div style={{ ...styles.speedMenu, top: jumpPos.top, left: jumpPos.left, transform: jumpPos.up ? 'translateY(-100%)' : undefined }}>
-							{JUMP_STEPS.map((step) => (
-								<div
-									key={step.key}
-									style={styles.speedItem}
-									onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
-									onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-									onClick={() => {
-										setJumpStep(step.key);
-										setJumpOpen(false);
-									}}
-								>
-									<span style={styles.speedDot}>{jumpStep === step.key ? '●' : ''}</span>
-									{step.label}
-								</div>
-							))}
+						<div
+							role="menu"
+							style={{ ...styles.speedMenu, top: jumpPos.top, left: jumpPos.left, transform: jumpPos.up ? 'translateY(-100%)' : undefined }}
+						>
+							{JUMP_STEPS.map((step) => {
+								const select = () => {
+									setJumpStep(step.key);
+									setJumpOpen(false);
+								};
+								return (
+									<div
+										key={step.key}
+										role="menuitemradio"
+										aria-checked={jumpStep === step.key}
+										tabIndex={0}
+										style={styles.speedItem}
+										onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
+										onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
+										onClick={select}
+										onKeyDown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												select();
+											}
+										}}
+									>
+										<span style={styles.speedDot}>{jumpStep === step.key ? '●' : ''}</span>
+										{step.label}
+									</div>
+								);
+							})}
 						</div>
 					)}
 				</div>
@@ -790,9 +805,8 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 					{secPerPx < 60 ? `1px = ${secPerPx.toFixed(1)}s` : `1px = ${(secPerPx / 60).toFixed(1)}m`}
 				</span>
 			</div>
-			)}
 
-			{/* The strip: thin ribbon at rest, full lane when engaged. */}
+			{/* The strip — the full lane, always. */}
 			<div
 				ref={stripRef}
 				style={{ ...styles.strip, height: STRIP_EXPANDED, cursor: dragging ? 'grabbing' : 'grab' }}

@@ -48,6 +48,11 @@ export interface IButtonProps {
 	 * as `aria-pressed`; visual selection is conveyed by the variant.
 	 */
 	pressed?: boolean;
+	/**
+	 * ARIA expanded state for dropdown-trigger usage — rendered as
+	 * `aria-expanded` so assistive tech knows the popup's open state.
+	 */
+	ariaExpanded?: boolean;
 }
 
 // =============================================================================
@@ -148,7 +153,7 @@ const VARIANT_STYLES: Record<ButtonVariant, CSSProperties> = {
  * @param props - {@link IButtonProps}.
  * @returns The button element.
  */
-export function Button({ variant = 'primary', small, mini, disabled, onClick, children, title, pressed }: IButtonProps): React.ReactElement {
+export function Button({ variant = 'primary', small, mini, disabled, onClick, children, title, pressed, ariaExpanded }: IButtonProps): React.ReactElement {
 	// Compose base + variant colour + optional size (mini wins over small) +
 	// the quiet ghost-small weight + optional disabled modifier.
 	const style: CSSProperties = {
@@ -161,7 +166,7 @@ export function Button({ variant = 'primary', small, mini, disabled, onClick, ch
 	};
 
 	return (
-		<button type="button" style={style} onClick={onClick} disabled={disabled} title={title} aria-pressed={pressed}>
+		<button type="button" style={style} onClick={onClick} disabled={disabled} title={title} aria-pressed={pressed} aria-expanded={ariaExpanded}>
 			{children}
 		</button>
 	);

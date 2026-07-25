@@ -439,12 +439,26 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 					) : (
 						slowest.map((doc) => {
 							const clickable = onOpenTrace && doc.beginSeq != null;
+							// One activation path for mouse AND keyboard.
+							const open = clickable ? () => onOpenTrace(doc.beginSeq as number, doc.name || 'completion') : undefined;
 							return (
 								<div
 									key={`${doc.beginSeq ?? doc.beginTime}`}
 									style={clickable ? { ...styles.slowRow, ...styles.slowRowClickable } : styles.slowRow}
 									title={clickable ? 'Open this completion’s trace' : undefined}
-									onClick={clickable ? () => onOpenTrace(doc.beginSeq as number, doc.name || 'completion') : undefined}
+									role={clickable ? 'button' : undefined}
+									tabIndex={clickable ? 0 : undefined}
+									onClick={open}
+									onKeyDown={
+										open
+											? (e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														open();
+													}
+												}
+											: undefined
+									}
 								>
 									<span style={styles.slowDot} />
 									<span style={styles.slowTime}>{formatClock(doc.beginTime)}</span>

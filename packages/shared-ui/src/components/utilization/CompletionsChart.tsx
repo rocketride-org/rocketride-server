@@ -152,11 +152,11 @@ export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, 
 			return dataPoints;
 		}
 
-		const ranges: Record<TimeRange, number> = {
+		// 'all' already returned above, so the map only covers bounded ranges.
+		const ranges: Record<Exclude<TimeRange, 'all'>, number> = {
 			'1min': 60,
 			'5min': 300,
 			'15min': 900,
-			all: dataPoints.length,
 		};
 
 		const pointsToShow = ranges[timeRange];
@@ -405,6 +405,10 @@ export const CompletionsChart: React.FC<CompletionsChartProps> = ({ dataPoints, 
 					chartInstanceRef.current.destroy();
 				} catch (error) {
 					console.error('Failed to destroy chart:', error);
+				} finally {
+					// Always drop the ref — a later effect must never call
+					// update() on a destroyed (or half-destroyed) instance.
+					chartInstanceRef.current = null;
 				}
 			}
 		};
