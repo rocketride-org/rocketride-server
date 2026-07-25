@@ -33,6 +33,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ai.constants import CONST_STATUS_HISTORY_LIMIT
 from ai.modules.task.task_engine import Task
 
 
@@ -477,10 +478,10 @@ def test_update_status_error_event_appends_to_errors():
     assert t._status.errors == ['disk full']
 
 
-def test_update_status_errors_buffer_trims_to_50():
-    """Error buffer keeps only the most recent 50 entries."""
+def test_update_status_errors_buffer_trims_to_limit():
+    """Error buffer keeps only the most recent CONST_STATUS_HISTORY_LIMIT entries."""
     t = _task(status=_make_status_for_update())
-    t._status.errors = [f'err-{i}' for i in range(50)]
+    t._status.errors = [f'err-{i}' for i in range(CONST_STATUS_HISTORY_LIMIT)]
     Task._update_status(
         t,
         {
@@ -488,13 +489,13 @@ def test_update_status_errors_buffer_trims_to_50():
             'body': {'message': 'err-new'},
         },
     )
-    assert len(t._status.errors) == 50
+    assert len(t._status.errors) == CONST_STATUS_HISTORY_LIMIT
     assert t._status.errors[-1] == 'err-new'
     assert 'err-0' not in t._status.errors  # oldest evicted
 
 
 def test_update_status_warning_event_appends_and_trims():
-    """An ``apaevt_status_warning`` event appends to warnings with the same 50-cap."""
+    """An ``apaevt_status_warning`` event appends to warnings with the same history cap."""
     t = _task(status=_make_status_for_update())
     Task._update_status(
         t,

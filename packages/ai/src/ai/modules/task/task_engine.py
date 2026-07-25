@@ -50,6 +50,7 @@ from ai.constants import (
     CONST_READY_POLL_INTERVAL,
     CONST_SUBPROCESS_BUFFER_LIMIT,
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
+    CONST_STATUS_HISTORY_LIMIT,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
@@ -1143,16 +1144,16 @@ class Task(DAPBase):
             error_message = body.get('message', '')
             self._status.errors.append(error_message)
 
-            if len(self._status.errors) > 50:
-                self._status.errors = self._status.errors[-50:]
+            if len(self._status.errors) > CONST_STATUS_HISTORY_LIMIT:
+                self._status.errors = self._status.errors[-CONST_STATUS_HISTORY_LIMIT:]
 
         # Handle warning messages with buffer management
         elif event_type == 'apaevt_status_warning':
             warning_message = body.get('message', '')
             self._status.warnings.append(warning_message)
 
-            if len(self._status.warnings) > 50:
-                self._status.warnings = self._status.warnings[-50:]
+            if len(self._status.warnings) > CONST_STATUS_HISTORY_LIMIT:
+                self._status.warnings = self._status.warnings[-CONST_STATUS_HISTORY_LIMIT:]
 
         # Handle download progress
         elif event_type == 'apaevt_status_download':
