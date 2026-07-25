@@ -124,9 +124,27 @@ function _fetchDashboard(): Promise<void> {
 			// load and the view sat on "Loading..." forever (saas #373).
 			console.log('[useDashboardData] Dashboard fetch failed:', err);
 			const message = err instanceof Error ? err.message : String(err);
-			_error = /denied|permission|forbidden|403/i.test(message)
-				? `You do not have permission to view the dashboard. ${message}`
+			const denied = /denied|permission|forbidden|403/i.test(message);
+			// The raw message already says "permission denied" in the case we most
+			// want to explain, so prefixing it produced "You do not have permission
+			// to view the dashboard. Permission denied". Replace it instead of
+			// appending — the verbatim text stays in the console line above for
+			// anyone debugging.
+			_error = denied
+				? 'You do not have permission to view the dashboard.'
 				: message;
+			// Deliberate: `_data` is NOT cleared on a transient failure. A poll that
+			// blips should leave the last good numbers on screen with an error
+			// alongside them, not blank the dashboard every time the network hiccups
+			// — going empty on each failed poll would be its own bug.
+			//
+			// A denial is different. It means this user is not entitled to these
+			// numbers, and continuing to display a previous session's data under an
+			// "access denied" banner is both confusing and the wrong default for
+			// something access-scoped. So clear it in that case only.
+			if (denied) {
+				_data = null;
+			}
 			_emit();
 		} finally {
 			_fetchPromise = null;
