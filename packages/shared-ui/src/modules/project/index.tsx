@@ -30,5 +30,5 @@ export type {
 } from './hooks/useTaskEvents';
 export { LogPane } from './components/LogPane';
 export type { ILogPaneProps } from './components/LogPane';
-export { AnalyzePane } from './components/AnalyzePane';
-export type { IAnalyzePaneProps } from './components/AnalyzePane';
+export { StatusPane } from './components/StatusPane';
+export type { IStatusPaneProps } from './components/StatusPane';

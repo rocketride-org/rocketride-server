@@ -90,6 +90,8 @@ from .pipeline import (
 from .task import (
     TASK_STATUS,
     TASK_STATE,
+    TASK_STATUS_COMPONENT_STAT,
+    TASK_STATUS_SLOWEST_DOC,
     TASK_STATUS_FLOW,
     TASK_TOKENS,
     TASK_METRICS,
@@ -223,6 +225,8 @@ __all__ = [
     'PipelineComponent',
     'PipelineConfig',
     # Task types
+    'TASK_STATUS_COMPONENT_STAT',
+    'TASK_STATUS_SLOWEST_DOC',
     'TASK_STATUS',
     'TASK_STATE',
     'TASK_STATUS_FLOW',

@@ -50,12 +50,20 @@ from ai.constants import (
     CONST_READY_POLL_INTERVAL,
     CONST_SUBPROCESS_BUFFER_LIMIT,
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
+    CONST_ANALYTICS_SLOWEST_DOCS,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
-from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
+from rocketride import (
+    TASK_STATUS,
+    TASK_STATUS_FLOW,
+    TASK_STATUS_COMPONENT_STAT,
+    TASK_STATUS_SLOWEST_DOC,
+    TASK_STATE,
+    EVENT_TYPE,
+)
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
 from .pipeline import resolve_pipeline_env
@@ -302,6 +310,26 @@ class Task(DAPBase):
 
         # Synchronization
         self._last_event_time = time.time()
+
+        # Run analytics accumulators (componentStats / slowestDocs in the
+        # status body). THE PIPE ID IS THE CORRELATION KEY: concurrent
+        # completions run the same component on different pipes and their
+        # begins/ends interleave (BEGIN[parse]:0, BEGIN[parse]:32,
+        # END[parse]:0, END[parse]:32) — keying by component would clobber
+        # one pipe's begin with another's. Aggregation rolls up by component
+        # AFTER correlation happened by pipe.
+        self._an_open_by_pipe: Dict[Any, Dict[str, Any]] = {}
+        self._an_component_open: Dict[Any, List[float]] = {}
+
+        # Pipe-unused (idle) accumulation — INTERNAL closed totals plus the
+        # moment the pipe last went quiet. The status body carries only
+        # display-ready numbers: _refresh_idle_status folds the still-open
+        # quiet stretch in server-side at every publish point, so clients
+        # never compute idle time themselves.
+        self._an_idle_total = 0.0
+        self._an_idle_longest = 0.0
+        self._an_idle_longest_at = 0.0
+        self._an_idle_since = 0.0
 
         # Run-log continuum sequencing (see stamp_log_event). A fresh stream
         # starts at 1; the run-log writer (L2) raises the floor to
@@ -1008,6 +1036,11 @@ class Task(DAPBase):
 
         # Metrics and tokens are updated in-place by TaskMetrics
 
+        # Fold the still-open quiet stretch into the idle counters — during
+        # silence no trace events arrive, so the periodic broadcast is what
+        # keeps the published idle numbers current.
+        self._refresh_idle_status()
+
         # Create status update event
         status_message = self.build_event(
             'apaevt_status_update',
@@ -1309,6 +1342,12 @@ class Task(DAPBase):
                     'apaevt_flow', body=body, event_time=(message.get('body') or {}).get('eventTime')
                 )
 
+                # Accumulate run analytics from the derived flow (its body
+                # carries the stamped eventTime, and for 'begin' its logSeq
+                # is the trace's permanent identity). Gated on tracing like
+                # the flow derivation itself — no traces, honest empties.
+                self._accumulate_analytics(operation, pipe_index, component_name, pipes, flow['body'])
+
                 # Forward off the event
                 await self._forward_task_event(EVENT_TYPE.FLOW, flow)
 
@@ -1511,6 +1550,106 @@ class Task(DAPBase):
 
         self.debug_message('Debugger detached from task')
 
+    def _accumulate_analytics(
+        self, operation: str, pipe_index: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]
+    ) -> None:
+        """
+        Fold one trace operation into the status body's run analytics.
+
+        Computed HERE — where every event is born — so statusAt(position)
+        reads are exact anywhere on the continuum (live, replayed, or
+        mid-scrub) with no client fold-window or recency caveats. The pipe
+        id correlates; the component aggregates.
+
+        Args:
+            operation: Trace op (begin / enter / leave / end).
+            pipe_index: The REAL pipe id the op runs on (correlation key).
+            component_name: The component this op refers to.
+            pipes: Current component stack (pipes[0] = the object name that
+                a begin carries).
+            flow_body: The derived flow event's body — carries the stamped
+                eventTime and, for 'begin', the continuum logSeq that IS the
+                trace identity.
+        """
+        event_time = float(flow_body.get('eventTime') or time.time())
+
+        if operation == 'begin':
+            # Activity resumes: close the quiet period the last end opened.
+            if not self._an_open_by_pipe and self._an_idle_since:
+                gap = round(max(0.0, event_time - self._an_idle_since), 2)
+                self._an_idle_total = round(self._an_idle_total + gap, 2)
+                if gap > self._an_idle_longest:
+                    self._an_idle_longest = gap
+                    self._an_idle_longest_at = self._an_idle_since
+                self._an_idle_since = 0.0
+                self._refresh_idle_status(event_time)
+            # A pipe hosts one completion at a time — its end looks up THIS.
+            self._an_open_by_pipe[pipe_index] = {
+                'name': str(pipes[0] if pipes else component_name)[:200],
+                'beginTime': event_time,
+                'beginSeq': flow_body.get('logSeq'),
+            }
+
+        elif operation == 'enter':
+            # Reentrancy within one pipe stacks; key = (pipe, component).
+            self._an_component_open.setdefault((pipe_index, component_name), []).append(event_time)
+
+        elif operation == 'leave':
+            stack = self._an_component_open.get((pipe_index, component_name))
+            if stack:
+                delta = max(0.0, event_time - stack.pop())
+                stat = self._status.componentStats.get(component_name)
+                if stat is None:
+                    stat = TASK_STATUS_COMPONENT_STAT()
+                    self._status.componentStats[component_name] = stat
+                stat.calls += 1
+                stat.totalSeconds = round(stat.totalSeconds + delta, 2)
+                stat.maxSeconds = max(stat.maxSeconds, round(delta, 2))
+
+        elif operation == 'end':
+            begun = self._an_open_by_pipe.pop(pipe_index, None)
+            if begun is not None:
+                elapsed = round(max(0.0, event_time - begun['beginTime']), 2)
+                self._status.completionSeconds = round(self._status.completionSeconds + elapsed, 2)
+                # Insert-sorted, bounded top list (slowest first).
+                entry = TASK_STATUS_SLOWEST_DOC(
+                    name=begun['name'], elapsed=elapsed, beginTime=begun['beginTime'], beginSeq=begun['beginSeq']
+                )
+                docs = self._status.slowestDocs
+                docs.append(entry)
+                docs.sort(key=lambda d: d.elapsed, reverse=True)
+                del docs[CONST_ANALYTICS_SLOWEST_DOCS:]
+                # Last completion out — the pipe is unused from HERE until
+                # the next begin (or a status publish) closes the gap.
+                if not self._an_open_by_pipe:
+                    self._an_idle_since = event_time
+
+    def _refresh_idle_status(self, now: Optional[float] = None) -> None:
+        """
+        Publish the pipe-unused counters into the status body.
+
+        The closed totals live in internal state; the still-open quiet
+        stretch is extended HERE to the given clock — no trace events
+        arrive during silence, so this runs at every status publish (and at
+        gap boundaries) to keep the emitted numbers current. Clients render
+        the fields verbatim and never compute idle time themselves.
+
+        Args:
+            now: Clock to extend the open stretch to (wall clock if None).
+        """
+        # The open stretch exists only while zero completions are in flight.
+        open_gap = 0.0
+        if self._an_idle_since and not self._an_open_by_pipe:
+            open_gap = round(max(0.0, (now if now is not None else time.time()) - self._an_idle_since), 2)
+        self._status.idleSeconds = round(self._an_idle_total + open_gap, 2)
+        # The open stretch may already be the longest the run has seen.
+        if open_gap > self._an_idle_longest:
+            self._status.idleLongestSeconds = open_gap
+            self._status.idleLongestAt = self._an_idle_since
+        else:
+            self._status.idleLongestSeconds = self._an_idle_longest
+            self._status.idleLongestAt = self._an_idle_longest_at
+
     def _reset_status(self) -> None:
         """
         Reset all runtime status from the previous run in preparation for a restart.
@@ -1541,6 +1680,19 @@ class Task(DAPBase):
         self._status.exitMessage = ''
         self._status.endTime = 0.0
         self._status.pipeflow = TASK_STATUS_FLOW()
+        self._status.componentStats = {}
+        self._status.slowestDocs = []
+        self._status.completionSeconds = 0.0
+        self._status.idleSeconds = 0.0
+        self._status.idleLongestSeconds = 0.0
+        self._status.idleLongestAt = 0.0
+        # Correlation state dies with the run — pipe ids recycle across runs.
+        self._an_open_by_pipe = {}
+        self._an_component_open = {}
+        self._an_idle_total = 0.0
+        self._an_idle_longest = 0.0
+        self._an_idle_longest_at = 0.0
+        self._an_idle_since = 0.0
         self._status_trace = []
         self.info = {}
 

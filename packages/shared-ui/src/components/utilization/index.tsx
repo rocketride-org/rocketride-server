@@ -3,5 +3,5 @@
 // Copyright (c) 2026 Aparavi Software AG Inc.
 // =============================================================================
 
-export { Status } from './Status';
-export { StatusHeader, StatusActions } from './StatusHeader';
+export { Utilization } from './Utilization';
+export { StatusHeader, StatusActions } from '../status-header/StatusHeader';

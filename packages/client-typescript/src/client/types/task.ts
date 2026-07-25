@@ -329,6 +329,64 @@ export interface TASK_STATUS {
 
 	/** Cumulative token usage for CPU, memory, GPU (100 tokens = $1.00) */
 	tokens: TASK_TOKENS;
+
+	// Run analytics (server-accumulated from trace events while tracing is
+	// enabled; empty when pipelineTraceLevel is 'none'). Computed at the
+	// supervisor where every event is born, so status-at-position reads are
+	// exact anywhere on the continuum — live, replayed, or mid-scrub.
+
+	/** Per-component timing accumulated this run (requires tracing). */
+	componentStats?: Record<string, TASK_STATUS_COMPONENT_STAT>;
+
+	/** The 10 slowest completions this run, slowest first (requires tracing). */
+	slowestDocs?: TASK_STATUS_SLOWEST_DOC[];
+
+	/** Total begin-to-end seconds across all completions this run (requires tracing). */
+	completionSeconds?: number;
+
+	/** Total seconds the pipe sat unused between completions this run (requires tracing). */
+	idleSeconds?: number;
+
+	/** Longest single unused stretch between completions this run (requires tracing). */
+	idleLongestSeconds?: number;
+
+	/** Epoch when the longest unused stretch began (0 while none is recorded). */
+	idleLongestAt?: number;
+
+}
+
+/**
+ * Per-component timing accumulated by the supervisor for one run.
+ *
+ * Correlation happens by PIPE (concurrent completions run the same component
+ * on different pipes); aggregation rolls up by component. Seconds are rounded
+ * to 2 decimals at accumulation.
+ */
+export interface TASK_STATUS_COMPONENT_STAT {
+	/** Completed enter/leave pairs this run. */
+	calls: number;
+	/** Sum of enter-to-leave seconds. */
+	totalSeconds: number;
+	/** Longest single call in seconds. */
+	maxSeconds: number;
+}
+
+/**
+ * One of the run's slowest completions (server-tracked top list).
+ *
+ * beginSeq is the completion's begin flow event's continuum seq — the
+ * permanent trace identity getTrace resolves. beginTime is carried
+ * explicitly: catalog-seeded seqs do not encode time.
+ */
+export interface TASK_STATUS_SLOWEST_DOC {
+	/** Object name from the begin event (capped at 200 chars). */
+	name: string;
+	/** Begin-to-end seconds, rounded to 2 decimals. */
+	elapsed: number;
+	/** Begin emission time (epoch seconds). */
+	beginTime: number;
+	/** Begin flow event continuum seq (trace identity). */
+	beginSeq?: number | null;
 }
 
 /**

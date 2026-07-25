@@ -22,13 +22,14 @@
  *                        to hundreds of runs: a list never runs out of pixels.
  * - Arrow keys         = ±30 s skips while the bar is open
  * - |< / >|            = jump to the previous / next run's beginning
- * - << / >>            = nudge the playhead ONE PIXEL of the strip at the
- *                        current zoom (zoom in for finer steps)
+ * - << / >>            = step by the selected JUMP AMOUNT (dropdown between
+ *                        them): a fixed time delta, or Request = the nearest
+ *                        completion begin. Independent of the zoom factor.
+ *                        Buttons disable when there is nowhere to go.
  *
- * At rest the strip is a thin ribbon (runs + needle only, chrome dimmed);
- * hovering unfolds the full lane. It stays open (pinned) while scrubbing,
- * brushing, browsing the menu, holding a selection, or replaying behind the
- * head — it only tucks away when pinned live and hands-off.
+ * The DVR is central chrome: the full lane and transport row are ALWAYS
+ * visible — no hover-reveal, no resting ribbon. (Live still slims the
+ * transport row itself, since stepping means nothing at the live head.)
  *
  * Rendering is a pure projection of [chapters + position]; all transport
  * behavior lives in the useTaskEvents controller.
@@ -85,6 +86,22 @@ const SPEEDS = [0.25, 0.5, 1, 2, 4, 10, 25];
 /** Seconds skipped by the arrow keys. */
 const SKIP_SECONDS = 30;
 
+/**
+ * Jump-amount choices for << / >>: Request steps to the nearest
+ * completion-begin flow event; numbers are fixed time deltas in seconds.
+ */
+const JUMP_STEPS: Array<{ key: number | 'request'; label: string }> = [
+	{ key: 'request', label: 'Request' },
+	{ key: 1, label: '1 s' },
+	{ key: 5, label: '5 s' },
+	{ key: 15, label: '15 s' },
+	{ key: 30, label: '30 s' },
+	{ key: 60, label: '1 min' },
+	{ key: 300, label: '5 min' },
+	{ key: 900, label: '15 min' },
+	{ key: 3600, label: '1 h' },
+];
+
 /** The fixed needle position as a fraction of the strip width. */
 const NEEDLE_FRACTION = 0.68;
 
@@ -92,15 +109,8 @@ const NEEDLE_FRACTION = 0.68;
 const MIN_SEC_PER_PX = 0.25;
 const MAX_SEC_PER_PX = 7200;
 
-/** Strip heights (px): resting ribbon vs unfolded lane. */
-const STRIP_COLLAPSED = 10;
+/** Strip height (px) — the lane is always fully unfolded. */
 const STRIP_EXPANDED = 62;
-/**
- * Collapsed height while pinned LIVE — a little taller than the replay
- * ribbon: with the chrome row hidden at the live edge, the bar itself is
- * the only presence, so it gets more of one.
- */
-const STRIP_LIVE = 16;
 
 /** Ruler steps (seconds) — the first that yields >= ~88px between labels wins. */
 const TICK_STEPS = [1, 5, 10, 30, 60, 300, 600, 1800, 3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 3 * 86400, 7 * 86400];
@@ -289,6 +299,13 @@ const styles: Record<string, CSSProperties> = {
 		flex: '0 0 auto',
 		textAlign: 'center',
 	},
+	// Thin vertical rule between transport groups in the chrome row.
+	separator: {
+		width: 1,
+		alignSelf: 'stretch',
+		background: 'var(--rr-border)',
+		margin: '1px 4px',
+	},
 };
 
 // =============================================================================
@@ -351,7 +368,6 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 
 	// --- View state -----------------------------------------------------------
 	const [secPerPx, setSecPerPx] = useState(2);
-	const [hovered, setHovered] = useState(false);
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [dragging, setDragging] = useState(false);
 	// While scrubbing, the strip renders from this local position; the real
@@ -415,6 +431,25 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 		setSpeedPos({ top: up ? rect.top - 6 : rect.bottom + 6, left: rect.left, up });
 	}, [speedOpen]);
 
+	// Jump-amount dropdown (replay only) — what << / >> step by: a fixed
+	// time delta or Request (nearest completion begin). Decoupled from zoom.
+	const jumpRef = useRef<HTMLDivElement>(null);
+	const [jumpOpen, setJumpOpen] = useState(false);
+	const closeJump = useCallback(() => setJumpOpen(false), []);
+	useClickOutside(jumpRef, closeJump);
+	const [jumpPos, setJumpPos] = useState<{ top: number; left: number; up: boolean } | null>(null);
+	useEffect(() => {
+		if (!jumpOpen || !jumpRef.current) {
+			setJumpPos(null);
+			return;
+		}
+		const rect = jumpRef.current.getBoundingClientRect();
+		const up = window.innerHeight - rect.bottom < 320;
+		setJumpPos({ top: up ? rect.top - 6 : rect.bottom + 6, left: rect.left, up });
+	}, [jumpOpen]);
+	const [jumpStep, setJumpStep] = useState<number | 'request'>(30);
+	const jumpLabel = JUMP_STEPS.find((step) => step.key === jumpStep)?.label ?? '30 s';
+
 	// --- Geometry -------------------------------------------------------------
 	const nowSec = Date.now() / 1000;
 	const isLive = player.mode === 'live';
@@ -427,9 +462,8 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 	/** Strip x (px) -> epoch seconds. */
 	const timeAt = useCallback((x: number): number => position - (needleX - x) * secPerPx, [needleX, position, secPerPx]);
 
-	// The bar stays unfolded while the user is engaged with it.
-	const pinned = dragging || menuOpen || brush !== null || selection !== null || !isLive;
-	const expanded = hovered || pinned;
+	// The DVR is central chrome — always fully unfolded, never a hover-reveal.
+	const expanded = true;
 
 	// --- Interactions ---------------------------------------------------------
 
@@ -581,17 +615,27 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 	}, [chapters]);
 	const activeBrush: [number, number] | null = brush ?? (selection ? [selection.from, selection.to] : null);
 
+	// --- Transport sensitivity: disable buttons with nowhere to go ------------
+	const streamStart = timeline?.startTime ?? chapters[0]?.beginTime ?? null;
+	const streamEnd = timeline?.endTime ?? null;
+	// While the stream is still growing, forward can run to the wall clock.
+	const streamGrowing = runActive ?? timeline?.completed === false;
+	const forwardLimit = streamGrowing ? nowSec : streamEnd;
+	const canStepBack = streamStart === null || position > streamStart + 0.5;
+	const canStepForward = forwardLimit === null || position < forwardLimit - 0.5;
+	// |<: an earlier landing exists (inside a run past its begin, or any
+	// earlier run). >|: an end ahead in this run, or a later run's begin.
+	const canPrevTrack = chapters.length > 0 && position > chapters[0].beginTime + 0.5;
+	const insideChapter = chapters.find((c) => c.beginTime <= position && position <= (c.endTime ?? Number.POSITIVE_INFINITY));
+	const canNextTrack =
+		(insideChapter?.endTime != null && position < insideChapter.endTime - 1) || chapters.some((c) => c.beginTime > position + 1);
+
 	// --- Render ---------------------------------------------------------------
 	return (
-		<div
-			style={styles.container}
-			onMouseEnter={() => setHovered(true)}
-			onMouseLeave={() => setHovered(false)}
-		>
-			{/* Chrome row — replay shows it always (pinned => expanded); at the
-			    live edge it appears only on hover: pinned-live-and-hands-off is
-			    just the bar, with the pause button, the LIVE clock, and the
-			    zoom scale all folded into the hover. */}
+		<div style={styles.container}>
+			{/* Chrome row — always visible: the DVR is central chrome, live
+			    and replay alike (live still slims the row to pause + clock,
+			    since stepping means nothing at the live head). */}
 			{expanded && (
 			<div style={styles.chrome}>
 				{/* Live means playing by definition — the button is simply Pause
@@ -604,65 +648,98 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 				>
 					{isLive || player.playing ? <PauseGlyph /> : <PlayGlyph />}
 				</Button>
-				{/* Replay-only controls: speed + window stepping mean nothing
-				    while pinned to the live head. */}
+				{/* The chrome row is ALWAYS visible, but live keeps it minimal:
+				    pause + the time/run dropdown (+ zoom scale). Speed and
+				    window stepping appear in replay, where they mean something. */}
 				{!isLive && (
-					<div ref={speedRef} style={{ position: 'relative', display: 'inline-flex' }}>
-						<Button variant="ghost" small onClick={() => setSpeedOpen((open) => !open)} title="Playback speed">
-							<span style={styles.timeButton}>
-								{player.speed}×<span style={styles.timeCaret}>▼</span>
-							</span>
-						</Button>
-						{speedOpen && speedPos && (
-							<div style={{ ...styles.speedMenu, top: speedPos.top, left: speedPos.left, transform: speedPos.up ? 'translateY(-100%)' : undefined }}>
-								{SPEEDS.map((value) => (
-									<div
-										key={value}
-										style={styles.speedItem}
-										onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
-										onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-										onClick={() => {
-											controller.setSpeed(value);
-											setSpeedOpen(false);
-										}}
-									>
-										<span style={styles.speedDot}>{player.speed === value ? '●' : ''}</span>
-										{value}×
-									</div>
-								))}
-							</div>
-						)}
-					</div>
+				<div ref={speedRef} style={{ position: 'relative', display: 'inline-flex' }}>
+					<Button variant="ghost" small onClick={() => setSpeedOpen((open) => !open)} title="Playback speed">
+						<span style={styles.timeButton}>
+							{player.speed}×<span style={styles.timeCaret}>▼</span>
+						</span>
+					</Button>
+					{speedOpen && speedPos && (
+						<div style={{ ...styles.speedMenu, top: speedPos.top, left: speedPos.left, transform: speedPos.up ? 'translateY(-100%)' : undefined }}>
+							{SPEEDS.map((value) => (
+								<div
+									key={value}
+									style={styles.speedItem}
+									onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
+									onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
+									onClick={() => {
+										controller.setSpeed(value);
+										setSpeedOpen(false);
+									}}
+								>
+									<span style={styles.speedDot}>{player.speed === value ? '●' : ''}</span>
+									{value}×
+								</div>
+							))}
+						</div>
+					)}
+				</div>
 				)}
-				{/* Transport stepping is replay-only: |< / << / >> / >| all
-				    vanish at the live head, per the live-mode minimal chrome.
-				    << / >> nudge ONE PIXEL of the strip at the current zoom
-				    (zoom in for finer steps). */}
+				{/* Window stepping (replay only): |< / << / >> / >| step by
+				    the JUMP AMOUNT selected in the dropdown between them (a
+				    time delta or Request = nearest completion begin) —
+				    independent of the zoom factor. Buttons disable when there
+				    is nowhere to go in their direction. */}
 				{!isLive && (
-					<>
-						<Button variant="ghost" small onClick={controller.previousTrack} title="Beginning of the previous run">
-							{'|<'}
-						</Button>
-						<Button
-							variant="ghost"
-							small
-							onClick={() => controller.skip(-secPerPx)}
-							title={`Back one pixel (${secPerPx < 1 ? secPerPx.toFixed(2) : secPerPx.toFixed(1)} s)`}
-						>
-							{'<<'}
-						</Button>
-						<Button
-							variant="ghost"
-							small
-							onClick={() => controller.skip(secPerPx)}
-							title={`Forward one pixel (${secPerPx < 1 ? secPerPx.toFixed(2) : secPerPx.toFixed(1)} s)`}
-						>
-							{'>>'}
-						</Button>
-						<Button variant="ghost" small onClick={controller.nextTrack} title="Beginning of the next run">
-							{'>|'}
-						</Button>
-					</>
+				<>
+				<span style={styles.separator} />
+				<Button variant="ghost" small disabled={!canPrevTrack} onClick={controller.previousTrack} title="Beginning of the previous run">
+					{'|<'}
+				</Button>
+				<Button
+					variant="ghost"
+					small
+					disabled={!canStepBack}
+					onClick={() => (jumpStep === 'request' ? controller.stepBegin(-1) : controller.skip(-jumpStep))}
+					title={jumpStep === 'request' ? 'Previous request begin' : `Back ${jumpLabel}`}
+				>
+					{'<<'}
+				</Button>
+				<div ref={jumpRef} style={{ position: 'relative', display: 'inline-flex' }}>
+					<Button variant="ghost" small onClick={() => setJumpOpen((open) => !open)} title="Jump amount for << and >>">
+						<span style={styles.timeButton}>
+							{jumpLabel}
+							<span style={styles.timeCaret}>▼</span>
+						</span>
+					</Button>
+					{jumpOpen && jumpPos && (
+						<div style={{ ...styles.speedMenu, top: jumpPos.top, left: jumpPos.left, transform: jumpPos.up ? 'translateY(-100%)' : undefined }}>
+							{JUMP_STEPS.map((step) => (
+								<div
+									key={step.key}
+									style={styles.speedItem}
+									onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
+									onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
+									onClick={() => {
+										setJumpStep(step.key);
+										setJumpOpen(false);
+									}}
+								>
+									<span style={styles.speedDot}>{jumpStep === step.key ? '●' : ''}</span>
+									{step.label}
+								</div>
+							))}
+						</div>
+					)}
+				</div>
+				<Button
+					variant="ghost"
+					small
+					disabled={!canStepForward}
+					onClick={() => (jumpStep === 'request' ? controller.stepBegin(1) : controller.skip(jumpStep))}
+					title={jumpStep === 'request' ? 'Next request begin' : `Forward ${jumpLabel}`}
+				>
+					{'>>'}
+				</Button>
+				<Button variant="ghost" small disabled={!canNextTrack} onClick={controller.nextTrack} title="Beginning of the next run">
+					{'>|'}
+				</Button>
+				<span style={styles.separator} />
+				</>
 				)}
 				<div ref={menuRef} style={{ position: 'relative', display: 'inline-flex' }}>
 					<Button variant="ghost" small onClick={() => setMenuOpen((open) => !open)} title="Jump to a run">
@@ -702,8 +779,8 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 					</div>
 					)}
 				</div>
-				{/* GO LIVE sits in the transport after the run selector — and only
-				    in replay: at the live edge there is nowhere to go. */}
+				{/* GO LIVE sits in the transport after the run selector — and
+				    only in replay: at the live edge there is nowhere to go. */}
 				{!isLive && (
 					<Button variant="primary" small onClick={controller.goLive} title="Return to the live edge">
 						GO LIVE
@@ -718,7 +795,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 			{/* The strip: thin ribbon at rest, full lane when engaged. */}
 			<div
 				ref={stripRef}
-				style={{ ...styles.strip, height: expanded ? STRIP_EXPANDED : isLive ? STRIP_LIVE : STRIP_COLLAPSED, cursor: dragging ? 'grabbing' : 'grab' }}
+				style={{ ...styles.strip, height: STRIP_EXPANDED, cursor: dragging ? 'grabbing' : 'grab' }}
 				onMouseDown={handleStripMouseDown}
 			>
 				{/* Run blocks (double-click = play that track). */}

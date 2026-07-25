@@ -32,8 +32,8 @@ import { commonStyles } from '../../../themes/styles';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
 import { PlayBar } from '../../../components/play-bar/PlayBar';
 import type { ITimeSelection } from '../../../components/play-bar/PlayBar';
-import Status from '../../../components/status/Status';
-import { StatusActions, StatusElapsed, StatusHeaderInfo } from '../../../components/status/StatusHeader';
+import Utilization from '../../../components/utilization/Utilization';
+import { StatusActions, StatusElapsed, StatusHeaderInfo } from '../../../components/status-header/StatusHeader';
 import { Card } from '../../../components/card/Card';
 import { SourceTokensContent } from '../../../components/tokens/Tokens';
 import { SourceFlowContent } from '../../../components/flow/Flow';
@@ -51,7 +51,7 @@ import { useTraceState } from '../hooks/useTraceState';
 import { useElapsedTimer } from '../hooks/useElapsedTimer';
 import { parseServerEvent } from '../utils';
 import { LogPane } from './LogPane';
-import { AnalyzePane } from './AnalyzePane';
+import { StatusPane } from './StatusPane';
 import type { TaskStatus, TraceEvent } from '../types';
 
 // =============================================================================
@@ -59,7 +59,7 @@ import type { TaskStatus, TraceEvent } from '../types';
 // =============================================================================
 
 /** The per-source views selectable in the section's pill bar. */
-export type SourcePill = 'status' | 'tokens' | 'flow' | 'trace' | 'errors' | 'log' | 'analyze';
+export type SourcePill = 'status' | 'tokens' | 'flow' | 'trace' | 'errors' | 'log' | 'utilization';
 
 /** Props for {@link SourceSection}. */
 export interface ISourceSectionProps {
@@ -101,7 +101,7 @@ const PILLS: Array<{ id: SourcePill; label: string }> = [
 	{ id: 'trace', label: 'Trace' },
 	{ id: 'errors', label: 'Errors' },
 	{ id: 'log', label: 'Log' },
-	{ id: 'analyze', label: 'Analyze' },
+	{ id: 'utilization', label: 'Utilization' },
 ];
 
 /** Timeline refresh cadence (ms) — chapters are one small control-file read. */
@@ -303,13 +303,14 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 		timeline,
 	});
 
-	// Analyze slice (brushed on the PlayBar with Shift+drag). Completing a
-	// brush also switches to the Analyze pill — selecting a slice IS asking
-	// for its analysis.
+	// Status slice (brushed on the PlayBar with Shift+drag). Completing a
+	// brush also switches to the Status pill — selecting a slice IS asking
+	// for its analysis (the slice scopes the event-folded pieces; the
+	// server-computed analytics stay run-scoped as-of the needle).
 	const [selection, setSelection] = useState<ITimeSelection | null>(null);
 	const handleSelectionChange = useCallback((next: ITimeSelection | null) => {
 		setSelection(next);
-		if (next) setPill('analyze');
+		if (next) setPill('status');
 	}, []);
 
 	// Task-active switch, flipped by the host's announcements: apaevt_task
@@ -394,6 +395,20 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 	// hook enforces it), and the snapshot panes gate on the same fact.
 	const track = useMemo(() => trackEvents(), [trackEvents]);
 	const cleared = !track.active;
+
+	// Dead-zone jump (Status pane ghost card): land the needle on the latest
+	// recorded run. An open chapter is the live run — go live; a sealed one
+	// seeks just inside its end, where the report card holds the run's final
+	// numbers. Undefined while the stream has no chapters (nothing to jump to).
+	const jumpToLatestRun = useMemo(() => {
+		const chapters = timeline?.chapters;
+		if (!chapters || chapters.length === 0) return undefined;
+		return () => {
+			const latest = chapters[chapters.length - 1];
+			if (latest.endTime == null) controller.goLive();
+			else controller.seekToTime(latest.endTime - 0.001);
+		};
+	}, [timeline, controller]);
 
 	/**
 	 * Full-chapter reconstruction for the Download actions: a THROWAWAY
@@ -540,11 +555,11 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 		// activity bar is where gaps are visualized; PLAY from a gap still
 		// auto-skips to the next track (DVD transport behavior in the hook).
 		switch (pill) {
-			case 'status':
+			case 'utilization':
 				// The chart consumes the DVR's ready-made 1-second grid —
 				// sliding while playing, frozen while paused, zeros through
 				// dead space — and the footer its track-scoped stats.
-				return <Status getSeries={chartSeries} getStats={trackStats} />;
+				return <Utilization getSeries={chartSeries} getStats={trackStats} />;
 			case 'tokens':
 				return <SourceTokensContent tokens={cleared ? undefined : paneStatus?.tokens} />;
 			case 'flow': {
@@ -601,9 +616,10 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 						fetchChapterEvents={fetchChapterEvents}
 					/>
 				);
-			case 'analyze':
-				// A brushed slice overrides the track scope; the header row
-				// names the slice and offers the way back.
+			case 'status':
+				// The landing report card. A brushed slice overrides the
+				// window the event-folded pieces (idle gaps) see; the header
+				// row names the slice and offers the way back.
 				return (
 					<>
 						{selection && (
@@ -618,7 +634,15 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 								</Button>
 							</div>
 						)}
-						<AnalyzePane events={selection ? rangeEvents(selection.from, selection.to) : track.events} onOpenTrace={(traceId, name) => setOpenTrace({ traceId, name })} />
+						<StatusPane
+							status={cleared ? null : (paneStatus ?? null)}
+							chapters={timeline?.chapters}
+							chapter={track.chapter}
+							position={player.cursorTime ?? undefined}
+							onOpenTrace={(traceId, name) => setOpenTrace({ traceId, name })}
+							onJumpToRun={jumpToLatestRun}
+							componentNames={componentNames}
+						/>
 					</>
 				);
 			default:

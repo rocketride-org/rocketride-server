@@ -44,7 +44,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChartStats, StatusDataPoint } from '../../../components/status/types';
+import type { ChartStats, StatusDataPoint } from '../../../components/utilization/types';
 
 // =============================================================================
 // TYPES
@@ -147,6 +147,14 @@ export interface TaskPlayerController {
 	seekToTime: (time: number) => void;
 	/** Skip relative to the cursor (e.g. -30 / +30 seconds). */
 	skip: (deltaSeconds: number) => void;
+	/**
+	 * Jump to the previous/next REQUEST — the nearest completion-begin flow
+	 * event relative to the cursor, bounded by the current chapter: with no
+	 * begin left in that direction the position lands on the chapter's own
+	 * boundary (begin for backward, end for forward). |< / >| cross run
+	 * boundaries instead.
+	 */
+	stepBegin: (direction: -1 | 1) => void;
 	/** |<: current task's begin, or the previous task's just-before-end. */
 	previousTrack: () => void;
 	/** >|: current task's just-before-end, or the next task's begin. */
@@ -226,6 +234,14 @@ const MAX_CHART_RANGE_SECONDS = 900;
  * live delivery follows arrival.
  */
 const RUNWAY_BASE_SECONDS = 120;
+
+/**
+ * Request stepping lands THIS far past the begin event, so the begin frame
+ * plays through: the begin itself plus the enters sharing its instant
+ * render, and the panes show the request as started rather than the moment
+ * just before it.
+ */
+const STEP_BEGIN_LEAD = 0.05;
 
 /**
  * Live FALLBACK anchor (seconds): entering live with no open chapter in the
@@ -350,9 +366,19 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 	// DELIVERY (the session's play callback → the fold)
 	// =========================================================================
 
+	/**
+	 * Forward request-hunt (stepBegin past the delivered window): while
+	 * armed, the runway throttle is suspended so delivery keeps draining
+	 * until the next completion-begin past fromTime arrives — deliver()
+	 * lands the cursor on it, or on endCap (the chapter's end) if the
+	 * stream passes it with no begin. Stale generations never fire; any
+	 * explicit transport action disarms it.
+	 */
+	const beginHuntRef = useRef<{ generation: number; fromTime: number; endCap: number } | null>(null);
+
 	/** End of the delivery runway for the current position (epoch seconds). */
 	const runwayEnd = useCallback((): number => {
-		if (pinnedRef.current) return Number.POSITIVE_INFINITY;
+		if (pinnedRef.current || beginHuntRef.current) return Number.POSITIVE_INFINITY;
 		const cursor = cursorTimeRef.current ?? 0;
 		return cursor + RUNWAY_BASE_SECONDS * Math.max(1, speedRef.current);
 	}, []);
@@ -376,6 +402,29 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				const floorSeq = fold[0].body.logSeq;
 				foldAnchorRef.current = fold[0].body.eventTime;
 				statusIndexRef.current = statusIndexRef.current.filter((snapshot) => snapshot.body.logSeq >= floorSeq);
+			}
+
+			// A forward request-hunt lands here: the first begin past the hunt
+			// origin becomes the new position; passing the chapter's end
+			// without one lands on the end itself. Either way the hunt
+			// disarms (restoring the runway throttle).
+			const hunt = beginHuntRef.current;
+			if (hunt && hunt.generation === generation) {
+				const time = message.body.eventTime;
+				const isBegin =
+					message.event === 'apaevt_flow' &&
+					(message.body as Record<string, unknown>).op === 'begin' &&
+					time > hunt.fromTime + 0.05;
+				if (isBegin && time <= hunt.endCap) {
+					beginHuntRef.current = null;
+					// Land just PAST the begin so its frame plays through.
+					setCursorTime(time + STEP_BEGIN_LEAD);
+					setRebuildTick((value) => value + 1);
+				} else if (time > hunt.endCap) {
+					beginHuntRef.current = null;
+					setCursorTime(hunt.endCap);
+					setRebuildTick((value) => value + 1);
+				}
 			}
 
 			const position = cursorTimeRef.current;
@@ -799,6 +848,8 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 
 	const seekToTime = useCallback(
 		(time: number) => {
+			// Any explicit seek supersedes a pending forward request-hunt.
+			beginHuntRef.current = null;
 			setPinned(false);
 			setPlaying(false);
 			setCursorTime(time);
@@ -833,6 +884,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			play: () => {
 				// PLAY inside a gap auto-skips to the next track's begin —
 				// exactly how a DVD treats the space between tracks.
+				beginHuntRef.current = null;
 				if (inGap && gapNeighbors.next) {
 					seekToTime(gapNeighbors.next.beginTime);
 				}
@@ -844,6 +896,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				// definition no longer pinned. Resume plays forward from the
 				// pause point (and re-pins when it catches the head);
 				// GO LIVE jumps straight back.
+				beginHuntRef.current = null;
 				setPinned(false);
 				setPlaying(false);
 			},
@@ -852,6 +905,74 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 			skip: (deltaSeconds: number) => {
 				const base = cursorTime ?? timeline?.endTime ?? Date.now() / 1000;
 				seekToTime(base + deltaSeconds);
+			},
+			stepBegin: (direction: -1 | 1) => {
+				// Request stepping is bounded by the CURRENT chapter: scan for
+				// the nearest completion-begin; none left in that direction
+				// lands on the chapter's own boundary (begin for <<, end for
+				// >>). The fold can span past both boundaries (chart depth
+				// behind, runway ahead), so both scans clamp to the chapter.
+				const cursor = cursorTime ?? timeline?.endTime ?? Date.now() / 1000;
+				const inside = chapters.find(
+					(chapter) => chapter.beginTime <= cursor && cursor <= (chapter.endTime ?? Number.POSITIVE_INFINITY),
+				);
+				const floor = inside?.beginTime ?? Number.NEGATIVE_INFINITY;
+				// An open (live) chapter has no end yet — the wall clock caps it.
+				const endCap = inside?.endTime != null ? inside.endTime - TRACK_END_EPSILON : Date.now() / 1000;
+				const fold = foldRef.current;
+				let target: number | null = null;
+				for (const message of fold) {
+					if (message.event !== 'apaevt_flow') continue;
+					if ((message.body as Record<string, unknown>).op !== 'begin') continue;
+					const time = message.body.eventTime;
+					if (direction < 0) {
+						// Last begin strictly before the cursor, inside the chapter.
+						if (time < cursor - 0.05) {
+							if (time >= floor) target = time;
+						} else break;
+					} else if (time > cursor + 0.05) {
+						// First begin strictly after the cursor.
+						target = time;
+						break;
+					}
+				}
+
+				if (direction < 0) {
+					// << : nearest earlier begin, else the chapter's beginning.
+					// Landing sits just PAST the begin so its frame plays
+					// through — the request reads as started, not about-to-be.
+					if (target !== null) seekToTime(target + STEP_BEGIN_LEAD);
+					else if (inside) seekToTime(inside.beginTime);
+					return;
+				}
+
+				// >> : nearest later begin within the chapter (landing just
+				// past it, same as <<); a begin beyond the chapter (or none at
+				// all with the end already delivered) lands on the chapter's
+				// end.
+				if (target !== null) {
+					seekToTime(Math.min(target + STEP_BEGIN_LEAD, endCap));
+					return;
+				}
+				const tail = fold.length > 0 ? fold[fold.length - 1].body.eventTime : null;
+				if (tail !== null && tail >= endCap) {
+					if (inside) seekToTime(endCap);
+					return;
+				}
+				// The next begin (or the chapter end) is past the delivered
+				// window — the runway throttle only drains ~2 min past the
+				// needle. Arm the hunt (suspends the throttle; deliver() lands
+				// on the next begin or the endCap) and kick a runway-paused
+				// session back into motion.
+				beginHuntRef.current = { generation: generationRef.current, fromTime: cursor, endCap };
+				const session = sessionRef.current;
+				if (session && !sessionRunningRef.current) {
+					const generation = generationRef.current;
+					sessionRunningRef.current = true;
+					void session.play(undefined, 0, (item) => deliver(generation, item.event)).catch(() => {
+						sessionRunningRef.current = false;
+					});
+				}
 			},
 			previousTrack: () => {
 				// |<: to the CURRENT task's beginning; already there (or in a
@@ -891,6 +1012,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				// GO LIVE = pin the position to now and resume; the ticker
 				// keeps it riding the wall clock and maybeResume drains the
 				// session up to the head.
+				beginHuntRef.current = null;
 				const fold = foldRef.current;
 				const tail = fold.length > 0 ? fold[fold.length - 1].body.eventTime : null;
 				const head = Math.max(Date.now() / 1000, tail ?? 0);
@@ -899,7 +1021,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 				setCursorTime(head);
 			},
 		};
-	}, [timeline, cursorTime, inGap, gapNeighbors, seekToTime]);
+	}, [timeline, cursorTime, inGap, gapNeighbors, seekToTime, deliver]);
 
 	// =========================================================================
 	// RESULT

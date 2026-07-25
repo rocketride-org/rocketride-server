@@ -50,7 +50,7 @@ const styles: Record<string, CSSProperties> = {
 // TYPES
 // =============================================================================
 
-interface StatusProps {
+interface UtilizationProps {
 	/**
 	 * The DVR's chart-series read (useTaskEvents.chartSeries): a 1-second
 	 * grid of the last N seconds ending at the position. Identity changes
@@ -82,7 +82,7 @@ const CHART_RANGE_SECONDS = 60;
 // COMPONENT
 // =============================================================================
 
-export const Status: React.FC<StatusProps> = ({ getSeries, getStats }) => {
+export const Utilization: React.FC<UtilizationProps> = ({ getSeries, getStats }) => {
 	// The fixed one-minute grid and the track-scoped stats — re-pulled when
 	// the position-second moves (getter identities).
 	const dataPoints = useMemo(() => getSeries(CHART_RANGE_SECONDS), [getSeries]);
@@ -103,4 +103,4 @@ export const Status: React.FC<StatusProps> = ({ getSeries, getStats }) => {
 	);
 };
 
-export default Status;
+export default Utilization;
