@@ -165,3 +165,42 @@ class LangChainAdapter:
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])
+
+
+class AnthropicAdapter:
+    """history is a Messages-API `messages` list; done.items is the assembled content
+    (thinking `signature` / redacted blocks intact) — append verbatim, never rebuild.
+    """
+
+    def __init__(
+        self,
+        client: Any,
+        model: str,
+        max_tokens: int = 16000,
+        thinking: dict | None = None,
+        history: list[Any] | None = None,
+    ):
+        self.client = client
+        self.model = model
+        self.max_tokens = max_tokens
+        self.thinking = thinking
+        self.history: list[Any] = history if history is not None else []
+
+    def stream(self, user_text: str) -> Iterator[Event]:
+        self.history.append({'role': 'user', 'content': user_text})
+        kwargs: dict[str, Any] = {'model': self.model, 'max_tokens': self.max_tokens, 'messages': self.history}
+        if self.thinking:
+            kwargs['thinking'] = self.thinking
+        with self.client.messages.stream(**kwargs) as stream:
+            for ev in stream:
+                if getattr(ev, 'type', '') != 'content_block_delta':
+                    continue
+                delta = ev.delta
+                dtype = getattr(delta, 'type', '')
+                if dtype == 'thinking_delta':
+                    yield Event('thinking', getattr(delta, 'thinking', '') or '')
+                elif dtype == 'text_delta':
+                    yield Event('text', getattr(delta, 'text', '') or '')
+            final = stream.get_final_message()
+        self.history.append({'role': 'assistant', 'content': final.content})
+        yield Event('done', items=final.content)
