@@ -10,7 +10,7 @@ Design: repo discussion #1679 (RFC — virtualized provider Adapter).
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Protocol, runtime_checkable
+from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
 
 @dataclass
@@ -34,6 +34,30 @@ class Adapter(Protocol):
     history: list[Any]
 
     def stream(self, user_text: str) -> Iterator[Event]: ...
+
+
+def drive_adapter(
+    adapter: Adapter,
+    user_text: str,
+    on_text: Optional[Callable[[str], None]] = None,
+    on_thinking: Optional[Callable[[str], None]] = None,
+) -> tuple[str, list[Any]]:
+    """Consume an adapter's Event stream: fan text/thinking deltas to the sinks,
+    return the joined answer text and the terminal opaque ``done.items``.
+    """
+    parts: list[str] = []
+    items: list[Any] = []
+    for ev in adapter.stream(user_text):
+        if ev.type == 'text':
+            parts.append(ev.text)
+            if on_text is not None:
+                on_text(ev.text)
+        elif ev.type == 'thinking':
+            if on_thinking is not None:
+                on_thinking(ev.text)
+        elif ev.type == 'done':
+            items = ev.items
+    return ''.join(parts), items
 
 
 def _make_think_tag_splitter():
