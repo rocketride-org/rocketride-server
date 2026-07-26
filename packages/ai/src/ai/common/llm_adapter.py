@@ -204,3 +204,34 @@ class AnthropicAdapter:
             final = stream.get_final_message()
         self.history.append({'role': 'assistant', 'content': final.content})
         yield Event('done', items=final.content)
+
+
+class OpenAIAdapter:
+    """history is a Responses-API `input` item list; done.items are the output items
+    (encrypted reasoning + assistant) — extend history verbatim, never replay a subset.
+    """
+
+    def __init__(self, client: Any, model: str, effort: str = 'medium', history: list[Any] | None = None):
+        self.client = client
+        self.model = model
+        self.effort = effort
+        self.history: list[Any] = history if history is not None else []
+
+    def stream(self, user_text: str) -> Iterator[Event]:
+        self.history.append({'role': 'user', 'content': user_text})
+        with self.client.responses.stream(
+            model=self.model,
+            input=self.history,
+            store=False,  # stateless: encrypted_content rides back on the reasoning items.
+            reasoning={'effort': self.effort, 'summary': 'auto', 'context': 'all_turns'},
+        ) as stream:
+            for ev in stream:
+                etype = getattr(ev, 'type', '')
+                if etype in ('response.reasoning_summary_text.delta', 'response.reasoning_text.delta'):
+                    yield Event('thinking', getattr(ev, 'delta', '') or '')
+                elif etype == 'response.output_text.delta':
+                    yield Event('text', getattr(ev, 'delta', '') or '')
+            final = stream.get_final_response()
+        items = [item.model_dump() for item in final.output]
+        self.history.extend(items)
+        yield Event('done', items=items)
