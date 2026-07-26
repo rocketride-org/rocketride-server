@@ -535,9 +535,18 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 	// ±30 s on arrow keys; Esc clears the selection.
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'ArrowLeft') controller.skip(-SKIP_SECONDS);
-			else if (e.key === 'ArrowRight') controller.skip(SKIP_SECONDS);
-			else if (e.key === 'Escape' && selection) onSelectionChange?.(null);
+			// The listener is global, so stand down while the user is typing in a
+			// form field or editable region anywhere on the page.
+			const target = e.target as HTMLElement | null;
+			const tag = target?.tagName;
+			if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
+			if (e.key === 'ArrowLeft') {
+				e.preventDefault();
+				controller.skip(-SKIP_SECONDS);
+			} else if (e.key === 'ArrowRight') {
+				e.preventDefault();
+				controller.skip(SKIP_SECONDS);
+			} else if (e.key === 'Escape' && selection) onSelectionChange?.(null);
 		};
 		window.addEventListener('keydown', onKey);
 		return () => window.removeEventListener('keydown', onKey);
