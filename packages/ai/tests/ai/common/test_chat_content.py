@@ -7,7 +7,7 @@
 that the LLM adapters will absorb. Behavior must not drift during that refactor.
 """
 
-from ai.common.chat import _make_stream_content_parser
+from ai.common.llm_adapter import _make_stream_content_parser
 
 
 def test_str_passthrough():
