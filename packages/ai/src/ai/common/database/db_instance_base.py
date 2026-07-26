@@ -47,6 +47,7 @@ from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
 
 from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
+from ai.common.utils import parse_bool
 from rocketlib.types import IInvokeLLM
 
 from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
@@ -237,7 +238,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         limit = args.get('limit', 250)
         result = self._buildSQLQuery(question, limit=limit)
 
-        is_valid = result.get('isValid', '').lower() == 'true'
+        is_valid = parse_bool(result.get('isValid'))
         sql_query = result.get('query', '')
 
         if is_valid and sql_query and is_sql_safe(sql_query):
@@ -349,7 +350,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         for attempt in range(self.IGlobal.max_validation_attempts):
             result = self._buildSQLQueryOnce(question_text, limit=limit, previous_sql=previous_sql, error=last_error)
 
-            is_valid = result.get('isValid', '').lower() == 'true'
+            is_valid = parse_bool(result.get('isValid'))
             sql_query = result.get('query', '')
 
             # If the LLM decided the question isn't a DB query, or the safety
@@ -370,9 +371,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             previous_sql = sql_query
             last_error = explain_error
 
-        warning(
-            f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); returning last result.'
-        )
+        warning(f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); rejecting the query.')
+        # Every EXPLAIN attempt failed. Force isValid False so callers (get_sql,
+        # get_data, writeQuestions) don't execute a query the database already
+        # refused; keep the last query for context and carry the EXPLAIN error
+        # so callers can tell this apart from a non-SQL question.
+        result['isValid'] = False
+        result['error'] = last_error or 'SQL validation failed'
         return result
 
     def _buildSQLQueryOnce(
@@ -564,7 +569,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             # Ask the LLM to translate the natural-language question into SQL.
             query_json = self._buildSQLQuery(question_text)
-            is_valid_query = query_json.get('isValid', '').lower() == 'true'
+            is_valid_query = parse_bool(query_json.get('isValid'))
             sql_query = query_json.get('query')
 
             # Execute the query only when the LLM flagged it as valid SQL and

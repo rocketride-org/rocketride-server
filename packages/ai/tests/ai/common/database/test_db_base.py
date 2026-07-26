@@ -35,6 +35,7 @@ from sqlalchemy import (
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.db_instance_base import DatabaseInstanceBase
+from ai.common.utils import parse_bool
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +217,78 @@ def test_sanitize_row_list_input():
 def test_sanitize_row_scalar_input():
     """A scalar value is sanitized directly (not wrapped in a list)."""
     assert DatabaseInstanceBase._sanitize_row(42) == 42
+
+
+# ---------------------------------------------------------------------------
+# _buildSQLQuery (EXPLAIN exhaustion + isValid parsing) — regression for #1601
+# ---------------------------------------------------------------------------
+
+
+class _TestableInstance(DatabaseInstanceBase):
+    """Concrete DatabaseInstanceBase that satisfies the two abstract methods."""
+
+    def _db_display_name(self):
+        """Human-readable name used in tool descriptions."""
+        return 'TestDB'
+
+    def _db_dialect(self):
+        """Machine-readable dialect identifier."""
+        return 'testdb'
+
+
+class _FakeGlobal:
+    """Stub IGlobal: every EXPLAIN attempt rejects the query."""
+
+    def __init__(self, max_attempts=2, explain_error='syntax error near FROM'):
+        self.max_validation_attempts = max_attempts
+        self._explain_error = explain_error
+
+    def _validateQuery(self, sql):
+        return False, self._explain_error
+
+
+def _sql_instance(fake_global):
+    inst = _TestableInstance.__new__(_TestableInstance)
+    inst.IGlobal = fake_global
+    return inst
+
+
+def test_build_sql_query_marks_invalid_after_explain_exhaustion():
+    """Every EXPLAIN attempt failing must flip isValid to False, not leave the LLM's 'true'.
+
+    Before the fix, exhaustion returned the last LLM response unchanged, so
+    get_sql/get_data/writeQuestions executed a statement the database had
+    already refused on every attempt.
+    """
+    inst = _sql_instance(_FakeGlobal())
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': 'true',
+        'query': 'SELECT * FROM users',
+    }
+
+    result = inst._buildSQLQuery('all users')
+
+    assert parse_bool(result.get('isValid')) is False
+    assert result.get('error')  # the EXPLAIN error is carried for the caller
+
+
+def test_build_sql_query_accepts_real_json_bool_isvalid():
+    """A real JSON bool from the LLM must not crash isValid parsing.
+
+    Before the fix, `result.get('isValid', '').lower()` raised AttributeError
+    the moment the LLM returned a real bool instead of the string 'true'.
+    """
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,  # real bool, not the string 'true'
+        'query': 'SELECT 1',
+    }
+
+    result = inst._buildSQLQuery('anything')  # must not raise AttributeError
+
+    assert parse_bool(result.get('isValid')) is True
 
 
 # ---------------------------------------------------------------------------
