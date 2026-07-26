@@ -94,6 +94,50 @@ def _make_think_tag_splitter():
     return feed
 
 
+def _make_stream_content_parser(has_reasoning_sink: bool):
+    """Split streamed content (str, or Anthropic/LangChain-v1 typed blocks) into
+    (visible_text, reasoning_text); also strips inline ``<think>`` from str content.
+    """
+    think_split = _make_think_tag_splitter()
+    state = {'signature_noted': False}
+
+    def feed(content):
+        text = ''
+        thinking = ''
+        if isinstance(content, list):
+            for b in content:
+                if not isinstance(b, dict):
+                    continue
+                btype = b.get('type', '')
+                if btype == 'thinking':
+                    # carries either text deltas or a signature-only final delta.
+                    piece_text = b.get('thinking') or b.get('text') or ''
+                    if piece_text:
+                        thinking += piece_text
+                    elif b.get('signature') and not state['signature_noted'] and has_reasoning_sink:
+                        thinking += (
+                            '_Extended thinking ran, but this stream only delivered the '
+                            'block verification signature, not the readable chain-of-thought '
+                            'text. The answer below still reflects internal reasoning._\n\n'
+                        )
+                        state['signature_noted'] = True
+                elif btype == 'reasoning':
+                    # LangChain v1 standard block (thinking → reasoning).
+                    piece_text = b.get('reasoning') or b.get('text') or ''
+                    if piece_text:
+                        thinking += piece_text
+                elif btype == 'text' or not btype:
+                    text += b.get('text', '')
+        elif isinstance(content, str):
+            text, thinking_inline = think_split(content)
+            if thinking_inline:
+                thinking += thinking_inline
+        return text, thinking
+
+    feed.flush = think_split.flush  # type: ignore[attr-defined]
+    return feed
+
+
 class ChatBase:
     """
     Abstract base class for all chat drivers with configurable token allocation.
@@ -606,29 +650,9 @@ class ChatBase:
             try:
                 parts = []
                 finish_reason: Optional[str] = None
-                _signature_only_note_sent = False
-                _think_split = _make_think_tag_splitter()
+                parse = _make_stream_content_parser(on_reasoning_chunk_w is not None)
                 for piece in _llm.stream(prompt, **_stop_kwargs()):
-                    # content: str for OpenAI-style, list of typed blocks for Anthropic.
-                    content = piece.content
-                    text = ''
-                    thinking_delta = ''
-                    if isinstance(content, list):
-                        # Block vocabulary lives in flatten_content_blocks so the
-                        # non-streaming paths cannot drift away from this one.
-                        text, thinking_delta, sig_only = flatten_content_blocks(content)
-                        if sig_only and not _signature_only_note_sent and on_reasoning_chunk_w is not None:
-                            thinking_delta += (
-                                '_Extended thinking ran, but this stream only delivered the '
-                                'block verification signature, not the readable chain-of-thought '
-                                'text. The answer below still reflects internal reasoning._\n\n'
-                            )
-                            _signature_only_note_sent = True
-                    elif isinstance(content, str):
-                        # Strip inline `<think>...</think>` (Perplexity sonar-reasoning fallback).
-                        text, _thinking_inline = _think_split(content)
-                        if _thinking_inline:
-                            thinking_delta += _thinking_inline
+                    text, thinking_delta = parse(piece.content)
                     if thinking_delta and on_reasoning_chunk_w is not None:
                         on_reasoning_chunk_w(thinking_delta)
                     if text:
@@ -638,7 +662,7 @@ class ChatBase:
                     if reason:
                         finish_reason = reason
                 # Drain chars buffered by the <think> splitter (partial-tag tail).
-                tail_visible, tail_reasoning = _think_split.flush()
+                tail_visible, tail_reasoning = parse.flush()
                 if tail_visible:
                     on_chunk_w(tail_visible)
                     parts.append(tail_visible)
