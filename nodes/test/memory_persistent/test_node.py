@@ -802,6 +802,10 @@ class TestIInstanceLifecycle:
         inst.IGlobal = MagicMock()
         inst.IGlobal.store = store
         inst.instance = MagicMock()
+        # The real IInstanceBase.preventDefault() raises APERR by design (it's
+        # meant to be caught by the C++ engine); stub it so unit tests can call
+        # writeQuestions/writeAnswers without a running engine.
+        inst.preventDefault = MagicMock()
         return inst
 
     def test_write_questions_forwards_without_store(self):
