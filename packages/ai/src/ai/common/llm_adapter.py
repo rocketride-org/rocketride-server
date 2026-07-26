@@ -133,3 +133,35 @@ def _make_stream_content_parser(has_reasoning_sink: bool):
 
     feed.flush = think_split.flush  # type: ignore[attr-defined]
     return feed
+
+
+class LangChainAdapter:
+    """Wraps a LangChain chat model so non-reasoning providers speak the Event contract.
+
+    ``done.items`` is the assistant text turn — LangChain carries no opaque reasoning state.
+    """
+
+    def __init__(self, llm: Any, history: list[Any] | None = None):
+        self.llm = llm
+        self.history: list[Any] = history if history is not None else []
+
+    def stream(self, user_text: str) -> Iterator[Event]:
+        self.history.append({'role': 'user', 'content': user_text})
+        parse = _make_stream_content_parser(True)
+        parts: list[str] = []
+        for piece in self.llm.stream(self.history):
+            text, thinking = parse(piece.content)
+            if thinking:
+                yield Event('thinking', thinking)
+            if text:
+                parts.append(text)
+                yield Event('text', text)
+        tail_text, tail_thinking = parse.flush()
+        if tail_thinking:
+            yield Event('thinking', tail_thinking)
+        if tail_text:
+            parts.append(tail_text)
+            yield Event('text', tail_text)
+        assistant = {'role': 'assistant', 'content': ''.join(parts)}
+        self.history.append(assistant)
+        yield Event('done', items=[assistant])
