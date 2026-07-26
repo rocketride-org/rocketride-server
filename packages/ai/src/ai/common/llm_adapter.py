@@ -165,21 +165,26 @@ class LangChainAdapter:
     ``done.items`` is the assistant text turn — LangChain carries no opaque reasoning state.
     """
 
-    def __init__(self, llm: Any, history: list[Any] | None = None):
+    def __init__(self, llm: Any, history: list[Any] | None = None, stream_kwargs: dict | None = None):
         self.llm = llm
         self.history: list[Any] = history if history is not None else []
+        self.stream_kwargs = stream_kwargs or {}
+        self.finish_reason: Optional[str] = None
 
     def stream(self, user_text: str) -> Iterator[Event]:
         self.history.append({'role': 'user', 'content': user_text})
         parse = _make_stream_content_parser(True)
         parts: list[str] = []
-        for piece in self.llm.stream(self.history):
+        for piece in self.llm.stream(self.history, **self.stream_kwargs):
             text, thinking = parse(piece.content)
             if thinking:
                 yield Event('thinking', thinking)
             if text:
                 parts.append(text)
                 yield Event('text', text)
+            reason = (getattr(piece, 'response_metadata', None) or {}).get('finish_reason')
+            if reason:
+                self.finish_reason = reason
         tail_text, tail_thinking = parse.flush()
         if tail_thinking:
             yield Event('thinking', tail_thinking)

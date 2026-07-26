@@ -21,7 +21,7 @@ from ai.common.util import parseJson
 from ai.common.utils.content_blocks import flatten_content_blocks
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
-from ai.common.llm_adapter import _make_stream_content_parser
+from ai.common.llm_adapter import LangChainAdapter, drive_adapter
 
 
 def _stop_kwargs() -> dict:
@@ -550,30 +550,14 @@ class ChatBase:
         result = None
         if on_chunk_w is not None and _llm is not None and hasattr(_llm, 'stream'):
             try:
-                parts = []
-                finish_reason: Optional[str] = None
-                parse = _make_stream_content_parser(on_reasoning_chunk_w is not None)
-                for piece in _llm.stream(prompt, **_stop_kwargs()):
-                    text, thinking_delta = parse(piece.content)
-                    if thinking_delta and on_reasoning_chunk_w is not None:
-                        on_reasoning_chunk_w(thinking_delta)
-                    if text:
-                        on_chunk_w(text)
-                        parts.append(text)
-                    reason = (piece.response_metadata or {}).get('finish_reason')
-                    if reason:
-                        finish_reason = reason
-                # Drain chars buffered by the <think> splitter (partial-tag tail).
-                tail_visible, tail_reasoning = parse.flush()
-                if tail_visible:
-                    on_chunk_w(tail_visible)
-                    parts.append(tail_visible)
-                if tail_reasoning and on_reasoning_chunk_w is not None:
-                    on_reasoning_chunk_w(tail_reasoning)
-                if parts:
-                    result = ''.join(parts)
+                # Stream the LangChain path through the normalized adapter; drive_adapter
+                # fans text/thinking to the callbacks and returns the joined answer.
+                adapter = LangChainAdapter(_llm, stream_kwargs=_stop_kwargs())
+                answer, _items = drive_adapter(adapter, prompt, on_chunk_w, on_reasoning_chunk_w)
+                if answer:
+                    result = answer
                     if on_finish is not None:
-                        on_finish(finish_reason)
+                        on_finish(adapter.finish_reason)
             except Exception as e:
                 warning(
                     f'Streaming disabled for model={self._model} '
