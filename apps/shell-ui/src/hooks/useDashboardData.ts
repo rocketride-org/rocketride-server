@@ -85,7 +85,7 @@ interface DashboardSnapshot {
 // `data` to `null` at this declaration (the function that assigns `_data` is
 // defined further down); without the annotation, the reassignment in `_emit`
 // below would not type-check. Runtime behavior is unchanged.
-/** Stable snapshot object — only replaced when data or events change. */
+/** Stable snapshot object — replaced whenever _emit() publishes a state update. */
 let _snapshot: DashboardSnapshot = { data: _data, events: _events, error: _error };
 
 /** Notify all subscribed React components that data changed. */
@@ -124,7 +124,22 @@ function _fetchDashboard(): Promise<void> {
 			// load and the view sat on "Loading..." forever (saas #373).
 			console.log('[useDashboardData] Dashboard fetch failed:', err);
 			const message = err instanceof Error ? err.message : String(err);
-			const denied = /denied|permission|forbidden|403/i.test(message);
+
+			// getDashboard() goes through call(), so a structured DAP error arrives
+			// as DAPException with the detail in `dapResult` — the human message is
+			// not guaranteed to carry it. Matching prose alone therefore misses the
+			// case this branch exists for: a real denial would keep rendering the
+			// previous session's numbers under an "access denied" banner. Read the
+			// structured status first and fall back to the text.
+			const dapResult =
+				(err as { dapResult?: Record<string, unknown> } | undefined)?.dapResult;
+			const status = Number(dapResult?.status ?? dapResult?.statusCode ?? dapResult?.code);
+			const denied =
+				status === 401 ||
+				status === 403 ||
+				/denied|permission|forbidden|unauthori[sz]ed|not\s*authori[sz]ed|\b40[13]\b/i.test(
+					message,
+				);
 			// The raw message already says "permission denied" in the case we most
 			// want to explain, so prefixing it produced "You do not have permission
 			// to view the dashboard. Permission denied". Replace it instead of
