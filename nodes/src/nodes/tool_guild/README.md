@@ -110,9 +110,10 @@ Example: [`examples/guild-delegate-agent.pipe`](../../../../examples/guild-deleg
 | Max sessions per run | `integer` | Default 10, range 1-1000. Cap on billed Guild sessions per pipeline run. |
 | Verify TLS certificate | `boolean` | Default on. Disable only for a self-hosted Guild with a self-signed certificate. |
 
-Every field falls back to an environment variable when left empty: `ROCKETRIDE_GUILD_URL`,
-`ROCKETRIDE_GUILD_KEY_ID`, `ROCKETRIDE_GUILD_KEY_SECRET`, `ROCKETRIDE_GUILD_OWNER`,
-`ROCKETRIDE_GUILD_WORKSPACE`, `ROCKETRIDE_GUILD_AGENT`.
+The connection fields fall back to an environment variable when left empty: `ROCKETRIDE_GUILD_URL`
+(Base URL), `ROCKETRIDE_GUILD_KEY_ID`, `ROCKETRIDE_GUILD_KEY_SECRET`, `ROCKETRIDE_GUILD_OWNER`,
+`ROCKETRIDE_GUILD_WORKSPACE`, and `ROCKETRIDE_GUILD_AGENT`. The run options (result mode, session
+timeout, max sessions, verify TLS) are read from the node config only.
 
 Out-of-range or non-numeric timeouts fall back to their defaults rather than failing the run.
 

@@ -640,7 +640,7 @@ class _FakeInstance:
         self.table = t
 
 
-def _make_instance(gclient, **global_over):
+def _make_instance(monkeypatch, gclient, **global_over):
     """An IInstance wired to a stubbed guild_client and a fresh budget."""
     inst = _imod.IInstance.__new__(_imod.IInstance)
     g = _make_global(**global_over)
@@ -656,8 +656,9 @@ def _make_instance(gclient, **global_over):
     inst.IGlobal = g
     inst._text_parts = []
     inst._documents = []
-    # Swap the module-level guild_client the instance calls into.
-    _imod.guild_client = gclient
+    # Swap the module-level guild_client the instance calls into; monkeypatch
+    # restores it after the test so the stub never leaks to other tests.
+    monkeypatch.setattr(_imod, 'guild_client', gclient)
     return inst
 
 
@@ -690,10 +691,10 @@ class _StubClient:
         return events[-1]['text'] if events else ''
 
 
-def test_run_agent_claims_budget_before_starting_the_session():
+def test_run_agent_claims_budget_before_starting_the_session(monkeypatch):
     """The billed POST must be gated by the budget, not the other way round."""
     client = _StubClient()
-    inst = _make_instance(client, max_sessions=1)
+    inst = _make_instance(monkeypatch, client, max_sessions=1)
     out = inst._run_agent('hello', 'hello-agent', wait=True)
     assert out['output'] == 'RR_MARKER ok'
     assert out['session_id'] == 'sess-xyz'
@@ -705,31 +706,32 @@ def test_run_agent_claims_budget_before_starting_the_session():
     assert client.calls == [], 'no Guild call may fire once the budget is exhausted'
 
 
-def test_pipeline_closing_emits_answer_on_connected_lanes_only():
+def test_pipeline_closing_emits_answer_on_connected_lanes_only(monkeypatch):
     client = _StubClient()
-    inst = _make_instance(client)
+    inst = _make_instance(monkeypatch, client)
     inst.instance = _FakeInstance(listeners=('text', 'answers'))
     inst._text_parts = ['find the ']
     inst._documents = ['overdue invoices']
+    # Parts joined with a newline, each byte-exact.
+    assert inst._build_input() == 'find the \noverdue invoices'
     inst.closing()
     assert inst.instance.text == 'RR_MARKER ok'
     assert inst.instance.answers == 'RR_MARKER ok'
     assert inst.instance.documents is None  # not connected -> not written
-    # Byte-exact input reached the agent (no trim/case-fold).
     assert client.calls[0] == 'start_session'
 
 
-def test_pipeline_closing_without_input_starts_no_session():
+def test_pipeline_closing_without_input_starts_no_session(monkeypatch):
     client = _StubClient()
-    inst = _make_instance(client)
+    inst = _make_instance(monkeypatch, client)
     inst.instance = _FakeInstance(listeners=('text',))
     inst.closing()  # no lane input accumulated
     assert client.calls == [], 'empty input must not start a billed session'
 
 
-def test_pipeline_closing_requires_a_configured_agent():
+def test_pipeline_closing_requires_a_configured_agent(monkeypatch):
     client = _StubClient()
-    inst = _make_instance(client, default_agent='')
+    inst = _make_instance(monkeypatch, client, default_agent='')
     inst.instance = _FakeInstance(listeners=('text',))
     inst._text_parts = ['something']
     with pytest.raises(ValueError, match='no agent configured'):

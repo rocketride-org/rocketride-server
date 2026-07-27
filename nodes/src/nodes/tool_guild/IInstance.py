@@ -189,7 +189,8 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_guild')
         g = self.IGlobal
         session_id = require_str(args, 'session_id', tool_name='get_session')
-        self._require_workspace()
+        # No workspace check: GET /api/sessions/{id} is addressed by session id alone,
+        # so an agent can follow up with only the id from an earlier run_agent.
         session = guild_client.get_session(g.base_url, g.key_id, g.key_secret, session_id, verify=g.verify_tls)
         return {
             'success': True,
@@ -227,7 +228,7 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_guild')
         g = self.IGlobal
         session_id = require_str(args, 'session_id', tool_name='get_session_events')
-        self._require_workspace()
+        # No workspace check: the events endpoint is addressed by session id alone.
         events = guild_client.get_session_events(
             g.base_url,
             g.key_id,
@@ -249,7 +250,7 @@ class IInstance(IInstanceBase):
     # Pipeline face — accumulate input, run the configured agent, emit
     # =======================================================================
 
-    def open(self, object: Entry):
+    def open(self, obj: Entry):
         """Reset the per-object input accumulators."""
         self._text_parts = []
         self._documents = []
@@ -276,10 +277,11 @@ class IInstance(IInstanceBase):
     def _build_input(self) -> str:
         """Flatten accumulated lane input into the agent's input text.
 
-        Content is joined, never trimmed or case-folded — what the pipeline
-        produced is what the Guild agent sees.
+        Parts are joined with a newline so adjacent chunks and documents keep a
+        boundary instead of running together; each part is passed through
+        byte-exact (never trimmed or case-folded).
         """
-        return ''.join(self._text_parts) + ''.join(self._documents)
+        return '\n'.join(self._text_parts + self._documents)
 
     def closing(self):
         """Run the configured Guild agent with the accumulated input and emit its answer."""

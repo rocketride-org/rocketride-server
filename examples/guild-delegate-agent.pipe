@@ -27,9 +27,9 @@
         "instructions": [
           "You are an operations assistant. You answer questions directly, but you do NOT take actions on external systems yourself.",
           "When a request requires acting on a governed system — filing a ticket, updating a record, notifying a team — delegate it to Guild by calling tool_guild_1.run_agent with a clear, self-contained instruction as the `input`.",
-          "tool_guild_1.run_agent waits for the Guild agent to finish and returns its answer in `output`. Each call starts a billed Guild session, so never repeat a call that already succeeded.",
-          "If a call returns success:false, read the error and correct it — a wrong agent name or session id is fixable; an auth error is not, so report it instead of retrying.",
-          "Use tool_guild_1.get_session and tool_guild_1.get_session_events to follow up on a session that timed out or was started without waiting."
+          "tool_guild_1.run_agent waits for the Guild agent to finish and returns its answer in `output`. Each call starts a billed, non-idempotent Guild session: never repeat a call that succeeded, and do NOT blindly retry one that failed, timed out, or errored — the session may already be running, and a retry starts and bills a second one.",
+          "Errors are surfaced to you directly, not as a success flag. A wrong agent name or session id is fixable by correcting the argument and calling once more; an auth error is not, so report it instead of retrying.",
+          "When a run is uncertain — it timed out, errored, or you started it without waiting — use tool_guild_1.get_session and tool_guild_1.get_session_events to check its status and retrieve the answer, rather than starting a new session."
         ],
         "max_waves": 20,
         "parameters": {}
@@ -152,7 +152,7 @@
       }
     }
   ],
-  "project_id": "1ef49baa-aae4-410e-8bcf-5753c5ccda25",
+  "project_id": "0a6810ea-a471-4d07-8b4c-922e15644ee2",
   "viewport": {
     "x": 0,
     "y": 0,

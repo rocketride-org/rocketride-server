@@ -63,10 +63,18 @@ them touches no other file:
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+
+# Allowlist for identifiers that become URL path segments (agent, session_id,
+# owner, workspace). Permits only plain-identifier characters — letters,
+# digits, and ``. _ ~ -`` (covers dotted owners, tilde-joined agent names, and
+# UUIDs). Everything else — path/scheme separators, percent-encoding, query and
+# fragment markers, whitespace, control characters — is rejected.
+_SEGMENT_RE = re.compile(r'^[A-Za-z0-9._~-]+$')
 
 DEFAULT_BASE_URL = 'https://app.guild.ai'
 DEFAULT_TIMEOUT = 30
@@ -162,8 +170,9 @@ def call(
 ) -> Any:
     """Make an authenticated Guild API call and return parsed JSON.
 
-    Raises ``ValueError`` on missing credentials, transport failure, or an HTTP
-    error status. Returns ``{}`` for an empty/204 response.
+    Raises ``ValueError`` for missing credentials, and ``RuntimeError`` for a
+    transport failure or a non-2xx HTTP status. Returns ``{}`` for an empty/204
+    response.
     """
     if not key_id or not key_secret:
         raise ValueError(
@@ -304,7 +313,7 @@ def wait_for_session(
 ) -> Dict[str, Any]:
     """Poll a session until it reaches a terminal state.
 
-    Raises ``ValueError`` when the session fails or the deadline passes. The
+    Raises ``RuntimeError`` when the session fails or the deadline passes. The
     timeout message carries the session id: a RocketRide-side timeout does NOT
     cancel the session on Guild, so the run must stay traceable.
     """
@@ -343,14 +352,7 @@ def safe_segment(value: str, field: str) -> str:
     text = (value or '').strip()
     if not text:
         raise ValueError(f'{field} is required')
-    if (
-        '://' in text
-        or '/' in text
-        or '\\' in text
-        or any(c.isspace() for c in text)
-        or any(ch in text for ch in ('?', '#'))
-        or text in ('.', '..')
-    ):
+    if text in ('.', '..') or not _SEGMENT_RE.match(text):
         raise ValueError(f'Invalid {field} "{text}": provide a plain identifier, not a path or URL.')
     return text
 
