@@ -275,3 +275,48 @@ class OpenAIAdapter:
         items = [item.model_dump() for item in final.output]
         self.history.extend(items)
         yield Event('done', items=items)
+
+
+class NativeOpenAIResponsesAdapter:
+    """Bridges the OpenAI Responses reasoning stream (create/stream=True) to Events."""
+
+    def __init__(self, chat: Any, history: list[Any] | None = None):
+        self.chat = chat
+        self.history: list[Any] = history if history is not None else []
+        self.finish_reason: Optional[str] = None
+
+    def stream(self, user_text: str) -> Iterator[Event]:
+        self.history.append({'role': 'user', 'content': user_text})
+        chat = self.chat
+        parts: list[str] = []
+        stream = chat._raw_client.responses.create(
+            model=chat._model,
+            input=user_text,
+            reasoning={'summary': 'auto'},
+            max_output_tokens=chat._modelOutputTokens,
+            stream=True,
+        )
+        for event in stream:
+            etype = getattr(event, 'type', '') or ''
+            if etype == 'response.reasoning_summary_text.delta':
+                delta = getattr(event, 'delta', '') or ''
+                if delta:
+                    yield Event('thinking', delta)
+            elif etype == 'response.output_text.delta':
+                delta = getattr(event, 'delta', '') or ''
+                if delta:
+                    parts.append(delta)
+                    yield Event('text', delta)
+            elif etype == 'response.completed':
+                resp = getattr(event, 'response', None)
+                status = getattr(resp, 'status', None) if resp is not None else None
+                if status == 'incomplete':
+                    details = getattr(resp, 'incomplete_details', None)
+                    self.finish_reason = (getattr(details, 'reason', None) if details else None) or 'length'
+                else:
+                    self.finish_reason = 'stop' if status == 'completed' else (status or 'stop')
+            elif etype in ('response.failed', 'response.error'):
+                self.finish_reason = 'error'
+        assistant = {'role': 'assistant', 'content': ''.join(parts)}
+        self.history.append(assistant)
+        yield Event('done', items=[assistant])
