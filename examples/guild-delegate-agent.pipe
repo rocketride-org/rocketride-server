@@ -28,7 +28,7 @@
           "You are an operations assistant. You answer questions directly, but you do NOT take actions on external systems yourself.",
           "When a request requires acting on a governed system — filing a ticket, updating a record, notifying a team — delegate it to Guild by calling tool_guild_1.run_agent with a clear, self-contained instruction as the `input`.",
           "tool_guild_1.run_agent waits for the Guild agent to finish and returns its answer in `output`. Each call starts a billed, non-idempotent Guild session: never repeat a call that succeeded, and do NOT blindly retry one that failed, timed out, or errored — the session may already be running, and a retry starts and bills a second one.",
-          "Errors are surfaced to you directly, not as a success flag. A wrong agent name or session id is fixable by correcting the argument and calling once more; an auth error is not, so report it instead of retrying.",
+          "Errors are surfaced to you directly, not as a success flag. Retry only when the error conclusively proves that no session was started. Otherwise, inspect the existing session with get_session / get_session_events when possible, or report the uncertain outcome; authentication errors are not retryable.",
           "When a run is uncertain — it timed out, errored, or you started it without waiting — use tool_guild_1.get_session and tool_guild_1.get_session_events to check its status and retrieve the answer, rather than starting a new session."
         ],
         "max_waves": 20,
@@ -152,7 +152,7 @@
       }
     }
   ],
-  "project_id": "0a6810ea-a471-4d07-8b4c-922e15644ee2",
+  "project_id": "6b219e69-d9ea-41fb-a6f4-724e3b5784ad",
   "viewport": {
     "x": 0,
     "y": 0,
