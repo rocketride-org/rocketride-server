@@ -306,8 +306,16 @@ def test_has_permission_logs_why_it_denied(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger=tc_mod.__name__):
         assert conn.has_permission('task.control') is False
 
-    assert caplog.records, 'denial produced no log record at all'
-    message = ' '.join(r.getMessage() for r in caplog.records)
+    # Pin the record down before reading it. Joining every captured record would
+    # let an unrelated log satisfy these field checks, and would keep passing if
+    # the denial were downgraded to debug or raised to error — either of which
+    # changes whether we actually see it in CloudWatch, which is the entire point.
+    records = [r for r in caplog.records if r.name == tc_mod.__name__ and r.levelno == logging.WARNING]
+    assert len(records) == 1, (
+        f'expected exactly one WARNING from {tc_mod.__name__}, got {[(r.name, r.levelname) for r in caplog.records]}'
+    )
+
+    message = records[0].getMessage()
     for expected in ('team-1', 'user-1', 'task.control', 'not in organization'):
         assert expected in message, f'denial log omits {expected!r}: {message}'
 
