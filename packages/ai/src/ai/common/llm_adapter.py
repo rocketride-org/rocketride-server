@@ -159,6 +159,17 @@ def _make_stream_content_parser(has_reasoning_sink: bool):
     return feed
 
 
+def flatten_content(content: Any) -> str:
+    """Collapse a full (non-streamed) message content to visible text, dropping thinking.
+
+    Non-streaming callers (agents, expectJson) must get a string, never a block list.
+    """
+    parse = _make_stream_content_parser(False)
+    text, _thinking = parse(content)
+    tail, _ = parse.flush()
+    return text + tail
+
+
 class LangChainAdapter:
     """Wraps a LangChain chat model so non-reasoning providers speak the Event contract.
 

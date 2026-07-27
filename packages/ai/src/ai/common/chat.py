@@ -20,7 +20,7 @@ from ai.common.config import Config
 from ai.common.util import parseJson
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
-from ai.common.llm_adapter import LangChainAdapter, drive_adapter
+from ai.common.llm_adapter import LangChainAdapter, drive_adapter, flatten_content
 
 
 def _stop_kwargs() -> dict:
@@ -188,8 +188,8 @@ class ChatBase:
         # so non-agent callers (and backends/mocks without a stop param) are unaffected.
         results = self._llm.invoke(prompt, **_stop_kwargs())
 
-        # Return the results
-        return results.content
+        # Flatten provider content (Anthropic returns typed blocks) so callers get a string.
+        return flatten_content(results.content)
 
     def getTokens(self, value: str) -> int:
         """
