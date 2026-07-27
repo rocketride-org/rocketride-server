@@ -85,7 +85,6 @@ from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
 from ai.account.models import AccountInfo, resolve_task_permissions
 from ai.account.store import Store
-from ai.account.deployment_store import DeploymentStore
 from .task_conn import TaskConn
 from .task_engine import Task
 from .types import LAUNCH_TYPE
@@ -214,7 +213,6 @@ class TaskServer(DAPBase):
         self._allocated_ports: List[int] = []
 
         # Shared store instance (lazy-loaded via property)
-        self._deployments_instance: Optional[DeploymentStore] = None
 
         # Start background tasks that must be cancelled on shutdown.
         self._bg_tasks: List[asyncio.Task] = [
@@ -250,13 +248,6 @@ class TaskServer(DAPBase):
         # instance, so server code and Store.file_store(ctx) call sites can
         # never diverge onto different stores.
         return Store.instance()
-
-    @property
-    def deployments(self) -> DeploymentStore:
-        """Shared DeploymentStore instance, lazy-initialized on first access."""
-        if self._deployments_instance is None:
-            self._deployments_instance = DeploymentStore(self.store._store)
-        return self._deployments_instance
 
     async def _cleanup_tasks(self) -> None:
         """
@@ -945,6 +936,8 @@ class TaskServer(DAPBase):
         team_id: str = '',
         org_id: str = '',
         env: Dict[str, str] | None = None,
+        run_kind: str = 'dev',
+        trigger: str = '',
     ) -> str:
         """
         Create and start a new computational task with full lifecycle management.
@@ -1159,6 +1152,8 @@ class TaskServer(DAPBase):
                 team_id=control.teamId,
                 org_id=control.orgId,
                 env=env or {},
+                run_kind=run_kind,
+                trigger=trigger,
             )
 
             # Register task in central registry

@@ -184,6 +184,51 @@ async def test_on_execute_foreign_team_denied_before_secret_merge(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_on_execute_run_kind_cannot_be_spoofed_via_dap():
+    """arguments.run_kind/trigger are IGNORED: run classification comes only
+    from the trusted in-process dispatch attributes, so a remote client can
+    never write into the deploy continuum or claim a scheduled trigger.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+
+    await TaskCommands.on_execute(
+        conn, {'arguments': {'pipeline': {'components': []}, 'run_kind': 'deploy', 'trigger': 'schedule'}}
+    )
+
+    kwargs = server.start_task.call_args.kwargs
+    assert kwargs['run_kind'] == 'dev'
+    assert kwargs['trigger'] == ''
+
+
+@pytest.mark.asyncio
+async def test_on_execute_trusted_attributes_classify_deploy_runs(monkeypatch):
+    """The in-process dispatch sets _trusted_run_kind/_trusted_trigger on its
+    connection; on_execute forwards them to start_task and SKIPS the user
+    env layer (a deployment's config must not depend on who deployed it).
+    """
+    from ai.account import account as account_singleton
+
+    merged = AsyncMock(return_value={})
+    monkeypatch.setattr(account_singleton, 'get_merged_env', merged)
+
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn._trusted_run_kind = 'deploy'
+    conn._trusted_trigger = 'schedule'
+
+    await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
+
+    kwargs = server.start_task.call_args.kwargs
+    assert kwargs['run_kind'] == 'deploy'
+    assert kwargs['trigger'] == 'schedule'
+    # No user layer for deploy runs.
+    assert merged.await_args.kwargs['user_id'] == ''
+
+
+@pytest.mark.asyncio
 async def test_on_execute_checks_plan_for_pipeline():
     """When the request includes a pipeline, verify_plans is invoked."""
     account = _account_info()

@@ -162,10 +162,19 @@ class TaskCommands(DAPConn):
             else:
                 merged_env = {}
 
-            # Layer org → team → user secrets on top
+            # Run classification comes ONLY from the trusted in-process
+            # dispatch (start_server_task_as_team sets these attributes on
+            # its connection) — never from DAP arguments, so remote clients
+            # cannot spoof a deploy run into the team continuum.
+            run_kind = getattr(self, '_trusted_run_kind', 'dev')
+            trigger = getattr(self, '_trusted_trigger', '') or ''
+
+            # Layer org → team → user secrets on top. Deploy runs skip the
+            # USER layer deliberately: a deployment's configuration must not
+            # depend on which human deployed it (org+team only).
             merged_env.update(
                 await account.get_merged_env(
-                    user_id=self._account_info.userId,
+                    user_id='' if run_kind == 'deploy' else self._account_info.userId,
                     org_id=org_id,
                     team_id=team_id,
                 )
@@ -183,6 +192,8 @@ class TaskCommands(DAPConn):
                 team_id=team_id,
                 org_id=org_id,
                 env=merged_env,
+                run_kind=run_kind,
+                trigger=trigger,
             )
 
             # Confirm successful task execution startup

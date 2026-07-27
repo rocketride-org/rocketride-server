@@ -1156,6 +1156,15 @@ class Task(DAPBase):
         if isinstance(body, dict) and 'project_id' not in body:
             body['project_id'] = self.project_id
             body['source'] = self.source
+        # Concrete identity stamp: teamId/userId/runKind ride every event
+        # body so watchers can scope streams client-side (two teams or two
+        # devs running the SAME project no longer alias in a watch UI), and
+        # server-side subscription filters can match these fields verbatim
+        # when they land. Idempotent like the project_id stamp above.
+        if isinstance(body, dict) and 'runKind' not in body:
+            body['runKind'] = self._run_kind
+            body['teamId'] = self.team_id
+            body['userId'] = self.client_id
 
         # Append to the run-log continuum: what clients see is what replay
         # reproduces (the writer filters/samples/caps internally; never

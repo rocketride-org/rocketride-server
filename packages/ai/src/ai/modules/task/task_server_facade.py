@@ -61,6 +61,70 @@ async def start_server_task(server: 'TaskServer', token: str, pipeline: Dict[str
     return exec_response['body']['token']
 
 
+async def start_server_task_as_team(
+    server: 'TaskServer',
+    pipeline: Dict[str, Any],
+    *,
+    org_id: str,
+    team_id: str,
+    actor: Dict[str, Any],
+    trigger: str = 'schedule',
+) -> str:
+    """Execute ``pipeline`` as a TEAM deployment run — no stored credential.
+
+    The trusted dispatch path for scheduled/deployed runs: instead of
+    replaying a user token, the connection's identity is CONSTRUCTED
+    server-side as the team — a synthetic AccountInfo whose only grant is
+    the task permission set on ``team_id``. Consequences, all deliberate:
+
+      - The env merge uses org+team layers only (no user layer) — a deploy
+        run's configuration never depends on which human deployed it.
+      - ``actor`` (the deploying user, from the deployment record) rides as
+        billing/attribution identity, not as authentication.
+      - ``run_kind='deploy'`` and ``trigger`` travel as TRUSTED connection
+        attributes read by on_execute — never as DAP arguments, so remote
+        clients cannot spoof a deploy run.
+
+    Raises:
+        RuntimeError: Execute request did not succeed.
+    """
+    from ai.account import account
+    from ai.account.models import AccountInfo
+
+    conn = _InProcessConn(server)
+
+    # Server-constructed team identity: full task permissions on the ONE
+    # team, nothing else. No userToken — deploy runs hold no credential.
+    conn._account_info = AccountInfo(
+        userId=str(actor.get('userId') or ''),
+        displayName=str(actor.get('display') or ''),
+        email=str(actor.get('email') or ''),
+        defaultTeam=team_id,
+        organization={
+            'id': org_id,
+            'name': '',
+            'permissions': [],
+            'teams': [
+                {
+                    'id': team_id,
+                    'name': '',
+                    'permissions': ['task.control', 'task.monitor', 'task.data', 'task.store'],
+                }
+            ],
+        },
+        capabilities=list(account.capabilities),
+    )
+    conn._authenticated = True
+
+    # The trusted, non-wire channel for run classification.
+    conn._trusted_run_kind = 'deploy'
+    conn._trusted_trigger = trigger
+
+    exec_response = await conn.request('execute', arguments={'pipeline': pipeline, 'teamId': team_id})
+
+    return exec_response['body']['token']
+
+
 # =============================================================================
 # PRIVATE
 # =============================================================================

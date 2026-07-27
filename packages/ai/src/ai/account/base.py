@@ -319,6 +319,93 @@ class AccountBase(ABC):
         return {'transactions': [], 'total': 0, 'page': page, 'pageSize': page_size}
 
     # =========================================================================
+    # DEPLOYMENTS — the teams-as-environments interface.
+    #
+    # PUBLISH creates an immutable artifact version in the ORG registry;
+    # DEPLOY points a TEAM at a version (promotion and rollback are the same
+    # pointer move); every action is audited (who/what/when, denormalized so
+    # it survives user deletion); removal is soft.
+    #
+    # The OSS defaults below delegate to the file-backed backend
+    # (deployment_backend.py). The SaaS implementation overrides them with
+    # DB-backed tables while REUSING the same artifact files — callers
+    # (cmd_deploy, the scheduler, UIs) never branch on edition.
+    #
+    # Permission checks do NOT live here: the command layer verifies team
+    # permissions before calling (the same division of labor as the run-log
+    # domain API over its system tree).
+    # =========================================================================
+
+    def _deployment_backend(self):
+        """The lazily-created file backend used by the OSS defaults."""
+        if getattr(self, '_deployments_backend', None) is None:
+            from .deployment_backend import FileDeploymentBackend
+            from .store import Store
+
+            self._deployments_backend = FileDeploymentBackend(Store.instance()._store)
+        return self._deployments_backend
+
+    async def deployments_publish(
+        self, org_id: str, project_id: str, pipeline: dict, actor: dict, comment: str = ''
+    ) -> dict:
+        """Snapshot ``pipeline`` as the next immutable registry version.
+
+        Returns the new registry entry (version, sha256, publishedBy, ...).
+        """
+        return await self._deployment_backend().publish(org_id, project_id, pipeline, actor, comment)
+
+    async def deployments_deploy(self, org_id: str, team_id: str, project_id: str, version: int, actor: dict) -> dict:
+        """Point ``team_id`` at registry ``version`` (promotion/rollback)."""
+        return await self._deployment_backend().deploy(org_id, team_id, project_id, version, actor)
+
+    async def deployments_set_state(self, org_id: str, team_id: str, project_id: str, state: str, actor: dict) -> dict:
+        """Pause/resume/error/soft-remove a team deployment."""
+        return await self._deployment_backend().set_state(org_id, team_id, project_id, state, actor)
+
+    async def deployments_schedule_set(
+        self,
+        org_id: str,
+        team_id: str,
+        project_id: str,
+        source_id: str,
+        cron: 'str | None',
+        enabled: bool,
+        actor: dict,
+    ) -> dict:
+        """Set (or clear with cron=None) one source's schedule."""
+        return await self._deployment_backend().schedule_set(
+            org_id, team_id, project_id, source_id, cron, enabled, actor
+        )
+
+    async def deployments_mark_run(self, org_id: str, team_id: str, project_id: str, source_id: str) -> None:
+        """Stamp lastRunAt after the scheduler fires a source (best-effort)."""
+        await self._deployment_backend().mark_run(org_id, team_id, project_id, source_id)
+
+    async def deployments_list(self, org_id: str, team_id: str) -> list:
+        """All non-removed deployments of one team, joined with registry info."""
+        return await self._deployment_backend().list_team(org_id, team_id)
+
+    async def deployments_get(self, org_id: str, team_id: str, project_id: str) -> 'dict | None':
+        """One team deployment (joined with registry info), or None."""
+        return await self._deployment_backend().get(org_id, team_id, project_id)
+
+    async def deployments_versions(self, org_id: str, project_id: str) -> list:
+        """The registry entries for a project, newest first (version strip)."""
+        return await self._deployment_backend().versions(org_id, project_id)
+
+    async def deployments_history(self, org_id: str, project_id: str, team_id: 'str | None' = None) -> list:
+        """The immutable audit trail, newest first; optionally one team's."""
+        return await self._deployment_backend().history(org_id, project_id, team_id)
+
+    async def deployments_artifact(self, org_id: str, project_id: str, version: int) -> dict:
+        """Load one artifact version, sha256-verified against the registry."""
+        return await self._deployment_backend().artifact(org_id, project_id, version)
+
+    def deployments_iter_active(self):
+        """Async-generate every active team deployment (the scheduler feed)."""
+        return self._deployment_backend().iter_active()
+
+    # =========================================================================
     # DAP COMMAND DISPATCH — SaaS overrides all three
     # =========================================================================
 

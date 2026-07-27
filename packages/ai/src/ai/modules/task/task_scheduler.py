@@ -21,16 +21,24 @@
 # SOFTWARE.
 
 """
-TaskScheduler — background asyncio loop that fires deployed pipelines on schedule.
+TaskScheduler — background asyncio loop that fires TEAM deployments on schedule.
 
-On startup it scans the store for all active deployments and builds an in-memory
-registry of (next_run, record) entries.  A single asyncio task wakes up when the
-soonest job is due (capped at 60 s) and dispatches overdue runs via
-start_server_task() — the same authenticated path as an on-demand API call.
+Teams-as-environments model: schedule entries are keyed
+``(team_id, project_id, source_id)`` — the same project deployed by two teams
+(Staging and Production) runs independently, and each SOURCE of a deployment
+carries its own cron. On startup the scheduler reads every active deployment
+from the account module (``deployments_iter_active`` — OSS files or SaaS DB,
+this layer never knows) and builds an in-memory min-heap of next-run entries.
+
+Dispatch is the TRUSTED team path (``start_server_task_as_team``): no stored
+credential — the run executes as the team, with the deploying user carried as
+attribution only. At fire time the deployment is RE-READ so a pause/remove/
+pointer-move between ticks always wins, and the artifact is sha256-verified
+before it runs.
 
 Caller responsibilities:
-  • Call scheduler.schedule(record) after every rrext_deploy add / update.
-  • Call scheduler.unschedule(project_id) after every rrext_deploy remove.
+  • Call scheduler.sync(org_id, deployment) after every mutation
+    (deploy / pause / resume / remove / schedule_set).
   • Do NOT call start() more than once.
 """
 
@@ -38,60 +46,96 @@ import asyncio
 import heapq
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from croniter import croniter
-from rocketlib import debug, error
+from rocketlib import debug, error, warning
 
-from ai.account.models import DeploymentRecord
-from .task_server_facade import ServerTaskAuthError, start_server_task
+from ai.account import account
+from .task_server_facade import start_server_task_as_team
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
 
 
+# The audit identity used when the SCHEDULER itself mutates a deployment
+# (e.g. marking it errored after a failed dispatch).
+_SCHEDULER_ACTOR = {'userId': 'system:scheduler', 'display': 'Scheduler', 'email': ''}
+
+# (team_id, project_id, source_id) — the schedule identity.
+RunKey = Tuple[str, str, str]
+
+
 @dataclass(order=True)
-class Task:
+class ScheduledRun:
+    """One (team, project, source) cron entry in the min-heap."""
+
     next_run: float
-    client_id: str = field(compare=False)
-    project_id: str = field(compare=False)
-    schedule: str = field(compare=False)
+    key: RunKey = field(compare=False)
+    org_id: str = field(compare=False)
+    cron: str = field(compare=False)
     cancelled: bool = field(default=False, compare=False)
 
 
 class TaskScheduler:
-    """Asyncio-native cron scheduler for server-managed pipeline deployments."""
+    """Asyncio-native cron scheduler for team-scoped pipeline deployments."""
 
     def __init__(self, task_server: 'TaskServer') -> None:
+        """Bind to the task server; state is built by start()/sync()."""
         self._server = task_server
-        # min-heap ordered by Task.next_run
-        self._schedule: List[Task] = []
-        # project_id -> current valid Task; absence means unscheduled
-        self._tasks: Dict[str, Task] = {}
-        # project_id -> token of the most-recently dispatched task (overlap guard)
-        self._active_tokens: Dict[str, str] = {}
+        # min-heap ordered by ScheduledRun.next_run
+        self._schedule: List[ScheduledRun] = []
+        # key -> current valid entry; absence means unscheduled
+        self._entries: Dict[RunKey, ScheduledRun] = {}
+        # key -> token of the most-recently dispatched run (overlap guard)
+        self._active_tokens: Dict[RunKey, str] = {}
         self._scheduling: asyncio.Task | None = None
         self._inflight_starts: set[asyncio.Task] = set()
 
-    def schedule(self, record: DeploymentRecord) -> None:
-        """Insert or update a deployment. Removes it when manual or not active."""
-        project_id = record.pipeline['project_id']
-        old = self._tasks.pop(project_id, None)
-        if old:
-            old.cancelled = True
-        if record.schedule == 'manual' or record.state != 'active':
-            return
-        run_time = croniter(record.schedule, datetime.now()).get_next(datetime).timestamp()
-        task = Task(next_run=run_time, client_id=record.userId, project_id=project_id, schedule=record.schedule)
-        self._tasks[project_id] = task
-        heapq.heappush(self._schedule, task)
+    # =========================================================================
+    # PUBLIC — sync/start/shutdown
+    # =========================================================================
 
-    def unschedule(self, project_id: str) -> None:
-        """Remove a deployment from the schedule."""
-        old = self._tasks.pop(project_id, None)
-        if old:
-            old.cancelled = True
-        self._active_tokens.pop(project_id, None)
+    def sync(self, org_id: str, deployment: Dict[str, Any]) -> None:
+        """Reconcile the heap with one team deployment's current state.
+
+        Drops every entry for (team, project), then re-adds one entry per
+        ENABLED schedule when the deployment is active — so a single call
+        after any mutation (deploy, pause, resume, remove, schedule_set)
+        makes the heap agree with the store.
+
+        Args:
+            org_id:     The deployment's organisation.
+            deployment: The account-module deployment dict
+                        (teamId, projectId, state, schedules{source: {...}}).
+        """
+        team_id = deployment.get('teamId', '')
+        project_id = deployment.get('projectId', '')
+        if not team_id or not project_id:
+            return
+
+        # Cancel every existing entry for this (team, project).
+        for key in [k for k in self._entries if k[0] == team_id and k[1] == project_id]:
+            self._entries.pop(key).cancelled = True
+
+        if deployment.get('state') != 'active':
+            # Paused/errored/removed deployments also lose their overlap guards.
+            for key in [k for k in self._active_tokens if k[0] == team_id and k[1] == project_id]:
+                self._active_tokens.pop(key, None)
+            return
+
+        for source_id, sched in (deployment.get('schedules') or {}).items():
+            cron = (sched or {}).get('cron')
+            if not cron or not sched.get('enabled', True):
+                continue
+            try:
+                next_run = croniter(cron, datetime.now()).get_next(datetime).timestamp()
+            except Exception as e:
+                error(f'[SCHEDULER] {team_id}/{project_id}/{source_id}: bad cron {cron!r}: {e}')
+                continue
+            entry = ScheduledRun(next_run=next_run, key=(team_id, project_id, source_id), org_id=org_id, cron=cron)
+            self._entries[entry.key] = entry
+            heapq.heappush(self._schedule, entry)
 
     def start(self) -> None:
         """Start the scheduler in the background: load deployments, then run the loop."""
@@ -115,59 +159,96 @@ class TaskScheduler:
         if self._inflight_starts:
             await asyncio.gather(*self._inflight_starts, return_exceptions=True)
 
+    # =========================================================================
+    # STARTUP LOAD
+    # =========================================================================
+
     async def _load(self) -> None:
-        """Populate the schedule from all persisted deployments across all users."""
+        """Populate the schedule from every active deployment, all orgs."""
         try:
-            async for record in self._server.deployments.iter_all():
+            count = 0
+            async for dep in account.deployments_iter_active():
                 try:
-                    self.schedule(record)
+                    self.sync(dep['orgId'], dep)
+                    count += 1
                 except Exception as e:
-                    error(f'[SCHEDULER] {record.pipeline.get("project_id")}: failed to schedule: {e}')
-            debug(f'[SCHEDULER] loaded {len(self._tasks)} scheduled deployment(s)')
+                    error(f'[SCHEDULER] {dep.get("projectId")}: failed to schedule: {e}')
+            debug(f'[SCHEDULER] loaded {count} active deployment(s), {len(self._entries)} schedule entrie(s)')
         except Exception as e:
             error(f'[SCHEDULER] startup scan failed: {e}')
 
+        await self._warn_legacy_records()
+
+    async def _warn_legacy_records(self) -> None:
+        """One startup warning when pre-teams user-scoped deployments exist.
+
+        The old model stored records at users/<uid>/deployments/ with a
+        replayable user token. Those are NOT migrated (the credential model
+        changed) — owners re-deploy. Capped scan so a large SaaS user tree
+        cannot slow boot.
+        """
+        try:
+            store = self._server.store._store
+            users = await store.list_entries('users/', recursive=False, include_files=False)
+            for user_prefix in users[:200]:
+                legacy = await store.list_entries(
+                    f'{user_prefix}deployments/', recursive=False, include_dirs=False, name_pattern='*.json'
+                )
+                if legacy:
+                    warning(
+                        '[SCHEDULER] legacy user-scoped deployment records found '
+                        f'(e.g. under {user_prefix}deployments/). These are no longer '
+                        'scheduled — re-deploy each pipeline to a team.'
+                    )
+                    return
+        except Exception:
+            # Purely informational — never let the warning path affect boot.
+            pass
+
+    # =========================================================================
+    # LOOP
+    # =========================================================================
+
     async def _run(self) -> None:
+        """Fire due entries forever; sleep until the soonest one (max 60 s)."""
         while True:
             now = datetime.now().timestamp()
 
             while self._schedule:
-                task = self._schedule[0]  # peek
+                entry = self._schedule[0]  # peek
 
-                if task.cancelled:
+                if entry.cancelled:
                     heapq.heappop(self._schedule)
                     continue
 
-                if task.next_run > now:
-                    break  # front task not due yet
+                if entry.next_run > now:
+                    break  # front entry not due yet
 
                 heapq.heappop(self._schedule)
 
                 try:
-                    next_run = croniter(task.schedule, datetime.now()).get_next(datetime).timestamp()
-                    new_task = Task(
-                        next_run=next_run,
-                        client_id=task.client_id,
-                        project_id=task.project_id,
-                        schedule=task.schedule,
-                    )
-                    self._tasks[task.project_id] = new_task
-                    heapq.heappush(self._schedule, new_task)
+                    # Requeue the next occurrence first, so a dispatch failure
+                    # can never silently stop the cadence.
+                    next_run = croniter(entry.cron, datetime.now()).get_next(datetime).timestamp()
+                    new_entry = ScheduledRun(next_run=next_run, key=entry.key, org_id=entry.org_id, cron=entry.cron)
+                    self._entries[entry.key] = new_entry
+                    heapq.heappush(self._schedule, new_entry)
 
-                    # Skip if the previous run for this deployment is still active.
-                    prev_token = self._active_tokens.get(task.project_id)
+                    # Skip if the previous run for this (team, project, source)
+                    # is still active — schedules never overlap themselves.
+                    prev_token = self._active_tokens.get(entry.key)
                     if prev_token:
                         ctrl = self._server._task_control.get(prev_token)
                         if ctrl and not ctrl.task.is_task_complete():
-                            debug(f'[SCHEDULER] {task.project_id}: previous run still active, skipping')
+                            debug(f'[SCHEDULER] {entry.key}: previous run still active, skipping')
                             continue
 
-                    task_start = asyncio.create_task(self._start_task(task.client_id, task.project_id))
+                    task_start = asyncio.create_task(self._start_run(entry))
                     self._inflight_starts.add(task_start)
                     task_start.add_done_callback(self._inflight_starts.discard)
 
                 except Exception as e:
-                    error(f'[SCHEDULER] {task.project_id}: scheduling tick failed: {e}')
+                    error(f'[SCHEDULER] {entry.key}: scheduling tick failed: {e}')
 
             # Sleep until the next scheduled run (max 60 s).
             if self._schedule:
@@ -178,42 +259,75 @@ class TaskScheduler:
 
             await asyncio.sleep(delay)
 
-    async def _start_task(self, client_id: str, project_id: str) -> None:
+    # =========================================================================
+    # DISPATCH
+    # =========================================================================
+
+    async def _start_run(self, entry: ScheduledRun) -> None:
+        """Fire one (team, project, source) occurrence via trusted dispatch."""
+        team_id, project_id, source_id = entry.key
+        org_id = entry.org_id
+
+        # Re-read the deployment at fire time: a pause/remove/pointer-move
+        # between ticks must always win over the in-memory heap.
         try:
-            record = await self._server.deployments.get(client_id, project_id)
+            dep = await account.deployments_get(org_id, team_id, project_id)
         except Exception as e:
-            error(f'[SCHEDULER] {project_id}: failed to load record: {e}')
+            error(f'[SCHEDULER] {entry.key}: failed to load deployment: {e}')
+            return
+        if dep is None or dep.get('state') != 'active':
+            self.sync(org_id, dep or {'teamId': team_id, 'projectId': project_id, 'state': 'removed'})
+            return
+        sched = (dep.get('schedules') or {}).get(source_id)
+        if not sched or not sched.get('enabled', True):
+            self.sync(org_id, dep)
             return
 
-        if not record.userToken:
-            # Without a replayable credential the run can never authenticate.
-            error(f'[SCHEDULER] {project_id}: no user token; cannot dispatch')
+        # Load the pointed-at artifact — sha256-verified; a tampered or
+        # missing artifact must never run.
+        try:
+            pipeline = await account.deployments_artifact(org_id, project_id, dep['version'])
+        except Exception as e:
+            error(f'[SCHEDULER] {entry.key}: artifact v{dep.get("version")} unusable: {e}; marking errored')
+            await self._mark_errored(org_id, team_id, project_id)
             return
+
+        # Per-source execution: a task IS project.source — the schedule's
+        # source becomes the pipeline entry point for this run.
+        pipeline = dict(pipeline)
+        pipeline['source'] = source_id
+
+        # The deploying user (from the pointer's audit trail) is the billing
+        # attribution identity; the run itself executes as the team.
+        actor = dep.get('updatedBy') or dep.get('createdBy') or _SCHEDULER_ACTOR
 
         try:
-            task_token = await start_server_task(self._server, record.userToken, record.pipeline)
-        except ServerTaskAuthError as e:
-            error(f'[SCHEDULER] {project_id}: authentication failed: {e}; marking errored')
-            await self._mark_errored(client_id, record)
+            task_token = await start_server_task_as_team(
+                self._server, pipeline, org_id=org_id, team_id=team_id, actor=actor, trigger='schedule'
+            )
+        except PermissionError as e:
+            # Permission-shaped failures are permanent until a human acts —
+            # mark errored instead of retrying every tick.
+            error(f'[SCHEDULER] {entry.key}: dispatch denied: {e}; marking errored')
+            await self._mark_errored(org_id, team_id, project_id)
             return
         except Exception as e:
-            error(f'[SCHEDULER] {project_id}: dispatch failed: {e}')
+            error(f'[SCHEDULER] {entry.key}: dispatch failed: {e}')
             return
 
-        self._active_tokens[project_id] = task_token
-        debug(f'[SCHEDULER] {project_id}: dispatched -> task {task_token}')
+        self._active_tokens[entry.key] = task_token
+        await account.deployments_mark_run(org_id, team_id, project_id, source_id)
+        debug(f'[SCHEDULER] {entry.key}: dispatched -> task {task_token}')
 
-    async def _mark_errored(self, client_id: str, record: DeploymentRecord) -> None:
-        """Flip a deployment to 'errored' (e.g. its user token expired) and stop scheduling it.
+    async def _mark_errored(self, org_id: str, team_id: str, project_id: str) -> None:
+        """Flip a deployment to 'errored' and drop its schedule entries.
 
-        Persisting the state lets the UI prompt for a re-deploy; unscheduling stops
-        the cron from re-attempting a doomed authentication every tick until then.
+        Persisting the state lets the UI surface the failure; the sync stops
+        the cron from re-attempting a doomed dispatch every tick until a
+        human re-deploys or resumes.
         """
-        project_id = record.pipeline['project_id']
         try:
-            record.state = 'errored'
-            record.updatedAt = datetime.now().timestamp()
-            await self._server.deployments.save(client_id, record)
+            dep = await account.deployments_set_state(org_id, team_id, project_id, 'errored', _SCHEDULER_ACTOR)
+            self.sync(org_id, dep)
         except Exception as e:
-            error(f'[SCHEDULER] {project_id}: failed to persist errored state: {e}')
-        self.unschedule(project_id)
+            error(f'[SCHEDULER] {team_id}/{project_id}: failed to persist errored state: {e}')
