@@ -330,7 +330,7 @@
 				"model": "mistral-nemo",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 4096, // litellm
+				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
 			"mistral-saba": {
@@ -361,8 +361,8 @@
 				"title": "Mistral: Mistral Small 3.2 24B",
 				"model": "mistral-small-3.2-24b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelTotalTokens": 256000, // openrouter
+				"modelOutputTokens": 4096, // default
 				"apikey": ""
 			}
 		}
