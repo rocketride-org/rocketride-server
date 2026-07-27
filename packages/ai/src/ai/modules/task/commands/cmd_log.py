@@ -28,11 +28,13 @@
 # via the stream's control file — clients never touch storage directly.
 # Dispatches on ``arguments.subcommand`` (chapters / read / segment / delete),
 # the same shape as rrext_store and rrext_deploy. Streams are addressed by the plain
-# identity tuple (projectId + source + runKind) — NEVER by token: tokens are
-# credentials and appear nowhere in the log system.
+# identity pair (projectId + source) — NEVER by token: tokens are
+# credentials and appear nowhere in the log system. The SCOPE IS THE KIND:
+# ``teamId`` present addresses that team's DEPLOY continuum, absent addresses
+# the caller's own DEV stream — run kind is derived, not an argument.
 # =============================================================================
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 from ai.account import Store
 from ai.common.dap import DAPConn, TransportBase
@@ -40,9 +42,6 @@ from ai.modules.task.run_log import RunLogReader
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
-
-# Run kinds a stream may be addressed by (separate continua per kind).
-_VALID_RUN_KINDS = frozenset({'dev', 'deploy'})
 
 
 # =============================================================================
@@ -122,31 +121,24 @@ class LogCommands(DAPConn):
     # SHARED RESOLUTION
     # =========================================================================
 
-    def _team_for(self, args: Dict[str, Any]) -> str:
+    def _scope_for(self, args: Dict[str, Any]) -> Tuple[str, str]:
         """
-        Validate and return the optional ``teamId`` scope argument.
+        Resolve the stream scope from the addressing arguments.
 
-        A team scope only makes sense for DEPLOY streams (deploy continua
-        live in the team tree); a dev stream is always the caller's own, so
-        pairing ``teamId`` with ``runKind: dev`` is a contract error.
+        THE SCOPE IS THE KIND: ``teamId`` present addresses that team's
+        DEPLOY continuum (deploy runs execute as the team and log into its
+        tree); absent addresses the caller's own DEV stream. Run kind is
+        derived from the scope — it is not part of the wire contract.
 
         Args:
             args: The subcommand arguments.
 
         Returns:
-            The team id, or '' when the request targets the caller's own
-            (dev) streams.
-
-        Raises:
-            ValueError: ``teamId`` given with a non-deploy ``runKind``, or
-                missing for a deploy stream.
+            ``(team_id, run_kind)`` — ``('', 'dev')`` for own streams,
+            ``(<id>, 'deploy')`` for a team scope.
         """
         team_id = args.get('teamId') or ''
-        if team_id and args.get('runKind') != 'deploy':
-            raise ValueError('teamId applies only to deploy streams')
-        if not team_id and args.get('runKind') == 'deploy':
-            raise ValueError('teamId is required for deploy streams')
-        return team_id
+        return team_id, ('deploy' if team_id else 'dev')
 
     def _verify_log_access(self, args: Dict[str, Any], perm: str) -> None:
         """
@@ -165,10 +157,9 @@ class LogCommands(DAPConn):
 
         Raises:
             PermissionError: Caller lacks ``perm`` in the resolved scope.
-            ValueError: Invalid ``teamId``/``runKind`` pairing.
         """
-        # Step 1: validate the scope pairing before touching permissions.
-        team_id = self._team_for(args)
+        # Step 1: resolve the scope the request addresses.
+        team_id, _ = self._scope_for(args)
 
         # Step 2: team scope resolves against THAT team; otherwise the
         # caller's default team, as before.
@@ -179,11 +170,12 @@ class LogCommands(DAPConn):
 
     def _reader_for(self, args: Dict[str, Any]) -> RunLogReader:
         """
-        Build a reader for the stream named by the identity-tuple arguments.
+        Build a reader for the stream named by the addressing arguments.
 
         Args:
-            args: Must contain ``projectId``, ``source``, ``runKind``;
-                optional ``teamId`` targets a team's deploy continuum.
+            args: Must contain ``projectId`` and ``source``; ``teamId``
+                selects that team's deploy continuum (run kind is derived
+                from the scope — see ``_scope_for``).
 
         Returns:
             A RunLogReader scoped to the CALLER's user id, or to the TEAM
@@ -194,23 +186,21 @@ class LogCommands(DAPConn):
         """
         project_id = args.get('projectId')
         source = args.get('source')
-        run_kind = args.get('runKind')
 
         if not project_id:
             raise ValueError('projectId is required')
         if not source:
             raise ValueError('source is required')
-        if run_kind not in _VALID_RUN_KINDS:
-            raise ValueError(f'runKind must be one of {sorted(_VALID_RUN_KINDS)}')
+        team_id, run_kind = self._scope_for(args)
 
         # Store scoping comes from the AUTHENTICATED user, never from raw
         # input: unscoped requests serve the caller their own streams only,
-        # and a teamId scope is validated (deploy-only) + permission-checked
-        # at the handler before this runs. .logs is a SYSTEM TREE — the file
-        # API denies it to every session identity — so the reader acts
-        # through an INTERNAL identity anchored at the caller's namespace;
-        # the reader's scope helper turns teamId into the '@/Team/=<id>/'
-        # prefix. The DOMAIN permission gate is _verify_log_access above.
+        # and a teamId scope is permission-checked at the handler before
+        # this runs. .logs is a SYSTEM TREE — the file API denies it to
+        # every session identity — so the reader acts through an INTERNAL
+        # identity anchored at the caller's namespace; the reader's scope
+        # helper turns teamId into the '@/Team/=<id>/' prefix. The DOMAIN
+        # permission gate is _verify_log_access above.
         from ai.account import RequestContext
 
         return RunLogReader(
@@ -219,7 +209,7 @@ class LogCommands(DAPConn):
             project_id,
             source,
             run_kind,
-            team_id=self._team_for(args),
+            team_id=team_id,
         )
 
     # =========================================================================

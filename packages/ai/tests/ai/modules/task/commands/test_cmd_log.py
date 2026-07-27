@@ -23,12 +23,13 @@
 """cmd_log handler tests — the team-scope permission gate.
 
 The reader itself is contract-tested in test_run_log_reader /
-test_run_log_team; these tests pin what the COMMAND layer owns: the
-teamId/runKind pairing rules (teamId is deploy-only AND required for
-deploy), per-subcommand permission resolution against the ADDRESSED team
-('task.monitor' reads, 'task.control' delete) with uniform denial for
-non-members, unscoped dev requests keeping the original default-team
-check, and the team scope reaching the reader construction.
+test_run_log_team; these tests pin what the COMMAND layer owns: THE SCOPE
+IS THE KIND (teamId present = that team's deploy continuum, absent = the
+caller's own dev stream; runKind is not a wire argument), per-subcommand permission
+resolution against the ADDRESSED team ('task.monitor' reads,
+'task.control' delete) with uniform denial for non-members, unscoped dev
+requests keeping the original default-team check, and the derived scope
+reaching the reader construction.
 """
 
 from types import MethodType, SimpleNamespace
@@ -95,7 +96,8 @@ def reader_stub(monkeypatch):
 
     class FakeReader:
         def __init__(self, store, client_id, project_id, source, run_kind, *, team_id=''):
-            calls['args'] = (client_id, project_id, source, run_kind)
+            calls['args'] = (client_id, project_id, source)
+            calls['run_kind'] = run_kind
             calls['team_id'] = team_id
             self.chapters = AsyncMock(return_value={'chapters': [], 'completed': True})
             self.read = AsyncMock(return_value={'events': []})
@@ -109,40 +111,43 @@ def reader_stub(monkeypatch):
 
 
 def _args(**over):
-    """Baseline deploy-read arguments; override per test."""
-    base = {'projectId': 'proj-1', 'source': 'chat_1', 'runKind': 'deploy', 'teamId': TEAM}
+    """Baseline team-scoped (deploy) read arguments; override per test."""
+    base = {'projectId': 'proj-1', 'source': 'chat_1', 'teamId': TEAM}
     base.update(over)
     return base
 
 
 # ============================================================================
-# Scope pairing rules
+# Scope inference
 # ============================================================================
 
 
-class TestScopePairing:
+class TestScopeInference:
     @pytest.mark.asyncio
-    async def test_team_with_dev_kind_is_rejected(self, reader_stub):
+    async def test_team_scope_means_deploy(self, reader_stub):
+        # The scope IS the kind: a teamId addresses the team's DEPLOY
+        # continuum — no runKind on the wire.
         conn = _make_conn(_account_info())
-        with pytest.raises(ValueError):
-            await conn._log_chapters({}, _args(runKind='dev'))
+        await conn._log_chapters({}, _args())
+        assert reader_stub['run_kind'] == 'deploy'
 
     @pytest.mark.asyncio
-    async def test_deploy_without_team_is_rejected(self, reader_stub):
-        # Deploy continua live in team trees only — an unscoped deploy read
-        # has no meaning and fails with a clear contract error.
-        conn = _make_conn(_account_info())
-        with pytest.raises(ValueError):
-            await conn._log_chapters({}, _args(teamId=None))
-
-    @pytest.mark.asyncio
-    async def test_dev_without_team_keeps_the_default_gate(self, reader_stub):
-        # The pre-existing dev path is untouched: default-team permission
+    async def test_no_team_means_own_dev_stream(self, reader_stub):
+        # Unscoped = the caller's own dev stream, default-team permission
         # check, reader anchored at the caller with NO team scope.
         conn = _make_conn(_account_info())
-        await conn._log_chapters({}, _args(runKind='dev', teamId=None))
+        await conn._log_chapters({}, _args(teamId=None))
         conn.verify_permission.assert_called_once_with('task.monitor')
         assert reader_stub['team_id'] == ''
+        assert reader_stub['run_kind'] == 'dev'
+
+    @pytest.mark.asyncio
+    async def test_run_kind_is_not_a_wire_argument(self, reader_stub):
+        # runKind is ignored like any unknown argument: the scope alone
+        # decides which continuum a request addresses.
+        conn = _make_conn(_account_info())
+        await conn._log_chapters({}, _args(runKind='dev'))
+        assert reader_stub['run_kind'] == 'deploy'
 
 
 # ============================================================================
@@ -159,7 +164,8 @@ class TestTeamGate:
         await conn._log_chapters({}, _args())
         conn.verify_permission.assert_not_called()
         assert reader_stub['team_id'] == TEAM
-        assert reader_stub['args'] == ('user-1', 'proj-1', 'chat_1', 'deploy')
+        assert reader_stub['args'] == ('user-1', 'proj-1', 'chat_1')
+        assert reader_stub['run_kind'] == 'deploy'
 
     @pytest.mark.asyncio
     async def test_all_read_subcommands_take_the_team_scope(self, reader_stub):
