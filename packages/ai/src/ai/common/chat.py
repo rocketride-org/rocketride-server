@@ -21,7 +21,7 @@ from ai.common.util import parseJson
 from ai.common.utils.content_blocks import flatten_content_blocks
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
-from ai.common.llm_adapter import LangChainAdapter, drive_adapter
+from ai.common.llm_adapter import LangChainAdapter, drive_adapter, flatten_content
 
 
 def _stop_kwargs() -> dict:
@@ -189,12 +189,8 @@ class ChatBase:
         # so non-agent callers (and backends/mocks without a stop param) are unaffected.
         results = self._llm.invoke(prompt, **_stop_kwargs())
 
-        # `content` is a plain string on OpenAI-style backends but a list of typed
-        # blocks on Anthropic with extended thinking. Returning that list verbatim
-        # hands every caller the repr of the blocks instead of the answer, and the
-        # reasoning is not the answer in any case. Flatten to the visible text.
-        text, _reasoning, _sig_only = flatten_content_blocks(results.content)
-        return text
+        # Flatten provider content (Anthropic returns typed blocks) so callers get a string.
+        return flatten_content(results.content)
 
     def getTokens(self, value: str) -> int:
         """
