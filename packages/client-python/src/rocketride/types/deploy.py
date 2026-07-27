@@ -23,27 +23,137 @@
 """
 Deploy type definitions for the RocketRide Python SDK.
 
+The teams-as-environments model: PUBLISH creates an immutable, sha256-locked
+artifact version in the ORG registry; DEPLOY points a TEAM at a version
+(promotion and rollback are the same pointer move); every publish and every
+pointer change is recorded immutably in the audit history.
+
 Types:
-    DeploymentRecord:   Deployment record as returned by add / list / status.
+    DeployActor:        Denormalized who-did-it identity on audit records.
+    DeployArtifact:     One immutable registry version (publish result).
+    DeploymentSchedule: Per-source cron schedule on a team deployment.
+    Deployment:         One team's deployment of a project (registry-joined).
+    DeployHistoryEntry: One immutable audit-trail row.
+    PublishResult:      publish() body: the artifact (+ deployment when
+                        deploy_to was given).
+    DeployListResult:   Standard list envelope of Deployment rows.
+    DeployVersionsResult: Standard list envelope of DeployArtifact rows.
+    DeployHistoryResult:  Standard list envelope of DeployHistoryEntry rows.
+    SchedulePreview:    preview() body: validity + next occurrences.
 """
 
 from typing import Literal, TypedDict
 
-from .pipeline import PipelineConfig
 
+class DeployActor(TypedDict, total=False):
+    """Denormalized audit identity — survives account deletion."""
 
-class DeploymentRecord(TypedDict, total=False):
-    """
-    Deployment record returned by ``deploy.add``, ``deploy.list``, and
-    ``deploy.status``.
-    """
-
-    pipeline: PipelineConfig
-    # Cron expression (e.g. '*/15 * * * *') or 'manual' for on-demand only.
-    schedule: str
-    state: Literal['active', 'paused', 'errored']
-    # ID of the user who created the deployment.
     userId: str
-    # Unix timestamps (seconds).
+    display: str
+    email: str
+
+
+class DeployArtifact(TypedDict, total=False):
+    """One immutable registry version of a project's pipeline."""
+
+    version: int
+    # sha256 over the exact stored artifact bytes; verified on every load.
+    sha256: str
+    bytes: int
+    pipelineName: str
+    publishedBy: DeployActor
+    # Unix timestamp (seconds).
+    publishedAt: float
+    # Optional "what changed" note supplied at publish time.
+    comment: str
+
+
+class DeploymentSchedule(TypedDict, total=False):
+    """Per-source schedule on a team deployment."""
+
+    # 5-field cron expression.
+    cron: str
+    enabled: bool
+    # Unix timestamp (seconds) of the last scheduler dispatch, or None.
+    lastRunAt: float
+
+
+class Deployment(TypedDict, total=False):
+    """One team's deployment of a project, joined with registry info."""
+
+    teamId: str
+    projectId: str
+    # The registry version this team currently points at.
+    version: int
+    state: Literal['active', 'paused', 'errored', 'removed']
+    pipelineName: str
+    # Per-source schedules, keyed by source id.
+    schedules: dict[str, DeploymentSchedule]
     createdAt: float
+    createdBy: DeployActor
     updatedAt: float
+    updatedBy: DeployActor
+    # Registry-joined fields of the pointed-at version.
+    sha256: str
+    publishedAt: float
+    publishedBy: DeployActor
+
+
+class DeployHistoryEntry(TypedDict, total=False):
+    """One immutable audit-trail row (who did what, where, when)."""
+
+    # Stable append-order key: newest first, never ties. Use as the row
+    # identity when rendering.
+    seq: int
+    # Unix timestamp (seconds).
+    at: float
+    action: Literal['publish', 'deploy', 'rollback', 'pause', 'resume', 'errored', 'remove']
+    # '' on org-wide rows (publish); the team id on pointer changes.
+    teamId: str
+    version: int
+    actor: DeployActor
+
+
+class PublishResult(TypedDict, total=False):
+    """Body of ``deploy.publish``."""
+
+    artifact: DeployArtifact
+    # Present only when deploy_to was given (one-step publish+deploy).
+    deployment: Deployment
+
+
+class DeployListResult(TypedDict, total=False):
+    """Standard list envelope of Deployment rows."""
+
+    rows: list[Deployment]
+    total: int
+    page: int
+    pageSize: int
+
+
+class DeployVersionsResult(TypedDict, total=False):
+    """Standard list envelope of DeployArtifact rows (newest first)."""
+
+    rows: list[DeployArtifact]
+    total: int
+    page: int
+    pageSize: int
+
+
+class DeployHistoryResult(TypedDict, total=False):
+    """Standard list envelope of DeployHistoryEntry rows (newest first)."""
+
+    rows: list[DeployHistoryEntry]
+    total: int
+    page: int
+    pageSize: int
+
+
+class SchedulePreview(TypedDict, total=False):
+    """Body of ``deploy.preview`` — THE single cron evaluator."""
+
+    valid: bool
+    # Human-readable reason when invalid.
+    error: str
+    # Unix timestamps (seconds) of the next occurrences.
+    next: list[float]

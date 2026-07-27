@@ -2705,14 +2705,16 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Lazily-initialised deploy API namespace.
+	 * Lazily-initialised deploy API namespace (teams-as-environments).
 	 *
-	 * Provides typed methods for managing server-side pipeline deployments:
-	 * add, remove, list, status, and update.
+	 * Publish immutable pipeline versions to the org registry, point teams
+	 * at them (promotion and rollback alike), schedule sources, and read
+	 * the audit history.
 	 *
 	 * @example
 	 * ```typescript
-	 * const rec = await client.deploy.add(pipeline, { schedule: '0/15 * * * *' });
+	 * const { artifact } = await client.deploy.publish(pipeline, { comment: 'v2' });
+	 * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
 	 * ```
 	 */
 	get deploy(): DeployApi {
@@ -2728,7 +2730,8 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @example
 	 * ```typescript
-	 * const stream = { projectId: 'proj', source: 'chat_1', runKind: 'dev' as const };
+	 * // Own dev stream; add teamId to address a team's deploy continuum.
+	 * const stream = { projectId: 'proj', source: 'chat_1' };
 	 * const { chapters } = await client.log.chapters(stream);
 	 * const { events } = await client.log.read(stream, { fromSeq: chapters[0].beginSeq });
 	 * ```

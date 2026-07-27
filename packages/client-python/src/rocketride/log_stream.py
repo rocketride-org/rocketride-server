@@ -59,7 +59,6 @@ from ._log_codec import SegmentDecoder, normalize_stamps
 from .types.log import (
     LogEvent,
     LogPlayItem,
-    LogRunKind,
     LogTraceDetail,
     LogTraceSummary,
     LogTracesResult,
@@ -137,7 +136,7 @@ class LogEventStream:
     of it, and ``play()`` streams forward from it.
     """
 
-    def __init__(self, client: RocketRideClient, project_id: str, source: str, run_kind: LogRunKind) -> None:
+    def __init__(self, client: RocketRideClient, project_id: str, source: str, *, team_id: str = '') -> None:
         """
         Bind the session to its client and stream identity.
 
@@ -145,12 +144,14 @@ class LogEventStream:
             client: The owning RocketRideClient.
             project_id: Pipeline project id.
             source: Source component id.
-            run_kind: 'dev' or 'deploy'.
+            team_id: A team id addresses that team's deploy continuum;
+                omitted = the caller's own dev stream (the scope IS the
+                kind — there is no run-kind argument).
         """
         self._client = client
         self._project_id = project_id
         self._source = source
-        self._run_kind = run_kind
+        self._team_id = team_id
 
         # Timeline (chapters + segment spans) cache.
         self._timeline: Optional[Dict[str, Any]] = None
@@ -210,7 +211,7 @@ class LogEventStream:
         """Fetch/refresh the timeline (chapters + segment spans) when stale."""
         if not force and self._timeline is not None and time.time() - self._timeline_at < _TIMELINE_TTL_S:
             return
-        self._timeline = await self._client.log.chapters(self._project_id, self._source, self._run_kind)
+        self._timeline = await self._client.log.chapters(self._project_id, self._source, team_id=self._team_id)
         self._timeline_at = time.time()
 
     # =========================================================================
@@ -749,7 +750,7 @@ class LogEventStream:
         offset = seg.next_offset or 0
         while True:
             chunk = await self._client.log.segment(
-                self._project_id, self._source, self._run_kind, seg.id, offset=offset
+                self._project_id, self._source, seg.id, team_id=self._team_id, offset=offset
             )
             data = chunk.get('data') or ''
             for line in data.split('\n'):

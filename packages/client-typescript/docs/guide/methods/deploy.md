@@ -5,8 +5,9 @@ date: 2026-06-12
 
 - [Overview](#overview)
 - [Methods](#methods)
+- [The list envelope](#the-list-envelope)
 - [Schedules](#schedules)
-- [The DeploymentRecord](#the-deploymentrecord)
+- [Record shapes](#record-shapes)
 - [Usage Examples](#usage-examples)
 - [Deployment States](#deployment-states)
 - [Error Handling](#error-handling)
@@ -15,148 +16,192 @@ date: 2026-06-12
 
 ## **Overview**
 
-The `client.deploy` namespace manages **deployments**: pipelines persisted on the server and run on a cron schedule or on demand. Unlike `use()`, which runs a pipeline for the duration of your session, a deployment outlives the connection — the server starts scheduled runs on your behalf under the account that created the deployment.
+The `client.deploy` namespace manages **teams-as-environments deployments**:
 
-Each deployment is identified by its pipeline's `project_id`. One deployment exists per project per user.
+- **`publish()`** snapshots a pipeline as an **immutable, sha256-locked
+  artifact version** in your organization's registry. Publishing puts
+  nothing live.
+- **`deploy()`** points a **team** at a published version. Teams are the
+  environments (Staging, Production, ...): promotion and rollback are the
+  same pointer move aimed at a different version or team. Deploy targets are
+  always explicit — there is no default-team fallback.
+- Every publish and every pointer change is recorded in an **immutable audit
+  history** (who did what, where, when).
+
+Scheduled runs execute **as the team** — no stored user credential — and
+their logs land in the team's run-log continuum, readable by teammates via
+[`client.log`](./log) with `teamId`.
 
 ## **Methods**
 
 | Method | Description |
 | --- | --- |
-| `deploy.add(pipeline, options?)` | Persist a pipeline as a deployment and activate it |
-| `deploy.remove(projectId)` | Undeploy and delete the deployment |
-| `deploy.list()` | List the authenticated user's deployments |
-| `deploy.status(projectId)` | Get one deployment record |
-| `deploy.update(projectId, options?)` | Replace the pipeline and/or schedule |
+| `deploy.publish(pipeline, options?)` | Snapshot the pipeline as the next registry version (`options.deployTo` also deploys it in one step) |
+| `deploy.deploy(projectId, version, teamId)` | Point a team at a version — promotion and rollback alike |
+| `deploy.list(params?)` | Deployments visible to you, standard list envelope |
+| `deploy.get(projectId, teamId)` | One team's deployment, registry-joined |
+| `deploy.versions(projectId, params?)` | Registry versions (the version strip), newest first |
+| `deploy.history(projectId, params?)` | The immutable audit trail, newest first, server-paged |
+| `deploy.pause(projectId, teamId)` | Schedules stop firing |
+| `deploy.resume(projectId, teamId)` | Resume a paused deployment |
+| `deploy.remove(projectId, teamId)` | Soft remove — history and artifacts survive forever |
+| `deploy.setSchedule(projectId, sourceId, schedule, teamId, options?)` | Set (or clear with `null`) one source's cron schedule |
+| `deploy.preview(schedule, count?)` | THE single cron evaluator: validity + next occurrences |
 
 ### Python (async)
 
 ```python
-record = await client.deploy.add(pipeline, schedule='*/15 * * * *')
-records = await client.deploy.list()
-record = await client.deploy.status(project_id)
-await client.deploy.update(project_id, schedule='@hourly')
-await client.deploy.remove(project_id)
+result = await client.deploy.publish(pipeline, comment='v2 prompt fix')
+await client.deploy.deploy('proj-1', result['artifact']['version'], 'team-staging')
+await client.deploy.set_schedule('proj-1', 'webhook_1', '*/15 * * * *', 'team-staging')
+live = await client.deploy.list()
+await client.deploy.remove('proj-1', 'team-staging')
 ```
 
 ### TypeScript
 
 ```typescript
-const record = await client.deploy.add(pipeline, { schedule: '*/15 * * * *' });
-const records = await client.deploy.list();
-const rec = await client.deploy.status(projectId);
-await client.deploy.update(projectId, { schedule: '@hourly' });
-await client.deploy.remove(projectId);
+const { artifact } = await client.deploy.publish(pipeline, { comment: 'v2 prompt fix' });
+await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
+await client.deploy.setSchedule('proj-1', 'webhook_1', '*/15 * * * *', 'team-staging');
+const live = await client.deploy.list();
+await client.deploy.remove('proj-1', 'team-staging');
 ```
+
+## **The list envelope**
+
+`list()`, `versions()`, and `history()` return the platform's standard list
+envelope and accept the standard arguments:
+
+```typescript
+const page = await client.deploy.history('proj-1', {
+	teamId: 'team-prod',
+	page: 1,
+	pageSize: 25,
+	search: 'rollback',
+	filters: { at__gte: 1750000000 }, // epoch seconds
+	sort: [{ field: 'seq', dir: 'desc' }],
+});
+// -> { rows: [...], total: 87, page: 1, pageSize: 25 }
+```
+
+`history` is paged **by the server** (the trail is unbounded by design);
+its rows carry `seq` — the stable append-order key that never ties — use it
+as the row identity.
 
 ## **Schedules**
 
-The `schedule` value accepted by `add()` and `update()`:
+Schedules are **per source** on a team deployment. The `schedule` value:
 
 | Value | Meaning |
 | --- | --- |
-| `"manual"` | No scheduled runs; the deployment only runs when started explicitly. Default. |
-| 5-field cron expression | e.g. `"*/15 * * * *"` — run every 15 minutes |
-| Cron preset | `@hourly`, `@daily`, `@midnight`, `@weekly`, `@monthly`, `@yearly`, `@annually` |
+| 5-field cron expression | e.g. `"*/15 * * * *"` — fire every 15 minutes |
+| `"manual"` / `null` (TS) / `None` (Python) | Clear the schedule — no scheduled runs |
 
-Invalid schedule strings are rejected with an error.
+Invalid cron strings are rejected. Use `preview()` for validation and
+next-occurrence rendering — never parse cron client-side, so what you show
+can never disagree with what the scheduler fires.
 
-## **The DeploymentRecord**
+## **Record shapes**
 
-Returned by `add()`, `status()`, and (as an array) `list()`:
+`Deployment` (from `deploy`/`get`/`pause`/`resume`/`remove`/`setSchedule`,
+and as `list()` rows):
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `pipeline` | `PipelineConfig` | The deployed pipeline definition |
-| `schedule` | `str` / `string` | Cron expression or `"manual"` |
-| `state` | `string` | `"active"` \| `"paused"` \| `"errored"` (see [Deployment States](#deployment-states)) |
-| `userId` | `str` / `string` | ID of the user who created the deployment |
-| `createdAt` | `float` / `number` | Creation time (Unix seconds) |
-| `updatedAt` | `float` / `number` | Last modification time (Unix seconds) |
+| `teamId` / `projectId` | `string` | The deployment's identity |
+| `version` | `number` | The registry version this team points at |
+| `state` | `string` | `"active"` \| `"paused"` \| `"errored"` \| `"removed"` |
+| `pipelineName` | `string` | From the pointed-at artifact |
+| `schedules` | `Record<string, DeploymentSchedule>` | Per-source schedules (`cron`, `enabled`, `lastRunAt`) |
+| `createdBy` / `updatedBy` | `DeployActor` | Denormalized audit identity |
+| `sha256` / `publishedAt` / `publishedBy` | | Registry-joined fields of the pointed-at version |
+
+`DeployArtifact` (from `publish`, and as `versions()` rows): `version`,
+`sha256`, `bytes`, `pipelineName`, `publishedBy`, `publishedAt`, `comment`.
+
+`DeployHistoryEntry` (as `history()` rows): `seq`, `at`, `action`
+(`publish` | `deploy` | `rollback` | `pause` | `resume` | `errored` |
+`remove`), `teamId` (`''` on org-wide publish rows), `version`, `actor`.
 
 ## **Usage Examples**
 
-### Deploy a pipeline on a 15-minute schedule
+### Publish and deploy in one step (small-team path)
 
 ```python
-import asyncio
-from rocketride import RocketRideClient
-
-
-async def main():
-    async with RocketRideClient(uri='https://cloud.rocketride.ai', auth='my-key') as client:
-        record = await client.deploy.add(my_pipeline, schedule='*/15 * * * *')
-        print(record['pipeline']['project_id'], record['state'])
-
-
-asyncio.run(main())
+result = await client.deploy.publish(my_pipeline, deploy_to='team-prod')
+print(result['deployment']['version'], result['deployment']['state'])
 ```
+
+### Staged rollout with rollback
 
 ```typescript
-const client = new RocketRideClient({ uri: 'https://cloud.rocketride.ai', auth: 'my-key' });
-await client.connect();
+// Publish once, verify on Staging, promote the SAME artifact to Production.
+const { artifact } = await client.deploy.publish(pipeline, { comment: 'RC1' });
+await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
+// ... verify ...
+await client.deploy.deploy('proj-1', artifact.version!, 'team-prod');
 
-const record = await client.deploy.add(myPipeline, { schedule: '*/15 * * * *' });
-console.log(record.pipeline!.project_id, record.state);
+// Rollback is the same gesture aimed at the previous version.
+await client.deploy.deploy('proj-1', artifact.version! - 1, 'team-prod');
 ```
 
-### Pause scheduled runs without deleting
+### Audit: who put what live where
 
-Switch the schedule to `"manual"`; switch back to a cron expression to resume:
-
-```python
-await client.deploy.update(project_id, schedule='manual')
-```
-
-### Inspect and clean up
-
-```python
-for rec in await client.deploy.list():
-    print(rec['pipeline']['project_id'], rec['schedule'], rec['state'])
-
-await client.deploy.remove(project_id)
+```typescript
+const trail = await client.deploy.history('proj-1');
+for (const row of trail.rows) {
+	console.log(row.seq, row.action, row.teamId, 'v' + row.version, row.actor?.display);
+}
 ```
 
 ## **Deployment States**
 
 | State | Meaning |
 | --- | --- |
-| `active` | Scheduled runs fire per the cron schedule (no runs when schedule is `"manual"`) |
-| `paused` | Deployment is retained but scheduled runs do not fire |
-| `errored` | Scheduled runs could no longer authenticate (e.g. the owner's API key was revoked) and have stopped |
+| `active` | Schedules fire per cron (nothing fires without a schedule) |
+| `paused` | Deployment retained; schedules do not fire |
+| `errored` | A scheduled dispatch failed on permissions; the scheduler stopped retrying. Fix access, then `resume()` |
+| `removed` | Soft-deleted: hidden from listings; history and artifacts survive. Re-`deploy()` any version to revive |
 
-An `errored` deployment is not retried. Remove it and `add()` it again to resume scheduled runs.
-
-If a scheduled run is still in progress when the next tick comes due, that tick is skipped — runs of the same deployment never overlap.
+If a scheduled run is still in progress when the next tick comes due, that
+tick is skipped — runs of the same deployment source never overlap.
 
 ## **Error Handling**
 
 | Error | Cause |
 | --- | --- |
-| `RuntimeError` / `Error` | Duplicate `add()` for an existing `project_id`; unknown `projectId` on `status()` / `update()` / `remove()`; invalid schedule string |
-| Authentication error | Invalid or missing API key, or missing `task.control` permission |
+| `RuntimeError` / `Error` | Unknown project/version; deploying an unpublished version; invalid cron; missing `teamId` |
+| Permission error | Missing `task.control` on the TARGET team (mutations) or `task.monitor` (reads). Unknown and foreign teams are denied identically |
 
 ```python
 try:
-    await client.deploy.add(pipeline, schedule='*/15 * * * *')
+    await client.deploy.deploy('proj-1', 7, 'team-prod')
 except RuntimeError as e:
     print(f'Deploy failed: {e}')
 ```
 
 ## **API Endpoints**
 
-These methods communicate via the RocketRide DAP protocol over WebSocket using the single `rrext_deploy` command, dispatched by a `subcommand` argument:
+These methods communicate via the RocketRide DAP protocol over WebSocket
+using the single `rrext_deploy` command, dispatched by a `subcommand`
+argument:
 
 | Method | DAP Command | `subcommand` |
 | --- | --- | --- |
-| `add()` | `rrext_deploy` | `add` |
-| `remove()` | `rrext_deploy` | `remove` |
+| `publish()` | `rrext_deploy` | `publish` |
+| `deploy()` | `rrext_deploy` | `deploy` |
 | `list()` | `rrext_deploy` | `list` |
-| `status()` | `rrext_deploy` | `status` |
-| `update()` | `rrext_deploy` | `update` |
+| `get()` | `rrext_deploy` | `get` |
+| `versions()` | `rrext_deploy` | `versions` |
+| `history()` | `rrext_deploy` | `history` |
+| `pause()` / `resume()` / `remove()` | `rrext_deploy` | `pause` / `resume` / `remove` |
+| `setSchedule()` | `rrext_deploy` | `schedule_set` |
+| `preview()` | `rrext_deploy` | `preview` |
 
 ## **Related Methods**
 
 - [`use()`](./use) - Run a pipeline interactively in the current session
+- [Run Log (`client.log`)](./log) - Watch and replay deploy runs (pass `teamId`)
 - [`get_task_status()` / `getTaskStatus()`](./get-task-status) - Monitor a running pipeline
 - [`terminate()`](./terminate) - Stop a running pipeline

@@ -23,27 +23,68 @@
 """
 Deploy API namespace for the RocketRide Python SDK.
 
-Provides typed methods for managing server-side pipeline deployments via the
-``rrext_deploy`` DAP command (dispatched by ``subcommand``) over the existing
-WebSocket connection.
+Teams-as-environments deployments via the ``rrext_deploy`` DAP command
+(dispatched by ``subcommand``) over the existing WebSocket connection:
+
+  - ``publish`` snapshots a pipeline as an IMMUTABLE, sha256-locked artifact
+    version in the org registry.
+  - ``deploy`` points a TEAM at a published version. Teams ARE the
+    environments (Staging, Production, ...): promotion and rollback are this
+    same pointer move aimed at a different version or team. Deploy targets
+    are always explicit — there is deliberately no default-team fallback.
+  - Every publish and pointer change lands in an immutable audit history.
+  - ``list``/``versions``/``history`` return the standard list envelope
+    ({rows, total, page, pageSize}) with page/search/filter/sort arguments.
 
 Usage:
-    deployment = await client.deploy.add(pipeline=my_pipeline)
-    deployments = await client.deploy.list()
-    status = await client.deploy.status(deployment['project_id'])
-    await client.deploy.update(deployment['project_id'], schedule='0/15 * * * *')
-    await client.deploy.remove(deployment['project_id'])
+    result = await client.deploy.publish(my_pipeline, comment='v2 prompt fix')
+    await client.deploy.deploy('proj-1', result['artifact']['version'], 'team-staging')
+    live = await client.deploy.list()
+    await client.deploy.set_schedule('proj-1', 'webhook_1', '*/15 * * * *', team_id='team-staging')
+    await client.deploy.pause('proj-1', 'team-staging')
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from .types.deploy import DeploymentRecord
+from .types.deploy import (
+    Deployment,
+    DeployHistoryResult,
+    DeployListResult,
+    DeployVersionsResult,
+    PublishResult,
+    SchedulePreview,
+)
 from .types.pipeline import PipelineConfig
 
 if TYPE_CHECKING:
     from .client import RocketRideClient
+
+
+def _list_args(
+    kwargs: dict,
+    page: int | None,
+    page_size: int | None,
+    search: str | None,
+    filters: dict[str, Any] | None,
+    sort: list[dict[str, str]] | None,
+) -> dict:
+    """Fold the standard list-API arguments into a call kwargs dict.
+
+    Only supplied values are sent — the server applies its own defaults
+    (page 1, clamped page size) to whatever is absent.
+    """
+    for key, value in (
+        ('page', page),
+        ('page_size', page_size),
+        ('search', search),
+        ('filters', filters),
+        ('sort', sort),
+    ):
+        if value is not None:
+            kwargs[key] = value
+    return kwargs
 
 
 class DeployApi:
@@ -65,81 +106,279 @@ class DeployApi:
         self._client = client
 
     # =========================================================================
-    # DEPLOYMENTS
+    # PUBLISH — immutable artifact into the org registry
     # =========================================================================
 
-    async def add(
+    async def publish(
         self,
         pipeline: PipelineConfig,
         *,
-        schedule: str | None = None,
-    ) -> DeploymentRecord:
+        comment: str | None = None,
+        deploy_to: str | None = None,
+    ) -> PublishResult:
         """
-        Deploy a pipeline to the server and activate it.
+        Publish a pipeline as the next immutable registry version.
+
+        The artifact is sha256-locked: what was published is provably what
+        runs. Publishing alone puts nothing live — point a team at the
+        version with :meth:`deploy` (or pass ``deploy_to`` to do both in one
+        step, the small-team convenience).
 
         Args:
-            pipeline: The pipeline definition dict to deploy.
-            schedule: Cron expression or ``"manual"``. Defaults to ``"manual"`` if omitted.
+            pipeline: The full pipeline definition dict to snapshot.
+            comment: Optional "what changed" note kept in the registry.
+            deploy_to: Optional team id to deploy the new version to
+                immediately (one-step publish+deploy).
 
         Returns:
-            The created deployment record.
+            ``{'artifact': ...}`` plus ``'deployment'`` when ``deploy_to``
+            was given.
         """
-        kwargs: dict = {'subcommand': 'add', 'pipeline': pipeline}
+        kwargs: dict = {'subcommand': 'publish', 'pipeline': pipeline}
+        if comment is not None:
+            kwargs['comment'] = comment
+        if deploy_to is not None:
+            kwargs['deployTo'] = deploy_to
+        return await self._client.call('rrext_deploy', **kwargs)
+
+    # =========================================================================
+    # DEPLOY — point a team at a version (promotion and rollback alike)
+    # =========================================================================
+
+    async def deploy(self, project_id: str, version: int, team_id: str) -> Deployment:
+        """
+        Point a team at a published version.
+
+        Promotion (Staging -> Production) and rollback (v3 -> v2) are both
+        this call — the team's pointer moves, nothing else changes. The team
+        is always explicit; requires ``task.control`` on it.
+
+        Args:
+            project_id: The project whose artifact to deploy.
+            version: The registry version to point the team at.
+            team_id: The target team (the environment).
+
+        Returns:
+            The updated deployment record, registry-joined.
+        """
+        return await self._client.call(
+            'rrext_deploy', subcommand='deploy', projectId=project_id, version=version, teamId=team_id
+        )
+
+    # =========================================================================
+    # READS — standard list envelopes
+    # =========================================================================
+
+    async def list(
+        self,
+        *,
+        team_id: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+        search: str | None = None,
+        filters: dict[str, Any] | None = None,
+        sort: list[dict[str, str]] | None = None,
+    ) -> DeployListResult:
+        """
+        Deployments visible to the caller, as the standard list envelope.
+
+        Args:
+            team_id: Restrict to one team; omitted = every team the caller
+                can monitor.
+            page: 1-based page number.
+            page_size: Rows per page (server-clamped).
+            search: Free-text search over projectId/pipelineName/teamId.
+            filters: Column filters (e.g. ``{'state': 'active'}``).
+            sort: ``[{'field': ..., 'dir': 'asc'|'desc'}]`` sorters.
+
+        Returns:
+            ``{'rows', 'total', 'page', 'pageSize'}``.
+        """
+        kwargs: dict = {'subcommand': 'list'}
+        if team_id is not None:
+            kwargs['teamId'] = team_id
+        return await self._client.call('rrext_deploy', **_list_args(kwargs, page, page_size, search, filters, sort))
+
+    async def get(self, project_id: str, team_id: str) -> Deployment:
+        """
+        One team's deployment of a project, registry-joined.
+
+        Args:
+            project_id: The project.
+            team_id: The team whose deployment to fetch.
+
+        Returns:
+            The deployment record (version, state, schedules, actors).
+        """
+        return await self._client.call('rrext_deploy', subcommand='get', projectId=project_id, teamId=team_id)
+
+    async def versions(
+        self,
+        project_id: str,
+        *,
+        page: int | None = None,
+        page_size: int | None = None,
+        search: str | None = None,
+        filters: dict[str, Any] | None = None,
+        sort: list[dict[str, str]] | None = None,
+    ) -> DeployVersionsResult:
+        """
+        The org-registry versions of a project (the version strip), newest
+        first, as the standard list envelope.
+
+        Args:
+            project_id: The project whose registry to read.
+            page: 1-based page number.
+            page_size: Rows per page (server-clamped).
+            search: Free-text search over pipelineName/comment.
+            filters: Column filters.
+            sort: ``[{'field': ..., 'dir': 'asc'|'desc'}]`` sorters.
+
+        Returns:
+            ``{'rows', 'total', 'page', 'pageSize'}``.
+        """
+        kwargs: dict = {'subcommand': 'versions', 'projectId': project_id}
+        return await self._client.call('rrext_deploy', **_list_args(kwargs, page, page_size, search, filters, sort))
+
+    async def history(
+        self,
+        project_id: str,
+        *,
+        team_id: str | None = None,
+        page: int | None = None,
+        page_size: int | None = None,
+        search: str | None = None,
+        filters: dict[str, Any] | None = None,
+        sort: list[dict[str, str]] | None = None,
+    ) -> DeployHistoryResult:
+        """
+        The immutable audit trail of a project, newest first, as the
+        standard list envelope.
+
+        The trail is unbounded by design (who published what when, who put
+        which version live where) — the server pages it; rows carry ``seq``,
+        the stable append-order key, as their identity.
+
+        Args:
+            project_id: The project whose trail to read.
+            team_id: Restrict to one team's pointer changes (org-wide
+                publish rows always ride along).
+            page: 1-based page number.
+            page_size: Rows per page (server-clamped).
+            search: Free-text search over action/teamId.
+            filters: Column filters; ``at__gte``/``at__lte`` take epoch
+                seconds.
+            sort: ``[{'field': ..., 'dir': 'asc'|'desc'}]`` sorters.
+
+        Returns:
+            ``{'rows', 'total', 'page', 'pageSize'}``.
+        """
+        kwargs: dict = {'subcommand': 'history', 'projectId': project_id}
+        if team_id is not None:
+            kwargs['teamId'] = team_id
+        return await self._client.call('rrext_deploy', **_list_args(kwargs, page, page_size, search, filters, sort))
+
+    # =========================================================================
+    # STATE — pause / resume / soft remove
+    # =========================================================================
+
+    async def pause(self, project_id: str, team_id: str) -> Deployment:
+        """
+        Pause one team's deployment (schedules stop firing).
+
+        Args:
+            project_id: The project.
+            team_id: The team whose deployment to pause.
+
+        Returns:
+            The updated deployment record.
+        """
+        return await self._client.call('rrext_deploy', subcommand='pause', projectId=project_id, teamId=team_id)
+
+    async def resume(self, project_id: str, team_id: str) -> Deployment:
+        """
+        Resume one team's paused deployment.
+
+        Args:
+            project_id: The project.
+            team_id: The team whose deployment to resume.
+
+        Returns:
+            The updated deployment record.
+        """
+        return await self._client.call('rrext_deploy', subcommand='resume', projectId=project_id, teamId=team_id)
+
+    async def remove(self, project_id: str, team_id: str) -> Deployment:
+        """
+        Soft-remove one team's deployment.
+
+        Listings hide it; the audit history and every registry artifact
+        survive forever (the enterprise requirement). Re-deploying any
+        version revives it.
+
+        Args:
+            project_id: The project.
+            team_id: The team whose deployment to remove.
+
+        Returns:
+            The final deployment record (state ``removed``).
+        """
+        return await self._client.call('rrext_deploy', subcommand='remove', projectId=project_id, teamId=team_id)
+
+    # =========================================================================
+    # SCHEDULES
+    # =========================================================================
+
+    async def set_schedule(
+        self,
+        project_id: str,
+        source_id: str,
+        schedule: str | None,
+        team_id: str,
+        *,
+        enabled: bool = True,
+    ) -> Deployment:
+        """
+        Set (or clear) one source's schedule on a team deployment.
+
+        Args:
+            project_id: The project.
+            source_id: The pipeline source the schedule fires.
+            schedule: 5-field cron expression; ``None`` or ``'manual'``
+                clears the schedule.
+            team_id: The team whose deployment to schedule.
+            enabled: Set False to keep the cron but stop it firing.
+
+        Returns:
+            The updated deployment record.
+        """
+        kwargs: dict = {
+            'subcommand': 'schedule_set',
+            'projectId': project_id,
+            'sourceId': source_id,
+            'teamId': team_id,
+            'enabled': enabled,
+        }
         if schedule is not None:
             kwargs['schedule'] = schedule
         return await self._client.call('rrext_deploy', **kwargs)
 
-    async def remove(self, project_id: str) -> None:
+    async def preview(self, schedule: str, count: int | None = None) -> SchedulePreview:
         """
-        Undeploy and remove a pipeline from the server.
+        Validate a schedule and return its next occurrences.
+
+        THE single cron evaluator: panel validation, "next:" lines, and DVR
+        ghost tracks all render from this — nothing client-side parses cron,
+        so a preview can never disagree with what the scheduler fires.
 
         Args:
-            project_id: Project ID of the deployment to remove.
-        """
-        await self._client.call('rrext_deploy', subcommand='remove', projectId=project_id)
-
-    async def list(self) -> list[DeploymentRecord]:
-        """
-        Return the authenticated user's deployments with their status and schedule config.
+            schedule: 5-field cron expression (or ``'manual'``).
+            count: How many upcoming occurrences to return (server-capped).
 
         Returns:
-            List of deployment summary records.
+            ``{'valid', 'next'}`` plus ``'error'`` when invalid.
         """
-        body = await self._client.call('rrext_deploy', subcommand='list')
-        return body.get('deployments', [])
-
-    async def status(self, project_id: str) -> DeploymentRecord:
-        """
-        Get detailed status of a specific deployment.
-
-        Args:
-            project_id: Project ID of the deployment to query.
-
-        Returns:
-            The deployment record including pipeline, state, schedule, and timestamps.
-        """
-        return await self._client.call('rrext_deploy', subcommand='status', projectId=project_id)
-
-    async def update(
-        self,
-        project_id: str,
-        *,
-        pipeline: PipelineConfig | None = None,
-        schedule: str | None = None,
-    ) -> None:
-        """
-        Modify the schedule or pipeline config for an existing deployment.
-
-        Both ``pipeline`` and ``schedule`` are optional — omit a parameter to leave it unchanged.
-
-        Args:
-            project_id: Project ID of the deployment to update.
-            pipeline: Replacement pipeline definition, or None to leave unchanged.
-            schedule: Replacement schedule configuration, or None to leave unchanged.
-        """
-        kwargs: dict = {'subcommand': 'update', 'projectId': project_id}
-        if pipeline is not None:
-            kwargs['pipeline'] = pipeline
-        if schedule is not None:
-            kwargs['schedule'] = schedule
-        await self._client.call('rrext_deploy', **kwargs)
+        kwargs: dict = {'subcommand': 'preview', 'schedule': schedule}
+        if count is not None:
+            kwargs['count'] = count
+        return await self._client.call('rrext_deploy', **kwargs)

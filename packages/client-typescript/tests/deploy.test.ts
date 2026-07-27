@@ -31,64 +31,49 @@ const TEST_CONFIG = {
 	timeout: 120000,
 };
 
-const PROJECT_ID = `test-project-${Math.random().toString(16).slice(2, 10)}`;
+/** The one team on the OSS test server. */
+const TEAM = 'local';
 
-const PIPELINE = {
-	project_id: PROJECT_ID,
-	components: [
-		{
-			id: 'webhook_1',
-			provider: 'webhook',
-			name: 'Test webhook',
-			config: { hideForm: true, mode: 'Source', type: 'webhook' },
-		},
-		{
-			id: 'response_1',
-			provider: 'response',
-			config: { lanes: [] },
-			input: [{ lane: 'text', from: 'webhook_1' }],
-		},
-	],
-	source: 'webhook_1',
-};
+/** A unique project id per test — registry versions accumulate forever. */
+function freshProject(): string {
+	return `sdk-deploy-${Math.random().toString(16).slice(2, 12)}`;
+}
 
-const PIPELINE_V2 = {
-	project_id: PROJECT_ID,
-	components: [
-		{
-			id: 'chat_1',
-			provider: 'chat',
-			name: 'Test chat',
-			config: { hideForm: true, mode: 'Source', type: 'chat' },
-		},
-		{
-			id: 'response_1',
-			provider: 'response',
-			config: { lanes: [] },
-			input: [{ lane: 'questions', from: 'chat_1' }],
-		},
-	],
-	source: 'chat_1',
-};
+/** A minimal valid pipeline for one throwaway project id. */
+function makePipeline(projectId: string) {
+	return {
+		project_id: projectId,
+		name: 'SDK deploy test',
+		components: [
+			{
+				id: 'webhook_1',
+				provider: 'webhook',
+				name: 'Test webhook',
+				config: { hideForm: true, mode: 'Source', type: 'webhook' },
+			},
+			{
+				id: 'response_1',
+				provider: 'response',
+				config: { lanes: [] },
+				input: [{ lane: 'text', from: 'webhook_1' }],
+			},
+		],
+		source: 'webhook_1',
+	};
+}
 
 /**
- * Integration tests for the deploy client API.
+ * Integration tests for the deploy client API (teams-as-environments).
  *
- * These tests connect to a live server and exercise the full CRUD lifecycle
- * (add, list, status, update, remove). They predate the TaskScheduler and
- * remain valid without modification for the following reasons:
+ * These tests connect to a live server and exercise the published contract:
+ * publish (immutable registry versions), deploy (pointing a team at a
+ * version — promotion and rollback alike), the standard list envelopes on
+ * list/versions/history, pause/resume, soft remove with a surviving audit
+ * trail, per-source schedules, and the single cron evaluator.
  *
- * - Tests that use the default schedule ('manual') are completely unaffected:
- *   manual deployments are never dispatched by the scheduler.
- * - Tests that supply a cron schedule (e.g. '* /15 * * * *') remove the
- *   deployment before the scheduler could ever fire — the minimum cron
- *   granularity is 60 s and all tests clean up in the finally block.
- * - 'remove' now also calls scheduler.unschedule() server-side, but the
- *   observable client behaviour (status throws after remove) is unchanged.
- *
- * These tests therefore cover the client API contract only. Scheduler
- * registration and execution are covered separately — see:
- *   packages/ai/tests/ai/modules/task/test_task_scheduler.py
+ * Every test uses a fresh project id and soft-removes its deployment in a
+ * finally block so scheduled work never leaks across tests. Scheduler
+ * dispatch itself is covered server-side (test_task_scheduler.py).
  */
 describe('Deploy API Integration Tests', () => {
 	let client: RocketRideClient;
@@ -104,189 +89,209 @@ describe('Deploy API Integration Tests', () => {
 		}
 	});
 
-	// ── add ────────────────────────────────────────────────────────────────────
+	/** Soft-remove the test deployment; tolerate never-deployed projects. */
+	async function cleanup(projectId: string): Promise<void> {
+		try {
+			await client.deploy.remove(projectId, TEAM);
+		} catch {
+			// Never deployed — nothing to clean.
+		}
+	}
+
+	// ── publish ────────────────────────────────────────────────────────────────
 
 	it(
-		'add returns full record',
+		'publish returns an immutable artifact and versions accumulate',
 		async () => {
-			const rec = await client.deploy.add(PIPELINE);
+			const project = freshProject();
+			const result = await client.deploy.publish(makePipeline(project), { comment: 'first cut' });
+			expect(result.artifact?.version).toBe(1);
+			expect(result.artifact?.sha256).toBeTruthy();
+			expect(result.artifact?.comment).toBe('first cut');
+			expect(result.artifact?.publishedBy?.userId).toBeTruthy();
+			expect(result.deployment).toBeUndefined();
+
+			const result2 = await client.deploy.publish(makePipeline(project));
+			expect(result2.artifact?.version).toBe(2);
+
+			const versions = await client.deploy.versions(project);
+			expect(versions.rows.map((v) => v.version)).toEqual([2, 1]);
+		},
+		TEST_CONFIG.timeout
+	);
+
+	it(
+		'publish with deployTo is one-step publish+deploy',
+		async () => {
+			const project = freshProject();
 			try {
-				expect(rec.pipeline!.project_id!).toBeTruthy();
-				expect(rec.pipeline).toEqual(PIPELINE);
-				expect(rec.schedule).toBe('manual');
-				expect(rec.state).toBe('active');
-				expect(rec.userId).toBeTruthy();
-				// The stored user credential must never be echoed back to clients.
-				expect(rec).not.toHaveProperty('userToken');
-				expect(rec.createdAt).toBeGreaterThan(0);
-				expect(rec.updatedAt).toBeGreaterThan(0);
+				const result = await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+				expect(result.deployment?.teamId).toBe(TEAM);
+				expect(result.deployment?.projectId).toBe(project);
+				expect(result.deployment?.version).toBe(1);
+				expect(result.deployment?.state).toBe('active');
 			} finally {
-				await client.deploy.remove(rec.pipeline!.project_id!);
+				await cleanup(project);
 			}
 		},
-		TEST_CONFIG.timeout,
+		TEST_CONFIG.timeout
 	);
 
+	// ── deploy: promotion and rollback are the same pointer move ───────────────
+
 	it(
-		'add with cron schedule',
+		'deploy and rollback move the pointer; history labels honestly',
 		async () => {
-			const rec = await client.deploy.add(PIPELINE, { schedule: '*/15 * * * *' });
+			const project = freshProject();
 			try {
-				expect(rec.schedule).toBe('*/15 * * * *');
+				await client.deploy.publish(makePipeline(project));
+				await client.deploy.publish(makePipeline(project));
+
+				let dep = await client.deploy.deploy(project, 2, TEAM);
+				expect(dep.version).toBe(2);
+
+				dep = await client.deploy.deploy(project, 1, TEAM);
+				expect(dep.version).toBe(1);
+
+				const history = await client.deploy.history(project, { teamId: TEAM });
+				expect(history.rows[0].action).toBe('rollback');
+				// seq is the stable append-order identity: strictly descending.
+				const seqs = history.rows.map((h) => h.seq ?? 0);
+				expect(seqs).toEqual([...seqs].sort((a, b) => b - a));
 			} finally {
-				await client.deploy.remove(rec.pipeline!.project_id!);
+				await cleanup(project);
 			}
 		},
-		TEST_CONFIG.timeout,
+		TEST_CONFIG.timeout
 	);
 
 	it(
-		'add with invalid schedule throws',
+		'deploying an unpublished version throws',
 		async () => {
-			await expect(client.deploy.add(PIPELINE, { schedule: 'not-a-cron' })).rejects.toThrow();
+			const project = freshProject();
+			await client.deploy.publish(makePipeline(project));
+			await expect(client.deploy.deploy(project, 7, TEAM)).rejects.toThrow();
 		},
-		TEST_CONFIG.timeout,
+		TEST_CONFIG.timeout
 	);
 
+	// ── reads: standard list envelopes ─────────────────────────────────────────
+
 	it(
-		'add duplicate throws',
+		'list returns the standard envelope with paging',
 		async () => {
-			const rec = await client.deploy.add(PIPELINE);
+			const project = freshProject();
 			try {
-				await expect(client.deploy.add(PIPELINE)).rejects.toThrow();
+				await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+
+				const body = await client.deploy.list();
+				expect(Object.keys(body).sort()).toEqual(['page', 'pageSize', 'rows', 'total']);
+				expect(body.rows.some((d) => d.projectId === project)).toBe(true);
+
+				const page = await client.deploy.list({ teamId: TEAM, pageSize: 1 });
+				expect(page.pageSize).toBe(1);
+				expect(page.rows.length).toBeLessThanOrEqual(1);
 			} finally {
-				await client.deploy.remove(rec.pipeline!.project_id!);
+				await cleanup(project);
 			}
 		},
-		TEST_CONFIG.timeout,
+		TEST_CONFIG.timeout
 	);
 
-	// ── list ───────────────────────────────────────────────────────────────────
+	it(
+		'get returns the registry-joined record; unknown project throws',
+		async () => {
+			const project = freshProject();
+			try {
+				await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+				const dep = await client.deploy.get(project, TEAM);
+				expect(dep.projectId).toBe(project);
+				expect(dep.sha256).toBeTruthy();
+				expect(dep.schedules).toEqual({});
+			} finally {
+				await cleanup(project);
+			}
+			await expect(client.deploy.get('nonexistent-project', TEAM)).rejects.toThrow();
+		},
+		TEST_CONFIG.timeout
+	);
+
+	// ── state: pause / resume / soft remove ────────────────────────────────────
 
 	it(
-		'list includes created deployment',
+		'pause and resume flip the state',
 		async () => {
-			const rec = await client.deploy.add(PIPELINE);
+			const project = freshProject();
 			try {
-				const deployments = await client.deploy.list();
-				const ids = deployments.map((d) => d.pipeline!.project_id!);
-				expect(ids).toContain(rec.pipeline!.project_id!);
+				await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+				expect((await client.deploy.pause(project, TEAM)).state).toBe('paused');
+				expect((await client.deploy.resume(project, TEAM)).state).toBe('active');
 			} finally {
-				await client.deploy.remove(rec.pipeline!.project_id!);
+				await cleanup(project);
 			}
 		},
-		TEST_CONFIG.timeout,
+		TEST_CONFIG.timeout
 	);
 
 	it(
-		'list returns array',
+		'remove is soft: hidden from list, history survives',
 		async () => {
-			const deployments = await client.deploy.list();
-			expect(Array.isArray(deployments)).toBe(true);
+			const project = freshProject();
+			await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+			const dep = await client.deploy.remove(project, TEAM);
+			expect(dep.state).toBe('removed');
+
+			const body = await client.deploy.list();
+			expect(body.rows.some((d) => d.projectId === project)).toBe(false);
+
+			const history = await client.deploy.history(project);
+			expect(history.rows.map((h) => h.action)).toContain('remove');
 		},
-		TEST_CONFIG.timeout,
+		TEST_CONFIG.timeout
 	);
 
-	// ── status ─────────────────────────────────────────────────────────────────
+	// ── schedules + the single evaluator ───────────────────────────────────────
 
 	it(
-		'status returns deployment',
+		'setSchedule sets and clears a per-source schedule',
 		async () => {
-			const rec = await client.deploy.add(PIPELINE);
+			const project = freshProject();
 			try {
-				const s = await client.deploy.status(rec.pipeline!.project_id!);
-				expect(s.pipeline!.project_id!).toBe(rec.pipeline!.project_id!);
-				expect(s.state).toBe('active');
+				await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+
+				let dep = await client.deploy.setSchedule(project, 'webhook_1', '0 * * * *', TEAM);
+				expect(dep.schedules?.webhook_1?.cron).toBe('0 * * * *');
+				expect(dep.schedules?.webhook_1?.enabled).toBe(true);
+
+				// null clears the schedule row entirely.
+				dep = await client.deploy.setSchedule(project, 'webhook_1', null, TEAM);
+				expect(dep.schedules?.webhook_1).toBeUndefined();
 			} finally {
-				await client.deploy.remove(rec.pipeline!.project_id!);
+				await cleanup(project);
 			}
 		},
-		TEST_CONFIG.timeout,
+		TEST_CONFIG.timeout
 	);
 
 	it(
-		'status with unknown id throws',
+		'invalid cron is rejected by setSchedule and reported by preview',
 		async () => {
-			await expect(client.deploy.status('nonexistent-deployment-id')).rejects.toThrow();
-		},
-		TEST_CONFIG.timeout,
-	);
-
-	// ── update ─────────────────────────────────────────────────────────────────
-
-	it(
-		'update schedule',
-		async () => {
-			const rec = await client.deploy.add(PIPELINE);
+			const project = freshProject();
 			try {
-				await client.deploy.update(rec.pipeline!.project_id!, { schedule: '0 * * * *' });
-				const s = await client.deploy.status(rec.pipeline!.project_id!);
-				expect(s.schedule).toBe('0 * * * *');
+				await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+				await expect(client.deploy.setSchedule(project, 'webhook_1', 'not-a-cron', TEAM)).rejects.toThrow();
 			} finally {
-				await client.deploy.remove(rec.pipeline!.project_id!);
+				await cleanup(project);
 			}
+
+			const ok = await client.deploy.preview('*/15 * * * *', 3);
+			expect(ok.valid).toBe(true);
+			expect(ok.next?.length).toBe(3);
+
+			const bad = await client.deploy.preview('not-a-cron');
+			expect(bad.valid).toBe(false);
+			expect(bad.error).toBeTruthy();
 		},
-		TEST_CONFIG.timeout,
-	);
-
-	it(
-		'update pipeline',
-		async () => {
-			const rec = await client.deploy.add(PIPELINE);
-			try {
-				await client.deploy.update(rec.pipeline!.project_id!, { pipeline: PIPELINE_V2 });
-				const s = await client.deploy.status(rec.pipeline!.project_id!);
-				expect(s.pipeline).toEqual(PIPELINE_V2);
-			} finally {
-				await client.deploy.remove(rec.pipeline!.project_id!);
-			}
-		},
-		TEST_CONFIG.timeout,
-	);
-
-
-	it(
-		'update bumps updatedAt',
-		async () => {
-			const rec = await client.deploy.add(PIPELINE);
-			try {
-				await client.deploy.update(rec.pipeline!.project_id!, { schedule: '@hourly' });
-				const s = await client.deploy.status(rec.pipeline!.project_id!);
-				expect(s.updatedAt!).toBeGreaterThanOrEqual(rec.updatedAt!);
-			} finally {
-				await client.deploy.remove(rec.pipeline!.project_id!);
-			}
-		},
-		TEST_CONFIG.timeout,
-	);
-
-	// ── remove ─────────────────────────────────────────────────────────────────
-
-	it(
-		'remove deletes deployment',
-		async () => {
-			const rec = await client.deploy.add(PIPELINE);
-			await client.deploy.remove(rec.pipeline!.project_id!);
-			await expect(client.deploy.status(rec.pipeline!.project_id!)).rejects.toThrow();
-		},
-		TEST_CONFIG.timeout,
-	);
-
-	it(
-		'remove unknown id throws',
-		async () => {
-			await expect(client.deploy.remove('nonexistent-deployment-id')).rejects.toThrow();
-		},
-		TEST_CONFIG.timeout,
-	);
-
-	// ── update errors ──────────────────────────────────────────────────────────
-
-	it(
-		'update nonexistent throws',
-		async () => {
-			await expect(client.deploy.update('nonexistent-deployment-id', { schedule: 'manual' })).rejects.toThrow();
-		},
-		TEST_CONFIG.timeout,
+		TEST_CONFIG.timeout
 	);
 });

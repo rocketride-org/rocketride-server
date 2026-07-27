@@ -25,24 +25,34 @@
 /**
  * Run-log type definitions for the RocketRide TypeScript SDK.
  *
- * A task's run log is ONE continuous JSONL event stream per identity
- * (`projectId.source.runKind`); individual runs are chapters (tracks)
- * inside it. Streams are addressed by the plain identity tuple — never by
- * token.
+ * A task's run log is ONE continuous JSONL event stream per identity;
+ * individual runs are chapters (tracks) inside it. Streams are addressed by
+ * the plain identity pair (`projectId` + `source`) plus the SCOPE — never by
+ * token. THE SCOPE IS THE KIND: `teamId` present addresses that team's
+ * DEPLOY continuum (deploy runs execute as the team and log into its tree —
+ * teammates with monitor rights can watch/replay); absent addresses the
+ * caller's own DEV stream. There is no run-kind wire argument.
  */
 
 // =============================================================================
 // LOG TYPES
 // =============================================================================
 
-/** The two run kinds — separate continua per task identity. */
+/**
+ * The two run kinds. Not part of stream addressing (the scope decides) —
+ * still stamped on event bodies for client-side filtering.
+ */
 export type LogRunKind = 'dev' | 'deploy';
 
-/** Identity tuple addressing one run-log stream. */
+/** Identity addressing one run-log stream. */
 export interface LogStreamRef {
 	projectId: string;
 	source: string;
-	runKind: LogRunKind;
+	/**
+	 * A team id addresses that team's deploy continuum; omitted = the
+	 * caller's own dev stream.
+	 */
+	teamId?: string;
 }
 
 /** One chapter (track) — a run inside the continuum. */

@@ -6,7 +6,7 @@ title: Run Logs (client.log)
 # Run Logs — `client.log`
 
 Every task writes one continuous JSONL event log per
-`projectId.source.runKind` — a **continuum** in which individual runs are
+`projectId` + `source` (+ scope) — a **continuum** in which individual runs are
 chapter markers. The `client.log` namespace reads it: chapters for the
 activity timeline, ranged event reads, raw segment fetches, deletion, and
 the **DVR session** (`open_event_stream`) that powers live monitoring and
@@ -69,11 +69,16 @@ into the body at decode, so consumers read one shape.
 
 | Method | Purpose |
 | --- | --- |
-| `chapters(project_id, source, run_kind)` | Runs (tracks) + segment spans + stream extents |
-| `read(project_id, source, run_kind, ...)` | Ranged event read: `from_seq`/`to_seq`, `from_time`/`to_time`, `types`, paging via `nextSeq` cursor |
-| `segment(project_id, source, run_kind, segment_id, ...)` | Raw whole-line-aligned segment bytes (bulk replay path) |
-| `delete(project_id, source, run_kind, ...)` | Drop history: `before_time` or everything |
-| `open_event_stream(project_id, source, run_kind)` | The DVR session (below) |
+| `chapters(project_id, source, *, team_id='')` | Runs (tracks) + segment spans + stream extents |
+| `read(project_id, source, *, team_id='', ...)` | Ranged event read: `from_seq`/`to_seq`, `from_time`/`to_time`, `types`, paging via `nextSeq` cursor |
+| `segment(project_id, source, segment_id, *, team_id='', ...)` | Raw whole-line-aligned segment bytes (bulk replay path) |
+| `delete(project_id, source, *, team_id='', ...)` | Drop history: `before_time` or everything |
+| `open_event_stream(project_id, source, *, team_id='')` | The DVR session (below) |
+
+**The scope is the kind.** Pass `team_id` to address that team's DEPLOY
+continuum — deploy runs execute as the team and log into its tree, so any
+teammate with monitor rights can watch and replay them. Omit `team_id` for
+your own dev stream. There is no run-kind argument anywhere.
 
 ## The DVR session
 

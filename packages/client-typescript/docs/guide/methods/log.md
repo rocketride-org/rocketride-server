@@ -1,7 +1,10 @@
 # Run Log
 
 Every task writes a **run log**: one continuous JSONL event stream per task
-identity (`projectId` + `source` + `runKind`). Individual runs are **chapters**
+identity (`projectId` + `source`, plus the scope: a `teamId` addresses that
+team's DEPLOY continuum — deploy runs log into the team's tree, readable by
+any teammate with monitor rights — while omitting it addresses your own dev
+stream; there is no run-kind argument). Individual runs are **chapters**
 (tracks) inside the stream — there are no per-run log files. The log survives
 disconnects and server restarts, powers replay of past runs through the same
 panels that render live monitoring, and is retained on a ring (last ~1 GB) plus
@@ -78,7 +81,8 @@ date-time, starting sequence number and outcome, the activity spans for the
 timeline bar, the retained window, and the retention horizon.
 
 ```typescript
-const stream = { projectId: 'proj-1', source: 'chat_1', runKind: 'dev' as const };
+// Own dev stream; add teamId: 'team-prod' to read a team's deploy continuum.
+const stream = { projectId: 'proj-1', source: 'chat_1' };
 const timeline = await client.log.chapters(stream);
 for (const track of timeline.chapters) {
 	console.log(track.beginTime, track.endTime, track.outcome);
