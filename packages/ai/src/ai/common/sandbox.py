@@ -49,6 +49,7 @@ import operator
 import sys
 import threading
 import traceback
+import warnings
 from typing import Any, Dict, Set
 
 from RestrictedPython import compile_restricted, safe_builtins, PrintCollector
@@ -175,11 +176,18 @@ def execute_sandboxed(
     """
     # ── 0. Compile with RestrictedPython ───────────────────────────────
     try:
-        compiled = compile_restricted(
-            code,
-            filename='<agent_script>',
-            mode='exec',
-        )
+        # compile_restricted emits a SyntaxWarning ("Prints, but never reads
+        # 'printed' variable") for ANY code that prints without reading the
+        # collector variable. Stdout is collected via PrintCollector below,
+        # so the hint is meaningless noise for every sandboxed script —
+        # suppress exactly that category around the compile.
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', SyntaxWarning)
+            compiled = compile_restricted(
+                code,
+                filename='<agent_script>',
+                mode='exec',
+            )
     except SyntaxError as exc:
         return {
             'stdout': '',

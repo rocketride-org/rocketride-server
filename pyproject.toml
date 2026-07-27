@@ -90,6 +90,14 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
 ]
+filterwarnings = [
+    # starlette deprecates its httpx-based testclient at fastapi.testclient
+    # IMPORT time, so every suite importing fastapi's TestClient trips it.
+    # The real fix is moving the test dependency to httpx2 — a constraints
+    # decision owned by the engine's dependency set, not something a test can
+    # address. Until that upgrade lands, silence exactly this message.
+    "ignore:Using `httpx` with `starlette\\.testclient` is deprecated",
+]
 asyncio_mode = "auto"
 
 # =============================================================================
