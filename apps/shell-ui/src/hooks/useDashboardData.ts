@@ -134,12 +134,17 @@ function _fetchDashboard(): Promise<void> {
 			const dapResult =
 				(err as { dapResult?: Record<string, unknown> } | undefined)?.dapResult;
 			const status = Number(dapResult?.status ?? dapResult?.statusCode ?? dapResult?.code);
+			// `code` is not always numeric — the server may send a symbolic
+			// 'UNAUTHORIZED' / 'FORBIDDEN', which Number() turns into NaN. Testing
+			// only the numeric status and the prose would then miss the denial
+			// whenever the human message is generic, which is precisely the failure
+			// this branch exists to prevent: the previous session's figures would
+			// stay on screen under a vague error. Match the code as text too.
+			const code = String(dapResult?.code ?? '');
+			const DENIAL =
+				/denied|permission|forbidden|unauthori[sz]ed|not\s*authori[sz]ed|\b40[13]\b/i;
 			const denied =
-				status === 401 ||
-				status === 403 ||
-				/denied|permission|forbidden|unauthori[sz]ed|not\s*authori[sz]ed|\b40[13]\b/i.test(
-					message,
-				);
+				status === 401 || status === 403 || DENIAL.test(code) || DENIAL.test(message);
 			// The raw message already says "permission denied" in the case we most
 			// want to explain, so prefixing it produced "You do not have permission
 			// to view the dashboard. Permission denied". Replace it instead of
