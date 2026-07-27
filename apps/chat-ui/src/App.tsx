@@ -32,6 +32,10 @@ import { startClient } from './hooks/clientSingleton';
 const App: React.FC = () => {
 	const [isVSCode] = useState(() => 'acquireVsCodeApi' in window);
 	const [authToken, setAuthToken] = useState<string | null>(null);
+	// Persistent-chat boot params delivered alongside ?auth=... by the chat node
+	// (see nodes/src/nodes/webhook/IEndpoint.py).
+	const [pipelineId, setPipelineId] = useState<string | null>(null);
+	const [persistEnabled, setPersistEnabled] = useState<boolean>(false);
 
 	// Initialize VSCode state
 	const [vscodeState, setVscodeState] = useState<VSCodeContextType>(() => {
@@ -94,7 +98,8 @@ const App: React.FC = () => {
 		// URL param always wins — it carries the freshly-minted pk for the
 		// current task and must not be shadowed by a stale sessionStorage value
 		// left over from a previous task on the same origin.
-		token = urlParams.get('auth') || '';
+		const urlToken = urlParams.get('auth') || '';
+		token = urlToken;
 		if (token) {
 			window.history.replaceState({}, '', window.location.pathname);
 		} else if (!isVSCode) {
@@ -103,6 +108,25 @@ const App: React.FC = () => {
 		}
 		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
+		}
+
+		// Pull persistent-chat params from the URL alongside auth (same channel as authToken).
+		// When the URL carries a fresh ?auth=, treat the params as authoritative for that session —
+		// missing pipelineId/persist mean "this task isn't persistent", NOT "fall back to whatever
+		// the last task left in sessionStorage". Falling back unconditionally would let a stale
+		// pipelineId/persist=1 enable persistence on the wrong task.
+		let urlPipelineId = urlParams.get('pipelineId') || '';
+		let urlPersist = urlParams.get('persist') === '1';
+		if (!isVSCode) {
+			if (urlToken) {
+				// Fresh URL session: scrub stale persist keys to match the new ?auth=.
+				if (!urlPipelineId) sessionStorage.removeItem('chatPipelineId');
+				if (!urlPersist) sessionStorage.removeItem('chatPersist');
+			} else {
+				// Reload without ?auth= — rehydrate everything from sessionStorage.
+				if (!urlPipelineId) urlPipelineId = sessionStorage.getItem('chatPipelineId') || '';
+				if (!urlPersist) urlPersist = sessionStorage.getItem('chatPersist') === '1';
+			}
 		}
 
 		// Check these
@@ -127,8 +151,12 @@ const App: React.FC = () => {
 		// Save the token in session storage (skip in VSCode) and our state
 		if (!isVSCode) {
 			sessionStorage.setItem('auth', token);
+			if (urlPipelineId) sessionStorage.setItem('chatPipelineId', urlPipelineId);
+			if (urlPersist) sessionStorage.setItem('chatPersist', '1');
 		}
 		setAuthToken(token);
+		setPipelineId(urlPipelineId || null);
+		setPersistEnabled(urlPersist && !!urlPipelineId);
 
 		// Handle VSCode integration
 		if (isVSCode) {
@@ -172,7 +200,7 @@ const App: React.FC = () => {
 	return (
 		<VSCodeProvider value={vscodeState}>
 			<ThemeProvider>
-				<ChatContainer authToken={authToken} />
+				<ChatContainer authToken={authToken} pipelineId={pipelineId} persistEnabled={persistEnabled} />
 			</ThemeProvider>
 		</VSCodeProvider>
 	);

@@ -61,10 +61,41 @@ class IEndpoint(IEndpointBase):
         """
         try:
             if self.endpoint.logicalType == 'chat':
+                # Read the per-node config so chat-ui can decide whether to
+                # persist ("Persist sessions" toggle, default OFF) and which
+                # pipeline to attribute new chats to.  Both are delivered via
+                # the embed URL — same channel as the existing ?auth=... token
+                # (see App.tsx URL-param boot path).
+                parameters = getattr(self.endpoint, 'parameters', None) or {}
+                persist_sessions = bool(parameters.get('persistSessions', False))
+
+                job_config = getattr(self.endpoint, 'jobConfig', None) or {}
+                # The pipeline's stable project_id lives at
+                # jobConfig.config.pipeline.project_id and survives across runs
+                # (taskId rolls every run and cannot anchor a resume).
+                pipeline_id = ''
+                try:
+                    pipeline_id = job_config.get('config', {}).get('pipeline', {}).get('project_id', '') or ''
+                except Exception:
+                    pipeline_id = ''
+
+                # Add the persist + pipelineId params if persistence is on.
+                # ``button-link`` is rendered with {host}/{public_auth} late by
+                # the dropper-ui; the chat-ui parses pipelineId/persist from
+                # its own URL alongside auth (see chat-ui App.tsx).
+                if persist_sessions and pipeline_id:
+                    # Persistent chat needs task.store permission for fs_mkdir / fs_write
+                    # on the user's filestore.  Public auth keys (pk_*) lack that scope —
+                    # only the private task token (tk_*) carries it.  See
+                    # task_server.py: tk_* → ['task.control','task.data','task.monitor','task.debug','task.store'].
+                    button_link = f'{{host}}/chat?auth={{token}}&pipelineId={pipeline_id}&persist=1'
+                else:
+                    button_link = '{host}/chat?auth={public_auth}'
+
                 # These should NOT be replacable strings!!!
                 info = {
                     'button-text': 'Chat now',
-                    'button-link': '{host}/chat?auth={public_auth}',
+                    'button-link': button_link,
                     'url-text': 'Chat interface URL',
                     'url-link': '{host}/chat',
                     'auth-text': 'Public Authorization Key',

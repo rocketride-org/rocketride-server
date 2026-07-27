@@ -89,9 +89,15 @@
 	//		in the shape
 	//
 	"fields": {
+		"persistSessions": {
+			"type": "boolean",
+			"title": "Persist sessions",
+			"description": "When on, conversations are saved per-user and resumable across windows. Off by default.",
+			"default": false
+		},
 		"Pipe.source.parameters": {
 			"section": "parameters",
-			"properties": []
+			"properties": ["persistSessions"]
 		}
 	},
 	//
@@ -103,7 +109,7 @@
 		{
 			"section": "Pipe",
 			"title": "Chat",
-			"properties": ["hideForm", "type", "source.mode", "Pipe.source.parameters"]
+			"properties": ["type", "source.mode", "Pipe.source.parameters"]
 		}
 	]
 }
