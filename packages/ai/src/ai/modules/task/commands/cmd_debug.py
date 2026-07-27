@@ -207,14 +207,18 @@ class DebugCommands(DAPConn):
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
 
-            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            # Debug runs are development runs: they ALWAYS execute under the
+            # user's profile-assigned development team. Clients do not choose
+            # a team at launch; a stray teamId is rejected rather than
+            # silently ignored so the caller is never surprised by which team
+            # the run was billed/authorized under.
             args = request.get('arguments') or {}
-            team_id = args.get('teamId') or self._account_info.defaultTeam
+            team_id = self._account_info.defaultTeam
+            requested_team = args.get('teamId')
+            if requested_team and requested_team != team_id:
+                raise PermissionError('Debug tasks run in your assigned development team; change it in your profile')
 
-            # Verify task.debug ON THE TARGET TEAM — membership alone is not
-            # enough (the previous check only proved the team exists in the
-            # caller's org), and a defaultTeam check alone would miss a
-            # foreign teamId entirely.
+            # Verify task.debug on the development team.
             self.verify_team_permission(team_id, 'task.debug')
 
             # Resolve the org that owns the TARGET team. Members resolve via

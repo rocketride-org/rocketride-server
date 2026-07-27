@@ -6,7 +6,9 @@
 /**
  * CloudPanel — target panel for Cloud connection mode.
  *
- * Renders: sign-in/out status, team selector.
+ * Renders: sign-in/out status and the subscribe prompt. The run team is never
+ * chosen here: development runs use the user's profile-assigned development
+ * team, deployed runs use the team on the deployment record.
  * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
@@ -30,11 +32,6 @@ export interface CloudPanelProps {
 	/** Trigger the OAuth sign-in flow. */
 	onCloudSignIn: () => void;
 	onCloudSignOut: () => void;
-	/** Available teams for the signed-in account. */
-	teams: Array<{ id: string; name: string }>;
-	/** Currently selected team ID (persisted in settings). */
-	selectedTeamId: string;
-	onTeamChange: (teamId: string) => void;
 	/** Unique prefix for HTML element IDs. */
 	idPrefix: string;
 	/** When true, hides advanced fields (used on Welcome page). */
@@ -46,8 +43,6 @@ export interface CloudPanelProps {
 	isSaas?: boolean;
 	/** Called on mount to probe the cloud server. Receives the cloud endpoint URL. */
 	onProbeServer?: (cloudUrl: string) => void;
-	/** Called when isSaas becomes true, to fetch the team list. Receives the cloud endpoint URL. */
-	onFetchTeams?: (cloudUrl: string) => void;
 	/** Whether the user has an active subscription. When false, shows a subscribe button. */
 	isSubscribed?: boolean;
 	/** Checkout callbacks -- when provided, CloudPanel renders the CheckoutModal itself. */
@@ -61,8 +56,7 @@ export interface CloudPanelProps {
 // COMPONENT
 // =============================================================================
 
-export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, teams, selectedTeamId, onTeamChange, idPrefix, isSaas, onProbeServer, onFetchTeams, isSubscribed, onFetchPlans, onCreateCheckout, onConfirmPending, onCheckoutSuccess }) => {
-	const id = (name: string) => `${idPrefix}-${name}`;
+export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUserName, onCloudSignIn, onCloudSignOut, idPrefix, isSaas, onProbeServer, isSubscribed, onFetchPlans, onCreateCheckout, onConfirmPending, onCheckoutSuccess }) => {
 	const theme = useTheme();
 	const [showCheckout, setShowCheckout] = useState(false);
 
@@ -75,16 +69,10 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 
 	const cloudUrl = process.env.ROCKETRIDE_URI || '';
 
-	// Step 1: Probe on mount to confirm server is SaaS.
+	// Probe on mount to confirm server is SaaS.
 	useEffect(() => {
 		if (onProbeServer && cloudUrl) onProbeServer(cloudUrl);
 	}, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-	// Step 3: Once SaaS is confirmed and user is signed in, fetch teams.
-	// (Step 2 — sign-in — is handled by the Sign In button / auth listener.)
-	useEffect(() => {
-		if (isSaas && cloudSignedIn && onFetchTeams && cloudUrl) onFetchTeams(cloudUrl);
-	}, [isSaas, cloudSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
 	return (
 		<>
@@ -127,24 +115,6 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 					<button type="button" onClick={onCloudSignIn} style={{ width: 'auto', padding: '10px 24px', fontWeight: 600 }}>
 						Sign In
 					</button>
-				</div>
-			)}
-
-			{/* Team selector */}
-			{isSaas && cloudSignedIn && teams.length > 0 && (
-				<div style={S.formGroup}>
-					<label htmlFor={id('team')} style={S.label}>
-						Team
-					</label>
-					<select id={id('team')} value={selectedTeamId} onChange={(e) => onTeamChange(e.target.value)}>
-						<option value="">Select a team...</option>
-						{teams.map((t) => (
-							<option key={t.id} value={t.id}>
-								{t.name}
-							</option>
-						))}
-					</select>
-					<div style={S.helpText}>Which team's engine to connect to</div>
 				</div>
 			)}
 

@@ -97,12 +97,10 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 			// Development
 			['connectionMode', 'development.connectionMode'],
 			['hostUrl', 'development.hostUrl'],
-			['developmentTeamId', 'development.teamId'],
 			['local.engineVersion', 'development.local.engineVersion'],
 			// Deployment
 			['deployTargetMode', 'deployment.connectionMode'],
 			['deployHostUrl', 'deployment.hostUrl'],
-			['deployTargetTeamId', 'deployment.teamId'],
 			['deploy.local.engineVersion', 'deployment.local.engineVersion'],
 		];
 

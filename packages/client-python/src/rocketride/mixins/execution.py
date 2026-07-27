@@ -104,7 +104,6 @@ class ExecutionMixin(DAPClient):
         pipelineTraceLevel: str = None,
         name: str = None,
         env: Dict[str, str] = None,
-        team_id: str = None,
     ) -> Dict[str, Any]:
         """
         Start an RocketRide pipeline for processing data.
@@ -276,8 +275,6 @@ class ExecutionMixin(DAPClient):
             effective_name = base
         if effective_name is not None:
             arguments['name'] = effective_name
-        if team_id is not None:
-            arguments['teamId'] = team_id
 
         # Send execution request to server
         response_body = await self.call('execute', **arguments)

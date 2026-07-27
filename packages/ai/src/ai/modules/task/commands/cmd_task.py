@@ -125,14 +125,21 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            # The run team is ALWAYS the session's team context: the user's
+            # profile-assigned development team for client connections, or the
+            # deployment's team for the trusted in-process dispatch (which
+            # synthesizes an AccountInfo with defaultTeam = the run's team).
+            # Clients do not choose a team at launch; a stray teamId is
+            # rejected rather than silently ignored so the caller is never
+            # surprised by which team a run was billed/authorized under.
             args = request.get('arguments') or {}
-            team_id = args.get('teamId') or self._account_info.defaultTeam
+            team_id = self._account_info.defaultTeam
+            requested_team = args.get('teamId')
+            if requested_team and requested_team != team_id:
+                raise PermissionError('Tasks run in your assigned development team; change it in your profile')
 
-            # Verify task.control ON THE TARGET TEAM — not defaultTeam — and
-            # BEFORE any secret handling. A client-supplied teamId outside the
-            # caller's permissions previously slipped through with org_id=''
-            # and pulled that team's secrets in the env merge below.
+            # Verify task.control on the run team BEFORE any secret handling,
+            # since the env merge below pulls that team's secrets.
             self.verify_team_permission(team_id, 'task.control')
 
             # Verify required pipeline plans

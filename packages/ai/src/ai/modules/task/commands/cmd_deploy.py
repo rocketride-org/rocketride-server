@@ -203,8 +203,13 @@ class DeployCommands(DAPConn):
         return out
 
     def _require_team(self, args: Dict[str, Any], perm: str) -> str:
-        """Extract ``teamId`` (default: the caller's defaultTeam) and verify ``perm`` on it."""
-        team_id = args.get('teamId') or self._account_info.defaultTeam
+        """Extract the REQUIRED ``teamId`` and verify ``perm`` on it.
+
+        Deploy targets are always explicit — there is deliberately no fallback
+        to the caller's development team, so a user changing their profile
+        assignment can never silently re-target a deployment.
+        """
+        team_id = args.get('teamId')
         if not team_id:
             raise ValueError('teamId is required')
         self.verify_team_permission(team_id, perm)

@@ -7,7 +7,7 @@
  * ProfilePanel — the Profile tab within AccountView.
  *
  * Displays the user's avatar card with identity information, organization
- * and team memberships with "Set default" actions, and the Edit Profile
+ * and team memberships with development-team assignment, and the Edit Profile
  * record panel — an edit-only form DetailPanel per the interaction standard
  * (2026-07-18): [Save Changes] MATERIALIZES only while a field differs from
  * the seeded profile snapshot; Cancel / X / Escape on a dirty form raise the
@@ -141,7 +141,7 @@ const styles = {
 		opacity: active ? 1 : 0.45,
 	}),
 
-	/** Green check label for the active org / default team. */
+	/** Green check label for the active org / development team. */
 	activeLabel: {
 		fontSize: 11,
 		color: 'var(--rr-color-success)',
@@ -221,7 +221,7 @@ export interface ProfilePanelProps {
 	authUser: ConnectResult | null;
 	/** Async handler that persists a ProfileUpdate and resolves on success. */
 	onSave: (fields: ProfileUpdate) => Promise<void>;
-	/** Sets the user's preferred default team by its ID. */
+	/** Assigns the team the user's development runs execute under, by its ID. */
 	onSetDefaultTeam: (teamId: string) => void;
 	/** Switches the user's active organization by its ID. */
 	onSetDefaultOrg: (orgId: string) => void;
@@ -242,8 +242,8 @@ const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} 
  * The Profile tab panel.
  *
  * Displays a large avatar card with the user's identity information,
- * a list of their organizations and team memberships with a "Set default"
- * action per team, and an inline Edit Profile modal.
+ * a list of their organizations and team memberships with a development-team
+ * assignment action per team, and an inline Edit Profile modal.
  */
 export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onSetDefaultOrg }) => {
 	/**
@@ -401,10 +401,10 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 															<div style={S.rowName}>{t.name}</div>
 														</div>
 														{isDefaultTeam ? (
-															<span style={styles.activeLabel}>{'✓'} Default</span>
+															<span style={styles.activeLabel}>{'✓'} Development team</span>
 														) : (
 															<Button variant="ghost" small onClick={() => onSetDefaultTeam(t.id)}>
-																Set default
+																Set as development team
 															</Button>
 														)}
 													</div>

@@ -80,11 +80,6 @@
 					"description": "Host URL for development connection",
 					"format": "uri"
 				},
-				"rocketride.development.teamId": {
-					"type": "string",
-					"default": "",
-					"description": "Cloud team ID for the development connection"
-				},
 				"rocketride.development.local.engineVersion": {
 					"type": "string",
 					"default": "latest",
@@ -111,11 +106,6 @@
 					"default": "",
 					"description": "Host URL for deployment connection",
 					"format": "uri"
-				},
-				"rocketride.deployment.teamId": {
-					"type": "string",
-					"default": "",
-					"description": "Cloud team ID for the deployment connection"
 				},
 				"rocketride.deployment.local.engineVersion": {
 					"type": "string",
@@ -240,11 +230,6 @@
 					"default": "",
 					"deprecationMessage": "Migrated to rocketride.development.hostUrl"
 				},
-				"rocketride.developmentTeamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Migrated to rocketride.development.teamId"
-				},
 				"rocketride.local.engineVersion": {
 					"type": "string",
 					"default": "latest",
@@ -262,11 +247,6 @@
 					"type": "string",
 					"default": "",
 					"deprecationMessage": "Migrated to rocketride.deployment.hostUrl"
-				},
-				"rocketride.deployTargetTeamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Migrated to rocketride.deployment.teamId"
 				},
 				"rocketride.deploy.local.engineVersion": {
 					"type": "string",

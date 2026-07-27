@@ -1081,11 +1081,9 @@ export class RocketRideClient extends DAPClient {
 			name?: string;
 			/** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
 			env?: Record<string, string>;
-			/** Team ID to run the task under. Defaults to the user's default team. */
-			teamId?: string;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env, teamId } = options;
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -1156,9 +1154,6 @@ export class RocketRideClient extends DAPClient {
 		const effectiveName = name ?? (filepath ? filepath.replace(/^.*[\\/]/, '').replace(/\.pipe(?:\.json)?$/, '') : undefined);
 		if (effectiveName !== undefined) {
 			arguments_.name = effectiveName;
-		}
-		if (teamId !== undefined) {
-			arguments_.teamId = teamId;
 		}
 
 		// Send execution request to server

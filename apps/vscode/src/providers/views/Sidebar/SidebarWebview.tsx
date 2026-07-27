@@ -51,7 +51,7 @@ interface TaskEventBody {
 	tasks?: { id: string; name: string; projectId: string; source: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDevelopmentTeam'; teamId: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'setDeployTargetTeam'; teamId: string } | { type: 'cloudSignIn' };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' };
 
 interface DashboardTaskDTO {
 	id: string;
@@ -62,13 +62,6 @@ interface DashboardTaskDTO {
 	state: number;
 }
 
-interface TeamDTO {
-	id: string;
-	name: string;
-	color?: string;
-	memberCount?: number;
-}
-
 type IncomingMessage =
 	| {
 			type: 'update';
@@ -76,18 +69,13 @@ type IncomingMessage =
 				// Dev connection
 				connectionState: string;
 				connectionMode: string;
-				developmentTeamId?: string;
 				devProgressMessage?: string;
 				devProgressLogLine?: string;
 				// Deploy connection
 				deployConnectionState?: string;
 				deployConnectionMode?: string | null;
-				deployTargetTeamId?: string;
 				deployProgressMessage?: string;
 				deployProgressLogLine?: string;
-				// Teams (from respective servers)
-				teams?: TeamDTO[];
-				deployTeams?: TeamDTO[];
 				// Shared auth
 				cloudConnected?: boolean;
 				userName?: string;
@@ -110,9 +98,7 @@ const SidebarViewWebview: React.FC = () => {
 	// ── Dev connection state ────────────────────────────────────────────────
 	const [connection, setConnection] = useState<ConnectionInfo>({ state: 'disconnected' });
 	const [developmentMode, setDevelopmentMode] = useState('local');
-	const [developmentTeamId, setDevelopmentTeamId] = useState('');
 	const [devProgressMessage, setDevProgressMessage] = useState<string | undefined>();
-	const [teams, setTeams] = useState<TeamDTO[]>([]);
 
 	// ── Subscription state ─────────────────────────────────────────────────
 	const [subscribed, setSubscribed] = useState(true);
@@ -120,9 +106,7 @@ const SidebarViewWebview: React.FC = () => {
 	// ── Deploy connection state ─────────────────────────────────────────────
 	const [deployConnectionState, setDeployConnectionState] = useState('disconnected');
 	const [deployTargetMode, setDeployTargetMode] = useState<string | null>(null);
-	const [deployTargetTeamId, setDeployTargetTeamId] = useState('');
 	const [deployProgressMessage, setDeployProgressMessage] = useState<string | undefined>();
-	const [deployTeams, setDeployTeams] = useState<TeamDTO[]>([]);
 
 	// ── Pipeline data ───────────────────────────────────────────────────────
 	const [entries, setEntries] = useState<ProjectEntry[]>([]);
@@ -251,9 +235,7 @@ const SidebarViewWebview: React.FC = () => {
 					if (msg.data.cloudConnected !== undefined) setCloudSignedIn(msg.data.cloudConnected);
 
 					// Dev connection state
-					if (msg.data.teams) setTeams(msg.data.teams);
 					if (msg.data.connectionMode) setDevelopmentMode(msg.data.connectionMode);
-					if (msg.data.developmentTeamId !== undefined) setDevelopmentTeamId(msg.data.developmentTeamId);
 					setDevProgressMessage(msg.data.devProgressMessage);
 
 					// Accumulate dev engine log lines; clear on connect
@@ -265,9 +247,7 @@ const SidebarViewWebview: React.FC = () => {
 
 					// Deploy connection state
 					if (msg.data.deployConnectionState) setDeployConnectionState(msg.data.deployConnectionState);
-					if (msg.data.deployTeams) setDeployTeams(msg.data.deployTeams);
 					if (msg.data.deployConnectionMode !== undefined) setDeployTargetMode(msg.data.deployConnectionMode ?? null);
-					if (msg.data.deployTargetTeamId !== undefined) setDeployTargetTeamId(msg.data.deployTargetTeamId);
 					setDeployProgressMessage(msg.data.deployProgressMessage);
 
 					// Accumulate deploy engine log lines; clear on connect
@@ -372,15 +352,11 @@ const SidebarViewWebview: React.FC = () => {
 
 	// ── Footer popup menu items ─────────────────────────────────────────────
 	//
-	// Development and Deployment appear in the popup with `>` indicators.
-	//   - Non-cloud modes: clicking opens the Settings page (dev or deploy section)
-	//   - Cloud mode: clicking opens a team selection submenu
+	// Development and Deployment appear in the popup; clicking opens the
+	// Settings page (dev or deploy section). Runs use the profile-assigned
+	// development team, so no team selection exists here.
 	// Account, Billing, Settings, Log out follow below.
 	// ─────────────────────────────────────────────────────────────────────────
-
-	/** Resolve team names from their respective connection's team lists. */
-	const devTeamName = teams.find((t) => t.id === developmentTeamId)?.name;
-	const deployTeamName = deployTeams.find((t) => t.id === deployTargetTeamId)?.name;
 
 	/** Builds a mode display label like "Local" or "Cloud". */
 	const modeLabel = (mode: string | null): string => {
@@ -420,8 +396,7 @@ const SidebarViewWebview: React.FC = () => {
 
 		// ── Development section ─────────────────────────────────────────────
 		const devStatus = connectionStatusText(connection.state, developmentMode, devProgressMessage);
-		const devTeamLine = developmentMode === 'cloud' && devTeamName ? `Team: ${devTeamName}` : undefined;
-		const devLines = [devStatus, ...(devTeamLine ? [devTeamLine] : []), ...devProgressLog];
+		const devLines = [devStatus, ...devProgressLog];
 		items.push({
 			id: 'dev-header',
 			label: 'Development',
@@ -429,14 +404,12 @@ const SidebarViewWebview: React.FC = () => {
 			statusText: devLines.join('\n'),
 			statusState: connection.state === 'connected' ? 'connected' : connection.state === 'connecting' ? 'connecting' : 'disconnected',
 			onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open', args: ['development'] }),
-			submenu: developmentMode === 'cloud' && teams.length > 0 ? [...teams].sort((a, b) => a.name.localeCompare(b.name)).map((t: TeamDTO) => ({ id: `dev-${t.id}`, label: t.name, checked: developmentTeamId === t.id, onClick: () => sendMessage({ type: 'setDevelopmentTeam', teamId: t.id }) })) : undefined,
 		});
 
 		// ── Deployment section ──────────────────────────────────────────────
 		if (deployTargetMode) {
 			const deployStatus = connectionStatusText(deployConnectionState, deployTargetMode, deployProgressMessage);
-			const deployTeamLine = deployTargetMode === 'cloud' && deployTeamName ? `Team: ${deployTeamName}` : undefined;
-			const deployLines = [deployStatus, ...(deployTeamLine ? [deployTeamLine] : []), ...deployProgressLog];
+			const deployLines = [deployStatus, ...deployProgressLog];
 			items.push({
 				id: 'deploy-header',
 				label: 'Deployment',
@@ -444,7 +417,6 @@ const SidebarViewWebview: React.FC = () => {
 				statusText: deployLines.join('\n'),
 				statusState: deployConnectionState === 'connected' ? 'connected' : deployConnectionState === 'connecting' ? 'connecting' : 'disconnected',
 				onClick: () => sendMessage({ type: 'command', command: 'rocketride.page.settings.open', args: ['deployment'] }),
-				submenu: deployTargetMode === 'cloud' && deployTeams.length > 0 ? [...deployTeams].sort((a, b) => a.name.localeCompare(b.name)).map((t: TeamDTO) => ({ id: `deploy-${t.id}`, label: t.name, checked: deployTargetTeamId === t.id, onClick: () => sendMessage({ type: 'setDeployTargetTeam', teamId: t.id }) })) : undefined,
 			});
 		}
 
@@ -473,7 +445,7 @@ const SidebarViewWebview: React.FC = () => {
 		}
 
 		return items;
-	}, [sendMessage, cloudConnected, connection.state, teams, deployTeams, developmentMode, developmentTeamId, devTeamName, devProgressMessage, devProgressLog, deployConnectionState, deployTargetMode, deployTargetTeamId, deployTeamName, deployProgressMessage, deployProgressLog, subscribed, anyConnected]);
+	}, [sendMessage, cloudConnected, connection.state, developmentMode, devProgressMessage, devProgressLog, deployConnectionState, deployTargetMode, deployProgressMessage, deployProgressLog, subscribed, anyConnected]);
 
 	// ── Footer slot ─────────────────────────────────────────────────────────
 	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} />;

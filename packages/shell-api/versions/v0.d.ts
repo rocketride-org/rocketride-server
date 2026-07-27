@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-23T18:39:00.513Z
-// Source commit: 6fc82b1bfc6c4b38c0e03658281f9ca491aa3b4e
+// Generated:     2026-07-27T20:59:48.708Z
+// Source commit: 5c7b2002e595fde1ad677dc6f78a0d0f25dd5501
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1506,6 +1506,36 @@ interface TASK_STATUS {
     metrics: TASK_METRICS;
     /** Cumulative token usage for CPU, memory, GPU (100 tokens = $1.00) */
     tokens: TASK_TOKENS;
+    /** Per-component timing accumulated this run (requires tracing). */
+    componentStats?: Record<string, TASK_STATUS_COMPONENT_STAT>;
+    /** The 10 slowest completions this run, slowest first (requires tracing). */
+    slowestDocs?: TASK_STATUS_SLOWEST_DOC[];
+    /** Total begin-to-end seconds across all completions this run (requires tracing). */
+    completionSeconds?: number;
+    /** Total seconds the pipe sat unused between completions this run (requires tracing). */
+    idleSeconds?: number;
+    /** Longest single unused stretch between completions this run (requires tracing). */
+    idleLongestSeconds?: number;
+    /** Epoch when the longest unused stretch began (0 while none is recorded). */
+    idleLongestAt?: number;
+}
+interface TASK_STATUS_COMPONENT_STAT {
+    /** Completed enter/leave pairs this run. */
+    calls: number;
+    /** Sum of enter-to-leave seconds. */
+    totalSeconds: number;
+    /** Longest single call in seconds. */
+    maxSeconds: number;
+}
+interface TASK_STATUS_SLOWEST_DOC {
+    /** Object name from the begin event (capped at 200 chars). */
+    name: string;
+    /** Begin-to-end seconds, rounded to 2 decimals. */
+    elapsed: number;
+    /** Begin emission time (epoch seconds). */
+    beginTime: number;
+    /** Begin flow event continuum seq (trace identity). */
+    beginSeq?: number | null;
 }
 interface TASK_TOKENS {
     /** Cumulative CPU utilization tokens charged since monitoring started */
@@ -2479,15 +2509,19 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Creates a new RocketRideClient instance.
      *
-     * Configuration priority (highest to lowest):
-     * 1. Values passed in config parameter (auth, uri)
-     * 2. Values from env parameter (if provided)
-     * 3. Values from .env file (Node.js only)
-     * 4. Default values
+     * `config.env` is copied as the configured environment map when provided;
+     * otherwise Node.js values are copied from `process.env`. The two maps are not merged.
+     * `config.uri` overrides `ROCKETRIDE_URI`; `config.auth` supplies the fallback
+     * credential used when `login()` receives no credential and the configured environment
+     * has no `ROCKETRIDE_APIKEY`.
+     *
+     * The client does not load `.env` files; load them into `process.env` before construction
+     * (for example, start Node with `--env-file=.env`).
      *
      * @param config - Configuration options for the client
-     * @param config.auth - API key for authentication (required)
-     * @param config.uri - Server URI (default: CONST_DEFAULT_SERVICE)
+     * @param config.auth - Optional initial API key; `login()` can also use
+     *   `ROCKETRIDE_APIKEY` from the configured environment
+     * @param config.uri - Server URI (default: CONST_DEFAULT_WEB_CLOUD)
      * @param config.env - Environment variables dictionary for configuration and substitution
      * @param config.onEvent - Callback for server events
      * @param config.onConnected - Callback when connection is established
@@ -2496,8 +2530,6 @@ export declare class RocketRideClient extends DAPClient {
      * @param config.requestTimeout - Default timeout in ms for individual requests
      * @param config.maxRetryTime - Max total time in ms to keep retrying connections
      * @param config.module - Optional module name for client identification
-     *
-     * @throws Error if auth is not provided via config, env, or .env file
      *
      * @example
      * ```typescript
@@ -2587,7 +2619,9 @@ export declare class RocketRideClient extends DAPClient {
      * @param credential - API key, rr_ token, or PKCE code object.
      * @param options - Optional URI override and/or timeout.
      * @returns ConnectResult with user identity on success.
-     * @throws AuthenticationException on auth failure (transport stays attached).
+     * @throws AuthenticationException when the server rejects authentication. Credential
+     * resolution checks the argument, configured environment, and stored client state
+     * (initialized by `config.auth` and updated after authentication). The transport stays attached.
      */
     login(credential?: string | {
         code: string;
@@ -2620,6 +2654,9 @@ export declare class RocketRideClient extends DAPClient {
      *
      * @param credential - API key / Zitadel access_token / rr_ user token / PKCE code object.
      * @param options - Optional overrides: uri and/or timeout.
+     * @throws AuthenticationException when the server rejects authentication. Credential
+     * resolution checks the argument, configured environment, and stored client state
+     * (initialized by `config.auth` and updated after authentication).
      */
     connect(credential?: string | {
         code: string;
@@ -2647,11 +2684,10 @@ export declare class RocketRideClient extends DAPClient {
      * Update the environment variables used for pipeline substitution.
      *
      * Replaces the client's env dictionary (seeded from `config.env` or, in
-     * Node, from `process.env`) with a copy of the given map. {@link use} and
-     * {@link validate} read it to build the `ROCKETRIDE_*` substitution env
-     * sent with the pipeline; `attach()` also consults `ROCKETRIDE_APIKEY`
-     * from it when no explicit credential is supplied. Mirrors the Python
-     * SDK's `set_env`.
+     * Node, from `process.env`) with a copy of the given map. {@link use} reads
+     * it to build the `ROCKETRIDE_*` substitution env sent with the pipeline.
+     * `login()` also consults `ROCKETRIDE_APIKEY` from it when no explicit
+     * credential is supplied. Mirrors the Python SDK's `set_env`.
      *
      * @param env - The new environment map; copied, so later caller-side
      *   mutations have no effect.
@@ -2701,9 +2737,8 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Start an RocketRide pipeline for processing data.
      *
-     * This method loads and executes a pipeline configuration. It automatically performs
-     * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
-     * placeholders with values from the .env file or the `env` dictionary passed to the constructor.
+     * This method loads a pipeline configuration and sends the client's configured
+     * `ROCKETRIDE_*` values plus any per-use overrides to the server for substitution.
      *
      * When loading from a file via `filepath`, the client automatically unwraps `.pipe` files
      * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
@@ -2754,10 +2789,8 @@ export declare class RocketRideClient extends DAPClient {
         pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
         /** Optional display name for the task (e.g. shown in dashboard). */
         name?: string;
-        /** ROCKETRIDE_* environment overrides merged on top of server-side env. */
+        /** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
         env?: Record<string, string>;
-        /** Team ID to run the task under. Defaults to the user's default team. */
-        teamId?: string;
     }): Promise<Record<string, unknown> & {
         token: string;
     }>;

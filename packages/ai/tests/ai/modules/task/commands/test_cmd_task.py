@@ -140,9 +140,10 @@ async def test_on_execute_requires_task_control_permission():
 
 
 @pytest.mark.asyncio
-async def test_on_execute_checks_permission_on_the_target_team(monkeypatch):
-    """The task.control check runs against the CLIENT-SUPPLIED teamId (not
-    defaultTeam) so a foreign team cannot be targeted.
+async def test_on_execute_rejects_client_team_override(monkeypatch):
+    """A client-supplied teamId that differs from the session's team context
+    (the profile-assigned development team) is REJECTED, not honored — clients
+    no longer choose which team a run executes under.
     """
     from ai.account import account as account_mod
 
@@ -155,15 +156,31 @@ async def test_on_execute_checks_permission_on_the_target_team(monkeypatch):
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
     conn = _make_conn(account_info=_account_info(default_team='team-1', organization=organization), server=server)
 
-    await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-target'}})
+    with pytest.raises(PermissionError, match='development team'):
+        await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-target'}})
 
-    conn.verify_team_permission.assert_called_once_with('team-target', 'task.control')
+    server.start_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_execute_accepts_team_id_matching_session_team():
+    """A teamId EQUAL to the session's team passes (the trusted in-process
+    dispatch sends teamId = the synthesized defaultTeam) and task.control is
+    verified on that team.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+
+    await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-1'}})
+
+    conn.verify_team_permission.assert_called_once_with('team-1', 'task.control')
 
 
 @pytest.mark.asyncio
 async def test_on_execute_foreign_team_denied_before_secret_merge(monkeypatch):
-    """A denied teamId aborts BEFORE the env/secret merge and before start_task —
-    the cross-team secret-exfiltration hole this check closes.
+    """A foreign teamId aborts BEFORE the env/secret merge and before
+    start_task — the cross-team secret-exfiltration hole this check closes.
     """
     from ai.account import account as account_mod
 
@@ -173,9 +190,8 @@ async def test_on_execute_foreign_team_denied_before_secret_merge(monkeypatch):
     server = MagicMock()
     server.start_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.verify_team_permission = MagicMock(side_effect=PermissionError('denied'))
 
-    with pytest.raises(PermissionError, match='denied'):
+    with pytest.raises(PermissionError, match='development team'):
         await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
 
     # Neither the secret merge nor the task start may have been reached.
