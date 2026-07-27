@@ -21,7 +21,7 @@ from ai.common.util import parseJson
 from ai.common.utils.content_blocks import flatten_content_blocks
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
-from ai.common.llm_adapter import LangChainAdapter, drive_adapter, flatten_content
+from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter, flatten_content
 
 
 def _stop_kwargs() -> dict:
@@ -401,70 +401,27 @@ class ChatBase:
         falling back to non-streaming invoke() only if nothing reached the UI yet.
         """
         prompt = validate_prompt(prompt, self._modelTotalTokens, self.getTokens)
-
-        text_parts: list = []
-        finish_reason: Optional[str] = None
         try:
-            stream = self._raw_client.responses.create(
-                model=self._model,
-                input=prompt,
-                reasoning={'summary': 'auto'},
-                max_output_tokens=self._modelOutputTokens,
-                stream=True,
-            )
-            for event in stream:
-                etype = getattr(event, 'type', '') or ''
-                if etype == 'response.reasoning_summary_text.delta':
-                    delta = getattr(event, 'delta', '') or ''
-                    if delta and on_reasoning_chunk is not None:
-                        on_reasoning_chunk(delta)
-                elif etype == 'response.output_text.delta':
-                    delta = getattr(event, 'delta', '') or ''
-                    if delta:
-                        text_parts.append(delta)
-                        if on_chunk is not None:
-                            on_chunk(delta)
-                elif etype == 'response.completed':
-                    resp = getattr(event, 'response', None)
-                    if resp is not None:
-                        status = getattr(resp, 'status', None)
-                        if status == 'completed':
-                            finish_reason = 'stop'
-                        elif status == 'incomplete':
-                            details = getattr(resp, 'incomplete_details', None)
-                            reason = getattr(details, 'reason', None) if details else None
-                            finish_reason = reason or 'length'
-                        else:
-                            finish_reason = status or 'stop'
-                elif etype in ('response.failed', 'response.error'):
-                    finish_reason = 'error'
+            adapter = NativeOpenAIResponsesAdapter(self)
+            text, _items = drive_adapter(adapter, prompt, on_chunk, on_reasoning_chunk)
+            if on_finish is not None:
+                on_finish(adapter.finish_reason)
+            return text
         except Exception as e:
             warning(f'Reasoning streaming disabled for model={self._model} ({type(e).__name__}): {e}.')
-            # Only retry non-streaming if nothing has reached the UI; otherwise
-            # the full fallback would arrive on top of the partial we already streamed.
+            # Only retry non-streaming if nothing reached the UI; otherwise the full
+            # fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
                 results = self._llm.invoke(prompt, **_stop_kwargs())
-                # str() on a typed-block list yields the blocks' repr, not the
-                # answer — it would put the model's raw reasoning (and its base64
-                # signatures) into the visible output.
-                content_text, fallback_reasoning, _sig_only = flatten_content_blocks(
-                    getattr(results, 'content', '') or ''
-                )
-                if fallback_reasoning and on_reasoning_chunk is not None:
-                    on_reasoning_chunk(fallback_reasoning)
-                text_parts = [content_text]
-                # Push the fallback answer through on_chunk so the open UI bubble
-                # gets the visible text (the caller dedupes the final pipeline result).
+                content_text = flatten_content(getattr(results, 'content', ''))
                 if content_text and on_chunk is not None:
                     on_chunk(content_text)
-                finish_reason = 'stop'
-            else:
-                finish_reason = 'error'
-
-        if on_finish is not None:
-            on_finish(finish_reason)
-
-        return ''.join(text_parts)
+                if on_finish is not None:
+                    on_finish('stop')
+                return content_text
+            if on_finish is not None:
+                on_finish('error')
+            return ''
 
     def chat_string(
         self,
