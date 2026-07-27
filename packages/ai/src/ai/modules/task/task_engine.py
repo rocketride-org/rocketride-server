@@ -562,7 +562,7 @@ class Task(DAPBase):
             # "Connection refused" error. We retry up to 10 times (150ms apart) to
             # give uvicorn time to start accepting connections.
             if not self._data_client:
-                uri = f'ws://localhost:{self._data_port}/task/data'
+                uri = f'ws://127.0.0.1:{self._data_port}/task/data'
 
                 @retry(
                     stop=stop_after_attempt(10),
@@ -1878,7 +1878,7 @@ class Task(DAPBase):
             child_args.extend(
                 [
                     f'--data_port={self._data_port}',
-                    '--data_host=localhost',
+                    '--data_host=127.0.0.1',
                 ]
             )
             # Pass model server address if configured

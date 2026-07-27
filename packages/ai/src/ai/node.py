@@ -81,7 +81,7 @@ def _parse_data_host_port() -> Tuple[str, Optional[int]]:
     whether that's an error.
     """
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--data_host', type=str, default='localhost')
+    parser.add_argument('--data_host', type=str, default='127.0.0.1')
     parser.add_argument('--data_port', type=int, default=None)
     args, _unknown = parser.parse_known_args(sys.argv)
     return args.data_host, args.data_port
@@ -92,7 +92,7 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
 
     EaaS spawns every subprocess with ``--data_port=N`` so DAP traffic
     (data flow, profiling, future trace control) can reach this process
-    on ``ws://localhost:N/task/data`` regardless of pipeline shape. This
+    on ``ws://127.0.0.1:N/task/data`` regardless of pipeline shape. This
     function constructs the WebServer on the existing ``server_loop``
     daemon thread, registers the ``data`` module (which exposes
     ``/task/data``), and blocks until the server signals it is up.

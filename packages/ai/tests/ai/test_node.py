@@ -149,7 +149,7 @@ def test_setup_defaults_host_to_localhost_when_only_data_port_provided(monkeypat
 
     node._setup_shared_web_server()
 
-    assert captured['config']['host'] == 'localhost'
+    assert captured['config']['host'] == '127.0.0.1'
     assert captured['config']['port'] == 20001
 
 
