@@ -31,13 +31,14 @@ using Ptr = std::unique_ptr<T, void (*)(T *)>;
 /// @details
 ///		This function will walk through filter drivers and bind them to
 ///		each other: the up/down ptrs, then the per-connection data lanes.
-///		Lifecycle (open/closing/close) is bound flat onto the pipe head in
-///		topological order for the source-reachable nodes - closing/close
-///		upstream-first, open reversed - so a node is flushed/closed only
-///		after all of its upstream data parents. Control/invoke sub-pipeline
-///		nodes are not source-reachable; they keep their per-parent lifecycle
-///		binding so their invoke node (e.g. tool_pipe) can still drive them.
-///		Called when we create the initial filter stack.
+///		Lifecycle (open/closing/close) is bound flat onto each region's root
+///		in topological order - closing/close upstream-first, open reversed -
+///		so a node is flushed/closed only after all of its upstream data
+///		parents. The pipe head owns the source region; each control/invoke
+///		node (e.g. tool_pipe) owns the sub-pipeline it reaches and drives it
+///		through the same flat binding. Any node owned by no region keeps its
+///		per-parent lifecycle binding. Called when we create the initial
+///		filter stack.
 ///	@param[in]	pipeId
 ///		The pipe id this stack belongs to.
 ///	@param[in]	filters
@@ -74,16 +75,17 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
     // If we are not in pipeline mode, or we are not a target
     if (!isPipeline()) return {};
 
-    // Lifecycle (open/closing/close) binding is split in two. Source-reachable
-    // nodes - the ones in lifecycleOrder - get their lifecycle driven from the
-    // pipe head in topological order (the flat binds after this loop). Every
-    // OTHER node (control/invoke sub-pipelines, driven by their own invoke node
-    // such as tool_pipe via self.instance.open()/close()) keeps its per-parent
-    // binding, without which that node could no longer open/close its
-    // sub-pipeline. headManaged is the "goes to the head" set used to tell the
-    // two apart below.
-    std::unordered_set<int> headManaged(lifecycleOrder.begin(),
-                                        lifecycleOrder.end());
+    // Lifecycle (open/closing/close) binding is split in two. A node OWNED by a
+    // region - the head's (lifecycleOrder) or a control root's
+    // (controlLifecycleOrders) - gets its lifecycle driven flat from that
+    // region's root in topological order (the flat binds after this loop). Any
+    // node owned by NO region (a subgraph fed by neither the source nor an
+    // invoked node) keeps its per-parent binding, without which it could not be
+    // opened/closed at all. `owned` is the union of all regions, used to tell
+    // the two apart below.
+    std::unordered_set<int> owned(lifecycleOrder.begin(), lifecycleOrder.end());
+    for (const auto &region : controlLifecycleOrders)
+        owned.insert(region.second.begin(), region.second.end());
 
     // Define a map to track per-parent lifecycle binds (keyed by target)
     std::unordered_map<std::string, bool> boundConnections;
@@ -114,10 +116,10 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
         // Create a key using the target index
         std::string connectionKey = std::to_string(toIndex);
 
-        // Bind the lifecycle lanes under the first parent ONLY for targets the
-        // head does not manage - this preserves control/invoke sub-pipelines,
-        // whose invoke node drives open/close through exactly these bindings.
-        if (headManaged.find(toIndex) == headManaged.end() &&
+        // Bind the lifecycle lanes under the first parent ONLY for targets no
+        // region owns - a region-owned node is driven flat by its root below,
+        // so binding it per-parent too would call its lifecycle twice.
+        if (owned.find(toIndex) == owned.end() &&
             boundConnections.find(connectionKey) == boundConnections.end()) {
             if (auto ccode = (*pFrom)->binder.bind("open", pTo->get()))
                 return ccode;
@@ -136,24 +138,41 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
         }
     }
 
-    // Bind the source-reachable nodes' lifecycle flat onto the pipe head, in
-    // dependency order. closing/close run upstream-first so flush-time output
-    // always lands on consumers that have not flushed yet; open runs
-    // downstream-first (the reverse) so a node emitting during its open
-    // callback reaches consumers that are already open.
-    for (auto toIndex : lifecycleOrder) {
-        if (toIndex < 0 || toIndex >= filters.size())
+    // Bind one region's lifecycle flat onto its root, in dependency order.
+    // closing/close run upstream-first so flush-time output always lands on
+    // consumers that have not flushed yet; open runs downstream-first (the
+    // reverse) so a node emitting during its open callback reaches consumers
+    // that are already open.
+    auto bindLifecycle = localfcn(ServiceInstance * pRoot,
+                                  const std::vector<int> &order)
+                             ->Error {
+        for (auto toIndex : order) {
+            if (toIndex < 0 || toIndex >= filters.size())
+                return APERR(Ec::InvalidParam,
+                             "Lifecycle bind to invalid index: out of range");
+            ServiceInstance *pTo = &filters[toIndex];
+            if (auto ccode = (*pRoot)->binder.bind("closing", pTo->get()))
+                return ccode;
+            if (auto ccode = (*pRoot)->binder.bind("close", pTo->get()))
+                return ccode;
+        }
+        for (auto it = order.rbegin(); it != order.rend(); ++it) {
+            ServiceInstance *pTo = &filters[*it];
+            if (auto ccode = (*pRoot)->binder.bind("open", pTo->get()))
+                return ccode;
+        }
+        return {};
+    };
+
+    // The pipe head drives the source region; each control root drives its own
+    // sub-pipeline region.
+    if (auto ccode = bindLifecycle(pPipeFilter, lifecycleOrder)) return ccode;
+    for (auto &region : controlLifecycleOrders) {
+        auto rootIndex = region.first;
+        if (rootIndex < 0 || rootIndex >= filters.size())
             return APERR(Ec::InvalidParam,
-                         "Lifecycle bind to invalid index: out of range");
-        ServiceInstance *pTo = &filters[toIndex];
-        if (auto ccode = (*pPipeFilter)->binder.bind("closing", pTo->get()))
-            return ccode;
-        if (auto ccode = (*pPipeFilter)->binder.bind("close", pTo->get()))
-            return ccode;
-    }
-    for (auto it = lifecycleOrder.rbegin(); it != lifecycleOrder.rend(); ++it) {
-        ServiceInstance *pTo = &filters[*it];
-        if (auto ccode = (*pPipeFilter)->binder.bind("open", pTo->get()))
+                         "Lifecycle root invalid index: out of range");
+        if (auto ccode = bindLifecycle(&filters[rootIndex], region.second))
             return ccode;
     }
 

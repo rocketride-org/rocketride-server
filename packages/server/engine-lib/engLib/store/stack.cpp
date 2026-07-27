@@ -86,45 +86,52 @@ Error IServiceEndpoint::getPipeFilters(IPipeFilters &filters) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Compute the deterministic order in which the pipeline's
-///		source-reachable components receive their lifecycle callbacks
-///		(open / closing / close).
-///
-///		The returned order is topological: every node appears after all of
-///		its upstream data parents. bindFilters walks closing/close in this
-///		order (upstream-first, so a node flushes only after ALL of its
-///		upstream parents have flushed) and open in the reverse.
+///		Compute the deterministic order in which one lifecycle region
+///		receives its open / closing / close callbacks. A region is the set
+///		of nodes a single root drives: the pipe head drives the source (-1)
+///		region, and each control/invoke node drives the sub-pipeline it
+///		reaches over data edges. bindFilters binds a region flat onto its
+///		root - closing/close in this order (upstream-first, so a node
+///		flushes only after ALL of its upstream parents), open reversed.
 ///
 ///		Two phases, which MUST stay separate:
-///		  1. Reachability. BFS from the source (-1) over data edges to
-///		     collect the reachable set R. Control/invoke nodes, and any node
-///		     reachable ONLY through one, are deliberately absent from R:
-///		     those sub-pipelines are driven by their invoke node (e.g.
-///		     tool_pipe calling self.instance.open()/close()) through their
-///		     existing per-parent bindings, so they must NOT be relocated onto
-///		     the pipe head.
-///		  2. Kahn topological sort over R only. A node's in-degree counts
-///		     only parents that are themselves in R, so a node fed by BOTH a
-///		     source-reachable parent and a control node is ordered after its
-///		     reachable parent while the control edge is ignored. Ties are
-///		     broken by strict first-seen order, which pins the result so it
-///		     does not depend on hash-map iteration order.
+///		  1. Reachability from `root` over data edges. `root` seeds the walk
+///		     and is never a member of its own region. A node in `claimed`
+///		     (already owned by an earlier region) is skipped entirely. A node
+///		     in `barriers` (another lifecycle root) joins this region when
+///		     reached - its owner region opens/closes the node itself - but its
+///		     outgoing edges are not followed, because its data children belong
+///		     to its own region.
+///		  2. Kahn topological sort over the region only. A node's in-degree
+///		     counts only edges whose endpoints are both in the region, minus
+///		     edges from `root` (a pre-satisfied seed, never emitted to
+///		     decrement it). Ties break by strict first-seen order, which pins
+///		     the result so it does not depend on hash-map iteration order.
 ///
 ///		Reachability is computed independently of the topo walk on purpose:
-///		a cycle inside R would leave its nodes un-emitted, and a "mark
-///		reachable as you emit" shortcut could not tell a real (reachable)
-///		cycle from a harmless unreachable one. Hence a cycle within R is an
-///		error, while a cycle confined to an unreachable region is out of
-///		scope and left alone (matching today's behavior for such graphs).
+///		a cycle inside the region would leave its nodes un-emitted, and a
+///		"mark reachable as you emit" shortcut could not tell a real cycle
+///		from a harmless one outside the region. Hence a cycle within the
+///		region is an error, while a cycle confined outside it is left alone.
 ///	@param[in]	connections
 ///		The (fromIndex, toIndex, lane) data-connection table; fromIndex == -1
 ///		is the pipeline source (the pipe head).
+///	@param[in]	root
+///		The lifecycle root that seeds this region (-1 for the source/head, or
+///		a control node's pipeStack index).
+///	@param[in]	barriers
+///		The other lifecycle roots. One reached by this region joins it
+///		(ordered as a member) but is not expanded past.
+///	@param[in]	claimed
+///		Nodes already owned by an earlier region; excluded from this one.
 ///	@returns
-///		The reachable pipeStack indices in topological order, or
-///		Ec::InvalidParam if the source-reachable region contains a cycle.
+///		The region's pipeStack indices in topological order, or
+///		Ec::InvalidParam if the region contains a cycle.
 //-------------------------------------------------------------------------
 ErrorOr<std::vector<int>> computeLifecycleOrder(
-    const std::vector<std::tuple<int, int, std::string>> &connections) noexcept {
+    const std::vector<std::tuple<int, int, std::string>> &connections, int root,
+    const std::unordered_set<int> &barriers,
+    const std::unordered_set<int> &claimed) noexcept {
     const int SOURCE = -1;
 
     // Collect the graph once. nodeOrder keeps real node indices in first-seen
@@ -155,29 +162,33 @@ ErrorOr<std::vector<int>> computeLifecycleOrder(
         edges.push_back({from, to});
     }
 
-    // Phase 1: reachability from the source over data edges. This set is
-    // exactly the nodes whose lifecycle bindFilters will relocate onto the
-    // pipe head; everything else keeps its per-parent binding untouched.
+    // Phase 1: reachability from `root` over data edges. `root` is the walk
+    // driver, never a member of its own region. A `claimed` node is owned by
+    // an earlier region and skipped; a `barrier` node (another lifecycle root)
+    // joins this region when reached but its outgoing edges are not followed -
+    // its data children belong to that barrier's own region.
     std::unordered_set<int> reachable;
-    std::vector<int> pending(adj[SOURCE].begin(), adj[SOURCE].end());
+    std::vector<int> pending(adj[root].begin(), adj[root].end());
     while (!pending.empty()) {
         int node = pending.back();
         pending.pop_back();
+        if (node == root || node == SOURCE) continue;
+        if (claimed.count(node)) continue;
         if (!reachable.insert(node).second) continue;
+        if (barriers.count(node)) continue;
         for (int to : adj[node]) pending.push_back(to);
     }
 
-    // Phase 2: Kahn's topological sort over the reachable subgraph only.
-    // Seed the in-degree table with the reachable nodes, then count incoming
-    // edges - but skip edges from the source (a pre-satisfied root that is
-    // never emitted to decrement it) and edges from a non-reachable parent
-    // (a control node feeding a reachable join: that edge must not hold the
-    // join back, since the control node is never walked here).
+    // Phase 2: Kahn's topological sort over the region only. Seed the in-degree
+    // table with the region's nodes, then count incoming edges - but skip edges
+    // from `root` (a pre-satisfied seed that is never emitted to decrement it)
+    // and edges from a node outside the region (e.g. another root feeding a
+    // shared join: that edge must not hold the join back).
     std::unordered_map<int, int> inDegree;
     for (int node : nodeOrder)
         if (reachable.count(node)) inDegree[node] = 0;
     for (const auto &edge : edges) {
-        if (edge.first == SOURCE) continue;
+        if (edge.first == root) continue;
         if (!reachable.count(edge.second)) continue;
         if (!reachable.count(edge.first)) continue;
         inDegree[edge.second]++;
@@ -205,16 +216,124 @@ ErrorOr<std::vector<int>> computeLifecycleOrder(
             break;
         }
 
-        // No emittable node but R not exhausted => a cycle among reachable
-        // nodes (a cycle in an unreachable region never entered R, so it does
-        // not trip this).
+        // No emittable node but the region not exhausted => a cycle among the
+        // region's nodes (a cycle outside the region never entered it, so it
+        // does not trip this).
         if (!progressed)
             return APERR(Ec::InvalidParam,
-                         "Cycle detected in the source-reachable pipeline "
-                         "connections");
+                         "Cycle detected in the pipeline connections reachable "
+                         "from lifecycle root ",
+                         root);
     }
 
     return order;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Partition the pipeline into lifecycle regions and validate ownership.
+///		See endpoint.hpp for the contract. Every invoked node is a lifecycle
+///		root that drives exactly the nodes it reaches over data edges, as the
+///		head (-1) drives its region; a node has exactly one owner (head first,
+///		then control roots in first-seen order); regions stop at any other
+///		root they reach (a member, not expanded past). A control root's
+///		sub-pipeline must be exclusively its own - it may not data-reach a
+///		node owned by the main flow (rejected).
+//-------------------------------------------------------------------------
+ErrorOr<LifecycleRegions> computeLifecycleRegions(
+    const std::vector<std::tuple<int, int, std::string>> &connections,
+    const std::vector<int> &invokedNodes) noexcept {
+    const int SOURCE = -1;
+
+    // Deduplicate the invoked nodes into control roots, first-seen order (a
+    // node invoked by two agents shows up twice but is one root).
+    std::unordered_set<int> controlRoots;
+    std::vector<int> rootOrder;
+    for (int invoked : invokedNodes)
+        if (controlRoots.insert(invoked).second) rootOrder.push_back(invoked);
+
+    LifecycleRegions regions;
+
+    // The head region; a cycle in it surfaces here.
+    auto head = computeLifecycleOrder(connections, SOURCE, controlRoots);
+    if (!head) return head.ccode();
+    regions.head = _mv(*head);
+
+    // ownerOf maps each region member to the root that owns its lifecycle
+    // (SOURCE = the head). The head claims first; a node reached by a control
+    // root is claimed by it. A member found already claimed is either a
+    // two-control-root overlap (rejected) or - only for a control root itself -
+    // a data-fed sub-pipeline owner (rejected after the loop).
+    std::unordered_set<int> headClaimed(regions.head.begin(), regions.head.end());
+    std::unordered_map<int, int> ownerOf;
+    for (int node : regions.head) ownerOf.emplace(node, SOURCE);
+
+    // A control root's sub-pipeline must be exclusively its own: it must not
+    // data-reach a node the main flow owns. Such a node flushes with the head at
+    // end-of-object, not during the invocation, so the control node would drive
+    // only part of its sub-pipeline and read an incomplete result. Walk data
+    // edges from each root, stopping at other control roots (their sub-pipelines
+    // belong to them), and reject if a head-owned node is reached.
+    std::unordered_map<int, std::vector<int>> dataAdj;
+    for (const auto &conn : connections)
+        dataAdj[std::get<0>(conn)].push_back(std::get<1>(conn));
+    for (int rootIndex : rootOrder) {
+        std::unordered_set<int> seen;
+        std::vector<int> stack(dataAdj[rootIndex].begin(),
+                               dataAdj[rootIndex].end());
+        while (!stack.empty()) {
+            int node = stack.back();
+            stack.pop_back();
+            if (node == rootIndex || node == SOURCE) continue;
+            if (!seen.insert(node).second) continue;
+            if (headClaimed.count(node))
+                return APERR(Ec::InvalidParam, "Control node ", rootIndex,
+                             " reaches node ", node,
+                             " that the main flow owns; a control node's "
+                             "sub-pipeline must not be shared with the main "
+                             "pipeline or another start");
+            if (controlRoots.count(node)) continue;  // barrier: its own sub-pipe
+            for (int to : dataAdj[node]) stack.push_back(to);
+        }
+    }
+
+    for (int rootIndex : rootOrder) {
+        // Computed against the head's claim only, so a control-vs-control
+        // overlap stays visible (both regions contain the shared node).
+        auto region =
+            computeLifecycleOrder(connections, rootIndex, controlRoots, headClaimed);
+        if (!region) return region.ccode();
+
+        for (int node : *region) {
+            auto it = ownerOf.find(node);
+            if (it != ownerOf.end())
+                return APERR(Ec::InvalidParam, "Pipeline node ", node,
+                             " is reachable from two control roots (", it->second,
+                             ", ", rootIndex,
+                             ") - a node has exactly one lifecycle owner");
+            ownerOf.emplace(node, rootIndex);
+        }
+
+        if (!region->empty())
+            regions.control.emplace_back(rootIndex, _mv(*region));
+    }
+
+    // A control root that owns a sub-pipeline must not itself be data-fed: its
+    // owning region would open/close it and cascade into that sub-pipeline,
+    // double-driving it alongside the invoke node's own per-invocation drive. A
+    // data-fed invoked node with NO sub-pipeline is fine (nothing to
+    // double-drive), so only roots that actually own a region are checked.
+    for (const auto &region : regions.control) {
+        auto it = ownerOf.find(region.first);
+        if (it != ownerOf.end())
+            return APERR(Ec::InvalidParam, "Control node ", region.first,
+                         " drives a sub-pipeline and is also data-fed (owned by ",
+                         it->second,
+                         "); an invoked node with a sub-pipeline must not take a "
+                         "data input");
+    }
+
+    return regions;
 }
 
 //-------------------------------------------------------------------------
@@ -243,10 +362,15 @@ Error IServiceEndpoint::buildConnections() noexcept {
     // If we are not in pipeline mode, done
     if (!isPipeline()) return {};
 
-    // Reset the connection table and the derived lifecycle order (recomputed
-    // from the fresh connections at the end of this function)
+    // Reset the connection/control tables and the derived lifecycle regions
+    // (all recomputed from the fresh config at the end of this function).
+    // Clearing controls matters: beginEndpoint may re-run after a partial
+    // failure, and the regions below derive from controls - a stale row would
+    // seed a phantom region.
     connections.clear();
+    controls.clear();
     lifecycleOrder.clear();
+    controlLifecycleOrders.clear();
 
     // If no connections are provided, return early
     auto &components = config.pipeline.components();
@@ -353,12 +477,18 @@ Error IServiceEndpoint::buildConnections() noexcept {
         }
     }
 
-    // Compute the deterministic lifecycle walk order (upstream-first over the
-    // source-reachable data DAG). Done here so a cycle surfaces at
-    // beginEndpoint, and bindFilters stays allocation-free per pipe.
-    auto order = computeLifecycleOrder(connections);
-    if (!order) return order.ccode();
-    lifecycleOrder = _mv(*order);
+    // Partition the pipeline into lifecycle regions (the head's plus one per
+    // invoked node) and validate ownership. Done here so a cycle or an invalid
+    // ownership shape surfaces at beginEndpoint, and bindFilters stays
+    // allocation-free per pipe.
+    std::vector<int> invoked;
+    invoked.reserve(controls.size());
+    for (const auto &ctrl : controls) invoked.push_back(std::get<1>(ctrl));
+
+    auto regions = computeLifecycleRegions(connections, invoked);
+    if (!regions) return regions.ccode();
+    lifecycleOrder = _mv(regions->head);
+    controlLifecycleOrders = _mv(regions->control);
 
     // And done
     return {};

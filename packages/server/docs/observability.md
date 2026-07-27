@@ -174,6 +174,13 @@ dependency order — `closing`/`close` upstream-first, `open` downstream-first �
 depth. Data-lane writes emitted while a component flushes still nest inside that
 component's `closing` frame.
 
+A control node's inline sub-pipeline (for example `tool_pipe`) is dispatched the same way,
+but from that control node rather than the pipe head: the sub-pipeline's lifecycle frames
+appear as siblings under the control node, once per invocation. To confirm each node runs
+its lifecycle exactly once per pass, count `open`/`closing`/`close` `enter` frames per
+`component` within one dispatch pass — each appears once (a control node's sub-pipeline
+repeats once per invocation, each invocation being its own pass).
+
 ### `apaevt_sse`: node-to-UI messages
 
 Nodes call `monitorSSE(pipe_id, type, data)` to broadcast custom updates

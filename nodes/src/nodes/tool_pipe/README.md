@@ -14,10 +14,13 @@ the same canvas to shape the tool's behavior, and cap each connected branch with
 response node so results can flow back. As always, the agent binds through the `invoke`
 capability.
 
-The sub-pipeline run is fully isolated: the lane write is synchronous, so by the time it
-returns the downstream response nodes have already populated their response values. Those
-response entries are snapshotted and then removed so they don't leak into the parent
-pipeline. The node has no external Python dependencies (`requirements.txt` is empty).
+The sub-pipeline run is fully isolated. After the input is routed, the sub-pipeline is
+flushed (`closing`) and closed in **dependency order** — a join is flushed only after all
+of its upstream branches, so a diamond sub-pipeline (two branches feeding one join)
+returns the merged output of both branches, not just the first. The flush completes before
+the response value is read. Those response entries are snapshotted and then removed so
+they don't leak into the parent pipeline. The node has no external Python dependencies
+(`requirements.txt` is empty).
 
 ---
 
