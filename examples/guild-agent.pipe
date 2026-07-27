@@ -1,0 +1,95 @@
+{
+  "components": [
+    {
+      "id": "webhook_1",
+      "provider": "webhook",
+      "name": "Webhook",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "webhook"
+      },
+      "ui": {
+        "position": {
+          "x": 20,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "tool_guild_1",
+      "provider": "tool_guild",
+      "name": "Guild.ai",
+      "config": {
+        "type": "tool_guild",
+        "baseUrl": "https://app.guild.ai",
+        "apiKeyId": "${ROCKETRIDE_GUILD_KEY_ID}",
+        "apiKeySecret": "${ROCKETRIDE_GUILD_KEY_SECRET}",
+        "owner": "${ROCKETRIDE_GUILD_OWNER}",
+        "workspace": "${ROCKETRIDE_GUILD_WORKSPACE}",
+        "agent": "${ROCKETRIDE_GUILD_AGENT}",
+        "resultMode": "wait",
+        "timeout": 300,
+        "parameters": {}
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "webhook_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "response_text_1",
+      "provider": "response_text",
+      "name": "Return Text",
+      "config": {
+        "laneName": "text"
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "tool_guild_1"
+        }
+      ],
+      "ui": {
+        "position": {
+          "x": 460,
+          "y": 200
+        },
+        "measured": {
+          "width": 150,
+          "height": 66
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    }
+  ],
+  "project_id": "45094b41-0b73-44ca-b7de-1b5030a21f9f",
+  "viewport": {
+    "x": 0,
+    "y": 0,
+    "zoom": 1
+  },
+  "version": 1
+}
