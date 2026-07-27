@@ -157,6 +157,23 @@ class TestDeploy:
         assert history[0]['actor'] == OTHER
         assert history[0]['version'] == 1
 
+    @pytest.mark.asyncio
+    async def test_history_ties_break_by_append_order(self, backend, monkeypatch):
+        # Two mutations inside the clock's resolution get the SAME 'at'
+        # stamp; ordering must still be newest-append-first (the DB backend
+        # guarantees this via id.desc() — the file backend must match).
+        import ai.account.deployment_backend as backend_mod
+
+        monkeypatch.setattr(backend_mod.time, 'time', lambda: 1_000_000.0)
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-prod', 'proj-1', 2, ACTOR)
+        await backend.deploy('org-1', 'team-prod', 'proj-1', 1, OTHER)
+
+        history = await backend.history('org-1', 'proj-1', 'team-prod')
+        # (Org-wide publish rows ride along in a team-filtered view.)
+        assert [h['action'] for h in history] == ['rollback', 'deploy', 'publish', 'publish']
+
 
 # ============================================================================
 # State + soft remove

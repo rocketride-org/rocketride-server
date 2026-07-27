@@ -2039,6 +2039,11 @@ class Task(DAPBase):
                     self._run_kind,
                     self.stamp_log_event,
                     self.raise_log_seq_floor,
+                    # Deploy runs write the TEAM continuum (teams are the
+                    # environments — teammates watch/replay the same stream);
+                    # dev runs stay in the owner's tree. The writer's scope
+                    # helper turns this into the '@/Team/=<id>/' store prefix.
+                    team_id=self.team_id if self._run_kind == 'deploy' else '',
                     debug=self.debug_message,
                 )
                 await self._run_log.open(

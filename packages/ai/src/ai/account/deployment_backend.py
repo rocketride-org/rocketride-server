@@ -408,7 +408,11 @@ class FileDeploymentBackend:
         rows = meta['history']
         if team_id is not None:
             rows = [r for r in rows if r['teamId'] in ('', team_id)]
-        return sorted(rows, key=lambda r: r['at'], reverse=True)
+        # Newest first with APPEND ORDER breaking timestamp ties: two
+        # mutations can land inside the clock's resolution, and a stable
+        # sort would then leave the OLDER row first. The DB backend gets
+        # the same guarantee from its id.desc() tie-break.
+        return [r for _, r in sorted(enumerate(rows), key=lambda p: (p[1]['at'], p[0]), reverse=True)]
 
     async def artifact(self, org_id: str, project_id: str, version: int) -> Dict[str, Any]:
         """Load one artifact version, sha256-verified against the registry.
