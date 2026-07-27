@@ -434,3 +434,90 @@ def test_require_target_called_by_cleanup_pipe(monkeypatch):
     # The logged message should reference the underlying error (no source target).
     logged_args = [call.args for call in conn.debug_message.call_args_list]
     assert any('target' in str(args).lower() or 'source' in str(args).lower() for args in logged_args)
+
+
+# ---------------------------------------------------------------------------
+# DataConn._tool — the borrowed-pipe path must lazy-init the semaphore too
+# ---------------------------------------------------------------------------
+
+
+def _stub_to_thread(result):
+    """Return an ``asyncio.to_thread`` stand-in that skips the worker body.
+
+    ``_tool`` runs its real work in a thread, which needs a whole node
+    chain and an endpoint pool. These tests pin the semaphore handling
+    around that call, so the body itself is replaced.
+
+    Args:
+        result: Value the fake ``to_thread`` resolves to.
+
+    Returns:
+        An async callable with ``asyncio.to_thread``'s signature.
+    """
+
+    async def _to_thread(func, /, *args, **kwargs):
+        return result
+
+    return _to_thread
+
+
+async def test_tool_standalone_call_initializes_pipe_semaphore(monkeypatch):
+    """A standalone tool call (no ``pipe_id``) must lazy-init ``_pipe_sem``.
+
+    Regression: ``_pipe_sem`` moved from eager init in ``__init__`` to lazy
+    init via ``_ensure_pipe_sem``, but ``_tool`` still acquired
+    ``self._pipe_sem`` directly. A standalone tool call borrows a pipe
+    instead of opening one, so ``_open`` — then the only caller of
+    ``_ensure_pipe_sem`` — never ran and the field was still ``None``,
+    failing with ``'NoneType' object has no attribute 'acquire'``.
+    """
+    from ai.modules.data.data_conn import DataConn
+
+    target = MagicMock()
+    target.taskConfig = {'threadCount': 2}
+    server_mock = MagicMock()
+    server_mock._target = target
+
+    conn = DataConn(server=server_mock, transport=MagicMock())
+    try:
+        monkeypatch.setattr(asyncio, 'to_thread', _stub_to_thread('tool-result'))
+        try:
+            response = await conn._tool(
+                {'seq': 1, 'type': 'request', 'command': 'rrext_process'},
+                {'tool': 'my_tool'},
+            )
+        finally:
+            monkeypatch.undo()
+
+        assert conn._pipe_sem is not None
+        assert conn._thread_count == 2
+        assert isinstance(response, dict)
+    finally:
+        await conn.disconnect()
+
+
+async def test_tool_standalone_call_releases_semaphore(monkeypatch):
+    """Every standalone tool call must hand its permit back.
+
+    With ``threadCount=1`` a leaked permit makes the second call wait
+    forever, so ``wait_for`` turns that deadlock into a failure instead
+    of a hanging test.
+    """
+    from ai.modules.data.data_conn import DataConn
+
+    target = MagicMock()
+    target.taskConfig = {'threadCount': 1}
+    server_mock = MagicMock()
+    server_mock._target = target
+
+    conn = DataConn(server=server_mock, transport=MagicMock())
+    try:
+        monkeypatch.setattr(asyncio, 'to_thread', _stub_to_thread('tool-result'))
+        try:
+            request = {'seq': 1, 'type': 'request', 'command': 'rrext_process'}
+            await asyncio.wait_for(conn._tool(request, {'tool': 'my_tool'}), timeout=5)
+            await asyncio.wait_for(conn._tool(request, {'tool': 'my_tool'}), timeout=5)
+        finally:
+            monkeypatch.undo()
+    finally:
+        await conn.disconnect()
