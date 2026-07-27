@@ -18,10 +18,10 @@ driven by two owners with conflicting timing.
 
 | File | Wrong pattern | Engine error (verbatim) |
 |---|---|---|
-| `incorrect-second-start-feeds-subpipe.pipe` | A second start (`chat_1`) also feeds the sub-pipeline's head node `sub_head`, so the whole sub-pipeline becomes main-flow-owned. | `Control node <pipe_tool_1> reaches node <sub_head> that the main flow owns; a control node's sub-pipeline must not be shared with the main pipeline or another start` |
+| `incorrect-second-start-feeds-subpipe.pipe` | A second start (`chat_1`) also feeds the sub-pipeline's head node `sub_head`, so the whole sub-pipeline becomes main-flow-owned. | `Control node "Pipeline Tool" (pipe_tool_1) reaches node "Prompt" (sub_head) that the main flow owns; a control node's sub-pipeline must not be shared with the main pipeline or another start` |
 | `incorrect-second-start-feeds-subpipe-node.pipe` | A second start feeds a *middle* sub-pipeline node `sub_mid`. | same "…must not be shared with the main pipeline or another start" |
 | `incorrect-subpipe-merges-into-main.pipe` | The sub-pipeline flows back into a main-flow node `main_node` (the tool pipeline intersects the main pipeline). | same "…must not be shared…" |
-| `incorrect-shared-subpipe-node.pipe` | Two `tool_pipe`s (`pipe_tool_1`, `pipe_tool_2`) whose sub-pipelines both include `shared_node`. | `Pipeline node <shared_node> is reachable from two control roots (<pipe_tool_1>, <pipe_tool_2>) - a node has exactly one lifecycle owner` |
+| `incorrect-shared-subpipe-node.pipe` | Two `tool_pipe`s (`pipe_tool_1`, `pipe_tool_2`) whose sub-pipelines both include `shared_node`. | `Pipeline node "Prompt" (shared_node) is reachable from two control roots ( "Pipeline Tool" (pipe_tool_1) and "Pipeline Tool" (pipe_tool_2) ) - a node has exactly one lifecycle owner` |
 | `incorrect-data-fed-tool-pipe.pipe` | A data input wired into `tool_pipe` (which also drives a sub-pipeline). | `Component pipe_tool_1 input lane questions not found in service definition` |
 
 The first three map to the topologies discussed as **#1, #2, #4**. (#3 — the same
@@ -37,9 +37,9 @@ engine's separate "drives a sub-pipeline and is also data-fed" guard is a safety
 
 ## Reading the error
 
-The engine names nodes by their **pipeStack index** (e.g. "Control node 8 reaches node 3"),
-not by id. The index is the node's position in the `components` array. The table above
-gives the node **ids** that each index refers to, so you can find them in the `.pipe`.
+The engine names each node by its **service title** (the label on the canvas) plus your
+**component id** — e.g. `Control node "Pipeline Tool" (pipe_tool_1) reaches node "Prompt"
+(sub_mid) …` — so the message points straight at the wiring to fix.
 
 ## To reproduce
 

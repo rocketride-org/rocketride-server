@@ -242,8 +242,19 @@ ErrorOr<std::vector<int>> computeLifecycleOrder(
 //-------------------------------------------------------------------------
 ErrorOr<LifecycleRegions> computeLifecycleRegions(
     const std::vector<std::tuple<int, int, std::string>> &connections,
-    const std::vector<int> &invokedNodes) noexcept {
+    const std::vector<int> &invokedNodes,
+    const std::vector<std::string> &nodeLabels) noexcept {
     const int SOURCE = -1;
+
+    // Name a node for a rejection message: its display label when we have one,
+    // otherwise its index (unit tests call this without labels).
+    auto nameOf = localfcn(int index)->std::string {
+        if (index == SOURCE) return "the pipeline source";
+        if (index >= 0 && index < (int)nodeLabels.size() &&
+            !nodeLabels[index].empty())
+            return nodeLabels[index];
+        return std::to_string(index);
+    };
 
     // Deduplicate the invoked nodes into control roots, first-seen order (a
     // node invoked by two agents shows up twice but is one root).
@@ -287,9 +298,9 @@ ErrorOr<LifecycleRegions> computeLifecycleRegions(
             if (node == rootIndex || node == SOURCE) continue;
             if (!seen.insert(node).second) continue;
             if (headClaimed.count(node))
-                return APERR(Ec::InvalidParam, "Control node ", rootIndex,
-                             " reaches node ", node,
-                             " that the main flow owns; a control node's "
+                return APERR(Ec::InvalidParam, "Control node", nameOf(rootIndex),
+                             "reaches node", nameOf(node),
+                             "that the main flow owns; a control node's "
                              "sub-pipeline must not be shared with the main "
                              "pipeline or another start");
             if (controlRoots.count(node)) continue;  // barrier: its own sub-pipe
@@ -307,9 +318,9 @@ ErrorOr<LifecycleRegions> computeLifecycleRegions(
         for (int node : *region) {
             auto it = ownerOf.find(node);
             if (it != ownerOf.end())
-                return APERR(Ec::InvalidParam, "Pipeline node ", node,
-                             " is reachable from two control roots (", it->second,
-                             ", ", rootIndex,
+                return APERR(Ec::InvalidParam, "Pipeline node", nameOf(node),
+                             "is reachable from two control roots (",
+                             nameOf(it->second), "and", nameOf(rootIndex),
                              ") - a node has exactly one lifecycle owner");
             ownerOf.emplace(node, rootIndex);
         }
@@ -326,9 +337,9 @@ ErrorOr<LifecycleRegions> computeLifecycleRegions(
     for (const auto &region : regions.control) {
         auto it = ownerOf.find(region.first);
         if (it != ownerOf.end())
-            return APERR(Ec::InvalidParam, "Control node ", region.first,
-                         " drives a sub-pipeline and is also data-fed (owned by ",
-                         it->second,
+            return APERR(Ec::InvalidParam, "Control node", nameOf(region.first),
+                         "drives a sub-pipeline and is also data-fed (owned by",
+                         nameOf(it->second),
                          "); an invoked node with a sub-pipeline must not take a "
                          "data input");
     }
@@ -485,7 +496,22 @@ Error IServiceEndpoint::buildConnections() noexcept {
     invoked.reserve(controls.size());
     for (const auto &ctrl : controls) invoked.push_back(std::get<1>(ctrl));
 
-    auto regions = computeLifecycleRegions(connections, invoked);
+    // Display label per node - the service title the author sees on the canvas
+    // plus their component id - so a rejection points straight at the wiring.
+    std::vector<std::string> nodeLabels;
+    nodeLabels.reserve(pipeStack.size());
+    for (size_t index = 0; index < pipeStack.size(); ++index) {
+        const auto &entry = pipeStack[index];
+        std::string label(entry.id);
+        auto serviceInfo = IServices::getServiceDefinition(entry.logicalType);
+        if (serviceInfo) {
+            auto title = (*serviceInfo)->serviceDefinition["title"].asString();
+            if (!title.empty()) label = "\"" + title + "\" (" + label + ")";
+        }
+        nodeLabels.push_back(label);
+    }
+
+    auto regions = computeLifecycleRegions(connections, invoked, nodeLabels);
     if (!regions) return regions.ccode();
     lifecycleOrder = _mv(regions->head);
     controlLifecycleOrders = _mv(regions->control);

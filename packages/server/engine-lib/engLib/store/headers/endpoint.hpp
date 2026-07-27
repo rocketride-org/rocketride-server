@@ -117,13 +117,19 @@ struct LifecycleRegions {
 ///		The (fromIndex, toIndex, lane) data-connection table.
 ///	@param[in]	invokedNodes
 ///		The controls-table target indices (the invoked nodes).
+///	@param[in]	nodeLabels
+///		Display labels indexed by pipeStack index - the service title plus the
+///		component id, e.g. `"Pipeline Tool" (pipe_tool_1)` - used to name nodes
+///		in rejection messages. Optional: an index with no label falls back to
+///		its number.
 ///	@returns
 ///		The lifecycle partition, or Ec::InvalidParam on a cycle in any region
 ///		or a rejected ownership shape.
 //-------------------------------------------------------------------------
 ErrorOr<LifecycleRegions> computeLifecycleRegions(
     const std::vector<std::tuple<int, int, std::string>> &connections,
-    const std::vector<int> &invokedNodes) noexcept;
+    const std::vector<int> &invokedNodes,
+    const std::vector<std::string> &nodeLabels = {}) noexcept;
 
 //-------------------------------------------------------------------------
 /// @details

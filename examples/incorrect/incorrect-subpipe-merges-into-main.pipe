@@ -6,7 +6,7 @@
 
 		{
 			"id": "agent_1",
-			"provider": "agent_rocketride",
+			"provider": "agent_crewai",
 			"config": { "instructions": ["Call the run_pipe tool once, then return its result."] },
 			"input": [{ "lane": "questions", "from": "chat_1" }]
 		},
@@ -42,8 +42,8 @@
 			"config": { "profile": "custom", "custom": { "model": "${ROCKETRIDE_OLLAMA_MODEL}", "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}", "apikey": "ollama", "modelTotalTokens": 32768 } },
 			"input": [{ "lane": "questions", "from": "main_node" }]
 		},
-		{ "id": "main_resp", "provider": "response", "config": {}, "input": [{ "lane": "answers", "from": "main_llm" }] },
+		{ "id": "main_resp", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "main_llm" }] },
 
-		{ "id": "response_1", "provider": "response", "config": {}, "input": [{ "lane": "answers", "from": "agent_1" }] }
+		{ "id": "response_1", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "agent_1" }] }
 	]
 }

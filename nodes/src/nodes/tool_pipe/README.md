@@ -24,6 +24,29 @@ they don't leak into the parent pipeline. The node has no external Python depend
 
 ---
 
+## The sub-pipeline must be exclusively this node's
+
+Because `tool_pipe` opens, flushes, and closes its sub-pipeline on every invocation, each
+node it reaches must have no other lifecycle owner. Three wirings break that and are
+**rejected when the pipeline opens**:
+
+- **Shared with the main flow or a second start.** If a sub-pipeline node is also
+  reachable from the source — the main flow feeds into it, or the sub-pipeline flows back
+  into a main-flow node — the main flow owns it and flushes it at end-of-object, not
+  during the invocation, so the tool reads an incomplete result. Keep each branch
+  self-contained and end it in its own response node.
+- **Shared between two `tool_pipe`s.** A node reached by two invoke nodes has ambiguous
+  ownership. Give each its own sub-pipeline.
+- **A data input on the invoke node itself.** `tool_pipe` has no input lane — it is driven
+  only through the tool control seam.
+
+Invoking the *same* `tool_pipe` from two agents is fine: that is one sub-pipeline with one
+owner, run once per invocation. Nesting is fine too — a sub-pipeline may contain an agent
+that invokes another `tool_pipe`, and each level flushes its own sub-pipeline in order.
+See `examples/incorrect/` for a runnable example of each rejection.
+
+---
+
 ## Configuration
 
 

@@ -6,7 +6,7 @@
 
 		{
 			"id": "agent_1",
-			"provider": "agent_rocketride",
+			"provider": "agent_crewai",
 			"config": {
 				"instructions": [
 					"You are a helpful assistant. For every user message you MUST call the run_pipe tool exactly once, passing the user's text as the `data` argument, and return the tool's result as your answer."
@@ -31,7 +31,7 @@
 
 		{
 			"id": "agent_2",
-			"provider": "agent_rocketride",
+			"provider": "agent_crewai",
 			"config": {
 				"instructions": [
 					"You are a helpful assistant. For every user message you MUST call the run_pipe tool exactly once, passing the user's text as the `data` argument, and return the tool's result as your answer."
@@ -68,10 +68,10 @@
 			"config": { "profile": "custom", "custom": { "model": "${ROCKETRIDE_OLLAMA_MODEL}", "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}", "apikey": "ollama", "modelTotalTokens": 32768 } },
 			"input": [{ "lane": "questions", "from": "join" }]
 		},
-		{ "id": "sub_resp2", "provider": "response", "config": {}, "input": [{ "lane": "answers", "from": "sub_llm2" }] },
+		{ "id": "sub_resp2", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "sub_llm2" }] },
 
-		{ "id": "sub_resp1", "provider": "response", "config": {}, "input": [{ "lane": "answers", "from": "agent_2" }] },
+		{ "id": "sub_resp1", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "agent_2" }] },
 
-		{ "id": "response_1", "provider": "response", "config": {}, "input": [{ "lane": "answers", "from": "agent_1" }] }
+		{ "id": "response_1", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "agent_1" }] }
 	]
 }

@@ -1,47 +1,234 @@
 {
-	"project_id": "e1000001-0000-4000-8000-000000000001",
-	"source": "chat_1",
-	"components": [
-		{ "id": "chat_1", "provider": "chat", "config": {} },
-
-		{
-			"id": "agent_1",
-			"provider": "agent_rocketride",
-			"config": { "instructions": ["Call the run_pipe tool once, then return its result."] },
-			"input": [{ "lane": "questions", "from": "chat_1" }]
-		},
-		{
-			"id": "agent_1_llm",
-			"provider": "llm_openai_api",
-			"config": { "profile": "custom", "custom": { "model": "${ROCKETRIDE_OLLAMA_MODEL}", "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}", "apikey": "ollama", "modelTotalTokens": 32768 } },
-			"control": [{ "classType": "llm", "from": "agent_1" }]
-		},
-		{ "id": "agent_1_mem", "provider": "memory_internal", "config": {}, "control": [{ "classType": "memory", "from": "agent_1" }] },
-
-		{
-			"id": "pipe_tool_1",
-			"provider": "tool_pipe",
-			"config": { "profile": "default", "default": { "tool_description": "Runs a sub-pipeline.", "return_type": "answers" } },
-			"control": [{ "classType": "tool", "from": "agent_1" }]
-		},
-
-		{
-			"id": "sub_head",
-			"provider": "prompt",
-			"config": { "instructions": ["Sub-pipeline head."] },
-			"input": [
-				{ "lane": "text", "from": "pipe_tool_1" },
-				{ "lane": "questions", "from": "chat_1" }
-			]
-		},
-		{
-			"id": "sub_llm",
-			"provider": "llm_openai_api",
-			"config": { "profile": "custom", "custom": { "model": "${ROCKETRIDE_OLLAMA_MODEL}", "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}", "apikey": "ollama", "modelTotalTokens": 32768 } },
-			"input": [{ "lane": "questions", "from": "sub_head" }]
-		},
-		{ "id": "sub_resp", "provider": "response", "config": {}, "input": [{ "lane": "answers", "from": "sub_llm" }] },
-
-		{ "id": "response_1", "provider": "response", "config": {}, "input": [{ "lane": "answers", "from": "agent_1" }] }
-	]
+  "project_id": "e1000001-0000-4000-8000-000000000001",
+  "source": "chat_1",
+  "components": [
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Chat",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 12,
+          "y": 111.83333333333334
+        },
+        "measured": {
+          "width": 150,
+          "height": 203
+        },
+        "nodeType": "default",
+        "formDataValid": false
+      }
+    },
+    {
+      "id": "agent_1",
+      "provider": "agent_crewai",
+      "name": "CrewAI Agent",
+      "config": {
+        "instructions": [
+          "Call the run_pipe tool once, then return its result."
+        ]
+      },
+      "ui": {
+        "position": {
+          "x": 290,
+          "y": 40
+        },
+        "measured": {
+          "width": 150,
+          "height": 88
+        },
+        "nodeType": "default",
+        "formDataValid": false
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "agent_1_llm",
+      "provider": "llm_openai_api",
+      "name": "OpenAI-Compatible API",
+      "config": {
+        "profile": "custom",
+        "custom": {
+          "model": "${ROCKETRIDE_OLLAMA_MODEL}",
+          "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}",
+          "apikey": "ollama",
+          "modelTotalTokens": 32768
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 200,
+          "y": 340
+        },
+        "measured": {
+          "width": 150,
+          "height": 79
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "llm",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "pipe_tool_1",
+      "provider": "tool_pipe",
+      "name": "Pipeline Tool",
+      "config": {
+        "profile": "default",
+        "default": {
+          "tool_description": "Runs a sub-pipeline.",
+          "return_type": "answers"
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 410,
+          "y": 270
+        },
+        "measured": {
+          "width": 150,
+          "height": 138
+        },
+        "nodeType": "default",
+        "formDataValid": false
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "agent_1"
+        }
+      ]
+    },
+    {
+      "id": "sub_head",
+      "provider": "prompt",
+      "name": "Prompt",
+      "config": {
+        "instructions": [
+          "Sub-pipeline head."
+        ]
+      },
+      "ui": {
+        "position": {
+          "x": 720,
+          "y": 180
+        },
+        "measured": {
+          "width": 150,
+          "height": 121
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "pipe_tool_1"
+        },
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ]
+    },
+    {
+      "id": "sub_llm",
+      "provider": "llm_openai_api",
+      "name": "OpenAI-Compatible API",
+      "config": {
+        "profile": "custom",
+        "custom": {
+          "model": "${ROCKETRIDE_OLLAMA_MODEL}",
+          "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}",
+          "apikey": "ollama",
+          "modelTotalTokens": 32768
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 940,
+          "y": 280
+        },
+        "measured": {
+          "width": 150,
+          "height": 79
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "sub_head"
+        }
+      ]
+    },
+    {
+      "id": "sub_resp",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 1162,
+          "y": 334.1666666666667
+        },
+        "measured": {
+          "width": 150,
+          "height": 68
+        },
+        "nodeType": "default",
+        "formDataValid": false
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "sub_llm"
+        }
+      ]
+    },
+    {
+      "id": "response_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {},
+      "ui": {
+        "position": {
+          "x": 560,
+          "y": 10
+        },
+        "measured": {
+          "width": 150,
+          "height": 68
+        },
+        "nodeType": "default",
+        "formDataValid": false
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "agent_1"
+        }
+      ]
+    }
+  ],
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ],
+  "version": 1,
+  "docRevision": 28
 }

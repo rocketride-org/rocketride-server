@@ -9,7 +9,7 @@
 		},
 		{
 			"id": "agent_1",
-			"provider": "agent_rocketride",
+			"provider": "agent_crewai",
 			"config": {
 				"instructions": [
 					"You are a helpful assistant. For every user message you MUST call the run_pipe tool exactly once, passing the user's text as the `data` argument, and then return the tool's result as your answer."
@@ -98,14 +98,14 @@
 		},
 		{
 			"id": "sub_response_1",
-			"provider": "response",
+			"provider": "response_answers",
 			"config": {},
 			"input": [{ "lane": "answers", "from": "sub_llm_1" }]
 		},
 
 		{
 			"id": "response_1",
-			"provider": "response",
+			"provider": "response_answers",
 			"config": {},
 			"input": [{ "lane": "answers", "from": "agent_1" }]
 		}
