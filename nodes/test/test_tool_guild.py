@@ -142,7 +142,7 @@ def _reset_requests():
 
 
 def _services():
-    return json.loads(_SERVICES_PATH.read_text())
+    return json.loads(_SERVICES_PATH.read_text(encoding='utf-8'))
 
 
 def test_services_declares_a_dual_data_tool_node():
