@@ -54,6 +54,8 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from rocketlib import error
 
+from ai.common.list_rows import paginate_rows
+
 from .store import IStore, StorageError, VersionMismatchError
 
 # How many CAS retries a meta.json read-modify-write attempts before failing.
@@ -398,21 +400,40 @@ class FileDeploymentBackend:
             return []
         return sorted(meta['versions'], key=lambda v: v['version'], reverse=True)
 
-    async def history(self, org_id: str, project_id: str, team_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        """The immutable audit trail, newest first; optionally one team's."""
+    async def history(
+        self,
+        org_id: str,
+        project_id: str,
+        team_id: Optional[str] = None,
+        list_args: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """The audit trail as a list-API envelope ({rows,total,page,pageSize}).
+
+        History is the unbounded surface (append-only enterprise audit), so
+        paging is the BACKEND's job — this OSS implementation materializes
+        the (small) trail and applies the shared list convention; the SaaS
+        implementation runs the same contract as real SQL.
+        """
         _safe_id(org_id, 'org_id')
         _safe_id(project_id, 'project_id')
         meta = await self._read_meta(org_id, project_id)
-        if meta is None:
-            return []
-        rows = meta['history']
-        if team_id is not None:
-            rows = [r for r in rows if r['teamId'] in ('', team_id)]
-        # Newest first with APPEND ORDER breaking timestamp ties: two
-        # mutations can land inside the clock's resolution, and a stable
-        # sort would then leave the OLDER row first. The DB backend gets
-        # the same guarantee from its id.desc() tie-break.
-        return [r for _, r in sorted(enumerate(rows), key=lambda p: (p[1]['at'], p[0]), reverse=True)]
+        rows: List[Dict[str, Any]] = []
+        if meta is not None:
+            # 'seq' = append position in the FULL trail: the stable identity
+            # and order key of an append-only log. Timestamps can tie inside
+            # the clock's resolution; seq cannot — so newest-first is simply
+            # seq descending, and pages never shuffle rows across requests.
+            # The DB backend exposes its row id under the same key.
+            rows = [{'seq': i, **r} for i, r in enumerate(meta['history'])]
+            if team_id is not None:
+                rows = [r for r in rows if r['teamId'] in ('', team_id)]
+        return paginate_rows(
+            rows,
+            list_args or {},
+            searchable_keys=('action', 'teamId'),
+            default_sort=('seq', 'desc'),
+            tiebreak_key='seq',
+        )
 
     async def artifact(self, org_id: str, project_id: str, version: int) -> Dict[str, Any]:
         """Load one artifact version, sha256-verified against the registry.

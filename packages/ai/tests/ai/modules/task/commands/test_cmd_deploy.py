@@ -101,7 +101,9 @@ def account_stub(monkeypatch):
         deployments_list=AsyncMock(return_value=[dep]),
         deployments_get=AsyncMock(return_value=dep),
         deployments_versions=AsyncMock(return_value=[{'version': 3}]),
-        deployments_history=AsyncMock(return_value=[{'action': 'publish'}]),
+        deployments_history=AsyncMock(
+            return_value={'rows': [{'action': 'publish', 'seq': 1}], 'total': 1, 'page': 1, 'pageSize': 50}
+        ),
         audit=AsyncMock(),
     )
     monkeypatch.setattr(cmd_mod, 'account', stub)
@@ -217,6 +219,36 @@ class TestReads:
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
         with pytest.raises(PermissionError):
             await conn._deploy_versions({}, {'projectId': 'proj-1'})
+
+    @pytest.mark.asyncio
+    async def test_list_returns_the_standard_envelope(self, account_stub):
+        # The DataGrid contract: {rows,total,page,pageSize}, paged at the
+        # command layer (rows are bounded by the caller's memberships).
+        conn = _make_conn(_account_info())
+        result = await conn._deploy_list({}, {'page_size': 1})
+        body = result['body']
+        assert set(body) == {'rows', 'total', 'page', 'pageSize'}
+        assert (body['total'], body['pageSize']) == (1, 1)
+        assert body['rows'][0]['projectId'] == 'proj-1'
+
+    @pytest.mark.asyncio
+    async def test_versions_returns_the_standard_envelope(self, account_stub):
+        conn = _make_conn(_account_info())
+        result = await conn._deploy_versions({}, {'projectId': 'proj-1'})
+        body = result['body']
+        assert set(body) == {'rows', 'total', 'page', 'pageSize'}
+        assert body['rows'] == [{'version': 3}]
+
+    @pytest.mark.asyncio
+    async def test_history_paging_is_delegated_to_the_backend(self, account_stub):
+        # History is unbounded: the COMMAND layer never materializes it —
+        # the list-args travel to the backend (SQL on saas) untouched.
+        conn = _make_conn(_account_info())
+        args = {'projectId': 'proj-1', 'page': 3, 'page_size': 10, 'search': 'rollback'}
+        result = await conn._deploy_history({}, args)
+        passed = account_stub.deployments_history.await_args.args
+        assert passed[1] == 'proj-1' and passed[3] is args
+        assert result['body']['rows'] == [{'action': 'publish', 'seq': 1}]
 
 
 # ============================================================================

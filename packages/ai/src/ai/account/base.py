@@ -393,9 +393,17 @@ class AccountBase(ABC):
         """The registry entries for a project, newest first (version strip)."""
         return await self._deployment_backend().versions(org_id, project_id)
 
-    async def deployments_history(self, org_id: str, project_id: str, team_id: 'str | None' = None) -> list:
-        """The immutable audit trail, newest first; optionally one team's."""
-        return await self._deployment_backend().history(org_id, project_id, team_id)
+    async def deployments_history(
+        self, org_id: str, project_id: str, team_id: 'str | None' = None, list_args: 'dict | None' = None
+    ) -> dict:
+        """The audit trail as a list-API envelope, newest (seq) first.
+
+        ``list_args`` is the standard list-API argument set (page/page_size/
+        search/filters/sort). Paging lives in the BACKEND because history is
+        unbounded by design (append-only enterprise audit): the SaaS backend
+        pages in SQL rather than materializing the whole trail.
+        """
+        return await self._deployment_backend().history(org_id, project_id, team_id, list_args)
 
     async def deployments_artifact(self, org_id: str, project_id: str, version: int) -> dict:
         """Load one artifact version, sha256-verified against the registry."""

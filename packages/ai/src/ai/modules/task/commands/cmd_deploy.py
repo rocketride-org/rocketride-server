@@ -50,6 +50,7 @@ from croniter import croniter
 from ai.account import account
 from ai.account.models import resolve_team_permissions
 from ai.common.dap import DAPConn, TransportBase
+from ai.common.list_rows import paginate_rows
 
 if TYPE_CHECKING:
     from ..task_scheduler import TaskScheduler
@@ -292,7 +293,18 @@ class DeployCommands(DAPConn):
         deployments: List[Dict[str, Any]] = []
         for team_id in team_ids:
             deployments.extend(await account.deployments_list(org_id, team_id))
-        return self.build_response(request, body={'deployments': deployments})
+        # Standard list-API envelope ({rows,total,page,pageSize}): rows are
+        # already materialized (bounded by the caller's team memberships),
+        # so the shared in-Python convention applies. History, by contrast,
+        # pages in the BACKEND (unbounded audit trail).
+        body = paginate_rows(
+            deployments,
+            args,
+            searchable_keys=('projectId', 'pipelineName', 'teamId'),
+            default_sort=('updatedAt', 'desc'),
+            tiebreak_key='projectId',
+        )
+        return self.build_response(request, body=body)
 
     async def _deploy_get(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """One team deployment, registry-joined."""
@@ -316,7 +328,15 @@ class DeployCommands(DAPConn):
             raise PermissionError("Permission 'task.monitor' denied")
 
         versions = await account.deployments_versions(self._org_id(), project_id)
-        return self.build_response(request, body={'versions': versions})
+        # Envelope over the (per-project, bounded) registry list.
+        body = paginate_rows(
+            versions,
+            args,
+            searchable_keys=('pipelineName', 'comment'),
+            default_sort=('version', 'desc'),
+            tiebreak_key='version',
+        )
+        return self.build_response(request, body=body)
 
     async def _deploy_history(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """The immutable audit trail for a project (optionally one team's)."""
@@ -329,8 +349,10 @@ class DeployCommands(DAPConn):
         elif not self._teams_with('task.monitor'):
             raise PermissionError("Permission 'task.monitor' denied")
 
-        rows = await account.deployments_history(self._org_id(), project_id, team_id)
-        return self.build_response(request, body={'history': rows})
+        # Paging happens in the BACKEND (SQL on saas): the trail is
+        # append-only and unbounded, so it is never fully materialized here.
+        body = await account.deployments_history(self._org_id(), project_id, team_id, args)
+        return self.build_response(request, body=body)
 
     # =========================================================================
     # STATE / REMOVE / SCHEDULES

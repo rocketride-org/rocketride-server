@@ -151,11 +151,13 @@ class TestDeploy:
         dep = await backend.deploy('org-1', 'team-prod', 'proj-1', 1, OTHER)
         assert dep['version'] == 1
 
-        history = await backend.history('org-1', 'proj-1', 'team-prod')
+        history = (await backend.history('org-1', 'proj-1', 'team-prod'))['rows']
         # Newest first: the downgrade is recorded as 'rollback', by whom.
         assert history[0]['action'] == 'rollback'
         assert history[0]['actor'] == OTHER
         assert history[0]['version'] == 1
+        # Every row carries the stable append-order key (paging identity).
+        assert [h['seq'] for h in history] == sorted((h['seq'] for h in history), reverse=True)
 
     @pytest.mark.asyncio
     async def test_history_ties_break_by_append_order(self, backend, monkeypatch):
@@ -170,9 +172,31 @@ class TestDeploy:
         await backend.deploy('org-1', 'team-prod', 'proj-1', 2, ACTOR)
         await backend.deploy('org-1', 'team-prod', 'proj-1', 1, OTHER)
 
-        history = await backend.history('org-1', 'proj-1', 'team-prod')
+        history = (await backend.history('org-1', 'proj-1', 'team-prod'))['rows']
         # (Org-wide publish rows ride along in a team-filtered view.)
         assert [h['action'] for h in history] == ['rollback', 'deploy', 'publish', 'publish']
+
+    @pytest.mark.asyncio
+    async def test_history_is_a_paged_list_envelope(self, backend):
+        # History is the unbounded audit surface: the BACKEND owns paging
+        # and returns the standard {rows,total,page,pageSize} envelope.
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        for _ in range(4):
+            await backend.deploy('org-1', 'team-prod', 'proj-1', 1, ACTOR)
+
+        page1 = await backend.history('org-1', 'proj-1', None, {'page': 1, 'page_size': 2})
+        page2 = await backend.history('org-1', 'proj-1', None, {'page': 2, 'page_size': 2})
+        assert (page1['total'], page1['page'], page1['pageSize']) == (5, 1, 2)
+        assert len(page1['rows']) == 2 and len(page2['rows']) == 2
+        # seq-descending across page boundaries: no overlap, no gaps.
+        seqs = [r['seq'] for r in page1['rows'] + page2['rows']]
+        assert seqs == sorted(seqs, reverse=True) and len(set(seqs)) == 4
+
+        # Search and filters run inside the envelope too.
+        publishes = await backend.history('org-1', 'proj-1', None, {'search': 'publish'})
+        assert [r['action'] for r in publishes['rows']] == ['publish']
+        filtered = await backend.history('org-1', 'proj-1', None, {'filters': {'action': 'deploy'}})
+        assert filtered['total'] == 4
 
 
 # ============================================================================
@@ -202,7 +226,7 @@ class TestState:
         assert await backend.list_team('org-1', 'team-1') == []
         # ...but the registry and the audit trail survive in full.
         assert len(await backend.versions('org-1', 'proj-1')) == 1
-        actions = [h['action'] for h in await backend.history('org-1', 'proj-1')]
+        actions = [h['action'] for h in (await backend.history('org-1', 'proj-1'))['rows']]
         assert 'remove' in actions and 'publish' in actions
 
         # And a fresh deploy revives the team's deployment.
