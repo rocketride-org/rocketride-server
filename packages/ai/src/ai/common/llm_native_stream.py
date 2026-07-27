@@ -19,6 +19,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import debug, warning
 
+from ai.common.llm_adapter import Event, drive_adapter
+
 # Per-call carrier for API-level stop sequences (e.g. CrewAI's ReAct "\nObservation:").
 # Set on the ask path in llm_base._question and read at every model sink so the stop
 # reaches the provider API instead of relying only on post-hoc text truncation. A
@@ -167,67 +169,65 @@ def anthropic_extended_thinking_active(chat: Any) -> bool:
     return bool(mk.get('thinking'))
 
 
-def _stream_anthropic_messages_api(
-    chat: Any,
-    prompt: str,
-    on_chunk: Callable[[str], None],
-    on_finish: Optional[Callable[[Optional[str]], None]],
-    on_reasoning_chunk: Optional[Callable[[str], None]],
-) -> str:
-    llm = chat._llm
-    # INVARIANT: read synchronously within the ask() call, while LLMBase._question still
-    # holds the contextvar (before its finally reset). The stream is consumed here, not
-    # deferred to the caller, so this never runs after the reset (which would send None).
-    payload: dict[str, Any] = dict(llm._get_request_payload(prompt, stop=STOP_SEQUENCES_VAR.get() or None, stream=True))
-    _raw_client = getattr(llm, '_client', None)
-    client = _raw_client() if callable(_raw_client) else _raw_client
-    if client is None:
-        raise RuntimeError('ChatAnthropic has no _client for native streaming')
+class NativeAnthropicAdapter:
+    """Bridges the native Anthropic Messages stream to the Event contract.
 
-    parts: list[str] = []
-    finish_reason: Optional[str] = None
-    reasoning_deltas = 0
-    raw_stream = _open_raw_message_stream(client, payload)
+    Same payload + raw create(stream=True) path as before; now yields normalized Events.
+    """
 
-    try:
-        for event in raw_stream:
-            et = _event_type_name(event)
-            if et == 'content_block_delta':
-                delta = getattr(event, 'delta', None)
-                if delta is None:
-                    continue
-                dt = _delta_type_name(delta)
-                if dt == 'thinking_delta' and on_reasoning_chunk is not None:
-                    piece = getattr(delta, 'thinking', None) or ''
-                    if piece:
-                        on_reasoning_chunk(piece)
-                        reasoning_deltas += 1
-                elif dt == 'text_delta' and on_chunk is not None:
-                    piece = getattr(delta, 'text', None) or ''
-                    if piece:
-                        on_chunk(piece)
-                        parts.append(piece)
-            elif et == 'message_delta':
-                md = getattr(event, 'delta', None)
-                if md is not None:
-                    sr = getattr(md, 'stop_reason', None)
-                    if sr is not None:
-                        finish_reason = _map_claude_stop_reason(sr)
-    finally:
-        closer = getattr(raw_stream, 'close', None)
-        if callable(closer):
-            try:
-                closer()
-            except Exception:
-                pass
+    def __init__(self, chat: Any, history: Optional[list] = None):
+        self.chat = chat
+        self.history = history if history is not None else []
+        self.finish_reason: Optional[str] = None
 
-    if not parts:
-        raise RuntimeError('Anthropic SDK stream produced no text')
+    def stream(self, user_text: str):
+        # INVARIANT: consume synchronously within ask() while STOP_SEQUENCES_VAR is still set.
+        self.history.append({'role': 'user', 'content': user_text})
+        llm = self.chat._llm
+        payload: dict[str, Any] = dict(
+            llm._get_request_payload(user_text, stop=STOP_SEQUENCES_VAR.get() or None, stream=True)
+        )
+        _raw_client = getattr(llm, '_client', None)
+        client = _raw_client() if callable(_raw_client) else _raw_client
+        if client is None:
+            raise RuntimeError('ChatAnthropic has no _client for native streaming')
 
-    if on_finish is not None:
-        on_finish(finish_reason)
+        parts: list[str] = []
+        raw_stream = _open_raw_message_stream(client, payload)
+        try:
+            for event in raw_stream:
+                et = _event_type_name(event)
+                if et == 'content_block_delta':
+                    delta = getattr(event, 'delta', None)
+                    if delta is None:
+                        continue
+                    dt = _delta_type_name(delta)
+                    if dt == 'thinking_delta':
+                        piece = getattr(delta, 'thinking', None) or ''
+                        if piece:
+                            yield Event('thinking', piece)
+                    elif dt == 'text_delta':
+                        piece = getattr(delta, 'text', None) or ''
+                        if piece:
+                            parts.append(piece)
+                            yield Event('text', piece)
+                elif et == 'message_delta':
+                    md = getattr(event, 'delta', None)
+                    if md is not None:
+                        sr = getattr(md, 'stop_reason', None)
+                        if sr is not None:
+                            self.finish_reason = _map_claude_stop_reason(sr)
+        finally:
+            closer = getattr(raw_stream, 'close', None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    pass
 
-    return ''.join(parts)
+        assistant = {'role': 'assistant', 'content': ''.join(parts)}
+        self.history.append(assistant)
+        yield Event('done', items=[assistant])
 
 
 def try_anthropic_native_chat_stream(
@@ -242,7 +242,12 @@ def try_anthropic_native_chat_stream(
         return None
 
     try:
-        text = _stream_anthropic_messages_api(chat, prompt, on_chunk, on_finish, on_reasoning_chunk)
+        adapter = NativeAnthropicAdapter(chat)
+        text, _items = drive_adapter(adapter, prompt, on_chunk, on_reasoning_chunk)
+        if not text:
+            raise RuntimeError('Anthropic SDK stream produced no text')
+        if on_finish is not None:
+            on_finish(adapter.finish_reason)
         return text
     except Exception as e:
         warning(
