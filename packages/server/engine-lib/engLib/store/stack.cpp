@@ -489,9 +489,9 @@ Error IServiceEndpoint::buildConnections() noexcept {
     }
 
     // Partition the pipeline into lifecycle regions (the head's plus one per
-    // invoked node) and validate ownership. Done here so a cycle or an invalid
-    // ownership shape surfaces at beginEndpoint, and bindFilters stays
-    // allocation-free per pipe.
+    // invoked node) and validate ownership. Done here, once per endpoint, so a
+    // cycle or an invalid ownership shape surfaces at beginEndpoint rather than
+    // once per pipe in bindFilters.
     std::vector<int> invoked;
     invoked.reserve(controls.size());
     for (const auto &ctrl : controls) invoked.push_back(std::get<1>(ctrl));

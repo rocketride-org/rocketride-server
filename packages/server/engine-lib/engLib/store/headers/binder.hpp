@@ -91,15 +91,6 @@ public:
     virtual std::vector<std::string> getListeners() noexcept;
     virtual bool hasListener(const std::string &methodName) noexcept;
 
-    //-----------------------------------------------------------------
-    ///	@details
-    ///		Read-only access to the instances bound on a lane, in bind
-    ///		order (nullptr when the lane has no bound instances). Used by
-    ///		tests to assert lifecycle lane contents/order.
-    //-----------------------------------------------------------------
-    const std::vector<IServiceFilterInstance *> *getBound(
-        const std::string &methodName) const noexcept;
-
     static Error callMethods(
         Binder *pThis, const std::string &methodName,
         std::function<Error(IServiceFilterInstance *)> fcn,

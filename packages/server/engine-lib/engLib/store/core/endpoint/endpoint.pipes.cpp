@@ -147,9 +147,6 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
                                   const std::vector<int> &order)
                              ->Error {
         for (auto toIndex : order) {
-            if (toIndex < 0 || toIndex >= filters.size())
-                return APERR(Ec::InvalidParam,
-                             "Lifecycle bind to invalid index: out of range");
             ServiceInstance *pTo = &filters[toIndex];
             if (auto ccode = (*pRoot)->binder.bind("closing", pTo->get()))
                 return ccode;
@@ -164,17 +161,30 @@ Error IServiceEndpoint::bindFilters(size_t pipeId,
         return {};
     };
 
+    // Range-check every index the binds below dereference, up front: the walks
+    // index `filters` directly, forwards and reversed, and a check inside one
+    // of those loops would silently leave the others covered only by the order
+    // they happen to run in.
+    auto checkRange = localfcn(int index)->Error {
+        if (index < 0 || (size_t)index >= filters.size())
+            return APERR(Ec::InvalidParam,
+                         "Lifecycle bind to invalid index: out of range");
+        return {};
+    };
+    for (auto toIndex : lifecycleOrder)
+        if (auto ccode = checkRange(toIndex)) return ccode;
+    for (auto &region : controlLifecycleOrders) {
+        if (auto ccode = checkRange(region.first)) return ccode;
+        for (auto toIndex : region.second)
+            if (auto ccode = checkRange(toIndex)) return ccode;
+    }
+
     // The pipe head drives the source region; each control root drives its own
     // sub-pipeline region.
     if (auto ccode = bindLifecycle(pPipeFilter, lifecycleOrder)) return ccode;
-    for (auto &region : controlLifecycleOrders) {
-        auto rootIndex = region.first;
-        if (rootIndex < 0 || rootIndex >= filters.size())
-            return APERR(Ec::InvalidParam,
-                         "Lifecycle root invalid index: out of range");
-        if (auto ccode = bindLifecycle(&filters[rootIndex], region.second))
+    for (auto &region : controlLifecycleOrders)
+        if (auto ccode = bindLifecycle(&filters[region.first], region.second))
             return ccode;
-    }
 
     // Add the control entry points
     for (auto &comp : this->controls) {

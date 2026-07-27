@@ -232,20 +232,6 @@ bool Binder::hasListener(const std::string &methodName) noexcept {
 }
 
 /**
- * @brief Read-only access to the instances bound on a lane, in bind order.
- *
- * @param methodName The lane to inspect.
- * @return Pointer to the bound-instance vector, or nullptr when the lane has
- *         no bound instances. Intended for tests asserting lane contents.
- */
-const std::vector<IServiceFilterInstance *> *Binder::getBound(
-    const std::string &methodName) const noexcept {
-    auto it = methodMap.find(methodName);
-    if (it == methodMap.end() || !it->second) return nullptr;
-    return it->second.get();
-}
-
-/**
  * @brief Opens an entry by delegating to all bound service filter instances.
  *
  * @param entry The entry to open.
