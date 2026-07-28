@@ -569,9 +569,9 @@ def test_thread_modify_requires_labels():
 # ---------------------------------------------------------------------------
 
 
-def _inst_with_token(access_tier: str, token: dict | None) -> 'IInstance.IInstance':
+def _inst_with_token(access_tier: str, token: dict | None, results: dict | None = None) -> 'IInstance.IInstance':
     """Return an IInstance whose IGlobal.glb simulates a persisted user token."""
-    inst = make_inst(access_tier)
+    inst = make_inst(access_tier, results=results)
     token_json = json.dumps(token) if token is not None else ''
     inst.IGlobal.glb = types.SimpleNamespace(logicalType='tool_gmail', connConfig={})
     inst.IGlobal._token_cfg = {'authType': 'user', 'userToken': token_json}
@@ -597,6 +597,7 @@ def test_check_connection_missing_scope(monkeypatch):
     _patch_config(monkeypatch, inst)
     result = inst.check_connection({})
     assert not result['connection_ok']
+    assert inst.IGlobal.service.call_for('getPop')['userId'] == 'me'
     assert any('gmail.settings.basic' in s for s in result['missingScopes'])
     assert result['authType'] == 'user'
 
@@ -609,8 +610,24 @@ def test_check_connection_ok_with_full_scope(monkeypatch):
     _patch_config(monkeypatch, inst)
     result = inst.check_connection({})
     assert result['connection_ok']
+    assert inst.IGlobal.service.call_for('getPop')['userId'] == 'me'
     assert result.get('missingScopes', []) == []
     assert result['authType'] == 'user'
+
+
+def test_check_connection_reports_gmail_api_probe_failure(monkeypatch):
+    """check_connection reports disabled/unreachable Gmail API as not OK."""
+    mocks = Path(__file__).resolve().parents[2] / 'mocks'
+    monkeypatch.syspath_prepend(str(mocks))
+    inst = _inst_with_token(
+        'settings',
+        {'access_token': 'tok', 'scope': 'https://mail.google.com/'},
+        results={'getPop': RuntimeError('Gmail API disabled')},
+    )
+    _patch_config(monkeypatch, inst)
+    result = inst.check_connection({})
+    assert result['connection_ok'] is False
+    assert 'Gmail API disabled' in result['error']
 
 
 def test_check_connection_readonly_satisfied_by_modify(monkeypatch):

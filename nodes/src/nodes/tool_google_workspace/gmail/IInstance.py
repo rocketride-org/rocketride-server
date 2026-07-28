@@ -140,13 +140,19 @@ class IInstance(GoogleToolInstanceBase):
             "Check the Gmail connection status and verify that the OAuth token's granted scopes "
             "cover the node's configured access tier. Call this when a Gmail operation fails with "
             'a scope or permission error, or before attempting settings-level operations for the '
-            'first time. Returns connection_ok: true when all required scopes are present.'
+            'first time. Returns connection_ok: true when the API probe succeeds and all required scopes are present.'
         ),
         input_schema={'type': 'object', 'properties': {}, 'required': []},
     )
     def check_connection(self, args: dict) -> dict:
         """Check Gmail connection status and whether granted OAuth scopes cover the configured access tier. Read-only."""
-        return self._check_connection_impl()
+
+        def probe(s):
+            if _GMAIL_SETTINGS_SCOPE in self._access().scopes:
+                return execute(s.users().settings().getPop(userId=USER_ID))
+            return execute(s.users().getProfile(userId=USER_ID))
+
+        return self._check_connection_impl(probe=probe)
 
     # =======================================================================
     # MESSAGES — read

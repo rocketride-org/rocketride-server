@@ -186,6 +186,9 @@ class FakeDrive:
     def changes(self):
         return _Node(self, 'changes')
 
+    def about(self):
+        return _Node(self, 'about')
+
     def call_for(self, op):
         """Return the kwargs of the FIRST recorded call to terminal method ``op``."""
         return next((kw for n, kw in self.calls if n == op), None)
@@ -729,6 +732,14 @@ def test_check_connection_reports_ok():
     assert out['connection_ok'] is True
     assert out['access'] == 'write'
     assert any('drive' in s for s in out['requiredScopes'])
+    assert inst.IGlobal.service.call_for('get')['fields'] == 'user'
+
+
+def test_check_connection_reports_drive_api_probe_failure():
+    inst = _make(results={'get': RuntimeError('Drive API disabled')})
+    out = inst.check_connection({})
+    assert out['connection_ok'] is False
+    assert 'Drive API disabled' in out['error']
 
 
 # ---------------------------------------------------------------------------
