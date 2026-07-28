@@ -8,19 +8,39 @@ True only if the supplied account has every required plan.
 
 External deps:
 
-- ``ai.web.AccountInfo`` — only used as a type hint; the real ``ai.web``
-  package is loaded normally so the import succeeds. Tests pass a
-  ``SimpleNamespace`` with a ``plans`` attribute at the call site; the
-  identity of ``AccountInfo`` is never inspected at runtime.
+- ``ai.web.AccountInfo`` — only used as a type hint. Tests pass a
+  ``SimpleNamespace`` at the call site; the identity of ``AccountInfo`` is
+  never inspected at runtime.
 - ``rocketlib.getServiceDefinition(provider)`` — returns the schema dict for
   a provider id, or None if unknown. Tests patch it via monkeypatch.
 """
 
+import importlib
+import sys
+import types
 from types import SimpleNamespace
 
 import pytest
 
-from ai.common.account import pipeline_validation as pv
+
+_MISSING = object()
+
+
+def _import_pipeline_validation():
+    saved = {name: sys.modules.get(name, _MISSING) for name in ('depends', 'rocketlib')}
+    sys.modules.setdefault('depends', types.SimpleNamespace(depends=lambda *_args, **_kwargs: None))
+    sys.modules.setdefault('rocketlib', types.SimpleNamespace(getServiceDefinition=lambda _provider_id: None))
+    try:
+        return importlib.import_module('ai.common.account.pipeline_validation')
+    finally:
+        for name, module in saved.items():
+            if module is _MISSING:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+pv = _import_pipeline_validation()
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +150,17 @@ def test_validate_rejects_when_account_has_no_plans(patch_service_definitions):
     }
     validator = pv.AccountPipelineValidation()
     assert validator.validate(_account([]), pipeline) is False
+
+
+def test_validate_rejects_account_without_plans_field(patch_service_definitions):
+    """An account object without plans should deny required plans, not crash."""
+    patch_service_definitions['providerA'] = {'plans': ['pro']}
+    pipeline = {
+        'source': 'a',
+        'components': [{'id': 'a', 'provider': 'providerA', 'input': []}],
+    }
+    validator = pv.AccountPipelineValidation()
+    assert validator.validate(SimpleNamespace(), pipeline) is False
 
 
 # ---------------------------------------------------------------------------

@@ -1,11 +1,13 @@
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 from collections import deque
-from ai.web import AccountInfo
 from rocketlib import getServiceDefinition
+
+if TYPE_CHECKING:
+    from ai.web import AccountInfo
 
 
 class AccountPipelineValidation:
-    def validate(self, account_info: AccountInfo, pipeline: Dict[str, Any]) -> bool:
+    def validate(self, account_info: 'AccountInfo', pipeline: Dict[str, Any]) -> bool:
         """
         Validate the user has the correct plan for a pipeline.
         """
@@ -13,7 +15,7 @@ class AccountPipelineValidation:
 
         # Check if user has required plan for pipeline
         if len(required_plans):
-            account_plans = set(account_info.plans)
+            account_plans = set(getattr(account_info, 'plans', []))
             for required_plan in required_plans:
                 if required_plan not in account_plans:
                     return False
