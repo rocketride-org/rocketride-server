@@ -802,6 +802,7 @@ class TestIInstanceLifecycle:
         inst.IGlobal = MagicMock()
         inst.IGlobal.store = store
         inst.instance = MagicMock()
+        inst.preventDefault = MagicMock()
         return inst
 
     def test_write_questions_forwards_without_store(self):
@@ -809,12 +810,14 @@ class TestIInstanceLifecycle:
         question = MagicMock()
         inst.writeQuestions(question)
         inst.instance.writeQuestions.assert_called_once()
+        inst.preventDefault.assert_called_once()
 
     def test_write_answers_forwards_without_store(self):
         inst = self._make_instance(store=None)
         answer = MagicMock()
         inst.writeAnswers(answer)
         inst.instance.writeAnswers.assert_called_once()
+        inst.preventDefault.assert_called_once()
 
     def test_write_questions_enriches_with_memory(self):
         store = PersistentMemoryStore(backend='memory')
@@ -827,6 +830,7 @@ class TestIInstanceLifecycle:
 
         inst.writeQuestions(question)
         inst.instance.writeQuestions.assert_called_once()
+        inst.preventDefault.assert_called_once()
 
         # The forwarded question should have memory_context
         forwarded = inst.instance.writeQuestions.call_args[0][0]
@@ -854,6 +858,7 @@ class TestIInstanceLifecycle:
 
         inst.writeAnswers(answer)
         inst.instance.writeAnswers.assert_called_once()
+        inst.preventDefault.assert_called_once()
 
         # Check that answer was stored
         result = store.get('test-sess', 'last_answer')

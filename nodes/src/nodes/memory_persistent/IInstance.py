@@ -40,7 +40,7 @@ class IInstance(IInstanceBase):
         store = self.IGlobal.store
         if store is None:
             self.instance.writeQuestions(question)
-            return
+            return self.preventDefault()
 
         # Deep copy to prevent mutation of the original question
         question = copy.deepcopy(question)
@@ -63,7 +63,7 @@ class IInstance(IInstanceBase):
                 self._current_session_id = None
                 debug(f'Ignoring invalid session_id in question metadata: {session_id!r}')
                 self.instance.writeQuestions(question)
-                return
+                return self.preventDefault()
 
             # Load all keys from the session
             keys_result = store.list_keys(session_id)
@@ -83,6 +83,7 @@ class IInstance(IInstanceBase):
 
         # Forward the (possibly enriched) question downstream
         self.instance.writeQuestions(question)
+        return self.preventDefault()
 
     def writeAnswers(self, answer: Answer) -> None:
         """Store answer text in session memory for future retrieval, then forward.
@@ -93,7 +94,7 @@ class IInstance(IInstanceBase):
         store = self.IGlobal.store
         if store is None:
             self.instance.writeAnswers(answer)
-            return
+            return self.preventDefault()
 
         # Deep copy to prevent mutation
         answer = copy.deepcopy(answer)
@@ -116,7 +117,7 @@ class IInstance(IInstanceBase):
             except ValueError:
                 debug(f'Ignoring invalid session_id in answer metadata: {session_id!r}')
                 self.instance.writeAnswers(answer)
-                return
+                return self.preventDefault()
 
             # Store the answer text
             answer_text = answer.getText() if hasattr(answer, 'getText') else str(answer)
@@ -129,3 +130,4 @@ class IInstance(IInstanceBase):
 
         # Forward the answer downstream
         self.instance.writeAnswers(answer)
+        return self.preventDefault()
