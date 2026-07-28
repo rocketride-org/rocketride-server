@@ -245,6 +245,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return {'sql': sql_query, 'valid': True}
         elif is_valid and sql_query:
             return {'error': 'Generated query contains unsafe SQL', 'sql': sql_query, 'valid': False}
+        elif result.get('error'):
+            # EXPLAIN rejected the query on every attempt -- surface the real
+            # database error instead of the rejected SQL, so callers can tell
+            # this apart from a genuinely off-topic question.
+            return {'error': result['error'], 'valid': False}
         else:
             return {'answer': sql_query, 'valid': False}
 
@@ -574,10 +579,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             # Execute the query only when the LLM flagged it as valid SQL and
             # the safety check passes; otherwise return the LLM's text response.
+            # When EXPLAIN rejected the query on every attempt, prefer the real
+            # database error over the rejected SQL text, which reads as prose
+            # and would be indistinguishable from a genuine off-topic answer.
             if is_valid_query and sql_query and is_sql_safe(sql_query):
                 result = self._executeSQLQuery(sql_query)
             else:
-                result = sql_query
+                result = query_json.get('error') or sql_query
 
             if 'text' in lanes:
                 self.instance.writeText(str(result))

@@ -291,6 +291,25 @@ def test_build_sql_query_accepts_real_json_bool_isvalid():
     assert parse_bool(result.get('isValid')) is True
 
 
+def test_get_sql_surfaces_explain_error_not_rejected_sql():
+    """get_sql() must return the EXPLAIN error, not the rejected SQL as prose.
+
+    Before this fix, the invalid branch always returned {'answer': sql_query,
+    'valid': False}, so a caller could not tell an EXPLAIN rejection (rejected
+    SQL text) apart from a genuinely off-topic question (LLM prose answer).
+    """
+    fake_global = _FakeGlobal(explain_error='column "userz" does not exist')
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': 'true',
+        'query': 'SELECT * FROM userz',
+    }
+
+    result = inst.get_sql({'question': 'all users'})
+
+    assert result == {'error': 'column "userz" does not exist', 'valid': False}
+
+
 # ---------------------------------------------------------------------------
 # _tableExists (engine-backed)
 # ---------------------------------------------------------------------------
