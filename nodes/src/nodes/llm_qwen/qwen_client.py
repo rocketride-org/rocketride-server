@@ -61,9 +61,13 @@ class Chat(ChatBase):
         if not apikey or not apikey.startswith('sk-'):
             raise ValueError('Invalid DashScope API key. Key must start with "sk-".')
 
-        # Resolve regional endpoint
-        region = config.get('region', 'us')
-        base_url = DASHSCOPE_REGIONS.get(region, DASHSCOPE_REGIONS['us'])
+        # Resolve the endpoint, an explicit base_url wins over the regional map
+        # so a profile can reach a host outside the compatible-mode endpoints
+        base_url = (config.get('base_url') or '').strip()
+
+        if not base_url:
+            region = config.get('region', 'us')
+            base_url = DASHSCOPE_REGIONS.get(region, DASHSCOPE_REGIONS['us'])
 
         # Get the llm using OpenAI-compatible endpoint
         self._llm = ChatOpenAI(
