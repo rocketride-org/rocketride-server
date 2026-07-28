@@ -2,7 +2,32 @@
 	"node": "n8n-nodes-rocketride.rocketRide",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
-	"categories": ["AI", "Development", "Utility"],
+	"categories": ["AI", "Development", "Data & Storage"],
+	"subcategories": {
+		"AI": ["Root Nodes"]
+	},
+	"alias": [
+		"Agent",
+		"AI Agent",
+		"AI Pipeline",
+		"Anonymize",
+		"Chat",
+		"Classify",
+		"Data Extraction",
+		"Data Processing",
+		"Data Transformation",
+		"Document Parsing",
+		"Document Processing",
+		"Extract",
+		"OCR",
+		"Parse",
+		"Parser",
+		"PII",
+		"RAG",
+		"Redact",
+		"Summarize",
+		"Transform"
+	],
 	"resources": {
 		"credentialDocumentation": [
 			{

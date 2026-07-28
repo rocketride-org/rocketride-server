@@ -1,12 +1,25 @@
 # n8n-nodes-rocketride
 
-An [n8n](https://n8n.io) community node for [RocketRide](https://github.com/rocketride-org) — **run RocketRide AI pipelines from your n8n workflows, and trigger n8n workflows from RocketRide.** It works on self-hosted n8n and n8n Cloud, and has zero runtime dependencies.
+An [n8n](https://n8n.io) community node for [RocketRide](https://github.com/rocketride-org) — **run RocketRide AI pipelines from your n8n workflows, and trigger n8n workflows from RocketRide.** It has zero runtime dependencies.
 
 ## Installation
 
-In n8n: **Settings → Community Nodes → Install**, then enter `n8n-nodes-rocketride`. On n8n Cloud, install it from the Nodes panel (verified community nodes).
+After this package is published to npm, self-hosted n8n instance owners can open **Settings → Community Nodes → Install** and enter `n8n-nodes-rocketride`.
+
+On n8n Cloud, RocketRide will be available from the Nodes panel after n8n approves it as a verified community node.
 
 To let n8n's **AI Agent** call RocketRide as a tool, set `N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true` on your instance.
+
+## Use cases
+
+The RocketRide node invokes deployed RocketRide pipelines. Those pipelines perform the AI work; the n8n node sends inputs to them and returns their outputs.
+
+- Parse documents and run OCR.
+- Extract structured data.
+- Anonymize or redact PII.
+- Transform, classify, and summarize data.
+- Power RAG workflows.
+- Run chat and agent pipelines, including as an n8n AI Agent tool.
 
 ## Nodes
 
@@ -27,7 +40,9 @@ Calls a deployed RocketRide pipeline and returns its result.
 
 Starts a workflow when a RocketRide pipeline calls in — a branded replacement for a generic Webhook node. Paste this trigger's URL into RocketRide's **n8n** node. Features: lifts the incoming payload to the top level, an optional shared **Secret** (checked on the `Authorization` header, rejected with `401`), and a configurable **Respond** mode (immediately / when the workflow finishes / via a *Respond to Webhook* node).
 
-## Credential — RocketRide API
+## Credentials
+
+### RocketRide API
 
 | Field | Notes |
 | --- | --- |

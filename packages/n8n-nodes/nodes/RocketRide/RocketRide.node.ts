@@ -32,7 +32,8 @@ export class RocketRide implements INodeType {
 		group: ['transform'],
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
-		description: 'Run RocketRide AI pipelines from n8n',
+		description:
+			'Run RocketRide AI pipelines for document parsing, OCR, data extraction, PII anonymization, transformation, RAG, chat, and agents.',
 		defaults: {
 			name: 'RocketRide',
 		},

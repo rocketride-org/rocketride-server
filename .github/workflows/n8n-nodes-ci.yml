@@ -63,6 +63,20 @@ jobs:
 
       - name: Enforce verified-node invariants
         run: |
+          node -e '
+            const assert = require("node:assert/strict");
+            const fs = require("node:fs");
+            const codexFiles = [
+              "nodes/RocketRide/RocketRide.node.json",
+              "nodes/RocketRideInboundTrigger/RocketRideInboundTrigger.node.json",
+            ];
+            for (const sourcePath of codexFiles) {
+              const source = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+              const built = JSON.parse(fs.readFileSync("dist/" + sourcePath, "utf8"));
+              assert.deepStrictEqual(built, source, "Built codex differs from " + sourcePath);
+            }
+            console.log("Built codex metadata matches source ✓");
+          '
           DEPS=$(node -p "Object.keys(require('./package.json').dependencies || {}).length")
           if [ "$DEPS" != "0" ]; then
             echo "::error::Verified n8n nodes must have ZERO runtime dependencies (found $DEPS)."
