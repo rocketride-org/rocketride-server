@@ -25,12 +25,23 @@ export function withTimeout<T>(
 	cleanup: () => Promise<unknown>,
 ): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
-		let timeout: ReturnType<typeof setTimeout> | undefined;
 		let settled = false;
 		let timedOut = false;
 
+		const timeout = setTimeout(async () => {
+			if (settled || timedOut) return;
+			timedOut = true;
+			clearTimeout(timeout);
+			try {
+				await cleanup();
+			} catch {
+				// The timeout error remains the recovery signal even if cleanup fails.
+			}
+			reject(timeoutError);
+		}, timeoutMs);
+
 		const clearTimer = () => {
-			if (timeout !== undefined) clearTimeout(timeout);
+			clearTimeout(timeout);
 		};
 
 		operation.then(
@@ -47,17 +58,5 @@ export function withTimeout<T>(
 				reject(error);
 			},
 		);
-
-		timeout = setTimeout(async () => {
-			if (settled || timedOut) return;
-			timedOut = true;
-			clearTimer();
-			try {
-				await cleanup();
-			} catch {
-				// The timeout error remains the recovery signal even if cleanup fails.
-			}
-			reject(timeoutError);
-		}, timeoutMs);
 	});
 }
