@@ -407,6 +407,9 @@ class ChatBase:
         try:
             adapter = NativeOpenAIResponsesAdapter(self)
             text, _items = drive_adapter(adapter, prompt, on_chunk, on_reasoning_chunk)
+            if not text:
+                # No text (e.g. response.failed) → route to the fallback below, like the Anthropic path.
+                raise RuntimeError('OpenAI Responses stream produced no text')
             if on_finish is not None:
                 on_finish(adapter.finish_reason)
             return text
