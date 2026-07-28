@@ -623,7 +623,7 @@ class CloudProvider(ABC):
                         _fields = json.loads(_raw[_f_start:_f_end])
 
                     _fields_copy = copy.deepcopy(_fields)
-                    _needs_repair = _repair_field_objects(_fields_copy)
+                    _needs_repair = _repair_field_objects(_fields_copy, updated_profiles)
                 except Exception:
                     pass
 

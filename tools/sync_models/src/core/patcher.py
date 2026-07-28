@@ -277,7 +277,10 @@ def _detect_namespace(fields: Dict[str, Any]) -> str:
     return ''
 
 
-def _repair_field_objects(fields: Dict[str, Any]) -> bool:
+_EXTENDED_THINKING = 'extendedThinking'
+
+
+def _repair_field_objects(fields: Dict[str, Any], profiles: Dict[str, Any] | None = None) -> bool:
     """
     Ensure every profile field object that exposes ``llm.cloud.apikey`` also
     exposes ``llm.cloud.modelSource``, and that ``llm.cloud.modelSource`` is
@@ -319,6 +322,19 @@ def _repair_field_objects(fields: Dict[str, Any]) -> bool:
                     break  # only one apikey entry per object
 
         has_apikey = 'llm.cloud.apikey' in props
+
+        # extendedThinking toggle: present iff the model reasons (capabilities.reasoning).
+        # Keeps the UI self-maintaining across syncs; skips 'custom' and non-model objects.
+        obj = value.get('object')
+        if profiles is not None and has_apikey and isinstance(obj, str) and obj != 'custom' and obj in profiles:
+            reasons = bool(((profiles.get(obj) or {}).get('capabilities') or {}).get('reasoning'))
+            if reasons and _EXTENDED_THINKING not in props:
+                props.append(_EXTENDED_THINKING)
+                repaired = True
+            elif not reasons and _EXTENDED_THINKING in props:
+                props.remove(_EXTENDED_THINKING)
+                repaired = True
+
         has_model_source = 'llm.cloud.modelSource' in props
         if has_apikey and not has_model_source:
             props.append('llm.cloud.modelSource')
@@ -357,12 +373,12 @@ def _update_fields_for_added(
 
     field_key = f'{namespace}.{profile_key}'
 
-    # 1. Field object
+    # 1. Field object — reasoning models get the extendedThinking toggle (before modelSource).
     if field_key not in fields:
-        fields[field_key] = {
-            'object': profile_key,
-            'properties': ['llm.cloud.apikey', 'llm.cloud.modelSource'],
-        }
+        props = ['llm.cloud.apikey', 'llm.cloud.modelSource']
+        if bool((profile.get('capabilities') or {}).get('reasoning')):
+            props.insert(1, _EXTENDED_THINKING)
+        fields[field_key] = {'object': profile_key, 'properties': props}
 
     # 2 & 3. enum + conditional live inside the profile selector field
     profile_field = fields.get(f'{namespace}.profile')
@@ -518,8 +534,8 @@ def patch(
 
         ns = _detect_namespace(fields)
 
-        # Repair existing field objects that are missing llm.cloud.modelSource
-        _repair_field_objects(fields)
+        # Repair existing field objects (modelSource + capabilities-aware extendedThinking)
+        _repair_field_objects(fields, updated_profiles)
 
         for key in sorted(_added):
             profile = updated_profiles.get(key, {})

@@ -543,8 +543,7 @@
 			"object": "claude-3-haiku",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-fable-5": {
