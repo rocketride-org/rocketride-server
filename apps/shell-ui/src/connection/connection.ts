@@ -955,6 +955,7 @@ export class ConnectionManager implements IConnectionManager {
 			progressMessage: undefined,
 			errorKind: undefined,
 		});
+		this.emit('shell:disconnected', { reason: 'Disconnected by request', hasError: false });
 	}
 
 	/**

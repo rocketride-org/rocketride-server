@@ -130,5 +130,10 @@ export class ApiKeyAuthProvider implements IAuthProvider {
 		} catch (e) {
 			console.error('[ApiKeyAuthProvider] Failed to clear token:', e);
 		}
+		try {
+			sessionStorage.removeItem(LS_TOKEN);
+		} catch (e) {
+			console.error('[ApiKeyAuthProvider] Failed to clear legacy session token:', e);
+		}
 	}
 }

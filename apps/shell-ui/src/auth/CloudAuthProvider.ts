@@ -226,5 +226,10 @@ export class CloudAuthProvider implements IAuthProvider {
 		} catch (e) {
 			console.error('[CloudAuthProvider] Failed to clear token:', e);
 		}
+		try {
+			sessionStorage.removeItem(LS_TOKEN);
+		} catch (e) {
+			console.error('[CloudAuthProvider] Failed to clear legacy session token:', e);
+		}
 	}
 }

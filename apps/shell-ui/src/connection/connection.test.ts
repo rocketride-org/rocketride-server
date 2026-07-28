@@ -28,6 +28,8 @@ import { ConnectionState, type ConnectionStatus } from 'shared/types/connection'
 import { ConnectionManager } from './connection.js';
 import { ConnectionFailure, withTimeout } from './errors.js';
 import { RemoteManager } from './remote-manager.js';
+import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider.js';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider.js';
 import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants.js';
 
 type EmittedEvent = { event: string; payload: unknown };
@@ -46,6 +48,7 @@ type TestOperation = {
 
 type ConnectionManagerTestAdapter = {
 	client: TestClient | RocketRideClient | null;
+	manager: { disconnect(client: RocketRideClient): Promise<void> } | null;
 	_attachPromise: Promise<void>;
 	serverUri: string;
 	pendingEvents: Map<string, unknown>;
@@ -220,6 +223,36 @@ test('clearToken removes current and legacy stored tokens', () => {
 		createTestManager().manager.clearToken();
 		assert.deepEqual(removedLocalKeys, ['rr:user_token']);
 		assert.deepEqual(removedSessionKeys, ['rr:user_token']);
+	} finally {
+		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
+		else delete (globalThis as { localStorage?: Storage }).localStorage;
+		if (originalSessionStorage) Object.defineProperty(globalThis, 'sessionStorage', originalSessionStorage);
+		else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
+	}
+});
+
+test('auth providers sign out by removing current and legacy stored tokens', async () => {
+	const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+	const originalSessionStorage = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+
+	try {
+		for (const provider of [ApiKeyAuthProvider.getInstance(), CloudAuthProvider.getInstance()]) {
+			const removedLocalKeys: string[] = [];
+			const removedSessionKeys: string[] = [];
+			Object.defineProperty(globalThis, 'localStorage', {
+				configurable: true,
+				value: { removeItem: (key: string) => removedLocalKeys.push(key) },
+			});
+			Object.defineProperty(globalThis, 'sessionStorage', {
+				configurable: true,
+				value: { removeItem: (key: string) => removedSessionKeys.push(key) },
+			});
+
+			await provider.signOut();
+
+			assert.deepEqual(removedLocalKeys, [LS_TOKEN]);
+			assert.deepEqual(removedSessionKeys, [LS_TOKEN]);
+		}
 	} finally {
 		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
 		else delete (globalThis as { localStorage?: Storage }).localStorage;
@@ -610,7 +643,7 @@ test('disconnect and logout invalidate an in-flight operation before client clea
 	for (const action of ['disconnect', 'logout'] as const) {
 		let resolveLogin: ((result: ConnectResult) => void) | undefined;
 		let disconnectCalls = 0;
-		const { manager } = createTestManager();
+		const { manager, emitted } = createTestManager();
 		manager.serverUri = 'https://shell.example.test';
 		manager.clearToken = () => {};
 		manager.clearSessionAppId = () => {};
@@ -623,8 +656,29 @@ test('disconnect and logout invalidate an in-flight operation before client clea
 		await manager[action]();
 		resolveLogin!(authenticatedResult);
 		assert.equal(await connecting, null);
-		assert.ok(disconnectCalls >= 1);
+		assert.equal(disconnectCalls, 1);
+		assert.deepEqual(
+			emitted.filter(({ event }) => event === 'shell:disconnected'),
+			[{ event: 'shell:disconnected', payload: { reason: 'Disconnected by request', hasError: false } }],
+		);
 	}
+});
+
+test('disconnect does not publish an intentional disconnected event after a newer generation takes ownership', async () => {
+	const { manager, emitted } = createTestManager();
+	let disconnectCalls = 0;
+	manager.client = testClient();
+	manager.manager = {
+		disconnect: async () => {
+			disconnectCalls++;
+			manager.connectionGeneration++;
+		},
+	};
+
+	await manager.disconnect();
+
+	assert.equal(disconnectCalls, 1);
+	assert.deepEqual(emitted.filter(({ event }) => event === 'shell:disconnected'), []);
 });
 
 test('bootstrap stored-token login publishes through the accepted operation once', async () => {
