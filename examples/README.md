@@ -148,6 +148,7 @@ chat -> Guild.ai -> response
 
 - Sends the chat input to the agent configured on the node, waits for the Guild session to finish, and emits its answer
 - Deterministic: the step runs the agent exactly once, no prompt tuning
+- Each run starts a billed Guild session. On timeout the step raises but does **not** cancel the session on Guild's side (it keeps running and billing), so re-running the pipeline starts a new one — raise the node's session timeout rather than re-running a slow session
 - See the [tool_guild README](../nodes/src/nodes/tool_guild/README.md) for creating a Guild trigger API key
 
 **Required env vars:** `ROCKETRIDE_GUILD_KEY_ID`, `ROCKETRIDE_GUILD_KEY_SECRET`, `ROCKETRIDE_GUILD_OWNER`, `ROCKETRIDE_GUILD_WORKSPACE`, `ROCKETRIDE_GUILD_AGENT`
