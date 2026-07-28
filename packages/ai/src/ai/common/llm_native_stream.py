@@ -187,6 +187,9 @@ class NativeAnthropicAdapter:
         payload: dict[str, Any] = dict(
             llm._get_request_payload(user_text, stop=STOP_SEQUENCES_VAR.get() or None, stream=True)
         )
+        # Thinking is added per call (not baked into the client) so it rides only this native
+        # streaming path — the agent / expectJson path never gets it.
+        payload.update(getattr(self.chat, '_thinking_mode_kwargs', None) or {})
         _raw_client = getattr(llm, '_client', None)
         client = _raw_client() if callable(_raw_client) else _raw_client
         if client is None:

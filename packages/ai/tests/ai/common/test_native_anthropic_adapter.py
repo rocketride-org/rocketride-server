@@ -48,9 +48,10 @@ class _LLM:
 
 
 class _Chat:
-    def __init__(self, llm):
+    def __init__(self, llm, thinking_mode=None):
         self._llm = llm
         self._extended_thinking = True
+        self._thinking_mode_kwargs = thinking_mode or {}
 
 
 def _chat_with(events, payload=None):
@@ -84,3 +85,20 @@ def test_handler_drives_adapter_and_reports_finish():
     )
     assert text == 'hi'
     assert finishes == ['length']  # max_tokens → length
+
+
+def test_thinking_mode_injected_into_payload_per_call():
+    client = _Client([_RawEvent('content_block_delta', _Delta('text_delta', text='ok'))])
+    chat = _Chat(
+        _LLM({'model': 'claude-sonnet-4-6', 'max_tokens': 1000}, client),
+        thinking_mode={'thinking': {'type': 'adaptive', 'display': 'summarized'}},
+    )
+    list(NativeAnthropicAdapter(chat).stream('q'))
+    assert client.messages.seen['thinking'] == {'type': 'adaptive', 'display': 'summarized'}
+
+
+def test_no_thinking_in_payload_when_mode_empty():
+    client = _Client([_RawEvent('content_block_delta', _Delta('text_delta', text='ok'))])
+    chat = _Chat(_LLM({'model': 'm', 'max_tokens': 10}, client))  # no thinking mode
+    list(NativeAnthropicAdapter(chat).stream('q'))
+    assert 'thinking' not in client.messages.seen
