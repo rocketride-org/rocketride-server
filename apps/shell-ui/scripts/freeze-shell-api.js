@@ -75,6 +75,17 @@ const TMP_DIR = path.join(SHELL_API_DIR, '.freeze-tmp');
 const BEGIN = '// ===== BEGIN FROZEN BUNDLE — do not edit =====';
 const END = '// ===== END FROZEN BUNDLE =====';
 
+// NOTE — the client must never appear in an INPUT position on the surface.
+// The RocketRideClient (an MF shared singleton the shell serves to every app)
+// is frozen INLINE in the bundle with a covariant type floor: additions pass,
+// removals fail — append-only, matching how the singleton actually evolves.
+// But if any surface member takes the client as a function parameter or
+// component prop, the contravariant VALUE floors flip direction there and
+// every additive SDK member reads as a breaking change (this bit
+// WorkspaceProvider once; it now reads the client from useShellConnection()
+// instead of props). Components should always source the client from
+// useShellConnection()/getClient(), never accept it as input.
+
 // Reusable MIT license header for the hand-shaped generated files.
 const MIT_HEADER = [
 	'// MIT License',
@@ -134,59 +145,13 @@ const ts = require(require.resolve('typescript', { paths: [APP_ROOT] }));
 // BUNDLE POST-PROCESSING
 // =============================================================================
 
-/**
- * Remove `private`/`protected` members from every class declaration in the
- * generated bundle.
- *
- * dts-bundle-generator inlines classes (RocketRideClient, ConnectionManager,
- * Documents, ...) as fresh declarations. A class with private/protected members
- * is compared NOMINALLY, so the inlined copy would never match the live class
- * and the conformance assertion would always fail. Stripping the non-public
- * members makes the frozen classes purely structural: the live classes stay
- * assignable to them, while removing a PUBLIC member still breaks conformance.
- *
- * @param {string} dtsText - The generated declaration bundle.
- * @returns {string} The bundle with all non-public class members removed.
- */
-function stripNonPublicMembers(dtsText) {
-	const sourceFile = ts.createSourceFile('bundle.d.ts', dtsText, ts.ScriptTarget.Latest, true);
-	const printer = ts.createPrinter({ removeComments: false, newLine: ts.NewLineKind.LineFeed });
-
-	// True when a class member carries a private or protected modifier.
-	const isNonPublic = (member) => {
-		const mods = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
-		return (
-			!!mods &&
-			mods.some(
-				(m) => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword,
-			)
-		);
-	};
-
-	const transformer = (context) => (root) => {
-		const visit = (node) => {
-			if (ts.isClassDeclaration(node)) {
-				// Drop non-public members so the class is compared structurally.
-				const members = node.members.filter((m) => !isNonPublic(m));
-				return ts.factory.updateClassDeclaration(
-					node,
-					node.modifiers,
-					node.name,
-					node.typeParameters,
-					node.heritageClauses,
-					members,
-				);
-			}
-			return ts.visitEachChild(node, visit, context);
-		};
-		return ts.visitNode(root, visit);
-	};
-
-	const result = ts.transform(sourceFile, [transformer]);
-	const printed = printer.printFile(result.transformed[0]);
-	result.dispose();
-	return printed;
-}
+// Strip non-public class members from the generated bundle so inlined classes
+// compare STRUCTURALLY rather than nominally. This still matters even with the
+// SDK's dist/types now trimmed at build time: dts-bundle-generator also inlines
+// shell-ui's OWN classes (ConnectionManager, the auth providers) from source,
+// which keep their privates. Shared with the SDK trim so both agree on "not
+// public" — see scripts/lib/stripDts.js.
+const { stripNonPublicMembers } = require('../../../scripts/lib/stripDts');
 
 // =============================================================================
 // PROCESS HELPERS
@@ -293,7 +258,7 @@ function generateCandidate() {
 	}
 	// Strip non-public class members so inlined classes compare structurally,
 	// then normalize trailing whitespace so the no-op comparison is stable.
-	const stripped = stripNonPublicMembers(fs.readFileSync(candidatePath, 'utf8'));
+	const stripped = stripNonPublicMembers(fs.readFileSync(candidatePath, 'utf8'), ts);
 	return `${stripped.replace(/\s+$/, '')}\n`;
 }
 
@@ -510,9 +475,16 @@ function regenerateBarrels(maxN) {
 /** Collect the individually-exported named types from the bundle body. */
 function parseExportedTypes(candidateBody) {
 	const names = new Set();
-	// Inline `export interface X` / `export type X` declarations.
+	// Inline `export interface X` / `export type X` declarations, plus
+	// explicitly-exported classes (`export declare class X`) — classes only
+	// become exported here when api.ts re-exports them by name (with
+	// --export-referenced-types=false merely-referenced classes stay
+	// unexported), so each collected name is importable from './api' and its
+	// covariant type floor gives the class an append-only guarantee. This is
+	// how the inlined RocketRideClient is frozen (additions pass, removals
+	// fail) without entangling the contravariant value floors.
 	let m;
-	const inlineRe = /^export (?:interface|type) (\w+)/gm;
+	const inlineRe = /^export (?:interface|type|declare (?:abstract )?class) (\w+)/gm;
 	while ((m = inlineRe.exec(candidateBody))) names.add(m[1]);
 	// Re-export blocks: `export { A as B, C }`.
 	const blockRe = /export \{([^}]*)\}/g;

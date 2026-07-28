@@ -29,7 +29,7 @@
  */
 
 import { registerRemotes, loadRemote } from '@module-federation/runtime';
-import type { AppManifestEntry, AppDescriptor, AppSettingDefinition } from '../workspace/types';
+import type { AppManifestEntry, AppDescriptor, AppConfiguration } from '../workspace/types';
 
 /**
  * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
@@ -48,7 +48,9 @@ export interface ServerAppEntry {
 	icon?: string;
 	/** Category tags. */
 	categories?: string[];
-	/** App-specific setting definitions. */
+	/** Settings contribution (VSCode contributes.configuration shape). */
+	configuration?: unknown;
+	/** @deprecated Legacy flat settings list from pre-configuration servers. */
 	settings?: unknown[];
 	/** URL to the MF remote entry file. */
 	entry: string;
@@ -118,7 +120,10 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		description:   a.description,
 		icon:          a.icon,
 		categories:    a.categories,
-		settings:      (a.settings ?? []) as AppSettingDefinition[],
+		// Settings contribution — validated structurally by the registry builder,
+		// so legacy array-shaped `settings` rows from an un-reseeded server are
+		// simply ignored rather than crashing the shell.
+		configuration: a.configuration as AppConfiguration | undefined,
 		authenticated: a.authenticated,
 		showHeader:    a.showHeader,
 		showStatusBar: a.showStatusBar,

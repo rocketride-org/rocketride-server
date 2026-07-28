@@ -206,6 +206,13 @@ export interface CheckoutModalBaseProps {
 	 */
 	preselectedPlan?: CheckoutPlan;
 
+	/**
+	 * Discount code (already validated on the pricing page) to apply to a
+	 * preselected-plan checkout. Seeds the applied promo so the auto-advanced
+	 * payment step shows and charges the discounted amount.
+	 */
+	preselectedPromo?: PromoValidation | null;
+
 	/** Fetches available subscription plans from the server. */
 	onFetchPlans: () => Promise<CheckoutPlan[]>;
 

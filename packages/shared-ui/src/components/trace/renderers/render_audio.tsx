@@ -4,6 +4,7 @@
 
 import { ReactElement } from 'react';
 import { RS } from './styles';
+import { isMediaResult, renderMediaResult, MediaResultData } from './render_media_result';
 
 // =============================================================================
 // TYPE GUARD
@@ -23,11 +24,13 @@ interface AudioMetaData {
 	file_size?: number;
 }
 
-type AudioData = AudioStreamData | AudioMetaData;
+type AudioData = AudioStreamData | AudioMetaData | MediaResultData;
 
 export function isAudio(data: unknown): data is AudioData {
 	if (!data || typeof data !== 'object') return false;
 	const d = data as Record<string, unknown>;
+	// Final-result media entry: {mime_type, audio|path, metadata?}
+	if (isMediaResult(data, 'audio')) return true;
 	// Stream format
 	if (typeof d.action === 'number') return true;
 	// Metadata format
@@ -58,6 +61,10 @@ export function summaryAudio(data: AudioData): string {
 // =============================================================================
 
 export function renderAudio(data: AudioData): ReactElement {
+	if (isMediaResult(data, 'audio')) {
+		return renderMediaResult('audio', data);
+	}
+
 	if ('action' in data && typeof data.action === 'number') {
 		const d = data as AudioStreamData;
 		const actionName = AUDIO_ACTIONS[d.action] ?? `Action ${d.action}`;

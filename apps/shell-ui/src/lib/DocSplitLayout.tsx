@@ -34,7 +34,7 @@ import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
-import type { Documents, LayoutNode, LayoutSplit } from './Documents';
+import type { Documents, Public, LayoutNode, LayoutSplit } from './Documents';
 
 // =============================================================================
 // STYLES
@@ -69,7 +69,7 @@ const SIZE_DEBOUNCE_MS = 200;
  */
 export interface DocSplitLayoutProps {
 	/** The Documents instance to read layout state from. */
-	docs: Documents;
+	docs: Public<Documents>;
 	/** Render function for each leaf pane — receives groupId, returns JSX. */
 	renderPane: (groupId: string) => React.ReactNode;
 }
@@ -107,7 +107,7 @@ interface LayoutNodeRendererProps {
 	/** The layout tree node to render. */
 	node: LayoutNode;
 	/** The Documents instance (for persisting resize sizes). */
-	docs: Documents;
+	docs: Public<Documents>;
 	/** Render function for leaf panes. */
 	renderPane: (groupId: string) => React.ReactNode;
 }
@@ -136,7 +136,7 @@ interface SplitRendererProps {
 	/** The split node to render. */
 	node: LayoutSplit;
 	/** The Documents instance. */
-	docs: Documents;
+	docs: Public<Documents>;
 	/** Render function for leaf panes. */
 	renderPane: (groupId: string) => React.ReactNode;
 }

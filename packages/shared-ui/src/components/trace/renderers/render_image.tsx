@@ -4,6 +4,7 @@
 
 import { ReactElement } from 'react';
 import { RS } from './styles';
+import { isMediaResult, renderMediaResult, MediaResultData } from './render_media_result';
 
 // =============================================================================
 // TYPE GUARD
@@ -22,11 +23,13 @@ interface ImageMetaData {
 	file_size?: number;
 }
 
-type ImageData = ImageStreamData | ImageMetaData;
+type ImageData = ImageStreamData | ImageMetaData | MediaResultData;
 
 export function isImage(data: unknown): data is ImageData {
 	if (!data || typeof data !== 'object') return false;
 	const d = data as Record<string, unknown>;
+	// Final-result media entry: {mime_type, image|path, metadata?}
+	if (isMediaResult(data, 'image')) return true;
 	if (typeof d.action === 'number') return true;
 	if (typeof d.format === 'string' || typeof d.width === 'number') return true;
 	return false;
@@ -55,6 +58,10 @@ export function summaryImage(data: ImageData): string {
 // =============================================================================
 
 export function renderImage(data: ImageData): ReactElement {
+	if (isMediaResult(data, 'image')) {
+		return renderMediaResult('image', data);
+	}
+
 	if ('action' in data && typeof data.action === 'number') {
 		const d = data as ImageStreamData;
 		const actionName = IMAGE_ACTIONS[d.action] ?? `Action ${d.action}`;

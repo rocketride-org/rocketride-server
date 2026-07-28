@@ -23,15 +23,15 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-08T03:31:01.867Z
-// Source commit: 31a1f11d40814010991a5d02307b96e5154e3d01
+// Generated:     2026-07-23T18:39:00.513Z
+// Source commit: 6fc82b1bfc6c4b38c0e03658281f9ca491aa3b4e
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
 
 // ===== BEGIN FROZEN BUNDLE — do not edit =====
 import React$1 from 'react';
-import { CSSProperties } from 'react';
+import { CSSProperties, ReactNode, ReactNode as ReactNode$1, RefObject } from 'react';
 declare class DAPException extends Error {
     readonly dapResult: Record<string, unknown>;
     constructor(dapResult: Record<string, unknown>);
@@ -263,6 +263,13 @@ interface MemberRecord {
     role: string;
     /** Membership status (e.g. "active" or "pending"). */
     status: string;
+    /** ISO timestamp of when the membership was created, or null. */
+    createdAt?: string | null;
+    /** Teams the member belongs to (id + display name pairs). */
+    teams?: Array<{
+        id: string;
+        name: string;
+    }>;
 }
 interface TeamRecord {
     /** Unique identifier for the team. */
@@ -293,6 +300,8 @@ interface TeamMemberRecord {
     email: string;
     /** Array of permission strings this user holds within the team. */
     permissions: string[];
+    /** ISO timestamp of when the user joined the team, or null. */
+    createdAt?: string | null;
 }
 interface ProfileUpdate {
     /** Display name (nickname). */
@@ -349,6 +358,8 @@ interface TeamMemberParams {
 interface BillingDetail {
     /** App identifier matching AppManifestEntry.id (e.g. "brandi"). */
     appId: string;
+    /** Resolved app display name (e.g. "Pipe Builder"). */
+    appName?: string;
     /** Stripe sub_* subscription identifier. */
     stripeSubscriptionId: string;
     /** Stripe price_* for the subscribed plan. */
@@ -373,7 +384,7 @@ interface BillingDetail {
         recurring?: Record<string, number>;
     } | null;
     /** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
-    creditLabels: Record<string, string> | null;
+    labels: Record<string, string> | null;
 }
 interface AppPrice {
     /** Internal price UUID. */
@@ -424,8 +435,12 @@ interface LedgerTransaction {
     idempotencyKey: string;
     /** User who triggered the transaction, or null for system events. */
     userId: string | null;
+    /** Resolved display name of the triggering user, or null. */
+    userName?: string | null;
     /** Team context, or null. */
     teamId: string | null;
+    /** Resolved display name of the team context, or null. */
+    teamName?: string | null;
     /** Human-readable context (pipeline name, source, pack_id, etc.). */
     context: Record<string, any> | null;
     /** Line-item detail (e.g. gpu_memory, cpu_utilization). */
@@ -446,6 +461,8 @@ interface TransactionsResult {
 interface UsageRollup {
     /** User or team ID (or '__none__' for unattributed). */
     id: string;
+    /** Resolved display name of the user or team, or null when unresolvable. */
+    name?: string | null;
     /** Consumption per resource type (absolute values — always positive). */
     credits: Record<string, number>;
 }
@@ -575,6 +592,147 @@ interface DeploymentRecord {
     createdAt?: number;
     /** Unix timestamp (seconds). */
     updatedAt?: number;
+}
+type LogRunKind = "dev" | "deploy";
+interface LogStreamRef {
+    projectId: string;
+    source: string;
+    runKind: LogRunKind;
+}
+interface LogChapter {
+    /** Run start (epoch seconds). */
+    beginTime: number;
+    /** First continuum seq of the run. */
+    beginSeq: number;
+    /** Run end (epoch seconds); null while the run is live. */
+    endTime?: number | null;
+    /** 'ok' | 'error' | 'cancelled'; null while the run is live. */
+    outcome?: string | null;
+}
+interface LogActivitySpan {
+    /** Segment id — the raw segment fetch / DVR cache key. */
+    id?: number;
+    /** First continuum seq recorded in this segment. */
+    seq?: number;
+    startTime?: number | null;
+    endTime?: number | null;
+    /** A run begins within this span. */
+    chapterStart: boolean;
+}
+interface LogChaptersResult {
+    chapters: LogChapter[];
+    segments: LogActivitySpan[];
+    /** Retained-window start (the horizon), epoch seconds. */
+    startTime?: number | null;
+    /** Latest activity, epoch seconds. */
+    endTime?: number | null;
+    /** First seq still retained after ring/age eviction. */
+    horizonSeq: number;
+    /** True when no run is currently writing the stream. */
+    completed: boolean;
+}
+interface LogReadParams {
+    /** Inclusive seq lower bound. */
+    fromSeq?: number;
+    /** Inclusive seq upper bound. */
+    toSeq?: number;
+    /** Inclusive eventTime lower bound (epoch seconds). */
+    fromTime?: number;
+    /** Inclusive eventTime upper bound (epoch seconds); omit for "to now". */
+    toTime?: number;
+    /** Read up to and including this segment id. */
+    toSegment?: number;
+    /** Continuation seq from a previous page's `nextSeq`. */
+    cursor?: number;
+    /** Page limit (server clamps to its maximum). */
+    maxEvents?: number;
+    /** Page byte limit (server clamps to its maximum). */
+    maxBytes?: number;
+    /** Server-side event-type filter (e.g. ['output'] for the Log page). */
+    types?: string[];
+}
+interface LogEventBody {
+    /** Continuum emission time (epoch seconds, float), stamped at engine ingress. */
+    eventTime: number;
+    /** Continuum sequence — catalog-seeded, strictly monotonic per stream. */
+    logSeq: number;
+    [key: string]: unknown;
+}
+interface LogEvent {
+    type: "event";
+    event: string;
+    body: LogEventBody;
+    [key: string]: unknown;
+}
+interface LogReadResult {
+    events: LogEvent[];
+    /** Present when paged: pass as `cursor` to continue. */
+    nextSeq?: number;
+    /** Present when the request reached below the retention horizon. */
+    truncatedAtSeq?: number;
+}
+interface LogDeleteResult {
+    deletedSegments: number;
+}
+type LogPosition = number | "live";
+interface LogTraceSummary {
+    /**
+     * Display id. For fold summaries this is the pipe SLOT (reused across
+     * requests); for getTrace results it is the begin seq. Always pass
+     * {@link beginSeq} (or a begin event's seq) to `getTrace` — that is the
+     * trace's permanent identity.
+     */
+    id: number | string;
+    /** The trace's begin-event continuum seq — its PERMANENT identity. */
+    beginSeq?: number;
+    /** Document/object name (the trace's display name). */
+    doc?: string;
+    /** Run start of this trace (epoch seconds). */
+    beginTime?: number;
+    /** Seconds from begin to close (closed traces only). */
+    elapsed?: number;
+    /** Number of component calls seen. */
+    calls?: number;
+    /** True while the trace is still in flight at the position. */
+    open: boolean;
+    /** Segment ids containing this trace's events (sparse expand list). */
+    touched?: number[];
+}
+interface LogTracesResult {
+    /** ALL in-flight traces at the position (bounded by real concurrency). */
+    open: LogTraceSummary[];
+    /** The most recently completed traces before the position (≤ n). */
+    closed: LogTraceSummary[];
+}
+interface LogTraceDetail {
+    summary: LogTraceSummary;
+    /** Every event belonging to this trace, seq-ordered, fully reconstructed. */
+    events: LogEvent[];
+}
+interface LogPlayItem {
+    /** One reconstructed event, delivered in seq order. */
+    event: LogEvent;
+}
+type LogPlayCallback = (item: LogPlayItem) => void;
+interface LogSegmentParams {
+    /** Byte offset to continue from (0 = segment start). */
+    offset?: number;
+    /** Chunk ceiling in bytes (clamped by the server; 0/omitted = server default). */
+    maxBytes?: number;
+}
+interface LogSegmentResult {
+    /** Segment id within the stream. */
+    segment: number;
+    /** Byte offset this chunk starts at. */
+    offset: number;
+    /** Raw JSONL text — every chunk ends on a line boundary, parse standalone. */
+    data: string;
+    /** Total segment size in bytes (grows while the segment is active). */
+    size: number;
+    /** Pass back as `offset` to continue; null when exhausted. */
+    nextOffset: number | null;
+    /** True when this chunk reached the end of the segment. */
+    final: boolean;
 }
 interface TraceInfo {
     /** File path where the error occurred */
@@ -710,6 +868,14 @@ interface OrgInfo {
      */
     teams: TeamInfo[];
 }
+/**
+ * Full identity and authorisation payload returned by the server after a
+ * successful authentication handshake (`auth` command).
+ *
+ * The client caches this object and re-emits it whenever the server pushes
+ * an `apaext_account` event (e.g. after a plan change). The `userToken`
+ * field is used for subsequent reconnects in persist mode.
+ */
 interface ConnectResult {
     /**
      * Short-lived RocketRide session token (`rr_…`) that can be replayed on
@@ -941,6 +1107,14 @@ interface DashboardConnection {
     authenticated: boolean;
     /** AccountInfo.clientid (account identifier). */
     clientId: string | null;
+    /** Stable user identifier resolved server-side from the connection's account (null until the connection authenticates). */
+    userId?: string | null;
+    /** Human display name of the authenticated user — displayName falling back to email (null when unauthenticated or nameless). */
+    userName?: string | null;
+    /** Organization id of the authenticated user (null when unauthenticated or without org membership). */
+    orgId?: string | null;
+    /** Organization display name of the authenticated user (null when unauthenticated or without org membership). */
+    orgName?: string | null;
     /** Masked API key (first 4 + last 4 chars). */
     apikey: string;
     /** Client name/version from auth handshake. */
@@ -1002,6 +1176,110 @@ interface DashboardResponse {
     connections: DashboardConnection[];
     tasks: DashboardTask[];
 }
+interface ListSortSpec {
+    /** The row key to sort by (e.g. 'startTime', 'connectedAt'). */
+    field: string;
+    /** Sort direction. */
+    dir: "asc" | "desc";
+}
+interface ListPageRequest {
+    /** 1-based page number (default 1). */
+    page?: number;
+    /** Rows per page (server-clamped 1..100, default 50). */
+    page_size?: number;
+    /** Free text matched case-insensitively over the command's searchable keys. */
+    search?: string;
+    /** Sort instructions, most significant first; unknown fields are ignored. */
+    sort?: ListSortSpec[];
+    /**
+     * Flat {key: value} filters. A string value means contains (strings) or
+     * coerced equality (booleans/numbers); an array means set membership.
+     * Range bounds ride as separate string entries under `${field}__gte` /
+     * `${field}__lte` keys (a date-only upper bound is end-of-day inclusive).
+     */
+    filters?: Record<string, string | string[]>;
+}
+interface ListPageResponse<TRow> {
+    /** The rows of the requested page. */
+    rows: TRow[];
+    /** Total row count after search/filters, across all pages. */
+    total: number;
+    /** The (clamped) 1-based page that was returned. */
+    page: number;
+    /** The (clamped) page size that was applied. */
+    pageSize: number;
+}
+type ListConnectionsResponse = ListPageResponse<DashboardConnection>;
+type ListTasksResponse = ListPageResponse<DashboardTask>;
+interface DashboardEventBase {
+    /** Unix timestamp when the event occurred. */
+    timestamp: number;
+}
+interface DashboardConnectionAdded extends DashboardEventBase {
+    action: "connection_added";
+    /** Unique monotonic connection identifier. */
+    connectionId: number;
+    /** Client display name from auth handshake. */
+    clientName?: string | null;
+    /** Client version from auth handshake. */
+    clientVersion?: string | null;
+    /** Account identifier. */
+    clientId?: string | null;
+}
+interface DashboardConnectionRemoved extends DashboardEventBase {
+    action: "connection_removed";
+    /** Unique monotonic connection identifier. */
+    connectionId: number;
+    /** Client display name from auth handshake. */
+    clientName?: string | null;
+    /** Client version from auth handshake. */
+    clientVersion?: string | null;
+}
+interface DashboardTaskStarted extends DashboardEventBase {
+    action: "task_started";
+    /** Task display identifier. */
+    taskId: string;
+}
+interface DashboardTaskStopped extends DashboardEventBase {
+    action: "task_stopped";
+    /** Task display identifier. */
+    taskId: string;
+}
+interface DashboardTaskRemoved extends DashboardEventBase {
+    action: "task_removed";
+    /** Task display identifier. */
+    taskId: string;
+}
+interface DashboardTaskError extends DashboardEventBase {
+    action: "task_error";
+    /** Task display identifier. */
+    taskId: string;
+    /** Process exit code. */
+    exitCode: number;
+    /** Exit message from the engine. */
+    exitMessage?: string | null;
+}
+interface DashboardAuthFailed extends DashboardEventBase {
+    action: "auth_failed";
+    /** Unique monotonic connection identifier. */
+    connectionId: number;
+    /** Reason the auth was rejected. */
+    reason: string;
+}
+interface DashboardMonitorChanged extends DashboardEventBase {
+    action: "monitor_changed";
+    /** Unique monotonic connection identifier. */
+    connectionId: number;
+    /** Client display name from auth handshake. */
+    clientName?: string | null;
+    /** Client version from auth handshake. */
+    clientVersion?: string | null;
+    /** The monitor key that changed. */
+    key: string;
+    /** Whether the monitor was added or removed. */
+    change: "subscribed" | "unsubscribed";
+}
+type DashboardEvent = DashboardConnectionAdded | DashboardConnectionRemoved | DashboardTaskStarted | DashboardTaskStopped | DashboardTaskRemoved | DashboardTaskError | DashboardAuthFailed | DashboardMonitorChanged;
 interface PIPELINE_RESULT {
     /** Unique identifier for this processing result (UUID format) */
     name: string;
@@ -1053,6 +1331,48 @@ interface UPLOAD_RESULT {
     /** Error message if upload or processing failed (when action is 'error') */
     error?: string;
 }
+interface TaskRunningEntry {
+    /** Unique task identifier. */
+    id: string;
+    /** Display name of the task (e.g. 'Parser1.Chat'). */
+    name: string;
+    /** Project identifier. */
+    projectId: string;
+    /** Source component entry point. */
+    source: string;
+}
+interface TaskEventRunning {
+    action: "running";
+    tasks: TaskRunningEntry[];
+}
+interface TaskEventBegin {
+    action: "begin";
+    /** Display name of the task. */
+    name: string;
+    /** Project identifier. */
+    projectId: string;
+    /** Source component identifier. */
+    source: string;
+}
+interface TaskEventEnd {
+    action: "end";
+    /** Display name of the task. */
+    name: string;
+    /** Project identifier. */
+    projectId: string;
+    /** Source component identifier. */
+    source: string;
+}
+interface TaskEventRestart {
+    action: "restart";
+    /** Display name of the task. */
+    name: string;
+    /** Project identifier. */
+    projectId: string;
+    /** Source component identifier. */
+    source: string;
+}
+type TaskEvent = TaskEventRunning | TaskEventBegin | TaskEventEnd | TaskEventRestart;
 interface ServiceInvokeSlot {
     /** Human-readable description of what this slot expects. */
     description: string;
@@ -1760,8 +2080,15 @@ declare class BillingApi {
     /**
      * Fetches paginated transaction detail from the credit ledger.
      *
+     * Sort / filters / search follow the platform list-API convention: sorters
+     * name camelCase row keys; filter values are a string (type-driven match)
+     * or an array (set membership), with `field__gte` / `field__lte` string
+     * entries for ranges; search matches case-insensitively across the
+     * ledger's string columns. Unknown keys are dropped server-side, and the
+     * caller's org/scope restriction always applies first.
+     *
      * @param orgId    - Organisation UUID.
-     * @param options  - Pagination and scope options.
+     * @param options  - Pagination, scope, and list-convention query options.
      * @returns Paginated transaction result.
      */
     getTransactions(orgId: string, options?: {
@@ -1770,7 +2097,22 @@ declare class BillingApi {
         page?: number;
         pageSize?: number;
         since?: string;
+        sort?: {
+            field: string;
+            dir: "asc" | "desc";
+        }[];
+        filters?: Record<string, string | string[]>;
+        search?: string;
     }): Promise<TransactionsResult>;
+    /**
+     * Fetches distinct values of one ledger column (org-scoped server-side)
+     * for the transaction grid's enum checklist filters.
+     *
+     * @param orgId - Organisation UUID.
+     * @param field - camelCase wire key (e.g. 'type', 'resource').
+     * @returns Sorted distinct values ([] for unknown/excluded fields).
+     */
+    getTransactionDistinct(orgId: string, field: string): Promise<(string | number | boolean)[]>;
     /**
      * Fetches per-user consumption rollup for an org.
      *
@@ -1893,6 +2235,160 @@ declare class DeployApi {
         schedule?: string;
     }): Promise<void>;
 }
+declare class LogEventStream {
+    /** @param client - Owning client. @param stream - Identity tuple. */
+    constructor(client: RocketRideClient, stream: LogStreamRef);
+    /**
+     * The stream's chapters (runs) — begin/end/outcome per run.
+     *
+     * @returns The chapters list (freshly fetched when the cache aged out).
+     */
+    getChapters(): Promise<LogChaptersResult["chapters"]>;
+    /**
+     * Position the session. Subsequent `get*()` calls answer as of this
+     * position; `play()` continues from it.
+     *
+     * @param pos - Epoch seconds, or 'live' to pin to now.
+     */
+    seek(pos: LogPosition): Promise<void>;
+    /** The current position (epoch seconds); rides the wall clock when live. */
+    position(): number;
+    /**
+     * The full status snapshot at the position (pipeflow byPipe included).
+     *
+     * @returns The reconstructed status body, or null before the first status.
+     */
+    getStatus(): Promise<Record<string, unknown> | null>;
+    /**
+     * The console exactly as it read at the position (terminal semantics:
+     * the keyframe scrollback + everything printed since, last `n` lines).
+     *
+     * @param n - Number of trailing lines wanted.
+     * @returns The last `n` console lines as of the position.
+     */
+    getConsole(n: number): Promise<string[]>;
+    /**
+     * Trace state at the position: ALL in-flight traces plus the `n` most
+     * recently completed (the sliding recency window).
+     *
+     * @param n - Closed-window size; must be ≤ 50.
+     * @returns Open + recently-closed trace summaries.
+     */
+    getTraces(n: number): Promise<LogTracesResult>;
+    /**
+     * One trace's complete event set (its call tree's raw material).
+     *
+     * IDENTITY CONTRACT: a trace is identified by its BEGIN event's continuum
+     * seq — the only key that is unique forever. The flow events' `body.id`
+     * is a pipe SLOT, reused across requests, and cannot name a trace.
+     * Resolution is deterministic and position-independent: locate the
+     * segment containing the seq (the span table carries each segment's
+     * first seq), find the begin event, then collect that slot's events
+     * forward until its matching `end`, crossing segments and the live tail
+     * as needed. Fails when the seq has fallen below the retention horizon,
+     * or when no trace-begin event exists at that seq (a recycled slot id
+     * or a fold docId is NOT a trace identity).
+     *
+     * @param traceId - The trace's begin-event continuum seq.
+     * @returns Summary + every event of the trace, seq-ordered.
+     */
+    getTrace(traceId: number): Promise<LogTraceDetail>;
+    /**
+     * Stream reconstructed events to `cb`, in order, strictly after the seed
+     * watermark, paced by `speed`. Auto-pins to live on catching the wall
+     * clock; while pinned, delivery follows event arrival.
+     *
+     * @param pos - Optional position to seek first (number | 'live').
+     * @param speed - 0 = as fast as possible; 0.25/1/10 = time-scaled.
+     * @param cb - Receives `{ event }` items.
+     */
+    play(pos: LogPosition | undefined, speed: number, cb: LogPlayCallback): Promise<void>;
+    /** Freeze the position (unpins live; a later play resumes from here). */
+    pause(): void;
+    /**
+     * Feed one live event from the host's subscription. While pinned and
+     * playing, it is delivered to the callback immediately (arrival paces
+     * live delivery); otherwise it is retained for later catch-up.
+     *
+     * @param msg - A stamped event message from the live feed.
+     */
+    ingestLive(msg: LogEvent): void;
+    /** Dispose the session (stops playback, clears caches). */
+    closeEventStream(): void;
+}
+declare class LogApi {
+    /** @param client - The parent RocketRideClient that owns this namespace. */
+    constructor(client: RocketRideClient);
+    /**
+     * Opens a DVR session over one source continuum.
+     *
+     * The session is the replay/monitoring surface: position-based
+     * `seek`/`get*`/`play` over reconstructed events — storage layout
+     * (segments, keyframes, deltas) is invisible. Dispose with
+     * {@link LogEventStream.closeEventStream} when done.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @returns A new, unpositioned session (call `seek()` first).
+     */
+    openEventStream(stream: LogStreamRef): LogEventStream;
+    /**
+     * Lists a stream's chapters (tracks) and activity-bar metadata.
+     *
+     * Everything the timeline needs from one small read: per-run begin/end
+     * times + starting seq + outcome, segment activity spans, the stream's
+     * retained window, and the retention horizon.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @returns Chapters, activity spans, and stream timeline metadata.
+     */
+    chapters(stream: LogStreamRef): Promise<LogChaptersResult>;
+    /**
+     * Reads a seq/time range of events from the continuum, paged.
+     *
+     * Range forms: `fromSeq`/`toSeq`, `fromTime`/`toTime` (omit the upper
+     * bound for "to now"), or `fromTime` → `toSegment`. When the response
+     * carries `nextSeq`, pass it back as `cursor` to continue; a
+     * `truncatedAtSeq` flag means the request reached below the retention
+     * horizon.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param params - Range, paging, and filter options.
+     * @returns The page of events plus paging/truncation metadata.
+     */
+    read(stream: LogStreamRef, params?: LogReadParams): Promise<LogReadResult>;
+    /**
+     * Fetches one segment's raw JSONL bytes, chunked by byte offset.
+     *
+     * The bulk replay path: the server does no line scanning, filtering, or
+     * parsing — it hands over the immutable segment content in
+     * whole-line-aligned chunks (each response ends on a newline, so every
+     * chunk parses standalone). Repeat with the returned `nextOffset` until
+     * `final`. The active segment is served up to its current length; the
+     * live subscription covers growth past that. The segment table (ids +
+     * time extents) comes from {@link chapters}.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param segment - Segment id within the stream.
+     * @param params - Byte offset to continue from + optional chunk ceiling.
+     * @returns One raw chunk plus paging metadata.
+     */
+    segment(stream: LogStreamRef, segment: number, params?: LogSegmentParams): Promise<LogSegmentResult>;
+    /**
+     * Deletes log data for a stream (destructive).
+     *
+     * Provide `beforeTime` to drop segments wholly older than the cutoff
+     * (chapters trimmed, horizon advanced), or `all: true` to remove the
+     * entire stream including its control file.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param options - Cutoff time and/or the delete-all flag.
+     * @returns The number of segments deleted.
+     */
+    delete(stream: LogStreamRef, options: {
+        beforeTime?: number;
+        all?: boolean;
+    }): Promise<LogDeleteResult>;
+}
 declare class DataPipe {
     /**
      * Creates a new DataPipe instance.
@@ -1977,7 +2473,7 @@ type MonitorKey = {
     source: string;
     pipeId?: number;
 };
-declare class RocketRideClient extends DAPClient {
+export declare class RocketRideClient extends DAPClient {
     /** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
     readonly _ssePipeCallbacks: Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>;
     /**
@@ -2147,10 +2643,20 @@ declare class RocketRideClient extends DAPClient {
      * Backward-compatible wrapper around ``logout()`` + ``detach()``.
      */
     disconnect(): Promise<void>;
-    // ============================================================================
-    // PING METHODS
-    // ============================================================================
-
+    /**
+     * Update the environment variables used for pipeline substitution.
+     *
+     * Replaces the client's env dictionary (seeded from `config.env` or, in
+     * Node, from `process.env`) with a copy of the given map. {@link use} and
+     * {@link validate} read it to build the `ROCKETRIDE_*` substitution env
+     * sent with the pipeline; `attach()` also consults `ROCKETRIDE_APIKEY`
+     * from it when no explicit credential is supplied. Mirrors the Python
+     * SDK's `set_env`.
+     *
+     * @param env - The new environment map; copied, so later caller-side
+     *   mutations have no effect.
+     */
+    setEnv(env: Record<string, string>): void;
     /**
      * Test connectivity to the RocketRide server.
      *
@@ -2670,6 +3176,27 @@ declare class RocketRideClient extends DAPClient {
      */
     getDashboard(): Promise<DashboardResponse>;
     /**
+     * Retrieve one page of the caller's active connections (platform list-API
+     * convention). Rows carry the same shape as the dashboard's connections
+     * list; the default sort is connectedAt ascending (registration order,
+     * matching the dashboard) with the monotonic id as tiebreak.
+     * Requires 'task.monitor' permission.
+     *
+     * @param req - Paging, search, sort, and filter arguments (all optional)
+     * @returns The standard { rows, total, page, pageSize } envelope
+     */
+    listConnections(req?: ListPageRequest): Promise<ListConnectionsResponse>;
+    /**
+     * Retrieve one page of the caller's tasks (platform list-API convention).
+     * Rows carry the same shape as the dashboard's tasks list; the default
+     * sort is startTime ascending (creation order, matching the dashboard)
+     * with the task id as tiebreak. Requires 'task.monitor' permission.
+     *
+     * @param req - Paging, search, sort, and filter arguments (all optional)
+     * @returns The standard { rows, total, page, pageSize } envelope
+     */
+    listTasks(req?: ListPageRequest): Promise<ListTasksResponse>;
+    /**
      * Start a cProfile profiling session on the server process or a pipeline.
      *
      * @param target  - Task token to profile a pipeline subprocess, or
@@ -2833,6 +3360,18 @@ declare class RocketRideClient extends DAPClient {
      */
     get deploy(): DeployApi;
     /**
+     * Run-log API namespace — chapters, ranged reads, and deletion over the
+     * per-task event continuum.
+     *
+     * @example
+     * ```typescript
+     * const stream = { projectId: 'proj', source: 'chat_1', runKind: 'dev' as const };
+     * const { chapters } = await client.log.chapters(stream);
+     * const { events } = await client.log.read(stream, { fromSeq: chapters[0].beginSeq });
+     * ```
+     */
+    get log(): LogApi;
+    /**
      * Sends a DAP command, unwraps the response body, and throws on failure.
      *
      * This is the single public entry point for all typed DAP operations.
@@ -2887,6 +3426,7 @@ interface ShellConnectionState {
 }
 declare function useShellConnection(): ShellConnectionState;
 declare function useAuthUser(): ConnectResult | null;
+declare function useLogout(): (() => void) | null;
 /**
  * Props injected by the shell into the app's main `<App />` component.
  *
@@ -2909,7 +3449,15 @@ export interface ShellSidebarProps {
     /** True when the sidebar is in collapsed (icon-only) mode. */
     collapsed: boolean;
 }
-interface WorkspacePrefs {
+/**
+ * Persisted preferences for a single app instance.
+ *
+ * Some fields (`theme`, `sidePanelOpen`) are also written to `global.json` so
+ * they survive app switches — see `useWorkspaceState.writeGlobalPrefs`.
+ * The index signature allows apps to stash additional preference keys without
+ * extending this interface.
+ */
+export interface WorkspacePrefs {
     /** ID of the currently active view or panel within the app. */
     activeView: string;
     /** ID of the currently active sidebar activity (e.g. 'explorer', 'search'). */
@@ -2921,43 +3469,110 @@ interface WorkspacePrefs {
     /** Extensible — apps can store additional preference keys. */
     [key: string]: unknown;
 }
-interface AppSettingDefinition {
-    /** Key name — also used as the ShellApiConfig key (e.g. 'ROCKETRIDE_OPENAI_KEY'). */
-    key: string;
-    /** Human-readable label shown in the settings UI. */
-    label: string;
-    /** Optional description shown below the field. */
+/**
+ * Complete persisted state for one app.
+ *
+ * Written to `<workspaceDir>/<appId>.workspace.json`.  At runtime each app's
+ * slice lives under `WorkspaceState.apps[appId]`.
+ *
+ * `prefs` holds shell-managed preferences.  `appState` is an opaque blob
+ * owned entirely by the app (or the Documents component library) — the shell
+ * persists it but never reads its contents.
+ */
+export interface AppWorkspaceState {
+    /** Shell-managed preferences (theme, active view, sidebar state). */
+    prefs: WorkspacePrefs;
+    /** Opaque app-owned state. Used by the Documents library to persist open docs, editors, groups, etc. */
+    appState: Record<string, unknown>;
+}
+/**
+ * Top-level workspace state shape.
+ *
+ * Only `activeAppId` is stored in `global.json`; individual app data lives in
+ * per-app files.  The `apps` map is the in-memory union of all loaded app
+ * states during a session.
+ */
+export interface WorkspaceState {
+    version: 3;
+    activeAppId: string;
+    apps: Record<string, AppWorkspaceState>;
+}
+/** Value types a setting may hold — mirrors the JSON primitive types. */
+export type SettingValue = string | number | boolean;
+/**
+ * JSON-Schema-style declaration of a single setting.
+ *
+ * The shape is 100% format-compatible with a property entry in the VSCode
+ * extension specification's `contributes.configuration` section, so anyone who
+ * has written a VSCode extension already knows how to declare a RocketRide
+ * setting.  RocketRide-specific editors are expressed through the JSON-Schema
+ * `format` keyword (unknown formats are legal JSON Schema), keeping the
+ * structural compatibility intact.
+ *
+ * The display label is DERIVED from the setting key, VSCode-style:
+ * 'rocketride.pipeBuilder.pipelineTraceLevel' renders as
+ * "Pipeline Builder: Pipeline Trace Level" — there is no label field.
+ * Key casing is therefore label casing (use 'pipelineTTL' for "Pipeline TTL").
+ */
+export interface SettingSchema {
+    /** JSON type of the value. Drives the rendered control. */
+    type: "string" | "number" | "integer" | "boolean";
+    /**
+     * Default value when the user has not set this key.  Defaults live ONLY in
+     * the schema — `settings.json` stores deltas and never contains defaults.
+     */
+    default?: SettingValue;
+    /** Plain-text description shown below the setting label. */
     description?: string;
-    /** Default value used when the user has not configured this setting. */
-    default?: string;
-    /** If true and no value is set, the shell highlights this as missing. */
-    required?: boolean;
+    /** Markdown variant of the description (preferred when both are present). */
+    markdownDescription?: string;
     /**
-     * Field type.  Defaults to `'text'` (a regular text input).
+     * Fixed value choices — renders as a dropdown. Typed string[] per the
+     * frozen v0 contract; integer/number schemas may carry numeric entries in
+     * the manifest JSON at runtime, so render through String() and coerce the
+     * selected value back via `type`.
+     */
+    enum?: Array<string | number>;
+    /** Per-choice descriptions aligned with `enum`. */
+    enumDescriptions?: string[];
+    /** Ordering hint within the section (lower renders first). */
+    order?: number;
+    /**
+     * RocketRide editor extension via the JSON-Schema `format` keyword:
      *
-     * - `'text'`    — standard text / password input (default)
-     * - `'select'`  — dropdown with fixed options from the `options` array
-     * - `'service'` — dropdown populated from the cached service catalog,
-     *                  filtered by `classType`.  When selected the shell
-     *                  automatically shows a companion API-key field whose
-     *                  key follows the `ROCKETRIDE_<SUFFIX>_KEY` convention.
-     * - `'envkey'`  — text input for a raw API key, or dropdown to pick a
-     *                  server-side environment variable (from account env keys).
+     * - `'rocketride.envkey'`  — the value is the NAME of a server-side
+     *   Variable (never the secret itself); renders as a Variable picker.
+     * - `'rocketride.service'` — the value is a service id from the cached
+     *   service catalog; renders as a service dropdown (see `classType`).
      */
-    type?: "text" | "select" | "service" | "envkey";
-    /**
-     * Fixed options for `type: 'select'` — each entry is `{ value, label }`.
-     */
-    options?: {
-        value: string;
-        label: string;
-    }[];
-    /**
-     * Service class filter — only used when `type` is `'service'`.
-     * The dropdown is populated with services whose `classType` array
-     * includes this value (e.g. `'llm'`).
-     */
+    format?: string;
+    /** Service classType filter — only used with format 'rocketride.service'. */
     classType?: string;
+    /** Extension keyword: highlight the setting as required when unset. */
+    required?: boolean;
+    /** Extension keyword: placeholder text for empty string inputs. */
+    placeholder?: string;
+}
+/**
+ * An app's settings contribution — the exact shape of the
+ * `contributes.configuration` section in the VSCode extension manifest
+ * specification.
+ *
+ * Declared in the app's package.json under
+ * `appManifest.contributes.configuration` and delivered to the shell on the
+ * manifest's `configuration` field.  Keys are dotted and prefixed with the
+ * app id (e.g. 'rocketride.pipeBuilder.pipelineTraceLevel') so they are
+ * globally unique and self-identify their owning app.
+ */
+export interface AppConfiguration {
+    /**
+     * Section title shown in the settings page nav.  Defaults to the app name.
+     * Apps that declare the SAME title are merged into one section (shared
+     * settings across a family of apps, e.g. games).
+     */
+    title?: string;
+    /** Setting declarations keyed by full dotted setting key. */
+    properties: Record<string, SettingSchema>;
 }
 /**
  * Lightweight descriptor for an app, available at boot before the app's
@@ -2988,8 +3603,12 @@ interface AppManifestEntry$1 {
     readme?: string;
     /** Categories for filtering/grouping in the app store. */
     categories?: string[];
-    /** Settings required by this app. Available at boot from the manifest. */
-    settings?: AppSettingDefinition[];
+    /**
+     * The app's settings contribution (VSCode `contributes.configuration`
+     * shape).  Available at boot from the manifest — the settings registry is
+     * flattened from the configurations of all desktop apps.
+     */
+    configuration?: AppConfiguration;
     /**
      * When false, the app can run without authentication (e.g. home/landing page).
      * Defaults to true — most apps require the user to be logged in.
@@ -3009,6 +3628,13 @@ interface AppManifestEntry$1 {
     appStatus?: string;
     /** Whether this app is on the user's desktop. */
     onDesktop?: boolean;
+    /**
+     * The shell-api contract version this app was built against (stamped into
+     * apps.json by the registration step from shell-ui's apiver.ts). The lowest
+     * value across all registered apps is the oldest frozen version still in use,
+     * which is what can be safely pruned once nothing depends on it.
+     */
+    shellApiVersion?: number;
     /** Async loader — dynamically imports and returns the full AppDescriptor. */
     load: () => Promise<AppDescriptor>;
 }
@@ -3048,7 +3674,14 @@ export interface AppDescriptor {
         [key: string]: React$1.ComponentType<any> | undefined;
     };
 }
-interface ShellBrandingConfig {
+/**
+ * Branding tokens for a specific app or the login screen.
+ *
+ * All fields except `appName` are optional React nodes or strings that the
+ * shell renders in designated branding slots (sidebar logo, welcome screen,
+ * etc.).
+ */
+export interface ShellBrandingConfig {
     /** App display name used in the sidebar header and tab bar. */
     appName: string;
     /** Logo rendered in the expanded sidebar header. */
@@ -3072,19 +3705,34 @@ interface ShellBrandingConfig {
     /** Subtitle text on the welcome/loading screen. */
     welcomeSubtitle?: string;
 }
-interface ShellThemeOption {
+/**
+ * A single theme option shown in the shell's theme picker.
+ */
+export interface ShellThemeOption {
     /** CSS theme bundle identifier (e.g. 'rocketride-light'). */
     id: string;
     /** Human-readable display name (e.g. 'RocketRide Light'). */
     name: string;
 }
-interface ShellThemeConfig {
+/**
+ * Theme configuration supplied by the host (cloud) app.
+ *
+ * `options` populates the theme picker list.  `onThemeChange` is called after
+ * the shell updates `prefs.theme` — used for fetching and applying theme CSS.
+ */
+export interface ShellThemeConfig {
     /** Ordered list of theme choices shown in the theme picker. */
     options: ShellThemeOption[];
     /** Called after shell updates prefs.theme, for fetching/applying theme CSS. */
     onThemeChange?: (themeId: string) => void;
 }
-interface ShellAccountConfig {
+/**
+ * Account information and logout callback provided by the host shell.
+ *
+ * The shell uses these to populate the account overlay and wire up the logout
+ * button.  All fields are optional to allow partial or deferred availability.
+ */
+export interface ShellAccountConfig {
     /** Display name of the authenticated user. */
     userName?: string;
     /** Email address of the authenticated user. */
@@ -3143,7 +3791,53 @@ export interface ShellConfig {
     /** Called once on mount before auth — use for initial theme application etc. */
     onInit?: () => void;
 }
-interface IVirtualFileSystem {
+interface RegistryEntry {
+    /** Full dotted setting key (e.g. 'rocketride.pipeBuilder.pipelineTraceLevel'). */
+    key: string;
+    /** The setting's JSON-Schema-style declaration. */
+    schema: SettingSchema;
+}
+interface RegistrySection {
+    /** Stable section id (the first contributing app's id). */
+    id: string;
+    /** Display title (configuration.title, falling back to the app name). */
+    title: string;
+    /** Ids of every app contributing to this section. */
+    appIds: string[];
+    /** Ordered setting entries (schema `order` first, then declaration order). */
+    entries: RegistryEntry[];
+}
+interface SettingsRegistry {
+    /** Nav sections in first-contribution order. */
+    sections: RegistrySection[];
+    /** Every declared schema keyed by full setting key. */
+    schemas: Map<string, SettingSchema>;
+    /** Default values for every key that declares one. */
+    defaults: Record<string, SettingValue>;
+}
+type ActivityEvent = {
+    source: "task";
+    body: TaskEvent;
+    receivedAt: number;
+} | {
+    source: "dashboard";
+    body: DashboardEvent;
+    receivedAt: number;
+};
+/**
+ * Virtual file system interface — the single abstraction for all file I/O.
+ *
+ * Created by the hosting container and passed as one prop through the
+ * entire component stack.  Both Explorer (file tree UI) and the
+ * Documents singleton (content lifecycle) use this interface.
+ *
+ * Implementations:
+ *   - RocketVFS:  client.fsListDir / fsReadJson / fsWriteJson / fsRename / fsDelete / fsMkdir
+ *   - VSCodeVFS:  postMessage to extension host
+ *   - ImageVFS:   REST API calls
+ *   - LocalVFS:   browser File System Access API
+ */
+export interface IVirtualFileSystem {
     /**
      * Lists the contents of a directory.
      *
@@ -3189,6 +3883,142 @@ interface IVirtualFileSystem {
      */
     mkdir(path: string): Promise<void>;
 }
+/**
+ * A file or directory entry in the document tree.
+ *
+ * The host builds a flat array of these; Explorer derives the directory
+ * hierarchy on the fly via path parsing (S3-style).
+ */
+interface ExplorerEntry {
+    /** Full relative path (e.g. 'ingest/analyze.pipe' or 'photos/vacation'). */
+    path: string;
+    /** Entry type — 'file' (default) or 'dir'. */
+    type?: "file" | "dir";
+    /** Optional unique identifier for the document. */
+    documentId?: string;
+    /**
+     * Optional child items displayed under this entry when expanded.
+     * For pipeline apps: source components.  For other apps: layers, tracks, etc.
+     */
+    children?: ExplorerChild[];
+}
+/**
+ * A child item under a document entry.
+ */
+interface ExplorerChild {
+    /** Unique child ID. */
+    id: string;
+    /** Display name. */
+    name: string;
+    /** Optional type/category label. */
+    provider?: string;
+}
+/**
+ * Status for a single entry or child item.
+ */
+interface ExplorerStatus {
+    /** Whether the entry/child is actively running/processing. */
+    running: boolean;
+    /** Error messages. */
+    errors: string[];
+    /** Warning messages. */
+    warnings: string[];
+}
+/**
+ * Configuration for the Explorer component.
+ *
+ * Allows the host to customise labels, file extension handling, and
+ * which features are enabled.
+ */
+interface ExplorerConfig {
+    /** Section header title (e.g. "Pipelines", "Photos", "Files"). */
+    title: string;
+    /** File extensions to filter/display (e.g. ['.pipe']). Null = show all. */
+    extensions?: string[] | null;
+    /**
+     * Custom display name formatter.  Receives the filename (not full path)
+     * and returns the display string.  Default strips known extensions.
+     *
+     * @param filename - The raw filename.
+     * @returns The display name.
+     */
+    displayName?: (filename: string) => string;
+    /** Placeholder text for the inline create input. Default: 'file name'. */
+    createPlaceholder?: string;
+    /** Empty state message. Default: 'No files'. */
+    emptyMessage?: string;
+    /** Whether to show the "New Folder" action. Default: true. */
+    allowFolders?: boolean;
+}
+interface ExplorerFileAction {
+    /** Stable identifier; also used as the React key. */
+    id: string;
+    /** Menu item label. */
+    label: string;
+    /** Optional leading icon node. */
+    icon?: React$1.ReactNode;
+    /** Invoked with the row's file path when the item is chosen. Omit if using children. */
+    onSelect?: (path: string) => void;
+    /** Submenu items — when present, hovering the item opens a nested menu. May be a static array or a function that receives the file path. */
+    children?: ExplorerFileAction[] | ((path: string) => ExplorerFileAction[]);
+}
+/**
+ * Props for the Explorer component.
+ */
+interface IExplorerProps {
+    /**
+     * Unused — the Explorer no longer performs file operations itself (hosts
+     * provide `entries` and handle actions via callbacks). It stays REQUIRED
+     * because the frozen shell contract (shell-api v1 `DocExplorerProps`) pins
+     * it that way — loosening it fails `shell:check`. Pass {@link NOOP_VFS};
+     * the prop drops out with the next contract version bump.
+     */
+    vfs: IVirtualFileSystem;
+    /** Component configuration (title, extensions, display names). */
+    config: ExplorerConfig;
+    /** Flat array of entries (host-provided). */
+    entries: ExplorerEntry[];
+    /** Status per entry/child, keyed by a string identifier. */
+    statuses?: Map<string, ExplorerStatus>;
+    /** Whether the host is connected (enables/disables action buttons). */
+    isConnected: boolean;
+    /** Whether child action buttons should be shown (e.g. subscription check). */
+    showChildActions?: boolean;
+    /** Currently active/open file path (for highlight). */
+    activeFilePath?: string;
+    /** Called when the user clicks a file entry to open it. */
+    onOpenFile: (path: string) => void;
+    /**
+     * Called for file management operations (rename, delete, create).
+     * Optional — when absent, file management UI is hidden (display-only).
+     */
+    onFileManage?: (action: "rename" | "delete" | "createFolder" | "createFile", path: string, newName?: string) => void;
+    /**
+     * Called when a child item action button is clicked (e.g. run/stop).
+     * Optional — when absent, no action buttons are shown on children.
+     */
+    onChildAction?: (action: "run" | "stop", filePath: string, childId: string, documentId?: string) => void;
+    /**
+     * Host-injected extra actions appended to each file row's kebab menu
+     * (e.g. Export). Optional — omitted hosts (VS Code) show only rename/delete.
+     */
+    fileActions?: ExplorerFileAction[];
+    /** Called when the user clicks the refresh button. */
+    onRefresh: () => void;
+    /**
+     * Called when a file or directory is dragged and dropped onto a directory.
+     * Optional — when absent, internal drag-to-move is disabled.
+     */
+    onMove?: (sourcePath: string, targetDir: string) => void;
+    /**
+     * Called when files are dropped from the OS onto the file tree.
+     * Optional — when absent, upload-by-drop is disabled.
+     *
+     * @param files     - The dropped File objects.
+     * @param targetDir - The directory path they were dropped onto ('' for root).
+     */
+    onUpload?: (files: File[], targetDir: string) => void;
+}
 interface CheckoutPlan {
     /** Internal price UUID. */
     id: string;
@@ -3211,6 +4041,34 @@ interface CheckoutPlan {
     /** ISO 8601 creation timestamp. */
     createdAt: string | null;
 }
+interface PromoValidation$1 {
+    /** Whether the code resolved to an active Stripe promotion code. */
+    valid: boolean;
+    /** Human-readable failure reason when `valid` is false. */
+    reason?: string;
+    /** Canonical code string as stored in Stripe. */
+    code?: string;
+    /** Human-readable description, e.g. "25% off for 3 months". */
+    description?: string;
+    /** Percentage discount (e.g. 25 or 100), if percent-based. */
+    percentOff?: number | null;
+    /** Fixed discount in cents, if amount-based. */
+    amountOffCents?: number | null;
+    /** ISO currency for `amountOffCents`. */
+    currency?: string | null;
+    /** Coupon duration: 'once' | 'repeating' | 'forever'. */
+    duration?: string | null;
+    /** Months the discount repeats for (duration === 'repeating'). */
+    durationInMonths?: number | null;
+    /** Credits granted on redemption ({resource: amount}) — grant codes only. */
+    creditsGranted?: Record<string, number> | null;
+    /** Target app for a grant code — presence marks a hackathon/grant code. */
+    appId?: string | null;
+    /** List price in cents of the plan passed as priceId (if any). */
+    amountCents?: number;
+    /** First-invoice price in cents after the discount (if priceId given). */
+    discountedAmountCents?: number;
+}
 declare enum ConnectionState {
     /** No active connection. */
     DISCONNECTED = "disconnected",
@@ -3223,8 +4081,24 @@ declare enum ConnectionState {
     /** Authentication was rejected by the server (bad/expired/revoked key). */
     AUTH_FAILED = "auth-failed"
 }
-type ConnectionMode = "cloud" | "local" | "onprem" | "docker" | "service" | "oss";
-interface ConnectionStatus {
+/**
+ * The mode of connection — determines credential requirements and server type.
+ *
+ * - cloud:  RocketRide.ai SaaS (OAuth2 PKCE via Zitadel)
+ * - local:  Local engine (VSCode only — no credentials needed)
+ * - onprem: Self-hosted server (API key + host URL)
+ * - docker: Docker container (auto-derived API key)
+ * - service: Service account (auto-derived API key)
+ * - oss:    Open-source server mode (optional API key)
+ */
+export type ConnectionMode = "cloud" | "local" | "onprem" | "docker" | "service" | "oss";
+/**
+ * Structured connection status for UI display and state tracking.
+ *
+ * Both hosts produce this object and expose it via getConnectionStatus().
+ * UI components consume it for status bars, spinners, retry indicators, etc.
+ */
+export interface ConnectionStatus {
     /** Current connection state. */
     state: ConnectionState;
     /** How this connection reaches the server. */
@@ -3242,7 +4116,14 @@ interface ConnectionStatus {
     /** Detailed progress message (e.g. "Reconnecting...", download %). */
     progressMessage?: string;
 }
-interface IAuthProvider {
+/**
+ * Common interface for authentication providers across all hosts.
+ *
+ * Both CloudAuthProvider (OAuth2 PKCE) and ApiKeyAuthProvider implement this.
+ * The shell and VSCode each have platform-specific implementations, but the
+ * contract is identical.
+ */
+export interface IAuthProvider {
     /** Initiate the sign-in flow (may redirect browser or open external URL). */
     signIn(...args: unknown[]): Promise<void>;
     /** Clear stored credentials and sign out. */
@@ -3260,6 +4141,19 @@ interface ShellAppEntry {
     /** Optional description. */
     description?: string;
 }
+/**
+ * Canonical map of all shell event names to their payload shapes.
+ *
+ * Both shell-ui and VSCode emit and listen to events from this map.
+ * Hosts may augment the map with host-specific events via declaration
+ * merging, but the core events listed here must be consistent.
+ *
+ * Events are grouped by concern:
+ * - **Connection lifecycle**: connect/disconnect/status
+ * - **Server data**: push events, account updates, service catalog
+ * - **Auth**: login/logout flows
+ * - **UI coordination**: app switching, subscriptions, theme, sidebar
+ */
 interface ShellConnectionEventMap {
     /** Fired when the WebSocket handshake completes and authentication succeeds. */
     "shell:connected": Record<string, never>;
@@ -3369,10 +4263,13 @@ interface ShellConnectionEventMap {
      * Opens the CheckoutModal. The `app` field is the manifest entry. The
      * optional `plan` preselects a tier and skips the picker — going straight
      * to payment (used by the web pricing page); omit it to show the picker.
+     * The optional `promo` carries a discount code already validated on the
+     * pricing page, so the skipped-picker checkout still applies the discount.
      */
     "shell:subscribe": {
         app: ShellAppEntry;
         plan?: CheckoutPlan;
+        promo?: PromoValidation$1 | null;
     };
     /**
      * User cancelled a subscription for an app from the account/billing UI.
@@ -3480,7 +4377,65 @@ interface IConnectionManager {
      */
     emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void;
 }
-interface IWorkspaceContext {
+declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
+declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
+    top: number;
+    left: number;
+} | null;
+/** One selectable entry in a view's sub-view menu. */
+export interface ViewMenuEntry {
+    /** Stable identifier for the entry; passed back through `onSelect`. */
+    id: string;
+    /** Human-readable label shown in both renderers. */
+    label: string;
+    /** Neutral count badge, e.g. Tokens 48. */
+    count?: number;
+    /** 'error' renders the count badge in --rr-color-error. */
+    severity?: "error";
+    /**
+     * Optional icon shown when a SidebarMenu is collapsed to its icon rail
+     * (design-owner decision: collapsed sidebars show icon-only entries).
+     * Entries without an icon fall back to a first-letter glyph.
+     */
+    icon?: React$1.ReactNode;
+    /**
+     * When true, the entry renders muted and is not selectable — used by
+     * SidebarMenu; ignored by PageViewControl.
+     */
+    disabled?: boolean;
+    /**
+     * Child entries, making this entry an expandable SECTION in SidebarMenu
+     * (one level deep — children never declare children of their own). A
+     * section row does not navigate: clicking it expands its children and
+     * collapses any other open section (accordion — at most ONE section is
+     * open at a time, decision 2026-07-18). While the sidebar is collapsed
+     * to the icon rail, sections flatten: their children render as icon
+     * squares directly. Ignored by PageViewControl and DetailPanel tabs.
+     */
+    children?: ViewMenuEntry[];
+}
+/** The entry list consumed by PageViewControl and SidebarMenu. */
+export interface ViewMenu {
+    /** Ordered list of selectable sub-view entries. */
+    entries: ViewMenuEntry[];
+}
+/** The shared preferences accessor: read one key, write one key. */
+export interface IPrefsApi {
+    /** Current value for `key`, or `undefined` if unset. Caller narrows the type. */
+    getPref: (key: string) => unknown;
+    /** Persist `value` under `key` (shallow-merged into the prefs bag). */
+    setPref: (key: string, value: unknown) => void;
+}
+declare function PrefsProvider({ value, children }: {
+    value: IPrefsApi;
+    children: React$1.ReactNode;
+}): React$1.ReactElement;
+declare function usePrefs(): IPrefsApi;
+/**
+ * The full public API surface of the workspace context — consumed by any
+ * component or hook that calls `useWorkspace()`.
+ */
+export interface IWorkspaceContext {
     /** True once the initial workspace load from disk has completed. */
     loaded: boolean;
     /** True once pre-auth default state has been seeded (before disk load). */
@@ -3503,12 +4458,44 @@ interface IWorkspaceContext {
     loadApp: (appId: string) => void;
     /** Per-app descriptor load-failure messages, keyed by appId. Absent ⇒ no error. */
     appLoadErrors: Record<string, string>;
-    /** Clears the recorded load error for an app and re-attempts its descriptor load. */
-    retryApp: (appId: string) => void;
-    /** Persisted settings — keyed by setting key (e.g. 'ROCKETRIDE_OPENAI_KEY'). */
-    settings: Record<string, string>;
-    /** Persist a single setting value. */
-    updateSetting: (key: string, value: string) => void;
+    /**
+     * Clears the recorded load error for an app and re-attempts its descriptor
+     * load. Resolves true when the re-attempt succeeded.
+     */
+    retryApp: (appId: string) => Promise<boolean>;
+    /**
+     * Set when a switch-to-app failed to load while another app stayed on
+     * screen — surfaced by the shell as a modal over the current app.
+     * Null when no failure is pending.
+     */
+    loadFailure: {
+        appId: string;
+        name: string;
+    } | null;
+    /** Dismisses the pending load-failure modal. */
+    dismissLoadFailure: () => void;
+    /**
+     * EFFECTIVE settings — every declared default overlaid with the user's
+     * stored overrides, keyed by dotted appId-prefixed key
+     * (e.g. 'rocketride.models.serverHost').  Each value keeps its declared JSON
+     * type (string | number | boolean).  Reading a setting is a plain lookup —
+     * the default-merge already happened here.
+     */
+    settings: Record<string, SettingValue>;
+    /**
+     * RAW overrides as stored in settings.json (deltas only).  A key present
+     * here means "modified from default" — this is what the settings page's
+     * modified indicator and reset action read.
+     */
+    settingsOverrides: Record<string, SettingValue>;
+    /** Flattened declarations from all desktop apps' configurations. */
+    settingsRegistry: SettingsRegistry;
+    /**
+     * Persist a single setting value.  Writing a value equal to the schema
+     * default DELETES the override (deltas-only storage); passing `undefined`
+     * resets the key to its default explicitly.
+     */
+    updateSetting: (key: string, value: SettingValue | undefined) => void;
     /** Update the active app's workspace preferences. */
     updatePrefs: (patch: Partial<WorkspacePrefs>) => void;
     /** Available theme options (id + display name). */
@@ -3528,6 +4515,34 @@ interface IWorkspaceContext {
     /** Subscribe to a named event. Returns an unsubscribe function. */
     on: <K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void) => () => void;
 }
+/**
+ * Props for {@link WorkspaceProvider}.
+ *
+ * The connection (client + isConnected) is deliberately NOT a prop: the
+ * provider reads it from {@link useShellConnection} like every other shell
+ * component. Threading the client through props would put the SDK client in
+ * an input (contravariant) position on the frozen shell-api surface, where
+ * every additive SDK member would read as a breaking change.
+ */
+export interface IWorkspaceProviderProps {
+    /** Array of lightweight app manifest entries. */
+    apps: AppManifestEntry$1[];
+    /** Directory for workspace persistence files (default ".workspace"). */
+    workspaceDir?: string;
+    /** Optional app to activate on initial load (overrides saved state). */
+    startupAppId?: string;
+    /** React subtree that will receive the context. */
+    children: React$1.ReactNode;
+    /** Fallback app when no saved state / startup override exists. */
+    defaultAppId?: string;
+    /** Selectable UI themes surfaced in the settings page. */
+    themeOptions?: {
+        id: string;
+        name: string;
+    }[];
+    /** Notifies the host bootstrap when the user switches theme. */
+    onThemeChange?: (themeId: string) => void;
+}
 declare function useWorkspace(): IWorkspaceContext;
 declare function useClient(): RocketRideClient | null;
 declare function useShellEvent<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): void;
@@ -3539,9 +4554,38 @@ declare function useSubscriptions(): {
     /** Quick lookup: what's this app's appStatus? */
     getStatus: (appId: string) => AppStatus | undefined;
 };
-declare function usePolling(fetcher: () => void | Promise<void>, interval: number): void;
+interface IUsePollingOptions {
+    /**
+     * Connection gate for the interval.
+     * - 'shell' (default): poll only while the shell's global connection is up —
+     *   right for anything fetched through the shell's RocketRide client.
+     * - 'none': poll unconditionally — for apps that talk to their own sockets
+     *   (e.g. models-ui's model-server telemetry, which runs unauthenticated
+     *   and must keep ticking while the shell is disconnected).
+     */
+    gate?: "shell" | "none";
+}
+declare function usePolling(fetcher: () => void | Promise<void>, interval: number, options?: IUsePollingOptions): void;
+/** Data returned by the useDashboardData hook. */
+export interface DashboardData {
+    /** Latest dashboard snapshot, or null if not yet loaded. */
+    data: DashboardResponse | null;
+    /** Activity events (newest first). */
+    events: ActivityEvent[];
+    /** Trigger a manual refresh. */
+    refresh: () => void;
+}
+declare function useDashboardData(): DashboardData;
+declare function useConnectionStatus(): ConnectionStatus;
+declare function useShellApiConfig(): ShellApiConfig;
+declare function useShellEvents(iframeRef: React$1.RefObject<HTMLIFrameElement>): void;
+declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
+declare function useSidebarContent(content: React$1.ReactNode | null): void;
 declare function getClient(): RocketRideClient | null;
-interface InitOptions {
+/**
+ * Options for ConnectionManager.initialize().
+ */
+export interface InitOptions {
     /** WebSocket / HTTP base URI. Defaults to window.location.origin. */
     uri?: string;
     /** Human-readable client name sent to the server. */
@@ -3561,7 +4605,10 @@ interface InitOptions {
     /** @deprecated Use ``authProvider`` instead. Zitadel OAuth2 client ID. */
     zitadelClientId?: string;
 }
-interface DebugLogEntry {
+/**
+ * A single entry in the debug event log.
+ */
+export interface DebugLogEntry {
     /** ISO 8601 timestamp when the event was emitted. */
     timestamp: string;
     /** The event name (e.g. 'shell:login'). */
@@ -3593,8 +4640,9 @@ declare class ConnectionManager implements IConnectionManager {
      * Delegates to the auth provider's ``signIn()`` method. Falls back to
      * the legacy PKCE flow if no auth provider is configured.
      *
-     * @param register - If true, requests Zitadel's sign-up form (prompt=create)
-     *                   instead of the default sign-in form.
+     * @param register - Retained for compatibility; no longer changes the
+     *                   destination. All flows land on Zitadel's login page
+     *                   (prompt=login), which offers a Register link.
      */
     startOAuth(register?: boolean): Promise<void>;
     /**
@@ -3722,6 +4770,104 @@ declare class ConnectionManager implements IConnectionManager {
     /** Clears all entries from the debug log. */
     clearDebugLog(): void;
 }
+declare class CloudAuthProvider implements IAuthProvider {
+    /** Returns the singleton CloudAuthProvider instance. */
+    static getInstance(): CloudAuthProvider;
+    /**
+     * Initialize with Zitadel configuration.
+     * Must be called before signIn().
+     *
+     * @param config - Zitadel OAuth2 configuration.
+     */
+    initialize(config: {
+        zitadelUrl: string;
+        clientId: string;
+    }): void;
+    /**
+     * Clean up resources.
+     */
+    dispose(): void;
+    /**
+     * Initiate OAuth2 PKCE sign-in by redirecting to Zitadel.
+     *
+     * Generates a PKCE challenge, stores the verifier in sessionStorage
+     * (survives the redirect), and navigates the browser to Zitadel's
+     * authorize endpoint.
+     *
+     * @param appId - Optional app ID to activate after sign-in completes.
+     * @param register - Retained for compatibility; no longer changes the
+     *                   destination. All flows land on Zitadel's login page,
+     *                   which offers a Register link for new users.
+     */
+    signIn(appId?: string, register?: boolean): Promise<void>;
+    /**
+     * Handle the OAuth callback after Zitadel redirects back with ?code=.
+     *
+     * Retrieves the stored PKCE verifier and returns the exchange payload
+     * that should be passed to ConnectionManager.connect().
+     *
+     * @param code - The authorization code from the URL.
+     * @returns The PKCE exchange object for client.connect(), or null if
+     *          the verifier is missing (stale/expired session).
+     */
+    handleCallback(code: string): {
+        code: string;
+        verifier: string;
+        redirectUri: string;
+    } | null;
+    /**
+     * Store an authentication token.
+     *
+     * @param token - The token string to persist.
+     */
+    storeToken(token: string): Promise<void>;
+    /**
+     * Retrieve the stored authentication token.
+     *
+     * @returns The token string, or null if not stored.
+     */
+    getToken(): Promise<string | null>;
+    /**
+     * Returns true if a token is stored (user has signed in before).
+     */
+    isSignedIn(): Promise<boolean>;
+    /**
+     * Clear stored credentials and sign out.
+     */
+    signOut(): Promise<void>;
+}
+declare class ApiKeyAuthProvider implements IAuthProvider {
+    /** Returns the singleton ApiKeyAuthProvider instance. */
+    static getInstance(): ApiKeyAuthProvider;
+    /**
+     * Sign in with an API key.
+     *
+     * Stores the key in sessionStorage for the current session. An empty string
+     * is valid (some OSS servers allow unauthenticated access).
+     *
+     * @param apiKey - The API key to store.
+     */
+    signIn(apiKey?: string): Promise<void>;
+    /**
+     * Retrieve the stored API key.
+     *
+     * @returns The API key string, or null if not stored.
+     */
+    getToken(): Promise<string | null>;
+    /**
+     * Returns true if a token is stored.
+     * Note: empty string counts as "signed in" for OSS mode (open access).
+     */
+    isSignedIn(): Promise<boolean>;
+    /**
+     * Clear stored API key.
+     */
+    signOut(): Promise<void>;
+}
+/**
+ * A single open document. One per URI. Content held in memory.
+ * Only disposed when no editors reference it and it is clean.
+ */
 interface Document$1 {
     /** Unique file path / identifier. */
     uri: string;
@@ -3764,8 +4910,12 @@ export interface Editor {
     /** Per-editor view state (active tab, viewport, flow mode). Opaque to Documents — the app casts at the boundary. */
     viewState?: Record<string, unknown>;
 }
-type SplitOrientation = "horizontal" | "vertical";
-interface EditorGroup {
+/** Split orientation for layout containers. */
+export type SplitOrientation = "horizontal" | "vertical";
+/**
+ * An editor group — a pane container that holds an ordered list of editors.
+ */
+export interface EditorGroup {
     /** Unique group ID. */
     id: string;
     /** Ordered list of editor IDs in this group. */
@@ -3773,14 +4923,21 @@ interface EditorGroup {
     /** Index of the currently active editor in this group. */
     activeEditorIndex: number;
 }
-interface LayoutLeaf {
+/**
+ * A leaf node in the layout tree — contains a single editor group.
+ */
+export interface LayoutLeaf {
     readonly type: "leaf";
     /** Unique node ID (same as the EditorGroup ID it wraps). */
     id: string;
     /** ID of the EditorGroup rendered in this leaf. */
     groupId: string;
 }
-interface LayoutSplit {
+/**
+ * A split container node in the layout tree — has exactly two children
+ * split in a direction.
+ */
+export interface LayoutSplit {
     readonly type: "split";
     /** Unique node ID (auto-generated). */
     id: string;
@@ -3797,8 +4954,13 @@ interface LayoutSplit {
         number
     ];
 }
-type LayoutNode = LayoutLeaf | LayoutSplit;
-interface DocumentsState {
+/** A node in the layout tree — either a leaf (editor group) or a split container. */
+export type LayoutNode = LayoutLeaf | LayoutSplit;
+type Public<T> = {
+    [K in keyof T]: T[K];
+};
+/** Complete documents model state. */
+export interface DocumentsState {
     /** All open documents keyed by URI. */
     documents: Record<string, Document$1>;
     /** All editor instances keyed by editor ID. */
@@ -4014,27 +5176,12 @@ declare class Documents {
      */
     destroy(): void;
 }
-interface DocTabsProps {
-    /** The Documents instance to read state from and dispatch actions to. */
-    docs: Documents;
-    /** The editor group whose tabs should be rendered. */
-    groupId: string;
-    /** Whether this group is the currently focused group. */
-    isActive?: boolean;
-    /** Whether this group can be closed (false when it's the only group). */
-    canClose?: boolean;
-    /** Optional callback when a tab's close button triggers a dirty document prompt. */
-    onDirtyClose?: (editorId: string, documentUri: string) => void;
-    /** Optional callback to split this group in a given direction. */
-    onSplit?: (groupId: string, orientation: SplitOrientation) => void;
-    /** Optional callback to close (remove) this entire group. */
-    onCloseGroup?: (groupId: string) => void;
-}
-interface DocSplitLayoutProps {
-    /** The Documents instance to read layout state from. */
-    docs: Documents;
-    /** Render function for each leaf pane — receives groupId, returns JSX. */
-    renderPane: (groupId: string) => React$1.ReactNode;
+/**
+ * Props for the top-level Shell component.
+ */
+export interface ShellProps {
+    /** Full shell configuration assembled by the host (bootstrap.tsx). */
+    config: ShellConfig;
 }
 interface IconProps {
     size?: number;
@@ -4043,7 +5190,31 @@ interface IconProps {
     style?: React$1.CSSProperties;
 }
 type IconComponent = React$1.FC<IconProps>;
-interface NavButtonProps {
+/**
+ * Props for the Sidebar component.
+ */
+export interface SidebarProps {
+    /** Theme picker configuration. */
+    themeConfig: ShellThemeConfig;
+    /** Account info and logout callback. */
+    account: ShellAccountConfig;
+    /** When true, the app switcher submenu in the footer is hidden. */
+    hideAppSwitcher?: boolean;
+    /** Callback to open a shell overlay (account, settings, environment). */
+    onOverlay: (overlay: "account" | "settings" | "environment") => void;
+    /**
+     * Server-probed edition flag (the 'saas' capability from the bootstrap
+     * probe). Gates SaaS-only footer items — the Account overlay has no
+     * backend on OSS/local servers, so the item is hidden there. NOTE: the
+     * connection mode is NOT a valid signal here (it defaults to 'cloud'
+     * regardless of the server edition).
+     */
+    isSaas?: boolean;
+}
+/**
+ * Props for the NavButton component.
+ */
+export interface NavButtonProps {
     /** Icon component to render. */
     icon: IconComponent;
     /** Text label shown when the sidebar is expanded. */
@@ -4059,7 +5230,7 @@ interface NavButtonProps {
     /** Tooltip override. Falls back to `label` if not provided. */
     title?: string;
 }
-interface ConfirmDialogProps {
+export interface ConfirmDialogProps {
     title: string;
     message: string;
     confirmLabel?: string;
@@ -4070,28 +5241,151 @@ interface ConfirmDialogProps {
     onSecondary?: () => void;
 }
 /**
+ * Sent by the shell to an iframe immediately after the iframe posts `view:ready`.
+ *
+ * Bootstraps the iframe's initial state: current CSS theme tokens, the
+ * authenticated user (or null), the WebSocket connection status, and all
+ * runtime API config values (RR_* keys).
+ */
+export interface ShellInitMsg {
+    type: "shell:init";
+    theme: Record<string, string>;
+    user: ConnectResult | null;
+    isConnected: boolean;
+    apiConfig: Record<string, string | undefined>;
+}
+interface ShellThemeChangeMsg {
+    type: "shell:themeChange";
+    tokens: Record<string, string>;
+}
+interface ShellConnectionChangeMsg {
+    type: "shell:connectionChange";
+    isConnected: boolean;
+}
+interface ShellLoginMsg {
+    type: "shell:login";
+    user: ConnectResult;
+}
+interface ShellLogoutMsg {
+    type: "shell:logout";
+}
+interface ServerEventMsg {
+    type: "shell:event";
+    event: unknown;
+}
+interface ShellViewActivatedMsg {
+    type: "shell:viewActivated";
+    viewId: string;
+}
+/**
+ * Discriminated union of every message the shell can post to an iframe.
+ *
+ * `useShellEvents` constructs and sends these via `contentWindow.postMessage`.
+ * Iframe apps receive them in their own `window.addEventListener('message', ...)` handler.
+ */
+export type ShellToIframeMsg = ShellInitMsg | ShellThemeChangeMsg | ShellConnectionChangeMsg | ShellLoginMsg | ShellLogoutMsg | ServerEventMsg | ShellViewActivatedMsg;
+interface ViewReadyMsg {
+    type: "view:ready";
+}
+interface ViewInitializedMsg {
+    type: "view:initialized";
+}
+interface IframeShellLogoutMsg {
+    type: "shell:logout";
+}
+interface IframeOpenTabMsg {
+    type: "shell:openTab";
+    viewType: string;
+    label: string;
+}
+/**
+ * Discriminated union of every message an iframe can post to the parent shell.
+ *
+ * `useShellEvents` filters incoming `MessageEvent`s to those from the managed
+ * iframe and discriminates on `msg.type` to route each message.
+ */
+export type IframeToShellMsg = ViewReadyMsg | ViewInitializedMsg | IframeShellLogoutMsg | IframeOpenTabMsg;
+/**
+ * Props for the DocTabs component.
+ */
+export interface DocTabsProps {
+    /** The Documents instance to read state from and dispatch actions to. */
+    docs: Public<Documents>;
+    /** The editor group whose tabs should be rendered. */
+    groupId: string;
+    /** Whether this group is the currently focused group. */
+    isActive?: boolean;
+    /** Whether this group can be closed (false when it's the only group). */
+    canClose?: boolean;
+    /** Optional callback when a tab's close button triggers a dirty document prompt. */
+    onDirtyClose?: (editorId: string, documentUri: string) => void;
+    /** Optional callback to split this group in a given direction. */
+    onSplit?: (groupId: string, orientation: SplitOrientation) => void;
+    /** Optional callback to close (remove) this entire group. */
+    onCloseGroup?: (groupId: string) => void;
+}
+/**
+ * Props for the DocSplitLayout component.
+ */
+export interface DocSplitLayoutProps {
+    /** The Documents instance to read layout state from. */
+    docs: Public<Documents>;
+    /** Render function for each leaf pane — receives groupId, returns JSX. */
+    renderPane: (groupId: string) => React$1.ReactNode;
+}
+interface BottomPanelProps {
+    onClose: () => void;
+}
+/**
  * The curated set of value symbols shell-ui exposes to remote apps.
  *
- * Every member here is imported by at least one app (verified by survey), plus
- * `usePolling`, the shell's canonical connection-aware polling hook. The object
- * is frozen at build time so its type — `ShellApiShape` — becomes the versioned
- * contract enforced against shell-ui's own compilation.
+ * Per the design-owner decision this covers shell-ui's ENTIRE value export
+ * surface. The object is frozen at build time so its type — `ShellApiShape` —
+ * becomes the versioned contract enforced against shell-ui's own compilation.
  */
 export declare const shellApi: {
     readonly useShellConnection: typeof useShellConnection;
     readonly useAuthUser: typeof useAuthUser;
+    readonly useLogout: typeof useLogout;
     readonly useWorkspace: typeof useWorkspace;
     readonly useClient: typeof useClient;
     readonly useShellEvent: typeof useShellEvent;
+    readonly useShellEvents: typeof useShellEvents;
     readonly useSubscriptions: typeof useSubscriptions;
     readonly usePolling: typeof usePolling;
+    readonly useDashboardData: typeof useDashboardData;
+    readonly useConnectionStatus: typeof useConnectionStatus;
+    readonly useShellApiConfig: typeof useShellApiConfig;
+    readonly useAppComponent: typeof useAppComponent;
+    readonly useSidebarContent: typeof useSidebarContent;
+    readonly useClickOutside: typeof useClickOutside;
+    readonly useFixedPopupPosition: typeof useFixedPopupPosition;
+    readonly usePrefs: typeof usePrefs;
     readonly getClient: typeof getClient;
     readonly ConnectionManager: typeof ConnectionManager;
+    readonly ConnectionState: typeof ConnectionState;
+    readonly CloudAuthProvider: typeof CloudAuthProvider;
+    readonly ApiKeyAuthProvider: typeof ApiKeyAuthProvider;
+    readonly WorkspaceProvider: import("react").FC<IWorkspaceProviderProps>;
+    readonly PrefsProvider: typeof PrefsProvider;
     readonly Documents: typeof Documents;
     readonly DocTabs: import("react").FC<DocTabsProps>;
     readonly DocSplitLayout: import("react").FC<DocSplitLayoutProps>;
+    readonly DocExplorer: import("react").FC<IExplorerProps>;
+    readonly Shell: import("react").FC<ShellProps>;
+    readonly Sidebar: import("react").FC<SidebarProps>;
+    readonly BottomPanel: import("react").FC<BottomPanelProps>;
+    readonly DebugPanel: import("react").FC<{
+        onClose: () => void;
+    }>;
     readonly NavButton: import("react").FC<NavButtonProps>;
     readonly ConfirmDialog: import("react").FC<ConfirmDialogProps>;
+    readonly PopupRow: import("react").FC<{
+        children: React$1.ReactNode;
+        onClick?: (e: React$1.MouseEvent<HTMLDivElement>) => void;
+    }>;
+    readonly AccountPage: import("react").FC<{}>;
+    readonly SettingsPage: import("react").FC<{}>;
     readonly BxPlus: IconComponent;
     readonly BxEditAlt: IconComponent;
     readonly BxTrash: IconComponent;
@@ -4120,14 +5414,6 @@ export declare const shellApi: {
  */
 export type ShellApiShape = typeof shellApi;
 /**
- * The current in-source shell API version.
- *
- * Incremented implicitly by each successful `shell:freeze` (which writes the
- * next `vN`); this constant tracks the highest frozen version the source
- * currently targets.
- */
-export declare const SHELL_API_VERSION: 0;
-/**
  * Returns the curated shell API surface.
  *
  * Apps call this (via shell-ui's public export) to obtain every shell-provided
@@ -4137,7 +5423,7 @@ export declare const SHELL_API_VERSION: 0;
  * @returns The frozen `shellApi` object.
  */
 export declare function getShellApi(): ShellApiShape;
-export { AppManifestEntry$1 as AppManifestEntry, };
+export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IExplorerProps as DocExplorerProps, ShellConnectionEventMap as ShellEventMap, };
 export {};
 // ===== END FROZEN BUNDLE =====
 export type ShellApiV0 = ShellApiShape;

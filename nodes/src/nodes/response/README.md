@@ -14,8 +14,7 @@ Data handling per lane:
 - **table**, **documents**, **questions** - appended as-is; documents and questions are serialized to plain dicts.
 - **json** - appended as-is (one entry per write).
 - **answers** - appended as parsed JSON when the answer is JSON, otherwise as plain text.
-- **image** - streamed chunks are buffered via AVI_ACTION signals (BEGIN / WRITE / END), then the complete image is base64-encoded and appended as `{"mime_type": ..., "image": ...}`.
-- **audio**, **video** - the raw bytes are not returned; only tracking metadata is appended: `{"url", "aviAction", "mimeType", "size"}`.
+- **image**, **audio**, **video** - the three multimedia lanes are handled identically: streamed chunks are buffered via AVI_ACTION signals (BEGIN / WRITE / END), then the complete stream is base64-encoded and appended as `{"mime_type": ..., "<lane>": ...}`, where `<lane>` is the payload key (`image` / `audio` / `video`). When the stream's BEGIN carries a stream descriptor, a sanitized projection of it is added as a `metadata` object (source provenance: mime, size, dimensions/duration, codec, and any nested `source` chain; the identity/security backlink is stripped). The `metadata` key is omitted when no descriptor arrived.
 
 The node has no Python dependencies of its own (`requirements.txt` is empty); it relies on the separately installed AI module for document, question, and answer schemas and for image processing.
 
@@ -56,9 +55,9 @@ All lanes are inputs; the node produces no output lanes.
 | `documents` | -        | Captured under the configured key |
 | `questions` | -        | Captured under the configured key |
 | `answers`   | -        | Captured under the configured key |
-| `audio`     | -        | Captured under the configured key (tracking metadata only, not raw bytes) |
-| `video`     | -        | Captured under the configured key (tracking metadata only, not raw bytes) |
-| `image`     | -        | Captured under the configured key (base64-encoded) |
+| `audio`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
+| `video`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
+| `image`     | -        | Captured under the configured key (base64-encoded stream + descriptor `metadata`) |
 
 ### HTTP Results (generic service)
 
@@ -95,6 +94,25 @@ The JSON object returned to the client has the following structure:
 ```
 
 Each configured result key holds an array: one element per result produced for the object. `result_types` maps each configured key back to its original lane type, so clients can identify the kind of data each key contains even when custom key names are used. The `name`, `path`, and `metadata` fields are only present when the processed object carries those attributes; `metadata` excludes all Tika-derived keys.
+
+For the multimedia lanes (`image`, `audio`, `video`) each array element is a media entry with the same shape — the base64 stream under the lane key plus the stream descriptor:
+
+```json
+{
+  "mime_type": "image/png",
+  "image": "<base64-encoded bytes>",
+  "metadata": {
+    "source_mime": "image/png",
+    "size": 583006,
+    "width": 1280,
+    "height": 720,
+    "name": "clip.frame0.png",
+    "source": { "source_mime": "video/mp4", "duration": 74.05, "...": "...(nested origin chain)" }
+  }
+}
+```
+
+The `metadata` object is the **sanitized provenance projection** of the stream descriptor parsed from the media BEGIN — the media detail (mime, size, dimensions/duration, codec) plus the nested `source` chain, which chains back through each transform hop to the original media (nested to any depth). The identity/security backlink (`objectId`, `parent`, `permissionId`, `signature`, `nodeId`) is intentionally stripped and never reaches the client. `metadata` is omitted entirely when the stream arrives without a descriptor.
 
 ---
 

@@ -144,6 +144,16 @@ export interface LayoutSplit {
 /** A node in the layout tree — either a leaf (editor group) or a split container. */
 export type LayoutNode = LayoutLeaf | LayoutSplit;
 
+/**
+ * A structural, brand-free view of a class's PUBLIC surface — a homomorphic
+ * mapped type over its public keys. Exposing `Documents` through `Public<Documents>`
+ * instead of the concrete class keeps its nominal private brand OUT of the
+ * shell-api contract, so structural conformance holds even in contravariant
+ * (React FC prop) positions — where the concrete private-bearing class would
+ * otherwise fail the frozen-vs-live comparison.
+ */
+export type Public<T> = { [K in keyof T]: T[K] };
+
 /** Complete documents model state. */
 export interface DocumentsState {
 	/** All open documents keyed by URI. */

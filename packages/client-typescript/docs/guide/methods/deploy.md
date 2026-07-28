@@ -82,10 +82,12 @@ Returned by `add()`, `status()`, and (as an array) `list()`:
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
-    async with RocketRideClient(uri="https://cloud.rocketride.ai", auth="my-key") as client:
-        record = await client.deploy.add(my_pipeline, schedule="*/15 * * * *")
-        print(record["pipeline"]["project_id"], record["state"])
+    async with RocketRideClient(uri='https://cloud.rocketride.ai', auth='my-key') as client:
+        record = await client.deploy.add(my_pipeline, schedule='*/15 * * * *')
+        print(record['pipeline']['project_id'], record['state'])
+
 
 asyncio.run(main())
 ```
@@ -103,14 +105,14 @@ console.log(record.pipeline!.project_id, record.state);
 Switch the schedule to `"manual"`; switch back to a cron expression to resume:
 
 ```python
-await client.deploy.update(project_id, schedule="manual")
+await client.deploy.update(project_id, schedule='manual')
 ```
 
 ### Inspect and clean up
 
 ```python
 for rec in await client.deploy.list():
-    print(rec["pipeline"]["project_id"], rec["schedule"], rec["state"])
+    print(rec['pipeline']['project_id'], rec['schedule'], rec['state'])
 
 await client.deploy.remove(project_id)
 ```
@@ -136,22 +138,22 @@ If a scheduled run is still in progress when the next tick comes due, that tick 
 
 ```python
 try:
-    await client.deploy.add(pipeline, schedule="*/15 * * * *")
+    await client.deploy.add(pipeline, schedule='*/15 * * * *')
 except RuntimeError as e:
-    print(f"Deploy failed: {e}")
+    print(f'Deploy failed: {e}')
 ```
 
 ## **API Endpoints**
 
-These methods communicate via the RocketRide DAP protocol over WebSocket using the `rrext_deploy_*` commands:
+These methods communicate via the RocketRide DAP protocol over WebSocket using the single `rrext_deploy` command, dispatched by a `subcommand` argument:
 
-| Method | DAP Command |
-| --- | --- |
-| `add()` | `rrext_deploy_add` |
-| `remove()` | `rrext_deploy_remove` |
-| `list()` | `rrext_deploy_list` |
-| `status()` | `rrext_deploy_status` |
-| `update()` | `rrext_deploy_update` |
+| Method | DAP Command | `subcommand` |
+| --- | --- | --- |
+| `add()` | `rrext_deploy` | `add` |
+| `remove()` | `rrext_deploy` | `remove` |
+| `list()` | `rrext_deploy` | `list` |
+| `status()` | `rrext_deploy` | `status` |
+| `update()` | `rrext_deploy` | `update` |
 
 ## **Related Methods**
 

@@ -6,6 +6,13 @@
 /**
  * TopUpModal -- modal dialog for purchasing token top-up packs.
  *
+ * Rendered through the stock {@link Modal} (one
+ * stock Modal for every dialog). The Modal owns the backdrop, box, header,
+ * and footer chrome -- including the zIndex 2000 overlay layer that stacks
+ * above record panels (DetailPanel, zIndex 1500) and the shared
+ * Escape-closes-topmost-layer behavior. This file supplies only the body
+ * content and the footer actions.
+ *
  * Reuses the PlanPicker card grid to display top-up plans (filtered by
  * metadata.kind === 'topup'). On selection and confirmation, calls the
  * host's purchase callback which charges the customer's card on file
@@ -18,6 +25,7 @@
 
 import React, { useState, useMemo, type CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
+import { Modal } from '../../../components/modal/Modal';
 import { PlanPicker, planAmount } from '../../checkout/PlanPicker';
 import type { CheckoutPlan } from '../../checkout/types';
 
@@ -26,55 +34,18 @@ import type { CheckoutPlan } from '../../checkout/types';
 // =============================================================================
 
 const S = {
-	/** Modal overlay -- full-screen backdrop. */
-	overlay: {
-		position: 'fixed' as const,
-		top: 0,
-		left: 0,
-		right: 0,
-		bottom: 0,
-		background: 'rgba(0, 0, 0, 0.5)',
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		zIndex: 1000,
-	} as CSSProperties,
-
-	/** Modal dialog container. */
-	dialog: {
-		background: 'var(--rr-bg-paper)',
-		borderRadius: 12,
-		padding: 24,
-		width: '90%',
-		maxWidth: 600,
-		maxHeight: '80vh',
-		overflow: 'auto',
-		boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+	/**
+	 * Scrollable body region. The hand-rolled dialog capped the whole box at
+	 * 80vh and scrolled it; the stock Modal owns the box chrome, so the cap
+	 * moves onto the body content instead (header and footer stay in view).
+	 */
+	body: {
+		maxHeight: '60vh',
+		overflowY: 'auto' as const,
 		scrollbarWidth: 'thin' as const,
-		scrollbarColor: 'var(--rr-scrollbar-thumb, rgba(128,128,128,0.3)) transparent',
-	} as CSSProperties,
-
-	/** Dialog header row. */
-	header: {
-		display: 'flex',
-		justifyContent: 'space-between',
-		alignItems: 'center',
-		marginBottom: 16,
-	} as CSSProperties,
-
-	/** Dialog title. */
-	title: {
-		fontSize: 18,
-		fontWeight: 700,
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-
-	/** Footer row with confirm button. */
-	footer: {
-		display: 'flex',
-		justifyContent: 'flex-end',
-		gap: 10,
-		marginTop: 16,
+		// The REAL token is --rr-bg-scrollbar-thumb (the old --rr-scrollbar-thumb
+		// name never existed, so this always fell back to the hardcoded grey).
+		scrollbarColor: 'var(--rr-bg-scrollbar-thumb, rgba(121, 121, 121, 0.4)) transparent',
 	} as CSSProperties,
 
 	/** Success message. */
@@ -150,54 +121,66 @@ export const TopUpModal: React.FC<TopUpModalProps> = ({ plans, onPurchase, onClo
 		}
 	};
 
+	// Confirm button style: primary, dimmed and non-interactive unless a pack
+	// is selected and no purchase is in flight.
+	const confirmStyle: CSSProperties = {
+		...commonStyles.buttonPrimary,
+		...(selectedPlan && !purchasing ? null : { opacity: 0.5, cursor: 'default' }),
+	};
+
 	return (
-		/* Backdrop is inert: dismissal is deliberate-only (close button / Cancel)
-		   per the 2026-07-08 design decision — clicking outside must NOT close. */
-		<div style={S.overlay}>
-			<div style={S.dialog}>
-				{/* Header — no top-right ✕: this dialog dismisses via footer Cancel and
-				    auto-closes after a successful purchase (refined popup policy
-				    2026-07-08: no redundant ✕ when an explicit close or auto-dismiss exists). */}
-				<div style={S.header}>
-					<div style={S.title}>Add More Capacity</div>
+		/* Stock Modal: inert backdrop (clicking outside never closes), Escape
+		   closes only the topmost overlay layer. No corner ✕ (showClose false):
+		   dismissal is the footer Cancel, Escape, or the success auto-close timer
+		   (refined popup policy 2026-07-08 — no redundant ✕ when an explicit
+		   close or auto-dismiss exists). Escape is suppressed while the purchase
+		   is in flight, mirroring the disabled Cancel button. */
+		<Modal
+			title="Add More Capacity"
+			onClose={onClose}
+			width={600}
+			showClose={false}
+			closeOnEscape={!purchasing}
+			footer={success ? undefined : (
+				<>
+					{/* Cancel — the dialog's explicit dismiss control. */}
+					<button
+						type="button"
+						style={commonStyles.buttonSecondary}
+						onClick={onClose}
+						disabled={purchasing}
+					>
+						Cancel
+					</button>
+					{/* Confirm — label reflects selection and in-flight state. */}
+					<button
+						type="button"
+						style={confirmStyle}
+						onClick={handleConfirm}
+						disabled={!selectedPlan || purchasing}
+					>
+						{purchasing ? 'Processing...' : selectedPlan ? `Purchase ${planAmount(selectedPlan)}` : 'Select a pack'}
+					</button>
+				</>
+			)}
+		>
+			{success ? (
+				/* Success confirmation — shown briefly until the auto-close timer
+				   dismisses the dialog (the footer is dropped in this state). */
+				<div style={S.success}>Purchase successful! Your tokens have been added.</div>
+			) : (
+				<div style={S.body}>
+					{/* Plan picker -- reuses the same card grid */}
+					<PlanPicker
+						plans={topupPlans}
+						selectedPlan={selectedPlan}
+						onSelectPlan={setSelectedPlan}
+					/>
+
+					{/* Error banner */}
+					{error && <div style={S.error}>{error}</div>}
 				</div>
-
-				{success ? (
-					<div style={S.success}>Purchase successful! Your tokens have been added.</div>
-				) : (
-					<>
-						{/* Plan picker -- reuses the same card grid */}
-						<PlanPicker
-							plans={topupPlans}
-							selectedPlan={selectedPlan}
-							onSelectPlan={setSelectedPlan}
-						/>
-
-						{/* Error banner */}
-						{error && <div style={S.error}>{error}</div>}
-
-						{/* Footer with confirm button */}
-						<div style={S.footer}>
-							<button
-								style={commonStyles.buttonSecondary as CSSProperties}
-								onClick={onClose}
-								disabled={purchasing}
-							>
-								Cancel
-							</button>
-							<button
-								style={{
-									...(selectedPlan && !purchasing ? commonStyles.buttonPrimary : { ...commonStyles.buttonPrimary, opacity: 0.5, cursor: 'default' }),
-								} as CSSProperties}
-								onClick={handleConfirm}
-								disabled={!selectedPlan || purchasing}
-							>
-								{purchasing ? 'Processing...' : selectedPlan ? `Purchase ${planAmount(selectedPlan)}` : 'Select a pack'}
-							</button>
-						</div>
-					</>
-				)}
-			</div>
-		</div>
+			)}
+		</Modal>
 	);
 };

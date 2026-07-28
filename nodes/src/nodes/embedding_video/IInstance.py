@@ -23,6 +23,7 @@
 
 from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 from ai.common.schema import Doc, DocMetadata
+from ai.common.avi.descriptor import descriptor_from_payload, attach_source, attach_name
 from .IGlobal import IGlobal
 
 # Supported video MIME types and their corresponding file extensions.
@@ -58,6 +59,7 @@ class IInstance(IInstanceBase):
         self._frame_chunk_id = 0
         self._video_data = None
         self._mime_type = None
+        self._source_descriptor = None
 
     def writeVideo(self, action: int, mimeType: str, buffer: bytes):
         """
@@ -72,6 +74,8 @@ class IInstance(IInstanceBase):
             buffer (bytes): The video data chunk.
         """
         if action == AVI_ACTION.BEGIN:
+            # BEGIN carries the stream descriptor (source provenance), not video bytes.
+            self._source_descriptor = descriptor_from_payload(buffer)
             self._video_data = bytearray()
             self._mime_type = mimeType
 
@@ -197,6 +201,11 @@ class IInstance(IInstanceBase):
                     )
                     metadata.time_stamp = time_stamp
                     metadata.frame_number = current_frame_pos
+
+                    # Source provenance + per-frame name (<video-stem>.frame<N>) from
+                    # the descriptor (extensionless: the doc is an embedding, not a file).
+                    attach_source(metadata, self._source_descriptor)
+                    attach_name(metadata, self._source_descriptor, index=current_frame_pos, marker='frame')
 
                     # Create the document with the frame image and embedding.
                     doc = Doc(type='Image', page_content=frame_base64, metadata=metadata)

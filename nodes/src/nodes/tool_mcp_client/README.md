@@ -94,6 +94,12 @@ The STDIO transport has no authentication fields: the subprocess runs locally wi
 
 ---
 
+## Zero-argument tools
+
+Some MCP tools take no arguments (their input schema is empty). Strict reasoning-model agents can silently drop such a tool from their catalog when it is advertised with an empty JSON Schema. To keep these tools usable everywhere, the client normalizes an empty input schema to carry a single optional placeholder argument (`rr_no_args`) before presenting the tool to an agent. RocketRide records which cached tools received that synthesized placeholder and strips it only for those tools before the call, so the MCP server never receives it. A tool that genuinely declares an argument named `rr_no_args` continues to receive that argument unchanged.
+
+---
+
 ## Upstream docs
 
 - [Model Context Protocol specification](https://modelcontextprotocol.io/)

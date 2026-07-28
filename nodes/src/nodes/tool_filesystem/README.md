@@ -12,7 +12,9 @@ env var injected by the task engine, no account configuration is needed on the n
 If that env var is missing or the account store fails to initialise, a warning is logged
 and **all** tool methods are hidden from the agent.
 
-The node has no pipeline lanes: it is connected to agents via the `tool` invoke channel.
+The node plays two roles. As a **tool** it is connected to agents via the `tool` invoke
+channel (see *Available tools*). As a **pipeline sink** it also accepts data lanes and
+writes whatever flows in to the same store (see *Pipeline sink*).
 
 Every operation is gated by a per-operation allow toggle. Read, write, list, mkdir, and
 stat are **on by default**; **delete is off by default**. Tools whose toggle is disabled
@@ -33,6 +35,9 @@ may touch.
 | `allowMkdir` | boolean | Default true.  |
 | `allowStat` | boolean | Default true.  |
 | `allowDelete` | boolean | Default false. Destructive, enable only when the agent is trusted to delete account files. |
+| `targetDir` | string | Default `output/`. Base directory that sink-lane writes are placed under. |
+| `emitUrl` | boolean | Default false. Also attach a time-limited signed download URL to the emitted document metadata. |
+| `urlExpiresIn` | integer | Default 3600 (max 3600). TTL in seconds for the signed URL when `emitUrl` is on. |
 | `whitelistPattern` | string | Default empty.  |
 | `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |
 
@@ -47,6 +52,50 @@ with `^` and `$` if you need a full-path match (e.g. `^docs/.*$`).
 Invalid regexes are skipped with a logged warning. An empty `path` on `list_directory`
 means the account root and bypasses the whitelist check (an empty string can't match a
 non-trivial regex).
+
+---
+
+## Pipeline sink (lanes)
+
+Besides the agent tools, the node doubles as a **pipeline sink**. Each input lane —
+`documents`, `text`, `table`, `image`, `audio`, `video` — writes whatever flows in to the
+account store, then emits `documents` metadata references on its output lane: one per file
+written, so an object that carries several documents yields one reference per document.
+
+- **Where it writes:** `targetDir` (default `output/`) + the object's original name stem,
+  with the lane's extension rule applied — e.g. `output/report.txt` (nameless inputs fall
+  back to the object id). If that name is already taken the sink appends `_1`, `_2`, …,
+  and gives up with an error after `MAX_COLLISION_SUFFIX` (100) attempts rather than
+  probing indefinitely. When one object emits several documents they also carry an index
+  (`report_0.txt`, `report_1.txt`, …).
+  Every candidate is whitelist-checked *before* it is probed, so a path the whitelist
+  would reject never reveals whether files exist in the store.
+- **How the extension is chosen:** each lane owns its own rule, keyed to what the lane
+  actually carries. `text`/`table` carry markdown, so they always store `.md`;
+  `documents` carries parsed text (`page_content`), so it always stores `.txt` — a parsed
+  `report.pdf` stores as `report.txt`, keeping the extension truthful about the bytes;
+  media derive it from the stream's mime type, then the source extension, then `.bin`.
+- **Media streaming:** image/audio/video chunks stream straight to the store, so memory
+  stays bounded regardless of file size. The file is created only once the first non-empty
+  chunk arrives — an empty stream writes nothing.
+- **What it emits:** a document whose `page_content` is the store path, carrying that path
+  (and, when **Emit download URL** is on, a time-limited signed URL) in its metadata —
+  only when a downstream node listens on `documents`. Each reference gets a distinct
+  `chunkId`, so downstream vector stores keyed on object id + chunk id never overwrite
+  one another.
+- **Guards:** the sink honours the same `allowWrite` toggle and path whitelist as the
+  `write_file` tool; the whitelist is checked before anything touches the store. The sink
+  also suppresses default routing, so downstream nodes receive the emitted references
+  rather than the original payload as well.
+
+The signed URL is minted server-side via the store's `get_url` (no agent `task.store`
+permission needed); **URL expiry (seconds)** (default 3600, max 3600) sets its TTL.
+
+| Lane in | Lane out | Description |
+| --- | --- | --- |
+| `documents` | `documents` | Persist each document (source extension, else `.txt`); emit one reference per document |
+| `text` / `table` | `documents` | Persist as `.md`; emit reference |
+| `image` / `audio` / `video` | `documents` | Stream chunks to the store, commit on end; emit reference |
 
 ---
 

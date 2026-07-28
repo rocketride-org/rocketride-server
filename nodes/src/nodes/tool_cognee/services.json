@@ -1,0 +1,121 @@
+{
+	"title": "Cognee",
+	"protocol": "tool_cognee://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_cognee",
+	"prefix": "cognee",
+	"icon": "cognee.svg",
+	"documentation": "https://docs.cognee.ai",
+	"description": [
+		"Persistent semantic memory backed by a Cognee server, exposed as three agent tools. ",
+		"Remember plain text, recall memory results while requesting references, and check background processing. The knowledge graph captures semantic relationships; it is not an AST, import graph, or call graph."
+	],
+	"tile": ["Dataset: ${parameters.cognee.dataset}"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Cognee",
+				"base_url": "http://localhost:8000",
+				"api_key": "",
+				"dataset": "main",
+				"allow_dataset_override": false,
+				"search_type": "GRAPH_COMPLETION_DECOMPOSITION",
+				"top_k": 15,
+				"request_timeout": 120
+			}
+		}
+	},
+	"fields": {
+		"cognee.base_url": {
+			"type": "string",
+			"title": "Server URL",
+			"description": "Base URL of the Cognee server. Self-hosted Cognee defaults to <b>http://localhost:8000</b>. For Cognee Cloud, use the instance URL from <a href='https://platform.cognee.ai' target='_blank'>platform.cognee.ai</a>.",
+			"default": "http://localhost:8000"
+		},
+		"cognee.api_key": {
+			"type": "string",
+			"optional": true,
+			"title": "API Key",
+			"description": "Cognee API key sent as the <code>X-Api-Key</code> header. Falls back to <code>COGNEE_API_KEY</code>. Self-hosted servers with access control disabled can leave this blank.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"cognee.dataset": {
+			"type": "string",
+			"title": "Dataset",
+			"description": "Default Cognee dataset used by all agent tools. Tool calls stay in this operator-controlled scope unless per-call overrides are enabled.",
+			"default": "main"
+		},
+		"cognee.allow_dataset_override": {
+			"type": "boolean",
+			"title": "Allow dataset override",
+			"description": "Allow agents to select a dataset per call. Leave off when several agents should share one operator-controlled memory scope.",
+			"default": false
+		},
+		"cognee.search_type": {
+			"type": "string",
+			"title": "Default recall strategy",
+			"description": "How recall retrieves memory. Graph completion decomposition is the semantic default; the agent can override it per call.",
+			"default": "GRAPH_COMPLETION_DECOMPOSITION",
+			"enum": [
+				["GRAPH_COMPLETION_DECOMPOSITION", "Graph completion decomposition (default)"],
+				["GRAPH_COMPLETION", "Graph completion"],
+				["RAG_COMPLETION", "RAG completion"],
+				["CHUNKS", "Chunks"],
+				["SUMMARIES", "Summaries"],
+				["TEMPORAL", "Temporal"],
+				["FEELING_LUCKY", "Feeling lucky"]
+			]
+		},
+		"cognee.top_k": {
+			"type": "integer",
+			"title": "Recall results (top_k)",
+			"description": "Maximum number of results recall retrieves per query.",
+			"default": 15,
+			"minimum": 1,
+			"maximum": 100
+		},
+		"cognee.request_timeout": {
+			"type": "integer",
+			"title": "Request timeout (s)",
+			"description": "Maximum seconds to wait for one Cognee request.",
+			"default": 120,
+			"minimum": 5,
+			"maximum": 600
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Config validation with placeholder credentials",
+				"text": "test"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Cognee",
+			"properties": [
+				"type",
+				"cognee.base_url",
+				"cognee.api_key",
+				"cognee.dataset",
+				"cognee.allow_dataset_override",
+				"cognee.search_type",
+				"cognee.top_k",
+				"cognee.request_timeout"
+			]
+		}
+	]
+}

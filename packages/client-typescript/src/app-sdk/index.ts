@@ -51,7 +51,9 @@ export type {
 	// App configuration
 	AppDescriptor,
 	AppManifestEntry,
-	AppSettingDefinition,
+	SettingValue,
+	SettingSchema,
+	AppConfiguration,
 	ShellBrandingConfig,
 
 	// Workspace

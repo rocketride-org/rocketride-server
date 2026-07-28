@@ -13,11 +13,12 @@
  * inside each page, below the strip.
  *
  * There is no publish/host machinery: consistency is enforced the same way as
- * Card/DataTable — views with sub-views must use this stock component and
+ * Card/DataGrid — views with sub-views must use this stock component and
  * never hand-roll their own tab bars.
  */
 
 import React, { CSSProperties, KeyboardEvent, ReactNode, useRef } from 'react';
+import { cardHeaderChrome } from '../card/Card';
 import { ViewMenu } from '../../types/viewMenu';
 import { ViewMenuBadge } from './ViewMenuBadge';
 
@@ -42,19 +43,19 @@ export interface IPageViewControlProps {
 // =============================================================================
 
 const styles = {
-	// The strip — snug row of tabs at the very top of the view's content column.
-	// The 5px top margin breathes it off whatever sits above (DocTabs, dialog
-	// edge, breadcrumb) — design-owner decision 2026-07-08.
+	// The strip — the row of tabs at the very top of the view's content column,
+	// filled with the CARD-HEADER background sourced from Card's exported
+	// chrome (single source, never re-declared) so it reads as header chrome.
+	// NO margins: the fill runs flush to the host's edge, and the vertical
+	// padding provides the breathing room INSIDE the band.
 	strip: {
 		flex: 'none',
 		display: 'flex',
 		alignItems: 'stretch',
 		gap: 2,
-		height: 38,
-		marginTop: 5,
-		padding: '0 10px',
+		padding: '15px 10px',
 		borderBottom: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-default)',
+		background: cardHeaderChrome.header.background,
 	} as CSSProperties,
 
 	// A single strip tab; the active treatment is layered on top. The active

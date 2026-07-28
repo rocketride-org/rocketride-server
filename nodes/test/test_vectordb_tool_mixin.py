@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Unit tests for the VectorStoreToolMixin (packages/ai/src/ai/common/store.py).
+"""Unit tests for the VectorStoreToolMixin (packages/ai/src/ai/common/store/document_store.py).
 
 These tests load ``store.py`` in isolation by stubbing its heavy imports
 (``rocketlib``, ``ai.common.schema``) so the module can be exercised without
@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 _ROOT = Path(__file__).resolve().parents[2]
-_STORE_PY = _ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'store.py'
+_STORE_PY = _ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'store' / 'document_store.py'
 
 _STUB_MODULE_NAMES = (
     'rocketlib',
@@ -39,6 +39,7 @@ _STUB_MODULE_NAMES = (
     'ai.common',
     'ai.common.schema',
     'ai.common.store',
+    'ai.common.store.document_store',
 )
 
 
@@ -188,9 +189,13 @@ def _install_stubs() -> None:
     schema_mod.QuestionType = _StubQuestionType
     schema_mod.Answer = _StubAnswer
 
+    store_pkg = types.ModuleType('ai.common.store')
+    store_pkg.__path__ = []  # mark as package so document_store's ``..schema`` resolves
+
     sys.modules['ai'] = ai_pkg
     sys.modules['ai.common'] = common_pkg
     sys.modules['ai.common.schema'] = schema_mod
+    sys.modules['ai.common.store'] = store_pkg
 
 
 @contextmanager
@@ -209,13 +214,13 @@ def _scoped_stubs() -> Iterator[None]:
 
 def _load_store_module() -> types.ModuleType:
     with _scoped_stubs():
-        # Load store.py as a submodule of the stubbed ``ai.common`` package so
-        # its ``from .schema import ...`` relative import resolves against the
-        # stub already installed in sys.modules.
-        spec = importlib.util.spec_from_file_location('ai.common.store', _STORE_PY)
+        # Load store/document_store.py as a submodule of the stubbed
+        # ``ai.common`` package so its ``from ..schema import ...`` relative
+        # import resolves against the stub already installed in sys.modules.
+        spec = importlib.util.spec_from_file_location('ai.common.store.document_store', _STORE_PY)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
-        sys.modules['ai.common.store'] = module
+        sys.modules['ai.common.store.document_store'] = module
         spec.loader.exec_module(module)
         return module
 

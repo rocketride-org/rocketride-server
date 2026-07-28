@@ -1,0 +1,120 @@
+{
+	//
+	// Required: The displayable name of this node
+	//
+	"title": "HydraDB",
+	//
+	// Required: The protocol is the endpoint protocol
+	//
+	"protocol": "db_hydradb://",
+	//
+	// Required: Class type of the node - a database that is also an agent-callable tool
+	//
+	"classType": ["graph", "database", "tool"],
+	//
+	// Required: Capabilities are flags that change engine behavior.
+	//   noremote - holds a client + credentials, so it pins to the local worker (per db_neo4j/db_arango)
+	//   invoke   - agent-invocable tool node. NOTE: unlike db_neo4j/db_arango there is NO "invoke": {llm}
+	//              block below - HydraDB retrieves natively (no NL-to-query translation), so no LLM is consumed.
+	//
+	"capabilities": ["noremote", "invoke"],
+	//
+	// Optional: Register a filter factory
+	//
+	"register": "filter",
+	//
+	// Optional: The physical node runtime
+	//
+	"node": "python",
+	//
+	// Optional: The python module path (must be nodes.<dir_name>)
+	//
+	"path": "nodes.graph_hydradb",
+	//
+	// Required: The prefix map used when converting URLs <=> paths (unique across the catalog)
+	//
+	"prefix": "hydradb",
+	//
+	// Optional: Description of this driver
+	//
+	"description": ["A database/tool node for HydraDB, a managed graph + memory store. ", "Exposes agent-callable tools to store text as memories (with automatic knowledge-graph ", "extraction) and recall graph-enriched context by natural-language query. Retrieval is ", "HydraDB's native server-side search - no embeddings or query language required."],
+	//
+	// Optional: The UI icon (co-located svg)
+	//
+	"icon": "hydradb.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional: Lanes - this MVP is a pure agent-tool surface, so no data-flow lanes.
+	//
+	"lanes": {},
+	//
+	// Optional: Profiles used with the "profile": key.
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"default": {
+				"collection": "default"
+			}
+		}
+	},
+	//
+	// Optional: Field definitions for the config schema (RJSF)
+	//
+	"fields": {
+		"hydradb.api_key": {
+			"type": "string",
+			"title": "API Key",
+			"description": "HydraDB API key. Falls back to the HYDRA_DB_API_KEY environment variable if left blank.",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"hydradb.database": {
+			"type": "string",
+			"title": "Database",
+			"description": "HydraDB database - the space that stores your context. Create one in the HydraDB dashboard."
+		},
+		"hydradb.collection": {
+			"type": "string",
+			"title": "Collection",
+			"default": "default",
+			"description": "Collection scope within the database (per-user/workspace partition for memories)."
+		},
+		"hydradb.max_results": {
+			"type": "integer",
+			"title": "Max results",
+			"default": 10,
+			"minimum": 1,
+			"maximum": 100,
+			"description": "Default maximum number of results returned by recall_memory."
+		},
+		"hydradb.default": {
+			"object": "default",
+			"properties": ["hydradb.api_key", "hydradb.database", "hydradb.collection", "hydradb.max_results"]
+		},
+		"hydradb.profile": {
+			"hidden": true,
+			"type": "string",
+			"default": "default",
+			"enum": [["default", "Default"]],
+			"conditional": [
+				{ "value": "default", "properties": ["hydradb.default"] }
+			]
+		}
+	},
+	//
+	// Required: The shape (side-panel layout) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "HydraDB",
+			"properties": ["hydradb.profile"]
+		}
+	]
+}

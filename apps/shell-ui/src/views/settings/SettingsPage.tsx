@@ -21,45 +21,48 @@
 // SOFTWARE.
 
 // =============================================================================
-// SETTINGS PAGE — VS Code-style settings with sidebar nav and search
+// SETTINGS PAGE — VSCode-style settings editor rendered from the registry
 // =============================================================================
 //
-// Layout: sidebar category nav on the left, scrollable settings on the right.
-// Search bar filters settings across all sections.  Each section renders as
-// a card.
+// Declarations come from the settings registry (each desktop app's
+// contributes.configuration flattened by WorkspaceContext); values are the
+// per-user overrides in .workspace/settings.json (deltas only — defaults live
+// in the schemas).
 //
-// Pipeline secrets (ROCKETRIDE_* keys) are managed in Account → Profile.
-// This page handles UI-only settings (trace level, preferences, etc.).
+// Behaviour (per the approved design):
+// - Left nav: one entry per registry section (= app / shared title).
+//   Selecting a section shows ONLY that section's settings.
+// - Search: switches to a cross-app results view spanning all sections.
+// - Rows: "<Section>: <Derived Label>" — labels derive from the key, there is
+//   no label field.  Description carries a muted "Default: x" hint.
+// - Modified indicator: accent bar when the key is present in the overrides;
+//   per-row gear menu offers Reset to default (deletes the key) and
+//   Copy Setting ID.
+// - Edits are BUFFERED in a local draft (the DetailPanel edit-mode pattern):
+//   a bottom Save/Cancel footer appears once the draft diverges from the
+//   committed overrides. Save commits each changed key via updateSetting
+//   (deltas-only — a value equal to the schema default deletes the override);
+//   Cancel discards the draft.
 //
-// Shell owns settings.json persistence via Workspace (updateSetting).
 // =============================================================================
 
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
+import { ContentHeader } from 'shared/components/content-header/ContentHeader';
 import { useWorkspace } from '../../workspace/WorkspaceContext';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ConnectionManager } from '../../connection/connection';
-import type { AppSettingDefinition } from '../../workspace/types';
+import { labelFromKey } from '../../workspace/settingsRegistry';
+import type { RegistryEntry, RegistrySection } from '../../workspace/settingsRegistry';
+import type { SettingValue } from '../../workspace/types';
 
 // =============================================================================
-// SHELL SETTINGS — general settings owned by the shell, not any specific app
+// CONSTANTS
 // =============================================================================
 
-/** Settings definitions for the shell's "General" section. */
-const SHELL_SETTINGS: AppSettingDefinition[] = [
-	{
-		key: 'ROCKETRIDE_TRACE_LEVEL',
-		label: 'Pipeline Trace Level',
-		description: 'Controls tracing verbosity for pipeline execution.',
-		type: 'select',
-		options: [
-			{ value: 'none', label: 'None' },
-			{ value: 'full', label: 'Full — step-by-step tracing' },
-		],
-		default: 'none',
-	},
-];
+/** App id of the Pipeline Builder — used for the subscribe banner. */
+const PIPE_BUILDER_APP_ID = 'rocketride.pipeBuilder';
 
 // =============================================================================
 // STYLES
@@ -73,18 +76,23 @@ const styles = {
 		backgroundColor: 'var(--rr-bg-default)',
 		fontFamily: 'var(--rr-font-family)',
 	} as CSSProperties,
-	topBar: {
+	searchRow: {
 		display: 'flex',
 		alignItems: 'center',
 		gap: 12,
-		padding: '12px 20px',
+		padding: '16px 24px 12px',
 		borderBottom: '1px solid var(--rr-border)',
 		flexShrink: 0,
 	} as CSSProperties,
 	searchInput: {
 		...commonStyles.inputField,
 		flex: 1,
-		maxWidth: 400,
+		maxWidth: 480,
+	} as CSSProperties,
+	searchCount: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		whiteSpace: 'nowrap',
 	} as CSSProperties,
 	body: {
 		display: 'flex',
@@ -96,270 +104,351 @@ const styles = {
 		flexShrink: 0,
 		borderRight: '1px solid var(--rr-border)',
 		overflowY: 'auto',
-		padding: '12px 0',
+		padding: '12px 8px',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
 	} as CSSProperties,
+	// Selectable nav row — the shared listRow pill (same shape/inset as the
+	// pipelines list and SidebarMenu) plus the button reset + active weight.
 	navItem: (active: boolean): CSSProperties => ({
-		display: 'block',
+		...commonStyles.listRow(active),
 		width: '100%',
-		padding: '6px 20px',
-		fontSize: 13,
-		color: active ? 'var(--rr-text-primary)' : 'var(--rr-text-secondary)',
-		fontWeight: active ? 600 : 400,
-		background: active ? 'var(--rr-bg-surface-alt)' : 'transparent',
+		margin: '1px 0',
 		border: 'none',
 		textAlign: 'left',
-		cursor: 'pointer',
-		borderLeft: active ? '2px solid var(--rr-brand)' : '2px solid transparent',
+		fontWeight: active ? 600 : 400,
+		fontFamily: 'var(--rr-font-family)',
 	}),
 	content: {
 		flex: 1,
 		overflowY: 'auto',
-		padding: '20px 0 64px',
+		padding: '4px 28px 48px 20px',
 	} as CSSProperties,
-	contentInner: {
-		maxWidth: 700,
-		margin: '0 auto',
-		padding: '0 24px',
+	sectionHead: {
+		padding: '18px 0 2px 12px',
+		display: 'flex',
+		alignItems: 'baseline',
+		gap: 8,
 	} as CSSProperties,
-	sectionCard: {
-		backgroundColor: 'var(--rr-bg-paper)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 10,
-		overflow: 'hidden',
-		marginBottom: 24,
+	sectionTitle: {
+		fontSize: 17,
+		fontWeight: 500,
+		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
-	sectionHeader: {
-		padding: '14px 20px',
-		borderBottom: '1px solid var(--rr-border)',
-		backgroundColor: 'var(--rr-bg-surface-alt)',
+	sectionAppId: {
+		fontSize: 11,
+		color: 'var(--rr-text-disabled)',
+	} as CSSProperties,
+	row: (modified: boolean): CSSProperties => ({
+		position: 'relative',
+		margin: '6px 0',
+		padding: '10px 12px 12px 12px',
+		borderLeft: `3px solid ${modified ? 'var(--rr-accent)' : 'transparent'}`,
+		borderRadius: 3,
+	}),
+	rowLabel: {
 		fontSize: 13,
 		fontWeight: 600,
 		color: 'var(--rr-text-primary)',
+		paddingRight: 34,
 	} as CSSProperties,
-	sectionBody: {
-		padding: 20,
-		display: 'flex',
-		flexDirection: 'column',
-		gap: 24,
-	} as CSSProperties,
-	settingRow: {
-		display: 'flex',
-		flexDirection: 'column',
-		gap: 4,
-	} as CSSProperties,
-	settingLabel: {
-		fontSize: 13,
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-	settingCategory: {
+	rowCategory: {
 		color: 'var(--rr-text-secondary)',
+		fontWeight: 400,
 	} as CSSProperties,
-	settingBold: {
-		fontWeight: 600,
-	} as CSSProperties,
-	settingDesc: {
-		margin: 0,
+	rowDesc: {
+		margin: '4px 0 8px 0',
 		fontSize: 12,
 		color: 'var(--rr-text-secondary)',
 		lineHeight: 1.5,
+		maxWidth: 640,
 	} as CSSProperties,
+	rowDefaultHint: {
+		color: 'var(--rr-text-disabled)',
+	} as CSSProperties,
+	requiredBadge: {
+		marginLeft: 6,
+		fontSize: 11,
+		fontWeight: 600,
+		color: 'var(--rr-color-error)',
+	} as CSSProperties,
+	control: {
+		...commonStyles.inputField,
+		maxWidth: 400,
+	} as CSSProperties,
+	checkRow: {
+		display: 'flex',
+		gap: 8,
+		alignItems: 'flex-start',
+		maxWidth: 640,
+		marginTop: 6,
+	} as CSSProperties,
+	gearWrap: {
+		position: 'absolute',
+		top: 8,
+		right: 8,
+	} as CSSProperties,
+	gearButton: {
+		border: 'none',
+		background: 'transparent',
+		cursor: 'pointer',
+		width: 26,
+		height: 26,
+		borderRadius: 4,
+		color: 'var(--rr-text-secondary)',
+		fontSize: 14,
+		lineHeight: '26px',
+		textAlign: 'center',
+	} as CSSProperties,
+	menu: {
+		position: 'absolute',
+		right: 0,
+		top: 28,
+		zIndex: 10,
+		background: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 4,
+		boxShadow: '0 4px 14px rgba(0, 0, 0, 0.18)',
+		minWidth: 170,
+		padding: '4px 0',
+	} as CSSProperties,
+	menuItem: (disabled: boolean): CSSProperties => ({
+		display: 'block',
+		width: '100%',
+		textAlign: 'left',
+		padding: '6px 12px',
+		border: 'none',
+		background: 'transparent',
+		fontSize: 13,
+		fontFamily: 'var(--rr-font-family)',
+		cursor: disabled ? 'default' : 'pointer',
+		color: disabled ? 'var(--rr-text-disabled)' : 'var(--rr-text-primary)',
+	}),
+	manageLink: {
+		fontSize: 12,
+		color: 'var(--rr-color-info)',
+		background: 'none',
+		border: 'none',
+		padding: 0,
+		marginTop: 6,
+		cursor: 'pointer',
+		textAlign: 'left',
+		fontFamily: 'var(--rr-font-family)',
+	} as CSSProperties,
+	noResults: {
+		padding: '40px 0',
+		textAlign: 'center',
+		color: 'var(--rr-text-disabled)',
+		fontSize: 14,
+	} as CSSProperties,
+	footer: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'flex-end',
+		gap: 8,
+		padding: '12px 20px',
+		borderTop: '1px solid var(--rr-border)',
+		flexShrink: 0,
+		backgroundColor: 'var(--rr-bg-default)',
+	} as CSSProperties,
+	footerCancel: { ...commonStyles.buttonSecondary, fontFamily: 'var(--rr-font-family)' } as CSSProperties,
+	footerSave: { ...commonStyles.buttonPrimary, fontFamily: 'var(--rr-font-family)' } as CSSProperties,
 };
 
 // =============================================================================
-// HELPERS
+// SETTING ROW
 // =============================================================================
 
 /**
- * Returns true if a setting key looks like it contains a secret value.
+ * Renders a single setting: "<Section>: <Derived Label>", description with a
+ * muted default hint, the schema-appropriate control, a modified accent bar,
+ * and a gear menu (Reset to default / Copy Setting ID).
  *
- * @param key - The setting key to check.
+ * Control selection by schema:
+ * - `enum`                        — dropdown of the fixed choices
+ * - `type: 'boolean'`             — checkbox with inline description
+ * - `type: 'number' | 'integer'`  — numeric input
+ * - `format: 'rocketride.envkey'` — Variable-name picker (never a secret value)
+ * - `format: 'rocketride.service'`— service dropdown from the cached catalog
+ * - otherwise                     — text input
  */
-function isSensitive(key: string): boolean {
-	return /key|secret|token|password|apikey/i.test(key);
-}
-
-/**
- * Returns true if a setting definition matches the search query.
- *
- * @param def   - The setting definition.
- * @param query - Lowercase search string.
- */
-function matchesSearch(def: AppSettingDefinition, query: string): boolean {
-	if (!query) return true;
-	return (
-		def.key.toLowerCase().includes(query) ||
-		def.label.toLowerCase().includes(query) ||
-		(def.description ?? '').toLowerCase().includes(query)
-	);
-}
-
-// =============================================================================
-// SETTING FIELD
-// =============================================================================
-
-/**
- * Renders a single setting in VS Code style: Category: **Label**, description, input.
- *
- * Supports four field types:
- * - `'text'`    — standard text / password input (default)
- * - `'select'`  — dropdown with fixed options
- * - `'service'` — dropdown populated from the cached service catalog
- * - `'envkey'`  — dropdown of server-side env key names, or free-text entry
- */
-const SettingField: React.FC<{
+const SettingRow: React.FC<{
 	category: string;
-	def: AppSettingDefinition;
-	value: string;
-	onChange: (key: string, value: string) => void;
-	services: Record<string, unknown>;
+	entry: RegistryEntry;
+	value: SettingValue | undefined;
+	modified: boolean;
+	menuOpen: boolean;
 	envKeys: string[];
-}> = ({ category, def, value, onChange, services, envKeys }) => {
-	const sensitive = def.type !== 'service' && def.type !== 'envkey' && isSensitive(def.key);
-	const [revealed, setRevealed] = React.useState(false);
+	services: Record<string, unknown>;
+	onChange: (key: string, value: SettingValue | undefined) => void;
+	onToggleMenu: (key: string | null) => void;
+}> = ({ category, entry, value, modified, menuOpen, envKeys, services, onChange, onToggleMenu }) => {
+	const { key, schema } = entry;
+	const label = labelFromKey(key);
+	const description = schema.description ?? schema.markdownDescription ?? '';
+	// Hovering reveals the gear; menuOpen pins it
+	const [hovered, setHovered] = useState(false);
 
-	// ── Header (shared by all types) ──────────────────────────────────────
+	/** Opens the Variables overlay for envkey settings. */
+	const openVariables = useCallback(() => {
+		ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'environment' });
+	}, []);
+
+	// ── Default hint appended to the description ──────────────────────────
+	// Enum defaults show their friendly enumDescriptions label when declared
+	const defaultEnumIndex = schema.enum && schema.default !== undefined ? schema.enum.findIndex((opt) => String(opt) === String(schema.default)) : -1;
+	const defaultText = defaultEnumIndex >= 0 ? (schema.enumDescriptions?.[defaultEnumIndex] ?? String(schema.default)) : String(schema.default);
+	const defaultHint = schema.default !== undefined && schema.default !== '' ? <span style={styles.rowDefaultHint}> Default: {defaultText}</span> : null;
+
+	// ── Header: "<Section>: <Label>" + required badge ─────────────────────
 	const header = (
-		<>
-			<div style={styles.settingLabel}>
-				<span style={styles.settingCategory}>{category}: </span>
-				<span style={styles.settingBold}>{def.label}</span>
-				{def.required && !value && (
-					<span style={{ marginLeft: 6, fontSize: 11, fontWeight: 600, color: 'var(--rr-color-error)' }}>Required</span>
-				)}
-			</div>
-			{def.description && <p style={styles.settingDesc}>{def.description}</p>}
-		</>
+		<div style={styles.rowLabel}>
+			<span style={styles.rowCategory}>{category}: </span>
+			{label}
+			{schema.required && (value === undefined || value === '') && <span style={styles.requiredBadge}>Required</span>}
+		</div>
 	);
 
-	// ── type: select ──────────────────────────────────────────────────────
-	if (def.type === 'select' && def.options) {
-		return (
-			<div style={styles.settingRow as CSSProperties}>
-				{header}
-				<select
-					value={value || def.default || ''}
-					onChange={(e) => onChange(def.key, e.target.value)}
-					style={{ ...commonStyles.inputField, cursor: 'pointer', maxWidth: 400 } as CSSProperties}
+	// ── Gear menu (shared by all control types) ───────────────────────────
+	const gear = (
+		<div style={styles.gearWrap}>
+			{(hovered || menuOpen) && (
+				<button
+					style={styles.gearButton}
+					title="More actions"
+					onClick={(e) => {
+						e.stopPropagation();
+						onToggleMenu(menuOpen ? null : key);
+					}}
 				>
-					{def.options.map((opt) => (
-						<option key={opt.value} value={opt.value}>{opt.label}</option>
-					))}
-				</select>
+					<svg width="14" height="14" viewBox="0 0 16 16" style={{ display: 'block', margin: '0 auto' }}>
+						<path fill="currentColor" d="M9.1 4.4l.6-2.4H6.3l.6 2.4-1.2.7-2.1-1.2-1.7 3 2.1 1.2v1.8l-2.1 1.2 1.7 3 2.1-1.2 1.2.7-.6 2.4h3.4l-.6-2.4 1.2-.7 2.1 1.2 1.7-3-2.1-1.2V7.9l2.1-1.2-1.7-3-2.1 1.2zM8 10.3a2.3 2.3 0 110-4.6 2.3 2.3 0 010 4.6z" />
+					</svg>
+				</button>
+			)}
+			{menuOpen && (
+				<div style={styles.menu}>
+					<button
+						style={styles.menuItem(!modified)}
+						disabled={!modified}
+						onClick={() => {
+							onChange(key, undefined);
+							onToggleMenu(null);
+						}}
+					>
+						Reset to default
+					</button>
+					<button
+						style={styles.menuItem(false)}
+						onClick={() => {
+							navigator.clipboard?.writeText(key).catch(() => {});
+							onToggleMenu(null);
+						}}
+					>
+						Copy Setting ID
+					</button>
+				</div>
+			)}
+		</div>
+	);
+
+	// ── Control by schema type/format ─────────────────────────────────────
+	let control: React.ReactNode;
+
+	if (schema.type === 'boolean') {
+		// Boolean: checkbox with the description inline (VSCode-style)
+		control = (
+			<div style={styles.checkRow}>
+				<input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(key, e.target.checked)} style={{ marginTop: 3, accentColor: 'var(--rr-accent)' }} />
+				<p style={{ ...styles.rowDesc, margin: 0 }}>
+					{description}
+					{defaultHint}
+				</p>
 			</div>
 		);
-	}
-
-	// ── type: service — dropdown from cached service catalog ──────────────
-	if (def.type === 'service') {
-		// Filter services by classType when specified
-		const filtered = Object.entries(services).filter(([, svc]) => {
-			if (!def.classType) return true;
-			const ct = (svc as any)?.classType;
-			if (Array.isArray(ct)) return ct.includes(def.classType);
-			return ct === def.classType;
-		});
-
-		return (
-			<div style={styles.settingRow as CSSProperties}>
-				{header}
-				<select
-					value={value || def.default || ''}
-					onChange={(e) => onChange(def.key, e.target.value)}
-					style={{ ...commonStyles.inputField, cursor: 'pointer', maxWidth: 400 } as CSSProperties}
-				>
-					{filtered.length === 0 && (
-						<option value="">No services available</option>
-					)}
-					{filtered.map(([key, svc]) => (
-						<option key={key} value={key}>
-							{(svc as any)?.title ?? key}
+	} else if (schema.enum) {
+		// Enum: dropdown of fixed choices — option text prefers the aligned
+		// enumDescriptions entry (friendly label) over the raw value. Numeric
+		// schemas store the selected value as a number, not its string form.
+		const coerceEnum = (raw: string): SettingValue => (schema.type === 'integer' || schema.type === 'number' ? Number(raw) : raw);
+		control = (
+			<select value={String(value ?? '')} onChange={(e) => onChange(key, coerceEnum(e.target.value))} style={{ ...styles.control, cursor: 'pointer' }}>
+				{schema.enum.map((opt, i) => (
+					<option key={String(opt)} value={String(opt)}>
+						{schema.enumDescriptions?.[i] ?? String(opt)}
+					</option>
+				))}
+			</select>
+		);
+	} else if (schema.format === 'rocketride.envkey') {
+		// Envkey: pick the NAME of a server-side Variable — never a secret value
+		control = (
+			<div style={{ display: 'flex', flexDirection: 'column', maxWidth: 400 }}>
+				<select value={String(value ?? '')} onChange={(e) => onChange(key, e.target.value === '' ? undefined : e.target.value)} style={{ ...styles.control, cursor: 'pointer' }}>
+					<option value="">(not set)</option>
+					{envKeys.map((k) => (
+						<option key={k} value={k}>
+							{k}
 						</option>
 					))}
 				</select>
+				<button style={styles.manageLink} onClick={openVariables}>
+					Manage variables
+				</button>
 			</div>
 		);
-	}
-
-	// ── type: envkey — dropdown of env key names + free-text entry ────────
-	if (def.type === 'envkey') {
-		// Value is either a ${VAR_NAME} reference or a raw key string
-		const isEnvRef = value.startsWith('${') && value.endsWith('}');
-		const envRefName = isEnvRef ? value.slice(2, -1) : '';
-		// "custom" when the user is typing a raw key, otherwise the env var name
-		const mode = isEnvRef ? envRefName : (value ? 'custom' : '');
-
-		return (
-			<div style={styles.settingRow as CSSProperties}>
-				{header}
-				<div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 400 } as CSSProperties}>
-					<select
-						value={mode}
-						onChange={(e) => {
-							const selected = e.target.value;
-							if (selected === 'custom') {
-								// Switch to free-text — clear value so user can type
-								onChange(def.key, '');
-							} else {
-								// Wrap in ${} to mark as env key reference
-								onChange(def.key, `\${${selected}}`);
-							}
-						}}
-						style={{ ...commonStyles.inputField, cursor: 'pointer' } as CSSProperties}
-					>
-						<option value="">Select an option…</option>
-						{envKeys.map((k) => (
-							<option key={k} value={k}>{k}</option>
-						))}
-						<option value="custom">Enter key manually…</option>
-					</select>
-					{mode === 'custom' && (
-						<input
-							type={revealed ? 'text' : 'password'}
-							value={isEnvRef ? '' : value}
-							onChange={(e) => onChange(def.key, e.target.value)}
-							placeholder="Paste your API key"
-							style={{
-								...commonStyles.inputField,
-								fontFamily: 'var(--rr-font-mono, monospace)',
-								border: `1px solid ${def.required && !value ? 'var(--rr-color-error)' : 'var(--rr-border-input)'}`,
-							} as CSSProperties}
-						/>
-					)}
-				</div>
-			</div>
+	} else if (schema.format === 'rocketride.service') {
+		// Service: dropdown from the cached service catalog, filtered by classType
+		const filtered = Object.entries(services).filter(([, svc]) => {
+			if (!schema.classType) return true;
+			const ct = (svc as { classType?: string | string[] })?.classType;
+			return Array.isArray(ct) ? ct.includes(schema.classType) : ct === schema.classType;
+		});
+		control = (
+			<select value={String(value ?? '')} onChange={(e) => onChange(key, e.target.value)} style={{ ...styles.control, cursor: 'pointer' }}>
+				{filtered.length === 0 && <option value="">No services available</option>}
+				{filtered.map(([svcKey, svc]) => (
+					<option key={svcKey} value={svcKey}>
+						{(svc as { title?: string })?.title ?? svcKey}
+					</option>
+				))}
+			</select>
 		);
+	} else if (schema.type === 'number' || schema.type === 'integer') {
+		// Number: numeric input; clearing the field resets to default
+		control = (
+			<input
+				type="number"
+				value={value === undefined ? '' : String(value)}
+				onChange={(e) => {
+					const raw = e.target.value;
+					if (raw === '') {
+						onChange(key, undefined);
+						return;
+					}
+					const num = Number(raw);
+					if (!Number.isNaN(num)) onChange(key, num);
+				}}
+				style={{ ...styles.control, maxWidth: 140 }}
+			/>
+		);
+	} else {
+		// String (default): plain text input
+		control = <input type="text" value={String(value ?? '')} onChange={(e) => onChange(key, e.target.value)} placeholder={schema.placeholder} style={styles.control} />;
 	}
 
-	// ── type: text (default) ──────────────────────────────────────────────
 	return (
-		<div style={styles.settingRow as CSSProperties}>
+		<div style={styles.row(modified)} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
 			{header}
-			<div style={{ display: 'flex', gap: 8, alignItems: 'center', maxWidth: 400 }}>
-				<input
-					type={sensitive && !revealed ? 'password' : 'text'}
-					value={value}
-					onChange={(e) => onChange(def.key, e.target.value)}
-					placeholder={sensitive ? '••••••••••••' : `Enter ${def.label}`}
-					style={{
-						...commonStyles.inputField,
-						flex: 1,
-						border: `1px solid ${def.required && !value ? 'var(--rr-color-error)' : 'var(--rr-border-input)'}`,
-						fontFamily: sensitive ? 'var(--rr-font-mono, monospace)' : 'var(--rr-font-family)',
-					} as CSSProperties}
-				/>
-				{sensitive && (
-					<button
-						onClick={() => setRevealed((v) => !v)}
-						style={{
-							padding: '8px 12px', borderRadius: 6, border: '1px solid var(--rr-border)',
-							backgroundColor: 'transparent', color: 'var(--rr-text-secondary)',
-							fontSize: 12, cursor: 'pointer', fontFamily: 'var(--rr-font-family)', whiteSpace: 'nowrap',
-						}}
-					>
-						{revealed ? 'Hide' : 'Show'}
-					</button>
-				)}
-			</div>
+			{/* Boolean rows carry the description inline next to the checkbox */}
+			{schema.type !== 'boolean' && description && (
+				<p style={styles.rowDesc}>
+					{description}
+					{defaultHint}
+				</p>
+			)}
+			{schema.type !== 'boolean' && !description && defaultHint && <p style={styles.rowDesc}>{defaultHint}</p>}
+			{control}
+			{gear}
 		</div>
 	);
 };
@@ -368,32 +457,103 @@ const SettingField: React.FC<{
 // SETTINGS PAGE
 // =============================================================================
 
-/** A section in the settings page (sidebar nav + content). */
-interface SettingsSection {
-	id: string;
-	label: string;
-	defs: AppSettingDefinition[];
+/**
+ * Returns true when a registry entry matches the search query — matched
+ * against the full key, the derived label, and the description.
+ *
+ * @param entry - The registry entry to test.
+ * @param query - Lowercase search string.
+ */
+function matchesSearch(entry: RegistryEntry, query: string): boolean {
+	const haystack = `${entry.key} ${labelFromKey(entry.key)} ${entry.schema.description ?? ''}`.toLowerCase();
+	return haystack.includes(query);
 }
 
 /**
- * Shell-owned settings overlay with VS Code-style layout:
- * sidebar nav on the left, searchable settings on the right.
+ * Shell-owned settings overlay, VSCode-style, rendered entirely from the
+ * settings registry.
  *
- * Pipeline secrets (ROCKETRIDE_* API keys) are managed in Account → Profile.
- * This page handles UI-only settings (trace level, preferences).
- *
+ * Two view modes: with no search text only the nav-selected app's section
+ * renders; typing a search switches to a cross-app results view spanning
+ * every section.  All edits apply immediately (deltas-only persistence).
  */
-const PIPE_BUILDER_APP_ID = 'rocketride.pipeBuilder';
-
 const SettingsPage: React.FC = () => {
-	const { appManifest, settings, updateSetting } = useWorkspace();
+	const { settingsRegistry, settingsOverrides, updateSetting } = useWorkspace();
+
+	// -- Buffered edit model (matches VSCode settings + DetailPanel) -----------
+	// Edits collect in a local draft layered over the committed overrides; the
+	// Save/Cancel footer commits or discards them (deltas-only, like updateSetting).
+	const [draft, setDraft] = useState<Record<string, SettingValue>>(() => ({ ...settingsOverrides }));
+
+	// Unsaved edits exist when the draft diverges from the committed overrides.
+	const dirty = useMemo(() => {
+		const keys = new Set([...Object.keys(draft), ...Object.keys(settingsOverrides)]);
+		for (const k of keys) {
+			if (draft[k] !== settingsOverrides[k]) return true;
+		}
+		return false;
+	}, [draft, settingsOverrides]);
+
+	// Re-sync the draft when the committed overrides change externally, but only
+	// while there are no local edits so a background update never clobbers them.
+	const dirtyRef = useRef(dirty);
+	dirtyRef.current = dirty;
+	useEffect(() => {
+		if (!dirtyRef.current) setDraft({ ...settingsOverrides });
+	}, [settingsOverrides]);
+
+	/**
+	 * Stage a setting change in the draft with deltas-only semantics: a value
+	 * equal to the schema default (or undefined) drops the key entirely.
+	 */
+	const handleDraftChange = useCallback(
+		(key: string, value: SettingValue | undefined) => {
+			setDraft((prev) => {
+				const next = { ...prev };
+				const def = settingsRegistry.defaults[key];
+				if (value === undefined || value === def) delete next[key];
+				else next[key] = value;
+				return next;
+			});
+		},
+		[settingsRegistry]
+	);
+
+	/** Commit the draft: write changed keys and reset removed keys to their default. */
+	const handleSave = useCallback(() => {
+		Object.keys(draft).forEach((k) => {
+			if (draft[k] !== settingsOverrides[k]) updateSetting(k, draft[k]);
+		});
+		Object.keys(settingsOverrides).forEach((k) => {
+			if (!(k in draft)) updateSetting(k, undefined);
+		});
+	}, [draft, settingsOverrides, updateSetting]);
+
+	/** Discard the draft, reverting every control to the committed values. */
+	const handleCancel = useCallback(() => setDraft({ ...settingsOverrides }), [settingsOverrides]);
+
+	/**
+	 * The typed effective value of a key: the raw override when present,
+	 * otherwise the schema default.  The controls need the TYPED value (a
+	 * boolean checkbox, a numeric input), so this reads the typed overrides and
+	 * registry defaults rather than the stringified public `settings` map.
+	 *
+	 * @param key - The full dotted setting key.
+	 * @returns The effective value, or undefined when neither is set.
+	 */
+	const effectiveValue = useCallback(
+		(key: string): SettingValue | undefined => {
+			return key in draft ? draft[key] : settingsRegistry.schemas.get(key)?.default;
+		},
+		[draft, settingsRegistry]
+	);
 	const { client, isConnected } = useShellConnection();
-	const [draft, setDraft] = useState<Record<string, string>>({});
-	const [saved, setSaved] = useState(false);
 	const [search, setSearch] = useState('');
 	const [selectedNav, setSelectedNav] = useState<string | null>(null);
+	// Key of the row whose gear menu is open (null = none)
+	const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
 
-	// ── Subscription status ─────────────────────────────────────────────
+	// ── Subscription status (pipeBuilder upsell banner) ────────────────────
 	const info = client?.getAccountInfo();
 	const pipeBuilderApp = (info?.apps ?? []).find((a: any) => a.id === PIPE_BUILDER_APP_ID);
 	const isSubscribed = pipeBuilderApp?.appStatus === 'subscribed' || pipeBuilderApp?.appStatus === 'trialing';
@@ -406,7 +566,7 @@ const SettingsPage: React.FC = () => {
 		ConnectionManager.getInstance().emit('shell:subscribe', { app: pipeBuilderApp });
 	}, [pipeBuilderApp]);
 
-	// ── Services from cached catalog ─────────────────────────────────────
+	// ── Services from cached catalog (for format 'rocketride.service') ────
 	const [services, setServices] = useState<Record<string, unknown>>({});
 
 	useEffect(() => {
@@ -414,225 +574,118 @@ const SettingsPage: React.FC = () => {
 		const cached = ConnectionManager.getInstance().getCachedServices();
 		setServices(cached.services);
 		// Subscribe to updates (lazy fetch fires if cache was empty)
-		const unsub = ConnectionManager.getInstance().on('shell:servicesUpdated', ({ services: s }) => {
+		return ConnectionManager.getInstance().on('shell:servicesUpdated', ({ services: s }) => {
 			setServices(s);
 		});
-		return unsub;
 	}, []);
 
-	// ── Environment key names from account ───────────────────────────────
+	// ── Variable names from account (for format 'rocketride.envkey') ──────
 	const [envKeys, setEnvKeys] = useState<string[]>([]);
 
 	useEffect(() => {
 		if (!client || !isConnected) return;
-		client.account.getEnvironmentKeys()
+		client.account
+			.getEnvironmentKeys()
 			.then((keys: string[]) => setEnvKeys(keys))
 			.catch(() => {});
 	}, [client, isConnected]);
 
-	// Build all sections for nav + rendering.
-	// Settings with identical keys across multiple apps are deduplicated —
-	// shown once under a combined label (e.g. "Games") rather than repeated
-	// in each app's section.
-	const sections = useMemo<SettingsSection[]>(() => {
-		const result: SettingsSection[] = [];
+	// ── Close any open gear menu on outside click ──────────────────────────
+	useEffect(() => {
+		if (!openMenuKey) return;
+		const close = () => setOpenMenuKey(null);
+		document.addEventListener('click', close);
+		return () => document.removeEventListener('click', close);
+	}, [openMenuKey]);
 
-		// General (shell)
-		if (SHELL_SETTINGS.length > 0) {
-			result.push({ id: 'general', label: 'General', defs: SHELL_SETTINGS });
-		}
-
-		// Track which setting keys have already been placed in a section
-		const seenKeys = new Set<string>();
-		// Group apps by their exact set of setting keys to detect shared settings
-		const keySignature = (defs: AppSettingDefinition[]) => defs.map((d) => d.key).sort().join(',');
-		const groups = new Map<string, { apps: typeof appManifest; defs: AppSettingDefinition[] }>();
-
-		for (const app of appManifest) {
-			// appManifest is the full catalog; only surface settings for apps the user has
-			// actually installed (on their desktop). Without this, an uninstalled app's
-			// settings (e.g. Aparavi AQL) would appear for everyone. Shell "General"
-			// settings above are unaffected and always shown.
-			if (!app.onDesktop) continue;
-			const appSettings = app.settings ?? [];
-			if (appSettings.length === 0) continue;
-			const sig = keySignature(appSettings);
-			const existing = groups.get(sig);
-			if (existing) {
-				existing.apps.push(app);
-			} else {
-				groups.set(sig, { apps: [app], defs: appSettings });
-			}
-		}
-
-		for (const { apps, defs } of groups.values()) {
-			// Deduplicate: skip settings already shown in a prior group
-			const uniqueDefs = defs.filter((d) => !seenKeys.has(d.key));
-			if (uniqueDefs.length === 0) continue;
-			uniqueDefs.forEach((d) => seenKeys.add(d.key));
-
-			// Use a combined label when multiple apps share the same settings
-			const label = apps.length > 1
-				? (apps[0].categories?.includes('games') ? 'Games' : apps.map((a) => a.name).join(', '))
-				: apps[0].name;
-			const id = apps.length > 1 ? `group:${apps[0].id}` : apps[0].id;
-			result.push({ id, label, defs: uniqueDefs });
-		}
-
-		return result;
-	}, [appManifest]);
-
-	// Filter sections by search query and sidebar selection
+	// ── Section selection + view mode ──────────────────────────────────────
+	const { sections } = settingsRegistry;
 	const query = search.toLowerCase().trim();
 
-	// The selected settings "page". Defaults to the first section (General) and falls
-	// back to it if a previously-selected app section is no longer present.
+	// The selected section — defaults to the first, falls back when apps change
 	const effectiveNav = useMemo(() => {
 		if (selectedNav && sections.some((s) => s.id === selectedNav)) return selectedNav;
 		return sections[0]?.id ?? null;
 	}, [selectedNav, sections]);
 
-	const visibleSections = useMemo(() => {
-		// Search spans every section so matches aren't hidden by the current page.
+	// Visible sections: search spans ALL sections; otherwise only the selected
+	// section renders — each nav entry is its own page.
+	const visibleSections = useMemo<RegistrySection[]>(() => {
 		if (query) {
-			return sections
-				.map((sec) => ({
-					...sec,
-					defs: sec.defs.filter((d) => matchesSearch(d, query)),
-				}))
-				.filter((sec) => sec.defs.length > 0);
+			return sections.map((sec) => ({ ...sec, entries: sec.entries.filter((e) => matchesSearch(e, query)) })).filter((sec) => sec.entries.length > 0);
 		}
-
-		// Otherwise show only the selected section — each nav button is its own page.
 		return sections.filter((sec) => sec.id === effectiveNav);
 	}, [sections, effectiveNav, query]);
 
-	/**
-	 * Returns the current value for any settings key, preferring draft over saved.
-	 */
-	const getValue = useCallback(
-		(key: string) => draft[key] ?? settings[key] ?? '',
-		[draft, settings],
-	);
+	// Total match count shown next to the search box while searching
+	const matchCount = useMemo(() => (query ? visibleSections.reduce((n, sec) => n + sec.entries.length, 0) : 0), [query, visibleSections]);
 
-	/**
-	 * Handles a setting value change — stores in draft until Save is clicked.
-	 */
-	const handleChange = useCallback((key: string, value: string) => {
-		setDraft((prev) => ({ ...prev, [key]: value }));
-		setSaved(false);
+	/** Selecting a section exits search mode and shows only that app's pane. */
+	const handleNavSelect = useCallback((id: string) => {
+		setSelectedNav(id);
+		setSearch('');
 	}, []);
 
-	/**
-	 * Persists all draft changes to the workspace settings store.
-	 */
-	const handleSave = useCallback(() => {
-		for (const [key, value] of Object.entries(draft)) {
-			updateSetting(key, value);
-		}
-		setDraft({});
-		setSaved(true);
-		setTimeout(() => setSaved(false), 3000);
-	}, [draft, updateSetting]);
-
-	const isDirty = Object.keys(draft).length > 0;
 	const hasAny = visibleSections.length > 0;
 
 	return (
 		<div style={styles.root}>
-			{/* ── Top bar: search + save + close ─────────────────── */}
-			<div style={styles.topBar}>
-				<input
-					type="text"
-					value={search}
-					onChange={(e) => setSearch(e.target.value)}
-					placeholder="Search settings…"
-					style={styles.searchInput as CSSProperties}
-				/>
-				{saved && (
-					<span style={{ fontSize: 13, color: 'var(--rr-color-success)' }}>Saved</span>
-				)}
-				{isDirty && (
-					<>
-						<button
-							onClick={() => { setDraft({}); setSaved(false); }}
-							style={{
-								...commonStyles.buttonSecondary,
-								fontFamily: 'var(--rr-font-family)',
-							} as CSSProperties}
-						>
-							Cancel
-						</button>
-						<button
-							onClick={handleSave}
-							style={{
-								...commonStyles.buttonPrimary,
-								fontWeight: 600,
-								fontFamily: 'var(--rr-font-family)',
-							} as CSSProperties}
-						>
-							Save
-						</button>
-					</>
-				)}
+			{/* ── Page heading ───────────────────────────────────── */}
+			<ContentHeader title="Settings" subtitle="Preferences for RocketRide and your installed apps. Only the values you change are saved — everything else uses each app's default." />
+
+			{/* ── Search row ─────────────────────────────────────── */}
+			<div style={styles.searchRow}>
+				<input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search settings" style={styles.searchInput} />
+				{query && <span style={styles.searchCount}>{matchCount} Settings Found</span>}
 			</div>
 
-			{/* ── Body: sidebar + content ─────────────────────────── */}
+			{/* ── Body: nav + content ─────────────────────────────── */}
 			<div style={styles.body}>
-				{/* ── Sidebar nav ─────────────────────────────────── */}
-				<nav style={styles.sidebar as CSSProperties}>
+				<nav style={styles.sidebar}>
 					{sections.map((sec) => (
-						<button
-							key={sec.id}
-							style={styles.navItem(sec.id === effectiveNav)}
-							onClick={() => setSelectedNav(sec.id)}
-						>
-							{sec.label}
+						<button key={sec.id} style={styles.navItem(!query && sec.id === effectiveNav)} onClick={() => handleNavSelect(sec.id)}>
+							{sec.title}
 						</button>
 					))}
 				</nav>
 
-				{/* ── Content area ────────────────────────────────── */}
-				<div style={styles.content as CSSProperties}>
-					<div style={styles.contentInner}>
-						{/* Subscribe prompt for unsubscribed users */}
-						{info && pipeBuilderApp && !isSubscribed && (
-							<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', marginBottom: 16, borderRadius: 10, border: '1px solid var(--rr-border)', background: 'var(--rr-bg-titleBar-inactive)' }}>
-								<span style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>
-									Subscribe to unlock pipeline execution and deployment.
-								</span>
-								<button onClick={handleSubscribe} style={{ ...commonStyles.buttonPrimary, fontFamily: 'var(--rr-font-family)', fontWeight: 600, whiteSpace: 'nowrap' } as CSSProperties}>
-									Subscribe to RocketRide
-								</button>
-							</div>
-						)}
-						{!hasAny && (
-							<div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--rr-text-disabled)', fontSize: 14 }}>
-								{query ? 'No settings match your search.' : 'No settings defined.'}
-							</div>
-						)}
+				<div style={styles.content}>
+					{/* Subscribe prompt for unsubscribed users */}
+					{info && pipeBuilderApp && !isSubscribed && (
+						<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', margin: '16px 0 0 0', borderRadius: 10, border: '1px solid var(--rr-border)', background: 'var(--rr-bg-titleBar-inactive)' }}>
+							<span style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>Subscribe to unlock pipeline execution and deployment.</span>
+							<button onClick={handleSubscribe} style={{ ...commonStyles.buttonPrimary, fontFamily: 'var(--rr-font-family)', fontWeight: 600, whiteSpace: 'nowrap' } as CSSProperties}>
+								Subscribe to RocketRide
+							</button>
+						</div>
+					)}
 
-						{visibleSections.map((sec) => (
-							<section key={sec.id} style={styles.sectionCard}>
-								<div style={styles.sectionHeader}>{sec.label}</div>
-								<div style={styles.sectionBody as CSSProperties}>
-									{sec.defs.map((def) => (
-										<SettingField
-											key={def.key}
-											category={sec.label}
-											def={def}
-											value={getValue(def.key)}
-											onChange={handleChange}
-											services={services}
-											envKeys={envKeys}
-										/>
-									))}
-								</div>
-							</section>
-						))}
-					</div>
+					{!hasAny && <div style={styles.noResults}>{query ? 'No settings matched your search.' : 'No settings defined.'}</div>}
+
+					{visibleSections.map((sec) => (
+						<section key={sec.id}>
+							<div style={styles.sectionHead}>
+								<span style={styles.sectionTitle}>{sec.title}</span>
+								<span style={styles.sectionAppId}>{sec.appIds.join(', ')}</span>
+							</div>
+							{sec.entries.map((entry) => (
+								<SettingRow key={entry.key} category={sec.title} entry={entry} value={effectiveValue(entry.key)} modified={entry.key in draft} menuOpen={openMenuKey === entry.key} envKeys={envKeys} services={services} onChange={handleDraftChange} onToggleMenu={setOpenMenuKey} />
+							))}
+						</section>
+					))}
 				</div>
 			</div>
+
+			{dirty && (
+				<div style={styles.footer}>
+					<button style={styles.footerCancel} onClick={handleCancel}>
+						Cancel
+					</button>
+					<button style={styles.footerSave} onClick={handleSave}>
+						Save
+					</button>
+				</div>
+			)}
 		</div>
 	);
 };

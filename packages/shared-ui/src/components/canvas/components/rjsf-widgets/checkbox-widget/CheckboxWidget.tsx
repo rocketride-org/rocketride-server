@@ -29,6 +29,8 @@ import InfoIcon from '@mui/icons-material/Info';
 import Tooltip from '@mui/material/Tooltip';
 import { ariaDescribedByIds, descriptionId, labelValue, schemaRequiresTrueValue, FormContextType, RJSFSchema, StrictRJSFSchema, WidgetProps } from '@rjsf/utils';
 
+import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -45,7 +47,7 @@ export default function CheckboxWidget<
 	S extends StrictRJSFSchema = RJSFSchema,
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	F extends FormContextType = any,
->({ schema, id, value, disabled, readonly, label = '', hideLabel, autofocus, onChange, onBlur, onFocus, options }: WidgetProps<T, S, F>) {
+>({ schema, id, value, disabled, readonly, label = '', hideLabel, autofocus, onChange, onBlur, onFocus, options, formContext }: WidgetProps<T, S, F>) {
 	// Because an unchecked checkbox will cause html5 validation to fail, only add
 	// the "required" attribute if the field value must be "true", due to the
 	// "const" or "enum" keywords
@@ -57,18 +59,23 @@ export default function CheckboxWidget<
 	const _onFocus = ({ target }: FocusEvent<HTMLButtonElement>) => onFocus(id, target && target.value);
 	// Prefer description from uiSchema options, falling back to the JSON Schema description
 	const description = options.description ?? schema.description;
+	const compactDescriptions = formContext?.compactDescriptions === true;
 
-	// Render the label with an inline info tooltip icon when a description is available
-	const renderLabel = () => (
-		<Box sx={{ display: 'flex', alignItems: 'center' }} id={descriptionId<T>(id)}>
-			{labelValue(label, hideLabel, false)}
-			{description && (
-				<Tooltip title={description} placement="right">
-					<InfoIcon sx={{ ml: 0.5, color: 'rgba(0, 0, 0, 0.54)', fontSize: 16 }} />
-				</Tooltip>
-			)}
-		</Box>
-	);
+	// Keep the existing checkbox label for ordinary forms; only the opted-in n8n
+	// form uses the compact, keyboard-accessible description trigger.
+	const renderLabel = () =>
+		compactDescriptions ? (
+			<FieldLabelWithInfo label={labelValue(label, hideLabel, false)} description={description} fieldTitle={label} id={descriptionId<T>(id)} />
+		) : (
+			<Box sx={{ display: 'flex', alignItems: 'center' }} id={descriptionId<T>(id)}>
+				{labelValue(label, hideLabel, false)}
+				{description && (
+					<Tooltip title={description} placement="right">
+						<InfoIcon sx={{ ml: 0.5, color: 'rgba(0, 0, 0, 0.54)', fontSize: 16 }} />
+					</Tooltip>
+				)}
+			</Box>
+		);
 
 	return <FormControlLabel control={<Checkbox size="small" id={id} name={id} checked={typeof value === 'undefined' ? false : Boolean(value)} required={required} disabled={disabled || readonly} autoFocus={autofocus} onChange={_onChange} onBlur={_onBlur} onFocus={_onFocus} aria-describedby={ariaDescribedByIds<T>(id)} />} label={renderLabel()} sx={{ mr: 0 }} />;
 }

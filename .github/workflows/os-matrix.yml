@@ -21,6 +21,9 @@ permissions:
 
 env:
   GH_TOKEN: ${{ github.token }}
+  # Non-interactive apt so tzdata/debconf never block the install in a container
+  # with no tty (harmless on the dnf distros).
+  DEBIAN_FRONTEND: noninteractive
   # Build every vcpkg dependency from source on each distro (no binary cache) —
   # that is the actual cross-OS compile test. A read-only nuget cache can be
   # layered in later to speed up the triplet-matching legs.
@@ -43,21 +46,49 @@ jobs:
           - fedora:latest
           - almalinux:9 # RHEL-compatible; may need EPEL / RHEL-column tuning in compiler-unix.sh — a break here is informative
     steps:
-      # Minimal base images ship without git; actions/checkout needs it for a
-      # real clone (submodules), so bootstrap it (+ curl/ca-certificates) first.
-      - name: Bootstrap git
+      # Minimal base images ship without git, Python, or the Python build
+      # backends. actions/checkout needs git; compiler-unix.sh installs the
+      # C/C++ toolchain but requires — and does not install — python3 plus the
+      # `build`/`wheel` modules (it prints "Missing Python build tools" and
+      # exits). Provide all of it here so the matrix tests the engine, not the
+      # bare base image.
+      - name: Bootstrap base build prerequisites
         shell: bash
         run: |
+          set -eux
           if command -v apt-get >/dev/null 2>&1; then
-            apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              git ca-certificates curl \
+              python3 python3-pip python3-venv
           elif command -v dnf >/dev/null 2>&1; then
-            dnf install -y git ca-certificates curl
+            # --allowerasing: minimal EL/Fedora images ship curl-minimal, which
+            # conflicts with the full curl package and aborts the whole install.
+            dnf install -y --allowerasing \
+              git ca-certificates curl \
+              python3 python3-pip
           fi
+          # Pre-provide the Python build backends compiler-unix.sh refuses to
+          # auto-install. No --upgrade: on 24.04+ `wheel` is distro-managed and
+          # pip can't uninstall it (no RECORD) — upgrading aborts the whole
+          # bootstrap; a plain install just skips the already-satisfied wheel.
+          # --break-system-packages for PEP-668 (24.04+/Fedora mark the env
+          # externally-managed); the fallback covers 22.04's older pip that
+          # lacks that flag (and isn't externally-managed anyway).
+          python3 -m pip install --break-system-packages build wheel \
+            || python3 -m pip install build wheel
 
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           submodules: recursive
+          persist-credentials: false
+      # The container runs as root but the checked-out tree is owned by the
+      # runner UID (host bind-mount), so git aborts ./builder's calls with
+      # "detected dubious ownership". Trust the workspace.
+      - name: Trust the workspace
+        shell: bash
+        run: git config --global --add safe.directory '*'
 
       - name: Install build prerequisites (cross-distro)
         shell: bash

@@ -1,0 +1,59 @@
+{
+	"title": "Google Drive",
+	"protocol": "tool_drive://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_google_workspace.drive",
+	"prefix": "drive",
+	"icon": "drive.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Google Drive operations as agent tools.", "List and search files, read metadata, download binary files and export native Docs/Sheets/Slides, create/update/copy/move files and folders, manage permissions (sharing), trash and untrash, and track changes. Supports My Drive and shared drives.", "Public and external-domain sharing, and permanent delete, are gated behind explicit config flags. Authenticates via a Google service account or user OAuth."],
+	"tile": ["Google Drive (${parameters.drive.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Google Drive",
+				"authType": "service",
+				"serviceKey": "",
+				"adminEmail": "",
+				"userToken": "",
+				"access": "write"
+			}
+		}
+	},
+	"fields": {
+		"drive.access": {
+			"type": "string",
+			"title": "Access level",
+			"description": "Drive scopes to request. readonly: list, read metadata, download, and export only. write: full read/write (create, update, copy, move, trash, folders, and sharing).",
+			"default": "write",
+			"enum": [
+				["readonly", "Read-only"],
+				["write", "Read/write"]
+			]
+		},
+		"drive.allowPublicSharing": {
+			"type": "boolean",
+			"title": "Allow public / external sharing",
+			"description": "Off by default. When off, permission_create refuses anyone-with-link grants and grants to a domain or user outside the account's own domain. Turn on to allow sharing files publicly or with external parties.",
+			"default": false
+		},
+		"drive.allowHardDelete": {
+			"type": "boolean",
+			"title": "Allow permanent delete",
+			"description": "Off by default. When off, file_delete (which permanently deletes a file, bypassing Trash and irreversibly) is refused. Turn on to allow permanent deletion; file_trash is the recoverable alternative.",
+			"default": false
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Google Drive",
+			"properties": ["type", "google.authType", "drive.access"]
+		}
+	]
+}

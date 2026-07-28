@@ -117,6 +117,8 @@
 		"@eslint/js": "^9.39.4",
 		"@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
 		"@types/node": "^20.19.41",
+		"@types/react": "18.2.79",
+		"@types/react-dom": "18.2.25",
 		"adm-zip": "^0.5.17",
 		"concurrently": "^8.2.2",
 		"dotenv": "^16.4.5",

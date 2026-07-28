@@ -51,6 +51,8 @@ class BillingDetail(TypedDict):
 
     Attributes:
         appId: App identifier matching AppManifestEntry.appId (e.g. "rocketride.brandy").
+        appName: Human-readable app name resolved server-side (falls back to appId
+            when the app registry has no row).
         stripeSubscriptionId: Stripe sub_* subscription identifier.
         stripePriceId: Stripe price_* for the subscribed plan.
         status: One of: active, trialing, past_due, canceled.
@@ -61,10 +63,13 @@ class BillingDetail(TypedDict):
         currentPeriodEnd: ISO 8601 datetime when the current billing period ends, or None.
         cancelAtPeriodEnd: True when the user has requested cancellation at period end.
         credits: Credit grants config from Stripe price metadata, or None.
-        creditLabels: Display templates for credit resource types, or None.
+        labels: Display templates for credit resource types, or None. (This is the
+            actual wire key; the type previously declared ``creditLabels``, which
+            never matched what the server sends.)
     """
 
     appId: str
+    appName: str
     stripeSubscriptionId: str
     stripePriceId: str
     status: str
@@ -75,7 +80,7 @@ class BillingDetail(TypedDict):
     currentPeriodEnd: str | None
     cancelAtPeriodEnd: bool
     credits: dict[str, dict[str, int]] | None
-    creditLabels: dict[str, str] | None
+    labels: dict[str, str] | None
 
 
 class PlanAction(TypedDict):
@@ -259,7 +264,10 @@ class LedgerTransaction(TypedDict):
         amount: Signed amount (positive for credits, negative for debits).
         idempotencyKey: Namespaced dedup key.
         userId: User who triggered the transaction, or None.
+        userName: Display name of that user resolved server-side
+            (coalesce of display name and email), or None when unattributed.
         teamId: Team context, or None.
+        teamName: Name of that team resolved server-side, or None.
         context: Human-readable audit context, or None.
         createdAt: ISO 8601 creation timestamp, or None.
     """
@@ -270,7 +278,9 @@ class LedgerTransaction(TypedDict):
     amount: float
     idempotencyKey: str
     userId: str | None
+    userName: str | None
     teamId: str | None
+    teamName: str | None
     context: dict | None
     createdAt: str | None
 
@@ -300,8 +310,11 @@ class UsageRollup(TypedDict):
 
     Attributes:
         id: User or team ID (or '__none__' for unattributed).
+        name: Display name resolved server-side (user display name / email
+            coalesce, or team name), or None when unresolved.
         credits: Consumption per resource type (absolute values).
     """
 
     id: str
+    name: str | None
     credits: dict[str, float]

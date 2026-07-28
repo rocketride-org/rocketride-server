@@ -23,4 +23,5 @@ pillow
 # them so test runs do not pay the depends() pip cost on first import.
 -r ../src/ai/requirements.txt
 -r ../src/ai/common/requirements.txt
+-r ../src/ai/common/image/requirements.txt
 -r ../src/ai/web/requirements.txt

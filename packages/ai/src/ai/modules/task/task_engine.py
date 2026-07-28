@@ -50,11 +50,20 @@ from ai.constants import (
     CONST_READY_POLL_INTERVAL,
     CONST_SUBPROCESS_BUFFER_LIMIT,
     CONST_STATUS_UPDATE_CANCEL_TIMEOUT,
+    CONST_ANALYTICS_SLOWEST_DOCS,
 )
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.modules.task.pipeflow import apply_pipeflow_event
-from rocketride import TASK_STATUS, TASK_STATUS_FLOW, TASK_STATE, EVENT_TYPE
+from ai.modules.task.run_log import RunLogWriter
+from rocketride import (
+    TASK_STATUS,
+    TASK_STATUS_FLOW,
+    TASK_STATUS_COMPONENT_STAT,
+    TASK_STATUS_SLOWEST_DOC,
+    TASK_STATE,
+    EVENT_TYPE,
+)
 from .dbg_debugpy import DbgDebugpy
 from .dbg_stdio import DbgStdio
 from .pipeline import resolve_pipeline_env
@@ -123,11 +132,24 @@ class Task(DAPBase):
             """
             Handle DAP events from subprocess.
 
-            Routes events to parent Task for broadcasting to connected clients.
+            Stamps the run-log continuum fields (body.eventTime) at the
+            ingress point — where raw engine stdout frames have just become
+            JSON events — then routes to the parent Task for broadcasting to
+            connected clients and (L2) appending to the run log.
 
             Args:
                 event: DAP event message from subprocess
             """
+            # Stamp the TIME at true ingress so eventTime reflects emission,
+            # not forwarding time. The logSeq is deliberately NOT assigned
+            # here: some ingress events are consumed without ever being
+            # delivered (apaevt_trace becomes a derived apaevt_flow), and a
+            # seq burned on an undelivered message leaves gaps in the
+            # continuum. logSeqs are assigned exactly once at the delivery
+            # point (_forward_task_event / the run-log writer), which
+            # preserves arrival order because the whole
+            # ingress->handler->forward path is synchronous per message.
+            self._parent_task.stamp_log_event(event, assign_seq=False)
             await self._parent_task.on_event(event)
 
         async def on_disconnected(self, reason=None, has_error=False):
@@ -288,6 +310,42 @@ class Task(DAPBase):
 
         # Synchronization
         self._last_event_time = time.time()
+
+        # Run analytics accumulators (componentStats / slowestDocs in the
+        # status body). THE PIPE ID IS THE CORRELATION KEY: concurrent
+        # completions run the same component on different pipes and their
+        # begins/ends interleave (BEGIN[parse]:0, BEGIN[parse]:32,
+        # END[parse]:0, END[parse]:32) — keying by component would clobber
+        # one pipe's begin with another's. Aggregation rolls up by component
+        # AFTER correlation happened by pipe.
+        self._an_open_by_pipe: Dict[Any, Dict[str, Any]] = {}
+        self._an_component_open: Dict[Any, List[float]] = {}
+
+        # Pipe-unused (idle) accumulation — INTERNAL closed totals plus the
+        # moment the pipe last went quiet. The status body carries only
+        # display-ready numbers: _refresh_idle_status folds the still-open
+        # quiet stretch in server-side at every publish point, so clients
+        # never compute idle time themselves.
+        self._an_idle_total = 0.0
+        self._an_idle_longest = 0.0
+        self._an_idle_longest_at = 0.0
+        self._an_idle_since = 0.0
+
+        # Run-log continuum sequencing (see stamp_log_event). A fresh stream
+        # starts at 1; the run-log writer (L2) raises the floor to
+        # control.lastSeq + 1 after reading the stream's catalog, so the
+        # continuum always continues where the recorded stream left off.
+        # Header `seq` is NOT this counter — seq belongs to the DAP
+        # per-connection message stream; the continuum rides in `logSeq`.
+        self._log_seq_next = 1
+
+        # Run-log writer — the per-task event continuum (created at subprocess
+        # start; None if logging setup failed, which must never break the run).
+        # run_kind separates the dev and deploy continua; the deploy feature's
+        # trusted dispatch path sets 'deploy', everything else logs as 'dev'.
+        self._run_log: Optional[RunLogWriter] = None
+        self._run_kind: str = kwargs.get('run_kind', 'dev')
+        self._run_trigger: str = kwargs.get('trigger', 'manual')
 
         # Subprocess debugging flag
         self._debug_subprocess = False
@@ -504,7 +562,7 @@ class Task(DAPBase):
             # "Connection refused" error. We retry up to 10 times (150ms apart) to
             # give uvicorn time to start accepting connections.
             if not self._data_client:
-                uri = f'ws://localhost:{self._data_port}/task/data'
+                uri = f'ws://127.0.0.1:{self._data_port}/task/data'
 
                 @retry(
                     stop=stop_after_attempt(10),
@@ -605,6 +663,12 @@ class Task(DAPBase):
         if not self._is_restarting:
             self._status.completed = True
             self._status.endTime = time.time()
+
+        # NOTE: the final zeroed status and the run-log close happen at the
+        # END of teardown (after metrics stop + terminal state assignment) —
+        # see below. Emitting them here shipped a bug once: the teardown's
+        # later status broadcast overwrote the zero as "last known" and
+        # charts held a stale residual reading forever.
 
         self.debug_message('Beginning resource cleanup for task')
 
@@ -738,8 +802,31 @@ class Task(DAPBase):
             self._status.state = TASK_STATE.CANCELLED.value
             self.debug_message(f'Task terminated abnormally with exit code {exit_code}')
 
-        # Send final status update
-        await self._send_status_update()
+        # Send final status update — the stream's LAST status. For a real
+        # termination the utilization gauges are explicitly zeroed: the
+        # process is gone, so CPU/RAM/VRAM are zero BY DATA and charts
+        # render generically from status events without
+        # inferring process death. This MUST be the last status-shaped
+        # broadcast of the task: it is emitted after metrics teardown and
+        # the terminal-state assignment, and nothing may send status after
+        # it — a later broadcast becomes the new "last known" reading and
+        # silently undoes the zero (that bug shipped once). body['final']
+        # marks it so the run-log sampler always records it.
+        if self._is_restarting:
+            await self._send_status_update()
+        else:
+            try:
+                self._status.metrics.cpu_percent = 0.0
+                self._status.metrics.cpu_memory_mb = 0.0
+                self._status.metrics.gpu_memory_mb = 0.0
+                final_body = self._status.model_dump()
+                final_body['final'] = True
+                await self._forward_task_event(
+                    EVENT_TYPE.SUMMARY,
+                    self.build_event('apaevt_status_update', id=self.id, body=final_body),
+                )
+            except Exception as e:
+                self.debug_message(f'Final zeroed status emit failed: {e}')
 
         # Send out the final events - last you will every here from us...
         if not self._final_events_sent:
@@ -810,6 +897,31 @@ class Task(DAPBase):
                         user_id=task_user_id,
                     )
 
+        # Close out (or annotate) the run-log continuum LAST — after the
+        # final zeroed status AND every terminal task event (exited /
+        # terminated / apaevt_task end) has been forwarded, because
+        # forwarding is what appends them to the log: closing any earlier
+        # loses the task-end from the recorded continuum. The run-end
+        # marker therefore remains the stream's true last line. A restart
+        # is NOT a new run: the chapter continues and only a restart marker
+        # is recorded; a real termination completes the chapter with its
+        # outcome. Best-effort — never blocks or breaks teardown.
+        if self._run_log is not None:
+            try:
+                if self._is_restarting:
+                    self._run_log.note_restart()
+                else:
+                    if self._status.state == TASK_STATE.CANCELLED.value:
+                        outcome = 'cancelled'
+                    elif self._status.exitCode == 0:
+                        outcome = 'ok'
+                    else:
+                        outcome = 'error'
+                    await self._run_log.end_run(outcome, self._status.exitMessage or '')
+                    self._run_log = None
+            except Exception as e:
+                self.debug_message(f'Run-log close failed: {e}')
+
         self.debug_message('Resource cleanup completed successfully')
 
     def _on_metrics_updated(self) -> None:
@@ -819,6 +931,99 @@ class Task(DAPBase):
         Sets the status update flag to trigger broadcast on next update cycle.
         """
         self._status_updated = True
+
+    def raise_log_seq_floor(self, floor: int) -> None:
+        """
+        Raise the continuum seq counter to at least ``floor``.
+
+        Called by the run-log writer after reading the stream's control file so
+        the next issued logSeq is control.lastSeq + 1 — the continuum continues
+        exactly where the recorded stream left off. (A crash's unpersisted tail
+        may re-issue values, accepted: the crash also drops every websocket, so
+        clients reconnect with fresh sessions and fresh live buckets.)
+
+        Args:
+            floor: Minimum value for the next issued seq (exclusive of past).
+        """
+        # Only ever move forward — the counter is strictly monotonic.
+        if floor > self._log_seq_next:
+            self._log_seq_next = floor
+
+    def build_event(
+        self, event: str, *, id: str = None, body: Optional[Dict[str, Any]] = None, event_time: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Build a Task event carrying the run-log continuum headers.
+
+        Overrides the DAP base builder: build_event IS the logSeq assigner for
+        every event the Task itself constructs, so no caller ever assigns a
+        second one (the downstream stamp calls are idempotent no-ops for built
+        events). The base class's per-endpoint DAP seq is left untouched —
+        each forwarding connection mints its own on send.
+
+        Args:
+            event: The DAP event name.
+            id: Optional correlation identifier.
+            body: Optional event payload.
+            event_time: Optional inherited emission time — derived events
+                (e.g. apaevt_flow) carry their source event's time.
+
+        Returns:
+            The stamped event message.
+        """
+        return self.stamp_log_event(super().build_event(event, id=id, body=body), event_time=event_time)
+
+    def stamp_log_event(
+        self, message: Dict[str, Any], *, event_time: Optional[float] = None, assign_seq: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Stamp a DAP event message with the run-log continuum fields.
+
+        Adds two fields to the event BODY (never the DAP envelope — the
+        envelope is pure protocol: seq belongs to each connection's own
+        message stream, and overloading it with the continuum broke DAP
+        sequencing the moment one connection monitored two tasks):
+        - ``body.eventTime``: epoch seconds float — set once at ingress and
+          never overwritten (an engine-provided stamp wins if one appears).
+        - ``body.logSeq``: the per-task continuum sequence — catalog-seeded
+          (control.lastSeq + 1; a fresh stream starts at 1), strictly
+          monotonic across runs and engine restarts. Idempotent: a body
+          already carrying logSeq passes through untouched.
+
+        The stamps ride beside the body's project_id + source identity — the
+        body is the complete task-scoped record; the envelope is transport.
+
+        Args:
+            message: The event message dict (mutated in place).
+            event_time: Optional explicit emission time — used by derived
+                events (e.g. apaevt_flow) to inherit the source event's time.
+            assign_seq: When False, stamp only ``eventTime``. Used at points
+                where the message may never be delivered (stdout ingress, the
+                trace->flow derivation): seqs are assigned exactly once, at the
+                delivery point (_forward_task_event / the log writer), so a
+                consumed-but-never-forwarded message does not burn a seq and
+                leave gaps in the continuum.
+
+        Returns:
+            The same message dict, stamped.
+        """
+        # The stamps live in the body; an event without one gets an empty
+        # body to carry them (DAP treats body as event-specific payload).
+        body = message.get('body')
+        if not isinstance(body, dict):
+            body = {}
+            message['body'] = body
+
+        # Emission time: set once; derived events may inherit their source's.
+        if 'eventTime' not in body:
+            body['eventTime'] = event_time if event_time is not None else time.time()
+
+        # Continuum seq: idempotent — assign once, never rewrite.
+        if assign_seq and 'logSeq' not in body:
+            body['logSeq'] = self._log_seq_next
+            self._log_seq_next += 1
+
+        return message
 
     async def _send_status_update(self) -> None:
         """
@@ -830,6 +1035,11 @@ class Task(DAPBase):
         self._status_updated = False
 
         # Metrics and tokens are updated in-place by TaskMetrics
+
+        # Fold the still-open quiet stretch into the idle counters — during
+        # silence no trace events arrive, so the periodic broadcast is what
+        # keeps the published idle numbers current.
+        self._refresh_idle_status()
 
         # Create status update event
         status_message = self.build_event(
@@ -882,6 +1092,32 @@ class Task(DAPBase):
             event_type: Event category for routing
             message: Event payload
         """
+        # Safety net: every broadcast event carries the continuum headers.
+        # Idempotent — events stamped at ingress or at their build site pass
+        # through unchanged; anything constructed on a path that missed a
+        # stamp (e.g. status updates built in _send_status_update) is stamped
+        # here, immediately before the one shared dict fans out to clients.
+        self.stamp_log_event(message)
+
+        # Safety net #2: every task-scoped event carries its identity in
+        # the body (project_id + source) so clients filter uniformly by
+        # body fields — raw engine events (output, SSE, granular status)
+        # arrive from the child without it. Idempotent: events that already
+        # carry project_id pass through untouched.
+        body = message.get('body') if isinstance(message, dict) else None
+        if isinstance(body, dict) and 'project_id' not in body:
+            body['project_id'] = self.project_id
+            body['source'] = self.source
+
+        # Append to the run-log continuum: what clients see is what replay
+        # reproduces (the writer filters/samples/caps internally; never
+        # blocks on the store).
+        if self._run_log is not None:
+            try:
+                self._run_log.append(message)
+            except Exception as e:
+                self.debug_message(f'Run-log append failed: {e}')
+
         # Route debug events to debugger
         if type & EVENT_TYPE.DEBUGGER:
             # If we have an attach debugger
@@ -979,6 +1215,14 @@ class Task(DAPBase):
                         # Handle string notes - simple replacement
                         note = note.replace('{token}', self.token)
                         note = note.replace('{public_auth}', self.public_auth)
+                        # getattr: partially-initialized tasks (and test stubs)
+                        # may not carry the identity attributes at all.
+                        project_id = getattr(self, 'project_id', None)
+                        source = getattr(self, 'source', None)
+                        if project_id is not None:
+                            note = note.replace('{project_id}', str(project_id))
+                        if source is not None:
+                            note = note.replace('{source}', str(source))
                         self._status.notes.append(note)
                     elif isinstance(note, dict):
                         # Handle dict notes - walk through and replace in all string values
@@ -988,6 +1232,12 @@ class Task(DAPBase):
                                 # Replace tokens in string values
                                 value = value.replace('{token}', self.token)
                                 value = value.replace('{public_auth}', self.public_auth)
+                                project_id = getattr(self, 'project_id', None)
+                                source = getattr(self, 'source', None)
+                                if project_id is not None:
+                                    value = value.replace('{project_id}', str(project_id))
+                                if source is not None:
+                                    value = value.replace('{source}', str(source))
                             processed_note[key] = value
                         self._status.notes.append(processed_note)
                     else:
@@ -1069,7 +1319,10 @@ class Task(DAPBase):
             component_name = body.get('pipe_id', '')
             trace = body.get('trace', {})
 
-            self._status.pipeflow.totalPipes = total_pipes
+            # total_pipes=0 marks a synthetic trace (tool-call events emit it
+            # as "unknown") — keep the data lane's real pipe count.
+            if total_pipes:
+                self._status.pipeflow.totalPipes = total_pipes
 
             # Update the per-pipe execution stack and get a stable snapshot chain.
             # See pipeflow.apply_pipeflow_event for why leave pops by identity and the
@@ -1081,22 +1334,34 @@ class Task(DAPBase):
             # (for 'leave', the leaving one) so consumers can pair enter/leave by identity
             # rather than assuming strict LIFO order — reentrant agent sub-invocations
             # interleave under one pipe_index. `pipes` remains the current component stack.
+            # Identity (project_id + source) is stamped centrally by
+            # _forward_task_event — not duplicated here.
             body = {
                 'id': pipe_index,
                 'op': operation,
                 'pipes': pipes,
                 'component': component_name,
                 'trace': trace or {},
-                'project_id': self.project_id,
-                'source': self.source,
             }
-            flow = self.build_event('apaevt_flow', body=body)
-
             # Send out a status update when needed
             self._status_updated = True
 
             # If this task is started with tracing
             if self._pipelineTraceLevel:
+                # Build the derived flow event only when it will actually be
+                # delivered — build_event assigns its continuum seq, and a
+                # built-but-unsent event would leave a gap. It inherits the
+                # source trace message's emission time.
+                flow = self.build_event(
+                    'apaevt_flow', body=body, event_time=(message.get('body') or {}).get('eventTime')
+                )
+
+                # Accumulate run analytics from the derived flow (its body
+                # carries the stamped eventTime, and for 'begin' its logSeq
+                # is the trace's permanent identity). Gated on tracing like
+                # the flow derivation itself — no traces, honest empties.
+                self._accumulate_analytics(operation, pipe_index, component_name, pipes, flow['body'])
+
                 # Forward off the event
                 await self._forward_task_event(EVENT_TYPE.FLOW, flow)
 
@@ -1299,6 +1564,106 @@ class Task(DAPBase):
 
         self.debug_message('Debugger detached from task')
 
+    def _accumulate_analytics(
+        self, operation: str, pipe_index: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]
+    ) -> None:
+        """
+        Fold one trace operation into the status body's run analytics.
+
+        Computed HERE — where every event is born — so statusAt(position)
+        reads are exact anywhere on the continuum (live, replayed, or
+        mid-scrub) with no client fold-window or recency caveats. The pipe
+        id correlates; the component aggregates.
+
+        Args:
+            operation: Trace op (begin / enter / leave / end).
+            pipe_index: The REAL pipe id the op runs on (correlation key).
+            component_name: The component this op refers to.
+            pipes: Current component stack (pipes[0] = the object name that
+                a begin carries).
+            flow_body: The derived flow event's body — carries the stamped
+                eventTime and, for 'begin', the continuum logSeq that IS the
+                trace identity.
+        """
+        event_time = float(flow_body.get('eventTime') or time.time())
+
+        if operation == 'begin':
+            # Activity resumes: close the quiet period the last end opened.
+            if not self._an_open_by_pipe and self._an_idle_since:
+                gap = round(max(0.0, event_time - self._an_idle_since), 2)
+                self._an_idle_total = round(self._an_idle_total + gap, 2)
+                if gap > self._an_idle_longest:
+                    self._an_idle_longest = gap
+                    self._an_idle_longest_at = self._an_idle_since
+                self._an_idle_since = 0.0
+                self._refresh_idle_status(event_time)
+            # A pipe hosts one completion at a time — its end looks up THIS.
+            self._an_open_by_pipe[pipe_index] = {
+                'name': str(pipes[0] if pipes else component_name)[:200],
+                'beginTime': event_time,
+                'beginSeq': flow_body.get('logSeq'),
+            }
+
+        elif operation == 'enter':
+            # Reentrancy within one pipe stacks; key = (pipe, component).
+            self._an_component_open.setdefault((pipe_index, component_name), []).append(event_time)
+
+        elif operation == 'leave':
+            stack = self._an_component_open.get((pipe_index, component_name))
+            if stack:
+                delta = max(0.0, event_time - stack.pop())
+                stat = self._status.componentStats.get(component_name)
+                if stat is None:
+                    stat = TASK_STATUS_COMPONENT_STAT()
+                    self._status.componentStats[component_name] = stat
+                stat.calls += 1
+                stat.totalSeconds = round(stat.totalSeconds + delta, 2)
+                stat.maxSeconds = max(stat.maxSeconds, round(delta, 2))
+
+        elif operation == 'end':
+            begun = self._an_open_by_pipe.pop(pipe_index, None)
+            if begun is not None:
+                elapsed = round(max(0.0, event_time - begun['beginTime']), 2)
+                self._status.completionSeconds = round(self._status.completionSeconds + elapsed, 2)
+                # Insert-sorted, bounded top list (slowest first).
+                entry = TASK_STATUS_SLOWEST_DOC(
+                    name=begun['name'], elapsed=elapsed, beginTime=begun['beginTime'], beginSeq=begun['beginSeq']
+                )
+                docs = self._status.slowestDocs
+                docs.append(entry)
+                docs.sort(key=lambda d: d.elapsed, reverse=True)
+                del docs[CONST_ANALYTICS_SLOWEST_DOCS:]
+                # Last completion out — the pipe is unused from HERE until
+                # the next begin (or a status publish) closes the gap.
+                if not self._an_open_by_pipe:
+                    self._an_idle_since = event_time
+
+    def _refresh_idle_status(self, now: Optional[float] = None) -> None:
+        """
+        Publish the pipe-unused counters into the status body.
+
+        The closed totals live in internal state; the still-open quiet
+        stretch is extended HERE to the given clock — no trace events
+        arrive during silence, so this runs at every status publish (and at
+        gap boundaries) to keep the emitted numbers current. Clients render
+        the fields verbatim and never compute idle time themselves.
+
+        Args:
+            now: Clock to extend the open stretch to (wall clock if None).
+        """
+        # The open stretch exists only while zero completions are in flight.
+        open_gap = 0.0
+        if self._an_idle_since and not self._an_open_by_pipe:
+            open_gap = round(max(0.0, (now if now is not None else time.time()) - self._an_idle_since), 2)
+        self._status.idleSeconds = round(self._an_idle_total + open_gap, 2)
+        # The open stretch may already be the longest the run has seen.
+        if open_gap > self._an_idle_longest:
+            self._status.idleLongestSeconds = open_gap
+            self._status.idleLongestAt = self._an_idle_since
+        else:
+            self._status.idleLongestSeconds = self._an_idle_longest
+            self._status.idleLongestAt = self._an_idle_longest_at
+
     def _reset_status(self) -> None:
         """
         Reset all runtime status from the previous run in preparation for a restart.
@@ -1329,6 +1694,19 @@ class Task(DAPBase):
         self._status.exitMessage = ''
         self._status.endTime = 0.0
         self._status.pipeflow = TASK_STATUS_FLOW()
+        self._status.componentStats = {}
+        self._status.slowestDocs = []
+        self._status.completionSeconds = 0.0
+        self._status.idleSeconds = 0.0
+        self._status.idleLongestSeconds = 0.0
+        self._status.idleLongestAt = 0.0
+        # Correlation state dies with the run — pipe ids recycle across runs.
+        self._an_open_by_pipe = {}
+        self._an_component_open = {}
+        self._an_idle_total = 0.0
+        self._an_idle_longest = 0.0
+        self._an_idle_longest_at = 0.0
+        self._an_idle_since = 0.0
         self._status_trace = []
         self.info = {}
 
@@ -1514,7 +1892,7 @@ class Task(DAPBase):
             child_args.extend(
                 [
                     f'--data_port={self._data_port}',
-                    '--data_host=localhost',
+                    '--data_host=127.0.0.1',
                 ]
             )
             # Pass model server address if configured
@@ -1583,6 +1961,35 @@ class Task(DAPBase):
                 self._debug_stdio = None
                 self.debug_message(f'Failed to initialize stdio interface: {e}')
 
+            # Open the run-log continuum for this run. Logging is best-effort
+            # observability: any failure here is logged and the task runs
+            # unlogged rather than failing execution.
+            try:
+                # The account-scoped FileStore handles user path scoping (and
+                # REFUSES an empty client_id — such a task runs unlogged and
+                # says so, rather than writing into a collapsed users/ path).
+                self._run_log = RunLogWriter(
+                    self._server.store.get_file_store(self.client_id),
+                    self.client_id,
+                    self.project_id,
+                    self.source,
+                    self._run_kind,
+                    self.stamp_log_event,
+                    self.raise_log_seq_floor,
+                    debug=self.debug_message,
+                )
+                await self._run_log.open(
+                    trigger=self._run_trigger,
+                    user=self.client_id,
+                    pipeline_hash=hashlib.sha256(
+                        json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
+                    ).hexdigest()[:16],
+                    trace_level=self._pipelineTraceLevel,
+                )
+            except Exception as e:
+                self._run_log = None
+                self.debug_message(f'Run-log setup failed (task continues unlogged): {e}')
+
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
                 # Resolve billing identity from task control
@@ -1621,6 +2028,11 @@ class Task(DAPBase):
                         'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
+                        # The run's CHAPTER identity: the run-begin marker's
+                        # seq (the writer opened just above). Lets clients
+                        # synthesize the chapter locally with the exact key
+                        # the server's chapter list will carry.
+                        'beginSeq': self._run_log.chapter_begin_seq if self._run_log is not None else None,
                     },
                     id=self.id,
                 )

@@ -853,10 +853,10 @@ function makeCopyTestDataAction() {
 			const destDatasets = path.join(DIST_DIR, 'datasets');
 			await mkdir(destDatasets);
 
-			// Sync from each subdirectory (images, documents, audio, video, text, misc)
+			// Sync from each subdirectory (images, documents, audio, video, text, misc, ...)
 			// to flatten into a single datasets folder for C++ tests
 			let stats = {};
-			const subdirs = ['images', 'documents', 'audio', 'video', 'text', 'misc'];
+			const subdirs = ['images', 'documents', 'audio', 'video', 'text', 'misc', 'contracts'];
 			for (const subdir of subdirs) {
 				const src = path.join(testdataDir, subdir);
 				if (await exists(src)) {

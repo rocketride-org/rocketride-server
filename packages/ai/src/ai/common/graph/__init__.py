@@ -25,10 +25,10 @@
 
 """Base classes for graph database nodes.
 
-The one node that derives from this base today is ``graph_falkordb``; it was the
-reference the abstraction was extracted from. ``db_neo4j`` is graph-capable but
-still ships its own copy of this logic — migrating it onto this base is the
-intended next step, not a promise this module already keeps.
+``graph_falkordb`` was the reference the abstraction was extracted from, and
+``graph_neo4j`` derives from it too. Those are the graph-query nodes the repo
+has: ``db_arango`` is multi-model and ``db_hydradb`` retrieves natively, so
+neither follows the natural-language-to-query loop this base implements.
 """
 
 from .cypher_safety import is_cypher_safe

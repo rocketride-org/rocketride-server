@@ -28,6 +28,7 @@ from PIL import Image
 from typing import List
 from rocketlib import IInstanceBase, AVI_ACTION, Entry
 from ai.common.schema import Doc
+from ai.common.avi.descriptor import rename_ext
 from .IGlobal import IGlobal
 
 
@@ -126,7 +127,9 @@ class IInstance(IInstanceBase):
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
-            self.image_data = buffer  # Initialize the image data with the first chunk
+            # BEGIN carries the stream descriptor (not image bytes); start empty so
+            # descriptor bytes never leak into the decoded image.
+            self.image_data = bytearray()
 
         # Handle AVI_WRITE action (appending chunks of the image)
         elif action == AVI_ACTION.WRITE:
@@ -207,6 +210,10 @@ class IInstance(IInstanceBase):
 
                 # Add the text to the document
                 txtdoc.page_content = text
+
+                # Content changed image -> text: swap the name extension to .txt
+                # (rename_ext copies the shared metadata so the input doc is untouched).
+                txtdoc.metadata = rename_ext(txtdoc.metadata, 'txt')
 
                 # Append it
                 txtdocs.append(txtdoc)

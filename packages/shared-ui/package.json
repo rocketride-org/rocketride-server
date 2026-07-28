@@ -75,12 +75,14 @@
 		"@types/react": "~18.3.29",
 		"@types/react-dom": "~18.3.7",
 		"@types/react-syntax-highlighter": "^15.5.13",
+		"@types/tabulator-tables": "~6.2.0",
 		"rollup": "~4.60.4",
 		"rollup-plugin-dts": "~6.4.1",
 		"rollup-plugin-peer-deps-external": "~2.2.4",
 		"rollup-plugin-postcss": "~4.0.2",
 		"run-script-os": "^1.1.6",
 		"svgo": "^3.3.3",
+		"tsx": "~4.23.1",
 		"typescript": "^5.6.3"
 	},
 	"exports": {
@@ -103,6 +105,7 @@
 	},
 	"dependencies": {
 		"@cfworker/json-schema": "^4.1.1",
-		"lucide-react": "^0.577.0"
+		"lucide-react": "^0.577.0",
+		"tabulator-tables": "~6.5.2"
 	}
 }

@@ -306,6 +306,24 @@ export interface IValidateResponse {
 }
 
 /**
+ * Single-component validation payload. The node config panel validates one
+ * component at a time on save; the validation endpoint accepts this shape
+ * alongside a full pipeline.
+ */
+export interface IComponentValidatePayload {
+	/** Pipeline schema version (PIPELINE_SCHEMA_VERSION). */
+	version: number;
+	/** The single component to validate. */
+	component: IProjectComponent;
+}
+
+/**
+ * Payload union accepted by the host's validate callback
+ * (`handleValidatePipeline`): a full pipeline or a single component.
+ */
+export type IValidatePipelinePayload = IProject | IComponentValidatePayload;
+
+/**
  * Shape of the JSON file produced by the export-toolchain feature.
  */
 export interface IToolchainExport {

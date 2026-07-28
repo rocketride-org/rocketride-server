@@ -188,7 +188,9 @@ DOCS = AccessSpec(
 CALENDAR = AccessSpec(
     scopes={'readonly': [f'{_G}/calendar.readonly'], 'write': [f'{_G}/calendar']},
     default='write',
-    flags=('allowDelete',),
+    # allowPublicSharing gates default/domain ACL grants (calendar exposure),
+    # mirroring the Drive sharing gate; allowDelete gates event/calendar deletion.
+    flags=('allowDelete', 'allowPublicSharing'),
 )
 SLIDES = AccessSpec(
     scopes={'readonly': [f'{_G}/presentations.readonly'], 'write': [f'{_G}/presentations']},

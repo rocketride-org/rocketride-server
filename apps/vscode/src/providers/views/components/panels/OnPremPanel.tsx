@@ -7,7 +7,8 @@
  * OnPremPanel — target panel for On-prem connection mode.
  *
  * Renders: host URL, API key with show/hide toggle, optional test-connection
- * button, debug output checkbox.
+ * button. Debug output is a pipeline setting (passed per task via `.use`),
+ * not a connection option.
  * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
@@ -26,8 +27,6 @@ export interface OnPremPanelProps {
 	apiKey: string;
 	onApiKeyChange: (key: string) => void;
 	onClearApiKey?: () => void;
-	debugOutput: boolean;
-	onDebugOutputChange: (checked: boolean) => void;
 	onTestConnection?: (hostUrl: string, apiKey: string) => void;
 	testMessage?: MessageData | null;
 	idPrefix: string;
@@ -38,7 +37,7 @@ export interface OnPremPanelProps {
 // COMPONENT
 // =============================================================================
 
-export const OnPremPanel: React.FC<OnPremPanelProps> = ({ hostUrl, onHostUrlChange, apiKey, onApiKeyChange, onClearApiKey, debugOutput, onDebugOutputChange, onTestConnection, testMessage, idPrefix, simplified }) => {
+export const OnPremPanel: React.FC<OnPremPanelProps> = ({ hostUrl, onHostUrlChange, apiKey, onApiKeyChange, onClearApiKey, onTestConnection, testMessage, idPrefix }) => {
 	const [showApiKey, setShowApiKey] = useState(false);
 	const [passwordToggleHover, setPasswordToggleHover] = useState(false);
 	const id = (name: string) => `${idPrefix}-${name}`;
@@ -103,19 +102,6 @@ export const OnPremPanel: React.FC<OnPremPanelProps> = ({ hostUrl, onHostUrlChan
 				</div>
 				<div style={S.helpText}>API key is saved securely when you save settings.</div>
 			</div>
-
-			{/* Debug output (hidden in simplified/welcome mode) */}
-			{!simplified && (
-				<div style={S.formGroup}>
-					<div>
-						<input type="checkbox" id={id('debugOutput')} checked={debugOutput} onChange={(e) => onDebugOutputChange(e.target.checked)} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-						<label htmlFor={id('debugOutput')} style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-							Full debug output
-						</label>
-					</div>
-					<div style={S.helpText}>Enable detailed server trace logging (see Output&#8594;RocketRide: Console)</div>
-				</div>
-			)}
 
 			{/* Test connection */}
 			{onTestConnection && (

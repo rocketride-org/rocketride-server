@@ -63,6 +63,9 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t.id = 'task-test'
     t.token = 'tk_test'
     t.source = source
+    # Real tasks always carry their project id; _forward_task_event stamps
+    # it into every forwarded body (identity safety net).
+    t.project_id = 'proj-test'
     t._task_name = task_name
     t._pipeline = pipeline if pipeline is not None else {}
     t._threads = 4
@@ -74,6 +77,10 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._status_updated = False
     t.public_auth = 'pk_test'
     t.info = {}
+    # Run-log continuum state consulted by _forward_task_event's stamping
+    # safety net (see Task.stamp_log_event): fresh-stream counter + no writer.
+    t._log_seq_next = 1
+    t._run_log = None
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
@@ -676,3 +683,201 @@ async def test_forward_task_event_debugger_swallows_send_failure():
 
     # Should not raise.
     await Task._forward_task_event(t, EVENT_TYPE.DEBUGGER, {'event': 'output'})
+
+
+# ---------------------------------------------------------------------------
+# _accumulate_analytics — run analytics in the status body
+# ---------------------------------------------------------------------------
+
+
+def _analytics_task():
+    """A task with a REAL status model and fresh analytics state."""
+    from rocketride import TASK_STATUS
+
+    t = _task(status=TASK_STATUS())
+    t._an_open_by_pipe = {}
+    t._an_component_open = {}
+    t._an_idle_total = 0.0
+    t._an_idle_longest = 0.0
+    t._an_idle_longest_at = 0.0
+    t._an_idle_since = 0.0
+    return t
+
+
+def test_analytics_interleaved_pipes_correlate_by_pipe():
+    """
+    The pipe id is the correlation key: BEGIN[parse]:0, BEGIN[parse]:32,
+    END[parse]:0, END[parse]:32 must yield two DISTINCT durations — a
+    component-keyed accumulator would clobber pipe 0's begin with pipe 32's.
+    """
+    t = _analytics_task()
+    t0 = 1_000.0
+
+    Task._accumulate_analytics(t, 'begin', 0, 'parse', ['a.txt'], {'eventTime': t0, 'logSeq': 100})
+    Task._accumulate_analytics(t, 'begin', 32, 'parse', ['b.txt'], {'eventTime': t0 + 0.5, 'logSeq': 101})
+    Task._accumulate_analytics(t, 'end', 0, 'parse', ['a.txt'], {'eventTime': t0 + 1.0})
+    Task._accumulate_analytics(t, 'end', 32, 'parse', ['b.txt'], {'eventTime': t0 + 3.0})
+
+    docs = t._status.slowestDocs
+    assert [(d.name, d.elapsed, d.beginSeq) for d in docs] == [('b.txt', 2.5, 101), ('a.txt', 1.0, 100)]
+    assert t._status.completionSeconds == 3.5
+    # Correlation state fully consumed.
+    assert t._an_open_by_pipe == {}
+
+
+def test_analytics_component_stats_key_by_pipe_and_reenter():
+    """Enter/leave pairs interleave across pipes and reenter within one."""
+    t = _analytics_task()
+    t0 = 2_000.0
+
+    # Interleaved across pipes: each leave must pair with ITS pipe's enter.
+    Task._accumulate_analytics(t, 'enter', 0, 'parse', [], {'eventTime': t0})
+    Task._accumulate_analytics(t, 'enter', 32, 'parse', [], {'eventTime': t0 + 1.0})
+    Task._accumulate_analytics(t, 'leave', 0, 'parse', [], {'eventTime': t0 + 2.0})
+    Task._accumulate_analytics(t, 'leave', 32, 'parse', [], {'eventTime': t0 + 2.5})
+
+    stat = t._status.componentStats['parse']
+    assert stat.calls == 2
+    assert stat.totalSeconds == 3.5  # 2.0 + 1.5
+    assert stat.maxSeconds == 2.0
+
+    # Reentrancy within ONE pipe: LIFO within the (pipe, component) stack.
+    Task._accumulate_analytics(t, 'enter', 0, 'llm', [], {'eventTime': t0})
+    Task._accumulate_analytics(t, 'enter', 0, 'llm', [], {'eventTime': t0 + 1.0})
+    Task._accumulate_analytics(t, 'leave', 0, 'llm', [], {'eventTime': t0 + 1.5})
+    Task._accumulate_analytics(t, 'leave', 0, 'llm', [], {'eventTime': t0 + 4.0})
+    llm = t._status.componentStats['llm']
+    assert llm.calls == 2
+    assert llm.totalSeconds == 4.5  # inner 0.5 + outer 4.0
+    assert llm.maxSeconds == 4.0
+
+
+def test_analytics_slowest_list_bounded_and_sorted():
+    """The slowest list keeps the configured cap, slowest first."""
+    from ai.constants import CONST_ANALYTICS_SLOWEST_DOCS
+
+    t = _analytics_task()
+    for i in range(CONST_ANALYTICS_SLOWEST_DOCS + 5):
+        Task._accumulate_analytics(t, 'begin', i, 'p', [f'doc-{i}'], {'eventTime': 100.0, 'logSeq': i})
+        Task._accumulate_analytics(t, 'end', i, 'p', [], {'eventTime': 100.0 + float(i + 1)})
+
+    docs = t._status.slowestDocs
+    assert len(docs) == CONST_ANALYTICS_SLOWEST_DOCS
+    elapsed = [d.elapsed for d in docs]
+    assert elapsed == sorted(elapsed, reverse=True)
+    # The fastest completions fell off the bounded list.
+    assert min(elapsed) > 1.0
+
+
+def test_analytics_reset_clears_state():
+    """_reset_status clears analytics fields AND correlation state."""
+    t = _analytics_task()
+    t._status_trace = []
+    t.info = {}
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['x'], {'eventTime': 1.0, 'logSeq': 1})
+    Task._accumulate_analytics(t, 'enter', 0, 'p', [], {'eventTime': 1.0})
+    Task._accumulate_analytics(t, 'leave', 0, 'p', [], {'eventTime': 2.0})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 3.0})
+    assert t._status.componentStats and t._status.slowestDocs
+
+    Task._reset_status(t)
+    assert t._status.componentStats == {}
+    assert t._status.slowestDocs == []
+    assert t._status.completionSeconds == 0.0
+    assert t._an_open_by_pipe == {} and t._an_component_open == {}
+
+
+def test_analytics_idle_between_completions():
+    """
+    Pipe-unused time: quiet stretches BETWEEN completions accumulate (total
+    + longest + when the longest began); overlapping completions never
+    count as quiet. All published numbers are server-computed.
+    """
+    t = _analytics_task()
+    t0 = 3_000.0
+
+    # First completion — nothing before it counts (never went quiet).
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': t0, 'logSeq': 1})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 1.0})
+    assert t._an_idle_since == t0 + 1.0
+    assert t._status.idleSeconds == 0.0
+
+    # 4s quiet closes at the next begin; the marker clears while busy. The
+    # longest stretch remembers WHEN it began.
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': t0 + 5.0, 'logSeq': 2})
+    assert t._status.idleSeconds == 4.0
+    assert t._status.idleLongestSeconds == 4.0
+    assert t._status.idleLongestAt == t0 + 1.0
+    assert t._an_idle_since == 0.0
+
+    # Overlap: pipe 1 begins before pipe 0 ends — no quiet in between.
+    Task._accumulate_analytics(t, 'begin', 1, 'p', ['c'], {'eventTime': t0 + 6.0, 'logSeq': 3})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 7.0})
+    assert t._an_idle_since == 0.0  # pipe 1 still busy
+    Task._accumulate_analytics(t, 'end', 1, 'p', [], {'eventTime': t0 + 8.0})
+    assert t._an_idle_since == t0 + 8.0
+
+    # A shorter 1s gap grows the total but not the longest (or its stamp).
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['d'], {'eventTime': t0 + 9.0, 'logSeq': 4})
+    assert t._status.idleSeconds == 5.0
+    assert t._status.idleLongestSeconds == 4.0
+    assert t._status.idleLongestAt == t0 + 1.0
+
+
+def test_analytics_idle_refresh_extends_open_stretch():
+    """
+    The periodic publish path folds the STILL-OPEN quiet stretch into the
+    status: total grows, and once the open stretch beats the recorded
+    longest it becomes the longest — with ITS start as the stamp. Trace
+    events never arrive during silence, so this is what keeps a quiet
+    pipe's numbers current.
+    """
+    t = _analytics_task()
+    t0 = 4_000.0
+
+    # One closed 2s gap, then quiet from t0+5.
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': t0, 'logSeq': 1})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 1.0})
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': t0 + 3.0, 'logSeq': 2})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': t0 + 5.0})
+
+    # 1s into the silence: total extends, closed 2s gap is still longest.
+    Task._refresh_idle_status(t, t0 + 6.0)
+    assert t._status.idleSeconds == 3.0
+    assert t._status.idleLongestSeconds == 2.0
+    assert t._status.idleLongestAt == t0 + 1.0
+
+    # 10s in: the open stretch is now the longest, stamped at ITS start.
+    Task._refresh_idle_status(t, t0 + 15.0)
+    assert t._status.idleSeconds == 12.0
+    assert t._status.idleLongestSeconds == 10.0
+    assert t._status.idleLongestAt == t0 + 5.0
+
+    # The provisional publishes never double-count: closing the gap at the
+    # next begin lands on the same numbers a fresh reader would compute.
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['c'], {'eventTime': t0 + 20.0, 'logSeq': 3})
+    assert t._status.idleSeconds == 17.0
+    assert t._status.idleLongestSeconds == 15.0
+    assert t._status.idleLongestAt == t0 + 5.0
+
+    # While busy, refresh republishes the closed totals unchanged.
+    Task._refresh_idle_status(t, t0 + 60.0)
+    assert t._status.idleSeconds == 17.0
+
+
+def test_analytics_idle_reset():
+    """_reset_status clears the pipe-unused counters with the rest."""
+    t = _analytics_task()
+    t._status_trace = []
+    t.info = {}
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['a'], {'eventTime': 1.0, 'logSeq': 1})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 2.0})
+    Task._accumulate_analytics(t, 'begin', 0, 'p', ['b'], {'eventTime': 5.0, 'logSeq': 2})
+    Task._accumulate_analytics(t, 'end', 0, 'p', [], {'eventTime': 6.0})
+    assert t._status.idleSeconds == 3.0 and t._an_idle_since == 6.0
+
+    Task._reset_status(t)
+    assert t._status.idleSeconds == 0.0
+    assert t._status.idleLongestSeconds == 0.0
+    assert t._status.idleLongestAt == 0.0
+    assert t._an_idle_total == 0.0 and t._an_idle_since == 0.0

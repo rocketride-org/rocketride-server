@@ -182,7 +182,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const mountedRef = useRef(true);
 
 	// ── Connection state ──────────────────────────────────────────────────
-	const { client, isConnected, statusMessage } = useShellConnection();
+	const { isConnected, statusMessage } = useShellConnection();
 
 	// ── Apps — probe catalog + post-auth merge ────────────────────────────
 	// The pre-auth probe registers public MF remotes. Post-auth, the
@@ -503,8 +503,6 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		<ShellIdentityContext.Provider value={identity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
 				<WorkspaceProvider
-					client={client}
-					isConnected={isConnected}
 					apps={apps}
 					workspaceDir={config.workspaceDir}
 					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}

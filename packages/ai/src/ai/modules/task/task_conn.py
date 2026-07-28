@@ -74,6 +74,7 @@ from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
 from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
+from .commands.cmd_log import LogCommands
 from .commands.cmd_store import StoreCommands
 from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
@@ -104,6 +105,7 @@ class TaskConn(
     AppCommands,
     PublicCommands,
     DeployCommands,
+    LogCommands,
     StoreCommands,
     DAPConn,
 ):
@@ -193,6 +195,8 @@ class TaskConn(
         CProfileCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
+        DeployCommands.__init__(self, connection_id, server, transport, **kwargs)
+        LogCommands.__init__(self, connection_id, server, transport, **kwargs)
         StoreCommands.__init__(self, connection_id, server, transport, **kwargs)
 
         # Store connection identifier for tracking and logging

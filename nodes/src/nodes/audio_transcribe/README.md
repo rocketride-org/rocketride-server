@@ -21,7 +21,7 @@ Models are downloaded from HuggingFace on first use. GPU is used automatically w
 | `audio`    | `text`      | Transcribed sentences, one per segment |
 | `video`    | `text`      | Audio track is extracted from the video and transcribed |
 
-When a `documents` listener is attached, the node also emits one document per merged sentence with `chunkId` (sequential per stream, reset on each new stream) and `time_stamp` (seconds from stream start) in the document metadata.
+When a `documents` listener is attached, the node also emits one document per merged sentence with `chunkId` (sequential per stream, reset on each new stream) and `time_stamp` (seconds from stream start) in the document metadata, plus `metadata.source` (the source audio's media detail — `source_mime`, `duration`, `sample_rate`, …) and `metadata.name` = `<audio-stem>.segment<N>.txt` when the input carried a stream descriptor.
 
 ### Fields
 

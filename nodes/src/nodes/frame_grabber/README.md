@@ -60,7 +60,7 @@ Input lane: `video`. Output lanes:
 |-------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `image`     | Each extracted frame streamed as a raw `image/png` payload.                                                                                       |
 | `table`     | One markdown table per video, written when the video closes: columns `Frame`, `Seconds`, `Time Stamp` (formatted as `HH:MM:SS.ss`).               |
-| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` set to the frame number and `time_stamp` (seconds) in the metadata. |
+| `documents` | One document per frame: `type: "Image"`, base64-encoded PNG as content, with `chunkId` set to the frame number, `time_stamp` (seconds), and a `source` object carrying the originating video's media detail (see Source provenance below) in the metadata. |
 
 ### Fields
 
@@ -78,6 +78,32 @@ The `grabber.profile` field selects the active mode and controls which sub-field
 
 Each profile has a title defined in `preconfig.profiles`: "Extract video frames at intervals" (interval), "Extract video frames at scene transitions" (transition), and "Extract video frames at keyframes" (key). The `transition` profile also sets `percent` to `0.4` as a profile-level default.
 
+### Watermark
+
+When `grabber.watermark` is set to `Add watermark`, each extracted frame is stamped with a text label before it is emitted on every output lane. The label is white text with a black outline (legible on any background) at a font size scaled to the frame height.
+
+| Field | services.json key | Default | Description |
+|---|---|---|---|
+| Watermark extracted frames | `grabber.watermark` | `no` | Enable the watermark; the fields below appear only when enabled. |
+| Watermark position | `grabber.watermark_location` | `bottom_right` | Corner for the label (top/bottom × left/right). |
+| Include file name | `grabber.watermark_filename` | `yes` | Add the source file name (from the stream descriptor). |
+| Include timestamp | `grabber.watermark_timestamp` | `yes` | Add the frame timestamp (`HH:MM:SS.ss`). |
+
+The file name comes from the stream descriptor attached to the video on `BEGIN`; when it is unavailable the label falls back to the timestamp alone.
+
+### Source provenance
+
+Every extracted frame carries a backlink to the video it came from. The frame's own metadata already identifies the source object (`objectId`, `parent`); a nested `source` object adds the video's media detail that the frame itself does not have:
+
+`source`: `source_mime`, `duration`, `fps`, `width`, `height`, `resource_name`, `container_mime`, `size`, `stream_index`.
+
+- On the `documents` lane the `source` object is attached to each frame document's metadata.
+- On the `image` lane the same detail (plus `origin: extracted`) is sent as the frame's stream-descriptor enrichment on `BEGIN`, so the raw image stream is self-describing too.
+
+`stream_index` distinguishes frames from different videos embedded in one source (e.g. two clips in one presentation). The block is omitted entirely when the incoming video carried no stream descriptor.
+
+Each frame document is also given a human-readable `metadata.name` of the form `<video-stem>.frame<N>.png` (e.g. `BBC - Tear down this wall.frame0.png`), where `<video-stem>` is the source video's file name without extension and `N` is the frame index — so frames are individually identifiable downstream. Omitted when the source has no name.
+
 ---
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
@@ -94,6 +120,14 @@ Each profile has a title defined in `preconfig.profiles`: "Extract video frames 
 | `grabber.profile` | `string` | **Frame grabber mode** | `"interval"` |
 | `grabber.second.interval` | `number` | **Interval (in seconds) between frames** | `5` |
 | `grabber.start_time` | `number` | **Start time (in seconds) for frame extraction (0=beginning)** | `0` |
+| `grabber.watermark` | `string` | **Watermark extracted frames** | `"no"` |
+| `grabber.watermark_filename` | `string` | **Include file name** | `"yes"` |
+| `grabber.watermark_location` | `string` | **Watermark position** | `"bottom_right"` |
+| `grabber.watermark_timestamp` | `string` | **Include timestamp** | `"yes"` |
+
+## Dependencies
+
+- `Pillow` `>=10.1.0 # ImageFont.load_default(size=)`
 
 ## Source
 
