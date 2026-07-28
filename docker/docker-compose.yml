@@ -56,7 +56,7 @@ services:
 
   # ── PostgreSQL + pgvector ────────────────────────────────────────────────
   postgres:
-    image: ankane/pgvector:v0.8.0
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-rocketride}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
