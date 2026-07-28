@@ -37,7 +37,7 @@ import os
 import threading
 
 from ai.common.config import Config
-from ai.common.utils import parse_bool
+from ai.common.utils import config_int, parse_bool
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
 # Pipeline env vars must be ROCKETRIDE_-prefixed (only those are substituted,
@@ -91,14 +91,11 @@ class IGlobal(IGlobalBase):
         self.default_agent = str(cfg.get('agent') or '').strip() or os.environ.get(GUILD_AGENT_ENV, '').strip()
 
         self.result_mode = 'start' if str(cfg.get('resultMode') or 'wait').strip().lower() == 'start' else 'wait'
-        try:
-            self.timeout = max(5, min(3600, int(cfg.get('timeout') or DEFAULT_TIMEOUT)))
-        except (ValueError, TypeError):
-            self.timeout = DEFAULT_TIMEOUT
-        try:
-            self.max_sessions = max(1, min(1000, int(cfg.get('maxSessions') or DEFAULT_MAX_SESSIONS)))
-        except (ValueError, TypeError):
-            self.max_sessions = DEFAULT_MAX_SESSIONS
+        # config_int treats a non-numeric or <= 0 value as "unspecified" and
+        # returns the default, then clamps — a slider left at 0 means "use the
+        # default", not "5 seconds".
+        self.timeout = config_int(cfg, 'timeout', DEFAULT_TIMEOUT, min_value=5, max_value=3600)
+        self.max_sessions = config_int(cfg, 'maxSessions', DEFAULT_MAX_SESSIONS, min_value=1, max_value=1000)
         self.verify_tls = parse_bool(cfg.get('verifyTls'), True)
 
         # Guild bills per automation (100/month on the free tier), so the node

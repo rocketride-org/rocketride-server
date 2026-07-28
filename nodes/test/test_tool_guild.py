@@ -73,6 +73,20 @@ class _FakeResponse:
         return self._body
 
 
+class _Codes:
+    """The subset of `requests.status_codes.codes` guild_client references."""
+
+    no_content = 204
+    unauthorized = 401
+    forbidden = 403
+    not_found = 404
+    too_many_requests = 429
+    internal_server_error = 500
+    bad_gateway = 502
+    service_unavailable = 503
+    gateway_timeout = 504
+
+
 class _FakeRequests(types.ModuleType):
     """Minimal `requests` stand-in with a real exception type."""
 
@@ -84,6 +98,7 @@ class _FakeRequests(types.ModuleType):
         self.calls = []
         self.responses = []
         self.raise_with = None
+        self.status_codes = types.SimpleNamespace(codes=_Codes())
 
     def request(self, method, url, **kwargs):
         self.calls.append({'method': method, 'url': url, **kwargs})
@@ -111,7 +126,12 @@ def _load_client():
     fake = _FakeRequests()
     added = 'requests' not in sys.modules
     saved = sys.modules.get('requests')
+    saved_sc = sys.modules.get('requests.status_codes')
+    added_sc = 'requests.status_codes' not in sys.modules
     sys.modules['requests'] = fake
+    # guild_client does `from requests.status_codes import codes`, which needs the
+    # submodule importable — register it alongside the stub.
+    sys.modules['requests.status_codes'] = types.SimpleNamespace(codes=_Codes())
     try:
         spec = importlib.util.spec_from_file_location('tool_guild_client_under_test', _CLIENT_PATH)
         module = importlib.util.module_from_spec(spec)
@@ -121,6 +141,10 @@ def _load_client():
             sys.modules.pop('requests', None)
         elif saved is not None:
             sys.modules['requests'] = saved
+        if added_sc:
+            sys.modules.pop('requests.status_codes', None)
+        elif saved_sc is not None:
+            sys.modules['requests.status_codes'] = saved_sc
     # The module holds a reference to the stub; hand it back for assertions.
     module._fake_requests = fake  # type: ignore[attr-defined]
     return module
@@ -505,6 +529,21 @@ def _build_engine_stubs():
     u.optional_int = lambda args, key, default=None, **k: int(args[key]) if args.get(key) is not None else default
     u.parse_bool = lambda v, d: bool(v) if v is not None else d
 
+    def _config_int(cfg, key, default, *, min_value=None, max_value=None):
+        try:
+            val = int(cfg.get(key))
+        except (TypeError, ValueError):
+            return default
+        if val <= 0:  # <= 0 means "unspecified" -> default (matches config_int)
+            return default
+        if min_value is not None:
+            val = max(min_value, val)
+        if max_value is not None:
+            val = min(max_value, val)
+        return val
+
+    u.config_int = _config_int
+
     sch = types.ModuleType('ai.common.schema')
 
     class _Answer:
@@ -538,6 +577,7 @@ def _build_engine_stubs():
         'ai.common.schema': sch,
         'ai.common.config': cfg,
         'requests': req,
+        'requests.status_codes': types.SimpleNamespace(codes=_Codes()),
     }, rl
 
 
@@ -787,16 +827,40 @@ def test_real_output_is_pulled_from_agent_notification_message_content_data():
     assert gc.extract_output(events) == 'RR_MARKER_7F3A9 ok'
 
 
-def test_real_output_ignores_the_user_echo():
-    # A transcript with only the user message must not echo it back as the answer.
-    user_only = [{'type': 'user_message', 'content': 'hello from rocketride RR_MARKER_7F3A9'}]
-    # No output-type event → falls through; the user echo is the only text, but it
-    # is not an agent output type, so the primary pass yields nothing.
-    out = gc.extract_output(user_only)
-    # Fallback may surface it; assert the primary agent-answer path found nothing here.
-    matches = [e for e in user_only if str(e.get('type') or '').lower() in gc._OUTPUT_EVENT_TYPES]
-    assert matches == []
-    assert out in ('', 'hello from rocketride RR_MARKER_7F3A9')
+def test_extract_output_never_emits_noise_as_the_answer():
+    """A transcript with no agent answer must return '' — never the user echo,
+    a banner, a span marker, or an intermediate progress step, all of which
+    carry text but are not the answer.
+    """
+    # user echo only
+    assert gc.extract_output([{'type': 'user_message', 'content': 'PLEASE FILE A TICKET'}]) == ''
+    # noise span markers only (content 'text' is the literal runtime_start value)
+    assert (
+        gc.extract_output(
+            [
+                {'type': 'trigger_message', 'content': 'Triggering agent ...'},
+                {'type': 'runtime_start', 'content': 'text'},
+                {'type': 'llm_start', 'content': None},
+            ]
+        )
+        == ''
+    )
+    # an intermediate progress step is not the final answer
+    assert (
+        gc.extract_output([{'type': 'agent_notification_progress', 'content': {'data': 'step 3 of 9', 'type': 'text'}}])
+        == ''
+    )
+
+
+def test_extract_output_finds_an_unknown_but_non_noise_answer_type():
+    """The fallback still surfaces a text-bearing event of an unfamiliar type,
+    as long as it is not known noise — tolerance for shapes not yet seen.
+    """
+    events = [
+        {'type': 'user_message', 'content': 'question'},
+        {'type': 'some_future_answer_event', 'content': {'data': 'the real answer', 'type': 'text'}},
+    ]
+    assert gc.extract_output(events) == 'the real answer'
 
 
 def test_real_api_trigger_transcript_ignores_noise_events():
@@ -840,3 +904,231 @@ def test_real_api_trigger_session_type_shapes():
     }
     assert gc.session_id_of(session) == '019f917c-0dd8-f9c4-0000-ffe4a69f586f'
     assert gc.session_status(session) == gc.COMPLETED
+
+
+# ---------------------------------------------------------------------------
+# get_session_events pagination — the answer is on the last page, so a
+# single-page read drops it on any transcript past one page.
+# ---------------------------------------------------------------------------
+
+
+def _events_page(items, *, has_more, limit=100, offset=0, total=None):
+    body = {'items': items, 'pagination': {'has_more': has_more, 'limit': limit, 'offset': offset}}
+    if total is not None:
+        body['pagination']['total_count'] = total
+    return _FakeResponse(200, body)
+
+
+def test_get_session_events_follows_pagination_to_the_last_page():
+    p1 = [{'type': 'user_message', 'content': 'q'}, {'type': 'runtime_start', 'content': 'text'}]
+    p2 = [{'type': 'agent_notification_message', 'content': {'data': 'the answer', 'type': 'text'}}]
+    gc._fake_requests.responses = [
+        _events_page(p1, has_more=True, offset=0),
+        _events_page(p2, has_more=False, offset=2),
+    ]
+    events = gc.get_session_events('https://app.guild.ai', 'k', 's', 'sess-1', limit=2)
+    assert len(events) == 3
+    # both pages fetched, and the answer (last page) is present
+    assert gc.extract_output(events) == 'the answer'
+    # second request carried the advancing offset
+    assert gc._fake_requests.calls[1]['params']['offset'] == 2
+
+
+def test_get_session_events_single_page_makes_one_request():
+    gc._fake_requests.responses = [
+        _events_page([{'type': 'agent_notification_message', 'content': {'data': 'a', 'type': 'text'}}], has_more=False)
+    ]
+    events = gc.get_session_events('https://app.guild.ai', 'k', 's', 'sess-1')
+    assert len(events) == 1
+    assert len(gc._fake_requests.calls) == 1
+
+
+def test_get_session_events_stops_at_max_event_limit():
+    # every page says has_more; the cap must stop the loop.
+    page = [{'type': 'x', 'content': str(i)} for i in range(100)]
+    gc._fake_requests.responses = [_events_page(page, has_more=True, offset=i * 100) for i in range(20)]
+    events = gc.get_session_events('https://app.guild.ai', 'k', 's', 'sess-1', limit=100)
+    assert len(events) <= gc.MAX_EVENT_LIMIT
+
+
+def test_has_more_infers_from_total_count_when_flag_absent():
+    data = {'items': [], 'pagination': {'total_count': 250, 'limit': 100}}
+    assert gc._has_more(data, offset=0, page_len=100) is True
+    assert gc._has_more(data, offset=200, page_len=50) is False
+
+
+# ---------------------------------------------------------------------------
+# beginGlobal — config read, env fallbacks, clamps, CONFIG-mode early return.
+# ---------------------------------------------------------------------------
+
+
+def _run_begin_global(monkeypatch, cfg, *, open_mode=None):
+    g = _gmod.IGlobal()
+    om = _gmod.OPEN_MODE.RUN if open_mode is None else open_mode
+    g.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode=om))
+    g.glb = types.SimpleNamespace(logicalType='tool_guild', connConfig={})
+    monkeypatch.setattr(_gmod.Config, 'getNodeConfig', lambda *a, **k: cfg)
+    g.beginGlobal()
+    return g
+
+
+def test_begin_global_reads_config(monkeypatch):
+    g = _run_begin_global(
+        monkeypatch,
+        {
+            'baseUrl': 'https://self.example.com/',
+            'apiKeyId': 'kid',
+            'apiKeySecret': 'ksec',
+            'owner': 'acme',
+            'workspace': 'ws',
+            'agent': 'bot',
+            'resultMode': 'wait',
+        },
+    )
+    assert g.base_url == 'https://self.example.com'  # trailing slash stripped
+    assert (g.key_id, g.key_secret, g.owner, g.workspace, g.default_agent) == ('kid', 'ksec', 'acme', 'ws', 'bot')
+
+
+def test_begin_global_falls_back_to_env(monkeypatch):
+    for name, val in [
+        ('ROCKETRIDE_GUILD_KEY_ID', 'envid'),
+        ('ROCKETRIDE_GUILD_KEY_SECRET', 'envsecret'),
+        ('ROCKETRIDE_GUILD_OWNER', 'envowner'),
+        ('ROCKETRIDE_GUILD_WORKSPACE', 'envws'),
+        ('ROCKETRIDE_GUILD_AGENT', 'envbot'),
+    ]:
+        monkeypatch.setenv(name, val)
+    g = _run_begin_global(monkeypatch, {})
+    assert (g.key_id, g.key_secret, g.owner, g.workspace, g.default_agent) == (
+        'envid',
+        'envsecret',
+        'envowner',
+        'envws',
+        'envbot',
+    )
+
+
+def test_begin_global_config_mode_is_an_early_return(monkeypatch):
+    g = _run_begin_global(monkeypatch, {'apiKeyId': 'should-not-be-read'}, open_mode=_gmod.OPEN_MODE.CONFIG)
+    assert g.key_id == ''  # class default, beginGlobal returned before reading
+
+
+def test_begin_global_clamps_and_defaults_numeric(monkeypatch):
+    g = _run_begin_global(monkeypatch, {'timeout': 99999, 'maxSessions': 0, 'agent': 'b'})
+    assert g.timeout == 3600  # clamped to max
+    assert g.max_sessions == _gmod.DEFAULT_MAX_SESSIONS  # 0 means "unspecified" -> default
+    g2 = _run_begin_global(monkeypatch, {'timeout': 'abc', 'agent': 'b'})
+    assert g2.timeout == _gmod.DEFAULT_TIMEOUT  # non-numeric -> default
+
+
+def test_begin_global_result_mode_normalises(monkeypatch):
+    assert _run_begin_global(monkeypatch, {'resultMode': 'START', 'agent': 'b'}).result_mode == 'start'
+    assert _run_begin_global(monkeypatch, {'resultMode': 'garbage', 'agent': 'b'}).result_mode == 'wait'
+
+
+# ---------------------------------------------------------------------------
+# validateConfig — the canvas warnings a user sees on a misconfig.
+# ---------------------------------------------------------------------------
+
+
+def _run_validate_config(monkeypatch, cfg):
+    for name in (
+        'ROCKETRIDE_GUILD_KEY_ID',
+        'ROCKETRIDE_GUILD_KEY_SECRET',
+        'ROCKETRIDE_GUILD_OWNER',
+        'ROCKETRIDE_GUILD_WORKSPACE',
+        'ROCKETRIDE_GUILD_AGENT',
+    ):
+        monkeypatch.delenv(name, raising=False)
+    _rl._warnings.clear()
+    g = _gmod.IGlobal()
+    g.glb = types.SimpleNamespace(logicalType='tool_guild', connConfig={})
+    monkeypatch.setattr(_gmod.Config, 'getNodeConfig', lambda *a, **k: cfg)
+    g.validateConfig()
+    return _rl._warnings
+
+
+def test_validate_config_warns_on_half_a_key(monkeypatch):
+    warnings = _run_validate_config(monkeypatch, {'apiKeyId': 'x', 'owner': 'o', 'workspace': 'w', 'agent': 'a'})
+    assert any('half of the API key' in w for w in warnings)
+
+
+def test_validate_config_warns_on_missing_workspace_and_agent(monkeypatch):
+    warnings = _run_validate_config(monkeypatch, {'apiKeyId': 'x', 'apiKeySecret': 'y'})
+    text = '\n'.join(warnings)
+    assert 'owner is empty' in text
+    assert 'Workspace is empty' in text
+    assert 'no Agent configured' in text
+
+
+def test_validate_config_warns_on_start_mode(monkeypatch):
+    warnings = _run_validate_config(
+        monkeypatch,
+        {'apiKeyId': 'x', 'apiKeySecret': 'y', 'owner': 'o', 'workspace': 'w', 'agent': 'a', 'resultMode': 'start'},
+    )
+    assert any('Result mode' in w and 'start' in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Public tool functions end to end (run_agent / get_session / get_session_events).
+# ---------------------------------------------------------------------------
+
+
+def test_run_agent_tool_resolves_wait_from_result_mode(monkeypatch):
+    client = _StubClient()
+    inst = _make_instance(monkeypatch, client)  # result_mode='wait'
+    out = inst.run_agent({'input': 'hi'})  # no 'wait' arg -> resolves to wait
+    assert out['output'] == 'RR_MARKER ok'
+    assert 'wait_for_session' in client.calls
+
+
+def test_run_agent_tool_start_mode_does_not_wait(monkeypatch):
+    client = _StubClient()
+    inst = _make_instance(monkeypatch, client)
+    inst.IGlobal.result_mode = 'start'
+    out = inst.run_agent({'input': 'hi'})  # no 'wait' arg -> resolves to start
+    assert out['status'] == client.RUNNING
+    assert out['output'] is None
+    assert 'wait_for_session' not in client.calls
+
+
+def test_run_agent_tool_falls_back_to_default_agent(monkeypatch):
+    captured = {}
+
+    class _CapClient(_StubClient):
+        def start_session(self, *a, **k):
+            captured['agent'] = k.get('agent')
+            return super().start_session(*a, **k)
+
+    inst = _make_instance(monkeypatch, _CapClient(), default_agent='configured-bot')
+    inst.run_agent({'input': 'hi'})  # no 'agent' arg
+    assert captured['agent'] == 'configured-bot'
+
+
+def test_get_session_tool_end_to_end(monkeypatch):
+    stub = types.SimpleNamespace(
+        get_session=lambda *a, **k: {'root_task': {'status': 'DONE'}},
+        session_status=lambda s: 'completed',
+    )
+    inst = _make_instance(monkeypatch, stub)
+    out = inst.get_session({'session_id': 'sess-9'})
+    assert out == {'success': True, 'session_id': 'sess-9', 'status': 'completed'}
+
+
+def test_get_session_events_tool_passes_bounded_limit(monkeypatch):
+    captured = {}
+
+    def _events(*a, **k):
+        captured['limit'] = k.get('limit')
+        return [{'type': 'agent_notification_message', 'content': {'data': 'ans', 'type': 'text'}}]
+
+    stub = types.SimpleNamespace(
+        get_session_events=_events,
+        extract_output=lambda events: 'ans',
+        DEFAULT_EVENT_LIMIT=100,
+        MAX_EVENT_LIMIT=1000,
+    )
+    inst = _make_instance(monkeypatch, stub)
+    out = inst.get_session_events({'session_id': 'sess-9', 'limit': 5})
+    assert out['output'] == 'ans'
+    assert captured['limit'] == 5

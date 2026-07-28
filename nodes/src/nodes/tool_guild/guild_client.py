@@ -39,26 +39,28 @@ them here would only duplicate that plumbing.
 
 Endpoints used (documented under docs.guild.ai/platform/triggers):
 
-- ``POST /api/workspaces/{owner}/{workspace}/sessions`` — start a session
-- ``GET  /api/sessions/{id}``                          — session status
-- ``GET  /api/sessions/{id}/events``                   — session transcript
+- ``POST /api/workspaces/{owner}~{workspace}/sessions`` — start a session
+- ``GET  /api/sessions/{id}``                           — session status
+- ``GET  /api/sessions/{id}/events``                    — session transcript (paginated)
 
 Authentication is HTTP Basic with a Guild *trigger API key*: the key id is the
 username, the key secret the password.
 
-UNVERIFIED AGAINST A LIVE WORKSPACE
------------------------------------
-Guild publishes no REST reference, so three details below are inferred from the
-docs' curl examples and are deliberately written to tolerate several plausible
-shapes. Each is marked ``VERIFY:``. When a live workspace is available, confirm
-them and tighten the code — they are isolated here precisely so that confirming
-them touches no other file:
+VERIFIED AGAINST A LIVE WORKSPACE (2026-07-23)
+----------------------------------------------
+Guild publishes no REST reference, so the response shapes were confirmed against
+a real api_trigger session over HTTP Basic auth and pinned as regression
+fixtures in the test suite. The confirmed facts, each marked ``VERIFIED:`` at its
+function:
 
-1. ``session_id_of``   — which field carries the new session's id.
-2. ``session_status``  — the status field name and its wire values (the docs
-   only give the UI labels Active / Completed / Failed).
-3. ``extract_output``  — which event ``type`` carries the agent's final answer.
-   This is the single most load-bearing unknown in the node.
+1. ``session_id_of``   — the new session's id is top-level ``id``.
+2. ``session_status``  — progress is on ``root_task.status`` (``DISPATCHED`` while
+   running, ``DONE`` when finished), not a top-level ``status`` field.
+3. ``extract_output``  — the answer is an ``agent_notification_message`` whose
+   ``content`` is a ``{"data": ..., "type": "text"}`` block.
+
+The remaining synonym lists and nested-field lookups are deliberate tolerance for
+shapes not seen in that one run, not guesses about the confirmed facts above.
 """
 
 from __future__ import annotations
@@ -68,6 +70,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from requests.status_codes import codes as status_codes
 
 # Allowlist for identifiers that become URL path segments (agent, session_id,
 # owner, workspace). Permits only plain-identifier characters — letters,
@@ -89,7 +92,13 @@ _POLL_MAX = 5.0
 _POLL_GROWTH = 1.4
 
 # Transient statuses worth retrying on idempotent GETs.
-_RETRY_STATUSES = {429, 500, 502, 503, 504}
+_RETRY_STATUSES = {
+    status_codes.too_many_requests,
+    status_codes.internal_server_error,
+    status_codes.bad_gateway,
+    status_codes.service_unavailable,
+    status_codes.gateway_timeout,
+}
 _MAX_GET_RETRIES = 2
 _MAX_BACKOFF = 8.0
 
@@ -125,6 +134,24 @@ _OUTPUT_EVENT_TYPES = (
 # answer sits at ``content.data`` (a nested ``{"data", "type"}`` block), so
 # ``data`` leads the list; the others cover plainer shapes.
 _TEXT_FIELDS = ('data', 'text', 'content', 'output', 'message', 'answer', 'result', 'body')
+
+# Event ``type`` values that are never the agent's final answer. VERIFIED from a
+# live transcript: the user echo, the trigger/system banners, the runtime/llm
+# span markers, and the intermediate progress step all carry text but none of it
+# is the answer. The output fallback skips these so a session that produced no
+# real answer yields '' rather than emitting one of them as the reply.
+_NOISE_EVENT_TYPES = frozenset(
+    {
+        'user_message',
+        'trigger_message',
+        'system_message',
+        'runtime_start',
+        'runtime_done',
+        'llm_start',
+        'llm_done',
+        'agent_notification_progress',
+    }
+)
 
 
 def _retry_delay(resp: requests.Response, attempt: int) -> float:
@@ -214,17 +241,17 @@ def call(
             continue
         break
 
-    if resp.status_code == 204:
+    if resp.status_code == status_codes.no_content:
         return {}
-    if resp.status_code in (401, 403):
+    if resp.status_code in (status_codes.unauthorized, status_codes.forbidden):
         raise RuntimeError(
             f'Guild API {resp.status_code}: unauthorized — check the API Key ID/Secret. '
             'Guild trigger API keys are scoped to a specific trigger, so a key created for '
             'one agent may not start sessions for another.'
         )
-    if resp.status_code == 404:
+    if resp.status_code == status_codes.not_found:
         raise RuntimeError(f'Guild API 404: not found — check the owner, workspace, and agent names ({path}).')
-    if resp.status_code == 429:
+    if resp.status_code == status_codes.too_many_requests:
         raise RuntimeError('Guild API 429: rate limited or automation quota exhausted — check the workspace plan.')
     if not resp.ok:
         raise RuntimeError(f'Guild API {resp.status_code}: {_error_message(resp)}')
@@ -295,11 +322,59 @@ def get_session_events(
     verify: bool = True,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> List[Dict[str, Any]]:
-    """Fetch a session's event log (its transcript)."""
+    """Fetch a session's event log (its transcript), following pagination.
+
+    The events endpoint is paginated and returns events **oldest-first**, so the
+    agent's answer is on the last page. ``limit`` is the page size; pages are
+    followed via ``offset`` until the response reports no more, bounded by
+    ``MAX_EVENT_LIMIT`` so a runaway transcript can't loop forever. Reading only
+    the first page would drop the answer of any run past one page.
+    """
     path = f'/api/sessions/{safe_segment(session_id, "session_id")}/events'
-    params = {'limit': max(1, min(int(limit or DEFAULT_EVENT_LIMIT), MAX_EVENT_LIMIT))}
-    data = call(base_url, key_id, key_secret, 'GET', path, params=params, verify=verify, timeout=timeout)
-    return _as_event_list(data)
+    page_size = max(1, min(int(limit or DEFAULT_EVENT_LIMIT), MAX_EVENT_LIMIT))
+    events: List[Dict[str, Any]] = []
+    offset = 0
+    while len(events) < MAX_EVENT_LIMIT:
+        data = call(
+            base_url,
+            key_id,
+            key_secret,
+            'GET',
+            path,
+            params={'limit': page_size, 'offset': offset},
+            verify=verify,
+            timeout=timeout,
+        )
+        page = _as_event_list(data)
+        if not page:
+            break
+        events.extend(page)
+        if not _has_more(data, offset, len(page)):
+            break
+        offset += len(page)
+    return events[:MAX_EVENT_LIMIT]
+
+
+def _has_more(data: Any, offset: int, page_len: int) -> bool:
+    """Whether another page of events follows, from the ``pagination`` block.
+
+    Reads ``has_more`` when present; else infers from ``total_count`` vs what has
+    been read; else falls back to "a full page probably has a successor".
+    """
+    if isinstance(data, dict):
+        pagination = data.get('pagination')
+        if isinstance(pagination, dict):
+            more = pagination.get('has_more')
+            if isinstance(more, bool):
+                return more
+            total = pagination.get('total_count')
+            limit = pagination.get('limit')
+            if isinstance(total, int):
+                read = offset + page_len
+                return read < total
+            if isinstance(limit, int) and limit > 0:
+                return page_len >= limit
+    return False
 
 
 def wait_for_session(
@@ -439,6 +514,11 @@ def _as_event_list(data: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _event_type(event: Dict[str, Any]) -> str:
+    """Normalised event ``type`` (falls back to ``event_type``), lowercased."""
+    return str(event.get('type') or event.get('event_type') or '').strip().lower()
+
+
 def _event_text(event: Dict[str, Any]) -> str:
     """Pull the text out of one event, looking one level into a nested payload."""
     for key in _TEXT_FIELDS:
@@ -462,13 +542,18 @@ def extract_output(events: List[Dict[str, Any]]) -> str:
     ``agent_notification_message`` with empty text and an ``agent_notification_progress``
     (the ``ui_notify`` tool) carrying the same text; taking the last output-type
     event with non-empty text lands on the real answer and skips the empty delta.
-    The type/field fallbacks cover other agent shapes.
+
+    If no known output type is present the fallback takes the last event with
+    text **whose type is not known noise** (the user echo, banners, span markers,
+    progress steps). A session that produced no real answer returns '' rather
+    than emitting noise as the reply — an empty answer is a better failure than a
+    wrong one, the same reasoning ``session_status`` follows.
     """
     if not events:
         return ''
 
     for wanted in _OUTPUT_EVENT_TYPES:
-        matches = [e for e in events if str(e.get('type') or e.get('event_type') or '').strip().lower() == wanted]
+        matches = [e for e in events if _event_type(e) == wanted]
         if matches:
             # Last match wins: the final answer, not an intermediate turn.
             for event in reversed(matches):
@@ -476,8 +561,11 @@ def extract_output(events: List[Dict[str, Any]]) -> str:
                 if text:
                     return text
 
-    # Nothing matched a known type — fall back to the last event with any text.
+    # No known output type: take the last text-bearing event that is not a known
+    # non-answer (user echo, banner, span marker, progress step). Never emit noise.
     for event in reversed(events):
+        if _event_type(event) in _NOISE_EVENT_TYPES:
+            continue
         text = _event_text(event)
         if text:
             return text

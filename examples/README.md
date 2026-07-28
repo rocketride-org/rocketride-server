@@ -138,6 +138,38 @@ chat -> agent (RocketRide Wave) -> response
 
 **Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_SLACK_TOKEN` (a bot token with `chat:write`, `channels:read`, `channels:history`)
 
+### guild-agent.pipe
+
+**Run a governed [Guild.ai](https://www.guild.ai/) agent as a pipeline step.**
+
+```text
+chat -> Guild.ai -> response
+```
+
+- Sends the chat input to the agent configured on the node, waits for the Guild session to finish, and emits its answer
+- Deterministic: the step runs the agent exactly once, no prompt tuning
+- See the [tool_guild README](../nodes/src/nodes/tool_guild/README.md) for creating a Guild trigger API key
+
+**Required env vars:** `ROCKETRIDE_GUILD_KEY_ID`, `ROCKETRIDE_GUILD_KEY_SECRET`, `ROCKETRIDE_GUILD_OWNER`, `ROCKETRIDE_GUILD_WORKSPACE`, `ROCKETRIDE_GUILD_AGENT`
+
+### guild-delegate-agent.pipe
+
+**A RocketRide agent that delegates actions to a governed Guild.ai agent.**
+
+```text
+chat -> agent (RocketRide Wave) -> response
+                 |
+          +------+------+
+          |      |      |
+         LLM  Memory  Guild.ai (tool)
+```
+
+- The agent answers directly, but delegates actions on governed systems to Guild by calling `tool_guild_1.run_agent`
+- Guild's runtime injects credentials, so the delegated agent acts without the pipeline ever holding the raw keys
+- Each `run_agent` call starts a billed, non-idempotent Guild session; the instructions tell the agent to call it once and not retry blindly
+
+**Required env vars:** `ROCKETRIDE_ANTHROPIC_KEY`, `ROCKETRIDE_GUILD_KEY_ID`, `ROCKETRIDE_GUILD_KEY_SECRET`, `ROCKETRIDE_GUILD_OWNER`, `ROCKETRIDE_GUILD_WORKSPACE`, `ROCKETRIDE_GUILD_AGENT`
+
 ## Getting Started
 
 1. Copy a template to your project directory
