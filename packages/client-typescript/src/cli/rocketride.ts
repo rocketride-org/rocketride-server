@@ -922,21 +922,26 @@ export class RocketRideCLI {
 			.option('--threads <num>', 'Number of threads to use for pipeline execution', '4')
 			.option('--max-concurrent <num>', 'Maximum number of concurrent file uploads', '5')
 			.option('--args <args...>', 'Additional arguments to pass to pipeline execution')
-			.action(async (files, options) => {
-				// Validate required arguments - validation will happen in createAndConnectClient
-				if (!options.pipeline && !options.token) {
-					console.error('Error: Either --pipeline or --token must be specified for upload command. Use --pipeline/--token or set ROCKETRIDE_PIPELINE/ROCKETRIDE_TOKEN in .env file');
-					process.exit(1);
-				}
+				.action(async (files, options) => {
+					// Validate required arguments - validation will happen in createAndConnectClient
+					if (!options.pipeline && !options.token) {
+						console.error('Error: Either --pipeline or --token must be specified for upload command. Use --pipeline/--token or set ROCKETRIDE_PIPELINE/ROCKETRIDE_TOKEN in .env file');
+						process.exit(1);
+					}
+					const maxConcurrent = Number(options.maxConcurrent || '5');
+					if (!Number.isFinite(maxConcurrent)) {
+						console.error('Error: --max-concurrent must be a finite number');
+						process.exit(1);
+					}
 
-				this.args = {
-					command: 'upload',
-					...options,
-					files,
-					threads: parseInt(options.threads),
-					max_concurrent: parseInt(options.maxConcurrent || '5'),
-					pipeline_args: options.args,
-				};
+					this.args = {
+						command: 'upload',
+						...options,
+						files,
+						threads: parseInt(options.threads),
+						max_concurrent: maxConcurrent,
+						pipeline_args: options.args,
+					};
 				this.uri = options.uri;
 
 				try {
@@ -1452,8 +1457,7 @@ export class RocketRideCLI {
 			});
 
 			// Upload files - progress events come through event subscription
-			// Server handles concurrency automatically
-			const results = await this.client!.sendFiles(fileObjects, taskToken!);
+			const results = await this.client!.sendFiles(fileObjects, taskToken!, this.args.max_concurrent);
 
 			const endTime = Date.now();
 

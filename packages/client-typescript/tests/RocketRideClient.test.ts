@@ -2213,6 +2213,44 @@ describe('RocketRideClient URI normalization', () => {
 	});
 });
 
+describe('RocketRideClient sendFiles concurrency', () => {
+	it('honors maxConcurrent', async () => {
+		const client = new RocketRideClient({ auth: 'test-key', uri: 'http://localhost:5565' });
+		let active = 0;
+		let maxActive = 0;
+
+		(client as any).pipe = jest.fn(async () => {
+			active += 1;
+			maxActive = Math.max(maxActive, active);
+			return {
+				open: jest.fn(async () => undefined),
+				write: jest.fn(async () => undefined),
+				close: jest.fn(async () => {
+					await new Promise((resolve) => setTimeout(resolve, 10));
+					active -= 1;
+					return undefined;
+				}),
+			};
+		});
+
+		const files = Array.from({ length: 5 }, (_, index) => ({
+			file: new File([`file-${index}`], `file-${index}.txt`, { type: 'text/plain' }),
+		}));
+
+		await client.sendFiles(files, 'task-token', 2);
+
+		expect((client as any).pipe).toHaveBeenCalledTimes(5);
+		expect(maxActive).toBeLessThanOrEqual(2);
+	});
+
+	it('rejects non-finite maxConcurrent', async () => {
+		const client = new RocketRideClient({ auth: 'test-key', uri: 'http://localhost:5565' });
+		const files = [{ file: new File(['file'], 'file.txt', { type: 'text/plain' }) }];
+
+		await expect(client.sendFiles(files, 'task-token', Number.NaN)).rejects.toThrow(RangeError);
+	});
+});
+
 export async function isServerAvailable(): Promise<boolean> {
 	try {
 		const client = new RocketRideClient({
