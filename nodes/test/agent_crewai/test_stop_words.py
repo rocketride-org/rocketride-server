@@ -242,7 +242,7 @@ def _load_native_stream():
 
 
 def _run_native_capture(ns, stop_value):
-    """Drive _stream_anthropic_messages_api with fakes; return the stop the payload got."""
+    """Drive the native Anthropic adapter with fakes; return the stop the payload got."""
     captured: dict = {}
 
     class _FakeLLM:
@@ -258,11 +258,8 @@ def _run_native_capture(ns, stop_value):
     ns._open_raw_message_stream = lambda client, payload: iter(())  # no events -> no text
     token = ns.STOP_SEQUENCES_VAR.set(stop_value)
     try:
-        # Produces no text, so the function raises after building the payload — we only
-        # assert the payload wiring, which happens before any streaming.
-        ns._stream_anthropic_messages_api(_FakeChat(), 'prompt', lambda t: None, None, None)
-    except RuntimeError:
-        pass
+        # Drain the adapter; the payload (with the stop) is built before any streaming.
+        list(ns.NativeAnthropicAdapter(_FakeChat()).stream('prompt'))
     finally:
         ns.STOP_SEQUENCES_VAR.reset(token)
     return captured.get('stop', 'UNSET')
