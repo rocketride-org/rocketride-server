@@ -203,9 +203,11 @@ export function ApiKeyLogin({ onSubmit, onCancel, appName = 'RocketRide', initia
 		} catch (err) {
 			// Show the server's message, or a generic fallback.
 			setError(err instanceof Error ? err.message : 'Connection failed');
+		} finally {
+			// A cancelled or unauthenticated submission leaves this form mounted.
+			// Always release its controls rather than relying on a Shell unmount.
 			setLoading(false);
 		}
-		// On success the shell unmounts this screen — no state to reset.
 	}, [apiKey, loading, onSubmit]);
 
 	// Enter submits (the stock Button renders type="button", so the implicit

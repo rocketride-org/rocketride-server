@@ -34,7 +34,7 @@
 // No engine process management (that's VSCode-only via LocalManager).
 // =============================================================================
 
-import { RocketRideClient, ConnectResult, AuthenticationException } from 'rocketride';
+import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError } from 'rocketride';
 import type { ManagerInfo } from 'shared';
 import { BaseManager, ShellConnectionConfig } from './base-manager';
 import { CONNECT_TIMEOUT_MS } from '../constants';
@@ -48,7 +48,7 @@ export class RemoteManager extends BaseManager {
 	/** Cached server info from the most recent successful connection. */
 	private serverInfo: ManagerInfo | null = null;
 
-	constructor(private readonly onLoginTimeout?: () => void) {
+	constructor(private readonly onLoginTimeout?: () => boolean | Promise<boolean | void> | void) {
 		super();
 	}
 
@@ -79,11 +79,12 @@ export class RemoteManager extends BaseManager {
 				CONNECT_TIMEOUT_MS,
 				new ConnectionFailure(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`, 'network'),
 				async () => {
-					this.onLoginTimeout?.();
-					await client.detach();
+					const ownsLogin = await this.onLoginTimeout?.();
+					if (ownsLogin !== false) await client.detach();
 				},
 			);
 		} catch (error) {
+			if (error instanceof LoginAttemptCancelledError) throw error;
 			if (error instanceof ConnectionFailure) throw error;
 			if (error instanceof AuthenticationException) {
 				throw new ConnectionFailure(error.message, 'auth');

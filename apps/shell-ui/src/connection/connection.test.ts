@@ -23,7 +23,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { RocketRideClient, type ConnectResult } from 'rocketride';
+import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, type ConnectResult } from 'rocketride';
 import { ConnectionState, type ConnectionStatus } from 'shared/types/connection';
 import { ConnectionManager } from './connection.js';
 import { ConnectionFailure, withTimeout } from './errors.js';
@@ -32,23 +32,52 @@ import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants.js';
 
 type EmittedEvent = { event: string; payload: unknown };
 
+type TestCredential = string | { code: string; verifier: string; redirectUri: string };
+type TestClient = Pick<RocketRideClient, 'login' | 'getAccountInfo' | 'isConnected'> &
+	Partial<Pick<RocketRideClient, 'detach' | 'disconnect' | 'getServices'>>;
+type TestOperation = {
+	key: string;
+	generation: number;
+	credential: TestCredential;
+	cancellationReason?: LoginAttemptCancelledError['reason'];
+	promise: Promise<ConnectResult | null>;
+	connectedPublished: boolean;
+};
+
 type ConnectionManagerTestAdapter = {
+	client: TestClient | RocketRideClient | null;
+	_attachPromise: Promise<void>;
+	serverUri: string;
+	pendingEvents: Map<string, unknown>;
+	lifecycleOwner?: TestOperation;
+	connectionOperation?: TestOperation;
+	connectionGeneration: number;
+	refreshServices: () => Promise<void>;
 	finishConnect(
 		result: ConnectResult,
 		appId: string,
 		config?: { apps?: Array<{ id: string }>; workspaceDir?: string; onThemeChange?: (theme: string) => void },
 	): Promise<{ result: ConnectResult; appId: string }>;
+	connectForBootstrap(
+		credential: TestCredential,
+		appId: string,
+		config?: { apps?: Array<{ id: string }>; workspaceDir?: string; onThemeChange?: (theme: string) => void },
+	): Promise<{ result: ConnectResult; appId: string } | null>;
 	handleStoredTokenFailure(error: unknown): boolean;
 	updateConnectionStatus(updates: Partial<ConnectionStatus>): void;
 	connectionStatus: ConnectionStatus;
 	accountInfo?: ConnectResult;
 	clearToken(): void;
+	clearSessionAppId(): void;
+	loadToken(): string;
 	emit(event: string, payload: unknown): void;
 	saveToken(token: string): void;
 	getPendingAppId(): string;
 	initialize(): void;
-	loginWithStoredToken(token: string): Promise<ConnectResult>;
-	loginWithTimeout(credential: string | { code: string; verifier: string; redirectUri: string }): Promise<ConnectResult>;
+	connect(credential?: unknown): Promise<ConnectResult | null>;
+	bootstrap(): Promise<{ result: ConnectResult; appId: string } | null>;
+	disconnect(): Promise<void>;
+	logout(): Promise<void>;
 };
 
 const authenticatedResult: ConnectResult = {
@@ -84,7 +113,25 @@ function createTestManager(lastFailure?: ConnectionStatus['lastFailure']) {
 	manager.emit = (event, payload) => emitted.push({ event, payload });
 	manager.saveToken = (token) => savedTokens.push(token);
 	manager.getPendingAppId = () => '';
+	manager.pendingEvents = new Map();
+	manager.connectionGeneration = 0;
 	return { manager, emitted, savedTokens };
+}
+
+function testClient(overrides: Partial<TestClient> = {}): TestClient {
+	return {
+		login: async () => authenticatedResult,
+		getAccountInfo: () => authenticatedResult,
+		isConnected: () => true,
+		getServices: async () => ({ services: {} }),
+		...overrides,
+	};
+}
+
+function hasConnectedCallback(client: TestClient | RocketRideClient | null): client is RocketRideClient & {
+	_callerOnConnected: () => Promise<void>;
+} {
+	return client !== null && '_callerOnConnected' in client;
 }
 
 test('updateConnectionStatus retains auth failures and clears network failures after CONNECTED', () => {
@@ -202,7 +249,6 @@ test('initialize handles LS_TOKEN removals only from localStorage', () => {
 
 	try {
 		const { manager } = createTestManager();
-		(manager as unknown as { pendingEvents: Map<string, unknown> }).pendingEvents = new Map();
 		manager.clearToken = () => { tokenCleared = true; };
 		manager.initialize();
 
@@ -252,7 +298,6 @@ test('initialize ignores storage events when localStorage cannot be read', () =>
 
 	try {
 		const { manager } = createTestManager();
-		(manager as unknown as { pendingEvents: Map<string, unknown> }).pendingEvents = new Map();
 		manager.initialize();
 
 		assert.doesNotThrow(() => listeners.get('storage')!({
@@ -292,78 +337,6 @@ test('initialize attaches with the native handshake timeout', () => {
 	}
 });
 
-test('stored-token login leaves request timeout unset for the outer cancellation guard', async () => {
-	const loginCalls: unknown[][] = [];
-	const { manager } = createTestManager();
-	(manager as unknown as { client: Pick<RocketRideClient, 'login'> }).client = {
-		login: async (...args: unknown[]) => {
-			loginCalls.push(args);
-			return authenticatedResult;
-		},
-	};
-
-	await manager.loginWithStoredToken('rr_test-token');
-
-	assert.deepEqual(loginCalls, [['rr_test-token']]);
-});
-
-test('ConnectionManager whole-login timeout detaches before rejecting and forwards token and OAuth credentials unchanged', async () => {
-	const realSetTimeout = globalThis.setTimeout;
-	const realClearTimeout = globalThis.clearTimeout;
-	let timeoutCallback: (() => void) | undefined;
-	let releaseDetach: (() => void) | undefined;
-	let resolveLogin: ((result: ConnectResult) => void) | undefined;
-	let detached = false;
-	let settled = false;
-	const loginCalls: unknown[][] = [];
-	const oauthCredential = { code: 'code', verifier: 'verifier', redirectUri: 'https://shell.example.test' };
-	const { manager } = createTestManager();
-
-	globalThis.setTimeout = ((callback: () => void) => {
-		timeoutCallback = callback;
-		return 0 as unknown as ReturnType<typeof setTimeout>;
-	}) as typeof setTimeout;
-	globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
-	(manager as unknown as { client: Pick<RocketRideClient, 'login' | 'detach'> }).client = {
-		login: async (...args: unknown[]) => {
-			loginCalls.push(args);
-			if (loginCalls.length === 1) return await new Promise<ConnectResult>((resolve) => { resolveLogin = resolve; });
-			return authenticatedResult;
-		},
-		detach: async () => {
-			detached = true;
-			await new Promise<void>((resolve) => { releaseDetach = resolve; });
-		},
-	};
-
-	try {
-		const timedLogin = manager.loginWithTimeout('rr_test-token');
-		void timedLogin.then(
-			() => { settled = true; },
-			() => { settled = true; },
-		);
-
-		timeoutCallback!();
-		await Promise.resolve();
-		assert.equal(detached, true);
-		assert.equal(settled, false);
-
-		resolveLogin!(authenticatedResult);
-		await Promise.resolve();
-		assert.equal(settled, false);
-
-		releaseDetach!();
-		await assert.rejects(timedLogin, (error: unknown) => error instanceof ConnectionFailure && error.kind === 'network');
-		assert.equal(settled, true);
-
-		assert.equal(await manager.loginWithTimeout(oauthCredential), authenticatedResult);
-		assert.deepEqual(loginCalls, [['rr_test-token'], [oauthCredential]]);
-	} finally {
-		globalThis.setTimeout = realSetTimeout;
-		globalThis.clearTimeout = realClearTimeout;
-	}
-});
-
 test('onConnected ignores stale callbacks but accepts the active authenticated connection', async () => {
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalAttach = RocketRideClient.prototype.attach;
@@ -378,9 +351,13 @@ test('onConnected ignores stale callbacks but accepts the active authenticated c
 
 	try {
 		const { manager, emitted } = createTestManager();
-		(manager as unknown as { pendingEvents: Map<string, unknown> }).pendingEvents = new Map();
 		manager.initialize();
-		const client = (manager as unknown as { client: { _callerOnConnected: () => Promise<void> } }).client;
+		assert.ok(hasConnectedCallback(manager.client));
+		const client = manager.client;
+		manager.lifecycleOwner = {
+			key: 'active', generation: 0, credential: 'token', promise: Promise.resolve(null), connectedPublished: false,
+		};
+		manager.connectionStatus.lastFailure = { kind: 'auth', lastError: 'expired' };
 
 		RocketRideClient.prototype.isAttached = () => false;
 		RocketRideClient.prototype.isAuthenticated = () => true;
@@ -391,17 +368,11 @@ test('onConnected ignores stale callbacks but accepts the active authenticated c
 		await client._callerOnConnected();
 
 		RocketRideClient.prototype.isAuthenticated = () => true;
-		(manager as unknown as { suppressConnected: boolean }).suppressConnected = true;
-		await client._callerOnConnected();
-
-		assert.equal(manager.connectionStatus.state, ConnectionState.DISCONNECTED);
-		assert.equal(emitted.some(({ event }) => event === 'shell:connected'), false);
-
-		(manager as unknown as { suppressConnected: boolean }).suppressConnected = false;
-		(manager as unknown as { refreshServices: () => Promise<void> }).refreshServices = async () => {};
+		manager.refreshServices = async () => {};
 		await client._callerOnConnected();
 
 		assert.equal(manager.connectionStatus.state, ConnectionState.CONNECTED);
+		assert.equal(manager.connectionStatus.lastFailure, undefined);
 		assert.equal(emitted.filter(({ event }) => event === 'shell:connected').length, 1);
 	} finally {
 		RocketRideClient.prototype.attach = originalAttach;
@@ -513,6 +484,241 @@ test('RemoteManager.connect detaches before returning a network timeout failure'
 			]),
 			(error: unknown) => error instanceof ConnectionFailure && error.kind === 'network',
 		);
+	} finally {
+		globalThis.setTimeout = realSetTimeout;
+		globalThis.clearTimeout = realClearTimeout;
+	}
+});
+
+test('connect coalesces identical credential operations and supersedes stale credential publication', async () => {
+	let resolveFirstLogin: ((result: ConnectResult) => void) | undefined;
+	let account = authenticatedResult;
+	let loginCount = 0;
+	const { manager, emitted } = createTestManager();
+	manager.serverUri = 'shell.example.test';
+	manager.client = testClient({
+		login: async () => {
+			loginCount++;
+			if (loginCount === 1) return await new Promise<ConnectResult>((resolve) => { resolveFirstLogin = resolve; });
+			account = { ...authenticatedResult, userId: 'new-user', userToken: 'new-token' };
+			return account;
+		},
+		getAccountInfo: () => account,
+	});
+
+	const first = manager.connect('first-token');
+	const joined = manager.connect('first-token');
+	assert.equal(joined, first);
+
+	const replacement = manager.connect('second-token');
+	assert.notEqual(replacement, first);
+	assert.equal((await replacement)!.userId, 'new-user');
+
+	resolveFirstLogin!(authenticatedResult);
+	assert.equal(await first, null);
+	assert.deepEqual(
+		emitted.filter(({ event }) => event === 'shell:login'),
+		[{ event: 'shell:login', payload: { user: account } }],
+	);
+});
+
+test('connect distinguishes string and PKCE credentials when coalescing', async () => {
+	const resolvers: Array<(result: ConnectResult) => void> = [];
+	const { manager } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	manager.client = testClient({
+		login: async () => await new Promise<ConnectResult>((resolve) => { resolvers.push(resolve); }),
+	});
+
+	const stringOperation = manager.connect('credential');
+	const pkceOperation = manager.connect({ code: 'credential', verifier: 'verifier', redirectUri: 'https://shell.example.test' });
+	assert.notEqual(stringOperation, pkceOperation);
+
+	resolvers[1]!(authenticatedResult);
+	assert.equal((await pkceOperation)!.userId, authenticatedResult.userId);
+	resolvers[0]!(authenticatedResult);
+	assert.equal(await stringOperation, null);
+});
+
+test('connect joins PKCE credentials with fields supplied in a different order', async () => {
+	let resolveLogin: ((result: ConnectResult) => void) | undefined;
+	const { manager } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	manager.client = testClient({
+		login: async () => await new Promise<ConnectResult>((resolve) => { resolveLogin = resolve; }),
+	});
+
+	const first = manager.connect({ code: 'code', verifier: 'verifier', redirectUri: 'https://shell.example.test' });
+	const joined = manager.connect({ redirectUri: 'https://shell.example.test', verifier: 'verifier', code: 'code' });
+
+	assert.equal(joined, first);
+	resolveLogin!(authenticatedResult);
+	assert.equal((await first)!.userId, authenticatedResult.userId);
+});
+
+test('public connect resolves intentional SDK cancellations silently for every reason', async () => {
+	for (const reason of ['superseded', 'logout', 'detached'] as const) {
+		const { manager, emitted } = createTestManager();
+		let clearTokenCalls = 0;
+		manager.serverUri = 'https://shell.example.test';
+		manager.clearToken = () => { clearTokenCalls++; };
+		manager.client = testClient({
+			login: async () => { throw new LoginAttemptCancelledError(reason); },
+		});
+
+		assert.equal(await manager.connect('token'), null);
+		assert.equal(clearTokenCalls, 0);
+		assert.equal(manager.connectionStatus.lastFailure, undefined);
+		assert.equal(emitted.some(({ event }) => event === 'shell:error'), false);
+	}
+});
+
+test('non-cancellation failures remain failures and auth recovery clears its latch', async () => {
+	const { manager, emitted } = createTestManager();
+	let clearTokenCalls = 0;
+	manager.serverUri = 'https://shell.example.test';
+	manager.clearToken = () => { clearTokenCalls++; };
+	manager.client = testClient({
+		login: async () => { throw new AuthenticationException({ message: 'invalid credential' }); },
+	});
+
+	await assert.rejects(manager.connect('token'));
+	assert.equal(clearTokenCalls, 1);
+	assert.equal(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+	assert.equal(manager.connectionStatus.lastFailure?.kind, 'auth');
+	assert.equal(emitted.some(({ event }) => event === 'shell:error'), true);
+
+	manager.client.login = async () => authenticatedResult;
+	await manager.connect('fresh-token');
+	assert.equal(manager.connectionStatus.lastFailure, undefined);
+});
+
+test('a disconnected transport error is a normal network failure, not a cancellation', async () => {
+	const { manager, emitted } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	manager.client = testClient({ login: async () => { throw new Error('disconnected'); } });
+
+	await assert.rejects(
+		manager.connect('token'),
+		(error: unknown) => error instanceof ConnectionFailure && error.kind === 'network',
+	);
+	assert.equal(manager.connectionStatus.lastFailure?.kind, 'network');
+	assert.equal(emitted.some(({ event }) => event === 'shell:error'), true);
+});
+
+test('disconnect and logout invalidate an in-flight operation before client cleanup', async () => {
+	for (const action of ['disconnect', 'logout'] as const) {
+		let resolveLogin: ((result: ConnectResult) => void) | undefined;
+		let disconnectCalls = 0;
+		const { manager } = createTestManager();
+		manager.serverUri = 'https://shell.example.test';
+		manager.clearToken = () => {};
+		manager.clearSessionAppId = () => {};
+		manager.client = testClient({
+			login: async () => await new Promise<ConnectResult>((resolve) => { resolveLogin = resolve; }),
+			disconnect: async () => { disconnectCalls++; },
+		});
+
+		const connecting = manager.connect('token');
+		await manager[action]();
+		resolveLogin!(authenticatedResult);
+		assert.equal(await connecting, null);
+		assert.ok(disconnectCalls >= 1);
+	}
+});
+
+test('bootstrap stored-token login publishes through the accepted operation once', async () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const { manager, emitted } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	manager.client = testClient();
+	manager._attachPromise = Promise.resolve();
+	manager.loadToken = () => 'stored-token';
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { search: '' } },
+	});
+
+	try {
+		const completed = await manager.bootstrap();
+
+		assert.equal(completed?.result, authenticatedResult);
+		assert.equal(completed?.appId, '');
+		assert.deepEqual(
+			emitted.filter(({ event }) => event === 'shell:login'),
+			[{ event: 'shell:login', payload: { user: authenticatedResult } }],
+		);
+	} finally {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	}
+});
+
+test('bootstrap cannot finish an old login under a replacement operation', async () => {
+	let resolveLogin: ((result: ConnectResult) => void) | undefined;
+	let finishConnectCalls = 0;
+	const { manager } = createTestManager();
+	const oldOperation: TestOperation = {
+		key: 'old',
+		generation: 1,
+		credential: 'old-token',
+		promise: Promise.resolve(null),
+		connectedPublished: false,
+	};
+	const replacementOperation: TestOperation = {
+		key: 'replacement',
+		generation: 2,
+		credential: 'new-token',
+		promise: Promise.resolve(null),
+		connectedPublished: false,
+	};
+	const login = new Promise<ConnectResult>((resolve) => { resolveLogin = resolve; });
+	void login.then(() => {
+		manager.connectionGeneration = replacementOperation.generation;
+		manager.lifecycleOwner = replacementOperation;
+		manager.connectionOperation = replacementOperation;
+	});
+	manager.connect = () => {
+		manager.connectionGeneration = oldOperation.generation;
+		manager.lifecycleOwner = oldOperation;
+		manager.connectionOperation = oldOperation;
+		return login;
+	};
+	manager.finishConnect = async () => {
+		finishConnectCalls++;
+		return { result: authenticatedResult, appId: '' };
+	};
+
+	const completing = manager.connectForBootstrap('old-token', '');
+	resolveLogin!(authenticatedResult);
+
+	assert.equal(await completing, null);
+	assert.equal(finishConnectCalls, 0);
+});
+
+test('timeout cleanup leaves a replacement shell operation attached', async () => {
+	const realSetTimeout = globalThis.setTimeout;
+	const realClearTimeout = globalThis.clearTimeout;
+	let timeoutCallback: (() => void) | undefined;
+	let detachCalls = 0;
+	globalThis.setTimeout = ((callback: () => void) => {
+		timeoutCallback = callback;
+		return 0 as unknown as ReturnType<typeof setTimeout>;
+	}) as typeof setTimeout;
+	globalThis.clearTimeout = (() => {}) as typeof clearTimeout;
+
+	try {
+		const client = {
+			login: async () => await new Promise<ConnectResult>(() => {}),
+			detach: async () => { detachCalls++; },
+		} as unknown as RocketRideClient;
+		const connect = new RemoteManager(() => false).connect(client, {
+			uri: 'https://shell.example.test',
+			credential: 'token',
+		});
+		timeoutCallback!();
+		await assert.rejects(connect, (error: unknown) => error instanceof ConnectionFailure && error.kind === 'network');
+		assert.equal(detachCalls, 0);
 	} finally {
 		globalThis.setTimeout = realSetTimeout;
 		globalThis.clearTimeout = realClearTimeout;
