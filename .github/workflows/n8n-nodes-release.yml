@@ -44,8 +44,14 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Guard — tag must match package.json version
-        if: startsWith(github.ref, 'refs/tags/')
         run: |
+          case "$GITHUB_REF" in
+            refs/tags/n8n-nodes-v*) ;;
+            *)
+              echo "::error::Release must run from an n8n-nodes-v* tag."
+              exit 1
+              ;;
+          esac
           PKG_VERSION="v$(node -p "require('./package.json').version")"
           TAG="${GITHUB_REF_NAME#n8n-nodes-}"
           if [ "$TAG" != "$PKG_VERSION" ]; then
