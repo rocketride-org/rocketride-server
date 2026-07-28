@@ -50,12 +50,12 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
 import { ContentHeader } from 'shared/components/content-header/ContentHeader';
-import { useWorkspace } from '../../workspace/WorkspaceContext';
-import { useShellConnection } from '../../connection/ConnectionContext';
-import { ConnectionManager } from '../../connection/connection';
-import { labelFromKey } from '../../workspace/settingsRegistry';
-import type { RegistryEntry, RegistrySection } from '../../workspace/settingsRegistry';
-import type { SettingValue } from '../../workspace/types';
+import { useWorkspace } from '../workspace/WorkspaceContext';
+import { useShellConnection } from '../connection/ConnectionContext';
+import { ConnectionManager } from '../connection/connection';
+import { labelFromKey } from '../workspace/settingsRegistry';
+import type { RegistryEntry, RegistrySection } from '../workspace/settingsRegistry';
+import type { SettingValue } from '../workspace/types';
 
 // =============================================================================
 // CONSTANTS
@@ -477,7 +477,7 @@ function matchesSearch(entry: RegistryEntry, query: string): boolean {
  * renders; typing a search switches to a cross-app results view spanning
  * every section.  All edits apply immediately (deltas-only persistence).
  */
-const SettingsPage: React.FC = () => {
+const SettingsProvider: React.FC = () => {
 	const { settingsRegistry, settingsOverrides, updateSetting } = useWorkspace();
 
 	// -- Buffered edit model (matches VSCode settings + DetailPanel) -----------
@@ -690,4 +690,4 @@ const SettingsPage: React.FC = () => {
 	);
 };
 
-export default SettingsPage;
+export default SettingsProvider;

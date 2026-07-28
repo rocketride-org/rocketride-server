@@ -302,8 +302,15 @@ class TaskScheduler:
         actor = dep.get('updatedBy') or dep.get('createdBy') or _SCHEDULER_ACTOR
 
         try:
+            ttl = sched.get('ttl')
             task_token = await start_server_task_as_team(
-                self._server, pipeline, org_id=org_id, team_id=team_id, actor=actor, trigger='schedule'
+                self._server,
+                pipeline,
+                org_id=org_id,
+                team_id=team_id,
+                actor=actor,
+                trigger='schedule',
+                ttl=int(ttl) if isinstance(ttl, (int, float)) and ttl else None,
             )
         except PermissionError as e:
             # Permission-shaped failures are permanent until a human acts —

@@ -342,6 +342,11 @@ class MonitorCommands(DAPConn):
                                 'name': status.name,
                                 'projectId': target.project_id,
                                 'source': target.source,
+                                # Identity stamps (parity with the per-event
+                                # _forward_task_event stamp): clients attribute
+                                # deploy runs to DEPLOYMENTS, never ad-hoc.
+                                'runKind': getattr(target, '_run_kind', 'dev'),
+                                'teamId': getattr(target, 'team_id', ''),
                             }
                         )
 

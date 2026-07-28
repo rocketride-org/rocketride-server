@@ -112,6 +112,17 @@ class TestDeploy:
         assert [v['version'] for v in versions['rows']] == [2, 1]
 
     @pytest.mark.asyncio
+    async def test_artifact_returns_the_published_pipeline(self):
+        project = fresh_project()
+        pipeline = make_pipeline(project)
+        await self.client.deploy.publish(pipeline)
+        fetched = await self.client.deploy.artifact(project, 1)
+        # Byte-for-byte the published definition (sha-verified server-side).
+        assert fetched == pipeline
+        with pytest.raises(RuntimeError):
+            await self.client.deploy.artifact(project, 9)
+
+    @pytest.mark.asyncio
     async def test_publish_with_deploy_to_is_one_step(self):
         project = fresh_project()
         try:
@@ -156,6 +167,31 @@ class TestDeploy:
         await self.client.deploy.publish(make_pipeline(project))
         with pytest.raises(RuntimeError):
             await self.client.deploy.deploy(project, 7, TEAM)
+
+    @pytest.mark.asyncio
+    async def test_run_now_dispatches_and_is_stoppable(self):
+        project = fresh_project()
+        try:
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            result = await self.client.deploy.run(project, 'webhook_1', TEAM)
+            assert result['token']
+            # The UI's stop path: resolve the live task and terminate it.
+            token = await self.client.get_task_token(project_id=project, source='webhook_1')
+            assert token == result['token']
+            await self.client.terminate(token)
+        finally:
+            await self._cleanup(project)
+
+    @pytest.mark.asyncio
+    async def test_run_now_refuses_paused(self):
+        project = fresh_project()
+        try:
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.pause(project, TEAM)
+            with pytest.raises(RuntimeError):
+                await self.client.deploy.run(project, 'webhook_1', TEAM)
+        finally:
+            await self._cleanup(project)
 
     # ── reads: standard list envelopes ───────────────────────────────────────
 

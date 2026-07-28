@@ -309,6 +309,7 @@ class FileDeploymentBackend:
         cron: Optional[str],
         enabled: bool,
         actor: Dict[str, Any],
+        ttl: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Set (or clear, with ``cron=None``) one source's schedule.
 
@@ -334,6 +335,9 @@ class FileDeploymentBackend:
                 dep['schedules'][source_id] = {
                     'cron': cron,
                     'enabled': bool(enabled),
+                    # Run window: None = until the pipeline finishes; seconds =
+                    # fixed window (the dispatch passes it as the task ttl).
+                    'ttl': ttl,
                     'lastRunAt': existing.get('lastRunAt'),
                 }
             dep['updatedAt'] = now

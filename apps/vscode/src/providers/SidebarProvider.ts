@@ -30,7 +30,10 @@ import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../sha
 import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
+import { getLogger } from '../shared/util/output';
+import { resolveDeployTeams, mapSidebarDeployments } from '../shared/util/deployMapping';
 import { getProjectProvider } from '../extension';
+import type { SidebarDeploymentDTO } from './views/deployTypes';
 
 // =============================================================================
 // TYPES — serialisable ProjectEntry sent to webview
@@ -41,6 +44,13 @@ interface ProjectEntryDTO {
 	projectId?: string;
 	sources?: { id: string; name: string; provider?: string }[];
 }
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/** Poll cadence for the deployments list (ms) — matches rocket-ui's hook. */
+const DEPLOYMENTS_POLL_INTERVAL_MS = 15_000;
 
 // =============================================================================
 // PROVIDER
@@ -58,6 +68,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
 
+	// ── Deployments state (the sidebar DEPLOYMENTS tree) ─────────────────────
+	/** Latest mapped deployment rows (empty while disconnected). */
+	private sidebarDeployments: SidebarDeploymentDTO[] = [];
+	/** The 15s deployments poll timer (poll-based until push events land). */
+	private deploymentsPollTimer: ReturnType<typeof setInterval>;
+	private logger = getLogger();
+
 	/**
 	 * Creates the sidebar provider.
 	 * Sets up file watchers and event listeners, and kicks off initial file load.
@@ -66,6 +83,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		this.setupFileWatching();
 		this.setupEventListeners();
 		this.loadPipelineFiles();
+		// Poll the deployments list on the same cadence as rocket-ui's
+		// useDeployments; each cycle no-ops while disconnected.
+		this.deploymentsPollTimer = setInterval(() => {
+			this.refreshDeployments().catch((err) => {
+				this.logger.error(`[SidebarProvider] Deployments poll failed: ${err}`);
+			});
+		}, DEPLOYMENTS_POLL_INTERVAL_MS);
 	}
 
 	// =========================================================================
@@ -90,6 +114,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				switch (message.type) {
 					case 'view:ready':
 						await this.sendFullUpdate();
+						// Fill the DEPLOYMENTS tree without waiting out the poll.
+						this.refreshDeployments().catch((err) => {
+							this.logger.error(`[SidebarProvider] Initial deployments fetch failed: ${err}`);
+						});
 						if (this.connectionManager.isConnected()) {
 							try {
 								const client = this.connectionManager.getClient();
@@ -125,6 +153,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						break;
 					case 'openUnknownTask':
 						vscode.commands.executeCommand('rocketride.page.status.open', message.projectId, message.sourceId, message.displayName);
+						break;
+					case 'openDeployment':
+						vscode.commands.executeCommand('rocketride.page.deployment.open', message.teamId, message.projectId, message.title);
+						break;
+					case 'refreshDeployments':
+						await this.refreshDeployments();
 						break;
 					case 'setDevelopmentMode':
 						await this.configManager.updateConnectionMode('development', message.mode);
@@ -285,8 +319,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			}
 			// Teams come from ConnectResult — no fetch needed, just update the webview
 			this.sendFullUpdate();
+			// A fresh connection means a fresh deployments list — fetch now
+			// instead of waiting out the poll interval.
+			this.refreshDeployments().catch((err) => {
+				this.logger.error(`[SidebarProvider] Deployments refresh on connect failed: ${err}`);
+			});
 		});
 		const disconnected = this.connectionManager.on('shell:disconnected', () => {
+			// Deployments are server state — a disconnected sidebar shows none.
+			this.sidebarDeployments = [];
 			this.sendFullUpdate();
 		});
 		const error = this.connectionManager.on('shell:error', () => {
@@ -399,8 +440,47 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// Pipeline data
 				entries: this.buildEntries(),
 				unknownTasks: [],
+				// Team deployments (the DEPLOYMENTS tree)
+				deployments: this.sidebarDeployments,
 			},
 		});
+	}
+
+	// =========================================================================
+	// DEPLOYMENTS
+	// =========================================================================
+
+	/**
+	 * Fetches the caller's team deployments (client.deploy.list), maps them
+	 * into sidebar rows with resolved team names (HOST-side, mirroring
+	 * rocket-ui's useDeployments + RocketSidebar mapping), and pushes a
+	 * deploymentsUpdate message when the rows changed.
+	 *
+	 * Runs from the 15s poll, the connect event, and the webview's refresh
+	 * button. A transient list failure keeps the previous tree rather than
+	 * blanking the section on every hiccup.
+	 */
+	private async refreshDeployments(): Promise<void> {
+		// Step 1: server state only exists while connected.
+		const client = this.connectionManager.getClient();
+		if (!client || !this.connectionManager.isConnected()) return;
+
+		// Step 2: fetch + map with team names and admin-expanded control rights.
+		let mapped: SidebarDeploymentDTO[];
+		try {
+			const list = await client.deploy.list();
+			const rows = list.rows ?? [];
+			mapped = mapSidebarDeployments(rows, resolveDeployTeams(client, rows));
+		} catch (err) {
+			this.logger.error(`[SidebarProvider] deploy.list failed: ${err}`);
+			return;
+		}
+
+		// Step 3: push only on change — the poll must not spam identical
+		// updates through the webview bridge every 15 seconds.
+		if (JSON.stringify(mapped) === JSON.stringify(this.sidebarDeployments)) return;
+		this.sidebarDeployments = mapped;
+		this._view?.webview.postMessage({ type: 'deploymentsUpdate', deployments: mapped });
 	}
 
 	/** Sends only updated entries. */
@@ -654,6 +734,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Unsubscribes from task events and disposes all listeners. */
 	public dispose(): void {
+		clearInterval(this.deploymentsPollTimer);
 		const client = this.connectionManager.getClient();
 		if (client) {
 			client.removeMonitor({ token: '*' }, ['task']).catch(() => {});

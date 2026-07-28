@@ -30,24 +30,11 @@
 import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
 import { AccountView } from 'shared';
 import type { IDataGridPageRequest } from 'shared';
-import type {
-	ConnectResult,
-	AccountSection,
-	ApiKeyRecord,
-	OrgDetail,
-	MemberRecord,
-	TeamRecord,
-	TeamDetail,
-	ProfileUpdate,
-	BillingDetail,
-	CreditBalance,
-	TransactionsResult,
-	UsageRollup,
-} from 'rocketride';
-import { useShellConnection } from '../../connection/ConnectionContext';
-import { useAuthUser, useLogout } from '../../hooks/useAuthUser';
-import { ConnectionManager } from '../../connection/connection';
-import { useWorkspace } from '../../workspace/WorkspaceContext';
+import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
+import { useShellConnection } from '../connection/ConnectionContext';
+import { useAuthUser, useLogout } from '../hooks/useAuthUser';
+import { ConnectionManager } from '../connection/connection';
+import { useWorkspace } from '../workspace/WorkspaceContext';
 
 // =============================================================================
 // STYLES
@@ -72,7 +59,7 @@ const accountStyles = {
  * all rendering to the shared-ui AccountView. Listens for `shell:accountUpdate`
  * bus events to keep the profile in sync with server-pushed updates.
  */
-const AccountPage: React.FC = () => {
+const AccountProvider: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
 	const authUser = useAuthUser();
 	const logout = useLogout();
@@ -94,9 +81,7 @@ const AccountPage: React.FC = () => {
 	const [subscriptions, setSubscriptions] = useState<BillingDetail[]>([]);
 	const [billingLoading, setBillingLoading] = useState(true);
 	const [billingError, setBillingError] = useState<string | null>(null);
-	const [creditBalance, setCreditBalance] = useState<CreditBalance | null>(
-		(authUser as { credits?: CreditBalance })?.credits ?? null,
-	);
+	const [creditBalance, setCreditBalance] = useState<CreditBalance | null>((authUser as { credits?: CreditBalance })?.credits ?? null);
 	const [allPlans, setAllPlans] = useState<any[]>([]);
 	const [transactions, setTransactions] = useState<TransactionsResult | null>(null);
 	const [usageByUser, setUsageByUser] = useState<UsageRollup[]>([]);
@@ -108,10 +93,14 @@ const AccountPage: React.FC = () => {
 
 	// Keep profile in sync with server-pushed account updates and bump the
 	// reload counter to re-fetch the active section
-	useEffect(() => ConnectionManager.getInstance().on('shell:accountUpdate', (data) => {
-		setProfile(data);
-		setReloadCounter((n) => n + 1);
-	}), []);
+	useEffect(
+		() =>
+			ConnectionManager.getInstance().on('shell:accountUpdate', (data) => {
+				setProfile(data);
+				setReloadCounter((n) => n + 1);
+			}),
+		[]
+	);
 
 	// Bumped by shell:accountUpdate — added to section-load effect deps so
 	// the currently visible section re-fetches its data (teams, members, etc.)
@@ -123,7 +112,7 @@ const AccountPage: React.FC = () => {
 	const orgId = authUser?.organization?.id ?? '';
 
 	/** Extracts a human-readable message from a thrown value. */
-	const errMsg = (e: unknown): string => e instanceof Error ? e.message : String(e);
+	const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 	/** Fetches the current user's profile from the server. */
 	const loadProfile = useCallback(async () => {
@@ -131,7 +120,9 @@ const AccountPage: React.FC = () => {
 		try {
 			const body = await client.account.getProfile();
 			setProfile(body);
-		} catch (e) { setSectionError(errMsg(e)); }
+		} catch (e) {
+			setSectionError(errMsg(e));
+		}
 	}, [client]);
 
 	/** Fetches the list of API keys owned by the current user. */
@@ -140,7 +131,9 @@ const AccountPage: React.FC = () => {
 		try {
 			const keys = await client.account.listKeys();
 			setKeys(keys);
-		} catch (e) { setSectionError(errMsg(e)); }
+		} catch (e) {
+			setSectionError(errMsg(e));
+		}
 	}, [client]);
 
 	/** Fetches the organization detail. */
@@ -149,7 +142,9 @@ const AccountPage: React.FC = () => {
 		try {
 			const body = await client.account.getOrg(orgId);
 			setOrg(body);
-		} catch (e) { setSectionError(errMsg(e)); }
+		} catch (e) {
+			setSectionError(errMsg(e));
+		}
 	}, [client, orgId]);
 
 	/** Fetches the flat list of organization members. */
@@ -158,7 +153,9 @@ const AccountPage: React.FC = () => {
 		try {
 			const members = await client.account.listMembers(orgId);
 			setMembers(members);
-		} catch (e) { setSectionError(errMsg(e)); }
+		} catch (e) {
+			setSectionError(errMsg(e));
+		}
 	}, [client, orgId]);
 
 	/** Fetches the flat list of teams in the organization. */
@@ -167,21 +164,27 @@ const AccountPage: React.FC = () => {
 		try {
 			const teams = await client.account.listTeams(orgId);
 			setTeams(teams);
-		} catch (e) { setSectionError(errMsg(e)); }
+		} catch (e) {
+			setSectionError(errMsg(e));
+		}
 	}, [client, orgId]);
 
 	/**
 	 * Fetches full detail (including member list) for a specific team.
 	 * @param teamId - The unique identifier of the team to load.
 	 */
-	const loadTeamDetail = useCallback(async (teamId: string) => {
-		if (!client || !orgId) return;
-		try {
-			const body = await client.account.getTeamDetail(orgId, teamId);
-			setTeamDetail(body);
-		} catch (e) { setSectionError(errMsg(e)); }
-	}, [client, orgId]);
-
+	const loadTeamDetail = useCallback(
+		async (teamId: string) => {
+			if (!client || !orgId) return;
+			try {
+				const body = await client.account.getTeamDetail(orgId, teamId);
+				setTeamDetail(body);
+			} catch (e) {
+				setSectionError(errMsg(e));
+			}
+		},
+		[client, orgId]
+	);
 
 	// ── Load billing data ───────────────────────────────────────────────────
 
@@ -218,11 +221,16 @@ const AccountPage: React.FC = () => {
 	}, [client, isConnected, orgId]);
 
 	/** Fetches just the transactions page (legacy pagination callback). */
-	const handleTransactionPage = useCallback(async (page: number) => {
-		if (!client || !orgId) return;
-		const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
-		if (tx) { setTransactions(tx); }
-	}, [client, orgId]);
+	const handleTransactionPage = useCallback(
+		async (page: number) => {
+			if (!client || !orgId) return;
+			const tx = await client.billing.getTransactions(orgId, { page, pageSize: 20 }).catch(() => null);
+			if (tx) {
+				setTransactions(tx);
+			}
+		},
+		[client, orgId]
+	);
 
 	/**
 	 * Direct ledger query for the transaction log grid: the grid's full
@@ -231,46 +239,58 @@ const AccountPage: React.FC = () => {
 	 * search work against the WHOLE ledger, not just the loaded page. A
 	 * failure resolves null and the grid keeps its prior rows.
 	 */
-	const fetchTransactions = useCallback(async (req: IDataGridPageRequest): Promise<TransactionsResult | null> => {
-		if (!client || !orgId) return null;
-		return client.billing
-			.getTransactions(orgId, {
-				page: req.page,
-				pageSize: req.size,
-				sort: req.sort,
-				filters: req.filters,
-				search: req.search,
-			})
-			.catch(() => null);
-	}, [client, orgId]);
+	const fetchTransactions = useCallback(
+		async (req: IDataGridPageRequest): Promise<TransactionsResult | null> => {
+			if (!client || !orgId) return null;
+			return client.billing
+				.getTransactions(orgId, {
+					page: req.page,
+					pageSize: req.size,
+					sort: req.sort,
+					filters: req.filters,
+					search: req.search,
+				})
+				.catch(() => null);
+		},
+		[client, orgId]
+	);
 
 	/**
 	 * Org-scoped distinct ledger values for the transaction grid's enum
 	 * checklists (Type / Resource). A failure surfaces as an empty checklist.
 	 */
-	const fetchTransactionDistinct = useCallback(async (field: string): Promise<(string | number | boolean)[]> => {
-		if (!client || !orgId) return [];
-		return client.billing.getTransactionDistinct(orgId, field).catch(() => []);
-	}, [client, orgId]);
+	const fetchTransactionDistinct = useCallback(
+		async (field: string): Promise<(string | number | boolean)[]> => {
+			if (!client || !orgId) return [];
+			return client.billing.getTransactionDistinct(orgId, field).catch(() => []);
+		},
+		[client, orgId]
+	);
 
 	/** Purchase a top-up pack by charging the card on file. */
-	const handlePurchaseTopup = useCallback(async (plan: any) => {
-		if (!client || !orgId) throw new Error('Not connected');
-		const result = await client.billing.purchaseTopup(orgId, plan.stripePriceId);
-		if (result.status === 'succeeded') {
-			// Re-fetch billing data to reflect the new balance
-			loadBilling();
-		}
-		return result;
-	}, [client, orgId, loadBilling]);
+	const handlePurchaseTopup = useCallback(
+		async (plan: any) => {
+			if (!client || !orgId) throw new Error('Not connected');
+			const result = await client.billing.purchaseTopup(orgId, plan.stripePriceId);
+			if (result.status === 'succeeded') {
+				// Re-fetch billing data to reflect the new balance
+				loadBilling();
+			}
+			return result;
+		},
+		[client, orgId, loadBilling]
+	);
 
 	/** Upgrade or downgrade an existing subscription to a new plan. */
-	const handleUpgradeSubscription = useCallback(async (appId: string, newPriceId: string) => {
-		if (!client || !orgId) throw new Error('Not connected');
-		await client.billing.upgradeSubscription(orgId, appId, newPriceId);
-		// Re-fetch billing data to reflect the updated subscription
-		loadBilling();
-	}, [client, orgId, loadBilling]);
+	const handleUpgradeSubscription = useCallback(
+		async (appId: string, newPriceId: string) => {
+			if (!client || !orgId) throw new Error('Not connected');
+			await client.billing.upgradeSubscription(orgId, appId, newPriceId);
+			// Re-fetch billing data to reflect the updated subscription
+			loadBilling();
+		},
+		[client, orgId, loadBilling]
+	);
 
 	// ── Load ALL data upfront on connect (badges, counts, billing) ──────────
 	useEffect(() => {
@@ -306,10 +326,17 @@ const AccountPage: React.FC = () => {
 		setSectionError(null);
 		if (section === 'profile') loadProfile();
 		else if (section === 'billing') loadBilling();
-		else if (section === 'api-keys') { loadProfile(); loadKeys(); }
-		else if (section === 'organization') loadOrg();
-		else if (section === 'members') { loadOrg(); loadMembers(); }
-		else if (section === 'teams') { loadOrg(); loadTeams(); }
+		else if (section === 'api-keys') {
+			loadProfile();
+			loadKeys();
+		} else if (section === 'organization') loadOrg();
+		else if (section === 'members') {
+			loadOrg();
+			loadMembers();
+		} else if (section === 'teams') {
+			loadOrg();
+			loadTeams();
+		}
 	}, [reloadCounter]);
 
 	// ── Load team detail when a team is selected or data changes ────────────
@@ -322,23 +349,32 @@ const AccountPage: React.FC = () => {
 	// ── Callbacks ────────────────────────────────────────────────────────────
 
 	/** Persists updated profile fields via the SDK. */
-	const handleSaveProfile = useCallback(async (fields: ProfileUpdate) => {
-		if (!client) return;
-		await client.account.updateProfile(fields);
-		// Server pushes an updated ConnectResult via shell:accountUpdate
-	}, [client]);
+	const handleSaveProfile = useCallback(
+		async (fields: ProfileUpdate) => {
+			if (!client) return;
+			await client.account.updateProfile(fields);
+			// Server pushes an updated ConnectResult via shell:accountUpdate
+		},
+		[client]
+	);
 
 	/** Sets the user's preferred default team. */
-	const handleSetDefaultTeam = useCallback(async (teamId: string) => {
-		if (!client) return;
-		await client.account.setDefaultTeam(teamId);
-	}, [client]);
+	const handleSetDefaultTeam = useCallback(
+		async (teamId: string) => {
+			if (!client) return;
+			await client.account.setDefaultTeam(teamId);
+		},
+		[client]
+	);
 
 	/** Switches the user's active organization. */
-	const handleSetDefaultOrg = useCallback(async (orgId: string) => {
-		if (!client) return;
-		await client.account.setDefaultOrg(orgId);
-	}, [client]);
+	const handleSetDefaultOrg = useCallback(
+		async (orgId: string) => {
+			if (!client) return;
+			await client.account.setDefaultOrg(orgId);
+		},
+		[client]
+	);
 
 	/** Deletes the user account. */
 	const handleDeleteAccount = useCallback(async () => {
@@ -347,98 +383,137 @@ const AccountPage: React.FC = () => {
 	}, [client]);
 
 	/** Persists an updated organization name. */
-	const handleSaveOrgName = useCallback(async (name: string) => {
-		if (!client || !orgId) return;
-		await client.account.updateOrgName(orgId, name);
-		// Optimistically update the in-memory org record
-		setOrg((c) => c ? { ...c, name } : c);
-	}, [client, orgId]);
+	const handleSaveOrgName = useCallback(
+		async (name: string) => {
+			if (!client || !orgId) return;
+			await client.account.updateOrgName(orgId, name);
+			// Optimistically update the in-memory org record
+			setOrg((c) => (c ? { ...c, name } : c));
+		},
+		[client, orgId]
+	);
 
 	/** Creates a new API key and returns the raw key string. */
-	const handleCreateKey = useCallback(async (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => {
-		if (!client) throw new Error('Not connected');
-		// Forward the full params (incl. teamId) so a team-scoped key is created
-		// team-scoped rather than silently falling back to org-wide.
-		const { key } = await client.account.createKey(params);
-		await loadKeys();
-		return { key };
-	}, [client, loadKeys]);
+	const handleCreateKey = useCallback(
+		async (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => {
+			if (!client) throw new Error('Not connected');
+			// Forward the full params (incl. teamId) so a team-scoped key is created
+			// team-scoped rather than silently falling back to org-wide.
+			const { key } = await client.account.createKey(params);
+			await loadKeys();
+			return { key };
+		},
+		[client, loadKeys]
+	);
 
 	/** Revokes an API key by ID. */
-	const handleRevokeKey = useCallback(async (keyId: string) => {
-		if (!client) return;
-		await client.account.revokeKey(keyId);
-		await loadKeys();
-	}, [client, loadKeys]);
+	const handleRevokeKey = useCallback(
+		async (keyId: string) => {
+			if (!client) return;
+			await client.account.revokeKey(keyId);
+			await loadKeys();
+		},
+		[client, loadKeys]
+	);
 
 	/** Sends an invitation to a new organization member. */
-	const handleInviteMember = useCallback(async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => {
-		if (!client || !orgId) return;
-		await client.account.inviteMember(orgId, params);
-		await loadMembers();
-	}, [client, orgId, loadMembers]);
+	const handleInviteMember = useCallback(
+		async (params: { email: string; givenName: string; familyName: string; role: string; teamAssignments?: Array<{ teamId: string; permissions: string[] }> }) => {
+			if (!client || !orgId) return;
+			await client.account.inviteMember(orgId, params);
+			await loadMembers();
+		},
+		[client, orgId, loadMembers]
+	);
 
 	/** Updates an organization member's role. */
-	const handleUpdateMemberRole = useCallback(async (userId: string, role: string) => {
-		if (!client || !orgId) return;
-		await client.account.updateMemberRole(orgId, userId, role);
-		await loadMembers();
-	}, [client, orgId, loadMembers]);
+	const handleUpdateMemberRole = useCallback(
+		async (userId: string, role: string) => {
+			if (!client || !orgId) return;
+			await client.account.updateMemberRole(orgId, userId, role);
+			await loadMembers();
+		},
+		[client, orgId, loadMembers]
+	);
 
 	/** Removes an organization member. */
-	const handleRemoveMember = useCallback(async (userId: string) => {
-		if (!client || !orgId) return;
-		await client.account.removeMember(orgId, userId);
-		await loadMembers();
-	}, [client, orgId, loadMembers]);
+	const handleRemoveMember = useCallback(
+		async (userId: string) => {
+			if (!client || !orgId) return;
+			await client.account.removeMember(orgId, userId);
+			await loadMembers();
+		},
+		[client, orgId, loadMembers]
+	);
 
 	/** Resends the initialization email for a pending member. */
-	const handleResendInvite = useCallback(async (userId: string) => {
-		if (!client || !orgId) return;
-		await client.account.resendInvite(orgId, userId);
-	}, [client, orgId]);
+	const handleResendInvite = useCallback(
+		async (userId: string) => {
+			if (!client || !orgId) return;
+			await client.account.resendInvite(orgId, userId);
+		},
+		[client, orgId]
+	);
 
 	/** Creates a new team. */
-	const handleCreateTeam = useCallback(async (name: string) => {
-		if (!client || !orgId) return;
-		await client.account.createTeam(orgId, name);
-		await loadTeams();
-	}, [client, orgId, loadTeams]);
+	const handleCreateTeam = useCallback(
+		async (name: string) => {
+			if (!client || !orgId) return;
+			await client.account.createTeam(orgId, name);
+			await loadTeams();
+		},
+		[client, orgId, loadTeams]
+	);
 
 	/** Deletes a team. */
-	const handleDeleteTeam = useCallback(async (teamId: string) => {
-		if (!client || !orgId) return;
-		await client.account.deleteTeam(orgId, teamId);
-		setActiveTeamId(null);
-		await loadTeams();
-	}, [client, orgId, loadTeams]);
+	const handleDeleteTeam = useCallback(
+		async (teamId: string) => {
+			if (!client || !orgId) return;
+			await client.account.deleteTeam(orgId, teamId);
+			setActiveTeamId(null);
+			await loadTeams();
+		},
+		[client, orgId, loadTeams]
+	);
 
 	/** Adds a member to a team with specified permissions. */
-	const handleAddTeamMember = useCallback(async (params: { teamId: string; userId: string; permissions: string[] }) => {
-		if (!client || !orgId) return;
-		await client.account.addTeamMember(orgId, params);
-		await loadTeamDetail(params.teamId);
-	}, [client, orgId, loadTeamDetail]);
+	const handleAddTeamMember = useCallback(
+		async (params: { teamId: string; userId: string; permissions: string[] }) => {
+			if (!client || !orgId) return;
+			await client.account.addTeamMember(orgId, params);
+			await loadTeamDetail(params.teamId);
+		},
+		[client, orgId, loadTeamDetail]
+	);
 
 	/** Updates a team member's permissions. */
-	const handleEditTeamMemberPerms = useCallback(async (params: { teamId: string; userId: string; permissions: string[] }) => {
-		if (!client || !orgId) return;
-		await client.account.updateTeamMemberPerms(orgId, params);
-		await loadTeamDetail(params.teamId);
-	}, [client, orgId, loadTeamDetail]);
+	const handleEditTeamMemberPerms = useCallback(
+		async (params: { teamId: string; userId: string; permissions: string[] }) => {
+			if (!client || !orgId) return;
+			await client.account.updateTeamMemberPerms(orgId, params);
+			await loadTeamDetail(params.teamId);
+		},
+		[client, orgId, loadTeamDetail]
+	);
 
 	/** Removes a member from a team. */
-	const handleRemoveTeamMember = useCallback(async (params: { teamId: string; userId: string }) => {
-		if (!client || !orgId) return;
-		await client.account.removeTeamMember(orgId, params);
-		await loadTeamDetail(params.teamId);
-	}, [client, orgId, loadTeamDetail]);
+	const handleRemoveTeamMember = useCallback(
+		async (params: { teamId: string; userId: string }) => {
+			if (!client || !orgId) return;
+			await client.account.removeTeamMember(orgId, params);
+			await loadTeamDetail(params.teamId);
+		},
+		[client, orgId, loadTeamDetail]
+	);
 
 	/** Requests loading of full detail for a specific team. */
-	const handleLoadTeamDetail = useCallback((teamId: string) => {
-		loadTeamDetail(teamId);
-		loadMembers();
-	}, [loadTeamDetail, loadMembers]);
+	const handleLoadTeamDetail = useCallback(
+		(teamId: string) => {
+			loadTeamDetail(teamId);
+			loadMembers();
+		},
+		[loadTeamDetail, loadMembers]
+	);
 
 	// ── Billing callbacks ────────────────────────────────────────────────────
 
@@ -446,12 +521,15 @@ const AccountPage: React.FC = () => {
 	 * Cancels a subscription and re-fetches the updated list.
 	 * @param appId - The app whose subscription to cancel.
 	 */
-	const handleCancelSubscription = useCallback(async (appId: string) => {
-		if (!client || !orgId) return;
-		await client.billing.cancelSubscription(orgId, appId);
-		const updated = await client.billing.getDetails(orgId);
-		setSubscriptions(updated);
-	}, [client, orgId]);
+	const handleCancelSubscription = useCallback(
+		async (appId: string) => {
+			if (!client || !orgId) return;
+			await client.billing.cancelSubscription(orgId, appId);
+			const updated = await client.billing.getDetails(orgId);
+			setSubscriptions(updated);
+		},
+		[client, orgId]
+	);
 
 	/** Opens the Stripe customer portal for payment method management. */
 	const handleOpenPortal = useCallback(async () => {
@@ -464,60 +542,60 @@ const AccountPage: React.FC = () => {
 	// ── Render ──────────────────────────────────────────────────────────────
 	return (
 		<div style={accountStyles.root}>
-		<AccountView
-			isConnected={isConnected}
-			sectionError={sectionError}
-			profile={profile}
-			authUser={authUser}
-			keys={keys}
-			org={org}
-			members={members}
-			teams={teams}
-			teamDetail={teamDetail}
-			subscriptions={subscriptions}
-			billingLoading={billingLoading}
-			billingError={billingError}
-			creditBalance={creditBalance}
-			apps={appManifest}
-			onCancelSubscription={handleCancelSubscription}
-			onOpenPortal={handleOpenPortal}
-			transactions={transactions}
-			usageByUser={usageByUser}
-			usageByTeam={usageByTeam}
-			activeTasks={[]}
-			topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
-			allPlans={allPlans}
-			onPurchaseTopup={handlePurchaseTopup}
-			onUpgradeSubscription={handleUpgradeSubscription}
-			dashboardLoading={dashboardLoading}
-			onTransactionPage={handleTransactionPage}
-			fetchTransactions={fetchTransactions}
-			fetchTransactionDistinct={fetchTransactionDistinct}
-			section={section}
-			onSectionChange={setSection}
-			activeTeamId={activeTeamId}
-			onActiveTeamIdChange={setActiveTeamId}
-			onSaveProfile={handleSaveProfile}
-			onSetDefaultTeam={handleSetDefaultTeam}
-			onSetDefaultOrg={handleSetDefaultOrg}
-			onLogout={() => logout?.()}
-			onDeleteAccount={handleDeleteAccount}
-			onSaveOrgName={handleSaveOrgName}
-			onCreateKey={handleCreateKey}
-			onRevokeKey={handleRevokeKey}
-			onInviteMember={handleInviteMember}
-			onUpdateMemberRole={handleUpdateMemberRole}
-			onRemoveMember={handleRemoveMember}
-			onResendInvite={handleResendInvite}
-			onCreateTeam={handleCreateTeam}
-			onDeleteTeam={handleDeleteTeam}
-			onAddTeamMember={handleAddTeamMember}
-			onEditTeamMemberPerms={handleEditTeamMemberPerms}
-			onRemoveTeamMember={handleRemoveTeamMember}
-			onLoadTeamDetail={handleLoadTeamDetail}
-		/>
+			<AccountView
+				isConnected={isConnected}
+				sectionError={sectionError}
+				profile={profile}
+				authUser={authUser}
+				keys={keys}
+				org={org}
+				members={members}
+				teams={teams}
+				teamDetail={teamDetail}
+				subscriptions={subscriptions}
+				billingLoading={billingLoading}
+				billingError={billingError}
+				creditBalance={creditBalance}
+				apps={appManifest}
+				onCancelSubscription={handleCancelSubscription}
+				onOpenPortal={handleOpenPortal}
+				transactions={transactions}
+				usageByUser={usageByUser}
+				usageByTeam={usageByTeam}
+				activeTasks={[]}
+				topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
+				allPlans={allPlans}
+				onPurchaseTopup={handlePurchaseTopup}
+				onUpgradeSubscription={handleUpgradeSubscription}
+				dashboardLoading={dashboardLoading}
+				onTransactionPage={handleTransactionPage}
+				fetchTransactions={fetchTransactions}
+				fetchTransactionDistinct={fetchTransactionDistinct}
+				section={section}
+				onSectionChange={setSection}
+				activeTeamId={activeTeamId}
+				onActiveTeamIdChange={setActiveTeamId}
+				onSaveProfile={handleSaveProfile}
+				onSetDefaultTeam={handleSetDefaultTeam}
+				onSetDefaultOrg={handleSetDefaultOrg}
+				onLogout={() => logout?.()}
+				onDeleteAccount={handleDeleteAccount}
+				onSaveOrgName={handleSaveOrgName}
+				onCreateKey={handleCreateKey}
+				onRevokeKey={handleRevokeKey}
+				onInviteMember={handleInviteMember}
+				onUpdateMemberRole={handleUpdateMemberRole}
+				onRemoveMember={handleRemoveMember}
+				onResendInvite={handleResendInvite}
+				onCreateTeam={handleCreateTeam}
+				onDeleteTeam={handleDeleteTeam}
+				onAddTeamMember={handleAddTeamMember}
+				onEditTeamMemberPerms={handleEditTeamMemberPerms}
+				onRemoveTeamMember={handleRemoveTeamMember}
+				onLoadTeamDetail={handleLoadTeamDetail}
+			/>
 		</div>
 	);
 };
 
-export default AccountPage;
+export default AccountProvider;

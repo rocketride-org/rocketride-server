@@ -25,8 +25,9 @@ import { ProjectView, parseServerEvent } from 'shared/modules/project';
 import type { TaskEventMessage, TaskStatus, ViewState } from 'shared/modules/project';
 import { CheckoutModal } from 'shared';
 import type { CheckoutPlan, PlanAction } from 'shared';
+import type { DeploySnapshot } from 'shared/modules/deploy';
 import { useMessaging } from '../hooks/useMessaging';
-import type { ProjectHostToWebview, ProjectWebviewToHost } from '../types';
+import type { ProjectHostToWebview, ProjectWebviewToHost, DeployTeamRefDTO, TeamDeploymentRowDTO } from '../types';
 
 // =============================================================================
 // CONSTANTS
@@ -42,6 +43,9 @@ const LIVE_EVENTS_MAX = 20000;
 
 /** Post-trim feed length (see {@link LIVE_EVENTS_MAX}). */
 const LIVE_EVENTS_KEEP = 10000;
+
+/** Safety timeout for deploy host round-trips so a lost reply never hangs (ms). */
+const DEPLOY_REQUEST_TIMEOUT_MS = 30000;
 
 // =============================================================================
 // COMPONENT
@@ -69,6 +73,17 @@ const ProjectWebview: React.FC = () => {
 	const [isReadonly, setIsReadonly] = useState(false);
 	const [showCheckout, setShowCheckout] = useState(false);
 	const [envKeys, setEnvKeys] = useState<string[]>([]);
+
+	// Deploy lifecycle: LIVE rows pushed by deploy:data (badges/where-live);
+	// the panel's registry snapshot resolves through pendingLifecycleFetches.
+	const [deployTeams, setDeployTeams] = useState<DeployTeamRefDTO[]>([]);
+	const [teamDeployments, setTeamDeployments] = useState<TeamDeploymentRowDTO[]>([]);
+	// Outstanding fetchDeployLifecycle promises — deploy:data is the full
+	// snapshot (not requestId'd), so ONE push settles every waiter.
+	const pendingLifecycleFetches = useRef<Array<{ resolve: (s: DeploySnapshot) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>([]);
+	// Pending publish/deploy round-trips keyed by requestId.
+	const pendingDeployActions = useRef<Map<number, { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
+	const deployRequestCounter = useRef(0);
 
 	// Checkout flow state — populated by host responses to checkout:* messages
 	const [checkoutPlans, setCheckoutPlans] = useState<CheckoutPlan[]>([]);
@@ -224,6 +239,30 @@ const ProjectWebview: React.FC = () => {
 				}
 				break;
 			}
+			case 'deploy:data': {
+				// LIVE rows for badges/where-live, and the settlement of every
+				// outstanding registry-snapshot fetch — one push answers all.
+				setDeployTeams(msg.teams);
+				setTeamDeployments(msg.deployments);
+				const waiting = pendingLifecycleFetches.current;
+				pendingLifecycleFetches.current = [];
+				for (const waiter of waiting) {
+					clearTimeout(waiter.timer);
+					waiter.resolve({ versions: msg.versions, history: msg.history });
+				}
+				break;
+			}
+			case 'deploy:actionResult': {
+				// Settle the pending publish/deploy promise for this correlation id.
+				const pending = pendingDeployActions.current.get(msg.requestId);
+				if (pending) {
+					pendingDeployActions.current.delete(msg.requestId);
+					clearTimeout(pending.timer);
+					if (msg.error) pending.reject(new Error(msg.error));
+					else pending.resolve();
+				}
+				break;
+			}
 			case 'shell:viewActivated':
 				window.dispatchEvent(new CustomEvent('canvas:restoreViewport'));
 				break;
@@ -337,7 +376,6 @@ const ProjectWebview: React.FC = () => {
 		sendMessage({ type: 'project:requestSave' });
 	}, [sendMessage]);
 
-
 	// --- Checkout callbacks (bridge to host via postMessage) ------------------
 
 	const handleFetchPlans = useCallback((): Promise<CheckoutPlan[]> => {
@@ -372,6 +410,81 @@ const ProjectWebview: React.FC = () => {
 		setSubscribed(true);
 	}, []);
 
+	// --- Deploy lifecycle capabilities (the DEPLOY page) ----------------------
+	// ProjectView composes the DeployPanel itself (capability-fed);
+	// this webview supplies the closures over the deploy:* message protocol.
+
+	/** Registry snapshot fetch — posts deploy:fetch; the next deploy:data
+	    push settles it (and every other outstanding waiter). */
+	const fetchDeployLifecycle = useCallback((): Promise<DeploySnapshot> => {
+		return new Promise<DeploySnapshot>((resolve, reject) => {
+			// A lost reply rejects — the panel keeps its last-known data.
+			const timer = setTimeout(() => {
+				const at = pendingLifecycleFetches.current.findIndex((waiter) => waiter.resolve === resolve);
+				if (at >= 0) {
+					pendingLifecycleFetches.current.splice(at, 1);
+					reject(new Error('The server did not respond in time'));
+				}
+			}, DEPLOY_REQUEST_TIMEOUT_MS);
+			pendingLifecycleFetches.current.push({ resolve, reject, timer });
+			sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+		});
+		// isConnected is a deliberate dep: a reconnect mints a new fetcher
+		// identity, which makes the panel re-fetch (its mount effect keys on it).
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [isConnected]);
+
+	/** One requestId-correlated deploy action settled by deploy:actionResult. */
+	const deployRequest = useCallback((build: (requestId: number) => ProjectWebviewToHost): Promise<void> => {
+		return new Promise<void>((resolve, reject) => {
+			// Step 1: allocate the correlation id and arm the timeout guard.
+			const requestId = ++deployRequestCounter.current;
+			const timer = setTimeout(() => {
+				if (pendingDeployActions.current.has(requestId)) {
+					pendingDeployActions.current.delete(requestId);
+					reject(new Error('The server did not respond in time'));
+				}
+			}, DEPLOY_REQUEST_TIMEOUT_MS);
+			// Step 2: register the resolver and post the message.
+			pendingDeployActions.current.set(requestId, { resolve, reject, timer });
+			sendMessageRef.current(build(requestId));
+		});
+	}, []);
+
+	/** Publish the SAVED document (the host snapshots it; only metadata travels). */
+	const handleDeployPublish = useCallback(
+		async (comment: string, deployTo?: string): Promise<void> => {
+			await deployRequest((requestId) => ({ type: 'deploy:publish', requestId, comment, ...(deployTo ? { deployTo } : {}) }));
+		},
+		[deployRequest]
+	);
+
+	/** Point a team at a version (promotion and rollback alike). */
+	const handleDeployVersion = useCallback(
+		async (version: number, teamId: string): Promise<void> => {
+			await deployRequest((requestId) => ({ type: 'deploy:deploy', requestId, projectId: projectIdRef.current, version, teamId }));
+		},
+		[deployRequest]
+	);
+
+	/** "Open" on a where-live row → the team's file-less deployment tab. */
+	const handleOpenDeployment = useCallback(
+		(teamId: string): void => {
+			// Initial title only — the deployment panel re-titles itself after
+			// its first registry fetch. Team prefix mirrors rocket-ui: only
+			// when several teams exist (cardinality-driven, never an edition
+			// check).
+			const teamName = deployTeams.find((t) => t.id === teamId)?.name ?? teamId;
+			const title = deployTeams.length > 1 ? `${teamName} / ${projectIdRef.current}` : projectIdRef.current;
+			sendMessageRef.current({ type: 'deploy:openDeployment', teamId, projectId: projectIdRef.current, title });
+		},
+		[deployTeams]
+	);
+
+	/** The provider owns the TextDocument; deploy:publish saves host-side —
+	    the panel just needs a resolvable save step for its flow. */
+	const handleDeploySaveDocument = useCallback(async (): Promise<void> => {}, []);
+
 	// --- Wait for initial state from host before rendering -------------------
 
 	if (!viewState || !prefs) return null;
@@ -382,7 +495,34 @@ const ProjectWebview: React.FC = () => {
 
 	return (
 		<>
-			<ProjectView project={project} servicesJson={servicesJson} isConnected={isConnected} isSubscribed={subscribed} statusMap={statusMap} serverHost={serverHost} isDirty={isDirty} isNew={isNew} initialViewState={viewState} initialPrefs={prefs} liveLogEvents={liveLogEvents} onContentChanged={handleContentChanged} onValidate={handleValidate} onPipelineAction={handlePipelineAction} onViewStateChange={handleViewStateChange} onPrefsChange={handlePrefsChange} onOpenLink={handleOpenLink} oauthReturnUrl={oauthReturnUrl} onOpenExternal={handleOpenExternal} pendingOAuthTokens={pendingOAuthTokens} clearPendingOAuthTokens={clearPendingOAuthTokens} onSave={handleSave} isReadonly={isReadonly} envKeys={envKeys} onMissingEnvVars={handleMissingEnvVars} />
+			<ProjectView
+				project={project}
+				servicesJson={servicesJson}
+				isConnected={isConnected}
+				isSubscribed={subscribed}
+				statusMap={statusMap}
+				serverHost={serverHost}
+				isDirty={isDirty}
+				isNew={isNew}
+				initialViewState={viewState}
+				initialPrefs={prefs}
+				liveLogEvents={liveLogEvents}
+				onContentChanged={handleContentChanged}
+				onValidate={handleValidate}
+				onPipelineAction={handlePipelineAction}
+				onViewStateChange={handleViewStateChange}
+				onPrefsChange={handlePrefsChange}
+				onOpenLink={handleOpenLink}
+				oauthReturnUrl={oauthReturnUrl}
+				onOpenExternal={handleOpenExternal}
+				pendingOAuthTokens={pendingOAuthTokens}
+				clearPendingOAuthTokens={clearPendingOAuthTokens}
+				onSave={handleSave}
+				isReadonly={isReadonly}
+				envKeys={envKeys}
+				onMissingEnvVars={handleMissingEnvVars}
+				{...(!isReadonly && projectId ? { fetchDeployLifecycle, teamDeployments, deployTeams, onDeployPublish: handleDeployPublish, onDeployVersion: handleDeployVersion, onOpenDeployment: handleOpenDeployment, onSaveDocument: handleDeploySaveDocument } : {})}
+			/>
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
 		</>
 	);

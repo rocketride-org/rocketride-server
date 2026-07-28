@@ -287,6 +287,11 @@
 				"category": "RocketRide"
 			},
 			{
+				"command": "rocketride.page.deployment.open",
+				"title": "Deployment",
+				"category": "RocketRide"
+			},
+			{
 				"command": "rocketride.sidebar.connection.connect",
 				"title": "Connect to Server",
 				"category": "RocketRide",
@@ -437,6 +442,10 @@
 				},
 				{
 					"command": "rocketride.page.status.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.deployment.open",
 					"when": "false"
 				},
 				{

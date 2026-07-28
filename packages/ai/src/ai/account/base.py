@@ -371,10 +371,11 @@ class AccountBase(ABC):
         cron: 'str | None',
         enabled: bool,
         actor: dict,
+        ttl: 'int | None' = None,
     ) -> dict:
         """Set (or clear with cron=None) one source's schedule."""
         return await self._deployment_backend().schedule_set(
-            org_id, team_id, project_id, source_id, cron, enabled, actor
+            org_id, team_id, project_id, source_id, cron, enabled, actor, ttl
         )
 
     async def deployments_mark_run(self, org_id: str, team_id: str, project_id: str, source_id: str) -> None:

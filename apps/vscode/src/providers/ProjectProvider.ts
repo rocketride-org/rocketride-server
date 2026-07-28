@@ -26,6 +26,7 @@ import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
+import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows } from '../shared/util/deployMapping';
 
 // =============================================================================
 // CONSTANTS
@@ -687,6 +688,73 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					}
 					break;
 				}
+
+				// Deploy lifecycle — snapshot request from the DEPLOY page
+				case 'deploy:fetch': {
+					await this.sendDeployData(webview, editorState);
+					break;
+				}
+
+				// Deploy lifecycle — publish the SAVED document as the next version
+				case 'deploy:publish': {
+					try {
+						const deployClient = this.connectionManager.getClient();
+						if (!deployClient) throw new Error('Not connected to server');
+						// Publish snapshots the DOCUMENT, never webview state: the
+						// immutable registry must hold exactly what is on disk, so a
+						// dirty or never-saved document blocks the publish outright.
+						if (document.isUntitled) throw new Error('Save the pipeline first');
+						// Save-first: a dirty document is saved before the snapshot,
+						// so the registry still holds exactly what is on disk.
+						if (document.isDirty) {
+							const saved = await document.save();
+							if (!saved) throw new Error('Save failed — publish cancelled');
+						}
+						const pipeline = JSON.parse(document.getText()) as PipelineConfig;
+						// The registry renders pipelineName on every deploy surface;
+						// .pipe JSON rarely carries one (names live in FILENAMES), so
+						// the snapshot takes the file's basename when the JSON has none.
+						if (!pipeline.name) {
+							pipeline.name =
+								document.uri.path
+									.split('/')
+									.pop()
+									?.replace(/\.pipe(?:\.json)?$/, '') || document.uri.path;
+						}
+						await deployClient.deploy.publish(pipeline, { ...(data.comment ? { comment: data.comment as string } : {}), ...(data.deployTo ? { deployTo: data.deployTo as string } : {}) });
+						webview.postMessage({ type: 'deploy:actionResult', requestId: data.requestId });
+						// Re-push the lifecycle so the strip/history show the new truth.
+						await this.sendDeployData(webview, editorState);
+					} catch (error) {
+						const msg = error instanceof Error ? error.message : String(error);
+						this.logger.error(`[ProjectProvider] Publish failed: ${msg}`);
+						webview.postMessage({ type: 'deploy:actionResult', requestId: data.requestId, error: msg });
+					}
+					break;
+				}
+
+				// Deploy lifecycle — point a team at a version (promotion/rollback)
+				case 'deploy:deploy': {
+					try {
+						const deployClient = this.connectionManager.getClient();
+						if (!deployClient) throw new Error('Not connected to server');
+						await deployClient.deploy.deploy((data.projectId as string) || editorState.projectId || '', data.version as number, data.teamId as string);
+						webview.postMessage({ type: 'deploy:actionResult', requestId: data.requestId });
+						// Re-push the lifecycle so badges/where-live show the new truth.
+						await this.sendDeployData(webview, editorState);
+					} catch (error) {
+						const msg = error instanceof Error ? error.message : String(error);
+						this.logger.error(`[ProjectProvider] Deploy failed: ${msg}`);
+						webview.postMessage({ type: 'deploy:actionResult', requestId: data.requestId, error: msg });
+					}
+					break;
+				}
+
+				// Deploy lifecycle — open the file-less deployment tab for a team
+				case 'deploy:openDeployment': {
+					vscode.commands.executeCommand('rocketride.page.deployment.open', data.teamId as string, data.projectId as string, data.title as string);
+					break;
+				}
 			}
 		});
 
@@ -724,6 +792,62 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			this.startMonitoring(webviewPanel).catch((error) => {
 				this.logger.error(`Starting initial monitoring: ${error}`);
 			});
+		}
+	}
+
+	// =========================================================================
+	// DEPLOY LIFECYCLE DATA
+	// =========================================================================
+
+	/**
+	 * Fetches this project's deploy lifecycle (registry versions, team
+	 * deployments, merged history, team roster) through the deploy API, maps
+	 * everything into serialisable view models HOST-side (mirroring
+	 * rocket-ui's ProjectProvider deploy closures + useDeployments), and pushes one
+	 * deploy:data snapshot to the webview.
+	 *
+	 * A project that was never published has no registry — the snapshot
+	 * degrades to empty arrays rather than an error state, so the DEPLOY
+	 * page renders its empty strip.
+	 *
+	 * @param webview - The editor webview to push the snapshot to.
+	 * @param editorState - The editor whose projectId scopes the fetch.
+	 */
+	private async sendDeployData(webview: vscode.Webview, editorState: EditorState): Promise<void> {
+		const projectId = editorState.projectId;
+		const client = this.connectionManager.getClient();
+
+		// No identity or connection yet — the empty snapshot ends the webview's
+		// loading state instead of leaving a spinner forever.
+		if (!projectId || !client || !this.connectionManager.isConnected()) {
+			webview.postMessage({ type: 'deploy:data', versions: [], deployments: [], history: [], teams: [] });
+			return;
+		}
+
+		try {
+			// Step 1: fetch the registry + deployments in parallel — versions and
+			// history are project-scoped, list() carries every visible deployment
+			// (also the team-roster fallback for rosterless identities).
+			const [versions, history, list] = await Promise.all([client.deploy.versions(projectId), client.deploy.history(projectId), client.deploy.list()]);
+			const deploymentRows = list.rows ?? [];
+
+			// Step 2: resolve the caller's teams (names + control rights).
+			const teams = resolveDeployTeams(client, deploymentRows);
+
+			// Step 3: map everything into view models and push the snapshot.
+			webview.postMessage({
+				type: 'deploy:data',
+				versions: mapVersionCards(versions.rows ?? []),
+				deployments: mapTeamDeploymentRows(deploymentRows, projectId, teams),
+				history: mapHistoryRows(history.rows ?? [], teams),
+				teams,
+			});
+		} catch (error) {
+			// A project that was never published has no registry — empty strip,
+			// but keep the identity-derived team roster so Publish still offers
+			// its one-step deploy targets.
+			this.logger.error(`[ProjectProvider] Deploy lifecycle fetch failed: ${error}`);
+			webview.postMessage({ type: 'deploy:data', versions: [], deployments: [], history: [], teams: resolveDeployTeams(client, []) });
 		}
 	}
 

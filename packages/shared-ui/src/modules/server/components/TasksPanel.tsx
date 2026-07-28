@@ -8,7 +8,7 @@
 // =============================================================================
 
 /**
- * TasksGrid — the All Tasks CardDataGrid shared by every server-monitor host
+ * TasksPanel — the All Tasks CardDataGrid shared by every server-monitor host
  * (admin-ui, monitor-ui, rocket-ui, the VSCode webview).
  *
  * Data modes follow the props (data-in, callbacks-out; no shell-ui imports):
@@ -72,8 +72,8 @@ interface TaskRow extends Record<string, unknown> {
 	status: string;
 }
 
-/** Props for the {@link TasksGrid} component. */
-export interface ITasksGridProps {
+/** Props for the {@link TasksPanel} component. */
+export interface ITasksPanelProps {
 	/**
 	 * Snapshot task rows (the dashboard snapshot): feeds the header's
 	 * running/completed counts in both modes, and the grid rows plus record
@@ -176,8 +176,8 @@ function taskRow(task: DashboardTask): TaskRow {
 		detail: `${task.provider} · ${task.launchType} · ${task.projectId?.slice(0, 8) ?? ''}`,
 		source: task.source,
 		elapsed: task.elapsedTime,
-		cpu: task.completed ? null : m?.cpu_percent ?? 0,
-		mem: task.completed ? null : m?.cpu_memory_mb ?? 0,
+		cpu: task.completed ? null : (m?.cpu_percent ?? 0),
+		mem: task.completed ? null : (m?.cpu_memory_mb ?? 0),
 		completions: task.completedCount,
 		idle: task.idleTime,
 		ttl: task.ttl,
@@ -227,10 +227,10 @@ function gaugeEl(pct: number, label: string, color: string): HTMLElement {
  * elapsed time, completion counts, TTL/idle time, and status badges;
  * clicking a row opens the task record panel.
  *
- * @param props - {@link ITasksGridProps}.
+ * @param props - {@link ITasksPanelProps}.
  * @returns The card-hosted grid plus its record panel.
  */
-export const TasksGrid: React.FC<ITasksGridProps> = ({ tasks, listTasks, onRefetchReady }) => {
+export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRefetchReady }) => {
 	// Stable snapshot list (the fallback while the snapshot is still loading
 	// would otherwise be a fresh [] every render).
 	const snapshotTasks = useMemo<DashboardTask[]>(() => tasks ?? [], [tasks]);
@@ -255,25 +255,28 @@ export const TasksGrid: React.FC<ITasksGridProps> = ({ tasks, listTasks, onRefet
 	 * @param req - The grid page request (1-based page, like the list APIs).
 	 * @returns The page of display rows and the total row count.
 	 */
-	const fetchTasks = useCallback(async (req: IDataGridPageRequest): Promise<IDataGridPage<TaskRow>> => {
-		// Step 1: LOCAL grids never call this; the guard keeps TS honest.
-		if (!listTasks) return { rows: [], total: 0 };
-		// Step 2: one server-paginated call. Sorters, filter values, and the
-		// search term are forwarded verbatim — the server whitelists the row
-		// keys, drops anything unknown, and matches across ALL pages.
-		const resp = await listTasks({
-			page: req.page,
-			page_size: req.size,
-			sort: req.sort,
-			filters: req.filters,
-			...(req.search !== undefined ? { search: req.search } : {}),
-		});
-		// Step 3: capture the wire rows for the record panel lookup, then
-		// flatten them (dashboard snapshot keys) for display.
-		const wireRows = resp?.rows ?? [];
-		setPageRows(wireRows);
-		return { rows: wireRows.map(taskRow), total: resp?.total ?? 0 };
-	}, [listTasks]);
+	const fetchTasks = useCallback(
+		async (req: IDataGridPageRequest): Promise<IDataGridPage<TaskRow>> => {
+			// Step 1: LOCAL grids never call this; the guard keeps TS honest.
+			if (!listTasks) return { rows: [], total: 0 };
+			// Step 2: one server-paginated call. Sorters, filter values, and the
+			// search term are forwarded verbatim — the server whitelists the row
+			// keys, drops anything unknown, and matches across ALL pages.
+			const resp = await listTasks({
+				page: req.page,
+				page_size: req.size,
+				sort: req.sort,
+				filters: req.filters,
+				...(req.search !== undefined ? { search: req.search } : {}),
+			});
+			// Step 3: capture the wire rows for the record panel lookup, then
+			// flatten them (dashboard snapshot keys) for display.
+			const wireRows = resp?.rows ?? [];
+			setPageRows(wireRows);
+			return { rows: wireRows.map(taskRow), total: resp?.total ?? 0 };
+		},
+		[listTasks]
+	);
 
 	// Hand the silent current-page refetch (no page reset) up to the host —
 	// the host owns usePolling and calls it on each tick (REMOTE mode only;
@@ -302,136 +305,139 @@ export const TasksGrid: React.FC<ITasksGridProps> = ({ tasks, listTasks, onRefet
 	 * endpoint to derive a checklist from). Sorting is remote: header clicks
 	 * ride the page request to the server.
 	 */
-	const columns = useMemo<GridColumnDefinition[]>(() => [
-		{
-			title: 'Task',
-			field: 'name',
-			rrType: 'string',
-			rrDefault: true,
-			rrDescription: 'Task display name (pipeline filename, config name, or source id — the internal task id when unnamed); the second line shows provider, launch type (launch or execute), and the first 8 characters of the project id.',
-			headerSort: true,
-			// Two-line cell: name over the provider / launch-type / project line.
-			formatter: (cell: CellComponent) => {
-				const row = cell.getRow().getData() as TaskRow;
-				const wrap = document.createElement('div');
-				const title = document.createElement('div');
-				Object.assign(title.style, domStyles.cellTitle);
-				title.textContent = row.name;
-				const sub = document.createElement('div');
-				Object.assign(sub.style, domStyles.cellSub);
-				sub.textContent = row.detail;
-				wrap.append(title, sub);
-				return wrap;
+	const columns = useMemo<GridColumnDefinition[]>(
+		() => [
+			{
+				title: 'Task',
+				field: 'name',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Task display name (pipeline filename, config name, or source id — the internal task id when unnamed); the second line shows provider, launch type (launch or execute), and the first 8 characters of the project id.',
+				headerSort: true,
+				// Two-line cell: name over the provider / launch-type / project line.
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as TaskRow;
+					const wrap = document.createElement('div');
+					const title = document.createElement('div');
+					Object.assign(title.style, domStyles.cellTitle);
+					title.textContent = row.name;
+					const sub = document.createElement('div');
+					Object.assign(sub.style, domStyles.cellSub);
+					sub.textContent = row.detail;
+					wrap.append(title, sub);
+					return wrap;
+				},
 			},
-		},
-		{
-			title: 'Source',
-			field: 'source',
-			rrType: 'string',
-			rrDefault: true,
-			rrDescription: 'Source component identifier the task was launched from (the source node id of the pipeline).',
-			headerSort: true,
-		},
-		{
-			title: 'Elapsed',
-			field: 'elapsed',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Runtime duration in seconds since the task started, rendered as a compact duration (e.g. 4m 7s).',
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			headerSort: true,
-			sorter: 'number',
-			formatter: (cell: CellComponent) => monoEl(formatUptime(cell.getValue() as number)),
-		},
-		{
-			title: 'CPU',
-			field: 'cpu',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'CPU utilisation of the running task as a percentage of one core (the cpu_percent metric); completed tasks report none.',
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			headerSort: true,
-			sorter: 'number',
-			// Mini gauge while running; muted placeholder once completed.
-			formatter: (cell: CellComponent) => {
-				const cpu = cell.getValue() as number | null;
-				if (cpu === null) return mutedEl('-');
-				return gaugeEl(cpu, `${cpu.toFixed(0)}%`, 'var(--rr-border-focus)');
+			{
+				title: 'Source',
+				field: 'source',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Source component identifier the task was launched from (the source node id of the pipeline).',
+				headerSort: true,
 			},
-		},
-		{
-			title: 'Memory',
-			field: 'mem',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Resident CPU memory of the running task in MB (the cpu_memory_mb metric); the gauge scales against a 2048 MB reference; completed tasks report none.',
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			headerSort: true,
-			sorter: 'number',
-			// Mini gauge while running; muted placeholder once completed.
-			formatter: (cell: CellComponent) => {
-				const mem = cell.getValue() as number | null;
-				if (mem === null) return mutedEl('-');
-				return gaugeEl((mem / 2048) * 100, `${mem.toFixed(0)}M`, 'var(--rr-accent)');
+			{
+				title: 'Elapsed',
+				field: 'elapsed',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Runtime duration in seconds since the task started, rendered as a compact duration (e.g. 4m 7s).',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => monoEl(formatUptime(cell.getValue() as number)),
 			},
-		},
-		{
-			title: 'Completions',
-			field: 'completions',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Items the task has completed so far (the completedCount progress counter); 0 renders as a muted placeholder.',
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			headerSort: true,
-			sorter: 'number',
-			formatter: (cell: CellComponent) => {
-				const count = cell.getValue() as number;
-				return count > 0 ? monoEl(formatNumber(count)) : mutedEl('-');
+			{
+				title: 'CPU',
+				field: 'cpu',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'CPU utilisation of the running task as a percentage of one core (the cpu_percent metric); completed tasks report none.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				// Mini gauge while running; muted placeholder once completed.
+				formatter: (cell: CellComponent) => {
+					const cpu = cell.getValue() as number | null;
+					if (cpu === null) return mutedEl('-');
+					return gaugeEl(cpu, `${cpu.toFixed(0)}%`, 'var(--rr-border-focus)');
+				},
 			},
-		},
-		{
-			title: 'TTL / Idle',
-			field: 'idle',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Seconds since the task last saw activity, over its time-to-live in seconds (0 TTL = no idle timeout); the pair turns warning-colored when idle time passes 80% of the TTL.',
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			headerSort: true,
-			sorter: 'number',
-			// idle / ttl pair; '-' when completed, 'none' when no timeout is set.
-			formatter: (cell: CellComponent) => {
-				const row = cell.getRow().getData() as TaskRow;
-				if (row.completed) return mutedEl('-');
-				if (row.ttl === 0) return mutedEl('none');
-				const el = monoEl(`${formatUptime(row.idle)} / ${formatUptime(row.ttl)}`);
-				if (row.idle / row.ttl > 0.8) Object.assign(el.style, domStyles.ttlWarning);
-				return el;
+			{
+				title: 'Memory',
+				field: 'mem',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Resident CPU memory of the running task in MB (the cpu_memory_mb metric); the gauge scales against a 2048 MB reference; completed tasks report none.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				// Mini gauge while running; muted placeholder once completed.
+				formatter: (cell: CellComponent) => {
+					const mem = cell.getValue() as number | null;
+					if (mem === null) return mutedEl('-');
+					return gaugeEl((mem / 2048) * 100, `${mem.toFixed(0)}M`, 'var(--rr-accent)');
+				},
 			},
-		},
-		{
-			title: 'Status',
-			field: 'status',
-			rrType: 'enum',
-			rrDefault: true,
-			// Declared filter vocabulary: the stable state families the status
-			// derivation produces (failed cells additionally carry the exit
-			// code). A remote grid has no distinct-value endpoint, so without
-			// rrOptions the enum filter would fall back to a plain text input.
-			rrOptions: ['running', 'completed', 'failed', 'idle (ttl)'],
-			rrDescription: 'Task state: the live status message while running (falling back to running), idle (ttl) near the idle timeout, completed on a clean exit, failed (code) otherwise.',
-			headerSort: true,
-			formatter: (cell: CellComponent) => {
-				const row = cell.getRow().getData() as TaskRow;
-				// Badge family shared with the record panel's Status section.
-				return badgeEl(taskStatusVariant(row.completed, row.exitCode, row.status), String(cell.getValue() ?? ''));
+			{
+				title: 'Completions',
+				field: 'completions',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Items the task has completed so far (the completedCount progress counter); 0 renders as a muted placeholder.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => {
+					const count = cell.getValue() as number;
+					return count > 0 ? monoEl(formatNumber(count)) : mutedEl('-');
+				},
 			},
-		},
-	], []);
+			{
+				title: 'TTL / Idle',
+				field: 'idle',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Seconds since the task last saw activity, over its time-to-live in seconds (0 TTL = no idle timeout); the pair turns warning-colored when idle time passes 80% of the TTL.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				// idle / ttl pair; '-' when completed, 'none' when no timeout is set.
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as TaskRow;
+					if (row.completed) return mutedEl('-');
+					if (row.ttl === 0) return mutedEl('none');
+					const el = monoEl(`${formatUptime(row.idle)} / ${formatUptime(row.ttl)}`);
+					if (row.idle / row.ttl > 0.8) Object.assign(el.style, domStyles.ttlWarning);
+					return el;
+				},
+			},
+			{
+				title: 'Status',
+				field: 'status',
+				rrType: 'enum',
+				rrDefault: true,
+				// Declared filter vocabulary: the stable state families the status
+				// derivation produces (failed cells additionally carry the exit
+				// code). A remote grid has no distinct-value endpoint, so without
+				// rrOptions the enum filter would fall back to a plain text input.
+				rrOptions: ['running', 'completed', 'failed', 'idle (ttl)'],
+				rrDescription: 'Task state: the live status message while running (falling back to running), idle (ttl) near the idle timeout, completed on a clean exit, failed (code) otherwise.',
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as TaskRow;
+					// Badge family shared with the record panel's Status section.
+					return badgeEl(taskStatusVariant(row.completed, row.exitCode, row.status), String(cell.getValue() ?? ''));
+				},
+			},
+		],
+		[]
+	);
 
 	// The record panel resolves against whichever WIRE rows back the grid:
 	// the latest fetched page (REMOTE) or the live snapshot (LOCAL).
@@ -459,9 +465,7 @@ export const TasksGrid: React.FC<ITasksGridProps> = ({ tasks, listTasks, onRefet
 						) : undefined
 					}
 					columns={columns}
-					{...(listTasks
-						? { fetchPage: fetchTasks, remoteSort: true }
-						: { data: localRows })}
+					{...(listTasks ? { fetchPage: fetchTasks, remoteSort: true } : { data: localRows })}
 					tableId="server-tasks"
 					emptyTitle="No tasks"
 					onRowClick={(row) => setSelectedId(row.id)}
@@ -469,11 +473,7 @@ export const TasksGrid: React.FC<ITasksGridProps> = ({ tasks, listTasks, onRefet
 			</Card>
 
 			{/* ── Task record panel (row click) ───────────────────────────── */}
-			<TaskRecordPanel
-				taskId={selectedId}
-				tasks={panelRows}
-				onClose={() => setSelectedId(null)}
-			/>
+			<TaskRecordPanel taskId={selectedId} tasks={panelRows} onClose={() => setSelectedId(null)} />
 		</>
 	);
 };

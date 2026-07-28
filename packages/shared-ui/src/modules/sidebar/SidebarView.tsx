@@ -14,12 +14,13 @@
  * just wraps it with app-specific chrome.
  */
 
-import React, { useState, useCallback, CSSProperties } from 'react';
+import React, { useState, useCallback, useMemo, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
+import { TabControl } from '../../components/tab-control/TabControl';
 import { SidebarMenu } from '../../components/sidebar-menu/SidebarMenu';
 import { Explorer, NOOP_VFS } from '../explorer';
-import type { ISidebarViewProps } from './types';
+import type { ISidebarViewProps, SidebarDeployment } from './types';
 import type { ViewMenu } from '../../types/viewMenu';
 import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from '../explorer';
 
@@ -94,6 +95,13 @@ const PIPELINE_CONFIG: ExplorerConfig = {
 	emptyMessage: 'No pipeline files',
 };
 
+/** Configuration for the deployments Explorer panel (same stock control). */
+const DEPLOYMENTS_CONFIG: ExplorerConfig = {
+	title: 'Deployments',
+	extensions: null,
+	emptyMessage: 'No deployments yet — publish from a pipeline\u2019s DEPLOY tab',
+};
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -105,12 +113,45 @@ const PIPELINE_CONFIG: ExplorerConfig = {
  * Maps ISidebarViewProps (pipeline-specific) to IExplorerProps (generic).
  * The Explorer component handles all file tree rendering internally.
  */
-export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, deployments, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, onOpenDeployment, onRefreshDeployments, activeDeploymentKey, activeFilePath }) => {
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
+	// Which tree the sidebar shows — the TabControl strip switches it.
+	const [treeMode, setTreeMode] = useState<'pipelines' | 'deployments'>('pipelines');
 
 	const isConnected = connection.state === 'connected';
 	const hasUnknown = (unknownTasks?.length ?? 0) > 0;
+	// The strip renders whenever the host SUPPLIES deployments (even empty)
+	// — discoverability without an edition check.
+	const hasDeployments = deployments !== undefined;
+
+	// Deployments as STOCK Explorer entries: '{team}/{pipeline}' paths give
+	// the team grouping for free (the Explorer derives dirs from paths);
+	// one team collapses to flat names — cardinality-driven.
+	const multiTeam = useMemo(() => new Set((deployments ?? []).map((dep) => dep.teamId)).size > 1, [deployments]);
+	const deploymentEntries: ExplorerEntry[] = useMemo(
+		() =>
+			(deployments ?? []).map((dep) => ({
+				path: multiTeam ? `${dep.teamName}/${dep.pipelineName}` : dep.pipelineName,
+				type: 'file' as const,
+				documentId: `${dep.teamId}:${dep.projectId}`,
+			})),
+		[deployments, multiTeam]
+	);
+	// Path -> deployment lookup for open/status resolution.
+	const deploymentByPath = useMemo(() => {
+		const map = new Map<string, SidebarDeployment>();
+		for (const dep of deployments ?? []) map.set(multiTeam ? `${dep.teamName}/${dep.pipelineName}` : dep.pipelineName, dep);
+		return map;
+	}, [deployments, multiTeam]);
+	// State dots through the Explorer's own status channel.
+	const deploymentStatuses = useMemo(() => {
+		const map = new Map<string, ExplorerStatus>();
+		for (const [path, dep] of deploymentByPath) {
+			map.set(path, { running: Boolean(dep.running), errors: dep.state === 'errored' ? ['errored'] : [], warnings: dep.state === 'paused' ? ['paused'] : [] });
+		}
+		return map;
+	}, [deploymentByPath]);
 
 	// --- Static top-nav menu (New pipeline / Monitor) ------------------------
 
@@ -163,20 +204,57 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 				    (activeId=''); the id-narrowing guard keeps onNavigate's union
 				    contract without a cast. SidebarMenu reads the collapsed flag
 				    from context, so no explicit collapsed prop is wired here. */}
-				<SidebarMenu menu={navMenu} activeId="" onSelect={(id) => { if (id === 'new' || id === 'monitor') onNavigate(id); }} />
+				<SidebarMenu
+					menu={navMenu}
+					activeId=""
+					onSelect={(id) => {
+						if (id === 'new' || id === 'monitor') onNavigate(id);
+					}}
+				/>
 			</div>
+
+			{/* ── Tree switch (stock TabControl) ─────────────────── */}
+			{hasDeployments && (
+				<TabControl
+					menu={{
+						entries: [
+							{ id: 'pipelines', label: 'Pipelines' },
+							{ id: 'deployments', label: 'Deployments' },
+						],
+					}}
+					activeId={treeMode}
+					onSelect={(id) => setTreeMode(id as 'pipelines' | 'deployments')}
+				/>
+			)}
 
 			{/* ── Explorer (file tree) ────────────────────────────────── */}
 			{/* vfs must be passed (frozen shell-contract shape) but is unused —
 			    the typed no-op replaces the old `null as any` cast. */}
-			<Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
+			{treeMode === 'pipelines' && <Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />}
 
-			{/* ── Unknown tasks (Other) ───────────────────────────────── */}
+			{/* ── Deployments (the SAME stock Explorer) ───────────────── */}
+			{treeMode === 'deployments' && (
+				<Explorer
+					vfs={NOOP_VFS}
+					config={DEPLOYMENTS_CONFIG}
+					entries={deploymentEntries}
+					statuses={deploymentStatuses}
+					isConnected={isConnected}
+					activeFilePath={activeDeploymentKey ? [...deploymentByPath.entries()].find(([, dep]) => `${dep.teamId}:${dep.projectId}` === activeDeploymentKey)?.[0] : undefined}
+					onOpenFile={(path) => {
+						const dep = deploymentByPath.get(path);
+						if (dep) onOpenDeployment?.(dep.teamId, dep.projectId, multiTeam ? `${dep.teamName} / ${dep.pipelineName}` : dep.pipelineName);
+					}}
+					onRefresh={() => onRefreshDeployments?.()}
+				/>
+			)}
+
+			{/* ── Unknown tasks (AD-HOC) — server tasks with no .pipe file */}
 			{hasUnknown && (
 				<div style={{ padding: '2px 6px', flexShrink: 0 }}>
 					<div style={{ ...S.row, marginTop: 4, ...hoverBg('unknown-root') }} onMouseEnter={() => setHoveredRow('unknown-root')} onMouseLeave={() => setHoveredRow(null)} onClick={() => setUnknownExpanded((p) => !p)}>
 						{unknownExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} />}
-						<span style={{ ...S.rowName, fontWeight: 600 }}>Other</span>
+						<span style={{ ...S.rowName, ...commonStyles.labelUppercase, color: 'var(--rr-text-secondary)' }}>Ad-hoc</span>
 						<span style={S.spacer} />
 						<span style={{ fontSize: 11, color: 'var(--rr-text-secondary)' }}>{unknownTasks!.length} running</span>
 					</div>

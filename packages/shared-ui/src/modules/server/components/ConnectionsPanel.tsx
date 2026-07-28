@@ -8,7 +8,7 @@
 // =============================================================================
 
 /**
- * ConnectionsGrid — the Active Connections CardDataGrid shared by every
+ * ConnectionsPanel — the Active Connections CardDataGrid shared by every
  * server-monitor host (admin-ui, monitor-ui, rocket-ui, the VSCode webview).
  *
  * Data modes follow the props (data-in, callbacks-out; no shell-ui imports):
@@ -48,8 +48,8 @@ import { ConnectionRecordPanel } from './ConnectionRecordPanel';
  */
 type ConnectionRow = DashboardConnection & Record<string, unknown>;
 
-/** Props for the {@link ConnectionsGrid} component. */
-export interface IConnectionsGridProps {
+/** Props for the {@link ConnectionsPanel} component. */
+export interface IConnectionsPanelProps {
 	/**
 	 * Snapshot connection rows (the dashboard snapshot). LOCAL mode renders
 	 * exactly these; with `listConnections` present the fetched pages take
@@ -188,10 +188,10 @@ function msgCounterEl(count: number, direction: 'in' | 'out'): HTMLElement {
  * identity, client label, traffic counters, subscription counts, and auth
  * status; clicking a row opens the connection record panel.
  *
- * @param props - {@link IConnectionsGridProps}.
+ * @param props - {@link IConnectionsPanelProps}.
  * @returns The card-hosted grid plus its record panel.
  */
-export const ConnectionsGrid: React.FC<IConnectionsGridProps> = ({ connections, listConnections, onRefetchReady }) => {
+export const ConnectionsPanel: React.FC<IConnectionsPanelProps> = ({ connections, listConnections, onRefetchReady }) => {
 	// ── Record panel state ────────────────────────────────────────────────
 	// The latest fetched page (REMOTE), captured by the fetcher: the record
 	// panel re-resolves its connection here on every render, so each poll
@@ -213,25 +213,28 @@ export const ConnectionsGrid: React.FC<IConnectionsGridProps> = ({ connections, 
 	 * @param req - The grid page request (1-based page, like the list APIs).
 	 * @returns The page of rows and the total row count.
 	 */
-	const fetchConnections = useCallback(async (req: IDataGridPageRequest): Promise<IDataGridPage<ConnectionRow>> => {
-		// Step 1: LOCAL grids never call this; the guard keeps TS honest.
-		if (!listConnections) return { rows: [], total: 0 };
-		// Step 2: one server-paginated call. Sorters, filter values, and the
-		// search term are forwarded verbatim — the server whitelists the row
-		// keys, drops anything unknown, and matches across ALL pages.
-		const resp = await listConnections({
-			page: req.page,
-			page_size: req.size,
-			sort: req.sort,
-			filters: req.filters,
-			...(req.search !== undefined ? { search: req.search } : {}),
-		});
-		// Step 3: widen the wire rows (dashboard snapshot keys) to grid rows.
-		const rows = (resp?.rows ?? []).map((row): ConnectionRow => ({ ...row }));
-		const total = resp?.total ?? 0;
-		setPageRows(rows);
-		return { rows, total };
-	}, [listConnections]);
+	const fetchConnections = useCallback(
+		async (req: IDataGridPageRequest): Promise<IDataGridPage<ConnectionRow>> => {
+			// Step 1: LOCAL grids never call this; the guard keeps TS honest.
+			if (!listConnections) return { rows: [], total: 0 };
+			// Step 2: one server-paginated call. Sorters, filter values, and the
+			// search term are forwarded verbatim — the server whitelists the row
+			// keys, drops anything unknown, and matches across ALL pages.
+			const resp = await listConnections({
+				page: req.page,
+				page_size: req.size,
+				sort: req.sort,
+				filters: req.filters,
+				...(req.search !== undefined ? { search: req.search } : {}),
+			});
+			// Step 3: widen the wire rows (dashboard snapshot keys) to grid rows.
+			const rows = (resp?.rows ?? []).map((row): ConnectionRow => ({ ...row }));
+			const total = resp?.total ?? 0;
+			setPageRows(rows);
+			return { rows, total };
+		},
+		[listConnections]
+	);
 
 	// Hand the silent current-page refetch (no page reset) up to the host —
 	// the host owns usePolling and calls it on each tick (REMOTE mode only;
@@ -245,10 +248,7 @@ export const ConnectionsGrid: React.FC<IConnectionsGridProps> = ({ connections, 
 
 	// LOCAL rows: the snapshot connections widened to grid rows (identity
 	// change applies silently — scroll, page, and sort preserved).
-	const localRows = useMemo<ConnectionRow[]>(
-		() => (connections ?? []).map((row): ConnectionRow => ({ ...row })),
-		[connections],
-	);
+	const localRows = useMemo<ConnectionRow[]>(() => (connections ?? []).map((row): ConnectionRow => ({ ...row })), [connections]);
 
 	/**
 	 * Connection list column definitions — DOM formatters from the stock cell
@@ -257,178 +257,180 @@ export const ConnectionsGrid: React.FC<IConnectionsGridProps> = ({ connections, 
 	 * remote, so array- and object-valued columns declare `headerSort: false`
 	 * (no scalar for the server to order by).
 	 */
-	const columns = useMemo<GridColumnDefinition[]>(() => [
-		{
-			title: 'Connection',
-			field: 'clientId',
-			rrType: 'string',
-			rrDefault: true,
-			rrDescription: 'Account identifier of the authenticated client (null before auth completes); the cell shows the handshake client name — falling back to this id, then the connection number — over the connection number line.',
-			headerSort: true,
-			// Two-line cell: display name over the connection-number line.
-			formatter: (cell: CellComponent) => nameCellEl(cell.getRow().getData() as ConnectionRow),
-		},
-		{
-			title: 'Client',
-			field: 'clientInfo',
-			rrType: 'json',
-			rrDefault: true,
-			rrDescription: 'Name/version map the client reported in the auth handshake (empty until the client identifies itself), shown as a tinted client label.',
-			// Object-valued column — not a sortable scalar on the server.
-			headerSort: false,
-			formatter: (cell: CellComponent) => clientCellEl(cell.getRow().getData() as ConnectionRow),
-		},
-		{
-			title: 'User',
-			field: 'userName',
-			rrType: 'string',
-			rrDefault: true,
-			rrDescription: 'Display name of the connection\'s user, resolved server-side from the account session (displayName, falling back to email); null means the connection has not authenticated.',
-			headerSort: true,
-			formatter: (cell: CellComponent) => {
-				const name = cell.getValue() as string | null | undefined;
-				return name ? name : mutedEl('--');
+	const columns = useMemo<GridColumnDefinition[]>(
+		() => [
+			{
+				title: 'Connection',
+				field: 'clientId',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Account identifier of the authenticated client (null before auth completes); the cell shows the handshake client name — falling back to this id, then the connection number — over the connection number line.',
+				headerSort: true,
+				// Two-line cell: display name over the connection-number line.
+				formatter: (cell: CellComponent) => nameCellEl(cell.getRow().getData() as ConnectionRow),
 			},
-		},
-		{
-			title: 'Organization',
-			field: 'orgName',
-			rrType: 'string',
-			rrDefault: true,
-			rrDescription: 'Display name of the user\'s organization, resolved server-side from the account session; null means the connection has not authenticated (or the user has no org membership).',
-			headerSort: true,
-			formatter: (cell: CellComponent) => {
-				const name = cell.getValue() as string | null | undefined;
-				return name ? name : mutedEl('--');
+			{
+				title: 'Client',
+				field: 'clientInfo',
+				rrType: 'json',
+				rrDefault: true,
+				rrDescription: 'Name/version map the client reported in the auth handshake (empty until the client identifies itself), shown as a tinted client label.',
+				// Object-valued column — not a sortable scalar on the server.
+				headerSort: false,
+				formatter: (cell: CellComponent) => clientCellEl(cell.getRow().getData() as ConnectionRow),
 			},
-		},
-		{
-			title: 'Connected',
-			field: 'connectedAt',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Unix timestamp (seconds) when the WebSocket connection was established, rendered as a local time of day.',
-			headerSort: true,
-			sorter: 'number',
-			formatter: (cell: CellComponent) => monoEl(formatTime(cell.getValue() as number)),
-		},
-		{
-			title: 'Tasks',
-			field: 'attachedTasks',
-			rrType: 'strings',
-			rrDefault: true,
-			rrDescription: 'Display names of the tasks this connection is monitoring (a JSON string array); the cell shows how many.',
-			// Array-valued column — not a sortable scalar on the server.
-			headerSort: false,
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			formatter: (cell: CellComponent) => monoEl(String((cell.getValue() as string[] | undefined)?.length ?? 0)),
-		},
-		{
-			title: 'Monitors',
-			field: 'monitors',
-			rrType: 'json',
-			rrDefault: true,
-			rrDescription: 'Active monitor subscriptions, each a key plus its event flags; the cell shows how many.',
-			// Array-valued column — not a sortable scalar on the server.
-			headerSort: false,
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			formatter: (cell: CellComponent) => monoEl(String((cell.getValue() as unknown[] | undefined)?.length ?? 0)),
-		},
-		{
-			title: 'Msgs In',
-			field: 'messagesIn',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Total messages received from this client since it connected.',
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			headerSort: true,
-			sorter: 'number',
-			formatter: (cell: CellComponent) => msgCounterEl(cell.getValue() as number, 'in'),
-		},
-		{
-			title: 'Msgs Out',
-			field: 'messagesOut',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Total messages sent to this client since it connected.',
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			headerSort: true,
-			sorter: 'number',
-			formatter: (cell: CellComponent) => msgCounterEl(cell.getValue() as number, 'out'),
-		},
-		{
-			title: 'Last Active',
-			field: 'lastActivity',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Unix timestamp (seconds) of the last message received from the client, rendered as a relative age.',
-			headerSort: true,
-			sorter: 'number',
-			formatter: (cell: CellComponent) => mutedEl(formatTimeAgo(cell.getValue() as number)),
-		},
-		{
-			title: 'Status',
-			field: 'authenticated',
-			// Boolean column: the Yes/No filter checklist is static, so it
-			// stays a real selector on a remote grid with no distinct endpoint.
-			rrType: 'boolean',
-			rrDefault: true,
-			rrDescription: 'Whether the connection has completed the auth handshake: connected once authenticated, pending before.',
-			headerSort: true,
-			formatter: (cell: CellComponent) =>
-				cell.getValue() ? badgeEl('success', 'connected') : badgeEl('warning', 'pending'),
-		},
-		// Default-hidden DECLARED columns (no rrDefault flag): available from
-		// the header popup / gear checklist without crowding the default view.
-		{
-			title: 'ID',
-			field: 'id',
-			rrType: 'number',
-			rrDescription: 'Unique monotonic connection identifier assigned by the server (also shown on the Connection identity line).',
-			hozAlign: 'right',
-			headerHozAlign: 'right',
-			headerSort: true,
-			sorter: 'number',
-			formatter: (cell: CellComponent) => monoEl(`#${cell.getValue() as number}`),
-		},
-		{
-			title: 'User ID',
-			field: 'userId',
-			rrType: 'string',
-			rrDescription: 'Stable user identifier of the authenticated account, resolved server-side from the session; null until the connection authenticates.',
-			headerSort: true,
-			formatter: (cell: CellComponent) => {
-				const id = cell.getValue() as string | null | undefined;
-				return id ? monoEl(id) : mutedEl('--');
+			{
+				title: 'User',
+				field: 'userName',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: "Display name of the connection's user, resolved server-side from the account session (displayName, falling back to email); null means the connection has not authenticated.",
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					const name = cell.getValue() as string | null | undefined;
+					return name ? name : mutedEl('--');
+				},
 			},
-		},
-		{
-			title: 'Org ID',
-			field: 'orgId',
-			rrType: 'string',
-			rrDescription: 'Organization identifier of the authenticated user, resolved server-side from the session; null when unauthenticated or without org membership.',
-			headerSort: true,
-			formatter: (cell: CellComponent) => {
-				const id = cell.getValue() as string | null | undefined;
-				return id ? monoEl(id) : mutedEl('--');
+			{
+				title: 'Organization',
+				field: 'orgName',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: "Display name of the user's organization, resolved server-side from the account session; null means the connection has not authenticated (or the user has no org membership).",
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					const name = cell.getValue() as string | null | undefined;
+					return name ? name : mutedEl('--');
+				},
 			},
-		},
-		{
-			title: 'API Key',
-			field: 'apikey',
-			rrType: 'string',
-			rrDescription: 'API key the connection authenticated with, masked to its first and last 4 characters.',
-			headerSort: true,
-			formatter: (cell: CellComponent) => {
-				const key = cell.getValue() as string | undefined;
-				return key ? monoEl(key) : mutedEl('--');
+			{
+				title: 'Connected',
+				field: 'connectedAt',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Unix timestamp (seconds) when the WebSocket connection was established, rendered as a local time of day.',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => monoEl(formatTime(cell.getValue() as number)),
 			},
-		},
-	], []);
+			{
+				title: 'Tasks',
+				field: 'attachedTasks',
+				rrType: 'strings',
+				rrDefault: true,
+				rrDescription: 'Display names of the tasks this connection is monitoring (a JSON string array); the cell shows how many.',
+				// Array-valued column — not a sortable scalar on the server.
+				headerSort: false,
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				formatter: (cell: CellComponent) => monoEl(String((cell.getValue() as string[] | undefined)?.length ?? 0)),
+			},
+			{
+				title: 'Monitors',
+				field: 'monitors',
+				rrType: 'json',
+				rrDefault: true,
+				rrDescription: 'Active monitor subscriptions, each a key plus its event flags; the cell shows how many.',
+				// Array-valued column — not a sortable scalar on the server.
+				headerSort: false,
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				formatter: (cell: CellComponent) => monoEl(String((cell.getValue() as unknown[] | undefined)?.length ?? 0)),
+			},
+			{
+				title: 'Msgs In',
+				field: 'messagesIn',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Total messages received from this client since it connected.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => msgCounterEl(cell.getValue() as number, 'in'),
+			},
+			{
+				title: 'Msgs Out',
+				field: 'messagesOut',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Total messages sent to this client since it connected.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => msgCounterEl(cell.getValue() as number, 'out'),
+			},
+			{
+				title: 'Last Active',
+				field: 'lastActivity',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Unix timestamp (seconds) of the last message received from the client, rendered as a relative age.',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => mutedEl(formatTimeAgo(cell.getValue() as number)),
+			},
+			{
+				title: 'Status',
+				field: 'authenticated',
+				// Boolean column: the Yes/No filter checklist is static, so it
+				// stays a real selector on a remote grid with no distinct endpoint.
+				rrType: 'boolean',
+				rrDefault: true,
+				rrDescription: 'Whether the connection has completed the auth handshake: connected once authenticated, pending before.',
+				headerSort: true,
+				formatter: (cell: CellComponent) => (cell.getValue() ? badgeEl('success', 'connected') : badgeEl('warning', 'pending')),
+			},
+			// Default-hidden DECLARED columns (no rrDefault flag): available from
+			// the header popup / gear checklist without crowding the default view.
+			{
+				title: 'ID',
+				field: 'id',
+				rrType: 'number',
+				rrDescription: 'Unique monotonic connection identifier assigned by the server (also shown on the Connection identity line).',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => monoEl(`#${cell.getValue() as number}`),
+			},
+			{
+				title: 'User ID',
+				field: 'userId',
+				rrType: 'string',
+				rrDescription: 'Stable user identifier of the authenticated account, resolved server-side from the session; null until the connection authenticates.',
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					const id = cell.getValue() as string | null | undefined;
+					return id ? monoEl(id) : mutedEl('--');
+				},
+			},
+			{
+				title: 'Org ID',
+				field: 'orgId',
+				rrType: 'string',
+				rrDescription: 'Organization identifier of the authenticated user, resolved server-side from the session; null when unauthenticated or without org membership.',
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					const id = cell.getValue() as string | null | undefined;
+					return id ? monoEl(id) : mutedEl('--');
+				},
+			},
+			{
+				title: 'API Key',
+				field: 'apikey',
+				rrType: 'string',
+				rrDescription: 'API key the connection authenticated with, masked to its first and last 4 characters.',
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					const key = cell.getValue() as string | undefined;
+					return key ? monoEl(key) : mutedEl('--');
+				},
+			},
+		],
+		[]
+	);
 
 	// The record panel resolves against whichever rows the grid renders:
 	// the latest fetched page (REMOTE) or the live snapshot (LOCAL).
@@ -444,25 +446,11 @@ export const ConnectionsGrid: React.FC<IConnectionsGridProps> = ({ connections, 
 			   LOCAL mode: the snapshot rows apply silently in place.
 			   Clicking a row opens the connection record panel. */}
 			<Card noBodyPadding>
-				<CardDataGrid<ConnectionRow>
-					ref={gridRef}
-					title="Active Connections"
-					columns={columns}
-					{...(listConnections
-						? { fetchPage: fetchConnections, remoteSort: true }
-						: { data: localRows })}
-					tableId="server-connections"
-					emptyTitle="No connections"
-					onRowClick={(row) => setSelectedId(row.id)}
-				/>
+				<CardDataGrid<ConnectionRow> ref={gridRef} title="Active Connections" columns={columns} {...(listConnections ? { fetchPage: fetchConnections, remoteSort: true } : { data: localRows })} tableId="server-connections" emptyTitle="No connections" onRowClick={(row) => setSelectedId(row.id)} />
 			</Card>
 
 			{/* ── Connection record panel (row click) ─────────────────────── */}
-			<ConnectionRecordPanel
-				connectionId={selectedId}
-				connections={panelRows}
-				onClose={() => setSelectedId(null)}
-			/>
+			<ConnectionRecordPanel connectionId={selectedId} connections={panelRows} onClose={() => setSelectedId(null)} />
 		</>
 	);
 };

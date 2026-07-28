@@ -101,6 +101,8 @@ def account_stub(monkeypatch):
         deployments_list=AsyncMock(return_value=[dep]),
         deployments_get=AsyncMock(return_value=dep),
         deployments_versions=AsyncMock(return_value=[{'version': 3}]),
+        deployments_artifact=AsyncMock(return_value={'project_id': 'proj-1', 'components': []}),
+        deployments_mark_run=AsyncMock(),
         deployments_history=AsyncMock(
             return_value={'rows': [{'action': 'publish', 'seq': 1}], 'total': 1, 'page': 1, 'pageSize': 50}
         ),
@@ -219,6 +221,69 @@ class TestReads:
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
         with pytest.raises(PermissionError):
             await conn._deploy_versions({}, {'projectId': 'proj-1'})
+
+    @pytest.mark.asyncio
+    async def test_publish_requires_a_pipeline_name(self, account_stub):
+        # Artifacts are immutable and pipelineName renders everywhere — a
+        # nameless publish would show as a GUID forever.
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='pipeline.name'):
+            await conn._deploy_publish({}, {'pipeline': {'project_id': 'proj-1', 'components': []}})
+        account_stub.deployments_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_run_dispatches_as_the_team_with_manual_trigger(self, account_stub, monkeypatch):
+        # Run-now = the scheduler's trusted dispatch with trigger='manual'
+        # and the CALLER as attribution; lastRunAt is stamped.
+        dispatched = {}
+
+        async def fake_dispatch(server, pipeline, *, org_id, team_id, actor, trigger, ttl=None):
+            dispatched.update(pipeline=pipeline, org_id=org_id, team_id=team_id, actor=actor, trigger=trigger)
+            return 'tk_manual'
+
+        monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
+        conn = _make_conn(_account_info())
+        result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 'webhook_1', 'teamId': 'team-1'})
+        assert result['body'] == {'token': 'tk_manual', 'version': 1}
+        assert dispatched['trigger'] == 'manual'
+        assert dispatched['team_id'] == 'team-1'
+        assert dispatched['pipeline']['source'] == 'webhook_1'
+        assert dispatched['actor']['userId'] == 'user-1'
+        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'team-1', 'proj-1', 'webhook_1')
+
+    @pytest.mark.asyncio
+    async def test_run_refuses_paused_and_needs_control(self, account_stub, monkeypatch):
+        async def fake_dispatch(*a, **k):
+            raise AssertionError('must not dispatch')
+
+        monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
+        # Paused deployment: no back-door single runs.
+        account_stub.deployments_get.return_value = {**account_stub.deployments_get.return_value, 'state': 'paused'}
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='paused'):
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': 'team-1'})
+        # No task.control on the team: uniform denial.
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
+        with pytest.raises(PermissionError):
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': 'team-1'})
+
+    @pytest.mark.asyncio
+    async def test_artifact_returns_the_pipeline(self, account_stub):
+        # The registry is the source of truth for what a deployed version
+        # IS — the read-only DESIGN render is built from this body.
+        conn = _make_conn(_account_info())
+        result = await conn._deploy_artifact({}, {'projectId': 'proj-1', 'version': 3})
+        assert result['body'] == {'project_id': 'proj-1', 'components': []}
+        assert account_stub.deployments_artifact.await_args.args == ('org-1', 'proj-1', 3)
+
+    @pytest.mark.asyncio
+    async def test_artifact_requires_monitor_and_integer_version(self, account_stub):
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
+        with pytest.raises(PermissionError):
+            await conn._deploy_artifact({}, {'projectId': 'proj-1', 'version': 1})
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError):
+            await conn._deploy_artifact({}, {'projectId': 'proj-1', 'version': '1'})
 
     @pytest.mark.asyncio
     async def test_list_returns_the_standard_envelope(self, account_stub):

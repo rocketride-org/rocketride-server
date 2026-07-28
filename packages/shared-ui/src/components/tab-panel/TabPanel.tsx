@@ -4,9 +4,9 @@
 // =============================================================================
 
 /**
- * TabPanelContent — the page-body stack below a view's PageViewControl strip.
+ * TabPanel — the page-body stack below a view's TabControl strip.
  *
- * A view with sub-views renders the stock PageViewControl strip at the top of
+ * A view with sub-views renders the stock TabControl strip at the top of
  * its content column and this component for the page bodies beneath it. Every
  * panel is mounted (so state such as a canvas's viewport survives switches)
  * and all but the active one are hidden with `display: none`.
@@ -47,8 +47,8 @@ export interface ITabPanelPanel {
 	content: React.ReactNode;
 }
 
-/** Props for the {@link TabPanelContent} component. */
-export interface ITabPanelContentProps {
+/** Props for the {@link TabPanel} component. */
+export interface ITabPanelProps {
 	/** Map of panel id → { content }. Every panel is mounted; inactive ones hide. */
 	panels: Record<string, ITabPanelPanel>;
 	/** Id of the panel to show (all others are hidden with `display: none`). */
@@ -62,21 +62,16 @@ export interface ITabPanelContentProps {
 /**
  * Renders the panel stack (no pill bar) with the active panel visible.
  *
- * @param props - {@link ITabPanelContentProps}.
+ * @param props - {@link ITabPanelProps}.
  * @returns The panel-stack element.
  */
-export function TabPanelContent({ panels, activeId }: ITabPanelContentProps): React.ReactElement {
+export function TabPanel({ panels, activeId }: ITabPanelProps): React.ReactElement {
 	return (
 		<div style={styles.wrapper}>
 			{Object.entries(panels).map(([id, panel]) => (
 				/* tabpanel role completes the ARIA tab pattern whose tabs are
-				   rendered by PageViewControl; hidden panels are aria-hidden. */
-				<div
-					key={id}
-					role="tabpanel"
-					aria-hidden={id !== activeId}
-					style={{ ...styles.panel, display: id === activeId ? undefined : 'none' }}
-				>
+				   rendered by TabControl; hidden panels are aria-hidden. */
+				<div key={id} role="tabpanel" aria-hidden={id !== activeId} style={{ ...styles.panel, display: id === activeId ? undefined : 'none' }}>
 					{panel.content}
 				</div>
 			))}

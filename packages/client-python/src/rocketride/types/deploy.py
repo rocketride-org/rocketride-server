@@ -74,6 +74,8 @@ class DeploymentSchedule(TypedDict, total=False):
     # 5-field cron expression.
     cron: str
     enabled: bool
+    # Run window in seconds ('fixed window'); absent/None = until finished.
+    ttl: int
     # Unix timestamp (seconds) of the last scheduler dispatch, or None.
     lastRunAt: float
 

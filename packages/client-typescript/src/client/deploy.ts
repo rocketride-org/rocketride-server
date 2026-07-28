@@ -186,6 +186,46 @@ export class DeployApi {
 	}
 
 	/**
+	 * Starts one deployed source NOW (manual trigger).
+	 *
+	 * The same trusted team dispatch the scheduler uses — the run executes
+	 * as the team, with the caller as the billing-attribution actor. The
+	 * deployment must be active.
+	 *
+	 * @param projectId - The deployed project.
+	 * @param sourceId - The pipeline source to fire.
+	 * @param teamId - The team whose deployment to run.
+	 * @returns The started run's token and the version that ran.
+	 */
+	async run(projectId: string, sourceId: string, teamId: string): Promise<{ token?: string; version?: number }> {
+		return this.client.call<{ token?: string; version?: number }>('rrext_deploy', {
+			subcommand: 'run',
+			projectId,
+			sourceId,
+			teamId,
+		});
+	}
+
+	/**
+	 * Fetches one immutable artifact's pipeline JSON from the registry.
+	 *
+	 * sha256-verified server-side on load: what you get is provably what was
+	 * published. This is the source of truth for read-only rendering of a
+	 * deployed version — never a local file, never a running task.
+	 *
+	 * @param projectId - The project.
+	 * @param version - The registry version to fetch.
+	 * @returns The pipeline definition exactly as published.
+	 */
+	async artifact(projectId: string, version: number): Promise<PipelineConfig> {
+		return this.client.call<PipelineConfig>('rrext_deploy', {
+			subcommand: 'artifact',
+			projectId,
+			version,
+		});
+	}
+
+	/**
 	 * The immutable audit trail of a project, newest first, as the standard
 	 * list envelope.
 	 *
@@ -276,9 +316,11 @@ export class DeployApi {
 	 * @param teamId - The team whose deployment to schedule.
 	 * @param options - Optional schedule options.
 	 * @param options.enabled - Set false to keep the cron but stop it firing.
+	 * @param options.ttl - Run window in seconds ('fixed window'); omitted
+	 *   runs each task until the pipeline finishes.
 	 * @returns The updated deployment record.
 	 */
-	async setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options: { enabled?: boolean } = {}): Promise<Deployment> {
+	async setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options: { enabled?: boolean; ttl?: number } = {}): Promise<Deployment> {
 		return this.client.call<Deployment>('rrext_deploy', {
 			subcommand: 'schedule_set',
 			projectId,
@@ -286,6 +328,7 @@ export class DeployApi {
 			teamId,
 			enabled: options.enabled ?? true,
 			...(schedule !== null && { schedule }),
+			...(options.ttl !== undefined && { ttl: options.ttl }),
 		});
 	}
 

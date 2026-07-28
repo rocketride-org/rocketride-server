@@ -6,7 +6,7 @@
 /**
  * ViewMenuBadge — the internal count badge shared by both ViewMenu components.
  *
- * A small rounded pill showing a numeric count. Both the {@link PageViewControl}
+ * A small rounded pill showing a numeric count. Both the {@link TabControl}
  * and the {@link SidebarMenu} render the exact same badge, so it lives here
  * once and is imported by each component. Not part of the shared-ui public
  * surface — it is an internal building block of the two menu components.

@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * PageViewControl — the tabs-across-the-top strip showing a view's pages.
+ * TabControl — the tabs-across-the-top strip showing a view's pages.
  *
  * Renders a view's declared {@link ViewMenu} as a compact 38px strip of
  * uppercase tabs, the active tab marked by a 2px brand underline on the
@@ -26,8 +26,8 @@ import { ViewMenuBadge } from './ViewMenuBadge';
 // TYPES
 // =============================================================================
 
-/** Props for the {@link PageViewControl} component. */
-export interface IPageViewControlProps {
+/** Props for the {@link TabControl} component. */
+export interface ITabControlProps {
 	/** The declared menu whose entries render as the strip tabs. */
 	menu: ViewMenu;
 	/** Id of the currently active entry (drawn with the brand underline). */
@@ -90,10 +90,10 @@ const styles = {
 /**
  * Renders a ViewMenu as the top page strip.
  *
- * @param props - {@link IPageViewControlProps}.
+ * @param props - {@link ITabControlProps}.
  * @returns The strip element.
  */
-export function PageViewControl({ menu, activeId, onSelect, trailing }: IPageViewControlProps): React.ReactElement {
+export function TabControl({ menu, activeId, onSelect, trailing }: ITabControlProps): React.ReactElement {
 	// Refs to the rendered tab elements, for roving-focus keyboard navigation.
 	const tabRefs = useRef<(HTMLDivElement | null)[]>([]);
 	// Index of the active entry; -1 when activeId matches nothing (then the

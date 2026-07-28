@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * SourceSection — the source-major unit of the Development / Deploy pages.
+ * SourcePanel — the source-major unit of the Development / Deploy pages.
  *
  * One self-contained, collapsible section per source ("like multiple status
  * cards today, extended"): a header (name, state, Run/Stop), its OWN pill
@@ -61,8 +61,8 @@ import type { TaskStatus, TraceEvent } from '../types';
 /** The per-source views selectable in the section's pill bar. */
 export type SourcePill = 'status' | 'tokens' | 'flow' | 'trace' | 'errors' | 'log' | 'utilization';
 
-/** Props for {@link SourceSection}. */
-export interface ISourceSectionProps {
+/** Props for {@link SourcePanel}. */
+export interface ISourcePanelProps {
 	/** Source identity (component id + display name). */
 	source: { id: string; name: string };
 	/** Which continuum this section is bound to. */
@@ -221,22 +221,7 @@ function formatTime(time: number | null | undefined): string {
 /**
  * The self-contained per-source monitoring + replay section.
  */
-export const SourceSection: React.FC<ISourceSectionProps> = ({
-	source,
-	runKind,
-	projectId,
-	liveEvents,
-	openSession,
-	fetchTimeline,
-	liveTaskStatus,
-	componentNames,
-	isConnected,
-	isSubscribed,
-	isReadonly,
-	serverHost,
-	onPipelineAction,
-	onOpenLink,
-}) => {
+export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, projectId, liveEvents, openSession, fetchTimeline, liveTaskStatus, componentNames, isConnected, isSubscribed, isReadonly, serverHost, onPipelineAction, onOpenLink }) => {
 	// --- Section-local view state --------------------------------------------
 	const [pill, setPill] = useState<SourcePill>('status');
 	const [timeline, setTimeline] = useState<TaskTimeline | null>(null);
@@ -263,9 +248,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					// vs run-begin marker) — treat a fetched chapter within 2s
 					// of a local begin as the same run, or the bar draws two
 					// overlapping blocks.
-					const localNewer = prev.chapters.filter(
-						(c) => !next.chapters.some((f) => f.beginSeq === c.beginSeq || Math.abs(f.beginTime - c.beginTime) < 2),
-					);
+					const localNewer = prev.chapters.filter((c) => !next.chapters.some((f) => f.beginSeq === c.beginSeq || Math.abs(f.beginTime - c.beginTime) < 2));
 					if (localNewer.length === 0) return next;
 					return { ...next, completed: false, chapters: [...next.chapters, ...localNewer] };
 				});
@@ -383,10 +366,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 	// panes have one source of truth. The HEADER (name/state/Run-Stop/
 	// notes) deliberately stays on the host's live map: its controls act on
 	// the live task, not the viewed position.
-	const streamStatus = useMemo<TaskStatus | undefined>(
-		() => (statusAt() ?? undefined) as TaskStatus | undefined,
-		[statusAt],
-	);
+	const streamStatus = useMemo<TaskStatus | undefined>(() => (statusAt() ?? undefined) as TaskStatus | undefined, [statusAt]);
 	const effectiveStatus = isReplay ? streamStatus : liveTaskStatus;
 	const paneStatus = streamStatus;
 
@@ -514,7 +494,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 			if (!session) throw new Error('Trace detail requires a connected session');
 			return session.getTrace(traceId);
 		},
-		[session],
+		[session]
 	);
 
 	// Flow pane: rebuild pipeflow.byPipe AT THE POSITION from the track's
@@ -608,14 +588,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					</>
 				);
 			case 'log':
-				return (
-					<LogPane
-						events={track.events}
-						downloadBase={`${source.id}.${runKind}`}
-						{...(track.truncatedBefore !== undefined ? { truncatedBefore: track.truncatedBefore } : {})}
-						fetchChapterEvents={fetchChapterEvents}
-					/>
-				);
+				return <LogPane events={track.events} downloadBase={`${source.id}.${runKind}`} {...(track.truncatedBefore !== undefined ? { truncatedBefore: track.truncatedBefore } : {})} fetchChapterEvents={fetchChapterEvents} />;
 			case 'status':
 				// The landing report card. The card's numbers are the
 				// server-computed run analytics — ALWAYS run-scoped, never
@@ -628,23 +601,14 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 								<span>
 									Slice <b>{formatTime(selection.from)}</b> → <b>{formatTime(selection.to)}</b>
 									{' · '}
-									{Math.max(1, Math.round(selection.to - selection.from))} s
-									{' — report card stays run-scoped'}
+									{Math.max(1, Math.round(selection.to - selection.from))} s{' — report card stays run-scoped'}
 								</span>
 								<Button variant="secondary" small onClick={() => setSelection(null)}>
 									Clear — back to track
 								</Button>
 							</div>
 						)}
-						<StatusPane
-							status={cleared ? null : (paneStatus ?? null)}
-							chapters={timeline?.chapters}
-							chapter={track.chapter}
-							position={player.cursorTime ?? undefined}
-							onOpenTrace={(traceId, name) => setOpenTrace({ traceId, name })}
-							onJumpToRun={jumpToLatestRun}
-							componentNames={componentNames}
-						/>
+						<StatusPane status={cleared ? null : (paneStatus ?? null)} chapters={timeline?.chapters} chapter={track.chapter} position={player.cursorTime ?? undefined} onOpenTrace={(traceId, name) => setOpenTrace({ traceId, name })} onJumpToRun={jumpToLatestRun} componentNames={componentNames} />
 					</>
 				);
 			default:
@@ -670,13 +634,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 					<div style={styles.headerActionsColumn}>
 						<div style={{ ...styles.headerActionsRow, ...(isReplay ? styles.headerDimmed : undefined) }} aria-disabled={isReplay || undefined}>
 							<PipelineActions notes={liveTaskStatus?.notes} host={serverHost} onOpenLink={onOpenLink} displayName={source.name} />
-							{runKind === 'dev' && !isReadonly && !isReplay && onPipelineAction && (
-								<StatusActions
-									taskStatus={liveTaskStatus ?? null}
-									onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)}
-									isSubscribed={isSubscribed}
-								/>
-							)}
+							{runKind === 'dev' && !isReadonly && !isReplay && onPipelineAction && <StatusActions taskStatus={liveTaskStatus ?? null} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} isSubscribed={isSubscribed} />}
 						</div>
 						{isReplay ? (
 							// The replayed track's identity replaces the live "Started
@@ -698,14 +656,7 @@ export const SourceSection: React.FC<ISourceSectionProps> = ({
 				<div style={styles.body}>{renderPane()}</div>
 
 				{/* This source's own transport + activity bar. */}
-				<PlayBar
-					timeline={timeline}
-					player={player}
-					controller={controller}
-					runActive={runActive}
-					selection={selection}
-					onSelectionChange={handleSelectionChange}
-				/>
+				<PlayBar timeline={timeline} player={player} controller={controller} runActive={runActive} selection={selection} onSelectionChange={handleSelectionChange} />
 			</Card>
 
 			{/* One request's full call tree — the stock right-side drawer, fed by

@@ -254,6 +254,11 @@ class TestSchedules:
         dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '*/5 * * * *', True, ACTOR)
         assert dep['schedules']['webhook_1']['cron'] == '*/5 * * * *'
         assert dep['schedules']['webhook_1']['enabled'] is True
+        assert dep['schedules']['webhook_1']['ttl'] is None
+
+        # The run window ('fixed window') rides the schedule record.
+        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '*/5 * * * *', True, ACTOR, 1800)
+        assert dep['schedules']['webhook_1']['ttl'] == 1800
 
         dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', None, True, ACTOR)
         assert 'webhook_1' not in dep['schedules']

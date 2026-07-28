@@ -8,7 +8,7 @@
 // =============================================================================
 
 /**
- * ActivityGrid — the Activity Stream CardDataGrid shared by every
+ * ActivityPanel — the Activity Stream CardDataGrid shared by every
  * server-monitor host (admin-ui, monitor-ui, rocket-ui, the VSCode webview).
  *
  * Always LOCAL mode (data-in, callbacks-out; no shell-ui imports): the host
@@ -63,8 +63,8 @@ interface ActivityRow extends Record<string, unknown> {
 	tone: EventTone;
 }
 
-/** Props for the {@link ActivityGrid} component. */
-export interface IActivityGridProps {
+/** Props for the {@link ActivityPanel} component. */
+export interface IActivityPanelProps {
 	/** Accumulated activity events (newest first, as delivered by the host). */
 	events: ActivityEvent[];
 }
@@ -180,10 +180,10 @@ export function getEventDisplay(event: ActivityEvent): IEventDisplay {
  * errors) as a CardDataGrid fed by the host's event feed (LOCAL mode: each
  * poll / push hands down a new events array, applied silently).
  *
- * @param props - {@link IActivityGridProps}.
+ * @param props - {@link IActivityPanelProps}.
  * @returns The card-hosted grid.
  */
-export const ActivityGrid: React.FC<IActivityGridProps> = ({ events }) => {
+export const ActivityPanel: React.FC<IActivityPanelProps> = ({ events }) => {
 	// Flatten each event into a display row (newest first, as delivered).
 	const rows = useMemo<ActivityRow[]>(
 		() =>
@@ -191,7 +191,7 @@ export const ActivityGrid: React.FC<IActivityGridProps> = ({ events }) => {
 				const display = getEventDisplay(event);
 				return { time: display.timestamp, kind: display.label, message: display.message, tone: display.tone };
 			}),
-		[events],
+		[events]
 	);
 
 	/**
@@ -199,43 +199,46 @@ export const ActivityGrid: React.FC<IActivityGridProps> = ({ events }) => {
 	 * factories. `rrDefault` marks the default view (array order = display
 	 * order); `rrDefaultSort` on time keeps the stream newest-first.
 	 */
-	const columns = useMemo<GridColumnDefinition[]>(() => [
-		{
-			title: 'Time',
-			field: 'time',
-			rrType: 'date',
-			rrDefault: true,
-			rrDefaultSort: 'desc',
-			rrDescription: 'When the event arrived at this client (epoch milliseconds recorded on receipt), shown as a local time of day; drives the newest-first default sort.',
-			width: 110,
-			headerSort: true,
-			sorter: 'number',
-			// formatTime takes Unix SECONDS; receivedAt is epoch milliseconds.
-			formatter: (cell: CellComponent) => mutedEl(formatTime((cell.getValue() as number) / 1000)),
-		},
-		{
-			title: 'Type',
-			field: 'kind',
-			rrType: 'enum',
-			rrDefault: true,
-			rrDescription: 'Event category derived from the wire action: connect / disconnect (connection lifecycle), task (task lifecycle), security (rejected auth), system (registry and monitor changes).',
-			width: 130,
-			headerSort: true,
-			// Badge tinted by the event tone (success / info / warning / muted).
-			formatter: (cell: CellComponent) => {
-				const row = cell.getRow().getData() as ActivityRow;
-				return badgeEl(TONE_VARIANTS[row.tone], String(cell.getValue() ?? ''));
+	const columns = useMemo<GridColumnDefinition[]>(
+		() => [
+			{
+				title: 'Time',
+				field: 'time',
+				rrType: 'date',
+				rrDefault: true,
+				rrDefaultSort: 'desc',
+				rrDescription: 'When the event arrived at this client (epoch milliseconds recorded on receipt), shown as a local time of day; drives the newest-first default sort.',
+				width: 110,
+				headerSort: true,
+				sorter: 'number',
+				// formatTime takes Unix SECONDS; receivedAt is epoch milliseconds.
+				formatter: (cell: CellComponent) => mutedEl(formatTime((cell.getValue() as number) / 1000)),
 			},
-		},
-		{
-			title: 'Message',
-			field: 'message',
-			rrType: 'string',
-			rrDefault: true,
-			rrDescription: 'One-line event summary assembled from the wire body: client name/version and connection number, or task name with exit code and message.',
-			headerSort: true,
-		},
-	], []);
+			{
+				title: 'Type',
+				field: 'kind',
+				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Event category derived from the wire action: connect / disconnect (connection lifecycle), task (task lifecycle), security (rejected auth), system (registry and monitor changes).',
+				width: 130,
+				headerSort: true,
+				// Badge tinted by the event tone (success / info / warning / muted).
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as ActivityRow;
+					return badgeEl(TONE_VARIANTS[row.tone], String(cell.getValue() ?? ''));
+				},
+			},
+			{
+				title: 'Message',
+				field: 'message',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'One-line event summary assembled from the wire body: client name/version and connection number, or task name with exit code and message.',
+				headerSort: true,
+			},
+		],
+		[]
+	);
 
 	return (
 		<>
@@ -244,15 +247,7 @@ export const ActivityGrid: React.FC<IActivityGridProps> = ({ events }) => {
 			    event count (`actions`), and the search box — the stream can
 			    grow to 200 events, so search stays on. */}
 			<Card noBodyPadding>
-				<CardDataGrid<ActivityRow>
-					title="Activity Stream"
-					actions={<span style={styles.headerCount}>{events.length} events</span>}
-					columns={columns}
-					data={rows}
-					tableId="server-activity"
-					emptyTitle="No activity yet"
-					emptyDescription="Events will appear here as connections and tasks change."
-				/>
+				<CardDataGrid<ActivityRow> title="Activity Stream" actions={<span style={styles.headerCount}>{events.length} events</span>} columns={columns} data={rows} tableId="server-activity" emptyTitle="No activity yet" emptyDescription="Events will appear here as connections and tasks change." />
 			</Card>
 		</>
 	);

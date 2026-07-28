@@ -22,7 +22,7 @@
 // =============================================================================
 
 /**
- * Flow — Top-level entry point for the pipeline canvas.
+ * CanvasPanel — Top-level entry point for the pipeline canvas.
  *
  * This is the single component that host applications (VS Code, web app)
  * render. It sets up:
@@ -50,10 +50,10 @@ import { IServiceCatalog } from './types';
 // =============================================================================
 
 /**
- * Props accepted by the Flow component.
+ * Props accepted by the CanvasPanel component.
  * The host supplies project data, service definitions, and callbacks.
  */
-export interface IFlowProps {
+export interface ICanvasPanelProps {
 	/** Root OAuth2 URL for authentication refresh endpoints. */
 	oauth2RootUrl: string;
 
@@ -134,7 +134,6 @@ export interface IFlowProps {
 	/** SaaS-only: export/download the current pipeline. Omitted hosts (VS Code) hide the button. */
 	onExport?: () => void;
 
-
 	/** When true, the canvas is fully read-only: no editing, no adding nodes, no run/stop. */
 	isReadonly?: boolean;
 
@@ -146,7 +145,7 @@ export interface IFlowProps {
 // Component
 // =============================================================================
 
-export default function Flow({ oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, isReadonly = false, envKeys }: IFlowProps) {
+export default function CanvasPanel({ oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, project, servicesJson, taskStatuses, componentPipeCounts, totalPipes, handleValidatePipeline, onOpenLink, onContentChanged, onViewportChange, onUndo, onRedo, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, isReadonly = false, envKeys }: ICanvasPanelProps) {
 	// --- Build inventory from service catalog --------------------------------
 	const inventory = buildInventory(servicesJson);
 

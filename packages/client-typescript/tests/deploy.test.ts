@@ -175,6 +175,28 @@ describe('Deploy API Integration Tests', () => {
 		TEST_CONFIG.timeout
 	);
 
+	it(
+		'run-now dispatches as the team and is stoppable; paused refuses',
+		async () => {
+			const project = freshProject();
+			try {
+				await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+				const result = await client.deploy.run(project, 'webhook_1', TEAM);
+				expect(result.token).toBeTruthy();
+				// The UI's stop path: resolve the live task and terminate it.
+				const token = await client.getTaskToken({ projectId: project, source: 'webhook_1' });
+				expect(token).toBe(result.token);
+				if (token) await client.terminate(token);
+
+				await client.deploy.pause(project, TEAM);
+				await expect(client.deploy.run(project, 'webhook_1', TEAM)).rejects.toThrow();
+			} finally {
+				await cleanup(project);
+			}
+		},
+		TEST_CONFIG.timeout
+	);
+
 	// ── reads: standard list envelopes ─────────────────────────────────────────
 
 	it(

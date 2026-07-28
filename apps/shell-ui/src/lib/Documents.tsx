@@ -420,6 +420,24 @@ export class Documents {
 		this._vfs = vfs ?? null;
 		this._workspace = workspace ?? null;
 
+		// Optional public member (see its declaration for the contract
+		// rationale) — assigned here so every instance carries it.
+		this.setEditorLabelByUri = (uri: string, label: string): void => {
+			this._update((prev) => {
+				// Step 1: relabel every editor bound to the URI (any group).
+				let changed = false;
+				const editors = { ...prev.editors };
+				for (const [editorId, editor] of Object.entries(editors)) {
+					if (editor.documentUri === uri && editor.label !== label) {
+						editors[editorId] = { ...editor, label };
+						changed = true;
+					}
+				}
+				// Step 2: untouched state when nothing matched — no re-render.
+				return changed ? { ...prev, editors } : prev;
+			});
+		};
+
 		// Restore from workspace persistence if available
 		const persisted = workspace?.appState?.[APPSTATE_KEY] as Record<string, any> | undefined;
 		if (persisted?.documents && persisted?.groups) {
@@ -622,6 +640,20 @@ export class Documents {
 	 * @param content - Optional content payload (opaque to Documents).
 	 * @param groupId - Target editor group (defaults to active group).
 	 */
+	/**
+	 * Updates the tab label of every editor viewing `uri`. The retitle path
+	 * for tabs whose display name is only known AFTER opening (e.g. a
+	 * file-less deployment tab resolving its pipeline name from the
+	 * registry). No-op when nothing shows the document or nothing changes.
+	 *
+	 * OPTIONAL on the public surface and assigned in the constructor: the
+	 * frozen shell-api snapshots Documents as an INPUT type (DocTabsProps
+	 * .docs), and inputs are contravariant — a new REQUIRED member would
+	 * break every frozen consumer, so append-only additions here must be
+	 * optional (the no-client-inputs rule).
+	 */
+	setEditorLabelByUri?: (uri: string, label: string) => void;
+
 	openStaticDocument(uri: string, label: string, content?: unknown, groupId?: string): void {
 		const s = this._state;
 		const targetGroup = groupId ?? s.activeGroupId;

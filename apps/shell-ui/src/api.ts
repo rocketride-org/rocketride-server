@@ -60,7 +60,7 @@ import { usePolling } from './hooks/usePolling';
 import { useDashboardData } from './hooks/useDashboardData';
 import { useConnectionStatus } from './hooks/useConnectionStatus';
 import { useShellApiConfig } from './connection/ShellApiConfigContext';
-import { useShellEvents } from './views/useShellEvents';
+import { useIframeBridge } from './hooks/useIframeBridge';
 import { useAppComponent } from './lib/useAppComponent';
 import { useSidebarContent } from './components/layout/HostChromeContext';
 
@@ -106,33 +106,14 @@ import ConfirmDialog from './components/layout/ConfirmDialog';
 import { PopupRow } from 'shared/components/PopupRow';
 
 // Shell-owned overlay pages
-import AccountPage from './views/account/AccountPage';
-import SettingsPage from './views/settings/SettingsPage';
+import AccountProvider from './providers/AccountProvider';
+import SettingsProvider from './providers/SettingsProvider';
 
 // Icons — a DELIBERATE subset of ./icons/BoxIcon: only the glyphs shell chrome
 // itself renders are part of the frozen contract. Apps needing other icons take
 // them from 'shared' (the full set), which is not contract-bound; every name
 // added here is frozen forever, so the surface grows only on demonstrated need.
-import {
-	BxPlus,
-	BxEditAlt,
-	BxTrash,
-	BxDesktop,
-	BxGridAlt,
-	BxCog,
-	BxListUl,
-	BxStop,
-	BxPlay,
-	BxHome,
-	BxNote,
-	BxComponent,
-	BxUser,
-	BxRocket,
-	BxLockOpen,
-	BxPurchaseTag,
-	BxChevronRight,
-	BxFolderOpen,
-} from './icons/BoxIcon';
+import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket, BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen } from './icons/BoxIcon';
 
 // =============================================================================
 // TYPE RE-EXPORTS — standalone types apps import from 'shell-ui'
@@ -149,24 +130,7 @@ import {
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types
-export type {
-	ShellAppProps,
-	ShellSidebarProps,
-	AppDescriptor,
-	AppManifestEntry,
-	ShellConfig,
-	ShellApiConfig,
-	WorkspacePrefs,
-	WorkspaceState,
-	AppWorkspaceState,
-	SettingValue,
-	SettingSchema,
-	AppConfiguration,
-	ShellBrandingConfig,
-	ShellThemeConfig,
-	ShellThemeOption,
-	ShellAccountConfig,
-} from './workspace/types';
+export type { ShellAppProps, ShellSidebarProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './workspace/types';
 
 // Top-level shell + sidebar component prop types
 export type { ShellProps } from './components/layout/Shell';
@@ -196,28 +160,18 @@ export type { ShellConnectionEventMap as ShellEventMap } from 'shared';
 export type { ConnectionStatus, ConnectionMode, IAuthProvider } from 'shared';
 
 // Iframe protocol message types
-export type { ShellToIframeMsg, IframeToShellMsg, ShellInitMsg } from './views/ShellIframeProtocol';
+export type { ShellToIframeMsg, IframeToShellMsg, ShellInitMsg } from './hooks/iframeBridgeProtocol';
 
 // Document component library standalone types.
 // `Documents` itself is captured as a constructor via `shellApi.Documents`;
 // these are its standalone helper/model types that apps import directly.
-export type {
-	Editor,
-	WorkspaceBinding,
-	Document,
-	EditorGroup,
-	SplitOrientation,
-	DocumentsState,
-	LayoutNode,
-	LayoutLeaf,
-	LayoutSplit,
-} from './lib/Documents';
+export type { Editor, WorkspaceBinding, Document, EditorGroup, SplitOrientation, DocumentsState, LayoutNode, LayoutLeaf, LayoutSplit } from './lib/Documents';
 export type { DocTabsProps } from './lib/DocTabs';
 export type { DocSplitLayoutProps } from './lib/DocSplitLayout';
 export type { DocExplorerProps, DocExplorerConfig, DocEntry, DocEntryChild, DocEntryStatus } from './lib/DocExplorer';
 export type { IVirtualFileSystem } from 'shared/modules/explorer/types';
 
-// ViewMenu declaration types (consumed by shared-ui's PageViewControl/SidebarMenu)
+// ViewMenu declaration types (consumed by shared-ui's TabControl/SidebarMenu)
 export type { DashboardData } from './hooks/useDashboardData';
 export type { ViewMenu, ViewMenuEntry } from 'shared';
 
@@ -243,7 +197,7 @@ export const shellApi = {
 	useWorkspace,
 	useClient,
 	useShellEvent,
-	useShellEvents,
+	useIframeBridge,
 	useSubscriptions,
 	usePolling,
 	useDashboardData,
@@ -286,8 +240,8 @@ export const shellApi = {
 	PopupRow,
 
 	// Shell-owned overlay pages
-	AccountPage,
-	SettingsPage,
+	AccountProvider,
+	SettingsProvider,
 
 	// Icons
 	BxPlus,

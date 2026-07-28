@@ -24,8 +24,8 @@
 // SHELL ↔ IFRAME POSTMESSAGE PROTOCOL — typed constants, no logic
 // =============================================================================
 //
-// Shell → Iframe messages are sent automatically by useShellEvents().
-// Iframe → Shell messages are handled automatically by useShellEvents().
+// Shell → Iframe messages are sent automatically by useIframeBridge().
+// Iframe → Shell messages are handled automatically by useIframeBridge().
 //
 // App-specific messages (project:load, project:contentChanged, etc.) are
 // defined and handled in their own providers — not here.
@@ -122,17 +122,10 @@ export interface ShellViewActivatedMsg {
 /**
  * Discriminated union of every message the shell can post to an iframe.
  *
- * `useShellEvents` constructs and sends these via `contentWindow.postMessage`.
+ * `useIframeBridge` constructs and sends these via `contentWindow.postMessage`.
  * Iframe apps receive them in their own `window.addEventListener('message', ...)` handler.
  */
-export type ShellToIframeMsg =
-	| ShellInitMsg
-	| ShellThemeChangeMsg
-	| ShellConnectionChangeMsg
-	| ShellLoginMsg
-	| ShellLogoutMsg
-	| ServerEventMsg
-	| ShellViewActivatedMsg;
+export type ShellToIframeMsg = ShellInitMsg | ShellThemeChangeMsg | ShellConnectionChangeMsg | ShellLoginMsg | ShellLogoutMsg | ServerEventMsg | ShellViewActivatedMsg;
 
 // =============================================================================
 // IFRAME → SHELL
@@ -142,7 +135,7 @@ export type ShellToIframeMsg =
  * Posted by an iframe to the parent shell as soon as the iframe's app code
  * has mounted and is ready to receive `shell:init`.
  *
- * The shell's `useShellEvents` hook listens for this message and responds
+ * The shell's `useIframeBridge` hook listens for this message and responds
  * with a `ShellInitMsg` containing the current theme, user, and config.
  */
 export interface ViewReadyMsg {
@@ -163,7 +156,7 @@ export interface ViewInitializedMsg {
 /**
  * Posted by an iframe to request a logout from within the iframe context.
  *
- * `useShellEvents` intercepts this and delegates to the shell's `useLogout` hook,
+ * `useIframeBridge` intercepts this and delegates to the shell's `useLogout` hook,
  * which handles the full Zitadel PKCE logout flow.
  */
 export interface IframeShellLogoutMsg {
@@ -173,7 +166,7 @@ export interface IframeShellLogoutMsg {
 /**
  * Posted by an iframe to ask the shell to open a singleton tab.
  *
- * `useShellEvents` converts this into a `shell:openSingleton` CustomEvent on
+ * `useIframeBridge` converts this into a `shell:openSingleton` CustomEvent on
  * `window`, which the shell's tab manager picks up and handles.
  */
 export interface IframeOpenTabMsg {
@@ -185,11 +178,7 @@ export interface IframeOpenTabMsg {
 /**
  * Discriminated union of every message an iframe can post to the parent shell.
  *
- * `useShellEvents` filters incoming `MessageEvent`s to those from the managed
+ * `useIframeBridge` filters incoming `MessageEvent`s to those from the managed
  * iframe and discriminates on `msg.type` to route each message.
  */
-export type IframeToShellMsg =
-	| ViewReadyMsg
-	| ViewInitializedMsg
-	| IframeShellLogoutMsg
-	| IframeOpenTabMsg;
+export type IframeToShellMsg = ViewReadyMsg | ViewInitializedMsg | IframeShellLogoutMsg | IframeOpenTabMsg;

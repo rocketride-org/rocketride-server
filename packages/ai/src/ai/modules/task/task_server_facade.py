@@ -69,6 +69,7 @@ async def start_server_task_as_team(
     team_id: str,
     actor: Dict[str, Any],
     trigger: str = 'schedule',
+    ttl: Optional[int] = None,
 ) -> str:
     """Execute ``pipeline`` as a TEAM deployment run — no stored credential.
 
@@ -120,7 +121,13 @@ async def start_server_task_as_team(
     conn._trusted_run_kind = 'deploy'
     conn._trusted_trigger = trigger
 
-    exec_response = await conn.request('execute', arguments={'pipeline': pipeline, 'teamId': team_id})
+    # The schedule's run window rides the execute arguments: start_task
+    # reads 'ttl', and a deploy run ALWAYS sends it — 0 means no window
+    # (run until the pipeline exits), N means seconds until shutdown (the
+    # 'fixed window' schedule option). Omitting it would silently apply
+    # the server's DEFAULT idle timeout, which is a dev-task policy.
+    arguments: Dict[str, Any] = {'pipeline': pipeline, 'teamId': team_id, 'ttl': int(ttl) if ttl else 0}
+    exec_response = await conn.request('execute', arguments=arguments)
 
     return exec_response['body']['token']
 

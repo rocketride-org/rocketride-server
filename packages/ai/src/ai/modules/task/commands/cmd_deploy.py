@@ -121,12 +121,14 @@ class DeployCommands(DAPConn):
             'list': self._deploy_list,
             'get': self._deploy_get,
             'versions': self._deploy_versions,
+            'artifact': self._deploy_artifact,
             'history': self._deploy_history,
             'pause': self._deploy_pause,
             'resume': self._deploy_resume,
             'remove': self._deploy_remove,
             'schedule_set': self._deploy_schedule_set,
             'preview': self._deploy_preview,
+            'run': self._deploy_run,
         }
 
     @property
@@ -231,6 +233,12 @@ class DeployCommands(DAPConn):
             raise PermissionError("Permission 'task.control' denied")
 
         pipeline = args.get('pipeline')
+        # A name is REQUIRED: pipelineName is what every deploy surface
+        # (tabs, sidebar, version strip, grids) renders — a nameless
+        # artifact would show as a project GUID forever, since artifacts
+        # are immutable.
+        if isinstance(pipeline, dict) and not str(pipeline.get('name') or '').strip():
+            raise ValueError('pipeline.name is required — the registry renders it on every deploy surface')
         if not isinstance(pipeline, dict) or not pipeline:
             raise ValueError('pipeline is required and must be an object')
         project_id = pipeline.get('project_id')
@@ -343,6 +351,27 @@ class DeployCommands(DAPConn):
         )
         return self.build_response(request, body=body)
 
+    async def _deploy_artifact(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """One immutable artifact's pipeline JSON, sha256-verified on load.
+
+        The read-only DESIGN render and the file-less deployment tab are
+        built from this: the registry is the source of truth for what a
+        deployed version IS — never a local file, never a running task.
+        """
+        project_id = args.get('projectId')
+        version = args.get('version')
+        if not project_id:
+            raise ValueError('projectId is required')
+        if not isinstance(version, int):
+            raise ValueError('version is required and must be an integer')
+        # Registry reads are org-level: any team monitor grant suffices
+        # (same rule as the versions listing this artifact came from).
+        if not self._teams_with('task.monitor'):
+            raise PermissionError("Permission 'task.monitor' denied")
+
+        body = await account.deployments_artifact(self._org_id(), project_id, version)
+        return self.build_response(request, body=body)
+
     async def _deploy_history(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """The immutable audit trail for a project (optionally one team's)."""
         project_id = args.get('projectId')
@@ -412,11 +441,17 @@ class DeployCommands(DAPConn):
                 cron = None
         enabled = bool(args.get('enabled', True))
 
+        # Run window: None/absent = until the pipeline finishes; a positive
+        # integer = seconds the task stays up (the 'fixed window' option).
+        ttl = args.get('ttl')
+        if ttl is not None and (not isinstance(ttl, int) or ttl <= 0):
+            raise ValueError('ttl must be a positive integer (seconds) or omitted')
+
         team_id = self._require_team(args, 'task.control')
         org_id = self._org_id()
 
         dep = await account.deployments_schedule_set(
-            org_id, team_id, project_id, source_id, cron, enabled, self._actor()
+            org_id, team_id, project_id, source_id, cron, enabled, self._actor(), ttl
         )
         self._scheduler.sync(org_id, dep)
         await account.audit(
@@ -427,6 +462,66 @@ class DeployCommands(DAPConn):
             org_id=org_id,
         )
         return self.build_response(request, body=dep)
+
+    # =========================================================================
+    # RUN — manual trigger (the smoke-test / run-now path)
+    # =========================================================================
+
+    async def _deploy_run(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Start one deployed source NOW.
+
+        The same trusted team dispatch the scheduler uses (no stored
+        credential — the run executes AS THE TEAM), with trigger='manual'
+        and the CALLER as the billing-attribution actor. Without this a
+        deployment could only ever run from a cron tick — no way to
+        smoke-test a version or fire an unscheduled source on demand.
+        """
+        project_id = args.get('projectId')
+        source_id = args.get('sourceId')
+        if not project_id:
+            raise ValueError('projectId is required')
+        if not source_id:
+            raise ValueError('sourceId is required')
+        team_id = self._require_team(args, 'task.control')
+        org_id = self._org_id()
+
+        # The deployment must exist and be runnable — a paused or errored
+        # deployment must not run "just this once" through the back door.
+        dep = await account.deployments_get(org_id, team_id, project_id)
+        if dep is None or dep.get('state') == 'removed':
+            raise ValueError(f'No deployment of {project_id} for team {team_id}')
+        if dep.get('state') != 'active':
+            raise ValueError(f'Deployment is {dep.get("state")} — resume it first')
+
+        # The pointed-at artifact, sha256-verified: what was published is
+        # what runs. The chosen source becomes the run's entry point.
+        pipeline = dict(await account.deployments_artifact(org_id, project_id, dep['version']))
+        pipeline['source'] = source_id
+
+        # Function-level import: the facade imports TaskConn, and this module
+        # is a TaskConn mixin — a top-level import would be circular.
+        from ..task_server_facade import start_server_task_as_team
+
+        # A manual run honors the source's configured run window too.
+        sched_ttl = ((dep.get('schedules') or {}).get(source_id) or {}).get('ttl')
+        token = await start_server_task_as_team(
+            self._server,
+            pipeline,
+            org_id=org_id,
+            team_id=team_id,
+            actor=self._actor(),
+            trigger='manual',
+            ttl=int(sched_ttl) if isinstance(sched_ttl, (int, float)) and sched_ttl else None,
+        )
+        await account.deployments_mark_run(org_id, team_id, project_id, source_id)
+        await account.audit(
+            self._account_info.userId,
+            'deploy',
+            'deploy_run',
+            request_data={'projectId': project_id, 'teamId': team_id, 'sourceId': source_id, 'version': dep['version']},
+            org_id=org_id,
+        )
+        return self.build_response(request, body={'token': token, 'version': dep['version']})
 
     # =========================================================================
     # PREVIEW — the single cron evaluator

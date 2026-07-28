@@ -58,6 +58,7 @@ export default defineConfig({
 			'page-monitor': './src/providers/views/Monitor/index.tsx',
 			'page-account': './src/providers/views/Account/index.tsx',
 			'page-environment': './src/providers/views/Environment/index.tsx',
+			'page-deployment': './src/providers/views/Deployment/index.tsx',
 		},
 	},
 

@@ -28,9 +28,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
 import { ConnectionManager } from '../../connection/connection';
-import AccountPage from '../../views/account/AccountPage';
-import SettingsPage from '../../views/settings/SettingsPage';
-import EnvironmentPage from '../../views/environment/EnvironmentPage';
+import AccountProvider from '../../providers/AccountProvider';
+import SettingsProvider from '../../providers/SettingsProvider';
+import EnvironmentProvider from '../../providers/EnvironmentProvider';
 
 // =============================================================================
 // TYPES
@@ -43,8 +43,7 @@ export type ShellOverlay = 'account' | 'settings' | 'environment' | null;
 const OPENABLE_OVERLAYS = ['account', 'settings', 'environment'] as const;
 
 /** Type guard: is `id` a valid openable overlay id (not null/unknown)? */
-const isOpenableOverlay = (id: unknown): id is Exclude<ShellOverlay, null> =>
-	typeof id === 'string' && (OPENABLE_OVERLAYS as readonly string[]).includes(id);
+const isOpenableOverlay = (id: unknown): id is Exclude<ShellOverlay, null> => typeof id === 'string' && (OPENABLE_OVERLAYS as readonly string[]).includes(id);
 
 // =============================================================================
 // STYLES
@@ -72,7 +71,7 @@ const styles = {
 		overflow: 'hidden',
 	} as CSSProperties,
 	// Close floats over the dialog's top-right corner. Shared views draw their
-	// own 38px PageViewControl strip at the top of the dialog, so the button is
+	// own 38px TabControl strip at the top of the dialog, so the button is
 	// vertically centered within that band ((38 - ~24px button) / 2 = 7) and
 	// reads as the strip row's trailing control. Strip entries are left-aligned,
 	// so they never reach the button at standard dialog widths.
@@ -145,16 +144,18 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 
 			{/* Shell-owned overlays render as modal dialogs over client area.
 			    Pages render directly; views with sub-views draw their own
-			    PageViewControl strip at the top of the dialog. Dismissal is
+			    TabControl strip at the top of the dialog. Dismissal is
 			    deliberate only (design-owner decision 2026-07-08): the ✕ button
 			    or Escape — clicking the backdrop must NOT close the dialog. */}
 			{overlay !== null && (
 				<div style={styles.backdrop}>
 					<div style={styles.dialog}>
-						<button style={styles.dialogClose} onClick={closeOverlay}>✕</button>
-						{overlay === 'account' && <AccountPage />}
-						{overlay === 'settings' && <SettingsPage />}
-						{overlay === 'environment' && <EnvironmentPage />}
+						<button style={styles.dialogClose} onClick={closeOverlay}>
+							✕
+						</button>
+						{overlay === 'account' && <AccountProvider />}
+						{overlay === 'settings' && <SettingsProvider />}
+						{overlay === 'environment' && <EnvironmentProvider />}
 					</div>
 				</div>
 			)}

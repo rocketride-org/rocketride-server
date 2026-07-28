@@ -64,6 +64,8 @@ export interface DeploymentSchedule {
 	/** 5-field cron expression. */
 	cron?: string;
 	enabled?: boolean;
+	/** Run window in seconds ('fixed window'); null/absent = until finished. */
+	ttl?: number | null;
 	/** Unix timestamp (seconds) of the last scheduler dispatch, or null. */
 	lastRunAt?: number | null;
 }

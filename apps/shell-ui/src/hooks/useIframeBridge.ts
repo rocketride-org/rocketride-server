@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// useShellEvents — standard shell ↔ iframe bridge hook
+// useIframeBridge — standard shell ↔ iframe bridge hook (pairs with iframeBridgeProtocol)
 // =============================================================================
 //
 // Call once in any iframe provider. Handles all cross-cutting shell messages:
@@ -33,11 +33,11 @@
 // =============================================================================
 
 import { RefObject, useEffect, useRef, useCallback } from 'react';
-import { useAuthUser, useLogout } from '../hooks/useAuthUser';
+import { useAuthUser, useLogout } from './useAuthUser';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useShellApiConfig } from '../connection/ShellApiConfigContext';
 import { ConnectionManager } from '../connection/connection';
-import type { ShellToIframeMsg } from './ShellIframeProtocol';
+import type { ShellToIframeMsg } from './iframeBridgeProtocol';
 
 // =============================================================================
 // HELPERS
@@ -93,7 +93,7 @@ function readCssTokens(): Record<string, string> {
  *
  * @param iframeRef - A ref pointing to the `<iframe>` DOM element to bridge.
  */
-export function useShellEvents(iframeRef: RefObject<HTMLIFrameElement>): void {
+export function useIframeBridge(iframeRef: RefObject<HTMLIFrameElement>): void {
 	// Retrieve current auth user from the shell's auth provider
 	const authUser = useAuthUser();
 	// Retrieve the current WebSocket connection status
@@ -124,14 +124,17 @@ export function useShellEvents(iframeRef: RefObject<HTMLIFrameElement>): void {
 	 *
 	 * @param msg - The typed message to post.
 	 */
-	const post = useCallback((msg: ShellToIframeMsg) => {
-		// Resolve the iframe's contentWindow; may be null if the element is unmounted
-		const win = iframeRef.current?.contentWindow;
-		// Post using the shell's origin — the iframe is served from the same origin
-		// in production. Using a specific origin instead of '*' prevents messages
-		// from leaking to unexpected frames.
-		if (win) win.postMessage(msg, window.location.origin);
-	}, [iframeRef]);
+	const post = useCallback(
+		(msg: ShellToIframeMsg) => {
+			// Resolve the iframe's contentWindow; may be null if the element is unmounted
+			const win = iframeRef.current?.contentWindow;
+			// Post using the shell's origin — the iframe is served from the same origin
+			// in production. Using a specific origin instead of '*' prevents messages
+			// from leaking to unexpected frames.
+			if (win) win.postMessage(msg, window.location.origin);
+		},
+		[iframeRef]
+	);
 
 	// ---- Send shell:init -------------------------------------------------------
 
@@ -182,9 +185,11 @@ export function useShellEvents(iframeRef: RefObject<HTMLIFrameElement>): void {
 				case 'shell:openTab':
 					// Translate the iframe's openTab request into a window CustomEvent
 					// that the shell's tab manager listens for
-					window.dispatchEvent(new CustomEvent('shell:openSingleton', {
-						detail: { viewType: msg.viewType, label: msg.label },
-					}));
+					window.dispatchEvent(
+						new CustomEvent('shell:openSingleton', {
+							detail: { viewType: msg.viewType, label: msg.label },
+						})
+					);
 					break;
 			}
 		};

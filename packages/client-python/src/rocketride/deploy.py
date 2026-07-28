@@ -240,6 +240,43 @@ class DeployApi:
         kwargs: dict = {'subcommand': 'versions', 'projectId': project_id}
         return await self._client.call('rrext_deploy', **_list_args(kwargs, page, page_size, search, filters, sort))
 
+    async def run(self, project_id: str, source_id: str, team_id: str) -> dict:
+        """
+        Start one deployed source NOW (manual trigger).
+
+        The same trusted team dispatch the scheduler uses — the run executes
+        as the team, with you as the billing-attribution actor. The
+        deployment must be active.
+
+        Args:
+            project_id: The deployed project.
+            source_id: The pipeline source to fire.
+            team_id: The team whose deployment to run.
+
+        Returns:
+            ``{'token', 'version'}`` of the started run.
+        """
+        return await self._client.call(
+            'rrext_deploy', subcommand='run', projectId=project_id, sourceId=source_id, teamId=team_id
+        )
+
+    async def artifact(self, project_id: str, version: int) -> PipelineConfig:
+        """
+        Fetch one immutable artifact's pipeline JSON from the registry.
+
+        sha256-verified server-side on load: what you get is provably what
+        was published. This is the source of truth for read-only rendering
+        of a deployed version — never a local file, never a running task.
+
+        Args:
+            project_id: The project.
+            version: The registry version to fetch.
+
+        Returns:
+            The pipeline definition exactly as published.
+        """
+        return await self._client.call('rrext_deploy', subcommand='artifact', projectId=project_id, version=version)
+
     async def history(
         self,
         project_id: str,
@@ -337,6 +374,7 @@ class DeployApi:
         team_id: str,
         *,
         enabled: bool = True,
+        ttl: int | None = None,
     ) -> Deployment:
         """
         Set (or clear) one source's schedule on a team deployment.
@@ -348,6 +386,8 @@ class DeployApi:
                 clears the schedule.
             team_id: The team whose deployment to schedule.
             enabled: Set False to keep the cron but stop it firing.
+            ttl: Run window in seconds ('fixed window'); ``None`` runs each
+                task until the pipeline finishes.
 
         Returns:
             The updated deployment record.
@@ -361,6 +401,8 @@ class DeployApi:
         }
         if schedule is not None:
             kwargs['schedule'] = schedule
+        if ttl is not None:
+            kwargs['ttl'] = ttl
         return await self._client.call('rrext_deploy', **kwargs)
 
     async def preview(self, schedule: str, count: int | None = None) -> SchedulePreview:

@@ -45,6 +45,7 @@ import { SettingsProvider } from './providers/SettingsProvider';
 import { MonitorProvider } from './providers/MonitorProvider';
 // DeployProvider removed — Docker/Service operations now live in Settings panels
 import { StatusProvider } from './providers/StatusProvider';
+import { DeploymentProvider } from './providers/DeploymentProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
@@ -70,6 +71,7 @@ let settings: SettingsProvider | undefined;
 let _monitor: MonitorProvider | undefined;
 // deploy removed — functionality moved to Settings panels
 let status: StatusProvider | undefined;
+let deploymentPage: DeploymentProvider | undefined;
 let barStatus: BarStatus | undefined;
 let welcome: WelcomeProvider | undefined;
 
@@ -288,6 +290,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				// deploy removed — register redirect command so sidebar "Deploy" opens Settings
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
+				// File-less per-team deployment tabs (teams-as-environments)
+				deploymentPage = new DeploymentProvider(context);
+				context.subscriptions.push(deploymentPage);
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				const account = new AccountProvider(context);
 				const environment = new EnvironmentProvider(context);
@@ -426,6 +431,9 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand('rocketride.page.status.open', (projectId: string, sourceId: string, displayName: string) => {
 			status?.show(projectId, sourceId, displayName);
+		}),
+		vscode.commands.registerCommand('rocketride.page.deployment.open', (teamId: string, projectId: string, title?: string) => {
+			deploymentPage?.show(teamId, projectId, title);
 		}),
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();
@@ -621,12 +629,16 @@ export async function deactivate(): Promise<void> {
 /** Cached GitHub releases (engine binaries). Populated by ConnectionMessageHandler.fetchAndBroadcastVersions(). */
 export let cachedEngineVersions: Array<{ tag_name: string; prerelease: boolean }> = [];
 /** Replaces the cached engine version list. Called by ConnectionMessageHandler after a successful GitHub API fetch. */
-export const setCachedEngineVersions = (v: typeof cachedEngineVersions) => { cachedEngineVersions = v; };
+export const setCachedEngineVersions = (v: typeof cachedEngineVersions) => {
+	cachedEngineVersions = v;
+};
 
 /** Cached GHCR container tags (Docker images). Populated by ConnectionMessageHandler.fetchAndBroadcastDockerTags(). */
 export let cachedDockerTags: string[] = [];
 /** Replaces the cached Docker tag list. Called by ConnectionMessageHandler after a successful GHCR API fetch. */
-export const setCachedDockerTags = (t: string[]) => { cachedDockerTags = t; };
+export const setCachedDockerTags = (t: string[]) => {
+	cachedDockerTags = t;
+};
 
 // Export getters for provider access
 export const getExtensionContext = () => extensionContext;

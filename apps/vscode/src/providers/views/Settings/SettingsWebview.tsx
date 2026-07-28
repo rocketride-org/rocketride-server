@@ -31,8 +31,8 @@ import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
 import type { CheckoutPlan, ViewMenu } from 'shared';
-import { TabPanelContent } from 'shared';
-import type { ITabPanelPanel } from 'shared/components/tab-panel/TabPanelContent';
+import { TabPanel } from 'shared';
+import type { ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
 import 'shared/themes/rocketride-default.css';
@@ -299,7 +299,7 @@ const subscribeBannerStyles = {
 // ============================================================================
 
 /**
- * Fills the space to the right of the left settings nav; TabPanelContent's
+ * Fills the space to the right of the left settings nav; TabPanel's
  * 100%-height wrapper resolves against this definite flex box.
  */
 const pageBodyStyle: CSSProperties = {
@@ -316,7 +316,7 @@ const pageBodyStyle: CSSProperties = {
 
 /**
  * Left-hand settings navigation, matching the browser settings page
- * (shell-ui SettingsPage): a fixed-width rail of `listRow` pills, one per
+ * (shell-ui SettingsProvider): a fixed-width rail of `listRow` pills, one per
  * section, with the page bodies rendered to its right. The pages themselves
  * are unchanged — only the section selector moved from a top strip to here.
  */
@@ -1072,7 +1072,7 @@ export const Settings: React.FC = () => {
 				{/* Left nav — one pill per settings section, driving the same activeTab. */}
 				<nav style={settingsNavStyles.sidebar} role="tablist" aria-orientation="vertical">
 					{settingsMenu.entries.map((entry) => {
-						// The selected section is highlighted and rendered by TabPanelContent.
+						// The selected section is highlighted and rendered by TabPanel.
 						const isActive = entry.id === activeTab;
 						return (
 							<button key={entry.id} role="tab" aria-selected={isActive} style={settingsNavStyles.navItem(isActive)} onClick={() => setActiveTab(entry.id)}>
@@ -1084,7 +1084,7 @@ export const Settings: React.FC = () => {
 
 				{/* Page bodies fill the space to the right of the nav. */}
 				<div style={pageBodyStyle}>
-					<TabPanelContent panels={panels} activeId={activeTab} />
+					<TabPanel panels={panels} activeId={activeTab} />
 				</div>
 			</div>
 
