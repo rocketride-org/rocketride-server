@@ -90,19 +90,6 @@
 		//   * Pinned generation IDs (qwen3.x) name a specific model release.
 		//
 		"profiles": {
-			"qwen3-8-max-preview": {
-				"title": "Qwen3.8 Max (preview)",
-				"model": "qwen3.8-max-preview",
-				"modelSource": "manual",
-				"modelTotalTokens": 983616, // manual
-				"modelOutputTokens": 131072, // manual
-				"region": "intl",
-				"base_url": "",
-				"apikey": "",
-				"capabilities": {
-					"reasoning": true
-				}
-			},
 			"qwen3-7-max": {
 				"title": "Qwen3.7 Max",
 				"model": "qwen3.7-max",
@@ -110,6 +97,7 @@
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 65536, // openrouter
 				"region": "us",
+				"base_url": "",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -122,6 +110,7 @@
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 65536, // openrouter
 				"region": "us",
+				"base_url": "",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -134,6 +123,7 @@
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 65536, // openrouter
 				"region": "us",
+				"base_url": "",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -146,6 +136,7 @@
 				"modelTotalTokens": 32768, // manual
 				"modelOutputTokens": 8192, // manual
 				"region": "us",
+				"base_url": "",
 				"apikey": ""
 			},
 			"qwen-plus": {
@@ -155,6 +146,7 @@
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 32768, // openrouter
 				"region": "us",
+				"base_url": "",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -167,6 +159,7 @@
 				"modelTotalTokens": 131072, // manual
 				"modelOutputTokens": 4096, // manual
 				"region": "us",
+				"base_url": "",
 				"apikey": ""
 			},
 			"qwen-turbo": {
@@ -176,6 +169,7 @@
 				"modelTotalTokens": 131072, // manual
 				"modelOutputTokens": 8192, // manual
 				"region": "us",
+				"base_url": "",
 				"apikey": ""
 			},
 			"qwen-plus-2025-07-28": {
@@ -185,11 +179,17 @@
 				"modelTotalTokens": 1000000, // openrouter
 				"modelOutputTokens": 32768, // openrouter
 				"region": "us",
+				"base_url": "",
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
 				}
 			},
+			//
+			// The profiles below were introduced by OpenRouter fallback discovery and
+			// carry OpenRouter/HuggingFace model IDs that the DashScope API rejects.
+			// They are deprecated rather than deleted so saved pipelines keep loading.
+			//
 			"qwen-2-5-72b-instruct": {
 				"title": "Qwen2.5 72B Instruct",
 				"model": "qwen-2.5-72b-instruct",
@@ -276,7 +276,10 @@
 			"type": "string",
 			"title": "Base URL override",
 			"default": "",
-			"description": "Optional. Overrides the endpoint selected by Region. Leave empty to use the regional endpoint. Set this when a model is served from an endpoint other than the standard compatible-mode hosts."
+			"description": "Optional. Overrides the endpoint selected by Region. Leave empty to use the regional endpoint. Set this to reach a DashScope host other than the three listed above, for example another Alibaba Cloud region.",
+			"ui": {
+				"ui:placeholder": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+			}
 		},
 		"qwen.custom": {
 			"object": "custom",
@@ -289,20 +292,12 @@
 				"llm.cloud.modelSource"
 			]
 		},
-		"qwen.qwen3-8-max-preview": {
-			"object": "qwen3-8-max-preview",
-			"properties": [
-				"llm.cloud.apikey",
-				"qwen.region",
-				"qwen.base_url",
-				"llm.cloud.modelSource"
-			]
-		},
 		"qwen.qwen3-7-max": {
 			"object": "qwen3-7-max",
 			"properties": [
 				"llm.cloud.apikey",
 				"qwen.region",
+				"qwen.base_url",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -311,6 +306,7 @@
 			"properties": [
 				"llm.cloud.apikey",
 				"qwen.region",
+				"qwen.base_url",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -319,6 +315,7 @@
 			"properties": [
 				"llm.cloud.apikey",
 				"qwen.region",
+				"qwen.base_url",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -327,6 +324,7 @@
 			"properties": [
 				"llm.cloud.apikey",
 				"qwen.region",
+				"qwen.base_url",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -335,6 +333,7 @@
 			"properties": [
 				"llm.cloud.apikey",
 				"qwen.region",
+				"qwen.base_url",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -343,6 +342,7 @@
 			"properties": [
 				"llm.cloud.apikey",
 				"qwen.region",
+				"qwen.base_url",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -351,6 +351,7 @@
 			"properties": [
 				"llm.cloud.apikey",
 				"qwen.region",
+				"qwen.base_url",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -359,6 +360,7 @@
 			"properties": [
 				"llm.cloud.apikey",
 				"qwen.region",
+				"qwen.base_url",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -407,12 +409,6 @@
 					"value": "custom",
 					"properties": [
 						"qwen.custom"
-					]
-				},
-				{
-					"value": "qwen3-8-max-preview",
-					"properties": [
-						"qwen.qwen3-8-max-preview"
 					]
 				},
 				{

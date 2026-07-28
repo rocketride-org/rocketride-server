@@ -41,26 +41,23 @@ Profiles come in two kinds.
 
 **Stable aliases** always resolve to DashScope's current snapshot for their tier, so they do not go stale as new generations ship. Prefer these unless you need to pin a specific release:
 
-| Profile                   | Model         | Context tokens | Output tokens |
-|---------------------------|---------------|----------------|---------------|
-| Qwen Flash *(default)*    | `qwen-flash`  | 131,072        | 4,096         |
-| Qwen Plus                 | `qwen-plus`   | 1,000,000      | 32,768        |
-| Qwen Max                  | `qwen-max`    | 32,768         | 8,192         |
-| Qwen Turbo                | `qwen-turbo`  | 131,072        | 8,192         |
+| Profile                          | Model         | Context tokens | Output tokens |
+|----------------------------------|---------------|----------------|---------------|
+| Qwen Flash (latest) *(default)*  | `qwen-flash`  | 131,072        | 4,096         |
+| Qwen Plus (latest)               | `qwen-plus`   | 1,000,000      | 32,768        |
+| Qwen Max (latest)                | `qwen-max`    | 32,768         | 8,192         |
+| Qwen Turbo (latest)              | `qwen-turbo`  | 131,072        | 8,192         |
 
 **Pinned releases** name a specific model version:
 
 | Profile                | Model                  | Context tokens | Output tokens |
 |------------------------|------------------------|----------------|---------------|
-| Qwen3.8 Max (preview)  | `qwen3.8-max-preview`  | 983,616        | 131,072       |
 | Qwen3.7 Max            | `qwen3.7-max`          | 1,000,000      | 65,536        |
 | Qwen3.7 Plus           | `qwen3.7-plus`         | 1,000,000      | 65,536        |
 | Qwen3.6 Flash          | `qwen3.6-flash`        | 1,000,000      | 65,536        |
 | Qwen Plus 0728         | `qwen-plus-2025-07-28` | 1,000,000      | 32,768        |
 
 Choose `custom` to set the model name and context length manually.
-
-> **Qwen3.8 Max is a preview model.** Access is limited and it may be served from an endpoint other than the standard compatible-mode hosts. If the profile fails to validate, set `base_url` to the endpoint shown in your Alibaba Cloud console.
 
 ### Deprecated profiles
 
@@ -89,7 +86,7 @@ DashScope has no `:thinking` model variants — reasoning is controlled with the
 
 The default is `us`. An unrecognised value falls back to the US endpoint.
 
-Setting `base_url` overrides this table entirely, which is how you reach an endpoint Alibaba Cloud serves outside the three hosts above. Leave it empty to use the regional endpoint.
+Setting `base_url` overrides this table entirely, which is how you reach a DashScope host Alibaba Cloud serves outside the three above — another Alibaba Cloud region, for instance. It is available on every profile, including `custom`. Leave it empty to use the regional endpoint.
 
 Note: DashScope API keys are not interchangeable between regions. A key issued for one region will fail authentication against another region's endpoint.
 
