@@ -185,12 +185,15 @@ class ChatBase:
             Should raise appropriate exceptions for API failures, authentication
             errors, or other provider-specific issues
         """
-        # Ask the LLM. The stop kwarg is only added when the agent set stop sequences,
-        # so non-agent callers (and backends/mocks without a stop param) are unaffected.
-        results = self._llm.invoke(prompt, **_stop_kwargs())
-
-        # Flatten provider content (Anthropic returns typed blocks) so callers get a string.
-        return flatten_content(results.content)
+        # Non-streaming: drain the adapter with no display sinks — same iterator and
+        # normalization as streaming, so item capture is structural on every path.
+        _llm = self._llm
+        if hasattr(_llm, 'stream'):
+            adapter = LangChainAdapter(_llm, stream_kwargs=_stop_kwargs())
+            text, _items = drive_adapter(adapter, prompt)
+            return text
+        # Backends/mocks without .stream: invoke and normalize the content to a string.
+        return flatten_content(_llm.invoke(prompt, **_stop_kwargs()).content)
 
     def getTokens(self, value: str) -> int:
         """

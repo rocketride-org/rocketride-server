@@ -70,3 +70,10 @@ def test_stop_sequences_reach_the_model():
     finally:
         STOP_SEQUENCES_VAR.reset(token)
     assert llm.kwargs == {'stop': ['\nObservation:']}
+
+
+def test_chat_nonstreaming_drains_adapter():
+    # The unify: _chat (no display callbacks) drains the same adapter and returns text.
+    llm = _FakeLLM([_Piece([{'type': 'thinking', 'thinking': 'x'}, {'type': 'text', 'text': 'plain answer'}])])
+    chat = _Chat(llm)
+    assert chat._chat('q') == 'plain answer'
