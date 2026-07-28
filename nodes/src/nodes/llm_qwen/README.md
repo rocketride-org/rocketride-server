@@ -86,7 +86,7 @@ DashScope has no `:thinking` model variants — reasoning is controlled with the
 
 The default is `us`. An unrecognised value falls back to the US endpoint.
 
-Setting `base_url` overrides this table entirely, which is how you reach a DashScope host Alibaba Cloud serves outside the three above — another Alibaba Cloud region, for instance. It is available on every profile, including `custom`. Leave it empty to use the regional endpoint.
+Setting `base_url` overrides this table entirely, which is how you reach a DashScope host Alibaba Cloud serves outside the three above — another Alibaba Cloud region, for instance. It is available on every live profile, including `custom`; the deprecated profiles above do not expose it. Leave it empty to use the regional endpoint.
 
 Note: DashScope API keys are not interchangeable between regions. A key issued for one region will fail authentication against another region's endpoint.
 
