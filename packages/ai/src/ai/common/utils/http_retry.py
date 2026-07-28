@@ -64,6 +64,51 @@ def post_with_retry(
     return _retrying(max_attempts, base_delay, max_delay)(_attempt)
 
 
+def request_with_retry(
+    method: str,
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    params: Any = None,
+    json: Any = None,
+    data: Any = None,
+    files: Any = None,
+    timeout: float = 30,
+    max_attempts: int = 4,
+    base_delay: float = 2.0,
+    max_delay: float = 60.0,
+) -> requests.Response:
+    """Issue any HTTP method with the same retry policy as POST/GET.
+
+    For verbs the dedicated helpers don't cover — PATCH, DELETE, PUT — as used
+    by REST APIs that map updates and deletes onto them. ``method`` is passed
+    to ``requests.request`` unchanged. Same policy as :func:`post_with_retry`:
+    retries timeouts, connection errors, and 429 / 5xx; other 4xx raise
+    immediately.
+
+    Note that retrying is only safe for idempotent verbs. DELETE and PUT are
+    idempotent by definition, and PATCH is idempotent for the value-set updates
+    this is used for; do not route a non-idempotent POST through here — use
+    :func:`post_with_retry`, which callers already expect to retry.
+    """
+
+    def _attempt() -> requests.Response:
+        resp = requests.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp
+
+    return _retrying(max_attempts, base_delay, max_delay)(_attempt)
+
+
 def get_with_retry(
     url: str,
     *,

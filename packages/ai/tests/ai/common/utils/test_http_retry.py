@@ -18,7 +18,7 @@ import pytest
 import requests
 
 import ai.common.utils.http_retry as hr
-from ai.common.utils import get_with_retry, post_with_retry
+from ai.common.utils import get_with_retry, post_with_retry, request_with_retry
 
 
 class _FakeResp:
@@ -176,3 +176,79 @@ def test_get_does_not_retry_4xx(monkeypatch):
     with pytest.raises(requests.exceptions.HTTPError):
         get_with_retry('https://api.example.com', base_delay=0)
     assert calls['n'] == 1  # no retry on a non-429 4xx
+
+
+# --- request_with_retry (PATCH / DELETE / PUT, same shared policy) ---
+
+
+def _patch_request(monkeypatch, fn):
+    monkeypatch.setattr(hr.requests, 'request', fn)
+
+
+@pytest.mark.parametrize('method', ['PATCH', 'DELETE', 'PUT'])
+def test_request_returns_response_on_success(monkeypatch, method):
+    ok = _FakeResp(200, {'ok': True})
+    _patch_request(monkeypatch, lambda *a, **k: ok)
+    assert request_with_retry(method, 'https://api.example.com', base_delay=0) is ok
+
+
+def test_request_forwards_method_and_payload(monkeypatch):
+    seen = {}
+
+    def fake_request(method, url, **kwargs):
+        seen['method'] = method
+        seen['url'] = url
+        seen.update(kwargs)
+        return _FakeResp(200, {})
+
+    _patch_request(monkeypatch, fake_request)
+    request_with_retry(
+        'PATCH',
+        'https://api.example.com/rows',
+        params={'id': 'eq.1'},
+        json={'name': 'x'},
+        base_delay=0,
+    )
+    assert seen['method'] == 'PATCH'
+    assert seen['url'] == 'https://api.example.com/rows'
+    assert seen['params'] == {'id': 'eq.1'}
+    assert seen['json'] == {'name': 'x'}
+
+
+def test_request_retries_429_then_succeeds(monkeypatch):
+    calls = {'n': 0}
+    ok = _FakeResp(200, {})
+
+    def fake_request(*a, **k):
+        calls['n'] += 1
+        return _FakeResp(429) if calls['n'] == 1 else ok
+
+    _patch_request(monkeypatch, fake_request)
+    assert request_with_retry('DELETE', 'https://api.example.com', base_delay=0) is ok
+    assert calls['n'] == 2
+
+
+def test_request_does_not_retry_4xx(monkeypatch):
+    calls = {'n': 0}
+
+    def fake_request(*a, **k):
+        calls['n'] += 1
+        return _FakeResp(404)
+
+    _patch_request(monkeypatch, fake_request)
+    with pytest.raises(requests.exceptions.HTTPError):
+        request_with_retry('PATCH', 'https://api.example.com', base_delay=0)
+    assert calls['n'] == 1  # no retry on a non-429 4xx
+
+
+def test_request_reraises_after_exhausting_attempts(monkeypatch):
+    calls = {'n': 0}
+
+    def fake_request(*a, **k):
+        calls['n'] += 1
+        raise requests.exceptions.ConnectionError('refused')
+
+    _patch_request(monkeypatch, fake_request)
+    with pytest.raises(requests.exceptions.ConnectionError):
+        request_with_retry('DELETE', 'https://api.example.com', max_attempts=3, base_delay=0)
+    assert calls['n'] == 3
