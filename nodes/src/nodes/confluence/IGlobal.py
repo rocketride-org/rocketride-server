@@ -21,14 +21,29 @@
 # SOFTWARE.
 # =============================================================================
 
+import os
+
 from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
     """Global configuration for the Confluence node.
 
-    No shared state to initialize — IEndpoint reads its config directly from
-    serviceConfig per run, matching the telegram/webhook source nodes.
+    No shared state beyond the dependency-install hook — IEndpoint reads its
+    config directly from serviceConfig per run, matching the telegram/webhook
+    source nodes.
     """
 
-    pass
+    def beginGlobal(self):
+        """Install the node's runtime requirements before any IEndpoint runs.
+
+        Heavy deps (``requests``, ``beautifulsoup4``) are imported lazily
+        inside the functions that use them so this hook has a chance to
+        install them first. Calling ``depends()`` at module top of
+        ``IEndpoint.py`` doesn't work because Python evaluates top-level
+        imports before any function body — matches telegram's pattern.
+        """
+        from depends import depends  # type: ignore
+
+        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        depends(requirements)

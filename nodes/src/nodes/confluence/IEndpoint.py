@@ -23,20 +23,15 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any, Callable, Dict
 
 from rocketlib import IEndpointBase, debug, getObject, monitorCompleted, monitorFailed, monitorStatus
 
-from depends import depends  # type: ignore
-
 from . import confluence_client
 from .converter import convert_storage_html
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
-
 _DEFAULT_PAGE_LIMIT = 25
+_DEFAULT_MAX_PAGES = 1000
 
 
 class IEndpoint(IEndpointBase):
@@ -94,7 +89,11 @@ class IEndpoint(IEndpointBase):
 
         Validates required configuration up front and bails out (logging via
         monitorStatus) rather than raising, so a misconfigured node fails
-        cleanly instead of crashing the engine.
+        cleanly instead of crashing the engine. A pagination error partway
+        through, however, is a genuine incomplete sweep, not a clean stop —
+        it's reported via monitorFailed and re-raised (see below) rather than
+        being logged as if the run had simply finished, so a half-built
+        pull doesn't read as a successful one downstream.
 
         Returns:
             None
@@ -111,24 +110,35 @@ class IEndpoint(IEndpointBase):
             limit = _DEFAULT_PAGE_LIMIT
         limit = max(1, min(250, limit))
 
+        try:
+            max_pages = int(config.get('maxPages') or _DEFAULT_MAX_PAGES)
+        except (TypeError, ValueError):
+            max_pages = _DEFAULT_MAX_PAGES
+        max_pages = max(1, max_pages)
+
         if not base_url or not email or not api_token or not space_key:
             monitorStatus('Confluence: missing required configuration (baseUrl/email/apiToken/spaceKey)')
             return
 
         session = confluence_client.build_session(email, api_token)
 
-        monitorStatus(f'Confluence: pulling space {space_key!r} from {base_url}')
+        monitorStatus(f'Confluence: pulling space {space_key!r} from {base_url} (max {max_pages} pages)')
         pulled = 0
 
         try:
-            for page in confluence_client.iter_space_pages(session, base_url, space_key, limit):
+            for page in confluence_client.iter_space_pages(session, base_url, space_key, limit, max_pages):
                 self._emit_page(page, space_key)
                 pulled += 1
         except Exception as e:
-            # A transient API hiccup ends this run rather than crashing the
-            # node; pages already emitted before the failure are unaffected.
-            debug(f'Confluence: failed to list pages for space {space_key!r}: {e}')
-            monitorStatus(f'Confluence: failed to list pages for space {space_key!r}: {e}')
+            # Pages already emitted before the failure stay emitted, but the
+            # sweep itself is incomplete — surface that as a real failure
+            # (not just a status line) so it doesn't look like a clean pull.
+            debug(f'Confluence: failed to list pages for space {space_key!r} after {pulled} page(s): {e}')
+            monitorFailed(0)
+            monitorStatus(
+                f'Confluence: INCOMPLETE — pulled {pulled} page(s) from space {space_key!r} before failing: {e}'
+            )
+            raise
 
         monitorStatus(f'Confluence: pulled {pulled} page(s) from space {space_key!r}')
 

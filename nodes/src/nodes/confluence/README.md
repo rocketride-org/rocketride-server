@@ -12,7 +12,9 @@ Each page is converted and emitted as one pipeline entry:
 
 This is a **source** node (`classType: ["source"]`, `register: "endpoint"`) — unlike the `reducto`/`llamaparse` document parsers, which passively receive an inbound byte stream, this node actively pulls from Confluence based on its own config. It performs one finite pass over the configured space per pipeline run rather than listening indefinitely.
 
-Failures are isolated per page: if one page fails to fetch or convert, it's logged and skipped, and the pull continues with the rest of the space, rather than aborting the whole run.
+Failures are isolated per page: if one page fails to convert, it's logged and skipped, and the pull continues with the rest of the space, rather than aborting the whole run. A pagination-level failure (a network error, or a rate limit that exhausts its retries) is different — pages already emitted stay emitted, but the sweep itself is incomplete, so that's reported as a failed run rather than a quiet status line, so a half-built pull doesn't look like a successful one.
+
+A `429` response is retried with bounded backoff honoring the `Retry-After` header before it's treated as a failure.
 
 ---
 
@@ -33,7 +35,8 @@ Failures are isolated per page: if one page fails to fetch or convert, it's logg
 | `email` | string | Atlassian account email used to generate the API token |
 | `apiToken` | string | Confluence Cloud API token |
 | `spaceKey` | string | The space to pull pages from (e.g. `ENG`) |
-| `limit` | number | Page batch size per API call while paginating (1-250, default 25) |
+| `limit` | number | Page batch size per API call while paginating (1-250, default 25). This is the API request size, not a cap on the total pull. |
+| `maxPages` | number | Hard cap on total pages pulled in one run (default 1000), regardless of how many more the space has |
 
 ---
 

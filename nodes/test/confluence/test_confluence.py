@@ -87,7 +87,7 @@ def test_run_bails_out_when_config_incomplete(monkeypatch):
     build_session.assert_not_called()
 
 
-def test_run_reports_pages_pulled_before_a_pagination_error(monkeypatch):
+def test_run_surfaces_pagination_error_as_a_failure(monkeypatch):
     ep = _make_endpoint(
         {'baseUrl': 'https://x.atlassian.net/wiki', 'email': 'a@b.com', 'apiToken': 'tok', 'spaceKey': 'ENG'}
     )
@@ -99,12 +99,54 @@ def test_run_reports_pages_pulled_before_a_pagination_error(monkeypatch):
 
     monkeypatch.setattr(endpoint_mod.confluence_client, 'build_session', lambda *a, **kw: MagicMock())
     monkeypatch.setattr(endpoint_mod.confluence_client, 'iter_space_pages', lambda *a, **kw: _flaky_pages())
+    endpoint_mod.monitorFailed.reset_mock()
 
-    # Should not raise — the failure is caught and reported, not propagated.
+    # An incomplete sweep must not look like a clean success: pages already
+    # emitted stay emitted, but the failure propagates rather than being
+    # swallowed into a plain status line.
+    with pytest.raises(RuntimeError, match='confluence 500'):
+        ep._run()
+
+    endpoint_mod.monitorFailed.assert_called_once_with(0)
+    final_call = endpoint_mod.monitorStatus.call_args_list[-1][0][0]
+    assert 'INCOMPLETE' in final_call
+    assert 'pulled 1 page' in final_call
+
+
+def test_run_passes_max_pages_from_config(monkeypatch):
+    ep = _make_endpoint(
+        {
+            'baseUrl': 'https://x.atlassian.net/wiki',
+            'email': 'a@b.com',
+            'apiToken': 'tok',
+            'spaceKey': 'ENG',
+            'maxPages': 5,
+        }
+    )
+
+    monkeypatch.setattr(endpoint_mod.confluence_client, 'build_session', lambda *a, **kw: MagicMock())
+    iter_pages = MagicMock(return_value=iter([]))
+    monkeypatch.setattr(endpoint_mod.confluence_client, 'iter_space_pages', iter_pages)
+
     ep._run()
 
-    final_call = endpoint_mod.monitorStatus.call_args_list[-1][0][0]
-    assert 'pulled 1 page' in final_call
+    args, _ = iter_pages.call_args
+    assert args[-1] == 5
+
+
+def test_run_defaults_max_pages_when_unset(monkeypatch):
+    ep = _make_endpoint(
+        {'baseUrl': 'https://x.atlassian.net/wiki', 'email': 'a@b.com', 'apiToken': 'tok', 'spaceKey': 'ENG'}
+    )
+
+    monkeypatch.setattr(endpoint_mod.confluence_client, 'build_session', lambda *a, **kw: MagicMock())
+    iter_pages = MagicMock(return_value=iter([]))
+    monkeypatch.setattr(endpoint_mod.confluence_client, 'iter_space_pages', iter_pages)
+
+    ep._run()
+
+    args, _ = iter_pages.call_args
+    assert args[-1] == endpoint_mod._DEFAULT_MAX_PAGES
 
 
 # ---------------------------------------------------------------------------

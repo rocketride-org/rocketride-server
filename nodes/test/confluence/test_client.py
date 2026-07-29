@@ -28,11 +28,14 @@ _spec.loader.exec_module(client)
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200, headers=None):
         self._payload = payload
+        self.status_code = status_code
+        self.headers = headers or {}
 
     def raise_for_status(self):
-        pass
+        if self.status_code >= 400:
+            raise requests.HTTPError(f'{self.status_code} error')
 
     def json(self):
         return self._payload
@@ -57,6 +60,67 @@ def test_extract_cursor_from_next_link():
 
 def test_extract_cursor_missing_returns_empty():
     assert client.extract_cursor('https://example.atlassian.net/wiki/api/v2/pages?limit=25') == ''
+
+
+# ---------------------------------------------------------------------------
+# _get_with_retry: 429 + Retry-After handling
+# ---------------------------------------------------------------------------
+
+
+def test_get_with_retry_returns_immediately_on_success():
+    fake_session = MagicMock()
+    fake_session.get.return_value = _FakeResponse({'ok': True})
+
+    response = client._get_with_retry(fake_session, 'https://x/pages', {})
+
+    assert response.status_code == 200
+    fake_session.get.assert_called_once()
+
+
+def test_get_with_retry_retries_on_429_honoring_retry_after(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(client.time, 'sleep', lambda seconds: sleeps.append(seconds))
+
+    responses = [
+        _FakeResponse({}, status_code=429, headers={'Retry-After': '2'}),
+        _FakeResponse({'ok': True}, status_code=200),
+    ]
+    fake_session = MagicMock()
+    fake_session.get.side_effect = lambda *a, **kw: responses.pop(0)
+
+    response = client._get_with_retry(fake_session, 'https://x/pages', {})
+
+    assert response.status_code == 200
+    assert sleeps == [2.0]
+    assert fake_session.get.call_count == 2
+
+
+def test_get_with_retry_caps_backoff_at_max_retry_after(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(client.time, 'sleep', lambda seconds: sleeps.append(seconds))
+
+    responses = [
+        _FakeResponse({}, status_code=429, headers={'Retry-After': '9999'}),
+        _FakeResponse({'ok': True}, status_code=200),
+    ]
+    fake_session = MagicMock()
+    fake_session.get.side_effect = lambda *a, **kw: responses.pop(0)
+
+    client._get_with_retry(fake_session, 'https://x/pages', {})
+
+    assert sleeps == [client.MAX_RETRY_AFTER_SECONDS]
+
+
+def test_get_with_retry_gives_up_after_max_attempts(monkeypatch):
+    monkeypatch.setattr(client.time, 'sleep', lambda seconds: None)
+
+    fake_session = MagicMock()
+    fake_session.get.return_value = _FakeResponse({}, status_code=429, headers={'Retry-After': '1'})
+
+    response = client._get_with_retry(fake_session, 'https://x/pages', {})
+
+    assert response.status_code == 429
+    assert fake_session.get.call_count == client.MAX_RETRY_ATTEMPTS
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +178,24 @@ def test_iter_space_pages_follows_cursor_until_exhausted():
     _, third_kwargs = fake_session.get.call_args_list[2]
     assert third_kwargs['params']['cursor'] == 'next-token'
     assert 'space-key' not in third_kwargs['params']
+
+
+def test_iter_space_pages_stops_at_max_pages_cap():
+    page1 = {
+        'results': [{'id': '1'}, {'id': '2'}],
+        '_links': {'next': '/wiki/api/v2/spaces/999/pages?cursor=next-token&limit=25'},
+    }
+    page2 = {'results': [{'id': '3'}], '_links': {}}
+
+    responses = [_space_lookup_response(space_id='999'), _FakeResponse(page1), _FakeResponse(page2)]
+    fake_session = MagicMock()
+    fake_session.get.side_effect = lambda *a, **kw: responses.pop(0)
+
+    pages = list(client.iter_space_pages(fake_session, 'https://example.atlassian.net/wiki', 'ENG', 25, max_pages=1))
+
+    assert [p['id'] for p in pages] == ['1']
+    # Must not fetch the second page of results once the cap is hit mid-batch
+    assert fake_session.get.call_count == 2
 
 
 def test_iter_space_pages_raises_when_space_key_unresolvable():

@@ -29,25 +29,59 @@ what lets nodes/test/confluence/test_live.py exercise the real Confluence API
 without a running engine. Raises on request/HTTP failure rather than
 swallowing errors; IEndpoint.py is responsible for catching around the
 pagination loop and reporting failures the way the engine expects.
+
+``requests`` is imported lazily inside build_session() rather than at module
+top, so merely importing this module never requires it to be installed —
+IGlobal.beginGlobal() is what installs it via depends() before any of this
+runs for real; only actually building a session does.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterator, Optional
+import time
+from typing import TYPE_CHECKING, Any, Dict, Iterator, Optional
 from urllib.parse import parse_qs, urlparse
 
-import requests
-from requests.auth import HTTPBasicAuth
+if TYPE_CHECKING:
+    import requests
 
 REQUEST_TIMEOUT_SECONDS = 30
+MAX_RETRY_ATTEMPTS = 3
+MAX_RETRY_AFTER_SECONDS = 30
 
 
-def build_session(email: str, api_token: str) -> requests.Session:
+def build_session(email: str, api_token: str) -> 'requests.Session':
     """Build a requests Session pre-authenticated for Confluence Cloud (Basic auth)."""
+    import requests
+    from requests.auth import HTTPBasicAuth
+
     session = requests.Session()
     session.auth = HTTPBasicAuth(email, api_token)
     session.headers.update({'Accept': 'application/json'})
     return session
+
+
+def _get_with_retry(session: 'requests.Session', url: str, params: Dict[str, Any]) -> 'requests.Response':
+    """GET with bounded retry on 429, honoring the ``Retry-After`` header.
+
+    Confluence Cloud rate-limits aggressively; a naive raise on the first 429
+    would abort an otherwise-healthy pull. Retries up to MAX_RETRY_ATTEMPTS
+    times, sleeping for the server-specified Retry-After (capped at
+    MAX_RETRY_AFTER_SECONDS so a misbehaving response can't stall the node
+    indefinitely). Any other status is left to raise_for_status() as before.
+    """
+    for attempt in range(MAX_RETRY_ATTEMPTS):
+        response = session.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
+        if response.status_code != 429 or attempt == MAX_RETRY_ATTEMPTS - 1:
+            return response
+
+        try:
+            delay = min(float(response.headers.get('Retry-After', 1)), MAX_RETRY_AFTER_SECONDS)
+        except (TypeError, ValueError):
+            delay = 1.0
+        time.sleep(delay)
+
+    return response
 
 
 def extract_cursor(next_link: str) -> str:
@@ -56,7 +90,7 @@ def extract_cursor(next_link: str) -> str:
     return values[0] if values else ''
 
 
-def resolve_space_id(session: requests.Session, base_url: str, space_key: str) -> str:
+def resolve_space_id(session: 'requests.Session', base_url: str, space_key: str) -> str:
     """Resolve a Confluence space key to its numeric space ID.
 
     Confluence REST API v2 has no ``space-key`` filter on ``/api/v2/pages`` —
@@ -67,7 +101,7 @@ def resolve_space_id(session: requests.Session, base_url: str, space_key: str) -
         requests.RequestException: on a network failure or non-2xx response.
         ValueError: if no space with that key is visible to this account.
     """
-    response = session.get(f'{base_url}/api/v2/spaces', params={'keys': space_key}, timeout=REQUEST_TIMEOUT_SECONDS)
+    response = _get_with_retry(session, f'{base_url}/api/v2/spaces', {'keys': space_key})
     response.raise_for_status()
     results = response.json().get('results', [])
     if not results:
@@ -75,20 +109,29 @@ def resolve_space_id(session: requests.Session, base_url: str, space_key: str) -
     return str(results[0]['id'])
 
 
-def iter_space_pages(session: requests.Session, base_url: str, space_key: str, limit: int) -> Iterator[Dict[str, Any]]:
+def iter_space_pages(
+    session: 'requests.Session', base_url: str, space_key: str, limit: int, max_pages: Optional[int] = None
+) -> Iterator[Dict[str, Any]]:
     """Yield every page dict in the space, following cursor pagination.
 
     Resolves the space key to a numeric space ID (see resolve_space_id), then
     calls Confluence REST API v2's ``GET /api/v2/spaces/{id}/pages``,
     requesting storage-format bodies inline so no second request per page is
     needed. Follows the ``_links.next`` cursor until the API stops returning
-    one.
+    one, or until ``max_pages`` total pages have been yielded — a hard cap so
+    a large corporate space doesn't get fully re-ingested (and re-embedded
+    downstream) on every run by default.
+
+    A 429 response is retried with bounded backoff honoring ``Retry-After``
+    (see _get_with_retry) before this raises.
 
     Args:
         session: Pre-authenticated HTTP session (see build_session).
         base_url: Confluence wiki base URL, no trailing slash.
         space_key: The space to pull pages from.
         limit: Page batch size per API call.
+        max_pages: Stop after yielding this many pages total, regardless of
+            how many more the space has. ``None`` means no cap.
 
     Yields:
         dict: Raw Confluence page objects (id, title, body.storage.value).
@@ -102,18 +145,21 @@ def iter_space_pages(session: requests.Session, base_url: str, space_key: str, l
     space_id = resolve_space_id(session, base_url, space_key)
 
     cursor: Optional[str] = None
+    yielded = 0
     while True:
         params: Dict[str, Any] = {'limit': limit, 'body-format': 'storage'}
         if cursor:
             params['cursor'] = cursor
 
-        response = session.get(
-            f'{base_url}/api/v2/spaces/{space_id}/pages', params=params, timeout=REQUEST_TIMEOUT_SECONDS
-        )
+        response = _get_with_retry(session, f'{base_url}/api/v2/spaces/{space_id}/pages', params)
         response.raise_for_status()
         payload = response.json()
 
-        yield from payload.get('results', [])
+        for page in payload.get('results', []):
+            if max_pages is not None and yielded >= max_pages:
+                return
+            yield page
+            yielded += 1
 
         next_link = payload.get('_links', {}).get('next')
         cursor = extract_cursor(next_link) if next_link else None

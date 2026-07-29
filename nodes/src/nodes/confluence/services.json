@@ -114,14 +114,21 @@
 		"confluence.limit": {
 			"type": "number",
 			"title": "Page Batch Size",
-			"description": "Number of pages to request per API call while paginating through the space (1-250)",
+			"description": "Number of pages to request per API call while paginating through the space (1-250). This is the API page size, not a cap on the total pull — see Max Pages for that.",
 			"default": 25,
+			"optional": true
+		},
+		"confluence.maxPages": {
+			"type": "number",
+			"title": "Max Pages",
+			"description": "Hard cap on the total number of pages pulled in one run, regardless of how many more the space has. Keeps a large space from being fully re-ingested (and re-embedded downstream) on every run by default.",
+			"default": 1000,
 			"optional": true
 		},
 		"Pipe.source.parameters": {
 			"section": "parameters",
 			"title": "Confluence Configuration",
-			"properties": ["confluence.baseUrl", "confluence.email", "confluence.apiToken", "confluence.spaceKey", "confluence.limit"]
+			"properties": ["confluence.baseUrl", "confluence.email", "confluence.apiToken", "confluence.spaceKey", "confluence.limit", "confluence.maxPages"]
 		}
 	},
 	//

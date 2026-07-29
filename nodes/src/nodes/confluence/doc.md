@@ -17,7 +17,7 @@ Each page becomes one pipeline entry:
 - The page body is converted from Confluence storage-format XHTML to plain text and written to the **text** lane.
 - Any tables in the body are extracted, rendered as Markdown, and written to the **table** lane (removed from the text output first, so content isn't duplicated).
 
-This is a **source** node — it pulls from Confluence based on its own config rather than reacting to inbound pipeline data, and performs one finite pass over the space per run. A failure on one page is logged and skipped rather than aborting the whole pull.
+This is a **source** node — it pulls from Confluence based on its own config rather than reacting to inbound pipeline data, and performs one finite pass over the space per run, capped by **Max Pages** (default 1000). A failure on one page is logged and skipped rather than aborting the whole pull; a failure while paginating (network error, or a rate limit that exhausts its retries) is reported as an incomplete run rather than a quiet status line. A `429` is retried with bounded backoff honoring `Retry-After` first.
 
 ## Lanes
 
