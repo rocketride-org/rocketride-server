@@ -1,5 +1,5 @@
 gliner
 # onnxruntime is an indirect dep (via gliner), not imported here.
 # Pin 1.20.1 to match the one shared install (rtmlib needs exactly that).
-onnxruntime-gpu==1.20.1; platform_system != 'Darwin'
+onnxruntime-gpu==1.20.2; platform_system != 'Darwin'
 onnxruntime==1.20.1; platform_system == 'Darwin'

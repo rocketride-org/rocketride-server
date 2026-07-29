@@ -877,7 +877,7 @@ onnxruntime==1.20.1
     #   chromadb
     #   faster-whisper
     #   gliner
-onnxruntime-gpu==1.20.1 ; sys_platform != 'darwin'
+onnxruntime-gpu==1.20.2 ; sys_platform != 'darwin'
     # via
     #   -r nodes/src/nodes/anonymize/requirements.txt
     #   -r nodes/src/nodes/audio_transcribe/requirements.txt
