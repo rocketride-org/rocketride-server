@@ -32,8 +32,6 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-from bs4 import BeautifulSoup
-
 
 def convert_storage_html(html: str) -> Tuple[str, List[str]]:
     """Convert a Confluence storage-format page body into (text, tables).
@@ -41,9 +39,18 @@ def convert_storage_html(html: str) -> Tuple[str, List[str]]:
     Tables are extracted and removed from the body first, so their cell
     text isn't duplicated in the plain-text output; each table is rendered
     as an independent Markdown table string.
+
+    bs4 is imported here rather than at module level so that merely
+    importing this module (as test collection and IEndpoint.py's
+    `from .converter import convert_storage_html` both do) never requires
+    beautifulsoup4 to be installed — only actually calling this function
+    does. The engine installs it at runtime via requirements.txt/depends(),
+    but the bare pytest-collection step some CI jobs run does not.
     """
     if not html or not html.strip():
         return '', []
+
+    from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(html, 'html.parser')
 

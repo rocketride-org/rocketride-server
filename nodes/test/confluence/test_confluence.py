@@ -20,6 +20,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# _emit_page calls the real convert_storage_html (which needs bs4) on real
+# HTML in several tests below — skip cleanly rather than failing with a
+# confusing assertion error if bs4 truly isn't installed.
+pytest.importorskip('bs4')
+
 _NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))

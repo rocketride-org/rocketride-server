@@ -19,6 +19,14 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
+# converter.py now imports bs4 lazily (inside convert_storage_html), so
+# importing the module never requires it — but these tests all call the
+# function, so skip cleanly here rather than erroring if bs4 truly isn't
+# installed in whatever environment runs this file.
+pytest.importorskip('bs4')
+
 _NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
