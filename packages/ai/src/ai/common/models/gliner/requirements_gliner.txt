@@ -3,7 +3,11 @@ gliner
 # needed for gliner_ko
 python-mecab-ko
 # onnxruntime is an indirect dep (via gliner), not imported here.
-# Pin 1.20.1 to match the one shared install (rtmlib needs exactly that).
-onnxruntime-gpu==1.20.1; platform_system != 'Darwin'
-onnxruntime==1.20.1; platform_system == 'Darwin'
+# One shared version across every onnxruntime consumer, so the ~200 MB runtime installs once.
+# rtmlib/gliner declare it unpinned and faster-whisper wants <2,>=1.14 -- the exact number is
+# ours to choose, but all these files must agree. 1.20.1 was withdrawn from PyPI for the -gpu
+# build (the CPU build of it survives), which is why this moved; 1.20.2 is the mirror trap --
+# it exists only for -gpu, so pinning it would break macOS.
+onnxruntime-gpu==1.22.0; platform_system != 'Darwin'
+onnxruntime==1.22.0; platform_system == 'Darwin'
 
