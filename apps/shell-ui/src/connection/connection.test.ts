@@ -416,6 +416,62 @@ test('onConnected ignores stale callbacks but accepts the active authenticated c
 	}
 });
 
+test('onConnectError latches a session-expired auth failure when a background re-login is rejected', async () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const originalAttach = RocketRideClient.prototype.attach;
+
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { origin: 'https://shell.example.test' }, addEventListener: () => {} },
+	});
+	RocketRideClient.prototype.attach = async () => {};
+
+	try {
+		const { manager, emitted } = createTestManager();
+		const clearedTokens: number[] = [];
+		manager.clearToken = () => { clearedTokens.push(1); };
+		manager.initialize();
+		const client = manager.client;
+		assert.ok(client !== null && '_callerOnConnectError' in client);
+		const onConnectError = (client as unknown as {
+			_callerOnConnectError: (error: Error) => Promise<void> | void;
+		})._callerOnConnectError;
+
+		manager.lifecycleOwner = {
+			key: 'active', generation: 0, credential: 'token', promise: Promise.resolve(null), connectedPublished: true,
+		};
+		manager.accountInfo = { userId: 'user-1' } as ConnectResult;
+
+		// The SDK reports a terminal background auth rejection and stops
+		// retrying — the shell must latch the session-expired banner, clear
+		// the dead token, and drop the stale identity.
+		await onConnectError(new AuthenticationException({ message: 'Invalid or revoked API key' }));
+		assert.equal(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+		assert.deepEqual(manager.connectionStatus.lastFailure, {
+			kind: 'auth',
+			lastError: 'Your session has expired — please sign in again.',
+			errorKind: 'session',
+		});
+		assert.equal(clearedTokens.length, 1);
+		assert.equal(manager.accountInfo, undefined);
+		assert.equal(manager.connectionStatus.retryAttempt, 0);
+
+		// A plain transport failure keeps the existing retry messaging.
+		manager.connectionStatus.lastFailure = undefined;
+		manager.connectionStatus.state = ConnectionState.CONNECTING;
+		await onConnectError(new Error('socket hang up'));
+		assert.equal(manager.connectionStatus.retryAttempt, 1);
+		assert.equal(manager.connectionStatus.progressMessage, 'Reconnecting…');
+		assert.equal(clearedTokens.length, 1);
+		assert.ok(emitted.some(({ event, payload }) =>
+			event === 'shell:statusMessage' && (payload as { message: string | null }).message === 'Reconnecting…'));
+	} finally {
+		RocketRideClient.prototype.attach = originalAttach;
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	}
+});
+
 test('withTimeout waits for cancellation before rejecting and suppresses late login completion', async () => {
 	const realSetTimeout = globalThis.setTimeout;
 	const realClearTimeout = globalThis.clearTimeout;

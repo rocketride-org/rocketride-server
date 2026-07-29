@@ -361,8 +361,18 @@ export class ConnectionManager implements IConnectionManager {
 			},
 
 			// Fired on each failed connection attempt before SDK retries
-			onConnectError: () => {
+			onConnectError: (error) => {
 				if (!this.hasCurrentLifecycleOwner()) return;
+				// A background re-login rejection is terminal: the SDK downgrades
+				// to an anonymous attachment and stops retrying. Without latching
+				// here, a token revoked mid-session leaves the UI showing
+				// "Reconnecting\u2026" forever with a dead token still stored.
+				if (error instanceof AuthenticationException) {
+					if (this.handleStoredTokenFailure(error)) this.clearToken();
+					this.accountInfo = undefined;
+					this.emit('shell:statusMessage', { message: null });
+					return;
+				}
 				this.updateConnectionStatus({
 					progressMessage: 'Reconnecting\u2026',
 					retryAttempt: this.connectionStatus.retryAttempt + 1,
