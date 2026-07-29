@@ -25,6 +25,7 @@
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
 
+import hashlib
 import os
 import re
 from typing import Any, Dict
@@ -45,8 +46,9 @@ class IGlobal(StoreGlobalBase):
         return Store(logical_type, conn_config, bag)
 
     def _sub_key(self) -> str:
-        """Return the transform sub-key: host/port/collection."""
-        return f'{self.store.host}/{self.store.port}/{self.store.collection}'
+        """Return the transform sub-key without leaking the Pinecone API key."""
+        account = hashlib.sha256((self.store.apikey or '').encode()).hexdigest()[:12]
+        return f'{account}/{self.store.profile}/{self.store.collection}'
 
     def _probe_connection(self, config: Dict[str, Any]) -> None:
         """
