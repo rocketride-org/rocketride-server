@@ -47,9 +47,9 @@ const styles = {
 export interface ConnectionErrorBannerProps {
 	/** Override the status-derived failure message for other connection errors. */
 	message?: string;
-	/** Override retry handling; defaults to ConnectionManager.reconnect(). */
+	/** Override retry handling; defaults to a full reload through bootstrap. */
 	onRetry?: () => void | Promise<void>;
-	/** Override sign-in handling; defaults to ConnectionManager.startOAuth(false). */
+	/** Override sign-in handling; defaults to emitting shell:loginRequest. */
 	onSignIn?: () => void | Promise<void>;
 }
 
@@ -85,7 +85,13 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 			// as the default action.
 			window.location.reload();
 		})
-		: onSignIn ?? (() => ConnectionManager.getInstance().startOAuth(false));
+		: onSignIn ?? (() => {
+			// Route through the shell's edition-aware login dispatcher: SaaS
+			// starts OAuth, OSS opens the API-key form. Calling startOAuth()
+			// directly here would throw "CloudAuthProvider not initialized" on
+			// OSS deployments and turn this button into a silent no-op.
+			ConnectionManager.getInstance().emit('shell:loginRequest', {});
+		});
 
 	return (
 		<div style={styles.banner} role="alert">
