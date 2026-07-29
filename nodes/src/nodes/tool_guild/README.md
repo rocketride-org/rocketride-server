@@ -82,10 +82,11 @@ Returns `{ success, session_id, status }`, where `status` is `running`, `complet
 | Parameter | Required | Description |
 |---|---|---|
 | `session_id` | yes | Id of the session to read. |
-| `limit` | no | Max events to return (default 100). |
+| `limit` | no | Max events to return (default 100, capped at 1000). |
 
-Returns `{ success, events, output }`. Guild's own default page size is 20, which truncates a
-long transcript, so this node always requests more.
+Returns `{ success, events, output }`. Events are oldest-first (the answer is last), so when the
+transcript is longer than `limit` the **most recent** `limit` events are returned — the answer is
+never dropped. The node follows the endpoint's pagination to reach the tail.
 
 Errors are raised, never returned as error dicts: `ValueError` for bad input or missing
 configuration, `RuntimeError` for API and transport failures. The engine converts a raised

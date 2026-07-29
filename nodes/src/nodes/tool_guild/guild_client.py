@@ -135,11 +135,11 @@ _OUTPUT_EVENT_TYPES = (
 # ``data`` leads the list; the others cover plainer shapes.
 _TEXT_FIELDS = ('data', 'text', 'content', 'output', 'message', 'answer', 'result', 'body')
 
-# Event ``type`` values that are never the agent's final answer. VERIFIED from a
-# live transcript: the user echo, the trigger/system banners, the runtime/llm
-# span markers, and the intermediate progress step all carry text but none of it
-# is the answer. The output fallback skips these so a session that produced no
-# real answer yields '' rather than emitting one of them as the reply.
+# Event ``type`` values that are never the agent's final answer, matched exactly
+# (not by prefix). VERIFIED from a live transcript: the user echo, the trigger and
+# system banners, the runtime/llm span markers, and the intermediate progress step
+# all carry text but none of it is the answer. The output fallback skips these so a
+# session that produced no real answer yields '' rather than emitting one as the reply.
 _NOISE_EVENT_TYPES = frozenset(
     {
         'user_message',
@@ -322,44 +322,66 @@ def get_session_events(
     verify: bool = True,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> List[Dict[str, Any]]:
-    """Fetch a session's event log (its transcript), following pagination.
+    """Return up to ``limit`` events from a session's transcript.
 
-    The events endpoint is paginated and returns events **oldest-first**, so the
-    agent's answer is on the last page. ``limit`` is the page size; pages are
-    followed via ``offset`` until the response reports no more, bounded by
-    ``MAX_EVENT_LIMIT`` so a runaway transcript can't loop forever. Reading only
-    the first page would drop the answer of any run past one page.
+    The endpoint is paginated and **oldest-first**, so the agent's answer is the
+    last event. ``limit`` caps how many events are returned (itself bounded by
+    ``MAX_EVENT_LIMIT``); when the transcript is longer, the **most recent**
+    ``limit`` are returned so the answer is never dropped. When the API reports
+    ``total_count`` the tail is fetched directly; otherwise pages are followed
+    forward (bounded by ``MAX_EVENT_LIMIT``) and trimmed to the tail.
     """
+    cap = max(1, min(int(limit or DEFAULT_EVENT_LIMIT), MAX_EVENT_LIMIT))
     path = f'/api/sessions/{safe_segment(session_id, "session_id")}/events'
-    page_size = max(1, min(int(limit or DEFAULT_EVENT_LIMIT), MAX_EVENT_LIMIT))
-    events: List[Dict[str, Any]] = []
-    offset = 0
-    while len(events) < MAX_EVENT_LIMIT:
-        data = call(
+
+    def fetch(offset: int) -> Any:
+        return call(
             base_url,
             key_id,
             key_secret,
             'GET',
             path,
-            params={'limit': page_size, 'offset': offset},
+            params={'limit': cap, 'offset': offset},
             verify=verify,
             timeout=timeout,
         )
+
+    first = fetch(0)
+    total = _total_count(first)
+    if isinstance(total, int) and total > cap:
+        # Oldest-first: the answer is in the tail, so seek straight to it rather
+        # than paging through the whole transcript to reach the last events.
+        return _as_event_list(fetch(max(0, total - cap)))[-cap:]
+
+    # total unknown or <= cap: page forward (bounded), keep the most recent cap.
+    events: List[Dict[str, Any]] = list(_as_event_list(first))
+    data = first
+    while len(events) < MAX_EVENT_LIMIT and _has_more(data, len(events)):
+        data = fetch(len(events))
         page = _as_event_list(data)
         if not page:
             break
         events.extend(page)
-        if not _has_more(data, offset, len(page)):
-            break
-        offset += len(page)
-    return events[:MAX_EVENT_LIMIT]
+    return events[-cap:]
 
 
-def _has_more(data: Any, offset: int, page_len: int) -> bool:
-    """Whether another page of events follows, from the ``pagination`` block.
+def _total_count(data: Any) -> Optional[int]:
+    """The ``pagination.total_count`` of an events response, or None."""
+    if isinstance(data, dict):
+        pagination = data.get('pagination')
+        if isinstance(pagination, dict) and isinstance(pagination.get('total_count'), int):
+            return pagination['total_count']
+    return None
 
-    Reads ``has_more`` when present; else infers from ``total_count`` vs what has
-    been read; else falls back to "a full page probably has a successor".
+
+def _has_more(data: Any, read: int) -> bool:
+    """Whether more events follow after ``read`` have been accumulated.
+
+    From the ``pagination`` block: ``has_more`` when present, else ``total_count``
+    vs ``read``, else a full page (page length == the requested ``limit``) implies
+    a successor. With no ``pagination`` block at all, returns False — a defensive
+    stop; the endpoint always paginates, and the caller is bounded by
+    ``MAX_EVENT_LIMIT`` regardless.
     """
     if isinstance(data, dict):
         pagination = data.get('pagination')
@@ -368,12 +390,11 @@ def _has_more(data: Any, offset: int, page_len: int) -> bool:
             if isinstance(more, bool):
                 return more
             total = pagination.get('total_count')
-            limit = pagination.get('limit')
             if isinstance(total, int):
-                read = offset + page_len
                 return read < total
+            limit = pagination.get('limit')
             if isinstance(limit, int) and limit > 0:
-                return page_len >= limit
+                return len(_as_event_list(data)) >= limit
     return False
 
 

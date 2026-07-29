@@ -919,24 +919,40 @@ def _events_page(items, *, has_more, limit=100, offset=0, total=None):
     return _FakeResponse(200, body)
 
 
-def test_get_session_events_follows_pagination_to_the_last_page():
+def test_get_session_events_pages_forward_and_returns_the_tail():
     p1 = [{'type': 'user_message', 'content': 'q'}, {'type': 'runtime_start', 'content': 'text'}]
     p2 = [{'type': 'agent_notification_message', 'content': {'data': 'the answer', 'type': 'text'}}]
     gc._fake_requests.responses = [
         _events_page(p1, has_more=True, offset=0),
         _events_page(p2, has_more=False, offset=2),
     ]
-    events = gc.get_session_events('https://app.guild.ai', 'k', 's', 'sess-1', limit=2)
-    assert len(events) == 3
-    # both pages fetched, and the answer (last page) is present
+    # limit=3 keeps the whole transcript; the answer (last page) is present.
+    events = gc.get_session_events('https://app.guild.ai', 'k', 's', 'sess-1', limit=3)
     assert gc.extract_output(events) == 'the answer'
-    # second request carried the advancing offset
-    assert gc._fake_requests.calls[1]['params']['offset'] == 2
+    assert gc._fake_requests.calls[1]['params']['offset'] == 2  # advancing offset
+
+
+def test_get_session_events_seeks_the_tail_when_total_exceeds_limit():
+    """A transcript past `limit` must return the MOST RECENT events (the answer is
+    last), not the oldest — the earlier bug returned events[:cap] and dropped it.
+    """
+    answer = [{'type': 'agent_notification_message', 'content': {'data': 'tail answer', 'type': 'text'}}]
+    gc._fake_requests.responses = [
+        # first probe reports a long transcript...
+        _events_page([{'type': 'user_message', 'content': 'q'}], has_more=True, limit=1, offset=0, total=1400),
+        # ...so the node seeks straight to the tail page and finds the answer there.
+        _events_page(answer, has_more=False, limit=1, offset=1399, total=1400),
+    ]
+    events = gc.get_session_events('https://app.guild.ai', 'k', 's', 'sess-1', limit=1)
+    assert gc.extract_output(events) == 'tail answer'
+    assert gc._fake_requests.calls[1]['params']['offset'] == 1399  # 1400 - 1
 
 
 def test_get_session_events_single_page_makes_one_request():
     gc._fake_requests.responses = [
-        _events_page([{'type': 'agent_notification_message', 'content': {'data': 'a', 'type': 'text'}}], has_more=False)
+        _events_page(
+            [{'type': 'agent_notification_message', 'content': {'data': 'a', 'type': 'text'}}], has_more=False, total=1
+        )
     ]
     events = gc.get_session_events('https://app.guild.ai', 'k', 's', 'sess-1')
     assert len(events) == 1
@@ -944,17 +960,23 @@ def test_get_session_events_single_page_makes_one_request():
 
 
 def test_get_session_events_stops_at_max_event_limit():
-    # every page says has_more; the cap must stop the loop.
+    # every page says has_more and no total_count; the hard cap must stop the loop.
     page = [{'type': 'x', 'content': str(i)} for i in range(100)]
     gc._fake_requests.responses = [_events_page(page, has_more=True, offset=i * 100) for i in range(20)]
     events = gc.get_session_events('https://app.guild.ai', 'k', 's', 'sess-1', limit=100)
     assert len(events) <= gc.MAX_EVENT_LIMIT
+    assert len(gc._fake_requests.calls) <= 11  # ~10 pages of 100 to reach the cap, not 20
 
 
-def test_has_more_infers_from_total_count_when_flag_absent():
-    data = {'items': [], 'pagination': {'total_count': 250, 'limit': 100}}
-    assert gc._has_more(data, offset=0, page_len=100) is True
-    assert gc._has_more(data, offset=200, page_len=50) is False
+def test_has_more_reads_flag_then_total_count():
+    assert gc._has_more({'pagination': {'has_more': True}}, read=0) is True
+    assert gc._has_more({'pagination': {'has_more': False}}, read=0) is False
+    # no flag -> total_count vs read
+    data = {'items': [], 'pagination': {'total_count': 250}}
+    assert gc._has_more(data, read=100) is True
+    assert gc._has_more(data, read=250) is False
+    # no pagination block at all -> defensive stop
+    assert gc._has_more({'items': [{'a': 1}]}, read=1) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1132,3 +1154,27 @@ def test_get_session_events_tool_passes_bounded_limit(monkeypatch):
     out = inst.get_session_events({'session_id': 'sess-9', 'limit': 5})
     assert out['output'] == 'ans'
     assert captured['limit'] == 5
+
+
+# ---------------------------------------------------------------------------
+# Credential env-var mapping — the one shared-framework change this node needed
+# (_ENV_ATTR_MAP gained KEY_ID / KEY_SECRET). Pins that the smoke test's
+# credential env vars resolve to the node's real config fields.
+# ---------------------------------------------------------------------------
+
+
+def test_credential_env_vars_map_to_config_fields():
+    _fw_src = _NODE_DIR.parent.parent.parent / 'test'
+    added = str(_fw_src) not in sys.path
+    if added:
+        sys.path.insert(0, str(_fw_src))
+    try:
+        from framework.pipeline import _parse_credential_env_var
+    finally:
+        if added:
+            sys.path.remove(str(_fw_src))
+    assert _parse_credential_env_var('ROCKETRIDE_GUILD_KEY_ID', 'tool_guild') == 'apiKeyId'
+    assert _parse_credential_env_var('ROCKETRIDE_GUILD_KEY_SECRET', 'tool_guild') == 'apiKeySecret'
+    # the already-mapping ones still resolve
+    assert _parse_credential_env_var('ROCKETRIDE_GUILD_OWNER', 'tool_guild') == 'owner'
+    assert _parse_credential_env_var('ROCKETRIDE_GUILD_WORKSPACE', 'tool_guild') == 'workspace'

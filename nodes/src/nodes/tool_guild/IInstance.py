@@ -206,8 +206,9 @@ class IInstance(IInstanceBase):
                 'session_id': {'type': 'string', 'description': 'Id of the Guild session to read.'},
                 'limit': {
                     'type': 'integer',
-                    'description': 'Max events to return (default 100). Guild defaults to 20, which truncates '
-                    'a long transcript.',
+                    'description': 'Max events to return (default 100, capped at 1000). Events are oldest-first, '
+                    'so when the transcript is longer than this the most recent events (including the '
+                    'answer) are returned.',
                 },
             },
         },
