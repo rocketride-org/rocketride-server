@@ -41,6 +41,7 @@ from rocketlib import IInstanceBase, tool_function
 from ai.common.utils import normalize_tool_input, require_dict, require_str
 
 from .insforge_client import (
+    DEFAULT_LIMIT,
     FILTER_OPERATORS,
     MAX_LIMIT,
     call,
@@ -370,7 +371,7 @@ class IInstance(IInstanceBase):
                 'search': {'type': 'string', 'description': 'Substring to match against object keys.'},
                 'limit': {
                     'type': 'integer',
-                    'description': 'Maximum objects to return (default 100, max 1000).',
+                    'description': f'Maximum objects to return (default {DEFAULT_LIMIT}, max {MAX_LIMIT}).',
                 },
                 'offset': {'type': 'integer', 'description': 'Objects to skip, for paging.'},
             },

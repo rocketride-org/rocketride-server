@@ -70,7 +70,9 @@ Filters use PostgREST's convention, expressed as an object mapping a column to a
 { "status": "eq.active", "views": "gte.100" }
 ```
 
-Supported operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `in`, `is`. Use `{"id": "in.(1,2,3)"}` for set membership and `{"deleted_at": "is.null"}` for null tests. Anything outside this grammar is rejected with a message naming the offending column, rather than being silently dropped.
+Supported operators: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`, `in`, `is`. Use `{"id": "in.(1,2,3)"}` for set membership and `{"deleted_at": "is.null"}` for null tests.
+
+The column, the operator, and the presence of a value are all checked before the request goes out, as are the two operator-specific shapes: `in` must carry a parenthesised set, and `is` must name `null`, `true`, `false`, or `unknown`. Each failure names the offending column instead of being silently dropped. The *value* of the other operators is passed through for Postgres to interpret, so a type mismatch surfaces as a `422` from the server rather than a local error.
 
 ---
 
@@ -93,7 +95,7 @@ HTTP failures are mapped to messages an agent can act on rather than raw stack t
 - `403` — "The key may lack permission, or a row-level security policy blocked it."
 - `404` — "Check the table, bucket, or object key."
 - `422` — "Check column names and value types."
-- `429` / `5xx` — retried with exponential backoff, then surfaced as retryable.
+- `429` / `5xx` — retried with exponential backoff on `GET`, `PATCH`, `DELETE`, and `PUT`, then surfaced as retryable. `POST` is exempt, for the reason under Safety above: a retried insert or RPC call would duplicate work, so its failures are surfaced on the first attempt.
 
 A missing project URL or key fails at pipeline start with a node-specific message, and shows as a configuration warning in the editor.
 

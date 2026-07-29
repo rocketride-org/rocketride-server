@@ -59,6 +59,22 @@ def _require_dict(value, **_kwargs):
     return value
 
 
+class _StubRequestException(Exception):
+    """Mirrors requests.exceptions.RequestException as the base of the tree."""
+
+
+class _StubHTTPError(_StubRequestException):
+    response = None
+
+
+class _StubTimeout(_StubRequestException):
+    pass
+
+
+class _StubConnectionError(_StubRequestException):
+    pass
+
+
 def _build_import_stubs():
     """Return {module_name: stub} for the deps needed only to import the modules."""
     rocketlib = MagicMock()
@@ -83,11 +99,13 @@ def _build_import_stubs():
 
     requests = MagicMock()
     requests.exceptions = MagicMock()
-    # Use real exception classes so except clauses can actually catch them.
-    requests.exceptions.Timeout = TimeoutError
-    requests.exceptions.ConnectionError = ConnectionError
-    requests.exceptions.HTTPError = Exception
-    requests.exceptions.RequestException = Exception
+    # Real classes, in requests' own hierarchy: the client catches the specific
+    # subclasses before falling back to RequestException, so flat Exception
+    # aliases would let the fallback swallow cases the specific handlers own.
+    requests.exceptions.RequestException = _StubRequestException
+    requests.exceptions.HTTPError = _StubHTTPError
+    requests.exceptions.Timeout = _StubTimeout
+    requests.exceptions.ConnectionError = _StubConnectionError
 
     requests_status_codes = MagicMock()
     requests_status_codes.codes = MagicMock()
@@ -220,6 +238,8 @@ def test_normalize_base_url_rejects_bad_urls(bad):
         ({'views': 'gte.100'}, {'views': 'gte.100'}),
         ({'id': 'in.(1,2,3)'}, {'id': 'in.(1,2,3)'}),
         ({'deleted_at': 'is.null'}, {'deleted_at': 'is.null'}),
+        ({'active': 'is.TRUE'}, {'active': 'is.TRUE'}),  # is-value check is case-insensitive
+        ({'name': 'eq.a,b'}, {'name': 'eq.a,b'}),  # a comma is a legal value for eq
         ({'meta->>role': 'eq.admin'}, {'meta->>role': 'eq.admin'}),
         (None, {}),
         ({}, {}),
@@ -237,6 +257,11 @@ def test_encode_filters_passes_documented_grammar(filters, expected):
         {'status': 'eq.'},  # no value
         {'bad column': 'eq.x'},  # space in identifier
         {'a;b': 'eq.x'},  # punctuation in identifier
+        {'id': 'in.1'},  # 'in' without a parenthesised set
+        {'id': 'in.1,2,3'},  # the mistake a model actually makes
+        {'id': 'in.(1,2'},  # unbalanced
+        {'deleted_at': 'is.nil'},  # not a PostgREST 'is' value
+        {'deleted_at': 'is.1'},
         'not-a-dict',
         ['not-a-dict'],
     ],
@@ -244,6 +269,34 @@ def test_encode_filters_passes_documented_grammar(filters, expected):
 def test_encode_filters_rejects_malformed_filters(bad):
     with pytest.raises(ValueError):
         client.encode_filters(bad)
+
+
+def test_encode_filters_error_names_the_column():
+    """A rejected filter has to say which one, or an agent cannot self-correct."""
+    with pytest.raises(ValueError, match='tags'):
+        client.encode_filters({'status': 'eq.active', 'tags': 'in.a,b'})
+
+
+# ---------------------------------------------------------------------------
+# call() transport-error mapping
+# ---------------------------------------------------------------------------
+
+
+def test_call_maps_uncommon_transport_errors_to_valueerror(monkeypatch):
+    """A RequestException with no specific handler still reaches the agent as text.
+
+    ChunkedEncodingError and friends are rare enough to have no dedicated
+    branch, but a raw traceback out of a tool call is not something an agent
+    can report or retry against.
+    """
+    exc_type = client.requests.exceptions.RequestException
+
+    def boom(*a, **kw):
+        raise exc_type('connection broken')
+
+    monkeypatch.setattr(client.requests, 'post', boom)
+    with pytest.raises(ValueError, match='InsForge request failed'):
+        client.call('k', 'https://p.insforge.app', 'POST', '/api/database/records/t')
 
 
 # ---------------------------------------------------------------------------

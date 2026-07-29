@@ -73,6 +73,10 @@ FILTER_OPERATORS = frozenset(
     }
 )
 
+# 'is' is only meaningful against these three in PostgREST; anything else is a
+# mistake worth catching here rather than as a 400 from the server.
+_IS_VALUES = frozenset({'null', 'true', 'false', 'unknown'})
+
 # Postgres identifiers this node is willing to put in a URL path. Deliberately
 # stricter than Postgres itself (no quoted identifiers, no dots): a table or
 # function name is never legitimately a path traversal.
@@ -180,6 +184,18 @@ def encode_filters(filters: Any) -> dict:
         if not value:
             raise ValueError(f'Filter for column {col!r} has no value: {expr!r}')
 
+        # Operator-specific shapes. Both are easy for a model to get subtly
+        # wrong ("in.1,2,3"), and PostgREST answers a malformed one with a
+        # generic 400 that says nothing about which filter caused it.
+        if operator == 'in' and not (value.startswith('(') and value.endswith(')')):
+            raise ValueError(
+                f'Filter for column {col!r} must give "in" a parenthesised set: {expr!r}. Expected in.(a,b,c).'
+            )
+        if operator == 'is' and value.lower() not in _IS_VALUES:
+            raise ValueError(
+                f'Filter for column {col!r} must give "is" one of {", ".join(sorted(_IS_VALUES))}, not {value!r}.'
+            )
+
         params[col] = text
 
     return params
@@ -266,7 +282,7 @@ def call(
 
     Transport goes through the shared retry helpers, which retry timeouts,
     connection errors and 429 / 5xx with exponential backoff and raise other
-    4xx immediately.
+    4xx immediately. POST is the exception and is never retried — see below.
 
     Raises:
         ValueError: With a human-readable, status-specific message on HTTP
@@ -301,6 +317,11 @@ def call(
         raise ValueError('InsForge request timed out. Retry later.') from e
     except requests.exceptions.ConnectionError as e:
         raise ValueError(f'Could not reach the InsForge project at {base_url}. Check the project URL.') from e
+    except requests.exceptions.RequestException as e:
+        # Base class, so the rarer transport failures (ChunkedEncodingError,
+        # InvalidURL, TooManyRedirects) still reach the agent as a ValueError
+        # it can report, not a raw traceback out of the tool call.
+        raise ValueError(f'InsForge request failed: {e}') from e
 
     return _parse(resp)
 
