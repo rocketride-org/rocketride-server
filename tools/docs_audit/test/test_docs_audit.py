@@ -27,7 +27,13 @@ from docs_audit.citations import (  # noqa: E402
     classify,
     extract,
 )
-from docs_audit.coverage import MISSING_DOC, STALE_PARAMS, audit_node, schema_params  # noqa: E402
+from docs_audit.coverage import (  # noqa: E402
+    MISSING_DOC,
+    STALE_PARAMS,
+    audit_node,
+    schema_params,
+    strip_jsonc,
+)
 from docs_audit.index import CodeIndex  # noqa: E402
 
 
@@ -172,3 +178,25 @@ def test_node_without_python_is_not_a_gap(tmp_path: Path) -> None:
     node.mkdir(parents=True)
     (node / 'icon.svg').write_text('<svg/>', encoding='utf-8')
     assert audit_node(node, tmp_path) == []
+
+
+def test_jsonc_services_file_is_parsed(tmp_path: Path) -> None:
+    """Regression: several nodes ship `//`-commented schemas. Failing to parse
+    them silently reported the node as having zero params, so real drift could
+    never surface.
+    """
+    node = tmp_path / 'nodes' / 'src' / 'nodes' / 'commented'
+    node.mkdir(parents=True)
+    (node / 'impl.py').write_text('x = 1\n', encoding='utf-8')
+    (node / 'services.json').write_text(
+        '{\n\t//\n\t// Required:\n\t//\n\t"fields": {"a": {"type": "string"}}\n}\n',
+        encoding='utf-8',
+    )
+    assert schema_params(node) == {'a'}
+
+
+def test_strip_jsonc_keeps_urls_inside_strings() -> None:
+    """A `//` inside a quoted value is data, not a comment."""
+    kept = strip_jsonc('{"url": "https://example.com/x"} // trailing')
+    assert 'https://example.com/x' in kept
+    assert 'trailing' not in kept

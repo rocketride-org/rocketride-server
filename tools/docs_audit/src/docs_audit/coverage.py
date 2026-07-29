@@ -46,6 +46,44 @@ def documented_params(readme_text: str) -> set[str] | None:
     return set(_PARAM_ROW.findall(match.group(1)))
 
 
+def strip_jsonc(text: str) -> str:
+    """Drop ``//`` line comments so JSONC ``services.json`` files parse.
+
+    Several nodes ship commented schemas. A plain ``json.loads`` raises on
+    those, and swallowing the error silently reports the node as having no
+    parameters at all -- so real drift would never surface. Quote state is
+    tracked so ``https://`` inside a string value survives.
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            out.append(char)
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            out.append(char)
+            index += 1
+            continue
+        if char == '/' and index + 1 < len(text) and text[index + 1] == '/':
+            while index < len(text) and text[index] != '\n':
+                index += 1
+            continue
+        out.append(char)
+        index += 1
+    return ''.join(out)
+
+
 def _is_user_facing_param(value: object) -> bool:
     """True for a real settable parameter, false for a profile grouping.
 
@@ -63,7 +101,7 @@ def schema_params(node_dir: Path) -> set[str]:
     keys: set[str] = set()
     for services in sorted(node_dir.glob('services*.json')):
         try:
-            data = json.loads(services.read_text(encoding='utf-8', errors='replace'))
+            data = json.loads(strip_jsonc(services.read_text(encoding='utf-8', errors='replace')))
         except (OSError, json.JSONDecodeError):
             continue
         fields = data.get('fields')
