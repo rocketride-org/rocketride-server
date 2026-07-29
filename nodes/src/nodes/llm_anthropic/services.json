@@ -336,7 +336,7 @@
 			"type": "boolean",
 			"title": "Extended thinking",
 			"default": false,
-			"description": "Enable Anthropic extended thinking (reasoning) for this node. Off by default. Only affects reasoning-capable models, and only on the interactive streaming path — agent / expectJson calls never use thinking."
+			"description": "Enable Anthropic extended thinking (reasoning) for this node. Off by default. Applies to reasoning-capable models on the interactive chat path."
 		},
 		"anthropic.custom": {
 			"object": "custom",
