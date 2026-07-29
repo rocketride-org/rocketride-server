@@ -324,9 +324,17 @@ def _repair_field_objects(fields: Dict[str, Any], profiles: Dict[str, Any] | Non
         has_apikey = 'llm.cloud.apikey' in props
 
         # extendedThinking toggle: present iff the model reasons (capabilities.reasoning).
-        # Keeps the UI self-maintaining across syncs; skips 'custom' and non-model objects.
+        # Only managed for nodes that DEFINE the field (today: llm_anthropic) so it never
+        # leaks into providers that neither define nor read it. Skips 'custom'/non-model objects.
         obj = value.get('object')
-        if profiles is not None and has_apikey and isinstance(obj, str) and obj != 'custom' and obj in profiles:
+        if (
+            profiles is not None
+            and _EXTENDED_THINKING in fields
+            and has_apikey
+            and isinstance(obj, str)
+            and obj != 'custom'
+            and obj in profiles
+        ):
             reasons = bool(((profiles.get(obj) or {}).get('capabilities') or {}).get('reasoning'))
             if reasons and _EXTENDED_THINKING not in props:
                 props.append(_EXTENDED_THINKING)
@@ -376,7 +384,8 @@ def _update_fields_for_added(
     # 1. Field object — reasoning models get the extendedThinking toggle (before modelSource).
     if field_key not in fields:
         props = ['llm.cloud.apikey', 'llm.cloud.modelSource']
-        if bool((profile.get('capabilities') or {}).get('reasoning')):
+        # Only nodes that define the extendedThinking field get the toggle (today: anthropic).
+        if _EXTENDED_THINKING in fields and bool((profile.get('capabilities') or {}).get('reasoning')):
             props.insert(1, _EXTENDED_THINKING)
         fields[field_key] = {'object': profile_key, 'properties': props}
 
