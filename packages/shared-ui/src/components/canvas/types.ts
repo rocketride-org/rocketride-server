@@ -37,7 +37,7 @@
 import type { PipelineInputConnection } from 'rocketride';
 
 // Re-export all general types so flow consumers can import from one place
-export type { IProject, IProjectComponent, IComponentUI, IControlConnection, IInputConnection, IPosition, IDimensions, IService, IServiceCatalog, INodeConfig, IValidateResponse, IServiceSchema, IToolchainExport, IToolchainState, IForm, IFormData, ITaskStatus, IFlowData } from '../../types/project';
+export type { IProject, IProjectComponent, IComponentUI, IControlConnection, IInputConnection, IPosition, IDimensions, IService, IServiceCatalog, INodeConfig, IValidateResponse, IComponentValidatePayload, IValidatePipelinePayload, IServiceSchema, IToolchainExport, IToolchainState, IForm, IFormData, ITaskStatus, IFlowData } from '../../types/project';
 
 export { IServiceCapabilities, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../../types/project';
 

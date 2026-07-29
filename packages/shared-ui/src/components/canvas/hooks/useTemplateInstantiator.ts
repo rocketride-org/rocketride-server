@@ -49,7 +49,7 @@ import { PIPELINE_SCHEMA_VERSION } from '../types';
 import { resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 import type { ITemplate } from '../templates/types';
-import type { INodeData, INode } from '../types';
+import type { INodeData } from '../types';
 
 /**
  * Instantiates a template onto the canvas.
@@ -91,7 +91,7 @@ export function useTemplateInstantiator() {
 		// so FlowGraphContext's incoming-version guard doesn't reject this update
 		// as a stale echo.
 		if (onContentChanged) {
-			const components = getProjectComponents(nodes as unknown as INode[], edges);
+			const components = getProjectComponents(nodes, edges);
 			const nextRevision = ((currentProject?.docRevision as number) ?? 0) + 1;
 			const project: IProject = {
 				...currentProject,
@@ -189,7 +189,7 @@ export function useTemplateInstantiator() {
 			// Merge existing + new nodes; derive edges for new nodes only,
 			// keep existing ReactFlow edges for current nodes (they're the source of truth)
 			const allNodes = [...currentNodes, ...newNodes];
-			const templateEdges = getEdgesFromNodes(newNodes as unknown as INode[]);
+			const templateEdges = getEdgesFromNodes(newNodes);
 			const currentEdges = [...edges];
 			const mergedEdges = [...currentEdges, ...templateEdges];
 			loadCanvas(allNodes, mergedEdges);

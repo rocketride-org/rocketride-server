@@ -20,6 +20,7 @@ import { applyTheme } from 'shared/themes';
 import { MonitorView, parseActivityEvent } from 'shared';
 import type { DashboardResponse, ActivityEvent } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
+import { useGridConfigBridge } from '../hooks/useGridConfigBridge';
 import type { MonitorHostToWebview, MonitorWebviewToHost } from '../types';
 
 // =============================================================================
@@ -27,6 +28,12 @@ import type { MonitorHostToWebview, MonitorWebviewToHost } from '../types';
 // =============================================================================
 
 const MonitorWebview: React.FC = () => {
+	// Grid config channel bridge: answers the shared DataGrids' layout reads
+	// from the host-seeded cache and forwards writes to the extension host.
+	// Mounted FIRST so its grid:config:init listener attaches before the
+	// view:ready handshake below triggers the host's seeding reply.
+	useGridConfigBridge();
+
 	// --- State (populated from host messages) ---------------------------------
 
 	const [data, setData] = useState<DashboardResponse | null>(null);
@@ -57,6 +64,9 @@ const MonitorWebview: React.FC = () => {
 			}
 			case 'monitor:dashboard':
 				setData(message.data);
+				break;
+			case 'grid:config:init':
+				// Consumed by useGridConfigBridge's own window listener.
 				break;
 		}
 	}, []);

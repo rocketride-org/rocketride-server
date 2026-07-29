@@ -409,8 +409,9 @@ export class ConnectionManager implements IConnectionManager {
 	 * Delegates to the auth provider's ``signIn()`` method. Falls back to
 	 * the legacy PKCE flow if no auth provider is configured.
 	 *
-	 * @param register - If true, requests Zitadel's sign-up form (prompt=create)
-	 *                   instead of the default sign-in form.
+	 * @param register - Retained for compatibility; no longer changes the
+	 *                   destination. All flows land on Zitadel's login page
+	 *                   (prompt=login), which offers a Register link.
 	 */
 	public async startOAuth(register?: boolean): Promise<void> {
 		// One-shot: a redirect is coming; never start a second authorize in the

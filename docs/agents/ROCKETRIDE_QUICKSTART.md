@@ -2,21 +2,23 @@
 
 ## Python: Complete Working Project
 
-### Step 1: Check `.env` File (Auto-Created)
+### Step 1: Set Up the `.env` File
 
-The RocketRide extension automatically creates/updates `.env` with your configured settings:
+When you connect to a **self-hosted engine** (local, docker, service, or on-prem) using the extension's **development connection group**, the extension auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
 
 ```env
-# Auto-populated from extension settings (rocketride.hostUrl and API key)
-ROCKETRIDE_URI=https://api.rocketride.ai  # Your configured server
-ROCKETRIDE_APIKEY=your-api-key-here     # From extension settings
+# Development-group self-hosted engines: auto-filled on connect (local uses the real dynamic port).
+# live engine address (auto-filled)
+ROCKETRIDE_URI=http://localhost:54123
+# self-hosted default; set your own for cloud
+ROCKETRIDE_APIKEY=MYAPIKEY
 
 # Add your custom variables:
 ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` are automatically synced from your extension settings. You can add additional custom variables as needed.
+> **Note:** For self-hosted engines in the development connection group, the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. Add any additional custom variables as needed. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
 
 ### Step 2: Install Client
 
@@ -65,6 +67,7 @@ Pipeline files **must** use the `.pipe` extension.
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
     # Client reads configuration from .env automatically
     client = RocketRideClient()
@@ -72,27 +75,28 @@ async def main():
     try:
         # Connect to server
         await client.connect()
-        print("Connected to RocketRide server")
+        print('Connected to RocketRide server')
 
         # Start pipeline
         result = await client.use(filepath='pipeline.pipe')
         token = result['token']
-        print(f"Pipeline started with token: {token}")
+        print(f'Pipeline started with token: {token}')
 
         # Send data
-        await client.send(token, "Hello, RocketRide!")
-        print("Data sent successfully")
+        await client.send(token, 'Hello, RocketRide!')
+        print('Data sent successfully')
 
         # Check status
         status = await client.get_task_status(token)
-        print(f"Pipeline state: {status['state']}")
+        print(f'Pipeline state: {status["state"]}')
 
     finally:
         # Always disconnect
         await client.disconnect()
-        print("Disconnected")
+        print('Disconnected')
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     asyncio.run(main())
 ```
 
@@ -106,21 +110,23 @@ python main.py
 
 ## TypeScript: Complete Working Project
 
-### Step 1: Check `.env` File (Auto-Created)
+### Step 1: Set Up the `.env` File
 
-The RocketRide extension automatically creates/updates `.env` with your configured settings:
+When you connect to a **self-hosted engine** (local, docker, service, or on-prem) using the extension's **development connection group**, the extension auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
 
 ```env
-# Auto-populated from extension settings (rocketride.hostUrl and API key)
-ROCKETRIDE_URI=https://api.rocketride.ai  # Your configured server
-ROCKETRIDE_APIKEY=your-api-key-here     # From extension settings
+# Development-group self-hosted engines: auto-filled on connect (local uses the real dynamic port).
+# live engine address (auto-filled)
+ROCKETRIDE_URI=http://localhost:54123
+# self-hosted default; set your own for cloud
+ROCKETRIDE_APIKEY=MYAPIKEY
 
 # Add your custom variables:
 ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` are automatically synced from your extension settings. You can add additional custom variables as needed.
+> **Note:** For self-hosted engines in the development connection group, the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. The TypeScript client reads `process.env`; it does not load `.env` itself, so load the file when starting the process as shown below. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
 
 ### Step 2: Install Client
 
@@ -171,7 +177,7 @@ Pipeline files **must** use the `.pipe` extension.
 import { RocketRideClient } from 'rocketride';
 
 async function main() {
-	// Client reads configuration from .env automatically
+	// Client reads ROCKETRIDE_* values from process.env
 	const client = new RocketRideClient();
 
 	try {
@@ -204,7 +210,7 @@ main().catch(console.error);
 ### Step 5: Run
 
 ```bash
-npx tsx main.ts
+npx tsx --env-file=.env main.ts
 ```
 
 ---
@@ -234,6 +240,7 @@ import asyncio
 from rocketride import RocketRideClient
 from rocketride.schema import Question
 
+
 async def main():
     client = RocketRideClient()
     await client.connect()
@@ -241,11 +248,13 @@ async def main():
     token = result['token']
 
     q = Question()
-    q.addQuestion("Hello, how are you?")
+    q.addQuestion('Hello, how are you?')
     response = await client.chat(token=token, question=q)
-    print("Answer:", response.get('answers', [None])[0])
+    print('Answer:', response.get('answers', [None])[0])
 
     await client.disconnect()
+
+
 asyncio.run(main())
 ```
 
@@ -275,7 +284,7 @@ await client.disconnect();
 ### Always Do This:
 
 1. Configure server URL in extension settings (`rocketride.hostUrl` and API key)
-2. Extension auto-creates/updates `.env` with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`
+2. When the extension's development connection group connects to a self-hosted engine, it auto-populates `.env` with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` (for cloud, set `ROCKETRIDE_APIKEY` manually)
 3. Use empty constructor: `RocketRideClient()` or `new RocketRideClient()`
 4. Use literal GUID for `project_id` - generate a new one per pipeline
 5. Use `${ROCKETRIDE_*}` variables in component `config` fields
@@ -284,9 +293,9 @@ await client.disconnect();
 
 ### Never Do This:
 
-1. Hardcode `uri` or `auth` in constructor (use `.env` instead)
+1. Hardcode `uri` or `auth` in the constructor (load `ROCKETRIDE_*` values into the process environment instead)
 2. Use variables in `project_id` field (must be literal GUID)
-3. Manually edit `ROCKETRIDE_URI` or `ROCKETRIDE_APIKEY` in `.env` (use extension settings)
+3. Hand-edit `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` for a self-hosted engine in the development connection group — the extension re-syncs them on connect (change them via extension settings; for cloud, set `ROCKETRIDE_APIKEY` manually)
 4. Skip `connect()` or `disconnect()`
 5. Use non-ROCKETRIDE\_\* variables in pipelines
 6. Use `.json` extension for pipeline files (use `.pipe`)

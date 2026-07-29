@@ -241,7 +241,10 @@ class AppManifestEntry(TypedDict, total=False):
         description (str): Short description.
         icon (str): URL path to the app's icon.
         categories (list[str]): Category tags for filtering.
-        settings (list): App-specific setting definitions.
+        configuration (dict): Settings contribution in the VSCode
+            ``contributes.configuration`` shape ({title, properties}). Preserved
+            through ConnectResult so permission-gated desktop apps (which never
+            appear in the public probe) still deliver their settings schema.
         entry (str): URL to the app's MF remote entry file.
         version (str): Semver version string.
         ownerType (str): Visibility scope — "public", "org", "team", or "user".
@@ -262,7 +265,7 @@ class AppManifestEntry(TypedDict, total=False):
     description: str
     icon: str
     categories: list[str]
-    settings: list
+    configuration: dict[str, Any]
     entry: str
     version: str
     ownerType: str

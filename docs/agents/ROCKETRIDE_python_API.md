@@ -75,10 +75,7 @@ You can override `.env` settings by passing parameters directly to the construct
 
 ```python
 # Override for testing or special cases
-client = RocketRideClient(
-    uri='https://api.rocketride.ai',
-    auth='your-api-key'
-)
+client = RocketRideClient(uri='https://api.rocketride.ai', auth='your-api-key')
 ```
 
 ### Environment Variable Substitution in Pipelines
@@ -212,10 +209,10 @@ pipeline = {
     'components': [
         {'id': 'input', 'provider': 'webhook', 'config': {}},
         {'id': 'process', 'provider': 'transform', 'config': {}, 'input': [{'lane': 'text', 'from': 'input'}]},
-        {'id': 'output', 'provider': 'response_text', 'config': {}, 'input': [{'lane': 'text', 'from': 'process'}]}
+        {'id': 'output', 'provider': 'response_text', 'config': {}, 'input': [{'lane': 'text', 'from': 'process'}]},
     ],
     'source': 'input',
-    'project_id': '{guid}'  # Replace with your unique GUID
+    'project_id': '{guid}',  # Replace with your unique GUID
 }
 
 # Start pipeline
@@ -251,26 +248,30 @@ async with RocketRideClient() as client:
 ```python
 from rocketride import RocketRideClient
 
+
 # Declare connection callbacks
 async def on_connected(info: str) -> None:
     print(f'Connected: {info}')
+
 
 async def on_disconnected(reason: str, has_error: bool) -> None:
     if has_error:
         print(f'Connection lost: {reason}')
 
+
 async def on_connect_error(error: str) -> None:
     print(f'Connection attempt failed: {error}')
+
 
 # Create client with automatic reconnection enabled
 client = RocketRideClient(
     uri='https://api.rocketride.ai',
     auth='your-api-key',
-    persist=True,                # Enable automatic reconnection (exponential backoff)
-    max_retry_time=60000,        # Stop retrying after 60 seconds (None = retry forever)
+    persist=True,  # Enable automatic reconnection (exponential backoff)
+    max_retry_time=60000,  # Stop retrying after 60 seconds (None = retry forever)
     on_connected=on_connected,
     on_disconnected=on_disconnected,
-    on_connect_error=on_connect_error
+    on_connect_error=on_connect_error,
 )
 
 # Connect to server
@@ -287,10 +288,7 @@ await client.disconnect()
 ```python
 from rocketride import RocketRideClient
 
-client = RocketRideClient(
-    uri='https://api.rocketride.ai',
-    auth='your-api-key'
-)
+client = RocketRideClient(uri='https://api.rocketride.ai', auth='your-api-key')
 
 await client.connect()
 
@@ -323,16 +321,15 @@ async with await client.pipe(token=myToken, mime_type='application/json') as pip
 ```python
 from rocketride import RocketRideClient
 
+
 # Declare event handler
 async def handle_events(event):
     if event['event'] == 'apaevt_status_upload':
         body = event['body']
-        print(f"{body['filepath']}: {body['action']} - {body['bytes_sent']}/{body['file_size']} bytes")
+        print(f'{body["filepath"]}: {body["action"]} - {body["bytes_sent"]}/{body["file_size"]} bytes')
 
-client = RocketRideClient(
-    auth='your-api-key',
-    on_event=handle_events
-)
+
+client = RocketRideClient(auth='your-api-key', on_event=handle_events)
 
 await client.connect()
 
@@ -341,18 +338,15 @@ files = ['doc1.pdf', 'data.csv', 'report.docx']
 results = await client.send_files(files, token)
 
 # With metadata and MIME types
-files = [
-    ('report.pdf', {'department': 'finance'}),
-    ('data.csv', {'type': 'sales_data'}, 'text/csv')
-]
+files = [('report.pdf', {'department': 'finance'}), ('data.csv', {'type': 'sales_data'}, 'text/csv')]
 results = await client.send_files(files, token)
 
 # Process results
 for result in results:
     if result['action'] == 'complete':
-        print(f"✓ {result['filepath']}: {result['upload_time']:.2f}s")
+        print(f'✓ {result["filepath"]}: {result["upload_time"]:.2f}s')
     else:
-        print(f"✗ {result['filepath']}: {result['error']}")
+        print(f'✗ {result["filepath"]}: {result["error"]}')
 
 await client.disconnect()
 ```
@@ -569,8 +563,7 @@ Create a streaming data pipe for sending large datasets.
 **Callback signature:**
 
 ```python
-async def on_sse(type: str, data: dict) -> None:
-    ...
+async def on_sse(type: str, data: dict) -> None: ...
 ```
 
 - `type` (str): The SSE event type
@@ -581,8 +574,10 @@ async def on_sse(type: str, data: dict) -> None:
 ```python
 from rocketride.schema import Question
 
+
 async def handle_sse(type: str, data: dict) -> None:
     print(f'[{type}] {data}')
+
 
 question = Question()
 question.addQuestion('Summarize the document.')
@@ -722,22 +717,22 @@ Add one or more documents to the question context.
 pipeline = {
     'components': [
         {
-            'id': str,              # Unique component identifier
-            'provider': str,        # Component type (e.g., 'webhook', 'response', 'ai_chat')
-            'name': str,            # Human-readable name (optional)
-            'description': str,     # Component description (optional)
-            'config': dict,         # Component-specific configuration
-            'ui': dict,             # UI-specific configuration (optional)
-            'input': [              # Input connections (optional)
+            'id': str,  # Unique component identifier
+            'provider': str,  # Component type (e.g., 'webhook', 'response', 'ai_chat')
+            'name': str,  # Human-readable name (optional)
+            'description': str,  # Component description (optional)
+            'config': dict,  # Component-specific configuration
+            'ui': dict,  # UI-specific configuration (optional)
+            'input': [  # Input connections (optional)
                 {
-                    'lane': str,    # Data lane/channel name
-                    'from': str     # Source component ID
+                    'lane': str,  # Data lane/channel name
+                    'from': str,  # Source component ID
                 }
-            ]
+            ],
         }
     ],
-    'source': str,                  # Entry point component ID
-    'project_id': str               # Project identifier
+    'source': str,  # Entry point component ID
+    'project_id': str,  # Project identifier
 }
 ```
 
@@ -745,13 +740,13 @@ pipeline = {
 
 ```python
 {
-    'action': str,           # 'open', 'write', 'close', 'complete', or 'error'
-    'filepath': str,         # Original filename
-    'bytes_sent': int,       # Bytes transmitted
-    'file_size': int,        # Total file size
-    'upload_time': float,    # Time taken in seconds
-    'result': dict,          # Processing result (on complete, optional)
-    'error': str             # Error message (on error, optional)
+    'action': str,  # 'open', 'write', 'close', 'complete', or 'error'
+    'filepath': str,  # Original filename
+    'bytes_sent': int,  # Bytes transmitted
+    'file_size': int,  # Total file size
+    'upload_time': float,  # Time taken in seconds
+    'result': dict,  # Processing result (on complete, optional)
+    'error': str,  # Error message (on error, optional)
 }
 ```
 
@@ -759,9 +754,9 @@ pipeline = {
 
 ```python
 {
-    'name': str,             # Result identifier (UUID)
-    'location': str,         # Storage location (optional)
-    'result_types': dict,    # Result type mapping (optional)
+    'name': str,  # Result identifier (UUID)
+    'location': str,  # Storage location (optional)
+    'result_types': dict,  # Result type mapping (optional)
     # Additional dynamic fields based on result_types
 }
 ```
@@ -770,9 +765,9 @@ pipeline = {
 
 ```python
 {
-    'state': str,            # 'running', 'completed', 'failed', 'terminated'
-    'progress': float,       # Progress percentage 0-100 (optional)
-    'message': str,          # Status message (optional)
+    'state': str,  # 'running', 'completed', 'failed', 'terminated'
+    'progress': float,  # Progress percentage 0-100 (optional)
+    'message': str,  # Status message (optional)
     # Additional status fields
 }
 ```
@@ -819,6 +814,7 @@ await client.connect()
 result = await client.use(filepath='chat_pipeline.pipe')
 token = result['token']
 
+
 async def my_chat(my_question: str) -> str:
     # Simple question
     question = Question()
@@ -835,6 +831,7 @@ async def my_chat(my_question: str) -> str:
     answer = response['answers'][0]
     return answer
 
+
 # Use the function
 answer = await my_chat('What are the main themes in these documents?')
 print(answer)
@@ -845,13 +842,11 @@ print(answer)
 ```python
 from rocketride.schema import Question
 
+
 async def extract(source_document: str):
     question = Question(expectJson=True)
     question.addQuestion('Extract email addresses and phone numbers')
-    question.addExample(
-        'Find contacts',
-        {'emails': ['john@company.com'], 'phones': ['555-1234']}
-    )
+    question.addExample('Find contacts', {'emails': ['john@company.com'], 'phones': ['555-1234']})
     question.addContext(source_document)
 
     response = await client.chat(token=token, question=question)
@@ -861,6 +856,7 @@ async def extract(source_document: str):
         structured_answer = response['answers'][0]
         return structured_answer
     return {}
+
 
 # Use the function
 result = await extract('Contact us at john@company.com or 555-1234')
@@ -901,6 +897,7 @@ response = await client.chat(token='chat-token', question=question)
 ```python
 from rocketride import RocketRideClient
 
+
 async def process_documents():
     async with RocketRideClient() as client:  # Configuration from .env
         # Start document processing pipeline
@@ -921,6 +918,7 @@ async def process_documents():
 import json
 from rocketride import RocketRideClient
 
+
 async def stream_sensor_data(data_generator):
     async with RocketRideClient() as client:  # Configuration from .env
         result = await client.use(filepath='sensor_processor.pipe')
@@ -932,7 +930,7 @@ async def stream_sensor_data(data_generator):
                 data = {
                     'timestamp': sensor_reading.timestamp,
                     'temperature': sensor_reading.temp,
-                    'humidity': sensor_reading.humidity
+                    'humidity': sensor_reading.humidity,
                 }
                 await pipe.write(json.dumps(data).encode())
             result = await pipe.close()
@@ -948,6 +946,7 @@ async def stream_sensor_data(data_generator):
 ```python
 from typing import Dict, Any
 
+
 async def handle_events(event: Dict[str, Any]) -> None:
     event_type = event['event']
     body = event['body']
@@ -957,16 +956,14 @@ async def handle_events(event: Dict[str, Any]) -> None:
             progress = (body['bytes_sent'] / body['file_size']) * 100
             print(f'Upload progress: {progress:.1f}%')
 
+
 # Create client with event handler
 client = RocketRideClient(on_event=handle_events)  # Configuration from .env
 
 await client.connect()
 
 # Subscribe to specific events
-await client.set_events(token, [
-    'apaevt_status_upload',
-    'apaevt_status_processing'
-])
+await client.set_events(token, ['apaevt_status_upload', 'apaevt_status_processing'])
 ```
 
 #### Connection Event Handlers
@@ -975,17 +972,16 @@ await client.set_events(token, [
 async def on_connected(info: str) -> None:
     print(f'Connected to {info}')
 
+
 async def on_disconnected(reason: str, has_error: bool) -> None:
     if has_error:
         print(f'Connection lost: {reason}')
     else:
         print('Disconnected gracefully')
 
+
 client = RocketRideClient(
-    uri='https://api.rocketride.ai',
-    auth='api_key',
-    on_connected=on_connected,
-    on_disconnected=on_disconnected
+    uri='https://api.rocketride.ai', auth='api_key', on_connected=on_connected, on_disconnected=on_disconnected
 )
 ```
 
@@ -1014,6 +1010,7 @@ while True:
 # Declare an EventCallback function
 async def event_notification(event: Dict[str, Any]) -> None:
     print(event)
+
 
 # Create the client
 client = RocketRideClient(

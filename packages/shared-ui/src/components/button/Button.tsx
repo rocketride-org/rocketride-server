@@ -6,8 +6,10 @@
 /**
  * Button — the platform's stock action button.
  *
- * Four variants (primary / secondary / ghost / danger) and an optional compact
- * `small` size. Every colour is drawn from a `--rr-*` token so the button tracks
+ * Four variants (primary / secondary / ghost / danger) and two optional compact
+ * sizes: `small` (26px — card/grid header chrome) and `mini` (16px — canvas-node
+ * chrome, where a 26px button overflows the node card). Every colour is drawn
+ * from a `--rr-*` token so the button tracks
  * light and dark themes automatically. The disabled state composes
  * `commonStyles.buttonDisabled` (dimmed + non-interactive).
  *
@@ -31,6 +33,8 @@ export interface IButtonProps {
 	variant?: ButtonVariant;
 	/** Render the compact (26px tall) size. */
 	small?: boolean;
+	/** Render the micro (16px tall) size — canvas-node chrome. Wins over `small`. */
+	mini?: boolean;
 	/** Disable the button — dimmed and non-interactive. */
 	disabled?: boolean;
 	/** Click handler. */
@@ -39,6 +43,16 @@ export interface IButtonProps {
 	children: ReactNode;
 	/** Native tooltip text. */
 	title?: string;
+	/**
+	 * ARIA pressed state for toggle/segmented usage (ToggleGroup) — rendered
+	 * as `aria-pressed`; visual selection is conveyed by the variant.
+	 */
+	pressed?: boolean;
+	/**
+	 * ARIA expanded state for dropdown-trigger usage — rendered as
+	 * `aria-expanded` so assistive tech knows the popup's open state.
+	 */
+	ariaExpanded?: boolean;
 }
 
 // =============================================================================
@@ -63,12 +77,33 @@ const styles = {
 		whiteSpace: 'nowrap',
 	} as CSSProperties,
 
-	// Compact size modifier.
+	// Compact size modifier (11px — the card-header / grid-header scale,
+	// user spec 2026-07-16).
 	small: {
 		height: 26,
 		padding: '0 11px',
-		fontSize: 12,
+		fontSize: 11,
 		borderRadius: 6,
+	} as CSSProperties,
+
+	// Micro size modifier — the canvas-node scale (the former PipelineActions
+	// micro-button tier, promoted to a stock size so nodes never need bespoke
+	// button styles).
+	mini: {
+		height: 16,
+		padding: '0 6px',
+		fontSize: 9,
+		fontWeight: 500,
+		lineHeight: 1,
+		gap: 4,
+		borderRadius: 3,
+	} as CSSProperties,
+
+	// Ghost + small combination: quiet utility buttons (grid/card header
+	// chrome like Export... and Clear) read at regular weight, not CTA
+	// weight (user spec 2026-07-16).
+	ghostSmall: {
+		fontWeight: 400,
 	} as CSSProperties,
 
 	// Variant colour treatments.
@@ -118,17 +153,20 @@ const VARIANT_STYLES: Record<ButtonVariant, CSSProperties> = {
  * @param props - {@link IButtonProps}.
  * @returns The button element.
  */
-export function Button({ variant = 'primary', small, disabled, onClick, children, title }: IButtonProps): React.ReactElement {
-	// Compose base + variant colour + optional size + optional disabled modifier.
+export function Button({ variant = 'primary', small, mini, disabled, onClick, children, title, pressed, ariaExpanded }: IButtonProps): React.ReactElement {
+	// Compose base + variant colour + optional size (mini wins over small) +
+	// the quiet ghost-small weight + optional disabled modifier.
 	const style: CSSProperties = {
 		...styles.base,
 		...VARIANT_STYLES[variant],
 		...(small ? styles.small : null),
+		...(small && variant === 'ghost' ? styles.ghostSmall : null),
+		...(mini ? styles.mini : null),
 		...(disabled ? styles.disabled : null),
 	};
 
 	return (
-		<button type="button" style={style} onClick={onClick} disabled={disabled} title={title}>
+		<button type="button" style={style} onClick={onClick} disabled={disabled} title={title} aria-pressed={pressed} aria-expanded={ariaExpanded}>
 			{children}
 		</button>
 	);

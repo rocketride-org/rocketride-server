@@ -4,28 +4,30 @@
 // =============================================================================
 
 /**
- * CreateNodePanel — Side panel for adding pipeline nodes to the canvas.
+ * CreateNodePanel — the "Add Node" catalog, a MODELESS DetailPanel drawer.
  *
- * Styled to match VS Code's Explorer panel using plain HTML + CSS.
- * No MUI components — avoids theme color overrides.
+ * Ported onto the record-panel standard: the chrome (EntityHeader, close glyph,
+ * left-edge resize handle, slide-in) is the stock {@link DetailPanel}; this file
+ * supplies only the body — a pinned search box over collapsible provider
+ * categories. It renders `modeless` + `contained`: no dim backdrop and the
+ * overlay passes pointer / drag events THROUGH to the ReactFlow canvas behind
+ * it, so BOTH add gestures keep working while the drawer is open —
+ *   - click a catalog item  -> adds the node at viewport centre;
+ *   - drag a catalog item onto the canvas -> the graph's own onDrop places it.
  *
- * Features:
- *   - Collapsible category sections with chevrons on the left
- *   - Text search to filter by title
- *   - Click-to-add at viewport center
- *   - Drag-to-add at drop position
- *   - Resizable via pill-shaped drag handle on the left border
+ * `contained` anchors the drawer to the canvas surface (the record-owning
+ * surface), so it dims/clips to the graph area rather than the whole page.
  */
 
-import { ReactElement, useMemo, useState, useCallback, useRef, useEffect } from 'react';
-import { TextField, InputAdornment } from '@mui/material';
-import { Search } from 'lucide-react';
+import { ReactElement, useMemo, useState, useEffect, useRef, CSSProperties } from 'react';
+import { Search, Plus, List, LayoutGrid } from 'lucide-react';
 
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
-import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
+import { usePrefs } from '../../../../../contexts/PrefsContext';
 import { IService, IServiceCapabilities } from '../../../types';
 import { Icon } from '../../../util/Icon';
+import { DetailPanel } from '../../../../detail-panel/DetailPanel';
 import { commonStyles } from '../../../../../themes/styles';
 import { CATEGORY_TITLES } from './categoryTitles';
 
@@ -33,140 +35,217 @@ import { CATEGORY_TITLES } from './categoryTitles';
 // Constants
 // =============================================================================
 
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 600;
-const DEFAULT_WIDTH = 260;
+/** Default drawer width when the workspace has no saved width yet — fairly wide
+ * so the default icon grid shows several columns. A saved width overrides it. */
+const PANEL_WIDTH = 440;
+
+/** Slim resize floor — a node list reads fine narrow, below the 380 record floor. */
+const PANEL_MIN_WIDTH = 240;
+
+/** Workspace-preference key the drawer width is remembered under. */
+const WIDTH_PERSIST_KEY = 'panelDetailAddNodeWidth';
+
+/** Workspace-preference key the list/icon view mode is remembered under. */
+const VIEW_MODE_PERSIST_KEY = 'panelDetailAddNodeViewMode';
+
+/** Catalog display modes: a vertical list, or an Explorer-style icon grid. */
+type ViewMode = 'list' | 'icon';
 
 // =============================================================================
 // Styles — all use --rr-* variables for theme adaptation
 // =============================================================================
 
 const styles = {
-	backdrop: {
-		position: 'absolute' as const,
-		inset: 0,
-		zIndex: 29,
-	},
-	container: {
-		position: 'absolute' as const,
-		right: 0,
-		top: 0,
-		bottom: 0,
-		display: 'flex',
-		zIndex: 30,
-	},
-	resizeHitArea: {
-		position: 'absolute' as const,
-		left: 0,
-		top: 0,
-		width: 6,
-		height: '100%',
-		cursor: 'col-resize',
-		zIndex: 1,
-	},
-	resizeLine: {
-		position: 'absolute' as const,
-		left: 0,
-		top: 0,
-		width: 4,
-		height: '100%',
-		background: 'var(--rr-sash-hover)',
-	},
-	panel: {
-		position: 'relative' as const,
-		flex: 1,
-		display: 'flex',
-		flexDirection: 'column' as const,
-		overflow: 'hidden',
-		backgroundColor: 'var(--rr-bg-widget)',
-		color: 'var(--rr-fg-widget)',
-		fontFamily: 'var(--rr-font-family-widget)',
-		fontSize: 'var(--rr-font-size-widget)',
-	},
-	header: {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		height: '36px',
-		padding: '0 8px 0 12px',
-		backgroundColor: 'var(--rr-bg-widget-header)',
-	},
-	headerTitle: {
-		...commonStyles.labelUppercase,
-		fontWeight: 700,
-	},
-	closeButton: {
-		background: 'none',
-		border: 'none',
-		cursor: 'pointer',
-		color: 'inherit',
-		padding: '4px',
-		display: 'flex',
-		alignItems: 'center',
-		borderRadius: '4px',
-	},
-	searchBox: {
-		padding: '6px 8px',
-	},
-	searchInput: {
+	// Plus-glyph avatar filling the DetailPanel's 42px round slot.
+	avatar: {
 		width: '100%',
-		height: '24px',
-		padding: '0 8px',
-		border: '1px solid var(--rr-border)',
-		borderRadius: '2px',
-		backgroundColor: 'var(--rr-bg-widget)',
-		color: 'inherit',
-		fontFamily: 'inherit',
-		fontSize: 'inherit',
-		outline: 'none',
-		boxSizing: 'border-box' as const,
-	},
+		height: '100%',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		background: 'color-mix(in srgb, var(--rr-brand) 16%, transparent)',
+		color: 'var(--rr-brand)',
+	} as CSSProperties,
+
+	// Fixed search header: stays put while the categories scroll in their OWN
+	// region below it (not underneath a sticky element) — see bodyFill/scrollArea.
+	searchWrap: {
+		flexShrink: 0,
+		background: 'var(--rr-bg-default)',
+		paddingBottom: 8,
+	} as CSSProperties,
+
+	// Fills the DetailPanel's scrolling body so the search is a fixed header and
+	// the category list owns a separate scroll region beneath it.
+	bodyFill: {
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+		minHeight: 0,
+	} as CSSProperties,
+
+	// Category scroll region below the fixed search. Negative side margins (with
+	// matching padding) reclaim the DetailPanel body's 20px gutters so the
+	// scrollbar sits at the panel edge while content stays aligned with the search.
 	scrollArea: {
 		flex: 1,
-		overflowY: 'auto' as const,
 		minHeight: 0,
-	},
+		overflowY: 'auto',
+		marginLeft: -20,
+		marginRight: -20,
+		paddingLeft: 20,
+		paddingRight: 20,
+	} as CSSProperties,
+
+	searchRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 6,
+	} as CSSProperties,
+
+	// Relative wrapper so the search glyph anchors to the input while the input
+	// flexes to leave room for the view-mode toggle on the right.
+	searchInputWrap: {
+		position: 'relative',
+		display: 'flex',
+		alignItems: 'center',
+		flex: 1,
+		minWidth: 0,
+	} as CSSProperties,
+
+	searchIcon: {
+		position: 'absolute',
+		left: 9,
+		display: 'flex',
+		color: 'var(--rr-text-disabled)',
+		pointerEvents: 'none',
+	} as CSSProperties,
+
+	searchInput: {
+		...commonStyles.inputField,
+		paddingLeft: 30,
+	} as CSSProperties,
+
+	// View-mode toggle: a small two-button segmented control (list / icon).
+	viewToggle: {
+		display: 'flex',
+		flexShrink: 0,
+		border: '1px solid var(--rr-border)',
+		borderRadius: 5,
+		overflow: 'hidden',
+	} as CSSProperties,
+
+	// One toggle button; the active mode fills with the theme highlight.
+	viewToggleBtn: (active: boolean): CSSProperties => ({
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		width: 26,
+		height: 26,
+		padding: 0,
+		border: 'none',
+		cursor: 'pointer',
+		background: active ? 'var(--rr-bg-list-active)' : 'transparent',
+		color: active ? 'var(--rr-fg-list-active)' : 'var(--rr-text-secondary)',
+	}),
+
+	// Icon (Explorer-style) grid for a category's nodes, replacing the list rows
+	// when icon mode is on: equal auto-filled columns of centered icon+label tiles.
+	iconGrid: {
+		display: 'grid',
+		gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))',
+		gap: 2,
+		padding: '2px 4px 6px 22px',
+	} as CSSProperties,
+
+	iconTile: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'center',
+		gap: 5,
+		padding: '8px 4px',
+		cursor: 'pointer',
+		borderRadius: 5,
+		textAlign: 'center',
+	} as CSSProperties,
+
+	iconTileIcon: {
+		width: 28,
+		height: 28,
+		flexShrink: 0,
+	} as CSSProperties,
+
+	iconTileTitle: {
+		fontSize: 10,
+		lineHeight: '13px',
+		color: 'var(--rr-text-primary)',
+		// Clamp to two lines so long node names wrap rather than overflow the tile.
+		display: '-webkit-box',
+		WebkitLineClamp: 2,
+		WebkitBoxOrient: 'vertical',
+		overflow: 'hidden',
+		wordBreak: 'break-word',
+	} as CSSProperties,
+
+	// Experimental pill for an icon tile: the same yellow as the list badge,
+	// centered beneath the label (no left margin).
+	iconTileExperimental: {
+		fontSize: '9px',
+		padding: '1px 4px',
+		borderRadius: '3px',
+		backgroundColor: 'var(--rr-color-warning)',
+		color: 'var(--rr-fg-button)',
+		lineHeight: '14px',
+	} as CSSProperties,
+
 	sectionHeader: {
 		...commonStyles.labelUppercase,
 		display: 'flex',
 		alignItems: 'center',
-		height: '22px',
-		padding: '0 8px 0 4px',
+		height: '26px',
+		padding: '0 4px',
 		cursor: 'pointer',
 		userSelect: 'none' as const,
 		fontWeight: 700,
-	},
+	} as CSSProperties,
+
 	chevron: {
 		width: '16px',
 		height: '16px',
 		marginRight: '2px',
 		flexShrink: 0,
 		transition: 'transform 0.15s',
-	},
+	} as CSSProperties,
+
 	item: {
 		display: 'flex',
 		alignItems: 'center',
-		height: '22px',
-		padding: '0 8px 0 28px',
+		height: '26px',
+		padding: '0 8px 0 26px',
 		cursor: 'pointer',
 		gap: '6px',
-	},
+		borderRadius: 5,
+	} as CSSProperties,
+
 	itemIcon: {
 		width: '16px',
 		height: '16px',
 		flexShrink: 0,
-	},
+	} as CSSProperties,
+
 	itemTitle: commonStyles.textEllipsis,
+
 	badge: {
 		fontSize: '9px',
 		padding: '1px 4px',
 		borderRadius: '3px',
 		backgroundColor: 'var(--rr-border)',
-		color: 'var(--rr-fg-widget)',
+		color: 'var(--rr-text-secondary)',
 		marginLeft: '4px',
 		flexShrink: 0,
 		lineHeight: '14px',
-	},
+	} as CSSProperties,
+
 	experimentalBadge: {
 		fontSize: '9px',
 		padding: '1px 4px',
@@ -176,19 +255,26 @@ const styles = {
 		marginLeft: '4px',
 		flexShrink: 0,
 		lineHeight: '14px',
-	},
+	} as CSSProperties,
+
 	empty: {
 		padding: '16px',
 		textAlign: 'center' as const,
 		color: 'var(--rr-text-disabled)',
-	},
+	} as CSSProperties,
 };
 
 // =============================================================================
 // Chevron SVG (matches VS Code's codicon chevron)
 // =============================================================================
 
-function ChevronIcon({ expanded }: { expanded: boolean }) {
+/**
+ * Right-pointing disclosure chevron that rotates to point down when expanded.
+ *
+ * @param expanded - Whether the owning category is open.
+ * @returns The chevron SVG.
+ */
+function ChevronIcon({ expanded }: { expanded: boolean }): ReactElement {
 	return (
 		<svg
 			viewBox="0 0 16 16"
@@ -204,22 +290,12 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
 }
 
 // =============================================================================
-// Close icon SVG
-// =============================================================================
-
-function CloseIcon() {
-	return (
-		<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
-			<path d="M8 8.707l3.646 3.647.708-.707L8.707 8l3.647-3.646-.707-.708L8 7.293 4.354 3.646l-.707.708L7.293 8l-3.646 3.646.707.708L8 8.707z" />
-		</svg>
-	);
-}
-
-// =============================================================================
 // Props
 // =============================================================================
 
+/** Props for {@link CreateNodePanel}. */
 interface ICreateNodePanelProps {
+	/** Close the drawer. */
 	onClose: () => void;
 }
 
@@ -227,63 +303,47 @@ interface ICreateNodePanelProps {
 // Component
 // =============================================================================
 
+/**
+ * Renders the Add Node catalog drawer.
+ *
+ * @param props - {@link ICreateNodePanelProps}.
+ * @returns The DetailPanel drawer element.
+ */
 export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): ReactElement {
 	const { inventory } = useFlowProject();
-	const { addNode, setTempNode, onDrop, onDragOver } = useFlowGraph();
-	const { getPreference, setPreference } = useFlowPreferences();
+	const { addNode, setTempNode } = useFlowGraph();
+	// The one shared prefs accessor: drives the list/icon view-mode persistence
+	// below (the drawer width rides the same store via DetailPanel's persistKey).
+	const { getPref, setPref } = usePrefs();
 
 	const [search, setSearch] = useState('');
-	const storedWidth = (getPreference?.('createPanelWidth') as number) ?? DEFAULT_WIDTH;
-	const [width, setWidth] = useState(storedWidth);
-	const [isResizing, setIsResizing] = useState(false);
-	const [handleHover, setHandleHover] = useState(false);
 	// Track which groups are expanded. Only "source" is open by default.
 	const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set(['source']));
 	const savedExpandedGroups = useRef<Set<string> | null>(null);
-	const resizeStart = useRef({ mouseX: 0, width: 0 });
 
-	// --- Resize handlers ---
+	// List vs icon catalog display, seeded from the persisted workspace preference.
+	// Default is the icon grid until the user explicitly picks the list.
+	const [viewMode, setViewMode] = useState<ViewMode>(() => (getPref(VIEW_MODE_PERSIST_KEY) === 'list' ? 'list' : 'icon'));
 
-	const onResizeMouseDown = useCallback(
-		(e: React.MouseEvent) => {
-			e.preventDefault();
-			resizeStart.current = { mouseX: e.clientX, width };
-			setIsResizing(true);
-			document.body.style.cursor = 'col-resize';
-			document.body.style.userSelect = 'none';
-			document.querySelectorAll('iframe').forEach((f) => {
-				(f as HTMLIFrameElement).style.pointerEvents = 'none';
-			});
-		},
-		[width]
-	);
+	/**
+	 * Switch the catalog display mode and remember it in the workspace file, so
+	 * the choice rides the workspace like the drawer width does.
+	 *
+	 * @param mode - The view mode to apply.
+	 */
+	const applyViewMode = (mode: ViewMode): void => {
+		setViewMode(mode);
+		setPref(VIEW_MODE_PERSIST_KEY, mode);
+	};
 
-	useEffect(() => {
-		if (!isResizing) return;
-		const onMouseMove = (e: MouseEvent) => {
-			const delta = resizeStart.current.mouseX - e.clientX;
-			setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, resizeStart.current.width + delta)));
-		};
-		const onMouseUp = () => {
-			setIsResizing(false);
-			setPreference?.('createPanelWidth', width);
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			document.querySelectorAll('iframe').forEach((f) => {
-				(f as HTMLIFrameElement).style.pointerEvents = '';
-			});
-		};
-		window.addEventListener('mousemove', onMouseMove);
-		window.addEventListener('mouseup', onMouseUp);
-		return () => {
-			window.removeEventListener('mousemove', onMouseMove);
-			window.removeEventListener('mouseup', onMouseUp);
-		};
-	}, [isResizing, width, setPreference]);
+	// --- Group toggle -------------------------------------------------------
 
-	// --- Group toggle ---
-
-	const toggleGroup = (key: string) => {
+	/**
+	 * Toggle one category open/closed.
+	 *
+	 * @param key - The category key to toggle.
+	 */
+	const toggleGroup = (key: string): void => {
 		setExpandedGroups((prev) => {
 			const next = new Set(prev);
 			if (next.has(key)) next.delete(key);
@@ -292,7 +352,7 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 		});
 	};
 
-	// --- Inventory grouping + filtering ---
+	// --- Inventory grouping + filtering -------------------------------------
 
 	const groupedInventory = useMemo(() => {
 		const catalog = (inventory ?? {}) as Record<string, Record<string, IService>>;
@@ -352,9 +412,14 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [search, groupedInventory]);
 
-	// --- Click to add ---
+	// --- Add gestures -------------------------------------------------------
 
-	const onClickItem = (providerKey: string) => {
+	/**
+	 * Click-to-add: drop a fresh node of this provider at the viewport centre.
+	 *
+	 * @param providerKey - The provider to instantiate.
+	 */
+	const onClickItem = (providerKey: string): void => {
 		addNode({
 			provider: providerKey,
 			name: '',
@@ -365,9 +430,14 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 		});
 	};
 
-	// --- Drag to add ---
-
-	const onDragStart = (e: React.DragEvent, providerKey: string) => {
+	/**
+	 * Drag-to-add: stage the temp node; the graph's own onDrop (which the
+	 * modeless overlay lets events reach) places it at the drop position.
+	 *
+	 * @param e - The dragstart event.
+	 * @param providerKey - The provider to instantiate.
+	 */
+	const onDragStart = (e: React.DragEvent, providerKey: string): void => {
 		setTempNode({
 			provider: providerKey,
 			name: '',
@@ -379,72 +449,122 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 		e.dataTransfer.effectAllowed = 'move';
 	};
 
+	// --- Render -------------------------------------------------------------
+
 	return (
-		<>
-			<div style={styles.backdrop} onClick={onClose} onDragOver={onDragOver} onDrop={onDrop} />
-			<div className="nopan nodrag" style={{ ...styles.container, width: `${width}px`, userSelect: isResizing ? 'none' : 'auto' }}>
-				{/* Resize handle */}
-				<div style={styles.resizeHitArea} onMouseDown={onResizeMouseDown} onMouseEnter={() => setHandleHover(true)} onMouseLeave={() => setHandleHover(false)}>
-					{(handleHover || isResizing) && <div style={styles.resizeLine} />}
+		<DetailPanel
+			open
+			contained
+			modeless
+			onClose={onClose}
+			title="Add Node"
+			subtitle="Click to add, or drag onto the canvas"
+			avatar={
+				<div style={styles.avatar}>
+					<Plus size={20} />
+				</div>
+			}
+			width={PANEL_WIDTH}
+			minWidth={PANEL_MIN_WIDTH}
+			persistKey={WIDTH_PERSIST_KEY}
+		>
+			{/* Pinned search + view-mode toggle — sticks to the top of the body. */}
+			<div style={styles.bodyFill}>
+				<div style={styles.searchWrap}>
+					<div style={styles.searchRow}>
+						<div style={styles.searchInputWrap}>
+							<span style={styles.searchIcon}>
+								<Search size={14} />
+							</span>
+							<input style={styles.searchInput} placeholder="Search nodes..." value={search} onChange={(e) => setSearch(e.target.value)} data-rr-autofocus="true" aria-label="Search nodes" />
+						</div>
+						{/* Button 1: list view · Button 2: icon (Explorer-style) view. */}
+						<div style={styles.viewToggle} role="group" aria-label="Catalog view mode">
+							<button type="button" style={styles.viewToggleBtn(viewMode === 'list')} onClick={() => applyViewMode('list')} title="List view" aria-label="List view" aria-pressed={viewMode === 'list'}>
+								<List size={14} />
+							</button>
+							<button type="button" style={styles.viewToggleBtn(viewMode === 'icon')} onClick={() => applyViewMode('icon')} title="Icon view" aria-label="Icon view" aria-pressed={viewMode === 'icon'}>
+								<LayoutGrid size={14} />
+							</button>
+						</div>
+					</div>
 				</div>
 
-				{/* Panel body */}
-				<div style={styles.panel}>
-					{/* Header */}
-					<div style={styles.header}>
-						<span style={styles.headerTitle}>Add Node</span>
-						<button style={styles.closeButton} onClick={onClose} title="Close">
-							<CloseIcon />
-						</button>
-					</div>
+				<div style={styles.scrollArea}>
+					{/* Collapsible provider categories. */}
+					{Object.entries(groupedInventory).map(([groupKey, items]) => {
+						const expanded = expandedGroups.has(groupKey);
+						return (
+							<div key={groupKey}>
+								{/* Section header — keyboard-operable (Enter/Space expand). */}
+								<div
+									style={styles.sectionHeader}
+									role="button"
+									tabIndex={0}
+									aria-expanded={expanded}
+									onClick={() => toggleGroup(groupKey)}
+									onKeyDown={(e) => {
+										if (e.key === 'Enter' || e.key === ' ') {
+											e.preventDefault();
+											toggleGroup(groupKey);
+										}
+									}}
+								>
+									<ChevronIcon expanded={expanded} />
+									<span>{CATEGORY_TITLES[groupKey] ?? groupKey}</span>
+								</div>
 
-					{/* Search */}
-					<div style={styles.searchBox}>
-						<TextField
-							size="small"
-							fullWidth
-							placeholder="Search nodes..."
-							value={search}
-							onChange={(e) => setSearch(e.target.value)}
-							InputProps={{
-								startAdornment: (
-									<InputAdornment position="start">
-										<Search size={14} style={{ color: 'var(--rr-text-disabled)' }} />
-									</InputAdornment>
-								),
-								sx: {
-									fontSize: 'inherit',
-									fontFamily: 'inherit',
-									color: 'inherit',
-									height: '24px',
-								},
-							}}
-						/>
-					</div>
-
-					{/* Scrollable node list */}
-					<div style={styles.scrollArea}>
-						{Object.entries(groupedInventory).map(([groupKey, items]) => {
-							const expanded = expandedGroups.has(groupKey);
-							return (
-								<div key={groupKey}>
-									{/* Section header */}
-									<div style={styles.sectionHeader} onClick={() => toggleGroup(groupKey)}>
-										<ChevronIcon expanded={expanded} />
-										<span>{CATEGORY_TITLES[groupKey] ?? groupKey}</span>
-									</div>
-
-									{/* Items */}
-									{expanded &&
+								{/* Items — vertical list rows, or an Explorer-style icon grid. */}
+								{expanded &&
+									(viewMode === 'icon' ? (
+										<div style={styles.iconGrid}>
+											{items.map(({ key, service }) => (
+												<div
+													key={key}
+													draggable
+													role="button"
+													tabIndex={0}
+													onDragStart={(e) => onDragStart(e, key)}
+													onClick={() => onClickItem(key)}
+													onKeyDown={(e) => {
+														if (e.key === 'Enter' || e.key === ' ') {
+															e.preventDefault();
+															onClickItem(key);
+														}
+													}}
+													style={styles.iconTile}
+													title={service.title ?? key}
+													onMouseEnter={(e) => {
+														(e.currentTarget as HTMLElement).style.backgroundColor = 'var(--rr-bg-list-hover)';
+													}}
+													onMouseLeave={(e) => {
+														(e.currentTarget as HTMLElement).style.backgroundColor = '';
+													}}
+												>
+													{service.icon && <Icon name={service.icon} style={styles.iconTileIcon} />}
+													<span style={styles.iconTileTitle}>{service.title ?? key}</span>
+													{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.iconTileExperimental}>Experimental</span>}
+												</div>
+											))}
+										</div>
+									) : (
 										items.map(({ key, service }) => (
 											<div
 												key={key}
 												draggable
+												role="button"
+												tabIndex={0}
 												onDragStart={(e) => onDragStart(e, key)}
 												onClick={() => onClickItem(key)}
+												onKeyDown={(e) => {
+													if (e.key === 'Enter' || e.key === ' ') {
+														e.preventDefault();
+														onClickItem(key);
+													}
+												}}
 												style={styles.item}
 												onMouseEnter={(e) => {
-													(e.currentTarget as HTMLElement).style.backgroundColor = 'var(--rr-bg-widget-hover)';
+													(e.currentTarget as HTMLElement).style.backgroundColor = 'var(--rr-bg-list-hover)';
 												}}
 												onMouseLeave={(e) => {
 													(e.currentTarget as HTMLElement).style.backgroundColor = '';
@@ -455,15 +575,15 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 												{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
 												{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}
 											</div>
-										))}
-								</div>
-							);
-						})}
+										))
+									))}
+							</div>
+						);
+					})}
 
-						{Object.keys(groupedInventory).length === 0 && <div style={styles.empty}>{search ? 'No matching nodes' : 'No nodes available'}</div>}
-					</div>
+					{Object.keys(groupedInventory).length === 0 && <div style={styles.empty}>{search ? 'No matching nodes' : 'No nodes available'}</div>}
 				</div>
 			</div>
-		</>
+		</DetailPanel>
 	);
 }

@@ -40,8 +40,9 @@
 export { default as MonitorView } from './modules/server';
 export type { IMonitorViewProps } from './modules/server';
 export { parseActivityEvent } from './modules/server';
-export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent } from './modules/server';
-export { OverviewTab, ConnectionsTab, TasksTab, ActivityTab } from './modules/server/components';
+export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from './modules/server';
+export { OverviewTab, OverviewGrid, ConnectionsGrid, TasksGrid, ActivityGrid, ConnectionRecordPanel, TaskRecordPanel, taskStatusText, taskStatusVariant, getEventDisplay } from './modules/server/components';
+export type { IOverviewGridProps, IConnectionsGridProps, ITasksGridProps, IActivityGridProps, IConnectionRecordPanelProps, ITaskRecordPanelProps, IEventDisplay, EventTone } from './modules/server/components';
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
@@ -126,11 +127,20 @@ export type { IChipProps, IChipAddProps } from './components/chip/Chip';
 export { DropZone } from './components/drop-zone/DropZone';
 export type { IDropZoneProps } from './components/drop-zone/DropZone';
 
-// --- DataTable + DataSource (style guide section 6.1) ------------------------
-export { DataTable } from './components/data-table/DataTable';
-export type { DataTableColumn, IDataTableProps } from './components/data-table/DataTable';
-export { createArrayDataSource, createQueryDataSource } from './components/data-table/dataSource';
-export type { DataQuery, DataPage, DataSource } from './components/data-table/dataSource';
+// --- DataGrid (style guide section 6.1) ---------------------------------------
+export { DataGrid } from './components/data-grid/DataGrid';
+export type { IDataGridProps, IDataGridHandle, IDataGridPage, IDataGridPageRequest } from './components/data-grid/DataGrid';
+export { CardDataGrid } from './components/data-grid/CardDataGrid';
+export type { ICardDataGridProps } from './components/data-grid/CardDataGrid';
+export { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch } from './components/data-grid/defaults';
+export type { GridColumnDefinition, GridColumnRRType, IGridAction, IActionsColumnConfig, CellBadgeVariant, CellButtonKind } from './components/data-grid/defaults';
+export { FilterStrip } from './components/data-grid/FilterStrip';
+export type { IGridFilterDef, IGridFilterOption, IFilterStripProps } from './components/data-grid/FilterStrip';
+export type { IDataGridPersistence, DataGridLayout } from './components/data-grid/persistence';
+export { createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from './components/data-grid/gridConfigChannel';
+export type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail } from './components/data-grid/gridConfigChannel';
+export { useDebouncedValue } from './hooks/useDebouncedValue';
+export type { ColumnDefinition, CellComponent, RowComponent, Options as TabulatorOptions } from 'tabulator-tables';
 
 // --- Stock composition components (style guide sections 5-6) ------------------
 export { ContentHeader } from './components/content-header/ContentHeader';
@@ -151,8 +161,14 @@ export { Section, LabelValue } from './components/section/Section';
 export type { ISectionProps, ILabelValueProps } from './components/section/Section';
 export { DetailPanel } from './components/detail-panel/DetailPanel';
 export type { IDetailPanelProps } from './components/detail-panel/DetailPanel';
+export { PrefsProvider, usePrefs } from './contexts/PrefsContext';
+export type { IPrefsApi } from './contexts/PrefsContext';
+export { PanelTabBody } from './components/detail-panel/PanelTabBody';
+export type { IPanelTabBodyProps } from './components/detail-panel/PanelTabBody';
 export { PageViewControl } from './components/page-view-control/PageViewControl';
 export type { IPageViewControlProps } from './components/page-view-control/PageViewControl';
+export { PlayBar } from './components/play-bar/PlayBar';
+export type { IPlayBarProps, ITimeSelection } from './components/play-bar/PlayBar';
 export { Modal, CLOSE_GLYPH } from './components/modal/Modal';
 export type { IModalProps } from './components/modal/Modal';
 export { ConfirmDialog } from './components/modal/ConfirmDialog';

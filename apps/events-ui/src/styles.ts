@@ -1,259 +1,78 @@
 // =============================================================================
-// EVENTS-UI — Styles (built on commonStyles + --rr-* tokens)
+// MIT License
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// =============================================================================
+// EVENTS-UI — STYLES (built on commonStyles + --rr-* tokens)
 // =============================================================================
 
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
 
 export const styles = {
-	// ─── Root layout ───
+	// ── View layout ──────────────────────────────────────────────────────────
+	// Root fills the shell client pane; the ContentHeader sits fixed at the top
+	// and the content region below it scrolls.
 	root: {
 		...commonStyles.columnFill,
 	} as CSSProperties,
 
-	// ─── Toolbar (top controls bar) ───
-	toolbar: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-		padding: '8px 16px',
-		borderBottom: '1px solid var(--rr-border)',
-		backgroundColor: 'var(--rr-bg-paper)',
-		flexShrink: 0,
-		flexWrap: 'wrap',
-	} as CSSProperties,
-
-	toolbarGroup: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 6,
-	} as CSSProperties,
-
-	toolbarSpacer: {
+	// Content column below the header: a definite-height flex column (standard
+	// 20/24 gutters). The metric row and capture card stay at natural height;
+	// the grid fills the remaining space and scrolls internally, so the page
+	// itself never scrolls.
+	content: {
 		flex: 1,
-	} as CSSProperties,
-
-	toolbarLabel: {
-		...commonStyles.labelUppercase,
-	} as CSSProperties,
-
-	// ─── Controls ───
-	input: {
-		...commonStyles.inputField,
-		width: 'auto',
-		padding: '4px 8px',
-		fontSize: 12,
-	} as CSSProperties,
-
-	tokenInput: {
-		width: 180,
-	} as CSSProperties,
-
-	select: {
-		...commonStyles.inputField,
-		width: 'auto',
-		padding: '4px 8px',
-		fontSize: 12,
-		cursor: 'pointer',
-	} as CSSProperties,
-
-	button: {
-		...commonStyles.buttonSecondary,
-		...commonStyles.buttonSmall,
-	} as CSSProperties,
-
-	buttonActive: {
-		...commonStyles.buttonPrimary,
-		...commonStyles.buttonSmall,
-	} as CSSProperties,
-
-	buttonDanger: {
-		...commonStyles.buttonDangerOutline,
-		...commonStyles.buttonSmall,
-	} as CSSProperties,
-
-	buttonDisabled: {
-		...commonStyles.buttonDisabled,
-	} as CSSProperties,
-
-	// ─── Stats bar ───
-	statsBar: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 16,
-		padding: '4px 16px',
-		borderBottom: '1px solid var(--rr-border)',
-		backgroundColor: 'var(--rr-bg-paper)',
-		fontSize: 11,
-		color: 'var(--rr-text-secondary)',
-		flexShrink: 0,
-	} as CSSProperties,
-
-	statValue: {
-		color: 'var(--rr-text-primary)',
-		fontWeight: 600,
-		fontVariantNumeric: 'tabular-nums',
-	} as CSSProperties,
-
-	// Status indicator item in the stats bar (dot + label).
-	statusItem: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 6,
-	} as CSSProperties,
-
-	// ─── Event type toggle chips ───
-	typeChipsRow: {
-		...commonStyles.toggleGroup,
-		flexWrap: 'wrap',
-	} as CSSProperties,
-
-	// ─── Event list ───
-	eventListContainer: {
-		flex: 1,
-		overflow: 'auto',
 		minHeight: 0,
-	} as CSSProperties,
-
-	eventList: {
-		...commonStyles.fontMono,
-		fontSize: 12,
-		lineHeight: '20px',
-	} as CSSProperties,
-
-	// ─── Event row ───
-	eventRow: {
-		borderBottom: '1px solid color-mix(in srgb, var(--rr-border) 30%, transparent)',
-		cursor: 'pointer',
-	} as CSSProperties,
-
-	eventRowHeader: {
 		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-		padding: '4px 16px',
+		flexDirection: 'column',
+		gap: 16,
+		padding: '20px 24px 24px',
+		overflow: 'hidden',
 	} as CSSProperties,
 
-	eventRowHeaderHover: {
-		backgroundColor: 'var(--rr-bg-list-hover)',
-	} as CSSProperties,
-
-	eventTime: {
-		...commonStyles.fontMono,
-		color: 'var(--rr-text-disabled)',
-		fontSize: 11,
-		fontVariantNumeric: 'tabular-nums',
+	// A non-growing row in the content column (metrics, capture card).
+	staticRow: {
 		flexShrink: 0,
-		width: 80,
 	} as CSSProperties,
 
-	eventIndex: {
-		color: 'var(--rr-text-disabled)',
-		fontSize: 10,
-		flexShrink: 0,
-		width: 50,
-		textAlign: 'right',
-	} as CSSProperties,
-
-	eventType: {
-		fontSize: 11,
-		fontWeight: 600,
-		flexShrink: 0,
-		minWidth: 120,
-	} as CSSProperties,
-
-	eventToken: {
-		...commonStyles.textEllipsis,
-		...commonStyles.fontMono,
-		color: 'var(--rr-text-disabled)',
-		fontSize: 10,
-		flexShrink: 0,
-		maxWidth: 80,
-	} as CSSProperties,
-
-	eventSummary: {
-		...commonStyles.textEllipsis,
-		color: 'var(--rr-text-secondary)',
-		fontSize: 11,
+	// The event grid fills the remaining column height (its Card uses `fill`,
+	// and the grid scrolls internally rather than paginating).
+	gridFill: {
 		flex: 1,
-		minWidth: 0,
-	} as CSSProperties,
-
-	expandArrow: {
-		color: 'var(--rr-text-disabled)',
-		fontSize: 10,
-		flexShrink: 0,
-		width: 16,
-		textAlign: 'center',
-	} as CSSProperties,
-
-	// ─── JSON tree (expanded event body) ───
-	jsonPanel: {
-		padding: '8px 16px 12px 56px',
-		backgroundColor: 'var(--rr-bg-surface-alt)',
-		borderTop: '1px solid color-mix(in srgb, var(--rr-border) 30%, transparent)',
-		overflow: 'auto',
-		maxHeight: 400,
-	} as CSSProperties,
-
-	jsonKey: {
-		color: 'var(--rr-chart-purple)',
-	} as CSSProperties,
-
-	jsonString: {
-		color: 'var(--rr-color-success)',
-	} as CSSProperties,
-
-	jsonNumber: {
-		color: 'var(--rr-color-info)',
-	} as CSSProperties,
-
-	jsonBool: {
-		color: 'var(--rr-chart-orange)',
-	} as CSSProperties,
-
-	jsonNull: {
-		color: 'var(--rr-text-disabled)',
-		fontStyle: 'italic',
-	} as CSSProperties,
-
-	jsonToggle: {
-		cursor: 'pointer',
-		userSelect: 'none',
-		color: 'var(--rr-text-disabled)',
-		display: 'inline-block',
-		width: 16,
-		textAlign: 'center',
-	} as CSSProperties,
-
-	jsonBracket: {
-		color: 'var(--rr-text-disabled)',
-	} as CSSProperties,
-
-	jsonLine: {
-		...commonStyles.fontMono,
-		whiteSpace: 'pre',
-		lineHeight: '20px',
-		fontSize: 12,
-	} as CSSProperties,
-
-	// ─── Empty state ───
-	emptyState: {
-		...commonStyles.empty,
-		height: '100%',
+		minHeight: 0,
 		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		fontSize: 13,
+		flexDirection: 'column',
 	} as CSSProperties,
-
-	// ─── Status indicators (re-export for convenience) ───
-	indicatorSuccess: commonStyles.indicatorSuccess,
-	indicatorError: commonStyles.indicatorError,
-	indicatorMuted: commonStyles.indicatorMuted,
 };
 
-// Event type → color map using --rr-chart-* and semantic tokens
+// =============================================================================
+// EVENT TYPE COLORS
+// =============================================================================
+
+/**
+ * DAP event name to display color, from the `--rr-chart-*` set and semantic
+ * tokens (never raw hex) so the coloring stays legible across every theme. The
+ * grid's Type column and the detail-panel header both read this map.
+ */
 const EVENT_COLORS: Record<string, string> = {
 	apaevt_status_update: 'var(--rr-chart-blue)',
 	apaevt_task: 'var(--rr-chart-green)',
@@ -266,14 +85,13 @@ const EVENT_COLORS: Record<string, string> = {
 	apaevt_status_upload: 'var(--rr-chart-purple)',
 };
 
+/**
+ * Resolve a DAP event name to its display color, falling back to the secondary
+ * text token for unmapped names.
+ *
+ * @param eventName - The DAP event name.
+ * @returns A `--rr-*` CSS color value.
+ */
 export function eventColor(eventName: string): string {
 	return EVENT_COLORS[eventName] ?? 'var(--rr-text-secondary)';
-}
-
-/**
- * Returns commonStyles.toggleButton with the given active state.
- * Convenience re-export so Toolbar doesn't need to import from shared directly.
- */
-export function toggleChip(active: boolean): CSSProperties {
-	return commonStyles.toggleButton(active);
 }

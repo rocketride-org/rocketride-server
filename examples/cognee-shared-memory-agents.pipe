@@ -1,0 +1,119 @@
+{
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"name": "Shared-memory request",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" },
+			"ui": { "position": { "x": 20, "y": 220 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "agent_writer_1",
+			"provider": "agent_rocketride",
+			"name": "Writer",
+			"config": {
+				"agent_description": "Primary chat agent that delegates durable fact storage and answers from shared Cognee memory.",
+				"instructions": [
+					"You are the primary writer and final responder. Delegate requests to research and durably store facts to the researcher agent.",
+					"Ask the researcher to call tool_cognee_1.remember for the requested facts and return only a storage confirmation, not the facts themselves.",
+					"When remember runs in the background, call tool_cognee_1.memory_status and wait for completed before relying on the memory.",
+					"After storage completes, call tool_cognee_1.recall yourself without receiving the fact directly from the researcher, then answer the user from the recalled results."
+				],
+				"max_waves": 15,
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 240, "y": 220 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_anthropic_writer_1",
+			"provider": "llm_anthropic",
+			"name": "Writer LLM",
+			"config": {
+				"profile": "claude-sonnet-4-6",
+				"claude-sonnet-4-6": { "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}" },
+				"parameters": {}
+			},
+			"control": [{ "classType": "llm", "from": "agent_writer_1" }],
+			"ui": { "position": { "x": 100, "y": 420 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "memory_internal_writer_1",
+			"provider": "memory_internal",
+			"name": "Writer working memory",
+			"config": { "type": "memory_internal" },
+			"control": [{ "classType": "memory", "from": "agent_writer_1" }],
+			"ui": { "position": { "x": 300, "y": 420 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "agent_researcher_1",
+			"provider": "agent_rocketride",
+			"name": "Researcher",
+			"config": {
+				"agent_description": "Researches facts requested by the writer and stores them in shared Cognee memory.",
+				"instructions": [
+					"You are the writer's researcher. For facts the writer asks you to research and store, determine the facts and call tool_cognee_1.remember to persist them.",
+					"Return only a concise storage confirmation and processing status. Do not return the stored facts directly to the writer."
+				],
+				"max_waves": 10,
+				"parameters": {}
+			},
+			"control": [{ "classType": "tool", "from": "agent_writer_1" }],
+			"ui": { "position": { "x": 500, "y": 420 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "llm_anthropic_researcher_1",
+			"provider": "llm_anthropic",
+			"name": "Researcher LLM",
+			"config": {
+				"profile": "claude-sonnet-4-6",
+				"claude-sonnet-4-6": { "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}" },
+				"parameters": {}
+			},
+			"control": [{ "classType": "llm", "from": "agent_researcher_1" }],
+			"ui": { "position": { "x": 460, "y": 620 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "memory_internal_researcher_1",
+			"provider": "memory_internal",
+			"name": "Researcher working memory",
+			"config": { "type": "memory_internal" },
+			"control": [{ "classType": "memory", "from": "agent_researcher_1" }],
+			"ui": { "position": { "x": 660, "y": 620 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "tool_cognee_1",
+			"provider": "tool_cognee",
+			"name": "Shared Cognee memory",
+			"config": {
+				"base_url": "${COGNEE_BASE_URL}",
+				"api_key": "${COGNEE_API_KEY}",
+				"dataset": "shared-research",
+				"allow_dataset_override": false,
+				"search_type": "GRAPH_COMPLETION_DECOMPOSITION",
+				"top_k": 15,
+				"request_timeout": 120,
+				"show_advanced": false,
+				"type": "tool_cognee",
+				"name": "Shared Cognee memory"
+			},
+			"control": [
+				{ "classType": "tool", "from": "agent_researcher_1" },
+				{ "classType": "tool", "from": "agent_writer_1" }
+			],
+			"ui": { "position": { "x": 700, "y": 420 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_answers_1",
+			"provider": "response_answers",
+			"name": "Writer response",
+			"config": { "laneName": "answers" },
+			"input": [{ "lane": "answers", "from": "agent_writer_1" }],
+			"ui": { "position": { "x": 920, "y": 220 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "c09ee000-1501-4c09-8000-000000001501",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1,
+	"isLocked": false
+}

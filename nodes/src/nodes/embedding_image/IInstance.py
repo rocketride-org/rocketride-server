@@ -25,6 +25,7 @@ from typing import List
 from rocketlib import IInstanceBase, AVI_ACTION
 from ai.common.schema import Doc, DocMetadata
 from ai.common.image import ImageProcessor
+from ai.common.avi.descriptor import descriptor_from_payload, attach_source, attach_name
 from .IGlobal import IGlobal
 
 
@@ -48,6 +49,7 @@ class IInstance(IInstanceBase):
         """Initialize instance state."""
         super().__init__(*args, **kwargs)
         self._image_chunk_id = 0
+        self._source_descriptor = None
 
     def writeDocuments(self, documents: List[Doc]):
         """
@@ -95,6 +97,8 @@ class IInstance(IInstanceBase):
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
+            # BEGIN carries the stream descriptor (source provenance), not image bytes.
+            self._source_descriptor = descriptor_from_payload(buffer)
             self.image_data = bytearray()
 
         # Handle AVI_WRITE action (appending chunks of the image)
@@ -119,6 +123,10 @@ class IInstance(IInstanceBase):
                 tableId=0,
                 isDeleted=False,
             )
+
+            # Source provenance + name (<image-stem>) from the stream descriptor.
+            attach_source(metadata, self._source_descriptor)
+            attach_name(metadata, self._source_descriptor)
 
             # Create a document
             doc = Doc(type='Image', page_content=image_str, metadata=metadata)

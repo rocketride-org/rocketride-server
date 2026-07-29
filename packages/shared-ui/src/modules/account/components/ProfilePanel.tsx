@@ -7,18 +7,29 @@
  * ProfilePanel — the Profile tab within AccountView.
  *
  * Displays the user's avatar card with identity information, organization
- * and team memberships with "Set default" actions, and an inline Edit Profile
- * modal. Grouped sections render as stock Cards. All server interactions are
- * delegated to the host via callback props.
+ * and team memberships with "Set default" actions, and the Edit Profile
+ * record panel — an edit-only form DetailPanel per the interaction standard
+ * (2026-07-18): [Save Changes] MATERIALIZES only while a field differs from
+ * the seeded profile snapshot; Cancel / X / Escape on a dirty form raise the
+ * stock "Discard changes?" confirm (the DetailPanel owns the X / Escape
+ * guard via the dirty / editing props; the footer Cancel routes through its
+ * own check); a successful Save closes the panel (correct for a form-only
+ * panel). Per the concurrent-edit ruling, the form seeds ONCE per open and
+ * never re-seeds mid-edit — the user's typing is sacred. Errors render as an
+ * in-panel Banner at the top of the body. Grouped sections render as stock
+ * Cards. All server interactions are delegated to the host via callback props.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import { Card } from '../../../components/card/Card';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
+import { Banner } from '../../../components/banner/Banner';
 import { Button } from '../../../components/button/Button';
 import type { ConnectResult, ProfileUpdate } from '../types';
-import { S, Badge, Avatar, Modal, initials, avatarColor } from './shared';
+import { S, Badge, Avatar, initials, avatarColor } from './shared';
 
 // =============================================================================
 // STYLES
@@ -185,11 +196,9 @@ const styles = {
 		flexShrink: 0,
 	}),
 
-	/** Inline error message beneath the edit modal fields. */
-	modalError: {
-		fontSize: 11,
-		color: 'var(--rr-color-error)',
-		marginTop: 4,
+	/** Spacing wrapper for the in-panel error Banner at the top of the body. */
+	errorBanner: {
+		marginBottom: 12,
 	} as CSSProperties,
 
 	/** Read-only input treatment (login name). */
@@ -239,8 +248,9 @@ const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} 
 export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onSetDefaultOrg }) => {
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
-	 * Called both on mount and whenever the underlying data changes, so the
-	 * edit modal always opens pre-populated with the freshest values.
+	 * Called exactly when the edit panel OPENS — the concurrent-edit ruling
+	 * (2026-07-18) forbids re-seeding staged fields while the panel is open,
+	 * so a profile refresh mid-edit never clobbers the user's typing.
 	 */
 	const fromProfile = (): ProfileUpdate => ({
 		displayName: profile?.displayName || authUser?.displayName || '',
@@ -253,15 +263,21 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 	});
 
 	const [editOpen, setEditOpen] = useState(false);
+	// Staged form fields, seeded once per open from the profile snapshot.
 	const [fields, setFields] = useState<ProfileUpdate>(fromProfile);
+	// The snapshot the form was seeded from — the dirty compare's baseline.
+	// Comparing against LIVE props instead would falsely dirty a clean form
+	// whenever the profile refreshes mid-edit.
+	const [seeded, setSeeded] = useState<ProfileUpdate>(fromProfile);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	// Footer-Cancel discard confirm (the DetailPanel guards X / Escape itself;
+	// the footer Cancel routes through this local gate per the standard).
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-	// Re-sync form fields when the server profile or auth user data is refreshed.
-	useEffect(() => {
-		setFields(fromProfile());
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [profile?.displayName, profile?.email, authUser?.email]);
+	// Dirty flag: any staged field differs from the seeded snapshot. Drives
+	// the materializing [Save Changes] and arms the discard guard.
+	const dirty = (Object.keys(fields) as Array<keyof ProfileUpdate>).some((key) => fields[key] !== seeded[key]);
 
 	/** Returns a change handler for a specific ProfileUpdate field key. */
 	const set = (key: keyof ProfileUpdate) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -269,24 +285,33 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 		setError(null);
 	};
 
-	/** Opens the edit modal and resets its form to the current profile snapshot. */
+	/**
+	 * Opens the edit panel, seeding the form AND the dirty baseline from the
+	 * freshest profile snapshot. This transition is the ONLY seeding point —
+	 * there is deliberately no prop-driven re-seed effect (see fromProfile).
+	 */
 	const openEdit = () => {
-		setFields(fromProfile());
+		const snapshot = fromProfile();
+		setFields(snapshot);
+		setSeeded(snapshot);
 		setError(null);
 		setEditOpen(true);
 	};
-	/** Closes the edit modal and clears any pending error message. */
+	/** Closes the edit panel and clears its transient state. */
 	const closeEdit = () => {
 		setEditOpen(false);
 		setError(null);
+		setConfirmDiscard(false);
 	};
 
-	/** Submits the edited profile fields; shows an inline error on failure. */
+	/** Submits the edited profile fields; a failure stays open with the staged
+	    values intact and shows the in-panel Banner. */
 	const handleSave = async () => {
 		setSaving(true);
 		setError(null);
 		try {
 			await onSave(fields);
+			// After Save the panel closes — correct for a form-only panel.
 			setEditOpen(false);
 		} catch (e) {
 			setError(e instanceof Error ? e.message : 'Save failed');
@@ -394,26 +419,49 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 				</Card>
 			)}
 
-			{/* -- Edit Profile Dialog -- */}
+			{/* -- Edit Profile record panel (record-panel standard 2026-07-17:
+			      the profile IS a record — editing slides out from the Account
+			      dialog's edge like every other record, no dialog). Edit-only
+			      form panel: editing is always true while open, [Save Changes]
+			      MATERIALIZES only while dirty (LEFT of the stationary Cancel),
+			      and a dirty Cancel / X / Escape raises the discard confirm. -- */}
 			{editOpen && (
-				<Modal
-					title="Edit Profile"
+				<DetailPanel
+					persistKey="panelDetailProfileWidth"
+					contained
+					open
 					onClose={closeEdit}
+					avatar={<div style={styles.avatarLarge(displayName || email)}>{initials(displayName, email)}</div>}
+					title={displayName}
+					subtitle={email || undefined}
+					dirty={dirty}
+					editing
+					onExitMode={closeEdit}
+					busy={saving}
 					footer={
 						<>
-							<Button variant="ghost" onClick={closeEdit} disabled={saving}>
+							{dirty && (
+								<Button variant="primary" small onClick={() => void handleSave()} disabled={saving}>
+									{saving ? 'Saving…' : 'Save Changes'}
+								</Button>
+							)}
+							<Button variant="ghost" small onClick={() => (dirty ? setConfirmDiscard(true) : closeEdit())} disabled={saving}>
 								Cancel
-							</Button>
-							<Button variant="primary" onClick={handleSave} disabled={saving}>
-								{saving ? 'Saving…' : 'Save Changes'}
 							</Button>
 						</>
 					}
 				>
+					{/* In-panel error surface (interaction standard): a stock Banner
+					    at the top of the body. */}
+					{error && (
+						<div style={styles.errorBanner}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					)}
 					<div style={S.fieldRow}>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Nickname</div>
-							<input value={fields.displayName} onChange={set('displayName')} style={commonStyles.inputField} autoFocus />
+							<input value={fields.displayName} onChange={set('displayName')} style={commonStyles.inputField} data-rr-autofocus="true" />
 							<div style={commonStyles.textMuted}>What we call you in the app</div>
 						</div>
 						<div style={S.field}>
@@ -438,8 +486,25 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 							<input value={fields.phoneNumber} onChange={set('phoneNumber')} placeholder="+15550000000" style={commonStyles.inputField} />
 						</div>
 					</div>
-					{error && <div style={styles.modalError}>{error}</div>}
-				</Modal>
+				</DetailPanel>
+			)}
+
+			{/* -- Footer-Cancel discard confirm (stock dialog, same copy as the
+			      DetailPanel's own X / Escape guard) -- */}
+			{confirmDiscard && (
+				<ConfirmDialog
+					title="Discard changes?"
+					message="Your unsaved changes will be lost."
+					confirmLabel="Discard"
+					cancelLabel="Keep Editing"
+					destructive
+					onConfirm={() => {
+						// The confirmed discard closes the edit-only form panel.
+						setConfirmDiscard(false);
+						closeEdit();
+					}}
+					onCancel={() => setConfirmDiscard(false)}
+				/>
 			)}
 		</section>
 	);

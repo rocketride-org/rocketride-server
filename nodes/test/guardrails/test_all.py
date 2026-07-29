@@ -58,15 +58,21 @@ _ENGINE_PATH = os.path.join(_GUARDRAILS_DIR, 'guardrails_engine.py')
 
 def _load_engine_module():
     """Load guardrails_engine.py as a standalone module."""
-    # Stub rocketlib so the module can be loaded without the runtime
-    if 'rocketlib' not in sys.modules:
-        _rocketlib_stub = types.ModuleType('rocketlib')
-        _rocketlib_stub.warning = lambda msg, *a, **kw: None
-        sys.modules['rocketlib'] = _rocketlib_stub
+    # Stub rocketlib only while loading; restore so it never leaks to sibling tests.
+    _saved_rl = sys.modules.get('rocketlib')
+    _rocketlib_stub = types.ModuleType('rocketlib')
+    _rocketlib_stub.warning = lambda msg, *a, **kw: None
+    sys.modules['rocketlib'] = _rocketlib_stub
     spec = importlib.util.spec_from_file_location('guardrails_engine', _ENGINE_PATH)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    try:
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        if _saved_rl is not None:
+            sys.modules['rocketlib'] = _saved_rl
+        else:
+            sys.modules.pop('rocketlib', None)
 
 
 _engine_mod = _load_engine_module()

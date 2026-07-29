@@ -3,11 +3,23 @@
 // Copyright (c) 2026 Aparavi Software AG Inc.
 // =============================================================================
 
-import React, { useState, CSSProperties } from 'react';
-import type { DashboardResponse, DashboardTask, DashboardConnection, ActivityEvent, DashboardEvent, TaskEvent } from '../types';
-import { StatusPill } from './StatusPill';
-import { ConnectionDetailModal } from './ConnectionsTab';
-import { formatUptime, formatTime, formatTimeAgo, formatNumber } from '../util';
+/**
+ * OverviewTab — the Monitor Overview page: hero stat strip, live activity
+ * ticker, the unified Connections & Tasks grid, recent activity feed, and
+ * resource summary.
+ *
+ * The table is the shared {@link OverviewGrid} (CardDataGrid with record
+ * panels and persisted layout); the surrounding chrome — stat tiles, ticker,
+ * feed, and resources card — stays here. Data arrives entirely by props
+ * (data-in, callbacks-out): the host owns polling and event subscription.
+ */
+
+import React, { CSSProperties } from 'react';
+import type { DashboardResponse, DashboardTask, ActivityEvent, DashboardEvent } from '../types';
+import { OverviewGrid } from './OverviewGrid';
+import { getEventDisplay } from './ActivityGrid';
+import type { EventTone } from './ActivityGrid';
+import { formatUptime, formatTime, formatNumber } from '../util';
 import { commonStyles } from '../../../themes/styles';
 
 // =============================================================================
@@ -94,76 +106,6 @@ const S = {
 		flexShrink: 0,
 	} as CSSProperties,
 
-	// ── Unified table ───────────────────────────────────────────────────────
-	table: {
-		width: '100%',
-		borderCollapse: 'collapse',
-		fontSize: 13,
-	} as CSSProperties,
-	clickableRow: {} as CSSProperties,
-	completedRow: {
-		opacity: 0.6,
-	} as CSSProperties,
-	mono: {
-		...commonStyles.fontMono,
-		fontVariantNumeric: 'tabular-nums',
-	} as CSSProperties,
-	taskName: {
-		fontWeight: 500,
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-	taskSub: {
-		fontSize: 11,
-		color: 'var(--rr-text-disabled)',
-		marginTop: 1,
-	} as CSSProperties,
-	typeLabel: (color: string): CSSProperties => ({
-		fontSize: 11,
-		color,
-	}),
-	msgGroup: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: 3,
-		fontSize: 11,
-		fontVariantNumeric: 'tabular-nums',
-		marginRight: 6,
-	} as CSSProperties,
-	msgIn: { color: 'var(--rr-color-success)', fontSize: 9 } as CSSProperties,
-	msgOut: { color: 'var(--rr-border-focus)', fontSize: 9 } as CSSProperties,
-
-	// ── Inline gauge bars ───────────────────────────────────────────────────
-	gaugeInline: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 8,
-		minWidth: 100,
-	} as CSSProperties,
-	gaugeBar: {
-		flex: 1,
-		height: 6,
-		background: 'color-mix(in srgb, var(--rr-border) 30%, transparent)',
-		borderRadius: 3,
-		overflow: 'hidden',
-	} as CSSProperties,
-	gaugeFillCpu: {
-		height: '100%',
-		borderRadius: 3,
-		background: 'var(--rr-border-focus)',
-	} as CSSProperties,
-	gaugeFillMem: {
-		height: '100%',
-		borderRadius: 3,
-		background: 'var(--rr-accent)',
-	} as CSSProperties,
-	gaugeLabel: {
-		fontSize: 11,
-		fontVariantNumeric: 'tabular-nums',
-		color: 'var(--rr-text-secondary)',
-		minWidth: 40,
-		textAlign: 'right',
-	} as CSSProperties,
-
 	// ── Bottom grid ─────────────────────────────────────────────────────────
 	bottomGrid: {
 		display: 'grid',
@@ -223,6 +165,11 @@ const S = {
 		borderRadius: 4,
 		overflow: 'hidden',
 	} as CSSProperties,
+	/**
+	 * Resource bar fill in the given color.
+	 *
+	 * @param color - CSS color of the fill.
+	 */
 	resBarFill: (color: string): CSSProperties => ({
 		height: '100%',
 		borderRadius: 4,
@@ -236,7 +183,8 @@ const S = {
 	} as CSSProperties,
 };
 
-const feedColors: Record<string, CSSProperties> = {
+/** Feed label color per event tone (Recent Activity card). */
+const feedColors: Record<EventTone, CSSProperties> = {
 	connection: { color: 'var(--rr-color-success)' },
 	task: { color: 'var(--rr-border-focus)' },
 	warning: { color: 'var(--rr-color-warning)' },
@@ -247,12 +195,20 @@ const feedColors: Record<string, CSSProperties> = {
 // HELPERS
 // =============================================================================
 
+/**
+ * Sum the live resource metrics across running tasks (completed tasks are
+ * excluded; their metrics are stale).
+ *
+ * @param tasks - All dashboard tasks.
+ * @returns Aggregate CPU percent, CPU/GPU memory MB, and completion count.
+ */
 function aggregateMetrics(tasks: DashboardTask[]) {
 	let totalCpu = 0;
 	let totalMem = 0;
 	let totalGpu = 0;
 	let totalCompletions = 0;
 
+	// Walk running tasks only; each contributes its current metric snapshot.
 	for (const t of tasks) {
 		if (t.completed) continue;
 		const m = t.metrics as Record<string, number> | null;
@@ -267,61 +223,12 @@ function aggregateMetrics(tasks: DashboardTask[]) {
 	return { totalCpu, totalMem, totalGpu, totalCompletions };
 }
 
-function getTaskPill(task: DashboardTask) {
-	if (task.completed) {
-		return task.exitCode === 0 ? <StatusPill label={`exit ${task.exitCode}`} variant="muted" /> : <StatusPill label={`exit ${task.exitCode}`} variant="error" />;
-	}
-	if (task.idleTime > 0 && task.ttl > 0 && task.idleTime > task.ttl * 0.8) {
-		return <StatusPill label="idle (ttl)" variant="warning" />;
-	}
-	return <StatusPill label="running" variant="success" />;
-}
-
-// ── Event display (shared logic with ActivityTab) ───────────────────────
-
-function formatClient(clientName?: string, clientVersion?: string, connectionId?: number): string {
-	if (clientName) return clientVersion ? `${clientName} ${clientVersion}:#${connectionId}` : `${clientName}:#${connectionId}`;
-	return `#${connectionId}`;
-}
-
-function getTaskEventDisplay(body: TaskEvent): { color: string; label: string; message: string } {
-	switch (body.action) {
-		case 'running':
-			return { color: 'task', label: 'task', message: `${body.tasks.length} task(s) running` };
-		case 'begin':
-			return { color: 'task', label: 'task', message: `Task ${body.name} started` };
-		case 'end':
-			return { color: 'warning', label: 'task', message: `Task ${body.name} stopped` };
-		case 'restart':
-			return { color: 'task', label: 'task', message: `Task ${body.name} restarted` };
-	}
-}
-
-function getDashboardEventDisplay(body: DashboardEvent): { color: string; label: string; message: string } {
-	switch (body.action) {
-		case 'connection_added':
-			return { color: 'connection', label: 'connect', message: `${formatClient(body.clientName ?? undefined, body.clientVersion ?? undefined, body.connectionId)} connected` };
-		case 'connection_removed':
-			return { color: 'connection', label: 'disconnect', message: `${formatClient(body.clientName ?? undefined, body.clientVersion ?? undefined, body.connectionId)} disconnected` };
-		case 'task_removed':
-			return { color: 'system', label: 'system', message: `Task ${body.taskId} removed` };
-		case 'task_error':
-			return { color: 'warning', label: 'task', message: `Task ${body.taskId} failed (exit ${body.exitCode})${body.exitMessage ? `: ${body.exitMessage}` : ''}` };
-		case 'auth_failed':
-			return { color: 'warning', label: 'security', message: `Auth rejected for #${body.connectionId}: ${body.reason}` };
-		case 'monitor_changed':
-			return { color: 'system', label: 'system', message: `${formatClient(body.clientName ?? undefined, body.clientVersion ?? undefined, body.connectionId)} ${body.change} to ${body.key}` };
-		default:
-			return { color: 'system', label: 'unknown', message: `Unknown event: ${(body as DashboardEvent).action}` };
-	}
-}
-
-function getEventDisplay(event: ActivityEvent): { color: string; label: string; message: string; timestamp: number } {
-	if (event.source === 'task') return { ...getTaskEventDisplay(event.body), timestamp: event.receivedAt };
-	return { ...getDashboardEventDisplay(event.body), timestamp: event.receivedAt };
-}
-
-/** Short summary for the ticker (just the key info, no prefix). */
+/**
+ * Short ticker summary of an event (just the key info, no prefix).
+ *
+ * @param event - The wrapped activity event.
+ * @returns Highlighted subject plus the trailing verb phrase.
+ */
 function getTickerSummary(event: ActivityEvent): { highlight: string; rest: string } {
 	if (event.source === 'task') {
 		const body = event.body;
@@ -353,25 +260,35 @@ function getTickerSummary(event: ActivityEvent): { highlight: string; rest: stri
 // COMPONENT
 // =============================================================================
 
+/** Props for the {@link OverviewTab} component. */
 interface OverviewTabProps {
+	/** Full dashboard snapshot (the hosting view gates on it being loaded). */
 	data: DashboardResponse;
+	/** Activity events pushed from the server (newest first). */
 	events: ActivityEvent[];
+	/** Callback to request a manual data refresh from the host. */
 	onRefresh?: () => void;
 }
 
+/**
+ * The Overview page body: stat tiles, ticker, the shared unified grid, and
+ * the activity / resources cards.
+ *
+ * @param props - {@link OverviewTabProps}.
+ * @returns The overview page content.
+ */
 export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefresh }) => {
+	// Snapshot-derived slices (small arrays; recomputed per poll).
 	const { overview, connections, tasks } = data;
 	const runningTasks = tasks.filter((t) => !t.completed);
 	const completedTasks = tasks.filter((t) => t.completed);
 	const agg = aggregateMetrics(tasks);
 	const recentEvents = events.slice(0, 5);
 	const tickerEvents = events.slice(0, 4);
-	const [selectedConnId, setSelectedConnId] = useState<number | null>(null);
-	const selectedConn = connections.find((c) => c.id === selectedConnId);
 
 	return (
 		<div>
-			{/* Pulse animation keyframe */}
+			{/* Pulse animation keyframe for the ticker dot. */}
 			<style>{`@keyframes rr-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }`}</style>
 
 			{/* ── Hero Stat Strip ─────────────────────────────────────── */}
@@ -385,7 +302,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 					<div style={S.heroLabel}>Tasks</div>
 					<div style={{ ...S.heroValue, color: 'var(--rr-border-focus)' }}>{overview.activeTasks}</div>
 					<div style={S.heroSub}>
-						{runningTasks.length} running{completedTasks.length > 0 ? ` \u00b7 ${completedTasks.length} completed` : ''}
+						{runningTasks.length} running{completedTasks.length > 0 ? ` · ${completedTasks.length} completed` : ''}
 					</div>
 				</div>
 				<div style={{ ...S.heroCell, ...S.heroCellBorder }}>
@@ -422,129 +339,8 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 				</div>
 			)}
 
-			{/* ── Unified Connections & Tasks Table ───────────────────── */}
-			<div style={commonStyles.card}>
-				<div style={commonStyles.cardHeader}>
-					<span>Connections &amp; Tasks</span>
-					<div style={{ display: 'flex', gap: 8 }}>
-						{onRefresh && (
-							<button type="button" style={commonStyles.buttonSecondarySmall} onClick={onRefresh}>
-								Refresh
-							</button>
-						)}
-					</div>
-				</div>
-				<table style={S.table}>
-					<thead>
-						<tr>
-							<th style={commonStyles.tableHeader}>Name</th>
-							<th style={commonStyles.tableHeader}>Type</th>
-							<th style={commonStyles.tableHeader}>CPU</th>
-							<th style={commonStyles.tableHeader}>Memory</th>
-							<th style={commonStyles.tableHeader}>Elapsed</th>
-							<th style={commonStyles.tableHeader}>Status</th>
-						</tr>
-					</thead>
-					<tbody>
-						{/* Connection rows */}
-						{connections.map((conn: DashboardConnection) => (
-							<tr key={`conn-${conn.id}`} style={S.clickableRow} tabIndex={0} onClick={() => setSelectedConnId(conn.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedConnId(conn.id); } }}>
-								<td style={commonStyles.tableCell}>
-									<div style={S.taskName}>{conn.clientInfo?.name || conn.clientId || `Conn #${conn.id}`}</div>
-									<div style={S.taskSub}>
-										Connection #{conn.id} &middot;{' '}
-										<span style={S.msgGroup}>
-											<span style={S.msgIn}>&#9660;</span>
-											{formatNumber(conn.messagesIn)}
-										</span>
-										<span style={S.msgGroup}>
-											<span style={S.msgOut}>&#9650;</span>
-											{formatNumber(conn.messagesOut)}
-										</span>
-									</div>
-								</td>
-								<td style={commonStyles.tableCell}>
-									<span style={S.typeLabel('var(--rr-color-success)')}>client</span>
-								</td>
-								<td style={{ ...commonStyles.tableCell, color: 'var(--rr-text-disabled)' }}>&mdash;</td>
-								<td style={{ ...commonStyles.tableCell, color: 'var(--rr-text-disabled)' }}>&mdash;</td>
-								<td style={{ ...commonStyles.tableCell, ...S.mono }}>{formatTimeAgo(conn.connectedAt)}</td>
-								<td style={commonStyles.tableCell}>
-									<StatusPill label="connected" variant="success" />
-								</td>
-							</tr>
-						))}
-
-						{/* Running task rows */}
-						{runningTasks.map((task: DashboardTask) => {
-							const m = task.metrics as Record<string, number> | null;
-							const cpu = m?.cpu_percent ?? 0;
-							const mem = m?.cpu_memory_mb ?? 0;
-							return (
-								<tr key={`task-${task.id}`} style={S.clickableRow}>
-									<td style={commonStyles.tableCell}>
-										<div style={S.taskName}>{task.name || task.id}</div>
-										<div style={S.taskSub}>
-											{task.provider} &middot; {task.projectId?.slice(0, 8)}
-											{task.source ? ` \u00b7 ${task.source}` : ''}
-										</div>
-									</td>
-									<td style={commonStyles.tableCell}>
-										<span style={S.typeLabel('var(--rr-border-focus)')}>task</span>
-									</td>
-									<td style={commonStyles.tableCell}>
-										<div style={S.gaugeInline}>
-											<div style={S.gaugeBar}>
-												<div style={{ ...S.gaugeFillCpu, width: `${Math.min(cpu, 100)}%` }} />
-											</div>
-											<span style={S.gaugeLabel}>{cpu.toFixed(0)}%</span>
-										</div>
-									</td>
-									<td style={commonStyles.tableCell}>
-										<div style={S.gaugeInline}>
-											<div style={S.gaugeBar}>
-												<div style={{ ...S.gaugeFillMem, width: `${Math.min((mem / 2048) * 100, 100)}%` }} />
-											</div>
-											<span style={S.gaugeLabel}>{mem.toFixed(0)}M</span>
-										</div>
-									</td>
-									<td style={{ ...commonStyles.tableCell, ...S.mono }}>{formatUptime(task.elapsedTime)}</td>
-									<td style={commonStyles.tableCell}>{getTaskPill(task)}</td>
-								</tr>
-							);
-						})}
-
-						{/* Completed task rows (dimmed) */}
-						{completedTasks.slice(0, 5).map((task: DashboardTask) => (
-							<tr key={`task-${task.id}`} style={{ ...S.clickableRow, ...S.completedRow }}>
-								<td style={commonStyles.tableCell}>
-									<div style={S.taskName}>{task.name || task.id}</div>
-									<div style={S.taskSub}>
-										{task.provider} &middot; {task.projectId?.slice(0, 8)}
-										{task.source ? ` \u00b7 ${task.source}` : ''}
-									</div>
-								</td>
-								<td style={commonStyles.tableCell}>
-									<span style={S.typeLabel('var(--rr-text-disabled)')}>task</span>
-								</td>
-								<td style={{ ...commonStyles.tableCell, color: 'var(--rr-text-disabled)' }}>&mdash;</td>
-								<td style={{ ...commonStyles.tableCell, color: 'var(--rr-text-disabled)' }}>&mdash;</td>
-								<td style={{ ...commonStyles.tableCell, ...S.mono }}>{formatUptime(task.elapsedTime)}</td>
-								<td style={commonStyles.tableCell}>{getTaskPill(task)}</td>
-							</tr>
-						))}
-
-						{/* Empty state */}
-						{connections.length === 0 && tasks.length === 0 && (
-							<tr>
-								<td colSpan={6} style={{ ...commonStyles.tableCell, ...commonStyles.empty }}>
-									No connections or tasks
-								</td>
-							</tr>
-						)}
-					</tbody>
-				</table>
-			</div>
+			{/* ── Unified Connections & Tasks grid (shared, with record panels) ── */}
+			<OverviewGrid data={data} onRefresh={onRefresh} />
 
 			{/* ── Bottom Grid: Activity + Resources ──────────────────── */}
 			<div style={S.bottomGrid}>
@@ -556,11 +352,12 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 					</div>
 					<div>
 						{recentEvents.map((event, i) => {
-							const { color, label, message, timestamp } = getEventDisplay(event);
+							const { tone, label, message, timestamp } = getEventDisplay(event);
 							return (
 								<div key={i} style={S.feedItem}>
-									<div style={S.feedTime}>{formatTime(timestamp)}</div>
-									<div style={{ ...S.feedType, ...feedColors[color] }}>{label}</div>
+									{/* formatTime takes Unix seconds; timestamps arrive as epoch ms. */}
+									<div style={S.feedTime}>{formatTime(timestamp / 1000)}</div>
+									<div style={{ ...S.feedType, ...feedColors[tone] }}>{label}</div>
 									<div style={S.feedMsg}>{message}</div>
 								</div>
 							);
@@ -614,7 +411,6 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ data, events, onRefres
 					</div>
 				</div>
 			</div>
-			{selectedConn && <ConnectionDetailModal connection={selectedConn} onClose={() => setSelectedConnId(null)} />}
 		</div>
 	);
 };

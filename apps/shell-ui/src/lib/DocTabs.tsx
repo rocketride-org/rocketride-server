@@ -32,7 +32,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
-import type { Documents, SplitOrientation } from './Documents';
+import type { Documents, Public, SplitOrientation } from './Documents';
 
 // =============================================================================
 // STYLES
@@ -157,7 +157,7 @@ const styles = {
  */
 export interface DocTabsProps {
 	/** The Documents instance to read state from and dispatch actions to. */
-	docs: Documents;
+	docs: Public<Documents>;
 	/** The editor group whose tabs should be rendered. */
 	groupId: string;
 	/** Whether this group is the currently focused group. */

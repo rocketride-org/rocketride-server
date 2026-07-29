@@ -57,6 +57,9 @@ class IGlobal(IGlobalBase):
     allow_stat: bool = True
     allow_delete: bool = False
     path_patterns: list[re.Pattern] | None = None
+    target_dir: str = 'output/'
+    emit_url: bool = False
+    url_expires_in: int = 3600
 
     def beginGlobal(self) -> None:
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
@@ -71,6 +74,7 @@ class IGlobal(IGlobalBase):
         self.allow_stat = bool(cfg.get('allowStat', True))
         self.allow_delete = bool(cfg.get('allowDelete', False))
         self.path_patterns = self._build_path_patterns(cfg)
+        self.target_dir, self.emit_url, self.url_expires_in = self._sink_config(cfg)
 
         client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
         if not client_id:
@@ -117,6 +121,22 @@ class IGlobal(IGlobalBase):
 
         return patterns
 
+    @staticmethod
+    def _sink_config(cfg: dict) -> tuple[str, bool, int]:
+        """Parse the sink lane config into ``(target_dir, emit_url, url_expires_in)``.
+
+        ``url_expires_in`` is clamped to the FileStore range of 1..3600 seconds;
+        non-positive or missing values fall back to the 3600-second default.
+        """
+        target_dir = str(cfg.get('targetDir', 'output/'))
+        emit_url = bool(cfg.get('emitUrl', False))
+        try:
+            raw_expires = int(cfg.get('urlExpiresIn', 3600) or 3600)
+        except (TypeError, ValueError):
+            raw_expires = 3600
+        url_expires_in = min(raw_expires, 3600) if raw_expires > 0 else 3600
+        return target_dir, emit_url, url_expires_in
+
     def validateConfig(self) -> None:
         try:
             cfg = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -128,3 +148,6 @@ class IGlobal(IGlobalBase):
         self.client_id = None
         self.file_store = None
         self.path_patterns = []
+        self.target_dir = 'output/'
+        self.emit_url = False
+        self.url_expires_in = 3600

@@ -20,7 +20,7 @@ describe('buildIndex', () => {
 
 		const manifest = [
 			{ id: 'quickstart', route: '/quickstart', title: 'Quickstart', mdSibling: '/quickstart.md' },
-			{ id: 'concepts/pipelines', route: '/concepts/pipelines', title: 'Pipelines', mdSibling: '/concepts/pipelines.md' },
+			{ id: 'concepts/pipelines', route: '/concepts/pipelines', title: 'Pipelines', mdSibling: '/concepts/pipelines.md', description: 'A pipeline is a directed graph of nodes.' },
 			{ id: 'nodes/webhook', route: '/nodes/webhook', title: 'webhook', mdSibling: '/nodes/webhook.md', node: 'webhook' },
 		];
 		await writeFile(path.join(contentDir, '.manifest.json'), JSON.stringify(manifest));
@@ -43,7 +43,11 @@ describe('buildIndex', () => {
 		assert.match(index, /^# RocketRide Documentation/m);
 		assert.match(index, /## Quickstart/);
 		assert.match(index, /## Concepts/);
-		assert.match(index, /\[Pipelines\]\(\/concepts\/pipelines\.md\)/);
+		// Links are absolute (the llms.txt format specifies URLs) and carry the
+		// manifest description when the page has one.
+		assert.match(index, /\[Pipelines\]\(https:\/\/docs\.rocketride\.org\/concepts\/pipelines\.md\): A pipeline is a directed graph of nodes\./);
+		// An entry without a description degrades to a bare link, no trailing colon.
+		assert.match(index, /\[Quickstart\]\(https:\/\/docs\.rocketride\.org\/quickstart\.md\)\n/);
 		// Quickstart section precedes Concepts (spine order)
 		assert.ok(index.indexOf('## Quickstart') < index.indexOf('## Concepts'));
 	});

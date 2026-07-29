@@ -42,13 +42,18 @@ import '../google-api-types';
  * configuration. Displays an "Authenticated" label when a user token is already
  * present, and shows an error color when required auth tokens are missing.
  */
-export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFSchema = RJSFSchema, F extends FormContextType = never>({ ...props }: IconButtonProps<T, S, F>) {
+export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFSchema = RJSFSchema, F extends FormContextType = never>({
+	...props
+}: // The canvas passes its RJSF formContext (formValues, nodeId, provider, ...)
+// down to widget buttons; @rjsf's IconButtonProps does not model it, so the
+// props type is widened with the extra optional member instead of casting.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+IconButtonProps<T, S, F> & { formContext?: Record<string, any> }) {
 	const { t } = useTranslation();
 
 	const { oauth2RootUrl, oauthReturnUrl, onOpenExternal } = useFlowProject();
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const formContext = (props as unknown as { formContext?: Record<string, any> }).formContext;
+	const formContext = props.formContext;
 	const formValues = formContext?.formValues ?? {};
 	const nodeId = formContext?.nodeId;
 	// Serialize the current form data for the OAuth redirect so the server can
@@ -67,13 +72,8 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		url.searchParams.set('node_id', nodeId ?? '');
 
 		// Include the service name if available, so the OAuth callback knows which service this is for
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		if ((props as any).formContext?.formData?.name) {
-			url.searchParams.set(
-				'name',
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				(props as any).formContext.formData.name
-			);
+		if (formContext?.formData?.name) {
+			url.searchParams.set('name', formContext.formData.name);
 		}
 
 		// "Login with Google" is personal OAuth by definition; service accounts

@@ -38,9 +38,9 @@ import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { useWorkspace } from '../../workspace/WorkspaceContext';
+import { PrefsProvider } from 'shared';
 import { ConnectionManager } from '../../connection/connection';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
-import { getCommonKeys, resolveSettingsForApp } from '../../views/settings/settingsUtils';
 import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
 import { HostChromeProvider } from './HostChromeContext';
@@ -239,7 +239,18 @@ export interface ShellLayoutProps {
 export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	config, isConnected, statusMessage, hideAppSwitcher, defaultAppId,
 }) => {
-	const { loaded, seeded, appLoading, prefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp, loadFailure, dismissLoadFailure } = useWorkspace();
+	const { loaded, seeded, appLoading, prefs, updatePrefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp, loadFailure, dismissLoadFailure } = useWorkspace();
+
+	// The ONE workspace-prefs accessor (getPref/setPref) handed to every app and
+	// overlay the shell renders — the same API the canvas uses via ProjectView.
+	// Reads/writes the active app's prefs bag; updatePrefs persists it.
+	const prefsApi = useMemo(
+		() => ({
+			getPref: (key: string): unknown => prefs[key],
+			setPref: (key: string, value: unknown): void => updatePrefs({ [key]: value }),
+		}),
+		[prefs, updatePrefs],
+	);
 
 	// Technical-details panel on the app-load error view; collapses whenever
 	// the active app changes so a stale trace never shows for a new app.
@@ -265,20 +276,22 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		}
 	};
 
-	// --- Merge API config: build-time -> setting defaults -> user settings ----
-	const mergedApiConfig = useMemo(() => {
-		// Collect default values from all app settings declarations
-		const settingDefaults = appManifest.reduce<Record<string, string>>((acc, app) => {
-			for (const s of app.settings ?? []) {
-				if (s.default !== undefined && !(s.key in acc)) acc[s.key] = s.default;
-			}
-			return acc;
-		}, {});
-		const base = { ...config.apiConfig, ...settingDefaults, ...settings };
-		// Resolve per-app overrides for the active app
-		const commonKeys = getCommonKeys(appManifest);
-		return resolveSettingsForApp(base, activeAppId, commonKeys);
-	}, [config.apiConfig, appManifest, settings, activeAppId]);
+	// --- Merge API config: build-time config + effective settings -------------
+	// `settings` from useWorkspace() is already the EFFECTIVE map (declared
+	// defaults overlaid with the user's overrides via the settings registry),
+	// so no per-key default collection or per-app override resolution is needed
+	// here. ShellApiConfig is an env-style string map handed to remote apps, so
+	// typed setting values (number/boolean) are coerced to strings at this
+	// boundary — the one place the two representations meet.
+	const mergedApiConfig = useMemo(
+		() => ({
+			...config.apiConfig,
+			...Object.fromEntries(
+				Object.entries(settings).map(([key, value]) => [key, String(value)]),
+			),
+		}),
+		[config.apiConfig, settings],
+	);
 
 	// --- Active app descriptor (undefined while loading) ---------------------
 	const activeApp = loadedApps[activeAppId];
@@ -392,6 +405,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 
 	// --- Render --------------------------------------------------------------
 	return (
+		<PrefsProvider value={prefsApi}>
 		<ShellApiConfigProvider config={mergedApiConfig}>
 		<HostChromeProvider>
 		<OverlayManager>
@@ -521,6 +535,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		</OverlayManager>
 		</HostChromeProvider>
 		</ShellApiConfigProvider>
+		</PrefsProvider>
 	);
 };
 

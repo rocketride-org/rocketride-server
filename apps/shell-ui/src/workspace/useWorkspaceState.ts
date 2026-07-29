@@ -26,7 +26,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { RocketRideClient } from 'rocketride';
-import type { AppWorkspaceState, WorkspacePrefs } from './types';
+import type { AppWorkspaceState, WorkspacePrefs, SettingValue } from './types';
 
 // =============================================================================
 // CONSTANTS
@@ -148,10 +148,11 @@ export function useWorkspaceState(
 	const [activeAppId, setActiveAppId] = useState<string>(defaultAppId);
 	// In-memory map of all app workspace states loaded during this session
 	const [apps, setApps] = useState<Record<string, AppWorkspaceState>>({});
-	// Persisted key/value settings (e.g. API keys) loaded from settings.json
-	const [settings, setSettings] = useState<Record<string, string>>({});
+	// Persisted setting OVERRIDES loaded from settings.json (deltas only —
+	// defaults live in the app manifests' configuration schemas)
+	const [settings, setSettings] = useState<Record<string, SettingValue>>({});
 	// Ref mirror of settings for use inside callbacks without stale closures
-	const settingsRef = useRef<Record<string, string>>({});
+	const settingsRef = useRef<Record<string, SettingValue>>({});
 	// Pending debounce timer handle for settings writes
 	const settingsSaveRef = useRef<ReturnType<typeof setTimeout>>();
 
@@ -257,7 +258,7 @@ export function useWorkspaceState(
 	 *
 	 * @param s - The complete settings object to persist.
 	 */
-	const writeSettings = useCallback((s: Record<string, string>) => {
+	const writeSettings = useCallback((s: Record<string, SettingValue>) => {
 		if (!canSave()) return;
 		// Cancel any pending timer so rapid successive updates are batched
 		clearTimeout(settingsSaveRef.current);
@@ -303,7 +304,7 @@ export function useWorkspaceState(
 		// Load global prefs and settings in parallel
 		Promise.all([
 			client.fsReadJson<GlobalFile>(globalPath(workspaceDir)).catch(() => null),
-			client.fsReadJson<Record<string, string>>(settingsPath(workspaceDir)).catch(() => null),
+			client.fsReadJson<Record<string, SettingValue>>(settingsPath(workspaceDir)).catch(() => null),
 		]).then(async ([global, savedSettings]) => {
 				// Active app: URL deep-link or built-in default
 				const restoredAppId = startupAppId ?? defaultAppId;
@@ -494,15 +495,22 @@ export function useWorkspaceState(
 	// --- Settings mutations --------------------------------------------------
 
 	/**
-	 * Persists a single setting key/value pair to the in-memory settings map and
+	 * Persists a single setting override to the in-memory settings map and
 	 * schedules a debounced write to `settings.json`.
 	 *
-	 * @param key   - The setting key (e.g. 'ROCKETRIDE_OPENAI_KEY').
-	 * @param value - The new value to store.
+	 * Passing `undefined` DELETES the key — settings.json stores deltas only,
+	 * so "reset to default" and "set to a value equal to the default" both
+	 * remove the entry rather than writing the default value.
+	 *
+	 * @param key   - The dotted setting key (e.g. 'rocketride.models.serverHost').
+	 * @param value - The override value, or undefined to delete the override.
 	 */
-	const updateSetting = useCallback((key: string, value: string) => {
+	const updateSetting = useCallback((key: string, value: SettingValue | undefined) => {
 		setSettings((prev) => {
-			const next = { ...prev, [key]: value };
+			// Build the next map: set the override, or remove it on undefined
+			const next = { ...prev };
+			if (value === undefined) delete next[key];
+			else next[key] = value;
 			settingsRef.current = next;
 			writeSettings(next);
 			return next;

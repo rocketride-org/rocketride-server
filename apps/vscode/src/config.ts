@@ -51,10 +51,6 @@ export interface ConnectionGroupConfig {
 	local: {
 		/** Engine version: 'latest', 'prerelease', or a specific tag */
 		engineVersion: string;
-		/** Enable full debug output (--trace=debugOut) */
-		debugOutput: boolean;
-		/** Additional engine arguments (passed to engine subprocess) */
-		engineArgs: string;
 	};
 }
 
@@ -71,6 +67,18 @@ export interface ConfigManagerInfo {
 
 	/** Pipeline restart behavior when .pipe files change */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+
+	/** Default idle-timeout (seconds) for runs without a per-pipeline override; 0 = no timeout. */
+	pipelineTtl: number;
+
+	/** Default trace verbosity for runs without a per-pipeline override. */
+	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
+
+	/** Additional command-line arguments passed to each pipeline task via `.use`. */
+	taskArguments: string;
+
+	/** Enable full debug output for pipeline tasks (--trace=debugOut via `.use` args). */
+	pipelineDebugOutput: boolean;
 }
 
 /** Per-group settings sent from the Settings UI on save. */
@@ -81,8 +89,6 @@ export interface ConnectionGroupSnapshot {
 	teamId: string;
 	local: {
 		engineVersion: string;
-		debugOutput: boolean;
-		engineArgs: string;
 	};
 }
 
@@ -96,6 +102,10 @@ export interface SettingsSnapshot {
 	deployment: ConnectionGroupSnapshot;
 	defaultPipelinePath: string;
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	pipelineTtl: number;
+	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
+	taskArguments: string;
+	pipelineDebugOutput: boolean;
 	autoAgentIntegration: boolean;
 	integrationCopilot: boolean;
 	integrationClaudeCode: boolean;
@@ -124,7 +134,7 @@ export class ConfigManager {
 		hostUrl: '',
 		apiKey: '',
 		teamId: '',
-		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+		local: { engineVersion: 'latest' },
 	};
 
 	// Cached configuration
@@ -133,6 +143,10 @@ export class ConfigManager {
 		deployment: { ...ConfigManager.DEFAULT_GROUP, connectionMode: null },
 		defaultPipelinePath: '',
 		pipelineRestartBehavior: 'prompt',
+		pipelineTtl: 900,
+		pipelineTraceLevel: 'summary',
+		taskArguments: '',
+		pipelineDebugOutput: false,
 	};
 
 	private constructor() {}
@@ -207,13 +221,11 @@ export class ConfigManager {
 			teamId: gc.get<string>('teamId', ''),
 			local: {
 				engineVersion: gc.get<string>('local.engineVersion', 'latest'),
-				debugOutput: gc.get<boolean>('local.debugOutput', false),
-				engineArgs: gc.get<string>('local.engineArgs', ''),
 			},
 		};
 	}
 
-/**
+	/**
 	 * Refreshes the cached configuration from all sources (VS Code settings
 	 * and secure storage). Public so that callers like applyAllSettings() and
 	 * EngineRegistry can force a cache refresh after external writes.
@@ -226,6 +238,10 @@ export class ConfigManager {
 			deployment: await this.refreshGroupConfig('deployment'),
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
+			pipelineTtl: config.get('pipelineTTL', 900),
+			pipelineTraceLevel: config.get('pipelineTraceLevel', 'summary'),
+			taskArguments: config.get('taskArguments', ''),
+			pipelineDebugOutput: config.get('pipelineDebugOutput', false),
 		};
 	}
 
@@ -258,6 +274,10 @@ export class ConfigManager {
 			deployment: { ...this.config.deployment, local: { ...this.config.deployment.local } },
 			defaultPipelinePath: this.config.defaultPipelinePath,
 			pipelineRestartBehavior: this.config.pipelineRestartBehavior,
+			pipelineTtl: this.config.pipelineTtl,
+			pipelineTraceLevel: this.config.pipelineTraceLevel,
+			taskArguments: this.config.taskArguments,
+			pipelineDebugOutput: this.config.pipelineDebugOutput,
 		};
 	}
 
@@ -299,26 +319,25 @@ export class ConfigManager {
 	}
 
 	/**
-	 * Returns the engine args as an array for the given group, injecting
-	 * --trace=debugOut if debug output is enabled and the user hasn't
-	 * specified their own --trace.
+	 * Returns the per-task arguments passed to `.use` when executing a pipe,
+	 * injecting --trace=debugOut if pipeline debug output is enabled and the
+	 * user hasn't specified their own --trace.
 	 *
-	 * Note: engineArgs is passed as a single string intentionally. The backend
-	 * engine splits all arguments according to shell parsing rules (handling
-	 * quoted paths, escaped spaces, etc.). Naive whitespace splitting here
-	 * would break arguments like --path='C:\Program Files\RocketRide'.
+	 * Note: taskArguments is passed as a single string intentionally. The
+	 * backend engine splits all arguments according to shell parsing rules
+	 * (handling quoted paths, escaped spaces, etc.). Naive whitespace splitting
+	 * here would break arguments like --path='C:\Program Files\RocketRide'.
 	 */
-	public getEngineArgs(group: ConnectionGroup = 'development'): string[] {
-		const gc = this.getConfig()[group];
-		const rawArgs = gc.local.engineArgs;
-		const argsStr = Array.isArray(rawArgs) ? rawArgs.join(' ') : String(rawArgs || '');
+	public getTaskArgs(): string[] {
+		const cfg = this.getConfig();
+		const argsStr = String(cfg.taskArguments || '');
 		const hasTrace = argsStr.includes('--trace=');
 
 		const result: string[] = [];
 		if (argsStr.trim()) {
 			result.push(argsStr.trim());
 		}
-		if (gc.local.debugOutput && !hasTrace) {
+		if (cfg.pipelineDebugOutput && !hasTrace) {
 			result.push('--trace=debugOut');
 		}
 		return result;
@@ -437,20 +456,22 @@ export class ConfigManager {
 			await wc.update('development.hostUrl', s.development.hostUrl, vscode.ConfigurationTarget.Global);
 			await wc.update('development.teamId', s.development.teamId, vscode.ConfigurationTarget.Global);
 			await wc.update('development.local.engineVersion', s.development.local.engineVersion, vscode.ConfigurationTarget.Global);
-			await wc.update('development.local.debugOutput', s.development.local.debugOutput, vscode.ConfigurationTarget.Global);
-			await wc.update('development.local.engineArgs', s.development.local.engineArgs, vscode.ConfigurationTarget.Global);
 
 			// --- Deployment group ---
 			await wc.update('deployment.connectionMode', s.deployment.connectionMode, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.hostUrl', s.deployment.hostUrl, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.teamId', s.deployment.teamId, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.local.engineVersion', s.deployment.local.engineVersion, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.local.debugOutput', s.deployment.local.debugOutput, vscode.ConfigurationTarget.Global);
-			await wc.update('deployment.local.engineArgs', s.deployment.local.engineArgs, vscode.ConfigurationTarget.Global);
 
 			// --- Global settings ---
 			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
 			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
+
+			// --- Pipeline execution defaults ---
+			await wc.update('pipelineTTL', s.pipelineTtl, vscode.ConfigurationTarget.Global);
+			await wc.update('pipelineTraceLevel', s.pipelineTraceLevel, vscode.ConfigurationTarget.Global);
+			await wc.update('taskArguments', s.taskArguments, vscode.ConfigurationTarget.Global);
+			await wc.update('pipelineDebugOutput', s.pipelineDebugOutput, vscode.ConfigurationTarget.Global);
 
 			// --- Integration settings ---
 			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);

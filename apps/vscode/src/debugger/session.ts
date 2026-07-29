@@ -258,7 +258,7 @@ export class RocketRideDebugAdapter implements vscode.DebugAdapter {
 		try {
 			if (this.isLaunchRequest(message)) {
 				message.arguments.pipeline = this.pipeline;
-				message.arguments.args = this.configManager.getEngineArgs('development');
+				message.arguments.args = this.configManager.getTaskArgs();
 			} else if (this.isAttachRequest(message)) {
 				this.token = message.arguments?.token;
 			}

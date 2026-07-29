@@ -32,6 +32,8 @@ const MAX_DOCS = 64;
 interface TraceDocument {
 	objectName: string;
 	completed: boolean;
+	/** The document's begin-event continuum seq — its permanent identity. */
+	beginSeq?: number;
 	rows: TraceRow[];
 }
 
@@ -56,11 +58,20 @@ interface PendingFrame {
 // Hook
 // =============================================================================
 
-export function useTraceState(traceEvents: TraceEvent[]): {
+export function useTraceState(
+	traceEvents: TraceEvent[],
+	resetKey?: string | number,
+): {
 	rows: TraceRow[];
 	clearTrace: () => void;
 } {
 	const [rows, setRows] = useState<TraceRow[]>([]);
+
+	// Fold-identity key: when it changes (a different track's events are now
+	// being fed), the fold restarts from scratch BEFORE processing — a
+	// shrink-check alone cannot catch switching to a LONGER foreign array,
+	// which would splice two runs' folds together.
+	const resetKeyRef = useRef(resetKey);
 
 	// =========================================================================
 	// Internal refs -- mutable bookkeeping that does not trigger re-renders
@@ -127,10 +138,25 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 	// =========================================================================
 
 	useEffect(() => {
-		const start = processedCountRef.current;
+		// Fold-identity change (new track): full reset, then fall through so
+		// the new array is processed from index 0 in this same pass.
+		if (resetKeyRef.current !== resetKey) {
+			resetKeyRef.current = resetKey;
+			documentsRef.current.clear();
+			docOrderRef.current = [];
+			slotBindingsRef.current.clear();
+			pendingStacksRef.current.clear();
+			rowCounterRef.current = 0;
+			nextDocIdRef.current = 0;
+			processedCountRef.current = 0;
+			setRows([]);
+		}
+
+		let start = processedCountRef.current;
 		const end = traceEvents.length;
 
-		// Handle reset: if events array shrank (host cleared), reset all state
+		// Shrunken input (host cleared / backward seek within a track): reset,
+		// then fall through and refold the whole array in this same pass.
 		if (end < start) {
 			documentsRef.current.clear();
 			docOrderRef.current = [];
@@ -140,7 +166,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 			nextDocIdRef.current = 0;
 			processedCountRef.current = 0;
 			setRows([]);
-			return;
+			start = 0;
 		}
 
 		if (start >= end) return; // nothing new
@@ -149,6 +175,10 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 			const event = traceEvents[i];
 			const { pipelineId, op, pipes, trace, source: eventSource, component } = event;
 			const lane = trace.lane || op;
+			// Row timestamps come from the server-stamped emission time
+			// (epoch seconds -> ms). Never the local wall clock: the same
+			// fold must produce identical rows live and on run-log replay.
+			const eventMs = event.eventTime * 1000;
 
 			switch (op) {
 				case 'begin': {
@@ -157,6 +187,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					documentsRef.current.set(docId, {
 						objectName,
 						completed: false,
+						...(event.seq !== undefined ? { beginSeq: event.seq } : {}),
 						rows: [],
 					});
 					docOrderRef.current.push(docId);
@@ -187,12 +218,13 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					const row: TraceRow = {
 						id: rowCounterRef.current++,
 						docId,
+						...(doc.beginSeq !== undefined ? { beginSeq: doc.beginSeq } : {}),
 						completed: false,
 						lane,
 						filterName,
 						depth,
 						entryData: trace.data,
-						timestamp: Date.now(),
+						timestamp: eventMs,
 						objectName: doc.objectName,
 						source: eventSource,
 					};
@@ -240,7 +272,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 							exitData: trace.data,
 							result: trace.result,
 							error: trace.error,
-							endTimestamp: Date.now(),
+							endTimestamp: eventMs,
 						};
 					}
 					break;
@@ -265,7 +297,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 											...doc.rows[idx],
 											result: 'error',
 											error: 'missing leave event',
-											endTimestamp: Date.now(),
+											endTimestamp: eventMs,
 										};
 									}
 								}
@@ -276,12 +308,13 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 								const resultRow: TraceRow = {
 									id: rowCounterRef.current++,
 									docId,
+									...(doc.beginSeq !== undefined ? { beginSeq: doc.beginSeq } : {}),
 									completed: true,
 									lane: '__result__',
 									filterName: '',
 									depth: 0,
-									timestamp: Date.now(),
-									endTimestamp: Date.now(),
+									timestamp: eventMs,
+									endTimestamp: eventMs,
 									objectName: doc.objectName,
 									source: eventSource,
 									pipelineResult: result,
@@ -300,7 +333,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 
 		processedCountRef.current = end;
 		flush();
-	}, [traceEvents, flush]);
+	}, [traceEvents, flush, resetKey]);
 
 	// =========================================================================
 	// clearTrace — callable by the host to manually reset

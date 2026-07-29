@@ -395,6 +395,11 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 	const discounted = promo ? discountedCents(plan, promo) : null;
 	const payLabel = discounted !== null ? formatCents(discounted, plan.currency) : planAmount(plan);
 
+	// Stripe accepts `wallets.link: 'never'` at runtime, but stripe-js@5's
+	// PaymentWalletsOption omits the `link` key — widen the local option type
+	// (intersection stays assignable to PaymentWalletsOption) instead of casting.
+	const walletsOption: PaymentWalletsOption & { link?: 'auto' | 'never' } = { link: 'never' };
+
 	return (
 		<>
 			<button style={S.backBtn} onClick={onBack}>&#8592; Change plan</button>
@@ -418,8 +423,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, subscriptionId, promo, 
 			</div>
 
 			<form onSubmit={handleSubmit}>
-				{/* Stripe accepts `link: 'never'` at runtime, but stripe-js@5's PaymentWalletsOption type omits it. */}
-				<PaymentElement options={{ wallets: { link: 'never' } as unknown as PaymentWalletsOption }} />
+				<PaymentElement options={{ wallets: walletsOption }} />
 				<button type="submit" disabled={!stripe || submitting} style={S.submitBtn(!stripe || submitting)}>
 					{submitting ? 'Processing\u2026' : `Subscribe \u2014 ${payLabel}`}
 				</button>

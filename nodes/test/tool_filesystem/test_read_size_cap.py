@@ -43,9 +43,6 @@ def _install_rocketlib_stub() -> None:
     decorator that stamps ``__tool_meta__`` on the wrapped method) — both
     are surface used by ``IInstance.py`` at import time.
     """
-    if 'rocketlib' in sys.modules:
-        return
-
     stub = types.ModuleType('rocketlib')
 
     class _IInstanceBase:
@@ -69,6 +66,10 @@ def _install_rocketlib_stub() -> None:
 
     stub.IInstanceBase = _IInstanceBase
     stub.tool_function = _tool_function
+    # Transitively needed: IInstance imports ai.common.utils, whose tool_args
+    # does ``from rocketlib import warning`` when the real ai package resolves
+    # and is not already cached in this process.
+    stub.warning = lambda *a, **k: None
     sys.modules['rocketlib'] = stub
 
 
@@ -111,15 +112,23 @@ def _install_tool_filesystem_pkg_stub() -> None:
     sys.modules['tool_filesystem.IGlobal'] = iglobal_mod
 
 
+# Stub rocketlib only while importing the node, then restore so it never leaks.
+_saved_rl = sys.modules.get('rocketlib')
 _install_rocketlib_stub()
 _install_tool_filesystem_pkg_stub()
 
-from tool_filesystem.IInstance import (  # noqa: E402  — must follow sys.modules setup
-    DEFAULT_READ_LIMIT,
-    MAX_READ_LIMIT,
-    IInstance,
-)
-from tool_filesystem.IGlobal import IGlobal  # noqa: E402
+try:
+    from tool_filesystem.IInstance import (  # noqa: E402  — must follow sys.modules setup
+        DEFAULT_READ_LIMIT,
+        MAX_READ_LIMIT,
+        IInstance,
+    )
+    from tool_filesystem.IGlobal import IGlobal  # noqa: E402
+finally:
+    if _saved_rl is not None:
+        sys.modules['rocketlib'] = _saved_rl
+    else:
+        sys.modules.pop('rocketlib', None)
 
 
 # ---------------------------------------------------------------------------

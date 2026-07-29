@@ -69,6 +69,7 @@ import TidyIcon from '../../../assets/icons/TidyIcon';
 
 import { INodeType } from '../types';
 import { useFlowProject } from '../context/FlowProjectContext';
+import { usePrefs } from '../../../contexts/PrefsContext';
 import { isInVSCode } from '../../../themes/vscode';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
@@ -202,19 +203,22 @@ export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady, configSnackbar, setConfigSnackbar } = useFlowGraph();
 
-	// --- Preferences from context ------------------------------------------
-	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
+	// --- Canvas state from context -----------------------------------------
+	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout } = useFlowPreferences();
 
-	// --- Floating toolbar position (persisted via workspace state) ----------
-	const toolbarPosition = getPreference('toolbarPosition') as IToolbarPosition | undefined;
+	// The one shared prefs accessor — the same getPref/setPref every app uses.
+	const { getPref, setPref } = usePrefs();
+
+	// --- Floating toolbar position (persisted via workspace prefs) ----------
+	const toolbarPosition = getPref('toolbarPosition') as IToolbarPosition | undefined;
 	const handleToolbarPositionChange = useCallback(
 		(pos: IToolbarPosition) => {
-			setPreference('toolbarPosition', pos);
+			setPref('toolbarPosition', pos);
 		},
-		[setPreference]
+		[setPref]
 	);
 
-	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, onOpenSettings, initialViewport } = useFlowProject();
+	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, initialViewport } = useFlowProject();
 	const { fitView, zoomIn, zoomOut, setViewport } = useReactFlow();
 
 	// Keep a ref so the restore handler always sees the latest viewport value
@@ -417,19 +421,13 @@ export default function Canvas(): ReactElement {
 					<BxIcon d={BX_EXPORT} size={16} />
 				</ToolbarButton>
 			)}
-			{onOpenSettings && !isLocked && (
-				<>
-					<ToolbarDivider />
-					<ToolbarButton title="Pipeline settings" onClick={onOpenSettings}>
-						<Settings size={18} />
-					</ToolbarButton>
-				</>
-			)}
 		</>
 	);
 
 	return (
-		<div ref={canvasRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+		// `overflow: hidden` makes this the clip/anchor surface for the `contained`
+		// DetailPanel drawers (Add Node, node config) that slide in over the graph.
+		<div ref={canvasRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
 			<FloatingToolbar position={toolbarPosition} onPositionChange={handleToolbarPositionChange}>
 				{canvasToolbar}
 			</FloatingToolbar>
@@ -480,7 +478,7 @@ export default function Canvas(): ReactElement {
 			{showCreatePanel && <CreateNodePanel onClose={() => setShowCreatePanel(false)} />}
 
 			{/* Node config panel — slides in from the right */}
-			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode as unknown as import('../types').INode} onClose={() => setEditingNodeId(undefined)} />}
+			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode} onClose={() => setEditingNodeId(undefined)} />}
 			{/* Configuration reminder after template instantiation */}
 			{configSnackbar !== null && (
 				<div

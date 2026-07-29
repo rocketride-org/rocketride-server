@@ -25,8 +25,9 @@
 /**
  * Deploy API namespace for the RocketRide TypeScript SDK.
  *
- * Provides typed methods for managing server-side pipeline deployments via
- * `rrext_deploy_*` DAP commands over the existing WebSocket connection.
+ * Provides typed methods for managing server-side pipeline deployments via the
+ * `rrext_deploy` DAP command (dispatched by `subcommand`) over the existing
+ * WebSocket connection.
  */
 
 import type { RocketRideClient } from './client.js';
@@ -37,7 +38,7 @@ import type { DeploymentRecord, PipelineConfig } from './types/deploy.js';
 // =============================================================================
 
 /**
- * Typed wrapper around the `rrext_deploy_*` DAP commands.
+ * Typed wrapper around the `rrext_deploy` DAP command and its subcommands.
  *
  * Accessed via `client.deploy` — not instantiated directly. All methods
  * delegate to {@link RocketRideClient.call} which handles envelope
@@ -64,7 +65,8 @@ export class DeployApi {
 		options: { schedule?: string } = {},
 	): Promise<DeploymentRecord> {
 		const { schedule } = options;
-		return this.client.call<DeploymentRecord>('rrext_deploy_add', {
+		return this.client.call<DeploymentRecord>('rrext_deploy', {
+			subcommand: 'add',
 			pipeline,
 			...(schedule !== undefined && { schedule }),
 		});
@@ -76,7 +78,7 @@ export class DeployApi {
 	 * @param projectId - Project ID of the deployment to remove.
 	 */
 	async remove(projectId: string): Promise<void> {
-		await this.client.call('rrext_deploy_remove', { projectId });
+		await this.client.call('rrext_deploy', { subcommand: 'remove', projectId });
 	}
 
 	/**
@@ -85,7 +87,7 @@ export class DeployApi {
 	 * @returns Array of deployment summary records.
 	 */
 	async list(): Promise<DeploymentRecord[]> {
-		const body = await this.client.call('rrext_deploy_list');
+		const body = await this.client.call('rrext_deploy', { subcommand: 'list' });
 		return body.deployments ?? [];
 	}
 
@@ -96,7 +98,7 @@ export class DeployApi {
 	 * @returns The deployment record including state, schedule, and timestamps.
 	 */
 	async status(projectId: string): Promise<DeploymentRecord> {
-		return this.client.call<DeploymentRecord>('rrext_deploy_status', { projectId });
+		return this.client.call<DeploymentRecord>('rrext_deploy', { subcommand: 'status', projectId });
 	}
 
 	/**
@@ -114,7 +116,8 @@ export class DeployApi {
 		options: { pipeline?: PipelineConfig; schedule?: string } = {},
 	): Promise<void> {
 		const { pipeline, schedule } = options;
-		await this.client.call('rrext_deploy_update', {
+		await this.client.call('rrext_deploy', {
+			subcommand: 'update',
 			projectId,
 			...(pipeline !== undefined && { pipeline }),
 			...(schedule !== undefined && { schedule }),

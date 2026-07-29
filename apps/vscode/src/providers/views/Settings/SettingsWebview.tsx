@@ -25,14 +25,13 @@ import React, { useState, useRef, useMemo, useCallback, CSSProperties } from 're
 import { useMessaging } from '../hooks/useMessaging';
 import { ConnectionSettings } from './ConnectionSettings';
 import { PipelineSettings } from './PipelineSettings';
-import { DebuggingSettings } from './DebuggingSettings';
 // EnvVariablesSettings removed — env is now managed in the Account page
 import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
 import type { CheckoutPlan, ViewMenu } from 'shared';
-import { TabPanelContent, PageViewControl } from 'shared';
+import { TabPanelContent } from 'shared';
 import type { ITabPanelPanel } from 'shared/components/tab-panel/TabPanelContent';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
@@ -65,8 +64,6 @@ export interface ConnectionGroupSettings {
 	/** Local engine settings (applies to local mode only). */
 	local: {
 		engineVersion: string;
-		debugOutput: boolean;
-		engineArgs: string;
 	};
 }
 
@@ -78,6 +75,14 @@ export interface SettingsData {
 	defaultPipelinePath: string;
 	/** How pipelines behave after file changes: auto-restart, manual, or prompt the user. */
 	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	/** Default idle-timeout (seconds) for runs without a per-pipeline override; 0 = no timeout. */
+	pipelineTtl: number;
+	/** Default trace verbosity for runs without a per-pipeline override. */
+	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
+	/** Additional command-line arguments passed to each pipeline task via `.use`. */
+	taskArguments: string;
+	/** Enable full debug output for pipeline tasks (--trace=debugOut via `.use` args). */
+	pipelineDebugOutput: boolean;
 	envVars?: Record<string, string>;
 	/** Auto-install RocketRide docs for detected coding agents. */
 	autoAgentIntegration: boolean;
@@ -240,6 +245,26 @@ export const settingsStyles = {
 		marginBottom: 8,
 		lineHeight: 1.4,
 	} as CSSProperties,
+	// Per-page header — names the page the user is on (matches the browser
+	// settings page's section head). Sits at the top of each flat page body.
+	pageHeader: {
+		display: 'flex',
+		alignItems: 'baseline',
+		gap: 8,
+	} as CSSProperties,
+	pageTitle: {
+		margin: 0,
+		fontSize: 17,
+		fontWeight: 500,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	// Flat page column — stacks header, description, and controls with a uniform
+	// gap (replaces the old card body now that pages are card-less).
+	pageBody: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 16,
+	} as CSSProperties,
 };
 
 // ============================================================================
@@ -279,7 +304,7 @@ const subscribeBannerStyles = {
 // ============================================================================
 
 /**
- * Fills the space below the top PageViewControl strip; TabPanelContent's
+ * Fills the space to the right of the left settings nav; TabPanelContent's
  * 100%-height wrapper resolves against this definite flex box.
  */
 const pageBodyStyle: CSSProperties = {
@@ -288,6 +313,98 @@ const pageBodyStyle: CSSProperties = {
 	flex: 1,
 	minWidth: 0,
 	minHeight: 0,
+};
+
+// ============================================================================
+// SETTINGS NAV STYLES — left-hand section menu (replaces the top pill strip)
+// ============================================================================
+
+/**
+ * Left-hand settings navigation, matching the browser settings page
+ * (shell-ui SettingsPage): a fixed-width rail of `listRow` pills, one per
+ * section, with the page bodies rendered to its right. The pages themselves
+ * are unchanged — only the section selector moved from a top strip to here.
+ */
+const settingsNavStyles = {
+	// Horizontal split: fixed nav column on the left, page bodies on the right.
+	body: {
+		display: 'flex',
+		flex: 1,
+		minWidth: 0,
+		minHeight: 0,
+		overflow: 'hidden',
+	} as CSSProperties,
+	// Fixed-width nav rail with its own scroll and a right divider.
+	sidebar: {
+		width: 200,
+		flexShrink: 0,
+		borderRight: '1px solid var(--rr-border)',
+		overflowY: 'auto',
+		padding: '12px 8px',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
+	} as CSSProperties,
+	// One nav row — the shared listRow pill plus the button reset + active weight.
+	navItem: (active: boolean): CSSProperties => ({
+		...commonStyles.listRow(active),
+		width: '100%',
+		margin: '1px 0',
+		border: 'none',
+		textAlign: 'left',
+		fontWeight: active ? 600 : 400,
+		fontFamily: 'var(--rr-font-family)',
+	}),
+};
+
+// ============================================================================
+// TITLE BAR STYLES — page title + one-line description at the very top
+// ============================================================================
+
+/**
+ * Top-of-page title bar, mirroring the browser settings page's ContentHeader
+ * (24px title + 14px muted subtitle). Fixed height above the nav/body split.
+ */
+const settingsHeaderStyles = {
+	container: {
+		flex: 'none',
+		padding: '24px 24px 16px',
+	} as CSSProperties,
+	title: {
+		margin: 0,
+		fontSize: 24,
+		fontWeight: 700,
+		letterSpacing: '-0.01em',
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	subtitle: {
+		marginTop: 4,
+		fontSize: 14,
+		fontWeight: 400,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+};
+
+// ============================================================================
+// FOOTER STYLES — Save/Cancel action row (mirrors DetailPanel's footer)
+// ============================================================================
+
+/**
+ * Bottom action row, matching DetailPanel's footer: a top-divided, right-
+ * aligned Save/Cancel pair. Rendered only while there are unsaved edits — the
+ * settings surface is "always editing", so the footer is the change affordance.
+ */
+const settingsFooterStyles = {
+	bar: {
+		flex: 'none',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'flex-end',
+		gap: 8,
+		padding: '12px 20px',
+		borderTop: '1px solid var(--rr-border)',
+		background: 'var(--rr-bg-default)',
+	} as CSSProperties,
+	cancel: { ...commonStyles.buttonSecondary } as CSSProperties,
+	save: { ...commonStyles.buttonPrimary } as CSSProperties,
 };
 
 const authErrorBannerStyles = {
@@ -318,42 +435,6 @@ const authErrorBannerStyles = {
 };
 
 // ============================================================================
-// SHARED CARD HEADER WITH SAVE BUTTON
-// ============================================================================
-
-/**
- * Card header with title + conditional Save/Cancel buttons.
- * Buttons only render when `dirty` is true (user has unsaved edits).
- * A brief "Saved" confirmation appears after a successful save.
- */
-export const SettingsCardHeader: React.FC<{
-	title: string;
-	onSave: () => void;
-	onCancel?: () => void;
-	dirty?: boolean;
-	saved?: boolean;
-}> = ({ title, onSave, onCancel, dirty, saved }) => (
-	<div style={settingsStyles.cardHeader}>
-		{title}
-		<div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-			{saved && <span style={{ fontSize: 11, color: 'var(--rr-color-success)' }}>Saved</span>}
-			{dirty && (
-				<>
-					{onCancel && (
-						<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onCancel}>
-							Cancel
-						</button>
-					)}
-					<button style={{ ...commonStyles.buttonPrimary, ...commonStyles.cardHeaderButton } as CSSProperties} onClick={onSave}>
-						Save All Settings
-					</button>
-				</>
-			)}
-		</div>
-	</div>
-);
-
-// ============================================================================
 // MAIN SETTINGS VIEW COMPONENT
 // ============================================================================
 
@@ -367,7 +448,7 @@ export const SettingsCardHeader: React.FC<{
  * - Connection settings with cloud/local mode support
  * - Pipeline configuration with default paths
  * - Local engine settings for self-hosted instances
- * - Debugging configuration options
+ * - Pipeline execution defaults (restart behavior, idle timeout, trace level)
  * - Real-time validation and feedback messaging
  */
 export const Settings: React.FC = () => {
@@ -382,7 +463,7 @@ export const Settings: React.FC = () => {
 			hasApiKey: false,
 			apiKey: '',
 			teamId: '',
-			local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+			local: { engineVersion: 'latest' },
 		},
 		deployment: {
 			connectionMode: null,
@@ -390,10 +471,14 @@ export const Settings: React.FC = () => {
 			hasApiKey: false,
 			apiKey: '',
 			teamId: '',
-			local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+			local: { engineVersion: 'latest' },
 		},
 		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
+		pipelineTtl: 900,
+		pipelineTraceLevel: 'summary',
+		taskArguments: '',
+		pipelineDebugOutput: false,
 		envVars: {},
 		autoAgentIntegration: true,
 		integrationCopilot: false,
@@ -451,9 +536,8 @@ export const Settings: React.FC = () => {
 	// Active settings tab
 	const [activeTab, setActiveTab] = useState('development');
 
-	// Dirty-state tracking — buttons only appear when user has edited something
+	// Dirty-state tracking — the footer Save/Cancel appear only when the user has edited something
 	const [dirty, setDirty] = useState(false);
-	const [saved, setSaved] = useState(false);
 	const savedSettingsRef = useRef<SettingsData | null>(null);
 	const pendingSaveSnapshotRef = useRef<SettingsData | null>(null);
 
@@ -556,11 +640,9 @@ export const Settings: React.FC = () => {
 						// On successful save acknowledgement: update the saved snapshot
 						// so Cancel reverts to the newly saved values
 						if (message.level === 'success' && message.context === 'save') {
-							savedSettingsRef.current = pendingSaveSnapshotRef.current ?? JSON.parse(JSON.stringify(settings)) as SettingsData;
+							savedSettingsRef.current = pendingSaveSnapshotRef.current ?? (JSON.parse(JSON.stringify(settings)) as SettingsData);
 							pendingSaveSnapshotRef.current = null;
 							setDirty(false);
-							setSaved(true);
-							setTimeout(() => setSaved(false), 5000);
 						}
 					}
 					break;
@@ -608,9 +690,7 @@ export const Settings: React.FC = () => {
 					// 'test' commands display results inline via testMessage
 					// rather than resetting engine busy state
 					if (command === 'test') {
-						const msg: MessageData = success
-							? { level: 'success', message: 'Connection successful!' }
-							: { level: 'error', message: error || 'Connection failed' };
+						const msg: MessageData = success ? { level: 'success', message: 'Connection successful!' } : { level: 'error', message: error || 'Connection failed' };
 						setTestMessage(msg);
 						// Clear the auth error banner on successful test connection
 						if (success) {
@@ -635,7 +715,6 @@ export const Settings: React.FC = () => {
 					}
 					break;
 				}
-
 			}
 		},
 	});
@@ -659,7 +738,6 @@ export const Settings: React.FC = () => {
 			setSettings(JSON.parse(JSON.stringify(savedSettingsRef.current)));
 		}
 		setDirty(false);
-		setSaved(false);
 	}, []);
 
 	/**
@@ -705,7 +783,6 @@ export const Settings: React.FC = () => {
 	 */
 	const handleSettingsChange = (changes: Partial<SettingsData>): void => {
 		setDirty(true);
-		setSaved(false);
 		// Clear stale test results when the user switches mode —
 		// previous test output is no longer relevant to the new mode
 		if (changes.development?.connectionMode || changes.deployment?.connectionMode) {
@@ -790,7 +867,6 @@ export const Settings: React.FC = () => {
 	const makeDockerHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('docker', actionType);
 	const makeServiceHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('service', actionType);
 
-
 	const handleSudoSubmit = (): void => {
 		const password = sudoPasswordInput;
 		setSudoPasswordInput('');
@@ -806,14 +882,13 @@ export const Settings: React.FC = () => {
 	// TAB DEFINITIONS
 	// ========================================================================
 
-	// ViewMenu declaration — rendered by this view's own PageViewControl strip.
+	// ViewMenu declaration — rendered as this view's left-hand section nav.
 	const settingsMenu = useMemo<ViewMenu>(
 		() => ({
 			entries: [
 				{ id: 'development', label: 'Development' },
 				{ id: 'deployment', label: 'Deployment' },
 				{ id: 'pipeline', label: 'Pipeline' },
-				{ id: 'debugging', label: 'Debugging' },
 				{ id: 'integrations', label: 'Integrations' },
 			],
 		}),
@@ -828,19 +903,25 @@ export const Settings: React.FC = () => {
 		});
 	}, [sendMessage]);
 
-	const handleCreateCheckout = useCallback((priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
-		return new Promise((resolve, reject) => {
-			checkoutResolvers.current.session = { resolve, reject };
-			sendMessage({ type: 'checkout:createSession', priceId } as any);
-		});
-	}, [sendMessage]);
+	const handleCreateCheckout = useCallback(
+		(priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> => {
+			return new Promise((resolve, reject) => {
+				checkoutResolvers.current.session = { resolve, reject };
+				sendMessage({ type: 'checkout:createSession', priceId } as any);
+			});
+		},
+		[sendMessage]
+	);
 
-	const handleConfirmPending = useCallback((subscriptionId: string, priceId: string): Promise<void> => {
-		return new Promise((resolve, reject) => {
-			checkoutResolvers.current.confirm = { resolve, reject };
-			sendMessage({ type: 'checkout:confirmPending', subscriptionId, priceId } as any);
-		});
-	}, [sendMessage]);
+	const handleConfirmPending = useCallback(
+		(subscriptionId: string, priceId: string): Promise<void> => {
+			return new Promise((resolve, reject) => {
+				checkoutResolvers.current.confirm = { resolve, reject };
+				sendMessage({ type: 'checkout:confirmPending', subscriptionId, priceId } as any);
+			});
+		},
+		[sendMessage]
+	);
 
 	const handleCheckoutSuccess = useCallback(() => {
 		setSubscribed(true);
@@ -855,10 +936,6 @@ export const Settings: React.FC = () => {
 						<ConnectionSettings
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
-							onSave={handleSaveSettings}
-							onCancel={handleCancelSettings}
-							dirty={dirty}
-							saved={saved}
 							onClearCredentials={handleClearCredentials}
 							onTestConnection={handleTestConnection}
 							serverCapabilities={serverCapabilities}
@@ -919,10 +996,6 @@ export const Settings: React.FC = () => {
 						<DeploySettings
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
-							onSave={handleSaveSettings}
-							onCancel={handleCancelSettings}
-							dirty={dirty}
-							saved={saved}
 							serverCapabilities={serverCapabilities}
 							teams={teams}
 							engineVersions={engineVersions}
@@ -980,15 +1053,7 @@ export const Settings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
-					</div>
-				),
-			},
-			debugging: {
-				content: (
-					<div style={commonStyles.tabContent}>
-						<MessageDisplay message={message} />
-						<DebuggingSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
+						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
 					</div>
 				),
 			},
@@ -996,7 +1061,7 @@ export const Settings: React.FC = () => {
 				content: (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
-						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} onSave={handleSaveSettings} onCancel={handleCancelSettings} dirty={dirty} saved={saved} />
+						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} />
 					</div>
 				),
 			},
@@ -1006,8 +1071,11 @@ export const Settings: React.FC = () => {
 
 	return (
 		<div style={commonStyles.columnFill}>
-			{/* ── Page strip — the view renders its own tabs at the very top ── */}
-			<PageViewControl menu={settingsMenu} activeId={activeTab} onSelect={setActiveTab} />
+			{/* ── Title bar — names the page + one-line description ── */}
+			<div style={settingsHeaderStyles.container}>
+				<h1 style={settingsHeaderStyles.title}>Settings</h1>
+				<div style={settingsHeaderStyles.subtitle}>Configure connections, pipelines, and integrations for the RocketRide extension.</div>
+			</div>
 
 			{/* ── Auth error banner (shown when opened due to auth failure) ── */}
 			{authError && (
@@ -1015,20 +1083,44 @@ export const Settings: React.FC = () => {
 					<div style={authErrorBannerStyles.content}>
 						<span style={{ fontSize: 18 }}>&#9888;</span>
 						<span style={authErrorBannerStyles.text}>{authError}</span>
-						<button
-							style={authErrorBannerStyles.dismiss}
-							onClick={() => setAuthError(null)}
-							title="Dismiss"
-						>
+						<button style={authErrorBannerStyles.dismiss} onClick={() => setAuthError(null)} title="Dismiss">
 							&#10005;
 						</button>
 					</div>
 				</div>
 			)}
-			{/* ── Page bodies fill the space below the strip ── */}
-			<div style={pageBodyStyle}>
-				<TabPanelContent panels={panels} activeId={activeTab} />
+			{/* ── Body: left section nav (was the top pill strip) + page bodies ── */}
+			<div style={settingsNavStyles.body}>
+				{/* Left nav — one pill per settings section, driving the same activeTab. */}
+				<nav style={settingsNavStyles.sidebar} role="tablist" aria-orientation="vertical">
+					{settingsMenu.entries.map((entry) => {
+						// The selected section is highlighted and rendered by TabPanelContent.
+						const isActive = entry.id === activeTab;
+						return (
+							<button key={entry.id} role="tab" aria-selected={isActive} style={settingsNavStyles.navItem(isActive)} onClick={() => setActiveTab(entry.id)}>
+								{entry.label}
+							</button>
+						);
+					})}
+				</nav>
+
+				{/* Page bodies fill the space to the right of the nav. */}
+				<div style={pageBodyStyle}>
+					<TabPanelContent panels={panels} activeId={activeTab} />
+				</div>
 			</div>
+
+			{/* ── Footer — Save/Cancel appear once there are unsaved edits (DetailPanel pattern) ── */}
+			{dirty && (
+				<div style={settingsFooterStyles.bar}>
+					<button style={settingsFooterStyles.cancel} onClick={handleCancelSettings}>
+						Cancel
+					</button>
+					<button style={settingsFooterStyles.save} onClick={handleSaveSettings}>
+						Save
+					</button>
+				</div>
+			)}
 		</div>
 	);
 };

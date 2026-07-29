@@ -75,6 +75,12 @@ import { ConnectionManager } from './connection/connection';
 // Connection state enum (re-exported from shared)
 import { ConnectionState } from 'shared';
 
+// Workspace-preferences accessor + provider (re-exported from shared) — the ONE
+// prefs API every app and shared-ui surface reads/writes through (get/set a key
+// in the app's workspace prefs bag). shared-ui sits below shell-ui, so the
+// implementation lives there; the shell surfaces it here as the frozen contract.
+import { usePrefs, PrefsProvider } from 'shared';
+
 // Auth providers
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 import { ApiKeyAuthProvider } from './auth/ApiKeyAuthProvider';
@@ -153,7 +159,9 @@ export type {
 	WorkspacePrefs,
 	WorkspaceState,
 	AppWorkspaceState,
-	AppSettingDefinition,
+	SettingValue,
+	SettingSchema,
+	AppConfiguration,
 	ShellBrandingConfig,
 	ShellThemeConfig,
 	ShellThemeOption,
@@ -165,8 +173,17 @@ export type { ShellProps } from './components/layout/Shell';
 export type { SidebarProps, NavButtonProps } from './components/layout/Sidebar';
 export type { ConfirmDialogProps } from './components/layout/ConfirmDialog';
 
-// Workspace context interface
-export type { IWorkspaceContext } from './workspace/WorkspaceContext';
+// Workspace context interface + provider props
+export type { IWorkspaceContext, IWorkspaceProviderProps } from './workspace/WorkspaceContext';
+
+// The shared RocketRide client — an MF shared singleton the shell serves to
+// every app, so its API surface is PART of this contract. Exporting the type
+// by name gives it its own per-version floor (Frozen = Current, covariant):
+// SDK additions pass, removals/narrowings of anything ever frozen fail
+// shell-ui's tsc. The client is deliberately kept INLINED in the frozen
+// bundle. It must never appear in an
+// input position on this surface — see contract-hold.ts.
+export type { RocketRideClient } from 'rocketride';
 
 // Connection manager standalone types
 export type { InitOptions, DebugLogEntry } from './connection/connection';
@@ -204,6 +221,9 @@ export type { IVirtualFileSystem } from 'shared/modules/explorer/types';
 export type { DashboardData } from './hooks/useDashboardData';
 export type { ViewMenu, ViewMenuEntry } from 'shared';
 
+// The workspace-prefs accessor shape ({ getPref, setPref }) for usePrefs/PrefsProvider.
+export type { IPrefsApi } from 'shared';
+
 // =============================================================================
 // SHELL API SURFACE
 // =============================================================================
@@ -233,6 +253,7 @@ export const shellApi = {
 	useSidebarContent,
 	useClickOutside,
 	useFixedPopupPosition,
+	usePrefs,
 
 	// Client access + connection manager + connection state
 	getClient,
@@ -243,8 +264,9 @@ export const shellApi = {
 	CloudAuthProvider,
 	ApiKeyAuthProvider,
 
-	// Workspace provider
+	// Workspace provider + prefs provider
 	WorkspaceProvider,
+	PrefsProvider,
 
 	// Document component library
 	Documents,

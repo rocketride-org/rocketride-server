@@ -29,7 +29,9 @@ _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 't
 
 
 # ---------------------------------------------------------------------------
-# Composable import scaffolding (augments existing stubs, never clobbers)
+# Import scaffolding: build FRESH stubs unconditionally. Never read the object
+# already in sys.modules — the _saved_core save/restore below restores the real
+# one, so a fresh stub can't leak even without the engine loaded.
 # ---------------------------------------------------------------------------
 
 
@@ -42,18 +44,13 @@ def _tool_function(**_meta):
 
 
 def _ensure_rocketlib() -> None:
-    mod = sys.modules.get('rocketlib') or types.ModuleType('rocketlib')
-    if not hasattr(mod, 'IInstanceBase'):
-        mod.IInstanceBase = type('IInstanceBase', (), {})
-    if not hasattr(mod, 'IGlobalBase'):
-        mod.IGlobalBase = type('IGlobalBase', (), {})
-    if not hasattr(mod, 'tool_function'):
-        mod.tool_function = _tool_function
-    if not hasattr(mod, 'OPEN_MODE'):
-        mod.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config'})
+    mod = types.ModuleType('rocketlib')
+    mod.IInstanceBase = type('IInstanceBase', (), {})
+    mod.IGlobalBase = type('IGlobalBase', (), {})
+    mod.tool_function = _tool_function
+    mod.OPEN_MODE = type('OPEN_MODE', (), {'CONFIG': 'config'})
     for name in ('debug', 'error', 'warning'):
-        if not hasattr(mod, name):
-            setattr(mod, name, lambda *a, **k: None)
+        setattr(mod, name, lambda *a, **k: None)
     sys.modules['rocketlib'] = mod
 
 
@@ -62,35 +59,33 @@ def _passthrough(args, tool_name=None):
 
 
 def _ensure_ai_common() -> None:
-    """Create minimal ``ai.common.*`` stubs only when absent.
+    """Install fresh ``ai.common.*`` stubs so the node imports without the engine.
 
-    Never overwrites a real/existing module attribute — that would pollute
-    other node tests in the same session. Deterministic behavior for THIS
-    node is pinned locally after import (see below), not globally here.
+    Deterministic behavior for THIS node is pinned locally after import (see
+    below); the fresh stubs never leak thanks to the _saved_core restore.
     """
     for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
-        if name not in sys.modules:
-            sys.modules[name] = types.ModuleType(name)
-    if not hasattr(sys.modules['ai.common.utils'], 'normalize_tool_input'):
-        sys.modules['ai.common.utils'].normalize_tool_input = _passthrough
-    if not hasattr(sys.modules['ai.common.config'], 'Config'):
+        sys.modules[name] = types.ModuleType(name)
+    # Mark containers as packages so sub-imports resolve even if not pre-inserted.
+    sys.modules['ai'].__path__ = []
+    sys.modules['ai.common'].__path__ = []
+    sys.modules['ai.common.utils'].normalize_tool_input = _passthrough
 
-        class _Config:
-            @staticmethod
-            def getNodeConfig(*_a, **_k):
-                return {}
+    class _Config:
+        @staticmethod
+        def getNodeConfig(*_a, **_k):
+            return {}
 
-        sys.modules['ai.common.config'].Config = _Config
+    sys.modules['ai.common.config'].Config = _Config
 
 
 def _ensure_requests() -> None:
-    """Stub ``requests`` if unavailable — the HTTP layer is patched out anyway."""
-    if 'requests' in sys.modules:
-        return
+    """Install a fresh ``requests`` stub — the HTTP layer is patched out anyway."""
     mod = types.ModuleType('requests')
     mod.RequestException = type('RequestException', (Exception,), {})
     exc = types.ModuleType('requests.exceptions')
     exc.Timeout = type('Timeout', (mod.RequestException,), {})
+    exc.HTTPError = type('HTTPError', (mod.RequestException,), {})
     mod.exceptions = exc
     mod.request = lambda *a, **k: None
     sys.modules['requests'] = mod
@@ -98,9 +93,7 @@ def _ensure_requests() -> None:
 
 
 def _ensure_tenacity() -> None:
-    """Stub ``tenacity`` if unavailable — the retry layer is patched out in tests."""
-    if 'tenacity' in sys.modules:
-        return
+    """Install a fresh ``tenacity`` stub — the retry layer is patched out in tests."""
     mod = types.ModuleType('tenacity')
     # Retrying(...)(fn) just calls fn once; tests patch _request_with_retry anyway.
     mod.Retrying = lambda **_kw: lambda fn, *a, **k: fn(*a, **k)
@@ -117,15 +110,36 @@ def _ensure_pkg() -> None:
         sys.modules['tool_xtrace_memory'] = pkg
 
 
+# Stub engine-only deps just long enough to import the node, then restore
+# sys.modules so these stubs never leak to sibling tests.
+_CORE_STUBS = (
+    'rocketlib',
+    'ai',
+    'ai.common',
+    'ai.common.utils',
+    'ai.common.config',
+    'requests',
+    'requests.exceptions',
+    'tenacity',
+)
+_saved_core = {_name: sys.modules.get(_name) for _name in _CORE_STUBS}
+
 _ensure_rocketlib()
 _ensure_ai_common()
 _ensure_requests()
 _ensure_tenacity()
 _ensure_pkg()
 
-from tool_xtrace_memory import IInstance as IInstanceMod  # noqa: E402
-from tool_xtrace_memory.IInstance import IInstance, _coerce_messages  # noqa: E402
-from tool_xtrace_memory.IGlobal import IGlobal, _split_group_ids  # noqa: E402
+try:
+    from tool_xtrace_memory import IInstance as IInstanceMod  # noqa: E402
+    from tool_xtrace_memory.IInstance import IInstance, _coerce_messages  # noqa: E402
+    from tool_xtrace_memory.IGlobal import IGlobal, _split_group_ids  # noqa: E402
+finally:
+    for _name, _mod in _saved_core.items():
+        if _mod is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _mod
 
 # Pin the input normalizer locally so behavior is deterministic regardless of
 # whatever ``ai.common.utils`` resolved to in this session (real or MagicMock).

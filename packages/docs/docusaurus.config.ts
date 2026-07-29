@@ -61,8 +61,14 @@ const config: Config = {
 					path: contentPath,
 					routeBasePath: '/',
 					sidebarPath: './sidebars.ts',
+					showLastUpdateTime: true,
 				},
 				blog: false,
+				sitemap: {
+					lastmod: 'date',
+					changefreq: null,
+					priority: null,
+				},
 				theme: {
 					customCss: './src/css/custom.css',
 				},

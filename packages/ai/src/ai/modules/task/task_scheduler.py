@@ -29,8 +29,8 @@ soonest job is due (capped at 60 s) and dispatches overdue runs via
 start_server_task() — the same authenticated path as an on-demand API call.
 
 Caller responsibilities:
-  • Call scheduler.schedule(record) after every rrext_deploy_add / _update.
-  • Call scheduler.unschedule(project_id) after every rrext_deploy_remove.
+  • Call scheduler.schedule(record) after every rrext_deploy add / update.
+  • Call scheduler.unschedule(project_id) after every rrext_deploy remove.
   • Do NOT call start() more than once.
 """
 

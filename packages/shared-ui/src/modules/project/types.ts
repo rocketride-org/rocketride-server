@@ -38,12 +38,23 @@ export interface TraceEvent {
 	pipelineResult?: Record<string, unknown>;
 	/** Source node ID (e.g. "chat_1") — identifies which pipeline source generated this event. */
 	source?: string;
+	/** Server-stamped emission time (epoch SECONDS, float) — stamped once at engine-stdout ingress; identical live and on run-log replay. */
+	eventTime: number;
+	/** Server-stamped continuum sequence — catalog-seeded (fresh stream starts at 1, reopen continues at lastSeq + 1), strictly monotonic per task across runs/restarts. */
+	seq: number;
 }
 
 /** Processed trace row for display in Trace component. */
 export interface TraceRow {
 	id: number;
 	docId: number;
+	/**
+	 * The trace's PERMANENT identity — its BEGIN event's continuum seq.
+	 * This is the id the log API's getTrace resolves. `docId` is only the
+	 * fold's client-side grouping counter, and the flow events' pipe/slot
+	 * id is reused across documents — neither can name a trace.
+	 */
+	beginSeq?: number;
 	completed: boolean;
 	lane: string;
 	filterName: string;
@@ -68,16 +79,21 @@ export interface TraceRow {
 /** Pipeline trace level passed to the engine on run (matches the SDK `client.use` option). */
 export type TraceLevel = 'none' | 'metadata' | 'summary' | 'full';
 
-/** View state — per-view UI state (mode, flowViewMode, viewport, trace level). */
+/** View state — per-view UI state (mode, flowViewMode, viewport). */
 export interface ViewState {
 	mode: ProjectViewMode;
 	flowViewMode?: 'pipeline' | 'component';
 	viewport?: { x: number; y: number; zoom: number };
-	/** Pipeline trace level for the next run. Persisted per-document; defaults to 'summary' when unset. */
-	pipelineTraceLevel?: TraceLevel;
 }
 
-export type ProjectViewMode = 'design' | 'parameters' | 'status' | 'tokens' | 'flow' | 'trace' | 'errors';
+/**
+ * Top-level document pages (UI direction v5): DESIGN edits the canvas,
+ * DEVELOPMENT monitors + replays the dev continuum, DEPLOY the deploy
+ * continuum (plus, when the deploy feature lands, its lifecycle card).
+ * The former per-view modes (status/tokens/flow/trace/errors) became
+ * per-source pills inside each page's SourceSections.
+ */
+export type ProjectViewMode = 'design' | 'development' | 'deploy';
 
 /** Base view props (for ServerView, WelcomeView, etc.). */
 export interface IViewProps {

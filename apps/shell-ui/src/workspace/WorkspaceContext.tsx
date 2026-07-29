@@ -24,11 +24,15 @@
 // WORKSPACE CONTEXT — state management + event bus
 // =============================================================================
 
-import React, { createContext, useContext, useCallback, useRef, useState, useEffect } from 'react';
-import { RocketRideClient } from 'rocketride';
+import React, { createContext, useContext, useCallback, useMemo, useRef, useState, useEffect } from 'react';
+import { useShellConnection } from '../connection/ConnectionContext';
 import { useWorkspaceState } from './useWorkspaceState';
-import type { WorkspacePrefs, AppDescriptor, AppManifestEntry } from './types';
+import { buildSettingsRegistry, effectiveSettings } from './settingsRegistry';
+import type { SettingsRegistry } from './settingsRegistry';
+import type { WorkspacePrefs, AppDescriptor, AppManifestEntry, SettingValue } from './types';
 import type { ShellConnectionEventMap } from 'shared';
+import { GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from 'shared';
+import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail, DataGridLayout } from 'shared';
 import { ConnectionManager } from '../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../constants';
 import { resetRemote } from '../lib/appLoader';
@@ -121,10 +125,28 @@ export interface IWorkspaceContext {
 	loadFailure: { appId: string; name: string } | null;
 	/** Dismisses the pending load-failure modal. */
 	dismissLoadFailure: () => void;
-	/** Persisted settings — keyed by setting key (e.g. 'ROCKETRIDE_OPENAI_KEY'). */
-	settings: Record<string, string>;
-	/** Persist a single setting value. */
-	updateSetting: (key: string, value: string) => void;
+	/**
+	 * EFFECTIVE settings — every declared default overlaid with the user's
+	 * stored overrides, keyed by dotted appId-prefixed key
+	 * (e.g. 'rocketride.models.serverHost').  Each value keeps its declared JSON
+	 * type (string | number | boolean).  Reading a setting is a plain lookup —
+	 * the default-merge already happened here.
+	 */
+	settings: Record<string, SettingValue>;
+	/**
+	 * RAW overrides as stored in settings.json (deltas only).  A key present
+	 * here means "modified from default" — this is what the settings page's
+	 * modified indicator and reset action read.
+	 */
+	settingsOverrides: Record<string, SettingValue>;
+	/** Flattened declarations from all desktop apps' configurations. */
+	settingsRegistry: SettingsRegistry;
+	/**
+	 * Persist a single setting value.  Writing a value equal to the schema
+	 * default DELETES the override (deltas-only storage); passing `undefined`
+	 * resets the key to its default explicitly.
+	 */
+	updateSetting: (key: string, value: SettingValue | undefined) => void;
 	/** Update the active app's workspace preferences. */
 	updatePrefs: (patch: Partial<WorkspacePrefs>) => void;
 	/** Available theme options (id + display name). */
@@ -154,35 +176,122 @@ const WorkspaceContext = createContext<IWorkspaceContext | null>(null);
 // =============================================================================
 
 /**
- * Provides workspace state, lazy app descriptor loading, and the shell event
- * bus to the entire React tree beneath it.
+ * Props for {@link WorkspaceProvider}.
  *
- * @param client        - The live RocketRideClient (or null while connecting).
- * @param isConnected   - Whether the RocketRide WebSocket is currently open.
- * @param apps          - Array of lightweight app manifest entries.
- * @param workspaceDir  - Directory for workspace persistence files (default ".workspace").
- * @param startupAppId  - Optional app to activate on initial load (overrides saved state).
- * @param children      - React subtree that will receive the context.
+ * The connection (client + isConnected) is deliberately NOT a prop: the
+ * provider reads it from {@link useShellConnection} like every other shell
+ * component. Threading the client through props would put the SDK client in
+ * an input (contravariant) position on the frozen shell-api surface, where
+ * every additive SDK member would read as a breaking change.
  */
-export const WorkspaceProvider: React.FC<{
-	client: RocketRideClient | null;
-	isConnected: boolean;
+export interface IWorkspaceProviderProps {
+	/** Array of lightweight app manifest entries. */
 	apps: AppManifestEntry[];
+	/** Directory for workspace persistence files (default ".workspace"). */
 	workspaceDir?: string;
+	/** Optional app to activate on initial load (overrides saved state). */
 	startupAppId?: string;
+	/** React subtree that will receive the context. */
 	children: React.ReactNode;
+	/** Fallback app when no saved state / startup override exists. */
 	defaultAppId?: string;
+	/** Selectable UI themes surfaced in the settings page. */
 	themeOptions?: { id: string; name: string }[];
+	/** Notifies the host bootstrap when the user switches theme. */
 	onThemeChange?: (themeId: string) => void;
-}> = ({ client, isConnected, apps, workspaceDir, startupAppId, defaultAppId: defaultAppIdProp, themeOptions: themeOptionsProp, onThemeChange, children }) => {
+}
+
+/**
+ * Provides workspace state, lazy app descriptor loading, and the shell event
+ * bus to the entire React tree beneath it. Sources the RocketRide client and
+ * connection state from the ConnectionManager singleton via
+ * {@link useShellConnection} (provider-less; re-renders on connect events).
+ *
+ * @param props - See {@link IWorkspaceProviderProps}.
+ */
+export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, workspaceDir, startupAppId, defaultAppId: defaultAppIdProp, themeOptions: themeOptionsProp, onThemeChange, children }) => {
+	// The shared client + connection state, straight from the singleton — the
+	// same source Shell reads; no prop threading.
+	const { client, isConnected } = useShellConnection();
+
 	// Default app ID — use the prop from Shell (mode-aware), or fall back to hello.
 	const defaultAppId = defaultAppIdProp || 'rocketride.hello';
 
 	// Destructure all state and mutation helpers from the persistence hook
 	const {
-		loaded, seeded, activeAppId, prefs, appState, settings,
-		switchApp, updatePrefs, updateAppState, updateSetting,
+		loaded, seeded, activeAppId, prefs, appState, settings: settingsOverrides,
+		switchApp, updatePrefs, updateAppState, updateSetting: writeSettingOverride,
 	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
+
+	// ── Settings registry + effective values ───────────────────────────────
+	// The registry flattens every desktop app's configuration (VSCode
+	// contributes.configuration shape) into one declaration index.  It rebuilds
+	// whenever the manifest changes (connect / shell:accountUpdate deliver a new
+	// `apps` array).  Effective settings = declared defaults + stored overrides.
+	const settingsRegistry = useMemo(() => buildSettingsRegistry(apps), [apps]);
+	// Effective values keep their declared JSON type (string | number | boolean).
+	// The settings page reads settingsOverrides + registry defaults for its
+	// controls; every other app reads this merged effective map.
+	const settings = useMemo(
+		() => effectiveSettings(settingsRegistry, settingsOverrides),
+		[settingsRegistry, settingsOverrides],
+	);
+
+	/**
+	 * Persists a setting change with deltas-only semantics: a value equal to
+	 * the schema default deletes the override instead of storing it, so
+	 * settings.json only ever contains deviations from the defaults.
+	 *
+	 * @param key   - The dotted setting key.
+	 * @param value - The new value, or undefined to reset to default.
+	 */
+	const updateSetting = useCallback((key: string, value: SettingValue | undefined) => {
+		const def = settingsRegistry.defaults[key];
+		// Equal to the declared default → remove the override entirely
+		writeSettingOverride(key, value !== undefined && value === def ? undefined : value);
+	}, [settingsRegistry, writeSettingOverride]);
+
+	// ── Grid config channel bridge (web host) ──────────────────────────────
+	// Answers shared-ui DataGrid persistence over the document CustomEvent
+	// channel from THIS app's workspace prefs (`prefs.tableLayouts`). The
+	// bridge is what lets shared components persist layouts WITHOUT importing
+	// shell-ui: grids dispatch, the active app's provider answers. `get` must
+	// reply synchronously (Tabulator's reader is sync) — hence the live ref;
+	// `set`/`clear` merge over the freshest map so several grids in one view
+	// never clobber each other's entries.
+	const gridPrefsRef = useRef(prefs);
+	gridPrefsRef.current = prefs;
+	useEffect(() => {
+		/** The current per-table layout map from the live prefs. */
+		const layoutMap = (): Record<string, DataGridLayout> => {
+			const stored = gridPrefsRef.current.tableLayouts;
+			return stored && typeof stored === 'object' ? { ...(stored as Record<string, DataGridLayout>) } : {};
+		};
+		const onGet = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigGetDetail>).detail;
+			detail.reply(layoutMap()[detail.tableId]);
+		};
+		const onSet = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigSetDetail>).detail;
+			const map = layoutMap();
+			map[detail.tableId] = { ...map[detail.tableId], [detail.type]: detail.blob };
+			updatePrefs({ tableLayouts: map });
+		};
+		const onClear = (event: Event): void => {
+			const detail = (event as CustomEvent<IGridConfigClearDetail>).detail;
+			const map = layoutMap();
+			delete map[detail.tableId];
+			updatePrefs({ tableLayouts: map });
+		};
+		document.addEventListener(GRID_CONFIG_GET, onGet);
+		document.addEventListener(GRID_CONFIG_SET, onSet);
+		document.addEventListener(GRID_CONFIG_CLEAR, onClear);
+		return () => {
+			document.removeEventListener(GRID_CONFIG_GET, onGet);
+			document.removeEventListener(GRID_CONFIG_SET, onSet);
+			document.removeEventListener(GRID_CONFIG_CLEAR, onClear);
+		};
+	}, [updatePrefs]);
 
 	// --- Lazy descriptor loading -----------------------------------------------
 
@@ -442,7 +551,7 @@ export const WorkspaceProvider: React.FC<{
 			loadApp: loadDescriptor,
 			appLoadErrors, retryApp,
 			loadFailure, dismissLoadFailure,
-			settings, updateSetting,
+			settings, settingsOverrides, settingsRegistry, updateSetting,
 			updatePrefs, themeOptions, setTheme, dispatch, emit, on,
 		}}>
 			{children}

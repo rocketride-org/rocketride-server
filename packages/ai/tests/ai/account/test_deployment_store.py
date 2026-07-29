@@ -118,7 +118,7 @@ class TestDeploymentStore:
     @pytest.mark.asyncio
     async def test_user_token_persisted_but_excluded_from_client_record(self, store):
         """The credential must survive the store round-trip (the scheduler replays
-        it) while to_client_record() — used for rrext_deploy_* responses — omits it.
+        it) while to_client_record() — used for rrext_deploy responses — omits it.
         """
         await store.save(CLIENT_1, make_record())
         result = await store.get(CLIENT_1, 'proj-1')

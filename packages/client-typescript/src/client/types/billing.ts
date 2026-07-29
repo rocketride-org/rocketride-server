@@ -42,6 +42,9 @@ export interface BillingDetail {
 	/** App identifier matching AppManifestEntry.id (e.g. "brandi"). */
 	appId: string;
 
+	/** Resolved app display name (e.g. "Pipe Builder"). */
+	appName?: string;
+
 	/** Stripe sub_* subscription identifier. */
 	stripeSubscriptionId: string;
 
@@ -73,7 +76,7 @@ export interface BillingDetail {
 	credits: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
 
 	/** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
-	creditLabels: Record<string, string> | null;
+	labels: Record<string, string> | null;
 }
 
 /**
@@ -189,8 +192,14 @@ export interface LedgerTransaction {
 	/** User who triggered the transaction, or null for system events. */
 	userId: string | null;
 
+	/** Resolved display name of the triggering user, or null. */
+	userName?: string | null;
+
 	/** Team context, or null. */
 	teamId: string | null;
+
+	/** Resolved display name of the team context, or null. */
+	teamName?: string | null;
 
 	/** Human-readable context (pipeline name, source, pack_id, etc.). */
 	context: Record<string, any> | null;
@@ -225,6 +234,9 @@ export interface TransactionsResult {
 export interface UsageRollup {
 	/** User or team ID (or '__none__' for unattributed). */
 	id: string;
+
+	/** Resolved display name of the user or team, or null when unresolvable. */
+	name?: string | null;
 
 	/** Consumption per resource type (absolute values — always positive). */
 	credits: Record<string, number>;

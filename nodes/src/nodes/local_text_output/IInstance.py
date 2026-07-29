@@ -22,7 +22,7 @@
 # =============================================================================
 
 import os
-from rocketlib import IInstanceBase, Entry, warning
+from rocketlib import IInstanceBase, Entry, warning, extended_length_path, shorten_path_components
 from .IGlobal import IGlobal
 
 
@@ -102,10 +102,16 @@ class IInstance(IInstanceBase):
                 name, _ = os.path.splitext(relative_path)
                 file = f'{name}.txt'
 
+                # Auto-derived names can exceed the filesystem's 255-char
+                # per-component limit (NTFS); hash-truncate any such segment so
+                # the write does not abort. This is separate from — and needed
+                # in addition to — the \\?\ total-length fix applied below.
+                file = shorten_path_components(file.lstrip('/\\'))
+
                 # Create the full target path by joining with output directory
                 # e.g. /Users/username/Desktop/Hackathon/folder1/gradient_terms_of_use.txt
                 resolved_output = os.path.realpath(output_path)
-                candidate_path = os.path.realpath(os.path.join(resolved_output, file.lstrip('/\\')))
+                candidate_path = os.path.realpath(os.path.join(resolved_output, file))
                 try:
                     is_within_output = os.path.commonpath([resolved_output, candidate_path]) == resolved_output
                 except ValueError:
@@ -114,17 +120,19 @@ class IInstance(IInstanceBase):
                     raise ValueError(f'Path traversal detected: {file} resolves outside output directory')
                 file_path = candidate_path
 
-                # Create all necessary subdirectories
+                # On Windows, prefix the local path with \\?\ so total path
+                # length can exceed the legacy 260-char MAX_PATH limit. Mirrors
+                # the C++ core (FilePath::plat(longForm)); a no-op elsewhere.
                 target_dir = os.path.dirname(file_path)
                 try:
-                    os.makedirs(target_dir, exist_ok=True)
+                    os.makedirs(extended_length_path(target_dir), exist_ok=True)
                 except Exception as dir_error:
                     warning(f'Failed to create directory structure {target_dir}: {dir_error}')
                     return
 
                 # Write text data to file (only if we have text)
                 if self.target_object_text:
-                    with open(file_path, 'w', encoding='utf-8') as f:
+                    with open(extended_length_path(file_path), 'w', encoding='utf-8') as f:
                         f.write(self.target_object_text)
 
             except Exception as e:

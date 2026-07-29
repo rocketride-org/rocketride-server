@@ -31,6 +31,7 @@ Each output document contains:
 - `type`: `Image`, with `page_content` holding the frame as a base64-encoded PNG
 - `embedding`: the frame's embedding vector (list of floats), plus `embedding_model` (the model identifier string)
 - metadata: `time_stamp` (seconds from the start of the video), `frame_number` (frame index in the source), and a per-video `chunkId` counter
+- provenance: `metadata.source` (the source video's media detail — `source_mime`, `duration`, `fps`, `width`, `height`, …) and `metadata.name` = `<video-stem>.frame<N>` (N = frame position); both omitted when the source carried no stream descriptor
 
 ### Fields
 

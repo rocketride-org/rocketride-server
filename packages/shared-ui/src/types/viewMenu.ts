@@ -31,7 +31,7 @@
 //   The VIEW ITSELF renders it as the very first element of its own content
 //   column (above any ContentHeader — the title lives inside each page, below
 //   the strip). There is no publish/host machinery: consistency is enforced
-//   the same way as Card/DataTable — views must use the stock component and
+//   the same way as Card/DataGrid — views must use the stock component and
 //   never hand-roll tab bars.
 //
 // - SidebarMenu — a plain, standard vertical menu-list component. Not
@@ -68,6 +68,16 @@ export interface ViewMenuEntry {
 	 * SidebarMenu; ignored by PageViewControl.
 	 */
 	disabled?: boolean;
+	/**
+	 * Child entries, making this entry an expandable SECTION in SidebarMenu
+	 * (one level deep — children never declare children of their own). A
+	 * section row does not navigate: clicking it expands its children and
+	 * collapses any other open section (accordion — at most ONE section is
+	 * open at a time, decision 2026-07-18). While the sidebar is collapsed
+	 * to the icon rail, sections flatten: their children render as icon
+	 * squares directly. Ignored by PageViewControl and DetailPanel tabs.
+	 */
+	children?: ViewMenuEntry[];
 }
 
 // =============================================================================

@@ -22,8 +22,8 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Any, TYPE_CHECKING
-from ai.constants import CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
+from typing import Dict, Any, Optional, TYPE_CHECKING
+from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
 from ai.common.schema import Question, Doc, Answer
@@ -39,11 +39,41 @@ from rocketlib import (
     getObject,
     monitorCompleted,
     monitorFailed,
+    monitorOther,
 )
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
     from .data_server import DataServer
+
+
+# =============================================================================
+# TOOL TRACE CONSTANTS
+# =============================================================================
+
+# Cap on serialized input/output payloads embedded in tool trace events —
+# trace events ride the run-log continuum, so unbounded tool payloads would
+# bloat segments without adding replay value.
+TOOL_TRACE_DATA_CAP = 2048
+
+
+def _trim_tool_data(value: Any) -> Any:
+    """
+    Bound a tool input/output payload for embedding in a trace event.
+
+    Args:
+        value: The raw payload (any JSON-serializable value).
+
+    Returns:
+        The payload unchanged when small, else its truncated JSON text.
+    """
+    try:
+        text = json.dumps(value, default=str)
+    except Exception:
+        return '<unserializable>'
+    if len(text) <= TOOL_TRACE_DATA_CAP:
+        return value
+    return text[:TOOL_TRACE_DATA_CAP] + '...'
 
 
 @dataclass
@@ -94,49 +124,36 @@ class DataConn(DAPConn):
     through the familiar DAP interface.
     """
 
-    def __init__(self, server: 'DataServer', target: IServiceEndpoint, **kwargs) -> None:
-        """
-        Initialize a new DataConnection instance.
+    def __init__(self, server: 'DataServer', **kwargs) -> None:
+        """Initialize a new DataConnection instance.
 
-        Sets up the connection with the data server and target endpoint, initializes
-        pipe mapping for tracking active data streams, and prepares the connection
-        for handling DAP commands related to data pipeline operations.
+        The target endpoint is NOT captured here — it's resolved lazily on
+        every access via the :pyattr:`_target` property so source nodes that
+        bind ``state.target`` AFTER a WebSocket connect still produce a
+        correct target lookup. The semaphore + thread-count are likewise
+        deferred (see :pyfunc:`_ensure_pipe_sem`) — `target.taskConfig`
+        isn't available at WebSocket-connect time on a cold subprocess.
 
         Args:
             server (DataServer): The data server managing operations and monitors.
-                                Used for operation lifecycle management and coordination.
-            target (IServiceEndpoint): The target endpoint for this connection.
-                                      Provides access to data processing pipes.
             **kwargs: Additional arguments passed to parent DAPConn constructor.
-                     May include transport, logging, and other DAP-specific settings.
         """
-        # Create connection name for logging and identification
-        # This helps distinguish data connections in logs from other DAP connections
         module_name = 'DATA'
-
-        # Get the specified thread count
-        self._thread_count = target.taskConfig.get('threadCount', 4)
-
-        # Initialize parent DAPConn with transport and module identification
-        # Note: transport should be passed via kwargs or created here
         super().__init__(module=module_name, **kwargs)
 
-        # Store server reference for operation management
-        # The server provides access to operation lifecycle, monitoring, and coordination
+        # `self._server` must be set before reading `self._target` — the
+        # property delegates to `self._server._target`.
         self._server = server
 
-        # Store target endpoint for pipe management
-        # The endpoint provides access to data processing pipes and their lifecycle
-        self._target = target
+        # Deferred to first `_open` via `_ensure_pipe_sem` — `state.target`
+        self._thread_count: Optional[int] = None
+        self._pipe_sem: Optional[asyncio.Semaphore] = None
+        self._pipe_sem_init_lock = asyncio.Lock()
 
         # Mapping a pipe id to its DataConnPipe instance for tracking active data streams
         # This allows us to correlate DAP commands with specific pipe instances and their metadata
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
-
-        # Use asyncio.Semaphore for non-blocking semaphore operations
-        # This prevents thread pool starvation while still limiting concurrent pipes
-        self._pipe_sem = asyncio.Semaphore(self._thread_count)
 
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
@@ -149,8 +166,62 @@ class DataConn(DAPConn):
 
         # Log initialization for debugging and monitoring
         self.debug_message(
-            f'Initializing data connection with max {self._thread_count} concurrent pipes and {self._pipe_timeout}s zombie timeout...'
+            f'Initializing data connection (concurrency limit deferred, zombie timeout {self._pipe_timeout}s)...'
         )
+
+    async def _ensure_pipe_sem(self) -> asyncio.Semaphore:
+        """Lazy-init `_thread_count` + `_pipe_sem` once `state.target` is bound.
+
+        Folds two concerns:
+
+        1. The race-window wait that used to live at the top of `_open` —
+           EaaS may send `data/open` BEFORE the source node's `_run()` has
+           bound `state.target`. Poll the lazy `_target` property for up
+           to ``CONST_DATA_OPEN_TARGET_WAIT`` seconds.
+        2. The semaphore size — read `target.taskConfig['threadCount']`
+           once target is actually available. Doing this in `__init__`
+           would always see `None` and silently default to 4, ignoring
+           any user-configured `threadCount`.
+
+        Idempotent. The lock guards against concurrent first-`_open`
+        calls on the same connection racing to init the semaphore.
+        """
+        if self._pipe_sem is not None:
+            return self._pipe_sem
+        async with self._pipe_sem_init_lock:
+            if self._pipe_sem is not None:  # double-check after acquiring lock
+                return self._pipe_sem
+            deadline = time.monotonic() + CONST_DATA_OPEN_TARGET_WAIT
+            while self._target is None and time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+            target = self._target
+            self._thread_count = target.taskConfig.get('threadCount', 4) if target is not None else 4
+            self._pipe_sem = asyncio.Semaphore(self._thread_count)
+            self.debug_message(f'Initialized pipe semaphore: max {self._thread_count} concurrent pipes')
+            return self._pipe_sem
+
+    @property
+    def _target(self) -> Optional['IServiceEndpoint']:
+        """Read the source target lazily — never snapshot at connection time."""
+        return self._server._target
+
+    def _require_target(self) -> 'IServiceEndpoint':
+        """Return the registered source target, or raise a controlled error.
+
+        Returns:
+            The registered ``IServiceEndpoint`` target.
+
+        Raises:
+            RuntimeError: If no source node has registered a target.
+        """
+        if self._target is None:
+            raise RuntimeError(
+                'Data operation requires a registered source target, but none is set. '
+                'This pipeline has no source node (e.g., agentic pipeline); '
+                'data-bearing operations are not supported. Process-scope DAP '
+                'commands such as rrext_cprofile_* are unaffected.'
+            )
+        return self._target
 
     async def disconnect(self):
         """
@@ -327,7 +398,7 @@ class DataConn(DAPConn):
 
             # Return pipe to the endpoint for reuse
             if conn_pipe.pipe:
-                self._target.putPipe(conn_pipe.pipe)
+                self._require_target().putPipe(conn_pipe.pipe)
                 self.debug_message(f'Returned pipe {conn_pipe.pipe_id} to endpoint')
 
             # Release the entry
@@ -477,9 +548,14 @@ class DataConn(DAPConn):
         if mime_type is None:
             raise ValueError('No mimeType specified')
 
+        # Lazy-init the semaphore using the now-bound target's threadCount
+        # config. Also folds the race-window wait for `state.target` — see
+        # `_ensure_pipe_sem` docstring.
+        pipe_sem = await self._ensure_pipe_sem()
+
         # Acquire semaphore in async context (non-blocking for event loop)
         self.debug_message(f'Waiting for semaphore slot (max: {self._thread_count})...')
-        await self._pipe_sem.acquire()
+        await pipe_sem.acquire()
 
         try:
             self.debug_message('Acquired semaphore slot for new pipe')
@@ -493,7 +569,7 @@ class DataConn(DAPConn):
                     entry = getObject(obj=obj)
 
                     # Get a pipe from the target endpoint
-                    pipe_instance = self._target.getPipe()
+                    pipe_instance = self._require_target().getPipe()
                     self.debug_message(f'Allocated pipe {pipe_instance.pipeId} from endpoint')
 
                     # Get the id and determine the lane
@@ -533,10 +609,10 @@ class DataConn(DAPConn):
                     return pipe_id
 
                 except Exception:
-                    # Clean up pipe if allocated
+                    # Clean up pipe if allocated.
                     if pipe_instance:
                         try:
-                            self._target.putPipe(pipe_instance)
+                            self._require_target().putPipe(pipe_instance)
                             self.debug_message(f'Returned pipe {pipe_instance.pipeId} due to error')
                         except Exception as cleanup_error:
                             self.debug_message(f'Error returning pipe during cleanup: {cleanup_error}')
@@ -765,6 +841,39 @@ class DataConn(DAPConn):
                 self._pipe_sem.release()
                 self.debug_message(f'Released semaphore for pipe {pipe_id}')
 
+    def _emit_tool_trace(self, op: str, pipe_id: int, component: str, trace: Dict[str, Any]) -> None:
+        """
+        Emit one ``>DBG`` trace event for a tool invocation.
+
+        Routed through ``monitorOther('DBG', ...)`` — the SAME monitor channel
+        the C++ Debugger uses for data-lane trace ops — so the supervisor's
+        stdio transport parses it into an ``apaevt_trace`` event and
+        everything downstream follows for free: the derived ``apaevt_flow``
+        events, the live Trace/Flow panes, the run-log continuum, and replay.
+        The ``total_pipes`` field is emitted as 0, which the supervisor treats
+        as "unknown — keep the current count" (getPipeCount is not exposed to
+        Python).
+
+        Args:
+            op: Trace operation (BEGIN / ENTER / LEAVE / END).
+            pipe_id: The REAL pipe id the call runs on (the caller's open
+                pipe or the borrowed pool pipe).
+            component: The component field — the target node id for
+                enter/leave, the call label for begin/end.
+            trace: Trace payload (lane/result/data), JSON-serialized inline.
+        """
+        try:
+            payload = json.dumps(trace, default=str)
+        except Exception:
+            payload = '{}'
+        # '*' is the DBG format's field delimiter; only the FINAL field (the
+        # JSON payload) tolerates it (the supervisor splits with a maxsplit).
+        # The component field cannot carry it — strip defensively so an odd
+        # node/tool name degrades to a readable label instead of shifting
+        # every field after it.
+        component = component.replace('*', '')
+        monitorOther('DBG', f'{op}*{pipe_id:x}*0*{component}*{payload}')
+
     async def _tool(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
         Invoke a @tool_function on a pipeline node.
@@ -814,14 +923,30 @@ class DataConn(DAPConn):
         # tool traffic from saturating the endpoint beyond threadCount.
         borrowed = conn_pipe is None
         if borrowed:
-            await self._pipe_sem.acquire()
+            # Standalone tool calls open no pipe, so lazy-init the semaphore here.
+            pipe_sem = await self._ensure_pipe_sem()
+            await pipe_sem.acquire()
+
+        # The trace label plays the document-name role in BEGIN/END (the same
+        # slot a data-lane BEGIN carries the object name in). No node targeted
+        # (broadcast, first handler wins) = just the call itself — a bare
+        # 'tool()' reads naturally in the trace tree, and the DBG wire cannot
+        # carry '*' in this field (it is the format's delimiter).
+        call_label = f'{node_id}.{tool_name}()' if node_id else f'{tool_name}()'
 
         def tool_sync():
             # Use caller's open pipe if provided, otherwise borrow one
             if conn_pipe is not None:
                 pipe = conn_pipe.pipe
+                trace_pipe_id = conn_pipe.pipe_id
             else:
                 pipe = self._target.getPipe()
+                trace_pipe_id = pipe.pipeId
+
+            # Open the trace for this call ON ITS REAL PIPE — a plain nested
+            # BEGIN/ENTER/LEAVE/END sequence, exactly like a document
+            # traversal (the END in the finally below closes it).
+            self._emit_tool_trace('BEGIN', trace_pipe_id, call_label, {})
 
             try:
                 # Walk the filter chain to find candidate node(s).
@@ -848,18 +973,61 @@ class DataConn(DAPConn):
                     py_instance = getattr(node, 'pyInstance', None)
                     if py_instance is None:
                         continue
+                    component = node.pipeType.id
                     param = IInvokeTool.Invoke(tool_name=tool_name, input=tool_input)
+
+                    # Trace the attempt: enter the node with the tool + input,
+                    # leave with the outcome (return / skip / error) + timing.
+                    self._emit_tool_trace(
+                        'ENTER',
+                        trace_pipe_id,
+                        component,
+                        {'lane': 'tool', 'data': {'tool': tool_name, 'input': _trim_tool_data(tool_input)}},
+                    )
+                    started = time.perf_counter()
                     try:
                         py_instance.invoke(param)
+                        self._emit_tool_trace(
+                            'LEAVE',
+                            trace_pipe_id,
+                            component,
+                            {
+                                'lane': 'tool',
+                                'result': 'continue',
+                                'data': {
+                                    'durationMs': round((time.perf_counter() - started) * 1000, 1),
+                                    'output': _trim_tool_data(param.output),
+                                },
+                            },
+                        )
                         return param.output
                     except APERR as e:
                         if e.ec == Ec.PreventDefault:
+                            # This node does not own the tool — record the probe
+                            # and move on to the next candidate.
+                            self._emit_tool_trace('LEAVE', trace_pipe_id, component, {'lane': 'tool', 'result': 'skip'})
                             continue
+                        self._emit_tool_trace(
+                            'LEAVE',
+                            trace_pipe_id,
+                            component,
+                            {
+                                'lane': 'tool',
+                                'result': 'error',
+                                'data': {
+                                    'durationMs': round((time.perf_counter() - started) * 1000, 1),
+                                    'error': str(e),
+                                },
+                            },
+                        )
                         raise
 
                 raise ValueError(f'No handler found for tool "{tool_name}" on node "{node_id}"')
 
             finally:
+                # Retire the synthetic document (removes it from byPipe) and
+                # return a borrowed pipe to the pool.
+                self._emit_tool_trace('END', trace_pipe_id, call_label, {})
                 if borrowed:
                     self._target.putPipe(pipe)
 

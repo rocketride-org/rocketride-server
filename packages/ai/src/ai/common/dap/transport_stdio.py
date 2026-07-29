@@ -825,11 +825,15 @@ class TransportStdio(TransportBase):
                     }
                 )
 
-        # Parse job status messages: '>JOB*status_message'
-        elif message.startswith('>JOB*'):
+        # Parse job status messages: '>JOB*status_message'. A BARE '>JOB'
+        # (no delimiter) is the empty status — the engine's monitorStatus('')
+        # only appends '*text' when there is text, and nodes use the empty
+        # form to CLEAR the status line, so it forwards as an empty message
+        # rather than falling through to the unknown-control branch.
+        elif message.startswith('>JOB*') or message == '>JOB':
             try:
                 parts = message.split('*', 1)
-                status = parts[1] if len(parts) >= 2 else 'Empty job status'
+                status = parts[1] if len(parts) >= 2 else ''
                 await self._transport_receive(
                     {'type': 'event', 'event': 'apaevt_status_message', 'body': {'message': status}}
                 )
@@ -964,8 +968,12 @@ class TransportStdio(TransportBase):
                 }
             )
 
-        # Handle regular console output (non-control messages)
+        # Handle regular console output (non-control messages). The originating
+        # channel is preserved as the output category so downstream consumers
+        # (e.g. the run-log Log page) can distinguish engine diagnostics on
+        # stderr from ordinary console prints on stdout.
         else:
+            category = 'stderr' if channel == 'stderr' else 'console'
             await self._transport_receive(
-                {'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'{message}\n'}}
+                {'type': 'event', 'event': 'output', 'body': {'category': category, 'output': f'{message}\n'}}
             )

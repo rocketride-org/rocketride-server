@@ -33,6 +33,7 @@
 const path = require('path');
 const { glob } = require('glob');
 const { execCommand, removeDirs, removeDirAndParents, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, exists, mkdir, syncDir, formatSyncStats, writeFile, copyFile, startServer, stopServer, bracket, parallel, hasSourceChanged, saveSourceHash, setState, parseServerAddress } = require('../../../scripts/lib');
+const { stripDtsDir } = require('../../../scripts/lib/stripDts');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src');
@@ -148,6 +149,12 @@ function makeGenerateTypesAction() {
 				return;
 			}
 			await execCommand('npx', ['tsc', '-p', 'tsconfig.types.json'], { task, cwd: PACKAGE_DIR });
+			// Strip private/protected members from the emitted declarations so the
+			// public .d.ts surface is structural (no nominal implementation brands
+			// leaking to consumers or into the frozen shell-api contract).
+			const ts = require(require.resolve('typescript', { paths: [PACKAGE_DIR] }));
+			const stripped = stripDtsDir(path.join(LOCAL_DIST, 'types'), ts);
+			task.output = `Compiled declarations; stripped non-public members from ${stripped} file(s)`;
 		},
 	};
 }

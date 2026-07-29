@@ -72,6 +72,26 @@ When connected to an agent, the node exposes three functions (named under the co
 
 ---
 
+## Transaction tool functions
+
+Three additional tool functions support explicit database transactions. All three require `allow_execute=true` on the node (the same gate as `QuestionType.EXECUTE`); requests are silently dropped when the gate is off.
+
+| Tool       | Input                     | Returns                    | Description                                                                                                   |
+| ---------- | ------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `begin`    | _(none)_                  | `{"session_id": "<id>"}`   | Opens a new transaction and reserves a dedicated connection for it. Returns a `session_id` that callers must thread through subsequent `execute`, `commit`, and `rollback` calls. |
+| `commit`   | `{"session_id": "<id>"}` | `{"ok": true}`             | Commits all statements made on the given session, releases the held connection back to the pool, and removes the session entry. |
+| `rollback` | `{"session_id": "<id>"}` | `{"ok": true}`             | Discards all statements made on the given session, releases the held connection, and removes the session entry. |
+
+To run a statement inside an open transaction, pass the `session_id` returned by `begin` as the `session_id` field of an `execute` tool call. Statements without a `session_id` run on a fresh auto-commit connection and are not part of any transaction.
+
+Sessions are server-scoped: the `session_id` is only valid on the node instance that issued it. Idle sessions are reaped automatically after a configurable timeout; the engine also closes all sessions when the pipeline is torn down.
+
+The Python SDK exposes these as `client.database.begin_transaction()`, `client.database.commit()`, and `client.database.rollback()`. The TypeScript SDK exposes them as `client.database.beginTransaction()`, `client.database.commit()`, and `client.database.rollback()`.
+
+To run a statement **inside** an open session from the SDK, pass the `session_id` (and any positional `$1..$n` `params`) to the database query method — Python `client.database.query(token=..., sql=..., session_id=..., params=[...])`, TypeScript `client.database.query({ token, sql, sessionId, params })`. Parameters are bound server-side. A `query(...)` call without a `session_id` runs on a fresh auto-commit connection and is not part of any transaction.
+
+---
+
 ## SQL safety & validation
 
 Generated SQL passes two gates before execution:
