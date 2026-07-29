@@ -14,7 +14,7 @@
  */
 
 import type { RocketRideClient, Deployment, DeployArtifact, DeployHistoryEntry } from 'rocketride';
-import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO, SidebarDeploymentDTO } from '../../providers/views/deployTypes';
+import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO } from '../../providers/views/deployTypes';
 
 // =============================================================================
 // TEAM RESOLUTION
@@ -113,53 +113,30 @@ export function mapHistoryRows(rows: DeployHistoryEntry[], teams: DeployTeamRefD
 // =============================================================================
 
 /**
- * Maps deployment rows into the file view's "where live" rows for ONE
- * project — removed rows are hidden, schedules fold into the compact
- * summary, and the newest dispatch across all sources becomes lastRunAt.
+ * Maps deployment rows into the file view's "where live" facts for ONE
+ * project — removed rows are hidden. RAW facts only: source names are
+ * resolved by the shared ProjectView against the pipeline it holds.
  *
  * @param deployments - `client.deploy.list()` rows (all projects).
  * @param projectId - The project whose deployments to keep.
  * @param teams - The resolved team refs (name lookup).
  * @returns The "where live" rows for the lifecycle panel.
  */
-export function mapTeamDeploymentRows(deployments: Deployment[], projectId: string, teams: DeployTeamRefDTO[], sourceNames?: Map<string, string>): TeamDeploymentRowDTO[] {
+export function mapTeamDeploymentRows(deployments: Deployment[], projectId: string, teams: DeployTeamRefDTO[]): TeamDeploymentRowDTO[] {
 	return deployments
 		.filter((dep) => dep.projectId === projectId && dep.state !== 'removed')
 		.map((dep) => {
-			// Fold the per-source schedules into the compact summary string.
-			const schedules = Object.entries(dep.schedules ?? {});
-			const armed = schedules.filter(([, sched]) => sched.cron && sched.enabled !== false);
-			const lastRun = Math.max(0, ...schedules.map(([, sched]) => sched.lastRunAt ?? 0));
+			// Normalize the schedule records (cron string, enabled default).
+			const schedules = (dep.schedules ?? {}) as Record<string, { cron?: string; paused?: boolean; ttl?: number; lastRunAt?: number }>;
 			return {
 				teamId: dep.teamId as string,
 				teamName: teamNameOf(teams, dep.teamId as string),
 				version: dep.version ?? 0,
 				state: (dep.state ?? 'active') as TeamDeploymentRowDTO['state'],
-				schedulesSummary: armed.length > 0 ? armed.map(([sourceId, sched]) => `${sourceNames?.get(sourceId) ?? sourceId} ${sched.cron}`).join(' · ') : 'manual',
-				...(lastRun > 0 ? { lastRunAt: lastRun } : {}),
+				deployedAt: dep.deployedAt ?? dep.updatedAt ?? 0,
+				schedules: Object.fromEntries(Object.entries(schedules).map(([sourceId, sched]) => [sourceId, { cron: sched.cron ?? '', paused: sched.paused === true, ...(sched.ttl ? { ttl: sched.ttl } : {}), ...(sched.lastRunAt ? { lastRunAt: sched.lastRunAt } : {}) }])),
 			};
 		});
-}
-
-/**
- * Maps deployment rows into sidebar DEPLOYMENTS tree rows (all projects,
- * removed rows hidden), mirroring rocket-ui's RocketSidebar mapping.
- *
- * @param deployments - `client.deploy.list()` rows.
- * @param teams - The resolved team refs (name lookup).
- * @returns Sidebar tree rows grouped later by the shared component.
- */
-export function mapSidebarDeployments(deployments: Deployment[], teams: DeployTeamRefDTO[]): SidebarDeploymentDTO[] {
-	return deployments
-		.filter((dep) => dep.teamId && dep.projectId && dep.state !== 'removed')
-		.map((dep) => ({
-			teamId: dep.teamId as string,
-			teamName: teamNameOf(teams, dep.teamId as string),
-			projectId: dep.projectId as string,
-			pipelineName: dep.pipelineName || (dep.projectId as string),
-			version: dep.version ?? 0,
-			state: (dep.state ?? 'active') as SidebarDeploymentDTO['state'],
-		}));
 }
 
 /**
@@ -181,26 +158,26 @@ export function mapDeploymentInfo(deployment: Deployment, projectId: string): De
 
 /**
  * Builds one schedule row per SOURCE component of the artifact (scheduled
- * or not), joined with the deployment's schedule map — mirrors rocket-ui's
- * DeploymentPage schedules memo.
+ * or not), joined with the deployment's schedule map — the team drawer's
+ * sources overview.
  *
  * @param pipeline - The immutable registry artifact (component list source).
  * @param deployment - The deployment record carrying the schedule map.
- * @returns Schedule rows for the STATUS schedules panel.
+ * @returns Schedule rows, one per source.
  */
 export function mapScheduleRows(pipeline: Record<string, unknown>, deployment: Deployment): DeployScheduleRowDTO[] {
 	// One row per SOURCE component; non-sources never schedule.
-	const components = Array.isArray(pipeline.components) ? (pipeline.components as Array<{ id?: string; config?: { mode?: string } }>) : [];
+	const components = Array.isArray(pipeline.components) ? (pipeline.components as Array<{ id?: string; name?: string; config?: { mode?: string } }>) : [];
 	return components
 		.filter((c) => c.config?.mode === 'Source' && c.id)
 		.map((c) => {
 			const sched = deployment.schedules?.[c.id as string];
 			return {
 				sourceId: c.id as string,
-				sourceName: (c as { name?: string }).name || (c.id as string),
-				cron: sched?.cron ?? '',
-				enabled: sched?.enabled !== false,
-				...(sched?.ttl ? { ttl: sched.ttl } : {}),
+				sourceName: c.name || (c.id as string),
+				cron: (sched?.cron as string) ?? '',
+				paused: sched?.paused === true,
+				...(sched?.ttl ? { ttl: sched.ttl as number } : {}),
 				...(sched?.lastRunAt ? { lastRunAt: sched.lastRunAt } : {}),
 			};
 		});

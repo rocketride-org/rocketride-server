@@ -21,13 +21,13 @@
 
 import React, { useEffect, useMemo, useState, CSSProperties, ReactNode } from 'react';
 
-import { commonStyles } from '../../../themes/styles';
-import { Button } from '../../../components/button/Button';
-import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
-import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
-import { InputField } from '../../../components/input-field/InputField';
-import { formatTime } from '../../server/util/formatters';
-import type { SchedulePreviewResult } from '../DeploymentView';
+import { commonStyles } from '../../themes/styles';
+import { Button } from '../button/Button';
+import { ConfirmDialog } from '../modal/ConfirmDialog';
+import { DetailPanel } from '../detail-panel/DetailPanel';
+import { InputField } from '../input-field/InputField';
+import { formatTime } from '../../modules/server/util/formatters';
+import type { SchedulePreviewResult } from './DeploymentView';
 
 // =============================================================================
 // PROPS
@@ -51,6 +51,11 @@ export interface ISchedulePanelProps {
 	initialTtl?: number;
 	/** Persist the schedule: cron (null clears) + run window (null = until finished). */
 	onSave: (cron: string | null, ttl: number | null) => Promise<void>;
+	/** The schedule's paused state (renders the Pause/Resume footer verb). */
+	paused?: boolean;
+	/** Pause/resume THIS schedule, preserving cron/ttl (footer verb; only a
+	    stored schedule can pause, so it renders only when one exists). */
+	onSetPaused?: (paused: boolean) => Promise<void>;
 	/** Dismiss without saving. */
 	onClose: () => void;
 	/** Cron preview via the server's single evaluator. */
@@ -175,9 +180,11 @@ const S = {
 	summaryMuted: {
 		color: 'var(--rr-text-disabled)',
 	} as CSSProperties,
-	/** Left-anchored run-verb slot in the panel footer (footer is flex-end). */
-	footerRunVerb: {
+	/** Left-anchored verb group in the panel footer (footer is flex-end). */
+	footerLeftVerbs: {
 		marginRight: 'auto',
+		display: 'flex',
+		gap: 8,
 	} as CSSProperties,
 	errorText: {
 		color: 'var(--rr-color-error)',
@@ -312,7 +319,7 @@ export function describeCron(cron: string): string {
 /**
  * The v4 schedule editor panel. See the module docstring.
  */
-export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, sourceName, teamName, pipelineName, initialCron, initialTtl, onSave, onClose, previewSchedule, running, onRunNow, onStopRun }) => {
+export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, sourceName, teamName, pipelineName, initialCron, initialTtl, onSave, onClose, paused = false, onSetPaused, previewSchedule, running, onRunNow, onStopRun }) => {
 	const [picker, setPicker] = useState<PickerState>(() => fromCron(initialCron));
 	// RUN FOR: finish-bounded, or a fixed window (seconds on the wire).
 	const [runFor, setRunFor] = useState<'finish' | 'window'>(initialTtl ? 'window' : 'finish');
@@ -375,6 +382,20 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 		}
 	};
 
+	/** Pause/resume this schedule in place (the panel stays open). */
+	const togglePause = async (): Promise<void> => {
+		if (!onSetPaused) return;
+		setBusy(true);
+		setError('');
+		try {
+			await onSetPaused(!paused);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	const invalidCron = Boolean(cron) && preview !== null && preview.valid === false;
 	const clearing = picker.kind === 'demand' && Boolean(initialCron.trim());
 
@@ -394,41 +415,47 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 			<DetailPanel
 				open={open}
 				onClose={onClose}
-				title={`Schedule — ${sourceName || sourceId}`}
-				subtitle={`${teamName} · ${pipelineName} · ${sourceId} · deploy`}
+				title={`Schedule — ${pipelineName ? `${pipelineName}/` : ''}${sourceName || sourceId}`}
+				subtitle={`When this source's deployed pipeline runs on ${teamName}, and how long each run stays up.`}
 				busy={busy}
 				dirty={dirty}
 				editing
 				onExitMode={onClose}
 				footer={
 					<>
-						{/* Record-level verbs at the LEFT edge (footer convention).
-						    [Save schedule] MATERIALIZES on the first change, LEFT of
-						    the stationary [Cancel] — Save's presence IS the dirty
-						    indicator; a dirty Cancel routes through the discard
-						    confirm (style guide). */}
-						{onRunNow && !running && (
-							<span style={S.footerRunVerb}>
-								<Button variant="secondary" small disabled={busy} onClick={onRunNow}>
-									Run now
+						{/* Record-level verbs at the LEFT edge (footer convention):
+						    Pause/Resume (only a stored schedule can pause) and the
+						    run verbs. [Save schedule] + [Cancel] MATERIALIZE on the
+						    first change — their presence IS the dirty indicator; a
+						    dirty Cancel routes through the discard confirm. Pristine
+						    panels close via X / Escape. */}
+						<span style={S.footerLeftVerbs}>
+							{onSetPaused && Boolean(initialCron.trim()) && (
+								<Button variant="secondary" small disabled={busy} onClick={() => void togglePause()}>
+									{paused ? 'Resume' : 'Pause'}
 								</Button>
-							</span>
-						)}
-						{onStopRun && running && (
-							<span style={S.footerRunVerb}>
+							)}
+							{onRunNow && !running && (
+								<Button variant="danger" small disabled={busy} onClick={onRunNow}>
+									Run
+								</Button>
+							)}
+							{onStopRun && running && (
 								<Button variant="danger" small disabled={busy} onClick={onStopRun}>
-									Stop run
+									Stop
 								</Button>
-							</span>
-						)}
+							)}
+						</span>
 						{dirty && (
-							<Button variant="primary" small disabled={busy || invalidCron || (picker.kind === 'cron' && !picker.cron.trim())} onClick={() => (clearing ? setClearConfirm(true) : void save())}>
-								{busy ? 'Saving…' : 'Save schedule'}
-							</Button>
+							<>
+								<Button variant="primary" small disabled={busy || invalidCron || (picker.kind === 'cron' && !picker.cron.trim())} onClick={() => (clearing ? setClearConfirm(true) : void save())}>
+									{busy ? 'Saving…' : 'Save schedule'}
+								</Button>
+								<Button variant="ghost" small disabled={busy} onClick={() => setDiscardConfirm(true)}>
+									Cancel
+								</Button>
+							</>
 						)}
-						<Button variant="ghost" small disabled={busy} onClick={() => (dirty ? setDiscardConfirm(true) : onClose())}>
-							Cancel
-						</Button>
 					</>
 				}
 			>

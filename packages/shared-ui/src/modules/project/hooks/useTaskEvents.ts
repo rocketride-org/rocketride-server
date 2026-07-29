@@ -83,6 +83,9 @@ export interface TaskChapter {
 	beginSeq: number;
 	endTime?: number | null;
 	outcome?: string | null;
+	/** The run's trace level (null/'none' = tracing off; absent on
+	    chapters recorded before the stamp existed). */
+	traceLevel?: string | null;
 }
 
 /** Chapters + activity metadata (log.chapters response shape). */
@@ -665,7 +668,7 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 					}
 				}
 				return {
-					chapter: { beginTime: first.body.eventTime, beginSeq: first.body.logSeq, endTime: null, outcome: null },
+					chapter: { beginTime: first.body.eventTime, beginSeq: first.body.logSeq, endTime: null, outcome: null, traceLevel: (first.body.traceLevel as string | undefined) ?? null },
 					active: true,
 				};
 			}

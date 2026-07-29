@@ -246,7 +246,7 @@ class DeployApi:
 
         The same trusted team dispatch the scheduler uses — the run executes
         as the team, with you as the billing-attribution actor. The
-        deployment must be active.
+        deployment must be enabled.
 
         Args:
             project_id: The deployed project.
@@ -316,34 +316,36 @@ class DeployApi:
         return await self._client.call('rrext_deploy', **_list_args(kwargs, page, page_size, search, filters, sort))
 
     # =========================================================================
-    # STATE — pause / resume / soft remove
+    # STATE — enable / disable / soft remove
     # =========================================================================
 
-    async def pause(self, project_id: str, team_id: str) -> Deployment:
+    async def disable(self, project_id: str, team_id: str) -> Deployment:
         """
-        Pause one team's deployment (schedules stop firing).
+        Disable one team's deployment — the kill switch: NOTHING runs
+        (schedules stop firing and manual runs are refused) until it is
+        enabled again.
 
         Args:
             project_id: The project.
-            team_id: The team whose deployment to pause.
+            team_id: The team whose deployment to disable.
 
         Returns:
             The updated deployment record.
         """
-        return await self._client.call('rrext_deploy', subcommand='pause', projectId=project_id, teamId=team_id)
+        return await self._client.call('rrext_deploy', subcommand='disable', projectId=project_id, teamId=team_id)
 
-    async def resume(self, project_id: str, team_id: str) -> Deployment:
+    async def enable(self, project_id: str, team_id: str) -> Deployment:
         """
-        Resume one team's paused deployment.
+        Enable one team's disabled deployment.
 
         Args:
             project_id: The project.
-            team_id: The team whose deployment to resume.
+            team_id: The team whose deployment to enable.
 
         Returns:
             The updated deployment record.
         """
-        return await self._client.call('rrext_deploy', subcommand='resume', projectId=project_id, teamId=team_id)
+        return await self._client.call('rrext_deploy', subcommand='enable', projectId=project_id, teamId=team_id)
 
     async def remove(self, project_id: str, team_id: str) -> Deployment:
         """
@@ -373,11 +375,14 @@ class DeployApi:
         schedule: str | None,
         team_id: str,
         *,
-        enabled: bool = True,
         ttl: int | None = None,
     ) -> Deployment:
         """
         Set (or clear) one source's schedule on a team deployment.
+
+        The paused flag is untouched — editing cron/ttl preserves it (a new
+        schedule starts unpaused); :meth:`pause_schedule` /
+        :meth:`resume_schedule` own it.
 
         Args:
             project_id: The project.
@@ -385,7 +390,6 @@ class DeployApi:
             schedule: 5-field cron expression; ``None`` or ``'manual'``
                 clears the schedule.
             team_id: The team whose deployment to schedule.
-            enabled: Set False to keep the cron but stop it firing.
             ttl: Run window in seconds ('fixed window'); ``None`` runs each
                 task until the pipeline finishes.
 
@@ -397,13 +401,83 @@ class DeployApi:
             'projectId': project_id,
             'sourceId': source_id,
             'teamId': team_id,
-            'enabled': enabled,
         }
         if schedule is not None:
             kwargs['schedule'] = schedule
         if ttl is not None:
             kwargs['ttl'] = ttl
         return await self._client.call('rrext_deploy', **kwargs)
+
+    async def set_source_config(
+        self,
+        project_id: str,
+        source_id: str,
+        team_id: str,
+        *,
+        trace_level: 'str | None' = None,
+        debug_out: bool = False,
+    ) -> Deployment:
+        """
+        Set one source's execution settings (trace level + debug output).
+
+        These ride every deploy run of the source — scheduled and manual —
+        exactly like the dev-run settings. Editing the schedule never
+        touches them; a source keeps its settings even with no schedule.
+
+        Args:
+            project_id: The project.
+            source_id: The source whose settings to store.
+            team_id: The team whose deployment carries them.
+            trace_level: Trace verbosity ('none'|'metadata'|'summary'|
+                'full'); ``None`` = the deploy default (full).
+            debug_out: Full task debug output (--trace=debugOut).
+
+        Returns:
+            The updated deployment record.
+        """
+        kwargs: dict = {
+            'subcommand': 'source_config',
+            'projectId': project_id,
+            'sourceId': source_id,
+            'teamId': team_id,
+            'debugOut': debug_out,
+        }
+        if trace_level is not None:
+            kwargs['traceLevel'] = trace_level
+        return await self._client.call('rrext_deploy', **kwargs)
+
+    async def pause_schedule(self, project_id: str, source_id: str, team_id: str) -> Deployment:
+        """
+        Pause ONE source's schedule — the cron/ttl stay configured, it just
+        stops firing until resumed.
+
+        Args:
+            project_id: The project.
+            source_id: The source whose schedule to pause.
+            team_id: The team whose deployment carries the schedule.
+
+        Returns:
+            The updated deployment record.
+        """
+        return await self._client.call(
+            'rrext_deploy', subcommand='schedule_pause', projectId=project_id, sourceId=source_id, teamId=team_id
+        )
+
+    async def resume_schedule(self, project_id: str, source_id: str, team_id: str) -> Deployment:
+        """
+        Resume a paused source schedule.
+
+        Args:
+            project_id: The project.
+            source_id: The source whose schedule to resume.
+            team_id: The team whose deployment carries the schedule.
+
+        Returns:
+            The updated deployment record.
+        """
+        return await self._client.call(
+            'rrext_deploy', subcommand='schedule_resume', projectId=project_id, sourceId=source_id, teamId=team_id
+        )
 
     async def preview(self, schedule: str, count: int | None = None) -> SchedulePreview:
         """

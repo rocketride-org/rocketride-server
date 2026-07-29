@@ -73,9 +73,15 @@ class DeploymentSchedule(TypedDict, total=False):
 
     # 5-field cron expression.
     cron: str
-    enabled: bool
+    # Paused schedules stay configured (cron/ttl kept) but never fire.
+    paused: bool
     # Run window in seconds ('fixed window'); absent/None = until finished.
     ttl: int
+    # Trace verbosity for this source's deploy runs; absent/None = the
+    # deploy default (full).
+    traceLevel: Literal['none', 'metadata', 'summary', 'full']
+    # Full task debug output (--trace=debugOut) for this source.
+    debugOut: bool
     # Unix timestamp (seconds) of the last scheduler dispatch, or None.
     lastRunAt: float
 
@@ -87,7 +93,8 @@ class Deployment(TypedDict, total=False):
     projectId: str
     # The registry version this team currently points at.
     version: int
-    state: Literal['active', 'paused', 'errored', 'removed']
+    # 'disabled' is the whole-deployment kill switch — nothing runs.
+    state: Literal['enabled', 'disabled', 'errored', 'removed']
     pipelineName: str
     # Per-source schedules, keyed by source id.
     schedules: dict[str, DeploymentSchedule]
@@ -95,6 +102,10 @@ class Deployment(TypedDict, total=False):
     createdBy: DeployActor
     updatedAt: float
     updatedBy: DeployActor
+    # Unix seconds of the latest POINTER MOVE for this team (deploy or
+    # rollback), computed from the audit trail — unlike updatedAt, it is
+    # NOT bumped by disable/enable or schedule edits.
+    deployedAt: float
     # Registry-joined fields of the pointed-at version.
     sha256: str
     publishedAt: float
@@ -109,7 +120,9 @@ class DeployHistoryEntry(TypedDict, total=False):
     seq: int
     # Unix timestamp (seconds).
     at: float
-    action: Literal['publish', 'deploy', 'rollback', 'pause', 'resume', 'errored', 'remove']
+    # 'pause'/'resume' appear only on rows written before the enable/disable
+    # vocabulary (the trail is immutable).
+    action: Literal['publish', 'deploy', 'rollback', 'enable', 'disable', 'pause', 'resume', 'errored', 'remove']
     # '' on org-wide rows (publish); the team id on pointer changes.
     teamId: str
     version: int

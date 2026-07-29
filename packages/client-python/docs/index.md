@@ -344,13 +344,15 @@ history.
 | `deploy.get`          | `async def get(self, project_id, team_id) -> Deployment`                                                         | `Deployment`           | One team's deployment, registry-joined.                                                                             |
 | `deploy.versions`     | `async def versions(self, project_id, *, page=None, ...) -> DeployVersionsResult`                                | `DeployVersionsResult` | The registry versions (the version strip), newest first, standard envelope.                                         |
 | `deploy.history`      | `async def history(self, project_id, *, team_id=None, page=None, ...) -> DeployHistoryResult`                    | `DeployHistoryResult`  | The immutable audit trail, newest first; rows carry `seq` (the stable append-order identity). Server-paged.        |
-| `deploy.pause`        | `async def pause(self, project_id, team_id) -> Deployment`                                                       | `Deployment`           | Pauses the team deployment (schedules stop firing).                                                                 |
-| `deploy.resume`       | `async def resume(self, project_id, team_id) -> Deployment`                                                      | `Deployment`           | Resumes a paused team deployment.                                                                                   |
+| `deploy.disable`      | `async def disable(self, project_id, team_id) -> Deployment`                                                     | `Deployment`           | Disables the team deployment — the kill switch: nothing runs until enabled again.                                   |
+| `deploy.enable`       | `async def enable(self, project_id, team_id) -> Deployment`                                                      | `Deployment`           | Enables a disabled team deployment.                                                                                 |
 | `deploy.remove`       | `async def remove(self, project_id, team_id) -> Deployment`                                                      | `Deployment`           | Soft remove: hidden from listings; history and artifacts survive forever. Re-deploying revives it.                  |
-| `deploy.set_schedule` | `async def set_schedule(self, project_id, source_id, schedule, team_id, *, enabled=True) -> Deployment`          | `Deployment`           | Sets (or clears with `None`/`'manual'`) one source's 5-field cron schedule.                                         |
+| `deploy.set_schedule` | `async def set_schedule(self, project_id, source_id, schedule, team_id, *, ttl=None) -> Deployment`              | `Deployment`           | Sets (or clears with `None`/`'manual'`) one source's 5-field cron schedule; the paused flag is untouched.           |
+| `deploy.pause_schedule` | `async def pause_schedule(self, project_id, source_id, team_id) -> Deployment`                                 | `Deployment`           | Pauses ONE source's schedule — cron/ttl kept, it just stops firing.                                                 |
+| `deploy.resume_schedule` | `async def resume_schedule(self, project_id, source_id, team_id) -> Deployment`                               | `Deployment`           | Resumes a paused source schedule.                                                                                   |
 | `deploy.preview`      | `async def preview(self, schedule, count=None) -> SchedulePreview`                                               | `SchedulePreview`      | THE single cron evaluator: validity + next occurrences. Never parse cron client-side.                               |
 
-**States:** `state` is `'active'` (schedules fire per cron), `'paused'`,
+**States:** `state` is `'enabled'` (schedules fire per cron), `'disabled'` (the kill switch),
 `'errored'` (a scheduled dispatch failed on permissions and the scheduler
 stopped retrying), or `'removed'` (soft delete). Scheduled runs execute AS
 THE TEAM (no stored user credential); their logs land in the team's run-log
@@ -445,7 +447,7 @@ From `rocketride.schema`. Used to parse chat response content. The client does n
 - **DAPMessage**: Dict with `type`, `seq`, and optional `command`, `arguments`, `body`, `success`, `message`, `event`, `token`, etc.
 - **PipelineConfig**: Pipeline definition with `name`, `description`, `version`, `components`, `source`, `project_id`.
 - **DeployArtifact**: one immutable registry version — `version`, `sha256`, `bytes`, `pipelineName`, `publishedBy`, `publishedAt`, `comment`.
-- **Deployment**: one team's deployment, registry-joined — `teamId`, `projectId`, `version`, `state` (`'active' | 'paused' | 'errored' | 'removed'`), `schedules`, actor/timestamp fields.
+- **Deployment**: one team's deployment, registry-joined — `teamId`, `projectId`, `version`, `state` (`'enabled' | 'disabled' | 'errored' | 'removed'`), `schedules`, actor/timestamp fields.
 - **DeployHistoryEntry**: one audit row — `seq` (stable append-order identity), `at`, `action`, `teamId`, `version`, `actor`.
 - **PublishResult / DeployListResult / DeployVersionsResult / DeployHistoryResult / SchedulePreview**: method result shapes (list results are the standard `{rows, total, page, pageSize}` envelope).
 - **QuestionHistory**: `{ 'role': str, 'content': str }`.

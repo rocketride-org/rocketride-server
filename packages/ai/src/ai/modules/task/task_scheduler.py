@@ -26,19 +26,20 @@ TaskScheduler — background asyncio loop that fires TEAM deployments on schedul
 Teams-as-environments model: schedule entries are keyed
 ``(team_id, project_id, source_id)`` — the same project deployed by two teams
 (Staging and Production) runs independently, and each SOURCE of a deployment
-carries its own cron. On startup the scheduler reads every active deployment
-from the account module (``deployments_iter_active`` — OSS files or SaaS DB,
+carries its own cron. On startup the scheduler reads every ENABLED deployment
+from the account module (``deployments_iter_enabled`` — OSS files or SaaS DB,
 this layer never knows) and builds an in-memory min-heap of next-run entries.
 
 Dispatch is the TRUSTED team path (``start_server_task_as_team``): no stored
 credential — the run executes as the team, with the deploying user carried as
-attribution only. At fire time the deployment is RE-READ so a pause/remove/
-pointer-move between ticks always wins, and the artifact is sha256-verified
-before it runs.
+attribution only. At fire time the deployment is RE-READ so a disable/remove/
+pointer-move or schedule pause between ticks always wins, and the artifact is
+sha256-verified before it runs.
 
 Caller responsibilities:
   • Call scheduler.sync(org_id, deployment) after every mutation
-    (deploy / pause / resume / remove / schedule_set).
+    (deploy / enable / disable / remove / schedule_set / schedule_pause /
+    schedule_resume).
   • Do NOT call start() more than once.
 """
 
@@ -100,9 +101,9 @@ class TaskScheduler:
         """Reconcile the heap with one team deployment's current state.
 
         Drops every entry for (team, project), then re-adds one entry per
-        ENABLED schedule when the deployment is active — so a single call
-        after any mutation (deploy, pause, resume, remove, schedule_set)
-        makes the heap agree with the store.
+        UNPAUSED schedule when the deployment is enabled — so a single call
+        after any mutation (deploy, enable, disable, remove, schedule_set,
+        schedule_pause/resume) makes the heap agree with the store.
 
         Args:
             org_id:     The deployment's organisation.
@@ -118,15 +119,15 @@ class TaskScheduler:
         for key in [k for k in self._entries if k[0] == team_id and k[1] == project_id]:
             self._entries.pop(key).cancelled = True
 
-        if deployment.get('state') != 'active':
-            # Paused/errored/removed deployments also lose their overlap guards.
+        if deployment.get('state') != 'enabled':
+            # Disabled/errored/removed deployments also lose their overlap guards.
             for key in [k for k in self._active_tokens if k[0] == team_id and k[1] == project_id]:
                 self._active_tokens.pop(key, None)
             return
 
         for source_id, sched in (deployment.get('schedules') or {}).items():
             cron = (sched or {}).get('cron')
-            if not cron or not sched.get('enabled', True):
+            if not cron or sched.get('paused', False):
                 continue
             try:
                 next_run = croniter(cron, datetime.now()).get_next(datetime).timestamp()
@@ -164,10 +165,10 @@ class TaskScheduler:
     # =========================================================================
 
     async def _load(self) -> None:
-        """Populate the schedule from every active deployment, all orgs."""
+        """Populate the schedule from every enabled deployment, all orgs."""
         try:
             count = 0
-            async for dep in account.deployments_iter_active():
+            async for dep in account.deployments_iter_enabled():
                 try:
                     self.sync(dep['orgId'], dep)
                     count += 1
@@ -268,18 +269,19 @@ class TaskScheduler:
         team_id, project_id, source_id = entry.key
         org_id = entry.org_id
 
-        # Re-read the deployment at fire time: a pause/remove/pointer-move
-        # between ticks must always win over the in-memory heap.
+        # Re-read the deployment at fire time: a disable/remove/pointer-move
+        # or schedule pause between ticks must always win over the in-memory
+        # heap.
         try:
             dep = await account.deployments_get(org_id, team_id, project_id)
         except Exception as e:
             error(f'[SCHEDULER] {entry.key}: failed to load deployment: {e}')
             return
-        if dep is None or dep.get('state') != 'active':
+        if dep is None or dep.get('state') != 'enabled':
             self.sync(org_id, dep or {'teamId': team_id, 'projectId': project_id, 'state': 'removed'})
             return
         sched = (dep.get('schedules') or {}).get(source_id)
-        if not sched or not sched.get('enabled', True):
+        if not sched or sched.get('paused', False):
             self.sync(org_id, dep)
             return
 
@@ -311,6 +313,9 @@ class TaskScheduler:
                 actor=actor,
                 trigger='schedule',
                 ttl=int(ttl) if isinstance(ttl, (int, float)) and ttl else None,
+                # Per-source execution settings ride the schedule record.
+                trace_level=sched.get('traceLevel') or 'full',
+                debug_out=bool(sched.get('debugOut')),
             )
         except PermissionError as e:
             # Permission-shaped failures are permanent until a human acts —
@@ -331,7 +336,7 @@ class TaskScheduler:
 
         Persisting the state lets the UI surface the failure; the sync stops
         the cron from re-attempting a doomed dispatch every tick until a
-        human re-deploys or resumes.
+        human re-deploys or re-enables.
         """
         try:
             dep = await account.deployments_set_state(org_id, team_id, project_id, 'errored', _SCHEDULER_ACTOR)

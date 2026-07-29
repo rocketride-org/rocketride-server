@@ -14,7 +14,8 @@ import type { ViewState, TaskStatus } from 'shared/modules/project';
 import type { DashboardResponse } from 'shared/modules/server';
 import type { PromoRedemption, PromoValidation } from 'shared/modules/checkout';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from 'rocketride';
-import type { DeployLifecycleHostToWebview, DeployLifecycleWebviewToHost } from './deployTypes';
+import type { DeployLifecycleHostToWebview, DeployLifecycleWebviewToHost, DeploymentHostToWebview, DeploymentWebviewToHost } from './deployTypes';
+import type { LogSessionHostToWebview, LogSessionWebviewToHost } from './logTypes';
 
 // =============================================================================
 // PROJECT EDITOR PROTOCOL
@@ -37,7 +38,11 @@ export type ProjectHostToWebview =
 	| { type: 'shell:event'; event: unknown }
 	| { type: 'project:envKeysUpdate'; envKeys: string[] }
 	// Deploy lifecycle pushes for the DEPLOY page (see deployTypes.ts).
-	| DeployLifecycleHostToWebview;
+	| DeployLifecycleHostToWebview
+	// Deployment record drawer pushes (the drawer lives in this webview).
+	| DeploymentHostToWebview
+	// Run-log session replies/pushes (the DVR bridge).
+	| LogSessionHostToWebview;
 
 /** All messages the ProjectWebview can send to the extension host. */
 export type ProjectWebviewToHost =
@@ -54,7 +59,11 @@ export type ProjectWebviewToHost =
 	| { type: 'status:missingEnvVars'; keys: string[] }
 	| { type: 'trace:clear' }
 	// Deploy lifecycle requests from the DEPLOY page (see deployTypes.ts).
-	| DeployLifecycleWebviewToHost;
+	| DeployLifecycleWebviewToHost
+	// Deployment record drawer requests.
+	| DeploymentWebviewToHost
+	// Run-log session requests (the DVR bridge).
+	| LogSessionWebviewToHost;
 
 // =============================================================================
 // SERVER MONITOR PROTOCOL
@@ -128,4 +137,8 @@ export type { EnvironmentSlotState, EnvironmentHostToWebview, EnvironmentWebview
 
 // Re-export from standalone file so the extension host can import the deploy
 // protocol + view-model DTOs without the `shared/modules/*` dependencies.
-export type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO, SidebarDeploymentDTO, SchedulePreviewResultDTO, DeployLifecycleHostToWebview, DeployLifecycleWebviewToHost, DeploymentLoadPayload, DeploymentHostToWebview, DeploymentWebviewToHost } from './deployTypes';
+export type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO, SchedulePreviewResultDTO, DeployLifecycleHostToWebview, DeployLifecycleWebviewToHost, DeploymentLoadPayload, DeploymentHostToWebview, DeploymentWebviewToHost } from './deployTypes';
+
+// Re-export from standalone file so the extension host can import the
+// run-log session protocol without the `shared/modules/*` dependencies.
+export type { LogSessionHostToWebview, LogSessionWebviewToHost } from './logTypes';

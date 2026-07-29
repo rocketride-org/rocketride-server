@@ -357,8 +357,9 @@ class TaskServer(DAPBase):
                         self.debug_message(
                             f'Task "{control.id}" exceeded TTL ({control.task._idle_time}s >= {control.task._ttl}s), terminating...'
                         )
-                        # Terminate the idle task
-                        await self.stop_task(control.token)
+                        # Terminate the idle task — reason 'ttl', so the
+                        # run records as completed, never as cancelled.
+                        await self.stop_task(control.token, reason='ttl')
 
             except Exception as e:
                 # Log errors but continue operation to maintain system stability
@@ -1335,7 +1336,7 @@ class TaskServer(DAPBase):
             self.debug_message(f'Failed to restart task: {str(e)}')
             raise
 
-    async def stop_task(self, token: str):
+    async def stop_task(self, token: str, reason: str = 'user'):
         """
         Stop a running task with proper cleanup and resource management.
 
@@ -1365,7 +1366,7 @@ class TaskServer(DAPBase):
 
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
-                await control.task.stop_task()
+                await control.task.stop_task(reason)
                 self.debug_message(f'Task "{control.id}" stopped on request')
 
         except Exception as e:

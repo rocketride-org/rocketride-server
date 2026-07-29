@@ -31,9 +31,10 @@
 #   list/get      team deployments (registry-joined)
 #   versions      the registry entries for a project (the version strip)
 #   history       the immutable audit trail (who/what/when)
-#   pause/resume  state flips on a team deployment
+#   enable/disable  the whole-deployment kill switch (disabled = NOTHING runs)
 #   remove        SOFT remove (history and artifacts retained)
-#   schedule_set  per-source cron on a team deployment
+#   schedule_set  per-source cron on a team deployment (paused flag untouched)
+#   schedule_pause/schedule_resume  pause ONE source's schedule (cron/ttl kept)
 #   preview       THE single cron evaluator (validate + next-N occurrences)
 #
 # Permission model (checked HERE, at the command layer — the account module
@@ -123,10 +124,13 @@ class DeployCommands(DAPConn):
             'versions': self._deploy_versions,
             'artifact': self._deploy_artifact,
             'history': self._deploy_history,
-            'pause': self._deploy_pause,
-            'resume': self._deploy_resume,
+            'enable': self._deploy_enable,
+            'disable': self._deploy_disable,
             'remove': self._deploy_remove,
             'schedule_set': self._deploy_schedule_set,
+            'source_config': self._deploy_source_config,
+            'schedule_pause': self._deploy_schedule_pause,
+            'schedule_resume': self._deploy_schedule_resume,
             'preview': self._deploy_preview,
             'run': self._deploy_run,
         }
@@ -395,7 +399,7 @@ class DeployCommands(DAPConn):
     async def _set_state(
         self, request: Dict[str, Any], args: Dict[str, Any], state: str, reason: str
     ) -> Dict[str, Any]:
-        """Shared body of pause/resume/remove: flip state, resync, audit."""
+        """Shared body of enable/disable/remove: flip state, resync, audit."""
         project_id = args.get('projectId')
         if not project_id:
             raise ValueError('projectId is required')
@@ -413,13 +417,13 @@ class DeployCommands(DAPConn):
         )
         return self.build_response(request, body=dep)
 
-    async def _deploy_pause(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Pause a team deployment (schedules stop firing)."""
-        return await self._set_state(request, args, 'paused', 'deploy_pause')
+    async def _deploy_disable(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Disable a team deployment — the kill switch: NOTHING runs."""
+        return await self._set_state(request, args, 'disabled', 'deploy_disable')
 
-    async def _deploy_resume(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Resume a paused team deployment."""
-        return await self._set_state(request, args, 'active', 'deploy_resume')
+    async def _deploy_enable(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Enable a disabled team deployment."""
+        return await self._set_state(request, args, 'enabled', 'deploy_enable')
 
     async def _deploy_remove(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """SOFT-remove a team deployment — history and artifacts remain."""
@@ -439,7 +443,6 @@ class DeployCommands(DAPConn):
             if cron == 'manual':
                 # 'manual' means "no schedule row" — normalize to a clear.
                 cron = None
-        enabled = bool(args.get('enabled', True))
 
         # Run window: None/absent = until the pipeline finishes; a positive
         # integer = seconds the task stays up (the 'fixed window' option).
@@ -450,9 +453,9 @@ class DeployCommands(DAPConn):
         team_id = self._require_team(args, 'task.control')
         org_id = self._org_id()
 
-        dep = await account.deployments_schedule_set(
-            org_id, team_id, project_id, source_id, cron, enabled, self._actor(), ttl
-        )
+        # The paused flag is NOT part of this call: editing cron/ttl keeps
+        # it, and schedule_pause/schedule_resume own flipping it.
+        dep = await account.deployments_schedule_set(org_id, team_id, project_id, source_id, cron, self._actor(), ttl)
         self._scheduler.sync(org_id, dep)
         await account.audit(
             self._account_info.userId,
@@ -462,6 +465,78 @@ class DeployCommands(DAPConn):
             org_id=org_id,
         )
         return self.build_response(request, body=dep)
+
+    async def _set_schedule_paused(
+        self, request: Dict[str, Any], args: Dict[str, Any], paused: bool, reason: str
+    ) -> Dict[str, Any]:
+        """Shared body of schedule_pause/schedule_resume: flip, resync, audit."""
+        project_id = args.get('projectId')
+        source_id = args.get('sourceId')
+        if not project_id:
+            raise ValueError('projectId is required')
+        if not source_id:
+            raise ValueError('sourceId is required')
+        team_id = self._require_team(args, 'task.control')
+        org_id = self._org_id()
+
+        dep = await account.deployments_schedule_set_paused(
+            org_id, team_id, project_id, source_id, paused, self._actor()
+        )
+        self._scheduler.sync(org_id, dep)
+        await account.audit(
+            self._account_info.userId,
+            'deploy',
+            reason,
+            request_data={'projectId': project_id, 'teamId': team_id, 'sourceId': source_id},
+            org_id=org_id,
+        )
+        return self.build_response(request, body=dep)
+
+    async def _deploy_source_config(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Set one source's execution settings (trace level + debug output)."""
+        project_id = args.get('projectId')
+        source_id = args.get('sourceId')
+        if not project_id:
+            raise ValueError('projectId is required')
+        if not source_id:
+            raise ValueError('sourceId is required')
+
+        # traceLevel: an explicit dev-run verbosity, or None = the deploy default (full).
+        trace_level = args.get('traceLevel')
+        if trace_level is not None and trace_level not in ('none', 'metadata', 'summary', 'full'):
+            raise ValueError(
+                'traceLevel must be one of none|metadata|summary|full, or omitted for the deploy default (full)'
+            )
+        debug_out = bool(args.get('debugOut', False))
+
+        team_id = self._require_team(args, 'task.control')
+        org_id = self._org_id()
+
+        dep = await account.deployments_source_config_set(
+            org_id, team_id, project_id, source_id, trace_level, debug_out, self._actor()
+        )
+        await account.audit(
+            self._account_info.userId,
+            'deploy',
+            'deploy_source_config',
+            request_data={
+                'projectId': project_id,
+                'teamId': team_id,
+                'sourceId': source_id,
+                'traceLevel': trace_level,
+                'debugOut': debug_out,
+            },
+            org_id=org_id,
+        )
+        return self.build_response(request, body=dep)
+
+    async def _deploy_schedule_pause(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Pause ONE source's schedule (cron/ttl kept; it just stops firing)."""
+        return await self._set_schedule_paused(request, args, True, 'deploy_schedule_pause')
+
+    async def _deploy_schedule_resume(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """Resume a paused source schedule."""
+        return await self._set_schedule_paused(request, args, False, 'deploy_schedule_resume')
 
     # =========================================================================
     # RUN — manual trigger (the smoke-test / run-now path)
@@ -485,13 +560,13 @@ class DeployCommands(DAPConn):
         team_id = self._require_team(args, 'task.control')
         org_id = self._org_id()
 
-        # The deployment must exist and be runnable — a paused or errored
+        # The deployment must exist and be runnable — a disabled or errored
         # deployment must not run "just this once" through the back door.
         dep = await account.deployments_get(org_id, team_id, project_id)
         if dep is None or dep.get('state') == 'removed':
             raise ValueError(f'No deployment of {project_id} for team {team_id}')
-        if dep.get('state') != 'active':
-            raise ValueError(f'Deployment is {dep.get("state")} — resume it first')
+        if dep.get('state') != 'enabled':
+            raise ValueError(f'Deployment is {dep.get("state")} — enable it first')
 
         # The pointed-at artifact, sha256-verified: what was published is
         # what runs. The chosen source becomes the run's entry point.
@@ -502,8 +577,10 @@ class DeployCommands(DAPConn):
         # is a TaskConn mixin — a top-level import would be circular.
         from ..task_server_facade import start_server_task_as_team
 
-        # A manual run honors the source's configured run window too.
-        sched_ttl = ((dep.get('schedules') or {}).get(source_id) or {}).get('ttl')
+        # A manual run honors the source's execution settings but NOT its
+        # run window: the ttl window belongs to scheduled fires — a run the
+        # user started runs until it finishes or the user stops it.
+        sched = (dep.get('schedules') or {}).get(source_id) or {}
         token = await start_server_task_as_team(
             self._server,
             pipeline,
@@ -511,7 +588,9 @@ class DeployCommands(DAPConn):
             team_id=team_id,
             actor=self._actor(),
             trigger='manual',
-            ttl=int(sched_ttl) if isinstance(sched_ttl, (int, float)) and sched_ttl else None,
+            ttl=None,
+            trace_level=sched.get('traceLevel') or 'full',
+            debug_out=bool(sched.get('debugOut')),
         )
         await account.deployments_mark_run(org_id, team_id, project_id, source_id)
         await account.audit(

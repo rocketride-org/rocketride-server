@@ -65,6 +65,9 @@ export interface LogChapter {
 	endTime?: number | null;
 	/** 'ok' | 'error' | 'cancelled'; null while the run is live. */
 	outcome?: string | null;
+	/** The run's trace level (null/'none' = tracing off; absent on
+	    chapters recorded before the stamp existed). */
+	traceLevel?: string | null;
 }
 
 /** One activity span (segment time range) for the activity bar. */

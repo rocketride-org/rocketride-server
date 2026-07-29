@@ -139,7 +139,7 @@ export class ConfigManager {
 		defaultPipelinePath: '',
 		pipelineRestartBehavior: 'prompt',
 		pipelineTtl: 900,
-		pipelineTraceLevel: 'summary',
+		pipelineTraceLevel: 'full',
 		taskArguments: '',
 		pipelineDebugOutput: false,
 	};
@@ -233,7 +233,7 @@ export class ConfigManager {
 			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
 			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
 			pipelineTtl: config.get('pipelineTTL', 900),
-			pipelineTraceLevel: config.get('pipelineTraceLevel', 'summary'),
+			pipelineTraceLevel: config.get('pipelineTraceLevel', 'full'),
 			taskArguments: config.get('taskArguments', ''),
 			pipelineDebugOutput: config.get('pipelineDebugOutput', false),
 		};

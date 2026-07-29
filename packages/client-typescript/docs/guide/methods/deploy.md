@@ -42,10 +42,12 @@ their logs land in the team's run-log continuum, readable by teammates via
 | `deploy.get(projectId, teamId)` | One team's deployment, registry-joined |
 | `deploy.versions(projectId, params?)` | Registry versions (the version strip), newest first |
 | `deploy.history(projectId, params?)` | The immutable audit trail, newest first, server-paged |
-| `deploy.pause(projectId, teamId)` | Schedules stop firing |
-| `deploy.resume(projectId, teamId)` | Resume a paused deployment |
+| `deploy.disable(projectId, teamId)` | The kill switch: NOTHING runs until enabled again |
+| `deploy.enable(projectId, teamId)` | Enable a disabled deployment |
 | `deploy.remove(projectId, teamId)` | Soft remove — history and artifacts survive forever |
-| `deploy.setSchedule(projectId, sourceId, schedule, teamId, options?)` | Set (or clear with `null`) one source's cron schedule |
+| `deploy.setSchedule(projectId, sourceId, schedule, teamId, options?)` | Set (or clear with `null`) one source's cron schedule; the paused flag is untouched |
+| `deploy.pauseSchedule(projectId, sourceId, teamId)` | Pause ONE schedule — cron/ttl kept, it just stops firing |
+| `deploy.resumeSchedule(projectId, sourceId, teamId)` | Resume a paused schedule |
 | `deploy.preview(schedule, count?)` | THE single cron evaluator: validity + next occurrences |
 
 ### Python (async)
@@ -102,27 +104,35 @@ Invalid cron strings are rejected. Use `preview()` for validation and
 next-occurrence rendering — never parse cron client-side, so what you show
 can never disagree with what the scheduler fires.
 
+A schedule can be **paused** without losing its cron/ttl
+(`pauseSchedule`/`resumeSchedule`); editing the schedule with `setSchedule`
+never changes the paused flag. This is distinct from **disabling the
+deployment** (`disable`), which stops everything at once.
+
 ## **Record shapes**
 
-`Deployment` (from `deploy`/`get`/`pause`/`resume`/`remove`/`setSchedule`,
+`Deployment` (from `deploy`/`get`/`enable`/`disable`/`remove`/`setSchedule`,
 and as `list()` rows):
 
 | Field | Type | Description |
 | --- | --- | --- |
 | `teamId` / `projectId` | `string` | The deployment's identity |
 | `version` | `number` | The registry version this team points at |
-| `state` | `string` | `"active"` \| `"paused"` \| `"errored"` \| `"removed"` |
+| `state` | `string` | `"enabled"` \| `"disabled"` \| `"errored"` \| `"removed"` |
 | `pipelineName` | `string` | From the pointed-at artifact |
-| `schedules` | `Record<string, DeploymentSchedule>` | Per-source schedules (`cron`, `enabled`, `lastRunAt`) |
+| `schedules` | `Record<string, DeploymentSchedule>` | Per-source schedules (`cron`, `paused`, `ttl`, `lastRunAt`) |
 | `createdBy` / `updatedBy` | `DeployActor` | Denormalized audit identity |
+| `deployedAt` | `number` | Latest pointer move (deploy/rollback) — the "deployed on" stamp; never bumped by disable/enable or schedule edits |
 | `sha256` / `publishedAt` / `publishedBy` | | Registry-joined fields of the pointed-at version |
 
 `DeployArtifact` (from `publish`, and as `versions()` rows): `version`,
 `sha256`, `bytes`, `pipelineName`, `publishedBy`, `publishedAt`, `comment`.
 
 `DeployHistoryEntry` (as `history()` rows): `seq`, `at`, `action`
-(`publish` | `deploy` | `rollback` | `pause` | `resume` | `errored` |
-`remove`), `teamId` (`''` on org-wide publish rows), `version`, `actor`.
+(`publish` | `deploy` | `rollback` | `enable` | `disable` | `errored` |
+`remove`; `pause`/`resume` appear only on rows written before the
+enable/disable vocabulary), `teamId` (`''` on org-wide publish rows),
+`version`, `actor`.
 
 ## **Usage Examples**
 
@@ -159,9 +169,9 @@ for (const row of trail.rows) {
 
 | State | Meaning |
 | --- | --- |
-| `active` | Schedules fire per cron (nothing fires without a schedule) |
-| `paused` | Deployment retained; schedules do not fire |
-| `errored` | A scheduled dispatch failed on permissions; the scheduler stopped retrying. Fix access, then `resume()` |
+| `enabled` | Schedules fire per cron (nothing fires without a schedule) |
+| `disabled` | The kill switch: schedules do not fire and manual runs are refused |
+| `errored` | A scheduled dispatch failed on permissions; the scheduler stopped retrying. Fix access, then `enable()` or re-`deploy()` |
 | `removed` | Soft-deleted: hidden from listings; history and artifacts survive. Re-`deploy()` any version to revive |
 
 If a scheduled run is still in progress when the next tick comes due, that
@@ -195,7 +205,8 @@ argument:
 | `get()` | `rrext_deploy` | `get` |
 | `versions()` | `rrext_deploy` | `versions` |
 | `history()` | `rrext_deploy` | `history` |
-| `pause()` / `resume()` / `remove()` | `rrext_deploy` | `pause` / `resume` / `remove` |
+| `enable()` / `disable()` / `remove()` | `rrext_deploy` | `enable` / `disable` / `remove` |
+| `pauseSchedule()` / `resumeSchedule()` | `rrext_deploy` | `schedule_pause` / `schedule_resume` |
 | `setSchedule()` | `rrext_deploy` | `schedule_set` |
 | `preview()` | `rrext_deploy` | `preview` |
 

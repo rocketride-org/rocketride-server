@@ -190,7 +190,7 @@ export class DeployApi {
 	 *
 	 * The same trusted team dispatch the scheduler uses — the run executes
 	 * as the team, with the caller as the billing-attribution actor. The
-	 * deployment must be active.
+	 * deployment must be enabled.
 	 *
 	 * @param projectId - The deployed project.
 	 * @param sourceId - The pipeline source to fire.
@@ -250,34 +250,36 @@ export class DeployApi {
 	}
 
 	// =========================================================================
-	// STATE — pause / resume / soft remove
+	// STATE — enable / disable / soft remove
 	// =========================================================================
 
 	/**
-	 * Pauses one team's deployment (schedules stop firing).
+	 * Disables one team's deployment — the kill switch: NOTHING runs
+	 * (schedules stop firing and manual runs are refused) until it is
+	 * enabled again.
 	 *
 	 * @param projectId - The project.
-	 * @param teamId - The team whose deployment to pause.
+	 * @param teamId - The team whose deployment to disable.
 	 * @returns The updated deployment record.
 	 */
-	async pause(projectId: string, teamId: string): Promise<Deployment> {
+	async disable(projectId: string, teamId: string): Promise<Deployment> {
 		return this.client.call<Deployment>('rrext_deploy', {
-			subcommand: 'pause',
+			subcommand: 'disable',
 			projectId,
 			teamId,
 		});
 	}
 
 	/**
-	 * Resumes one team's paused deployment.
+	 * Enables one team's disabled deployment.
 	 *
 	 * @param projectId - The project.
-	 * @param teamId - The team whose deployment to resume.
+	 * @param teamId - The team whose deployment to enable.
 	 * @returns The updated deployment record.
 	 */
-	async resume(projectId: string, teamId: string): Promise<Deployment> {
+	async enable(projectId: string, teamId: string): Promise<Deployment> {
 		return this.client.call<Deployment>('rrext_deploy', {
-			subcommand: 'resume',
+			subcommand: 'enable',
 			projectId,
 			teamId,
 		});
@@ -309,26 +311,90 @@ export class DeployApi {
 	/**
 	 * Sets (or clears) one source's schedule on a team deployment.
 	 *
+	 * The paused flag is untouched — editing cron/ttl preserves it (a new
+	 * schedule starts unpaused); {@link pauseSchedule}/{@link resumeSchedule}
+	 * own it.
+	 *
 	 * @param projectId - The project.
 	 * @param sourceId - The pipeline source the schedule fires.
 	 * @param schedule - 5-field cron expression; `null` or `'manual'` clears
 	 *   the schedule.
 	 * @param teamId - The team whose deployment to schedule.
 	 * @param options - Optional schedule options.
-	 * @param options.enabled - Set false to keep the cron but stop it firing.
 	 * @param options.ttl - Run window in seconds ('fixed window'); omitted
 	 *   runs each task until the pipeline finishes.
 	 * @returns The updated deployment record.
 	 */
-	async setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options: { enabled?: boolean; ttl?: number } = {}): Promise<Deployment> {
+	async setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options: { ttl?: number } = {}): Promise<Deployment> {
 		return this.client.call<Deployment>('rrext_deploy', {
 			subcommand: 'schedule_set',
 			projectId,
 			sourceId,
 			teamId,
-			enabled: options.enabled ?? true,
 			...(schedule !== null && { schedule }),
 			...(options.ttl !== undefined && { ttl: options.ttl }),
+		});
+	}
+
+	/**
+	 * Sets one source's execution settings (trace level + debug output).
+	 *
+	 * These ride every deploy run of the source — scheduled and manual —
+	 * exactly like the dev-run settings. Editing the schedule never touches
+	 * them; a source keeps its settings even with no schedule.
+	 *
+	 * @param projectId - The project.
+	 * @param sourceId - The source whose settings to store.
+	 * @param teamId - The team whose deployment carries them.
+	 * @param options - The settings.
+	 * @param options.traceLevel - Trace verbosity; omit/null for the deploy
+	 *   default (full).
+	 * @param options.debugOut - Full task debug output (--trace=debugOut).
+	 * @returns The updated deployment record.
+	 */
+	async setSourceConfig(projectId: string, sourceId: string, teamId: string, options: { traceLevel?: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut?: boolean } = {}): Promise<Deployment> {
+		return this.client.call<Deployment>('rrext_deploy', {
+			subcommand: 'source_config',
+			projectId,
+			sourceId,
+			teamId,
+			...(options.traceLevel ? { traceLevel: options.traceLevel } : {}),
+			debugOut: options.debugOut ?? false,
+		});
+	}
+
+	/**
+	 * Pauses ONE source's schedule — the cron/ttl stay configured, it just
+	 * stops firing until resumed.
+	 *
+	 * @param projectId - The project.
+	 * @param sourceId - The source whose schedule to pause.
+	 * @param teamId - The team whose deployment carries the schedule.
+	 * @returns The updated deployment record.
+	 */
+	async pauseSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment> {
+		return this.client.call<Deployment>('rrext_deploy', {
+			subcommand: 'schedule_pause',
+			projectId,
+			sourceId,
+			teamId,
+		});
+	}
+
+	/**
+	 * Resumes a paused source schedule.
+	 *
+	 * @param projectId - The project.
+	 * @param sourceId - The source whose schedule to resume.
+	 * @param teamId - The team whose deployment carries the schedule.
+	 * @returns The updated deployment record.
+	 */
+	async resumeSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment> {
+		return this.client.call<Deployment>('rrext_deploy', {
+			subcommand: 'schedule_resume',
+			projectId,
+			sourceId,
+			teamId,
 		});
 	}
 

@@ -22,12 +22,13 @@ import type { ThemeTokens } from 'shared/themes/tokens';
 // barrel is the shell's MF share and must stay canvas-free; this webview
 // bundles the project module directly.
 import { ProjectView, parseServerEvent } from 'shared/modules/project';
-import type { TaskEventMessage, TaskStatus, ViewState } from 'shared/modules/project';
+import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, ViewState } from 'shared/modules/project';
 import { CheckoutModal } from 'shared';
 import type { CheckoutPlan, PlanAction } from 'shared';
-import type { DeploySnapshot } from 'shared/modules/deploy';
+import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from 'shared/components/deploy-panel';
+import type { DeploySnapshot } from 'shared/components/deploy-panel';
 import { useMessaging } from '../hooks/useMessaging';
-import type { ProjectHostToWebview, ProjectWebviewToHost, DeployTeamRefDTO, TeamDeploymentRowDTO } from '../types';
+import type { ProjectHostToWebview, ProjectWebviewToHost, DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from '../types';
 
 // =============================================================================
 // CONSTANTS
@@ -46,6 +47,9 @@ const LIVE_EVENTS_KEEP = 10000;
 
 /** Safety timeout for deploy host round-trips so a lost reply never hangs (ms). */
 const DEPLOY_REQUEST_TIMEOUT_MS = 30000;
+
+/** Refresh cadence for the open deployment drawer (ms) — matches cloud. */
+const DEPLOYMENT_POLL_INTERVAL_MS = 10_000;
 
 // =============================================================================
 // COMPONENT
@@ -83,7 +87,31 @@ const ProjectWebview: React.FC = () => {
 	const pendingLifecycleFetches = useRef<Array<{ resolve: (s: DeploySnapshot) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>([]);
 	// Pending publish/deploy round-trips keyed by requestId.
 	const pendingDeployActions = useRef<Map<number, { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
+	// Pending artifact fetches (the version cards' record drawer) keyed by
+	// requestId — value-resolving, unlike the void action acks above.
+	const pendingArtifactFetches = useRef<Map<number, { resolve: (pipeline: Record<string, unknown>) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
 	const deployRequestCounter = useRef(0);
+
+	// Deployment record DRAWER (the Add Node model: a component this webview
+	// loads into a DetailPanel): open team, its pushed snapshot, and the
+	// requestId-correlated round-trips of the deployment:* protocol.
+	const [openDeployment, setOpenDeployment] = useState<{ teamId: string; sourceId?: string } | null>(null);
+	const openDeploymentRef = useRef<{ teamId: string; sourceId?: string } | null>(null);
+	useEffect(() => {
+		openDeploymentRef.current = openDeployment;
+	}, [openDeployment]);
+	const [deploymentData, setDeploymentData] = useState<DeploymentLoadPayload | null>(null);
+	const [deploymentError, setDeploymentError] = useState('');
+	const pendingDeploymentRequests = useRef<Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
+	const deploymentRequestCounter = useRef(0);
+
+	// Run-log session round-trips (the DVR): pending promises keyed by
+	// requestId, live play callbacks keyed by session id — the SAME
+	// component-owned shape as every other protocol in this webview.
+	const pendingLogRequests = useRef<Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>(new Map());
+	const logPlayCallbacks = useRef<Map<string, (item: { event: TaskEventMessage }) => void>>(new Map());
+	const logRequestCounter = useRef(0);
+	const logSessionCounter = useRef(0);
 
 	// Checkout flow state — populated by host responses to checkout:* messages
 	const [checkoutPlans, setCheckoutPlans] = useState<CheckoutPlan[]>([]);
@@ -248,7 +276,18 @@ const ProjectWebview: React.FC = () => {
 				pendingLifecycleFetches.current = [];
 				for (const waiter of waiting) {
 					clearTimeout(waiter.timer);
-					waiter.resolve({ versions: msg.versions, history: msg.history });
+					waiter.resolve({ versions: msg.versions });
+				}
+				break;
+			}
+			case 'deploy:artifactResult': {
+				// Settle the pending artifact fetch for this correlation id.
+				const pending = pendingArtifactFetches.current.get(msg.requestId);
+				if (pending) {
+					pendingArtifactFetches.current.delete(msg.requestId);
+					clearTimeout(pending.timer);
+					if (msg.error || !msg.pipeline) pending.reject(new Error(msg.error || 'Artifact fetch failed'));
+					else pending.resolve(msg.pipeline);
 				}
 				break;
 			}
@@ -260,6 +299,62 @@ const ProjectWebview: React.FC = () => {
 					clearTimeout(pending.timer);
 					if (msg.error) pending.reject(new Error(msg.error));
 					else pending.resolve();
+				}
+				break;
+			}
+			case 'deployment:load': {
+				// Stale-drawer guard: only the OPEN record's pushes apply
+				// (sourceId absent on both sides for the team record).
+				if (msg.teamId !== openDeploymentRef.current?.teamId || (msg.sourceId ?? null) !== (openDeploymentRef.current?.sourceId ?? null)) break;
+				const { type: _ignored, teamId: _team, ...payload } = msg;
+				setDeploymentData(payload as DeploymentLoadPayload);
+				setDeploymentError('');
+				break;
+			}
+			case 'deployment:error': {
+				if (msg.teamId !== openDeploymentRef.current?.teamId) break;
+				setDeploymentError(msg.error);
+				break;
+			}
+			case 'deployment:actionResult': {
+				const pending = pendingDeploymentRequests.current.get(msg.requestId);
+				if (pending) {
+					pendingDeploymentRequests.current.delete(msg.requestId);
+					clearTimeout(pending.timer);
+					if (msg.error) pending.reject(new Error(msg.error));
+					else pending.resolve(undefined);
+				}
+				break;
+			}
+			case 'deployment:previewResult': {
+				const pending = pendingDeploymentRequests.current.get(msg.requestId);
+				if (pending) {
+					pendingDeploymentRequests.current.delete(msg.requestId);
+					clearTimeout(pending.timer);
+					if (msg.error) pending.reject(new Error(msg.error));
+					else pending.resolve(msg.result);
+				}
+				break;
+			}
+			case 'logsession:result': {
+				const pending = pendingLogRequests.current.get(msg.requestId);
+				if (pending) {
+					pendingLogRequests.current.delete(msg.requestId);
+					clearTimeout(pending.timer);
+					if (msg.error) pending.reject(new Error(msg.error));
+					else pending.resolve(msg.result);
+				}
+				break;
+			}
+			case 'logsession:event':
+				logPlayCallbacks.current.get(msg.sessionId)?.(msg.item as { event: TaskEventMessage });
+				break;
+			case 'deployment:validateResult': {
+				const pending = pendingDeploymentRequests.current.get(msg.requestId);
+				if (pending) {
+					pendingDeploymentRequests.current.delete(msg.requestId);
+					clearTimeout(pending.timer);
+					pending.resolve(msg.result);
 				}
 				break;
 			}
@@ -451,6 +546,23 @@ const ProjectWebview: React.FC = () => {
 		});
 	}, []);
 
+	/** Fetch one immutable artifact (the version cards' record drawer). */
+	const fetchDeployArtifact = useCallback((version: number): Promise<Record<string, unknown>> => {
+		return new Promise<Record<string, unknown>>((resolve, reject) => {
+			// Step 1: allocate the correlation id and arm the timeout guard.
+			const requestId = ++deployRequestCounter.current;
+			const timer = setTimeout(() => {
+				if (pendingArtifactFetches.current.has(requestId)) {
+					pendingArtifactFetches.current.delete(requestId);
+					reject(new Error('The server did not respond in time'));
+				}
+			}, DEPLOY_REQUEST_TIMEOUT_MS);
+			// Step 2: register the resolver and post the message.
+			pendingArtifactFetches.current.set(requestId, { resolve, reject, timer });
+			sendMessageRef.current({ type: 'deploy:artifact', requestId, projectId: projectIdRef.current, version });
+		});
+	}, []);
+
 	/** Publish the SAVED document (the host snapshots it; only metadata travels). */
 	const handleDeployPublish = useCallback(
 		async (comment: string, deployTo?: string): Promise<void> => {
@@ -467,23 +579,105 @@ const ProjectWebview: React.FC = () => {
 		[deployRequest]
 	);
 
-	/** "Open" on a where-live row → the team's file-less deployment tab. */
-	const handleOpenDeployment = useCallback(
-		(teamId: string): void => {
-			// Initial title only — the deployment panel re-titles itself after
-			// its first registry fetch. Team prefix mirrors rocket-ui: only
-			// when several teams exist (cardinality-driven, never an edition
-			// check).
-			const teamName = deployTeams.find((t) => t.id === teamId)?.name ?? teamId;
-			const title = deployTeams.length > 1 ? `${teamName} / ${projectIdRef.current}` : projectIdRef.current;
-			sendMessageRef.current({ type: 'deploy:openDeployment', teamId, projectId: projectIdRef.current, title });
-		},
-		[deployTeams]
-	);
+	/** Where-live / version-badge click → a deployment record drawer (this
+	    webview owns its record panels, the grid-view pattern): the TEAM
+	    record without a sourceId, one source's record with it. */
+	const handleOpenDeployment = useCallback((teamId: string, sourceId?: string): void => {
+		setDeploymentData(null);
+		setDeploymentError('');
+		setOpenDeployment({ teamId, ...(sourceId ? { sourceId } : {}) });
+		sendMessageRef.current({ type: 'deployment:fetch', teamId, ...(sourceId ? { sourceId } : {}) });
+	}, []);
+
+	// Refresh the open drawer on a cadence (scheduled runs, state flips,
+	// history growth) — poll-based until the monitoring refactor lands push.
+	useEffect(() => {
+		if (!openDeployment) return undefined;
+		const timer = setInterval(() => {
+			sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId, ...(openDeployment.sourceId ? { sourceId: openDeployment.sourceId } : {}) });
+		}, DEPLOYMENT_POLL_INTERVAL_MS);
+		return () => clearInterval(timer);
+	}, [openDeployment]);
+
+	/** One requestId-correlated deployment round-trip (actionResult /
+	    previewResult / validateResult settle it; lost replies time out). */
+	const deploymentRequest = useCallback((build: (requestId: number) => ProjectWebviewToHost): Promise<unknown> => {
+		return new Promise<unknown>((resolve, reject) => {
+			const requestId = ++deploymentRequestCounter.current;
+			const timer = setTimeout(() => {
+				if (pendingDeploymentRequests.current.has(requestId)) {
+					pendingDeploymentRequests.current.delete(requestId);
+					reject(new Error('The server did not respond in time'));
+				}
+			}, DEPLOY_REQUEST_TIMEOUT_MS);
+			pendingDeploymentRequests.current.set(requestId, { resolve, reject, timer });
+			sendMessageRef.current(build(requestId));
+		});
+	}, []);
 
 	/** The provider owns the TextDocument; deploy:publish saves host-side —
 	    the panel just needs a resolvable save step for its flow. */
 	const handleDeploySaveDocument = useCallback(async (): Promise<void> => {}, []);
+
+	// --- Run-log DVR bindings (logsession:* — identical contract to cloud) ----
+
+	/** One requestId-correlated log-session round-trip (logsession:result
+	    settles it; lost replies time out — the standard shape). */
+	const logRequest = useCallback((build: (requestId: number) => ProjectWebviewToHost): Promise<unknown> => {
+		return new Promise<unknown>((resolve, reject) => {
+			const requestId = ++logRequestCounter.current;
+			const timer = setTimeout(() => {
+				if (pendingLogRequests.current.has(requestId)) {
+					pendingLogRequests.current.delete(requestId);
+					reject(new Error('The server did not respond in time'));
+				}
+			}, DEPLOY_REQUEST_TIMEOUT_MS);
+			pendingLogRequests.current.set(requestId, { resolve, reject, timer });
+			sendMessageRef.current(build(requestId));
+		});
+	}, []);
+
+	/** Opens a run-log session: a real {@link TaskEventSession} whose every
+	    member speaks the logsession:* protocol — the components cannot tell
+	    which transport is underneath. teamId scopes to a deploy continuum. */
+	const openLogSession = useCallback(
+		(source: string, teamId?: string): TaskEventSession => {
+			const sessionId = `ls_${++logSessionCounter.current}`;
+			sendMessageRef.current({ type: 'logsession:open', sessionId, source, ...(teamId ? { teamId } : {}) });
+			return {
+				seek: (pos) => logRequest((requestId) => ({ type: 'logsession:call', sessionId, requestId, method: 'seek', args: [pos] })) as Promise<void>,
+				getStatus: () => logRequest((requestId) => ({ type: 'logsession:call', sessionId, requestId, method: 'getStatus', args: [] })) as Promise<Record<string, unknown> | null>,
+				getTrace: (traceId) => logRequest((requestId) => ({ type: 'logsession:call', sessionId, requestId, method: 'getTrace', args: [traceId] })) as Promise<{ events: TaskEventMessage[] }>,
+				play: (pos, speed, cb) => {
+					// Register the delivery sink FIRST — items may arrive
+					// before the ack settles.
+					logPlayCallbacks.current.set(sessionId, cb);
+					return logRequest((requestId) => ({ type: 'logsession:play', sessionId, requestId, pos: pos === undefined ? null : pos, speed })) as Promise<void>;
+				},
+				pause: () => {
+					sendMessageRef.current({ type: 'logsession:pause', sessionId });
+				},
+				// The dev page's hook feeds live events for near-live merging.
+				ingestLive: (message) => {
+					sendMessageRef.current({ type: 'logsession:ingest', sessionId, event: message });
+				},
+				closeEventStream: () => {
+					logPlayCallbacks.current.delete(sessionId);
+					sendMessageRef.current({ type: 'logsession:close', sessionId });
+				},
+			};
+		},
+		[logRequest]
+	);
+
+	/** Chapters/timeline fetch for one source (session-independent). */
+	const fetchLogTimeline = useCallback((source: string, teamId?: string): Promise<TaskTimeline> => logRequest((requestId) => ({ type: 'logsession:chapters', requestId, source, ...(teamId ? { teamId } : {}) })) as Promise<TaskTimeline>, [logRequest]);
+
+	/** Dev-continuum DVR session factory for ProjectView's sections. */
+	const openEventStream = useCallback((stream: { source: string; runKind: 'dev' | 'deploy' }) => openLogSession(stream.source), [openLogSession]);
+
+	/** Dev-continuum chapters fetch for ProjectView's sections. */
+	const fetchTimeline = useCallback((stream: { source: string; runKind: 'dev' | 'deploy' }) => fetchLogTimeline(stream.source), [fetchLogTimeline]);
 
 	// --- Wait for initial state from host before rendering -------------------
 
@@ -521,8 +715,143 @@ const ProjectWebview: React.FC = () => {
 				isReadonly={isReadonly}
 				envKeys={envKeys}
 				onMissingEnvVars={handleMissingEnvVars}
-				{...(!isReadonly && projectId ? { fetchDeployLifecycle, teamDeployments, deployTeams, onDeployPublish: handleDeployPublish, onDeployVersion: handleDeployVersion, onOpenDeployment: handleOpenDeployment, onSaveDocument: handleDeploySaveDocument } : {})}
+				openEventStream={isConnected ? openEventStream : undefined}
+				fetchTimeline={fetchTimeline}
+				{...(!isReadonly && projectId
+					? {
+							fetchDeployLifecycle,
+							teamDeployments,
+							deployTeams,
+							onDeployPublish: handleDeployPublish,
+							onDeployVersion: handleDeployVersion,
+							onOpenDeployment: handleOpenDeployment,
+							// Where-live interactions ride the SAME deployment:* protocol
+							// as the record drawer (teamId is on every message); the rows
+							// refresh via deploy:fetch once the mutation resolves.
+							onDeploySetDisabled: async (teamId: string, disabled: boolean) => {
+								await deploymentRequest((requestId) => ({ type: 'deployment:setDisabled', teamId, requestId, disabled }));
+								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+							},
+							onDeploySetSchedule: async (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => {
+								await deploymentRequest((requestId) => ({ type: 'deployment:setSchedule', teamId, requestId, sourceId, cron, ttl }));
+								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+							},
+							onDeploySetSchedulePaused: async (teamId: string, sourceId: string, paused: boolean) => {
+								await deploymentRequest((requestId) => ({ type: 'deployment:setSchedulePaused', teamId, requestId, sourceId, paused }));
+								sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+							},
+							onDeployPreviewSchedule: async (cron: string, count: number) => (await deploymentRequest((requestId) => ({ type: 'deployment:preview', teamId: '', requestId, cron, count }))) as SchedulePreviewResultDTO,
+							fetchDeployArtifact,
+							onSaveDocument: handleDeploySaveDocument,
+						}
+					: {})}
 			/>
+			{/* Deployment record drawer — a component this webview loads into
+			    the DetailPanel (Add Node model). ONE panel instance across
+			    loading -> loaded (no width flash). DVR rides the run-log
+			    session bridge — identical contract to cloud. */}
+			{openDeployment && !openDeployment.sourceId && (
+				<TeamDeploymentRecordPanel
+					key={`team:${openDeployment.teamId}`}
+					open
+					onClose={() => setOpenDeployment(null)}
+					fallbackTitle={`${deployTeams.find((t) => t.id === openDeployment.teamId)?.name ?? openDeployment.teamId} / ${projectId}`}
+					{...(deploymentError ? { loadError: deploymentError } : {})}
+					{...(deploymentData
+						? {
+								data: {
+									teamName: deploymentData.teamName,
+									deployment: deploymentData.deployment,
+									versions: deploymentData.versions,
+									history: deploymentData.history,
+									schedules: deploymentData.schedules,
+									...(deploymentData.nextRuns ? { nextRuns: deploymentData.nextRuns } : {}),
+									runningSources: deploymentData.runningSources,
+									canControl: deploymentData.canControl,
+									isConnected,
+									fetchTimeline: (sourceId: string) => fetchLogTimeline(sourceId, openDeployment.teamId),
+									onOpenSource: (sourceId: string) => handleOpenDeployment(openDeployment.teamId, sourceId),
+									// Verbs ack, then THIS webview re-fetches the record.
+									onSetDisabled: async (disabled: boolean) => {
+										await deploymentRequest((requestId) => ({ type: 'deployment:setDisabled', teamId: openDeployment.teamId, requestId, disabled }));
+										sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId });
+										sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+									},
+									onDeployVersion: async (version: number) => {
+										await deploymentRequest((requestId) => ({ type: 'deployment:deployVersion', teamId: openDeployment.teamId, requestId, version }));
+										sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId });
+										sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+									},
+									...(deploymentData.canControl
+										? {
+												onRemove: async () => {
+													await deploymentRequest((requestId) => ({ type: 'deployment:remove', teamId: openDeployment.teamId, requestId }));
+													// The record is gone — the drawer closes itself.
+													setOpenDeployment(null);
+													sendMessageRef.current({ type: 'deploy:fetch', projectId: projectIdRef.current });
+												},
+											}
+										: {}),
+								},
+							}
+						: {})}
+				/>
+			)}
+			{openDeployment && openDeployment.sourceId && (
+				<DeploymentRecordPanel
+					key={`${openDeployment.teamId}:${openDeployment.sourceId}`}
+					open
+					onClose={() => setOpenDeployment(null)}
+					fallbackTitle={`${deployTeams.find((t) => t.id === openDeployment.teamId)?.name ?? openDeployment.teamId} / ${projectId}`}
+					{...(deploymentError ? { loadError: deploymentError } : {})}
+					{...(deploymentData
+						? {
+								data: {
+									teamName: deploymentData.teamName,
+									deployment: deploymentData.deployment,
+									pipeline: deploymentData.pipeline as never,
+									servicesJson: deploymentData.servicesJson as never,
+									handleValidatePipeline: (async (pipelineToValidate: unknown) => {
+										try {
+											return (await deploymentRequest((requestId) => ({ type: 'deployment:validate', teamId: openDeployment.teamId, requestId, pipeline: pipelineToValidate }))) as { errors: unknown[]; warnings: unknown[] };
+										} catch {
+											return { errors: [], warnings: [] };
+										}
+									}) as never,
+									sourceId: deploymentData.sourceId ?? openDeployment.sourceId,
+									...(deploymentData.sourceName ? { sourceName: deploymentData.sourceName } : {}),
+									history: deploymentData.history,
+									...(deploymentData.nextRun ? { nextRun: deploymentData.nextRun } : {}),
+									runningSources: deploymentData.runningSources,
+									canControl: deploymentData.canControl,
+									isConnected,
+									openSession: (sourceId: string) => openLogSession(sourceId, openDeployment.teamId),
+									fetchTimeline: (sourceId: string) => fetchLogTimeline(sourceId, openDeployment.teamId),
+									// Verbs ack, then THIS webview re-fetches the record
+									// (host refresh died with the source-scoped payload).
+									...(deploymentData.sourcePaused !== undefined ? { sourcePaused: deploymentData.sourcePaused } : {}),
+									...(deploymentData.sourceConfig ? { sourceConfig: deploymentData.sourceConfig } : {}),
+									onSetSourceConfig: async (traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null, debugOut: boolean) => {
+										await deploymentRequest((requestId) => ({ type: 'deployment:setSourceConfig', teamId: openDeployment.teamId, requestId, sourceId: openDeployment.sourceId as string, traceLevel, debugOut }));
+										sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId, sourceId: openDeployment.sourceId });
+									},
+									onSetSchedulePaused: async (paused: boolean) => {
+										await deploymentRequest((requestId) => ({ type: 'deployment:setSchedulePaused', teamId: openDeployment.teamId, requestId, sourceId: openDeployment.sourceId, paused }));
+										sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId, sourceId: openDeployment.sourceId });
+									},
+									onRunSource: async (sourceId) => {
+										await deploymentRequest((requestId) => ({ type: 'deployment:runSource', teamId: openDeployment.teamId, requestId, sourceId }));
+										sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId, sourceId: openDeployment.sourceId });
+									},
+									onStopSource: async (sourceId) => {
+										await deploymentRequest((requestId) => ({ type: 'deployment:stopSource', teamId: openDeployment.teamId, requestId, sourceId }));
+										sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId, sourceId: openDeployment.sourceId });
+									},
+								},
+							}
+						: {})}
+				/>
+			)}
 			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor — run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={handleCheckoutSuccess} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => sendMessageRef.current({ type: 'project:openLink', url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
 		</>
 	);

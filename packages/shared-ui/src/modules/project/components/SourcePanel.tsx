@@ -332,6 +332,8 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 						beginSeq: typeof announced === 'number' ? announced : message.body.logSeq,
 						endTime: null,
 						outcome: null,
+						// The run-begin marker carries its trace level.
+						traceLevel: ((message.body as Record<string, unknown>).traceLevel as string | undefined) ?? null,
 					};
 					setTimeline((prev) => {
 						const base = prev ?? { chapters: [], segments: [], horizonSeq: 0, completed: false };

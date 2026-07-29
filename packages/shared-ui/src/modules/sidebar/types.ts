@@ -71,30 +71,6 @@ export interface UnknownTask {
 	projectLabel: string;
 }
 
-/**
- * One deployment row in the sidebar DEPLOYMENTS tree.
- *
- * The host maps deploy.list() rows into these (resolving team display
- * names); the tree groups by team, collapsing to a flat list when only
- * one team exists — cardinality-driven, never an edition check.
- */
-export interface SidebarDeployment {
-	/** Owning team id (the environment). */
-	teamId: string;
-	/** Team display name (host-resolved; falls back to the id). */
-	teamName: string;
-	/** Deployed project id. */
-	projectId: string;
-	/** Pipeline display name from the registry artifact. */
-	pipelineName: string;
-	/** The registry version this team points at. */
-	version: number;
-	/** Deployment state (removed rows never reach the sidebar). */
-	state: 'active' | 'paused' | 'errored';
-	/** True while a run of this deployment is LIVE on the server. */
-	running?: boolean;
-}
-
 // =============================================================================
 // CONNECTION STATE
 // =============================================================================
@@ -124,8 +100,6 @@ export interface ISidebarViewProps {
 	activeTasks: Map<string, ActiveTaskState>;
 	/** Server tasks with no matching local .pipe file. */
 	unknownTasks?: UnknownTask[];
-	/** Team deployments (the DEPLOYMENTS tree); omitted hides the section. */
-	deployments?: SidebarDeployment[];
 
 	// ── Capabilities ────────────────────────────────────────────────────────
 	/**
@@ -163,14 +137,6 @@ export interface ISidebarViewProps {
 	// ── Unknown task action ─────────────────────────────────────────────────
 	/** Called when the user clicks an unknown task. Opens a status-only view. */
 	onOpenUnknownTask?: (projectId: string, sourceId: string, displayName: string) => void;
-
-	// ── Deployments ─────────────────────────────────────────────────────────
-	/** Called when the user clicks a deployment row (opens the file-less tab). */
-	onOpenDeployment?: (teamId: string, projectId: string, title: string) => void;
-	/** Refresh button on the DEPLOYMENTS section header. */
-	onRefreshDeployments?: () => void;
-	/** `${teamId}:${projectId}` of the active deployment tab (row highlight). */
-	activeDeploymentKey?: string | undefined;
 
 	// ── Tree UI ─────────────────────────────────────────────────────────────
 	/** Currently open file path (for active highlight). */

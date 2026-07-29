@@ -120,7 +120,7 @@ class TestDeploy:
         dep = await backend.deploy('org-1', 'team-stag', 'proj-1', 1, ACTOR)
         assert dep['teamId'] == 'team-stag'
         assert dep['version'] == 1
-        assert dep['state'] == 'active'
+        assert dep['state'] == 'enabled'
         # Mutations return the JOINED record — scheduler.sync() keys off
         # projectId, so a raw internal dict here silently breaks scheduling.
         assert dep['projectId'] == 'proj-1'
@@ -206,14 +206,31 @@ class TestDeploy:
 
 class TestState:
     @pytest.mark.asyncio
-    async def test_pause_resume(self, backend):
+    async def test_disable_enable(self, backend):
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        deployed = await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
+        assert deployed['deployedAt'] is not None
+
+        dep = await backend.set_state('org-1', 'team-1', 'proj-1', 'disabled', ACTOR)
+        assert dep['state'] == 'disabled'
+        # deployedAt is the POINTER-MOVE stamp — state flips never bump it.
+        assert dep['deployedAt'] == deployed['deployedAt']
+        dep = await backend.set_state('org-1', 'team-1', 'proj-1', 'enabled', ACTOR)
+        assert dep['state'] == 'enabled'
+
+        # History records the user verbs, not raw states.
+        actions = [h['action'] for h in (await backend.history('org-1', 'proj-1'))['rows']]
+        assert 'disable' in actions and 'enable' in actions
+
+    @pytest.mark.asyncio
+    async def test_old_state_names_are_rejected(self, backend):
+        # The pre-0007 vocabulary must not silently round-trip.
         await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
         await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
-
-        dep = await backend.set_state('org-1', 'team-1', 'proj-1', 'paused', ACTOR)
-        assert dep['state'] == 'paused'
-        dep = await backend.set_state('org-1', 'team-1', 'proj-1', 'active', ACTOR)
-        assert dep['state'] == 'active'
+        with pytest.raises(ValueError, match='invalid state'):
+            await backend.set_state('org-1', 'team-1', 'proj-1', 'paused', ACTOR)
+        with pytest.raises(ValueError, match='invalid state'):
+            await backend.set_state('org-1', 'team-1', 'proj-1', 'active', ACTOR)
 
     @pytest.mark.asyncio
     async def test_soft_remove_hides_but_retains_everything(self, backend):
@@ -231,13 +248,13 @@ class TestState:
 
         # And a fresh deploy revives the team's deployment.
         dep = await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
-        assert dep['state'] == 'active'
+        assert dep['state'] == 'enabled'
 
     @pytest.mark.asyncio
     async def test_state_change_requires_existing_deployment(self, backend):
         await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
         with pytest.raises(StorageError, match='No deployment'):
-            await backend.set_state('org-1', 'team-x', 'proj-1', 'paused', ACTOR)
+            await backend.set_state('org-1', 'team-x', 'proj-1', 'disabled', ACTOR)
 
 
 # ============================================================================
@@ -251,23 +268,82 @@ class TestSchedules:
         await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
         await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
 
-        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '*/5 * * * *', True, ACTOR)
+        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '*/5 * * * *', ACTOR)
         assert dep['schedules']['webhook_1']['cron'] == '*/5 * * * *'
-        assert dep['schedules']['webhook_1']['enabled'] is True
+        assert dep['schedules']['webhook_1']['paused'] is False
         assert dep['schedules']['webhook_1']['ttl'] is None
 
         # The run window ('fixed window') rides the schedule record.
-        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '*/5 * * * *', True, ACTOR, 1800)
+        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '*/5 * * * *', ACTOR, 1800)
         assert dep['schedules']['webhook_1']['ttl'] == 1800
 
-        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', None, True, ACTOR)
+        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', None, ACTOR)
         assert 'webhook_1' not in dep['schedules']
+
+    @pytest.mark.asyncio
+    async def test_pause_resume_one_schedule(self, backend):
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
+        await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '*/5 * * * *', ACTOR, 900)
+
+        # Pause keeps cron/ttl; resume flips it back.
+        dep = await backend.schedule_set_paused('org-1', 'team-1', 'proj-1', 'webhook_1', True, ACTOR)
+        assert dep['schedules']['webhook_1']['paused'] is True
+        assert dep['schedules']['webhook_1']['cron'] == '*/5 * * * *'
+        assert dep['schedules']['webhook_1']['ttl'] == 900
+        dep = await backend.schedule_set_paused('org-1', 'team-1', 'proj-1', 'webhook_1', False, ACTOR)
+        assert dep['schedules']['webhook_1']['paused'] is False
+
+    @pytest.mark.asyncio
+    async def test_pause_survives_cron_edit(self, backend):
+        # Editing cron/ttl must NOT silently unpause a paused schedule.
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
+        await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '*/5 * * * *', ACTOR)
+        await backend.schedule_set_paused('org-1', 'team-1', 'proj-1', 'webhook_1', True, ACTOR)
+
+        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '@hourly', ACTOR, 600)
+        assert dep['schedules']['webhook_1']['paused'] is True
+        assert dep['schedules']['webhook_1']['cron'] == '@hourly'
+
+    @pytest.mark.asyncio
+    async def test_source_config_set_and_survives_schedule_edits(self, backend):
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
+
+        # Config on an UNSCHEDULED source creates the row with cron '' —
+        # the 'manual' wire semantic, so nothing ever fires from it.
+        dep = await backend.source_config_set('org-1', 'team-1', 'proj-1', 'webhook_1', 'none', True, ACTOR)
+        assert dep['schedules']['webhook_1']['traceLevel'] == 'none'
+        assert dep['schedules']['webhook_1']['debugOut'] is True
+        assert dep['schedules']['webhook_1']['cron'] == ''
+
+        # Setting a schedule keeps the config; clearing it keeps the row
+        # BECAUSE config is still set (cron returns to '').
+        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '@hourly', ACTOR, 600)
+        assert dep['schedules']['webhook_1']['traceLevel'] == 'none'
+        assert dep['schedules']['webhook_1']['debugOut'] is True
+        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', None, ACTOR)
+        assert dep['schedules']['webhook_1']['cron'] == ''
+        assert dep['schedules']['webhook_1']['traceLevel'] == 'none'
+
+        # Clearing the config back to defaults, then the schedule: row gone.
+        await backend.source_config_set('org-1', 'team-1', 'proj-1', 'webhook_1', None, False, ACTOR)
+        dep = await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', None, ACTOR)
+        assert 'webhook_1' not in dep['schedules']
+
+    @pytest.mark.asyncio
+    async def test_pause_requires_existing_schedule(self, backend):
+        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
+        with pytest.raises(StorageError, match='No schedule'):
+            await backend.schedule_set_paused('org-1', 'team-1', 'proj-1', 'ghost_1', True, ACTOR)
 
     @pytest.mark.asyncio
     async def test_mark_run_stamps_last_fired(self, backend):
         await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
         await backend.deploy('org-1', 'team-1', 'proj-1', 1, ACTOR)
-        await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '@hourly', True, ACTOR)
+        await backend.schedule_set('org-1', 'team-1', 'proj-1', 'webhook_1', '@hourly', ACTOR)
 
         await backend.mark_run('org-1', 'team-1', 'proj-1', 'webhook_1')
         dep = await backend.get('org-1', 'team-1', 'proj-1')
@@ -306,18 +382,18 @@ class TestArtifact:
 # ============================================================================
 
 
-class TestIterActive:
+class TestIterEnabled:
     @pytest.mark.asyncio
-    async def test_yields_only_active_deployments_across_orgs(self, backend):
+    async def test_yields_only_enabled_deployments_across_orgs(self, backend):
         await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
         await backend.deploy('org-1', 'team-a', 'proj-1', 1, ACTOR)
         await backend.deploy('org-1', 'team-b', 'proj-1', 1, ACTOR)
-        await backend.set_state('org-1', 'team-b', 'proj-1', 'paused', ACTOR)
+        await backend.set_state('org-1', 'team-b', 'proj-1', 'disabled', ACTOR)
 
         await backend.publish('org-2', 'proj-9', {**PIPE, 'project_id': 'proj-9'}, OTHER)
         await backend.deploy('org-2', 'team-z', 'proj-9', 1, OTHER)
 
-        seen = [(d['orgId'], d['teamId'], d['projectId']) async for d in backend.iter_active()]
+        seen = [(d['orgId'], d['teamId'], d['projectId']) async for d in backend.iter_enabled()]
         assert ('org-1', 'team-a', 'proj-1') in seen
         assert ('org-2', 'team-z', 'proj-9') in seen
         assert all(t != 'team-b' for _, t, _p in seen)

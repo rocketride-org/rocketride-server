@@ -172,7 +172,7 @@
 						"summary",
 						"full"
 					],
-					"default": "summary",
+					"default": "full",
 					"description": "Controls tracing verbosity for pipeline execution."
 				},
 				"rocketride.taskArguments": {
@@ -284,11 +284,6 @@
 			{
 				"command": "rocketride.page.status.open",
 				"title": "Task Status",
-				"category": "RocketRide"
-			},
-			{
-				"command": "rocketride.page.deployment.open",
-				"title": "Deployment",
 				"category": "RocketRide"
 			},
 			{
@@ -442,10 +437,6 @@
 				},
 				{
 					"command": "rocketride.page.status.open",
-					"when": "false"
-				},
-				{
-					"command": "rocketride.page.deployment.open",
 					"when": "false"
 				},
 				{

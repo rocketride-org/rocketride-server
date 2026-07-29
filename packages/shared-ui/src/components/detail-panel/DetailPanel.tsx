@@ -156,6 +156,15 @@ export interface IDetailPanelProps {
 	 */
 	footer?: ReactNode;
 	/**
+	 * Body hosts a full VIEW (its own TabControl strip, gutters, and inner
+	 * scroll regions): the body becomes a definite, non-scrolling flex box
+	 * with no padding — the hosted View owns all scrolling. Without this, a
+	 * height-100% View collapses inside the default scrolling body and
+	 * scrollbars double up. Ignored when `tabs` are used (bodyTabs already
+	 * stops outer scrolling).
+	 */
+	flushBody?: boolean;
+	/**
 	 * Anchor the drawer to the nearest POSITIONED ANCESTOR instead of the
 	 * viewport. A slide-out anchors to the surface that OWNS the record:
 	 * grids on app pages open viewport drawers;
@@ -387,6 +396,19 @@ const styles = {
 		padding: '6px 20px 20px',
 	} as CSSProperties,
 
+	// Flush body (View-hosting drawers): a full *View* mounted as the body —
+	// with its own TabControl strip, gutters, and inner scroll regions —
+	// needs a definite flex box and NO padding or outer scrolling, or its
+	// height-100% chain breaks and scrollbars double up.
+	bodyFlush: {
+		flex: 1,
+		minHeight: 0,
+		display: 'flex',
+		flexDirection: 'column',
+		overflow: 'hidden',
+		padding: 0,
+	} as CSSProperties,
+
 	// Covered-layer catcher: sits over a panel that is NOT the stack top —
 	// an extra dim that makes depth readable, swallows every interaction
 	// (the covered panel is inert), and turns the exposed sliver into the
@@ -435,7 +457,7 @@ const styles = {
  * @param props - {@link IDetailPanelProps}.
  * @returns The drawer element, or `null` when closed.
  */
-export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, activeTab, onTabSelect, children, side = 'right', width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, footer, contained, resizable = true, dirty, editing, onExitMode, busy, modeless, minWidth, persistKey }: IDetailPanelProps): React.ReactElement | null {
+export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, activeTab, onTabSelect, children, side = 'right', width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, footer, flushBody, contained, resizable = true, dirty, editing, onExitMode, busy, modeless, minWidth, persistKey }: IDetailPanelProps): React.ReactElement | null {
 	// The ambient workspace-prefs accessor (no-op when no PrefsProvider is
 	// mounted) — the single store DetailPanel persists its width through.
 	const prefs = usePrefs();
@@ -895,7 +917,7 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 				{/* Body: independently scrolling for plain panels; with TABS the
 				    outer region stops scrolling and each tab panel owns its own
 				    overflow (PanelTabBody / grids), per the 2026-07-18 standard. */}
-				<div style={tabs != null && tabs.length > 0 ? styles.bodyTabs : styles.body}>{children}</div>
+				<div style={tabs != null && tabs.length > 0 ? styles.bodyTabs : flushBody ? styles.bodyFlush : styles.body}>{children}</div>
 
 				{/* Fixed footer — RECORD machinery only (record-level verbs left,
 				    mode machinery right); navigation lives in the header. */}

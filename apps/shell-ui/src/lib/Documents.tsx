@@ -338,9 +338,7 @@ function collapseEmptyGroup(state: DocumentsState, groupId: string): DocumentsSt
 
 	// Pick a new active group if the collapsed one was active
 	const allGroupIds = collectGroupIds(newRoot);
-	const newActiveGroup = allGroupIds.includes(state.activeGroupId)
-		? state.activeGroupId
-		: allGroupIds[allGroupIds.length - 1]!;
+	const newActiveGroup = allGroupIds.includes(state.activeGroupId) ? state.activeGroupId : allGroupIds[allGroupIds.length - 1]!;
 
 	return { ...state, groups: remainingGroups, rootNode: newRoot, activeGroupId: newActiveGroup };
 }
@@ -419,24 +417,6 @@ export class Documents {
 	constructor(vfs?: IVirtualFileSystem | null, workspace?: WorkspaceBinding) {
 		this._vfs = vfs ?? null;
 		this._workspace = workspace ?? null;
-
-		// Optional public member (see its declaration for the contract
-		// rationale) — assigned here so every instance carries it.
-		this.setEditorLabelByUri = (uri: string, label: string): void => {
-			this._update((prev) => {
-				// Step 1: relabel every editor bound to the URI (any group).
-				let changed = false;
-				const editors = { ...prev.editors };
-				for (const [editorId, editor] of Object.entries(editors)) {
-					if (editor.documentUri === uri && editor.label !== label) {
-						editors[editorId] = { ...editor, label };
-						changed = true;
-					}
-				}
-				// Step 2: untouched state when nothing matched — no re-render.
-				return changed ? { ...prev, editors } : prev;
-			});
-		};
 
 		// Restore from workspace persistence if available
 		const persisted = workspace?.appState?.[APPSTATE_KEY] as Record<string, any> | undefined;
@@ -555,7 +535,7 @@ export class Documents {
 				this._listeners.add(listener);
 				return () => this._listeners.delete(listener);
 			},
-			() => this._state,
+			() => this._state
 		);
 	}
 
@@ -598,16 +578,25 @@ export class Documents {
 			if (this._vfs) {
 				try {
 					const raw = await this._vfs.read(uri);
-					if (raw !== null && raw !== undefined) { content = raw; loadedOk = true; }
-				} catch { /* read failed */ }
+					if (raw !== null && raw !== undefined) {
+						content = raw;
+						loadedOk = true;
+					}
+				} catch {
+					/* read failed */
+				}
 			}
 			doc = { uri, content, dirty: false, version: 1, editorCount: 0, isNew: !loadedOk };
 		}
 
 		const editorId = this._nextEditorId();
 		const editor: Editor = {
-			id: editorId, documentUri: uri,
-			scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1,
+			id: editorId,
+			documentUri: uri,
+			scrollTop: 0,
+			scrollLeft: 0,
+			cursorLine: 1,
+			cursorColumn: 1,
 			label: labelFromUri(uri),
 		};
 
@@ -640,20 +629,6 @@ export class Documents {
 	 * @param content - Optional content payload (opaque to Documents).
 	 * @param groupId - Target editor group (defaults to active group).
 	 */
-	/**
-	 * Updates the tab label of every editor viewing `uri`. The retitle path
-	 * for tabs whose display name is only known AFTER opening (e.g. a
-	 * file-less deployment tab resolving its pipeline name from the
-	 * registry). No-op when nothing shows the document or nothing changes.
-	 *
-	 * OPTIONAL on the public surface and assigned in the constructor: the
-	 * frozen shell-api snapshots Documents as an INPUT type (DocTabsProps
-	 * .docs), and inputs are contravariant — a new REQUIRED member would
-	 * break every frozen consumer, so append-only additions here must be
-	 * optional (the no-client-inputs rule).
-	 */
-	setEditorLabelByUri?: (uri: string, label: string) => void;
-
 	openStaticDocument(uri: string, label: string, content?: unknown, groupId?: string): void {
 		const s = this._state;
 		const targetGroup = groupId ?? s.activeGroupId;
@@ -680,8 +655,12 @@ export class Documents {
 		const doc: Document = { uri, content: content ?? null, dirty: false, version: 1, editorCount: 1, isNew: false, static: true };
 		const editorId = this._nextEditorId();
 		const editor: Editor = {
-			id: editorId, documentUri: uri,
-			scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1,
+			id: editorId,
+			documentUri: uri,
+			scrollTop: 0,
+			scrollLeft: 0,
+			cursorLine: 1,
+			cursorColumn: 1,
 			label,
 		};
 
@@ -716,8 +695,12 @@ export class Documents {
 		const doc: Document = { uri, content: initialContent ?? '', dirty: false, version: 1, editorCount: 1, isNew: true };
 		const editorId = this._nextEditorId();
 		const editor: Editor = {
-			id: editorId, documentUri: uri,
-			scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1,
+			id: editorId,
+			documentUri: uri,
+			scrollTop: 0,
+			scrollLeft: 0,
+			cursorLine: 1,
+			cursorColumn: 1,
 			label: uri,
 		};
 
@@ -889,7 +872,11 @@ export class Documents {
 		if (existingDoc?.static) return;
 		let newContent: unknown = null;
 		if (this._vfs) {
-			try { newContent = await this._vfs.read(uri); } catch { /* read failed */ }
+			try {
+				newContent = await this._vfs.read(uri);
+			} catch {
+				/* read failed */
+			}
 		}
 		if (newContent === null || newContent === undefined) return;
 		this._update((prev) => {
@@ -930,7 +917,9 @@ export class Documents {
 
 			// Replace the original leaf with a split containing both
 			const splitNode: LayoutSplit = {
-				type: 'split', id: splitNodeId, orientation,
+				type: 'split',
+				id: splitNodeId,
+				orientation,
 				children: [leaf, newLeaf],
 			};
 
@@ -979,8 +968,12 @@ export class Documents {
 			if (activeDocUri && prev.documents[activeDocUri]) {
 				// Open the same document in the new group
 				const newEditor: Editor = {
-					id: editorId, documentUri: activeDocUri,
-					scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1,
+					id: editorId,
+					documentUri: activeDocUri,
+					scrollTop: 0,
+					scrollLeft: 0,
+					cursorLine: 1,
+					cursorColumn: 1,
 					label: activeEditor!.label,
 				};
 				newGroup = { id: newGroupId, editorIds: [editorId], activeEditorIndex: 0 };
@@ -994,7 +987,9 @@ export class Documents {
 
 			const newLeaf: LayoutLeaf = { type: 'leaf', id: newGroupId, groupId: newGroupId };
 			const splitNode: LayoutSplit = {
-				type: 'split', id: splitNodeId, orientation,
+				type: 'split',
+				id: splitNodeId,
+				orientation,
 				children: [leaf, newLeaf],
 			};
 

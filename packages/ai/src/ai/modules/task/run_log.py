@@ -574,6 +574,9 @@ class RunLogWriter:
                     'beginSeq': begin['body']['logSeq'],
                     'endTime': None,
                     'outcome': None,
+                    # Whether THIS run recorded traces — None/'none' lets the
+                    # UI say "tracing was off" instead of "no data yet".
+                    'traceLevel': trace_level,
                 }
             )
             del chapters[:-CONST_LOG_CHAPTERS]
@@ -1118,7 +1121,7 @@ class RunLogWriter:
     # RUN END / CLOSE
     # =========================================================================
 
-    async def end_run(self, outcome: str, exit_message: str = '') -> None:
+    async def end_run(self, outcome: str, exit_message: str = '', reason: 'str | None' = None) -> None:
         """
         Complete the current run: end marker, chapter completion, SEAL, upload.
 
@@ -1133,12 +1136,19 @@ class RunLogWriter:
         Args:
             outcome: 'ok' | 'error' | 'cancelled'.
             exit_message: Optional human detail for the end marker.
+            reason: WHY a requested stop happened ('user' | 'ttl'); kept on
+                the end marker and the chapter so the audit stays honest —
+                a ttl expiry arrives here as outcome 'ok', reason 'ttl'.
         """
         async with self._lock:
             if not self._open:
                 return
 
-            end = self._stamp(_lifecycle_event('run-end', outcome=outcome, detail=exit_message))
+            end = self._stamp(
+                _lifecycle_event(
+                    'run-end', outcome=outcome, detail=exit_message, **({'reason': reason} if reason else {})
+                )
+            )
             self._append_event(end)
 
             # Complete the newest open chapter.
@@ -1146,6 +1156,8 @@ class RunLogWriter:
                 if chapter.get('endTime') is None:
                     chapter['endTime'] = end['body']['eventTime']
                     chapter['outcome'] = outcome
+                    if reason:
+                        chapter['reason'] = reason
                     break
 
             self._control['completed'] = True

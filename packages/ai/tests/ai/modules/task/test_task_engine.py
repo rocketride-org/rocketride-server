@@ -33,7 +33,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai.modules.task.task_engine import Task
+from ai.modules.task.task_engine import CONST_TRACE_PAYLOAD_CAP, CONST_TRACE_PREVIEW_BYTES, Task, cap_trace_payload
 
 
 # ---------------------------------------------------------------------------
@@ -932,3 +932,37 @@ def test_analytics_idle_reset():
     assert t._status.idleLongestSeconds == 0.0
     assert t._status.idleLongestAt == 0.0
     assert t._an_idle_total == 0.0 and t._an_idle_since == 0.0
+
+
+# ---------------------------------------------------------------------------
+# cap_trace_payload — the 1MB trace/flow payload clamp
+# ---------------------------------------------------------------------------
+
+
+def test_cap_trace_payload_passes_small_payloads_through():
+    """Payloads under the cap pass through IDENTICALLY (same object)."""
+    payload = {'op': 'x', 'data': 'y' * 1000}
+    assert cap_trace_payload(payload) is payload
+    # Falsy payloads are untouched too (no marker for nothing).
+    assert cap_trace_payload({}) == {}
+    assert cap_trace_payload(None) is None
+
+
+def test_cap_trace_payload_truncates_oversized_payloads():
+    """An over-cap payload becomes the honest marker with a bounded preview."""
+    blob = {'data': 'z' * (CONST_TRACE_PAYLOAD_CAP + 100)}
+    capped = cap_trace_payload(blob)
+    assert capped['truncated'] is True
+    assert capped['originalBytes'] > CONST_TRACE_PAYLOAD_CAP
+    assert len(capped['preview']) == CONST_TRACE_PREVIEW_BYTES
+    # The marker CLIPS to the cap — consumers still get (just under) the
+    # full megabyte, and the marker never exceeds the cap itself.
+    import json as _json
+
+    assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
+
+
+def test_cap_trace_payload_leaves_unserializable_payloads_alone():
+    """Unserializable payloads pass through — the transport owns that error."""
+    payload = {'bad': object()}
+    assert cap_trace_payload(payload) is payload

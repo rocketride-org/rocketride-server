@@ -30,7 +30,7 @@ import 'shared/themes/rocketride-vscode.css';
 import { SidebarView, BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shared';
 import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, SidebarDeployment, ConnectionInfo } from 'shared';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
 import { useMessaging } from '../hooks/useMessaging';
 
 // =============================================================================
@@ -45,7 +45,7 @@ interface HostProjectEntry {
 
 interface TaskEventBody {
 	action: 'begin' | 'end' | 'restart' | 'running';
-	/** Run classification stamp — deploy runs belong to the deployments tree. */
+	/** Run classification stamp — deploy runs never enter the dev lists. */
 	runKind?: string;
 	name?: string;
 	projectId: string;
@@ -53,7 +53,7 @@ interface TaskEventBody {
 	tasks?: { id: string; name: string; projectId: string; source: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'openDeployment'; teamId: string; projectId: string; title: string } | { type: 'refreshDeployments' } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' };
 
 interface DashboardTaskDTO {
 	id: string;
@@ -85,12 +85,9 @@ type IncomingMessage =
 				// Pipeline data
 				entries: HostProjectEntry[];
 				unknownTasks: UnknownTask[];
-				// Team deployments (the DEPLOYMENTS tree)
-				deployments?: SidebarDeployment[];
 			};
 	  }
 	| { type: 'entriesUpdate'; entries: HostProjectEntry[] }
-	| { type: 'deploymentsUpdate'; deployments: SidebarDeployment[] }
 	| { type: 'taskEvent'; event: TaskEventBody }
 	| { type: 'statusUpdate'; projectId: string; sourceId: string; errors: string[]; warnings: string[] }
 	| { type: 'dashboardSnapshot'; tasks: DashboardTaskDTO[] };
@@ -117,9 +114,6 @@ const SidebarViewWebview: React.FC = () => {
 	const [entries, setEntries] = useState<ProjectEntry[]>([]);
 	const [activeTasks, setActiveTasks] = useState<Map<string, ActiveTaskState>>(new Map());
 	const [unknownTasks, setUnknownTasks] = useState<UnknownTask[]>([]);
-
-	// ── Team deployments (the DEPLOYMENTS tree; host-mapped rows) ───────────
-	const [deployments, setDeployments] = useState<SidebarDeployment[]>([]);
 
 	// ── Engine progress log (last N lines for popup display) ───────────────
 	const MAX_PROGRESS_LINES = 15;
@@ -241,7 +235,6 @@ const SidebarViewWebview: React.FC = () => {
 					});
 					setEntries(msg.data.entries);
 					if (msg.data.unknownTasks) setUnknownTasks(msg.data.unknownTasks);
-					if (msg.data.deployments) setDeployments(msg.data.deployments);
 					if (msg.data.userName !== undefined) setUserName(msg.data.userName || undefined);
 					if (msg.data.userEmail !== undefined) setUserEmail(msg.data.userEmail || undefined);
 					// Shared auth
@@ -275,10 +268,6 @@ const SidebarViewWebview: React.FC = () => {
 
 				case 'entriesUpdate':
 					setEntries(msg.entries);
-					break;
-
-				case 'deploymentsUpdate':
-					setDeployments(msg.deployments);
 					break;
 
 				case 'taskEvent':
@@ -366,19 +355,6 @@ const SidebarViewWebview: React.FC = () => {
 		},
 		[sendMessage]
 	);
-
-	/** Deployment row click → the host opens the file-less deployment tab. */
-	const onOpenDeployment = useCallback(
-		(teamId: string, projectId: string, title: string) => {
-			sendMessage({ type: 'openDeployment', teamId, projectId, title });
-		},
-		[sendMessage]
-	);
-
-	/** Refresh button on the DEPLOYMENTS section header. */
-	const onRefreshDeployments = useCallback(() => {
-		sendMessage({ type: 'refreshDeployments' });
-	}, [sendMessage]);
 
 	// ── Footer popup menu items ─────────────────────────────────────────────
 	//
@@ -485,7 +461,7 @@ const SidebarViewWebview: React.FC = () => {
 	// No headerSlot: the VS Code host has no home-app destination, so it injects no
 	// host-specific top nav. The "Home" button is a SaaS-shell concept owned by the
 	// web host (rocket-ui), intentionally absent from shared-ui / this extension.
-	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} deployments={deployments} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} onOpenDeployment={onOpenDeployment} onRefreshDeployments={onRefreshDeployments} />;
+	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} />;
 };
 
 export default SidebarViewWebview;

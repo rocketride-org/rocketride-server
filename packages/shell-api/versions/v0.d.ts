@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-28T09:04:33.449Z
-// Source commit: 744db213dc1173521368aea91d3235e1f14c8928
+// Generated:     2026-07-28T19:11:58.922Z
+// Source commit: 7d708f3711c106a2d6a7007260c83c73d61dd92c
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -604,7 +604,8 @@ interface DeployArtifact {
 interface DeploymentSchedule {
     /** 5-field cron expression. */
     cron?: string;
-    enabled?: boolean;
+    /** Paused schedules stay configured (cron/ttl kept) but never fire. */
+    paused?: boolean;
     /** Run window in seconds ('fixed window'); null/absent = until finished. */
     ttl?: number | null;
     /** Unix timestamp (seconds) of the last scheduler dispatch, or null. */
@@ -615,7 +616,8 @@ interface Deployment {
     projectId?: string;
     /** The registry version this team currently points at. */
     version?: number;
-    state?: "active" | "paused" | "errored" | "removed";
+    /** `disabled` is the whole-deployment kill switch — nothing runs. */
+    state?: "enabled" | "disabled" | "errored" | "removed";
     pipelineName?: string;
     /** Per-source schedules, keyed by source id. */
     schedules?: Record<string, DeploymentSchedule>;
@@ -636,7 +638,9 @@ interface DeployHistoryEntry {
     seq?: number;
     /** Unix timestamp (seconds). */
     at?: number;
-    action?: "publish" | "deploy" | "rollback" | "pause" | "resume" | "errored" | "remove";
+    /** `pause`/`resume` appear only on rows written before the
+        enable/disable vocabulary (the trail is immutable). */
+    action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
     /** `''` on org-wide rows (publish); the team id on pointer changes. */
     teamId?: string;
     version?: number;
@@ -2370,7 +2374,7 @@ declare class DeployApi {
      *
      * The same trusted team dispatch the scheduler uses — the run executes
      * as the team, with the caller as the billing-attribution actor. The
-     * deployment must be active.
+     * deployment must be enabled.
      *
      * @param projectId - The deployed project.
      * @param sourceId - The pipeline source to fire.
@@ -2412,21 +2416,23 @@ declare class DeployApi {
         teamId?: string;
     }): Promise<DeployListEnvelope<DeployHistoryEntry>>;
     /**
-     * Pauses one team's deployment (schedules stop firing).
+     * Disables one team's deployment — the kill switch: NOTHING runs
+     * (schedules stop firing and manual runs are refused) until it is
+     * enabled again.
      *
      * @param projectId - The project.
-     * @param teamId - The team whose deployment to pause.
+     * @param teamId - The team whose deployment to disable.
      * @returns The updated deployment record.
      */
-    pause(projectId: string, teamId: string): Promise<Deployment>;
+    disable(projectId: string, teamId: string): Promise<Deployment>;
     /**
-     * Resumes one team's paused deployment.
+     * Enables one team's disabled deployment.
      *
      * @param projectId - The project.
-     * @param teamId - The team whose deployment to resume.
+     * @param teamId - The team whose deployment to enable.
      * @returns The updated deployment record.
      */
-    resume(projectId: string, teamId: string): Promise<Deployment>;
+    enable(projectId: string, teamId: string): Promise<Deployment>;
     /**
      * Soft-removes one team's deployment.
      *
@@ -2442,21 +2448,42 @@ declare class DeployApi {
     /**
      * Sets (or clears) one source's schedule on a team deployment.
      *
+     * The paused flag is untouched — editing cron/ttl preserves it (a new
+     * schedule starts unpaused); {@link pauseSchedule}/{@link resumeSchedule}
+     * own it.
+     *
      * @param projectId - The project.
      * @param sourceId - The pipeline source the schedule fires.
      * @param schedule - 5-field cron expression; `null` or `'manual'` clears
      *   the schedule.
      * @param teamId - The team whose deployment to schedule.
      * @param options - Optional schedule options.
-     * @param options.enabled - Set false to keep the cron but stop it firing.
      * @param options.ttl - Run window in seconds ('fixed window'); omitted
      *   runs each task until the pipeline finishes.
      * @returns The updated deployment record.
      */
     setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options?: {
-        enabled?: boolean;
         ttl?: number;
     }): Promise<Deployment>;
+    /**
+     * Pauses ONE source's schedule — the cron/ttl stay configured, it just
+     * stops firing until resumed.
+     *
+     * @param projectId - The project.
+     * @param sourceId - The source whose schedule to pause.
+     * @param teamId - The team whose deployment carries the schedule.
+     * @returns The updated deployment record.
+     */
+    pauseSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment>;
+    /**
+     * Resumes a paused source schedule.
+     *
+     * @param projectId - The project.
+     * @param sourceId - The source whose schedule to resume.
+     * @param teamId - The team whose deployment carries the schedule.
+     * @returns The updated deployment record.
+     */
+    resumeSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment>;
     /**
      * Validates a schedule and returns its next occurrences.
      *
@@ -5290,19 +5317,6 @@ declare class Documents {
      * @param content - Optional content payload (opaque to Documents).
      * @param groupId - Target editor group (defaults to active group).
      */
-    /**
-     * Updates the tab label of every editor viewing `uri`. The retitle path
-     * for tabs whose display name is only known AFTER opening (e.g. a
-     * file-less deployment tab resolving its pipeline name from the
-     * registry). No-op when nothing shows the document or nothing changes.
-     *
-     * OPTIONAL on the public surface and assigned in the constructor: the
-     * frozen shell-api snapshots Documents as an INPUT type (DocTabsProps
-     * .docs), and inputs are contravariant — a new REQUIRED member would
-     * break every frozen consumer, so append-only additions here must be
-     * optional (the no-client-inputs rule).
-     */
-    setEditorLabelByUri?: (uri: string, label: string) => void;
     openStaticDocument(uri: string, label: string, content?: unknown, groupId?: string): void;
     /**
      * Creates a new untitled document with optional initial content.

@@ -92,12 +92,14 @@ def _make_conn(account_info, scheduler=None):
 @pytest.fixture
 def account_stub(monkeypatch):
     """Stub the account module the handlers call."""
-    dep = {'teamId': 'team-1', 'projectId': 'proj-1', 'state': 'active', 'version': 1, 'schedules': {}}
+    dep = {'teamId': 'team-1', 'projectId': 'proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}}
     stub = SimpleNamespace(
         deployments_publish=AsyncMock(return_value={'version': 3, 'sha256': 'abc'}),
         deployments_deploy=AsyncMock(return_value=dep),
-        deployments_set_state=AsyncMock(return_value={**dep, 'state': 'paused'}),
+        deployments_set_state=AsyncMock(return_value={**dep, 'state': 'disabled'}),
         deployments_schedule_set=AsyncMock(return_value=dep),
+        deployments_schedule_set_paused=AsyncMock(return_value=dep),
+        deployments_source_config_set=AsyncMock(return_value=dep),
         deployments_list=AsyncMock(return_value=[dep]),
         deployments_get=AsyncMock(return_value=dep),
         deployments_versions=AsyncMock(return_value=[{'version': 3}]),
@@ -234,14 +236,39 @@ class TestReads:
     @pytest.mark.asyncio
     async def test_run_dispatches_as_the_team_with_manual_trigger(self, account_stub, monkeypatch):
         # Run-now = the scheduler's trusted dispatch with trigger='manual'
-        # and the CALLER as attribution; lastRunAt is stamped.
+        # and the CALLER as attribution; lastRunAt is stamped. The source's
+        # execution settings ride along, but its ttl window does NOT — a
+        # manual run has no window (the user stops it).
         dispatched = {}
 
-        async def fake_dispatch(server, pipeline, *, org_id, team_id, actor, trigger, ttl=None):
-            dispatched.update(pipeline=pipeline, org_id=org_id, team_id=team_id, actor=actor, trigger=trigger)
+        async def fake_dispatch(
+            server, pipeline, *, org_id, team_id, actor, trigger, ttl=None, trace_level=None, debug_out=False
+        ):
+            dispatched.update(
+                pipeline=pipeline,
+                org_id=org_id,
+                team_id=team_id,
+                actor=actor,
+                trigger=trigger,
+                ttl=ttl,
+                trace_level=trace_level,
+                debug_out=debug_out,
+            )
             return 'tk_manual'
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
+        account_stub.deployments_get.return_value = {
+            **account_stub.deployments_get.return_value,
+            'schedules': {
+                'webhook_1': {
+                    'cron': '0 * * * *',
+                    'paused': False,
+                    'ttl': 900,
+                    'traceLevel': 'summary',
+                    'debugOut': True,
+                }
+            },
+        }
         conn = _make_conn(_account_info())
         result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 'webhook_1', 'teamId': 'team-1'})
         assert result['body'] == {'token': 'tk_manual', 'version': 1}
@@ -249,18 +276,22 @@ class TestReads:
         assert dispatched['team_id'] == 'team-1'
         assert dispatched['pipeline']['source'] == 'webhook_1'
         assert dispatched['actor']['userId'] == 'user-1'
+        # The schedule's 900s window is ignored; its execution settings are not.
+        assert dispatched['ttl'] is None
+        assert dispatched['trace_level'] == 'summary'
+        assert dispatched['debug_out'] is True
         account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'team-1', 'proj-1', 'webhook_1')
 
     @pytest.mark.asyncio
-    async def test_run_refuses_paused_and_needs_control(self, account_stub, monkeypatch):
+    async def test_run_refuses_disabled_and_needs_control(self, account_stub, monkeypatch):
         async def fake_dispatch(*a, **k):
             raise AssertionError('must not dispatch')
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
-        # Paused deployment: no back-door single runs.
-        account_stub.deployments_get.return_value = {**account_stub.deployments_get.return_value, 'state': 'paused'}
+        # Disabled deployment: no back-door single runs.
+        account_stub.deployments_get.return_value = {**account_stub.deployments_get.return_value, 'state': 'disabled'}
         conn = _make_conn(_account_info())
-        with pytest.raises(ValueError, match='paused'):
+        with pytest.raises(ValueError, match='disabled'):
             await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': 'team-1'})
         # No task.control on the team: uniform denial.
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
@@ -323,13 +354,13 @@ class TestReads:
 
 class TestStateAndSchedules:
     @pytest.mark.asyncio
-    async def test_pause_resume_remove_map_to_states(self, account_stub):
+    async def test_disable_enable_remove_map_to_states(self, account_stub):
         conn = _make_conn(_account_info())
-        await conn._deploy_pause({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
-        await conn._deploy_resume({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
+        await conn._deploy_disable({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
+        await conn._deploy_enable({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
         await conn._deploy_remove({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
         states = [c.args[3] for c in account_stub.deployments_set_state.await_args_list]
-        assert states == ['paused', 'active', 'removed']
+        assert states == ['disabled', 'enabled', 'removed']
         # Every mutation resyncs the scheduler.
         assert conn._test_scheduler.sync.call_count == 3
 
@@ -345,6 +376,43 @@ class TestStateAndSchedules:
             {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1', 'schedule': 'manual'}
         )
         assert account_stub.deployments_schedule_set.await_args.args[4] is None
+
+    @pytest.mark.asyncio
+    async def test_schedule_pause_resume_flip_the_flag(self, account_stub):
+        conn = _make_conn(_account_info())
+        await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1'})
+        await conn._deploy_schedule_resume({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1'})
+        flags = [c.args[4] for c in account_stub.deployments_schedule_set_paused.await_args_list]
+        assert flags == [True, False]
+        # Both flips resync the scheduler and audit.
+        assert conn._test_scheduler.sync.call_count == 2
+        assert account_stub.audit.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_source_config_validates_and_routes(self, account_stub):
+        conn = _make_conn(_account_info())
+        # An unknown trace level is refused before anything persists.
+        with pytest.raises(ValueError, match='traceLevel'):
+            await conn._deploy_source_config(
+                {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1', 'traceLevel': 'loud'}
+            )
+        # Valid config routes with the exact (level, debugOut) pair.
+        await conn._deploy_source_config(
+            {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1', 'traceLevel': 'none', 'debugOut': True}
+        )
+        passed = account_stub.deployments_source_config_set.await_args.args
+        assert passed[3] == 's1' and passed[4] == 'none' and passed[5] is True
+        account_stub.audit.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_schedule_pause_requires_source_and_control(self, account_stub):
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='sourceId'):
+            await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
+        # No task.control on the team: uniform denial.
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
+        with pytest.raises(PermissionError):
+            await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1'})
 
 
 # ============================================================================

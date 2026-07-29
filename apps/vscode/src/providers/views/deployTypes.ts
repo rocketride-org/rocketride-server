@@ -10,7 +10,7 @@
  * pulling in `shared/modules/*` (which is only resolvable under the webview
  * tsconfig).
  *
- * The view-model DTOs mirror `packages/shared-ui/src/modules/deploy/types.ts`
+ * The view-model DTOs mirror `packages/shared-ui/src/components/deploy-panel/types.ts`
  * (the contract of record) field-for-field, so the webview can hand them to
  * the shared DeployPanel / DeploymentView components unchanged —
  * structural typing keeps the two in lockstep, and the extension host does
@@ -44,16 +44,30 @@ export interface DeployVersionCardDTO {
 	comment?: string;
 }
 
-/** One team's live deployment of the project (the "where live" rows). */
+/** Per-source schedule facts (keyed by sourceId on the row). */
+export interface TeamDeploymentScheduleDTO {
+	/** 5-field cron, or '' when the source has no schedule (manual). */
+	cron: string;
+	/** Paused schedules stay configured (cron/ttl kept) but never fire. */
+	paused: boolean;
+	/** Run window seconds ('fixed window'); absent = until finished. */
+	ttl?: number;
+	/** Unix seconds of the last scheduler dispatch, if any. */
+	lastRunAt?: number;
+}
+
+/** One team's live deployment of the project — RAW facts only (mirrors
+    shared TeamDeployment). Source names are resolved by the shared
+    ProjectView against the pipeline it holds, never host-side. */
 export interface TeamDeploymentRowDTO {
 	teamId: string;
 	teamName: string;
 	version: number;
-	state: 'active' | 'paused' | 'errored' | 'removed';
-	// Compact schedule summary, e.g. 'webhook_1 */30' or 'manual'.
-	schedulesSummary: string;
-	/** Unix seconds of the most recent scheduler dispatch, if any. */
-	lastRunAt?: number;
+	state: 'enabled' | 'disabled' | 'errored' | 'removed';
+	/** Unix seconds of the pointer move (the header's deployed-at). */
+	deployedAt: number;
+	/** Schedule records keyed by sourceId. */
+	schedules: Record<string, TeamDeploymentScheduleDTO>;
 }
 
 /** One audit-trail row (registry + team pointer changes, merged). */
@@ -62,7 +76,7 @@ export interface DeployHistoryRowDTO {
 	seq: number;
 	/** Unix seconds. */
 	at: number;
-	action: 'publish' | 'deploy' | 'rollback' | 'pause' | 'resume' | 'errored' | 'remove';
+	action: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove';
 	/** '' on org-wide publish rows. */
 	teamId: string;
 	/** Team display name ('' on publish rows). */
@@ -74,14 +88,19 @@ export interface DeployHistoryRowDTO {
 	comment?: string;
 }
 
-/** Per-source schedule row on a team deployment. */
+/** Per-source schedule row on a team deployment (paused flag + window). */
 export interface DeployScheduleRowDTO {
 	sourceId: string;
+	/** Display name from the artifact (falls back to the id). */
+	sourceName?: string;
 	/** 5-field cron, or '' when the source has no schedule (manual). */
 	cron: string;
-	enabled: boolean;
+	/** Paused schedules stay configured (cron/ttl kept) but never fire. */
+	paused: boolean;
 	/** Unix seconds of the last dispatch, if any. */
 	lastRunAt?: number;
+	/** Run window in seconds ('fixed window'); absent = until finished. */
+	ttl?: number;
 }
 
 /** The deployment header state rendered on the deployment tab. */
@@ -90,27 +109,11 @@ export interface DeploymentInfoDTO {
 	pipelineName: string;
 	/** The registry version this team points at. */
 	version: number;
-	state: 'active' | 'paused' | 'errored' | 'removed';
+	state: 'enabled' | 'disabled' | 'errored' | 'removed';
 	/** Deployed-by attribution (display name). */
 	deployedBy: string;
 	/** Unix seconds of the pointer move. */
 	deployedAt: number;
-}
-
-/** One deployment row in the sidebar DEPLOYMENTS tree. */
-export interface SidebarDeploymentDTO {
-	/** Owning team id (the environment). */
-	teamId: string;
-	/** Team display name (host-resolved; falls back to the id). */
-	teamName: string;
-	/** Deployed project id. */
-	projectId: string;
-	/** Pipeline display name from the registry artifact. */
-	pipelineName: string;
-	/** The registry version this team points at. */
-	version: number;
-	/** Deployment state (removed rows never reach the sidebar). */
-	state: 'active' | 'paused' | 'errored';
 }
 
 /** Cron preview result from the server's single evaluator. */
@@ -133,10 +136,16 @@ export type DeployLifecycleHostToWebview =
 			versions: DeployVersionCardDTO[];
 			/** This project's team deployments (the "where live" rows). */
 			deployments: TeamDeploymentRowDTO[];
-			/** Merged audit history, newest first. */
-			history: DeployHistoryRowDTO[];
 			/** Teams visible to the caller, with resolved names + control rights. */
 			teams: DeployTeamRefDTO[];
+	  }
+	| {
+			/** Reply to deploy:artifact — the sha-verified pipeline JSON. */
+			type: 'deploy:artifactResult';
+			requestId: number;
+			/** Absent when the fetch failed (error carries the reason). */
+			pipeline?: Record<string, unknown>;
+			error?: string;
 	  }
 	| {
 			/** Completion ack for a deploy:publish / deploy:deploy request. */
@@ -156,6 +165,14 @@ export type DeployLifecycleWebviewToHost =
 			projectId: string;
 	  }
 	| {
+			/** Fetch one immutable artifact's pipeline (the version cards'
+			    readonly-canvas record drawer). */
+			type: 'deploy:artifact';
+			requestId: number;
+			projectId: string;
+			version: number;
+	  }
+	| {
 			/** Publish the SAVED document as the next registry version. */
 			type: 'deploy:publish';
 			/** Correlation id for the deploy:actionResult reply. */
@@ -173,19 +190,14 @@ export type DeployLifecycleWebviewToHost =
 			projectId: string;
 			version: number;
 			teamId: string;
-	  }
-	| {
-			/** Open the file-less deployment tab for one team. */
-			type: 'deploy:openDeployment';
-			teamId: string;
-			projectId: string;
-			/** Tab title, e.g. 'Production / invoice-flow'. */
-			title: string;
 	  };
 
 // =============================================================================
-// DEPLOYMENT TAB PROTOCOL (file-less per-team deployment panel)
+// DEPLOYMENT RECORD DRAWER PROTOCOL (rides the Project webview channel)
 // =============================================================================
+// The drawer lives INSIDE the Project webview, so every message carries the
+// TEAM identity (the project identity is the panel's own); replies stamp it
+// back so a switched drawer ignores stale pushes.
 
 /** The full state payload of one team deployment (host-mapped view models). */
 export interface DeploymentLoadPayload {
@@ -197,12 +209,24 @@ export interface DeploymentLoadPayload {
 	pipeline: Record<string, unknown>;
 	/** Service catalog for the readonly canvas render. */
 	servicesJson: Record<string, unknown>;
-	/** Per-source schedules, for the STATUS schedules panel. */
+	/** The FOCUSED source id; absent = the TEAM record. */
+	sourceId?: string;
+	/** Focused source display name (artifact-resolved; id fallback). */
+	sourceName?: string;
+	/** The focused source's schedule paused flag; absent = no schedule. */
+	sourcePaused?: boolean;
+	/** The focused source's execution settings (server truth). */
+	sourceConfig?: { traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut: boolean };
+	/** One row per source (artifact sources with their schedule records) —
+	    the team drawer's sources overview. */
 	schedules: DeployScheduleRowDTO[];
+	/** Per-source next occurrence (host-previewed), keyed by sourceId —
+	    the team drawer's status-grid Next-run column. */
+	nextRuns?: Record<string, number>;
+	/** Registry versions (the team drawer's Deploy version… picker). */
+	versions: DeployVersionCardDTO[];
 	/** This team's audit history, newest first. */
 	history: DeployHistoryRowDTO[];
-	/** Registry versions (the Deploy version… / Rollback pickers). */
-	versions: DeployVersionCardDTO[];
 	/** Next scheduled occurrence (host-previewed), if any schedule is armed. */
 	nextRun?: { at: number; sourceId: string; cron: string };
 	/** sourceId -> true while a run of that source is live on the server. */
@@ -215,10 +239,11 @@ export interface DeploymentLoadPayload {
 
 /** All messages the extension host can send to the Deployment webview. */
 export type DeploymentHostToWebview =
-	| ({ type: 'deployment:load' } & DeploymentLoadPayload)
+	| ({ type: 'deployment:load'; teamId: string } & DeploymentLoadPayload)
 	| {
-			/** The deployment could not be loaded (rendered as the page state). */
+			/** The deployment could not be loaded (rendered as the drawer state). */
 			type: 'deployment:error';
+			teamId: string;
 			error: string;
 	  }
 	| {
@@ -246,49 +271,82 @@ export type DeploymentHostToWebview =
 
 /** All messages the Deployment webview can send to the extension host. */
 export type DeploymentWebviewToHost =
-	| { type: 'view:ready' }
 	| {
-			/** Pause (true) / resume (false) this team deployment. */
-			type: 'deployment:setPaused';
+			/** (Re-)fetch the deployment snapshot — sent on drawer open, by the
+			    drawer's own poll, and after every mutation (the WEBVIEW drives
+			    refresh). The record is (team, project, source). */
+			type: 'deployment:fetch';
+			teamId: string;
+			/** Absent = the TEAM record (team operations drawer). */
+			sourceId?: string;
+	  }
+	| {
+			/** Disable (true) / enable (false) this team deployment — the
+			    whole-deployment kill switch. */
+			type: 'deployment:setDisabled';
+			teamId: string;
 			requestId: number;
-			paused: boolean;
+			disabled: boolean;
 	  }
 	| {
 			/** Point this team at a version (Deploy version… / Rollback alike). */
 			type: 'deployment:deployVersion';
+			teamId: string;
 			requestId: number;
 			version: number;
 	  }
 	| {
-			/** Soft-remove this team deployment (host closes the panel). */
+			/** Soft-remove this team deployment (the drawer closes itself). */
 			type: 'deployment:remove';
+			teamId: string;
 			requestId: number;
 	  }
 	| {
 			/** Start one source NOW (the manual smoke-test dispatch). */
 			type: 'deployment:runSource';
+			teamId: string;
 			requestId: number;
 			sourceId: string;
 	  }
 	| {
 			/** Stop one source's live run. */
 			type: 'deployment:stopSource';
+			teamId: string;
 			requestId: number;
 			sourceId: string;
 	  }
 	| {
+			/** Persist one source's execution settings (trace + debug). */
+			type: 'deployment:setSourceConfig';
+			teamId: string;
+			requestId: number;
+			sourceId: string;
+			traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null;
+			debugOut: boolean;
+	  }
+	| {
+			/** Pause (true) / resume (false) one source's schedule — cron/ttl
+			    are preserved; it just stops firing. */
+			type: 'deployment:setSchedulePaused';
+			teamId: string;
+			requestId: number;
+			sourceId: string;
+			paused: boolean;
+	  }
+	| {
 			/** Set (cron string) or clear (null) one source's schedule. */
 			type: 'deployment:setSchedule';
+			teamId: string;
 			requestId: number;
 			sourceId: string;
 			cron: string | null;
-			enabled: boolean;
 			/** Run window in seconds ('fixed window'); null = until finished. */
 			ttl?: number | null;
 	  }
 	| {
 			/** Cron preview via the server's single evaluator. */
 			type: 'deployment:preview';
+			teamId: string;
 			requestId: number;
 			cron: string;
 			count: number;
@@ -296,6 +354,7 @@ export type DeploymentWebviewToHost =
 	| {
 			/** Pipeline validation passthrough for the readonly canvas. */
 			type: 'deployment:validate';
+			teamId: string;
 			requestId: number;
 			pipeline: unknown;
 	  };

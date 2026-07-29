@@ -71,6 +71,52 @@ from .types import LAUNCH_TYPE
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
 
+# Serialized-size cap for one trace payload. Trace (and its derived flow)
+# is the only unbounded event payload — a component can attach whole
+# documents or model responses — and every event fans out to EVERY
+# subscribed websocket and into the run-log continuum. Payloads over the
+# cap are replaced by an honest truncation marker.
+CONST_TRACE_PAYLOAD_CAP = 1_000_000
+# How much of the oversized payload the marker keeps: the cap minus a
+# little headroom for the marker fields themselves — an over-cap payload
+# still ships (just under) the full megabyte, clipped rather than shrunk.
+CONST_TRACE_PREVIEW_BYTES = CONST_TRACE_PAYLOAD_CAP - 1_024
+
+
+def cap_trace_payload(trace: Any) -> Any:
+    """Clamp one trace payload to ``CONST_TRACE_PAYLOAD_CAP`` serialized bytes.
+
+    Under the cap the payload passes through untouched. Over it, the whole
+    structure is replaced with a marker — ``{'truncated': True,
+    'originalBytes': N, 'preview': <first bytes of the serialized JSON>}`` —
+    because pruning arbitrary nested user data field-by-field is guesswork,
+    while the marker is honest and bounded. Applied ONCE where apaevt_trace
+    is parsed, so the broadcast trace, the derived flow, and the run-log
+    continuum all carry the same clamped payload (replay reproduces exactly
+    what live viewers saw).
+
+    Args:
+        trace: The raw trace payload from the engine event.
+
+    Returns:
+        The payload unchanged, or the truncation marker.
+    """
+    if not trace:
+        return trace
+    try:
+        raw = json.dumps(trace)
+    except (TypeError, ValueError):
+        # Unserializable payloads fail later anyway — leave them for the
+        # transport's own error handling rather than masking the bug here.
+        return trace
+    if len(raw) <= CONST_TRACE_PAYLOAD_CAP:
+        return trace
+    return {
+        'truncated': True,
+        'originalBytes': len(raw),
+        'preview': raw[:CONST_TRACE_PREVIEW_BYTES],
+    }
+
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
@@ -295,6 +341,10 @@ class Task(DAPBase):
         # Lifecycle state
         self._tmpfile = None
         self._stop_requested = False
+        # WHY the stop was requested ('user' | 'ttl'); None until requested.
+        # A ttl-window expiry is SUCCESS (the run stayed up exactly as
+        # configured), so the run-log outcome derives from this.
+        self._stop_reason: 'str | None' = None
 
         # Client connections
         self._debugger: Optional[TaskConn] = None
@@ -916,6 +966,7 @@ class Task(DAPBase):
                         'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
+                        **({'reason': self._stop_reason} if self._stop_reason else {}),
                     },
                     id=self.id,
                 )
@@ -959,13 +1010,16 @@ class Task(DAPBase):
                 if self._is_restarting:
                     self._run_log.note_restart()
                 else:
+                    # A ttl-window expiry is SUCCESS: the run stayed up
+                    # exactly as configured, then shut down. Only a real
+                    # stop (or abnormal exit) reads as cancelled.
                     if self._status.state == TASK_STATE.CANCELLED.value:
-                        outcome = 'cancelled'
+                        outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
                     elif self._status.exitCode == 0:
                         outcome = 'ok'
                     else:
                         outcome = 'error'
-                    await self._run_log.end_run(outcome, self._status.exitMessage or '')
+                    await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
                     self._run_log = None
             except Exception as e:
                 self.debug_message(f'Run-log close failed: {e}')
@@ -1374,7 +1428,9 @@ class Task(DAPBase):
             total_pipes = body.get('total_pipes', 0)
             pipe_index = body.get('id', '')
             component_name = body.get('pipe_id', '')
-            trace = body.get('trace', {})
+            # Clamp oversized payloads HERE, before the rebuilt body fans out
+            # to the broadcast, the derived flow, and the run-log continuum.
+            trace = cap_trace_payload(body.get('trace', {}))
 
             # total_pipes=0 marks a synthetic trace (tool-call events emit it
             # as "unknown") — keep the data lane's real pipe count.
@@ -1874,6 +1930,7 @@ class Task(DAPBase):
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False
+            self._stop_reason = None
             self._is_terminating = False
 
             # Set our current state
@@ -2136,9 +2193,14 @@ class Task(DAPBase):
             self.debug_message(f'Task startup failed: {e}')
             raise
 
-    async def stop_task(self) -> None:
+    async def stop_task(self, reason: str = 'user') -> None:
         """
         Initiate graceful task termination with resource cleanup.
+
+        Args:
+            reason: WHY the stop happens — 'user' (explicit request) or
+                'ttl' (the run window elapsed). Drives the recorded run
+                outcome: a ttl expiry is a successful run, not a cancel.
         """
         try:
             # Prevent race conditions
@@ -2146,8 +2208,9 @@ class Task(DAPBase):
                 # Get subprocess reference
                 engine = self._engine_process
 
-                # Mark as user-requested stop and block new operations
+                # Mark as a requested stop and block new operations.
                 self._stop_requested = True
+                self._stop_reason = reason
                 self._is_terminating = True
 
                 # Handle subprocess termination

@@ -46,12 +46,12 @@ export type { IOverviewGridProps, IConnectionsPanelProps, ITasksPanelProps, IAct
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
-export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, SidebarDeployment, ConnectionInfo } from './modules/sidebar/types';
+export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
 
-// --- Deploy module (teams-as-environments deployment surfaces) ----------------
+// --- Deploy panel family (teams-as-environments deployment surfaces) ---------
 // Deliberately NOT exported from this barrel: DeploymentView drags the canvas
 // (same weight problem as the project module). Consumers import
-// 'shared/modules/deploy' directly, exactly like 'shared/modules/project'.
+// 'shared/components/deploy-panel' directly, like 'shared/modules/project'.
 
 // --- Explorer module (generic file tree panel) -------------------------------
 export { Explorer } from './modules/explorer';

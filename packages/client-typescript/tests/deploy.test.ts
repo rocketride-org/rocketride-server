@@ -129,7 +129,7 @@ describe('Deploy API Integration Tests', () => {
 				expect(result.deployment?.teamId).toBe(TEAM);
 				expect(result.deployment?.projectId).toBe(project);
 				expect(result.deployment?.version).toBe(1);
-				expect(result.deployment?.state).toBe('active');
+				expect(result.deployment?.state).toBe('enabled');
 			} finally {
 				await cleanup(project);
 			}
@@ -176,7 +176,7 @@ describe('Deploy API Integration Tests', () => {
 	);
 
 	it(
-		'run-now dispatches as the team and is stoppable; paused refuses',
+		'run-now dispatches as the team and is stoppable; disabled refuses',
 		async () => {
 			const project = freshProject();
 			try {
@@ -188,7 +188,7 @@ describe('Deploy API Integration Tests', () => {
 				expect(token).toBe(result.token);
 				if (token) await client.terminate(token);
 
-				await client.deploy.pause(project, TEAM);
+				await client.deploy.disable(project, TEAM);
 				await expect(client.deploy.run(project, 'webhook_1', TEAM)).rejects.toThrow();
 			} finally {
 				await cleanup(project);
@@ -238,16 +238,16 @@ describe('Deploy API Integration Tests', () => {
 		TEST_CONFIG.timeout
 	);
 
-	// ── state: pause / resume / soft remove ────────────────────────────────────
+	// ── state: enable / disable / soft remove ──────────────────────────────────
 
 	it(
-		'pause and resume flip the state',
+		'disable and enable flip the state',
 		async () => {
 			const project = freshProject();
 			try {
 				await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
-				expect((await client.deploy.pause(project, TEAM)).state).toBe('paused');
-				expect((await client.deploy.resume(project, TEAM)).state).toBe('active');
+				expect((await client.deploy.disable(project, TEAM)).state).toBe('disabled');
+				expect((await client.deploy.enable(project, TEAM)).state).toBe('enabled');
 			} finally {
 				await cleanup(project);
 			}
@@ -283,11 +283,39 @@ describe('Deploy API Integration Tests', () => {
 
 				let dep = await client.deploy.setSchedule(project, 'webhook_1', '0 * * * *', TEAM);
 				expect(dep.schedules?.webhook_1?.cron).toBe('0 * * * *');
-				expect(dep.schedules?.webhook_1?.enabled).toBe(true);
+				expect(dep.schedules?.webhook_1?.paused).toBe(false);
 
 				// null clears the schedule row entirely.
 				dep = await client.deploy.setSchedule(project, 'webhook_1', null, TEAM);
 				expect(dep.schedules?.webhook_1).toBeUndefined();
+			} finally {
+				await cleanup(project);
+			}
+		},
+		TEST_CONFIG.timeout
+	);
+
+	it(
+		'pauseSchedule/resumeSchedule flip one schedule, preserving cron/ttl',
+		async () => {
+			const project = freshProject();
+			try {
+				await client.deploy.publish(makePipeline(project), { deployTo: TEAM });
+				await client.deploy.setSchedule(project, 'webhook_1', '0 * * * *', TEAM, { ttl: 600 });
+
+				// Pause keeps cron/ttl; a cron edit must not unpause it.
+				let dep = await client.deploy.pauseSchedule(project, 'webhook_1', TEAM);
+				expect(dep.schedules?.webhook_1?.paused).toBe(true);
+				expect(dep.schedules?.webhook_1?.cron).toBe('0 * * * *');
+				expect(dep.schedules?.webhook_1?.ttl).toBe(600);
+				dep = await client.deploy.setSchedule(project, 'webhook_1', '30 * * * *', TEAM);
+				expect(dep.schedules?.webhook_1?.paused).toBe(true);
+
+				dep = await client.deploy.resumeSchedule(project, 'webhook_1', TEAM);
+				expect(dep.schedules?.webhook_1?.paused).toBe(false);
+
+				// Pausing a source with no schedule is an explicit error.
+				await expect(client.deploy.pauseSchedule(project, 'ghost_1', TEAM)).rejects.toThrow();
 			} finally {
 				await cleanup(project);
 			}

@@ -45,7 +45,6 @@ import { SettingsProvider } from './providers/SettingsProvider';
 import { MonitorProvider } from './providers/MonitorProvider';
 // DeployProvider removed — Docker/Service operations now live in Settings panels
 import { StatusProvider } from './providers/StatusProvider';
-import { DeploymentProvider } from './providers/DeploymentProvider';
 import { BarStatus } from './providers/BarStatusProvider';
 import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
@@ -71,7 +70,6 @@ let settings: SettingsProvider | undefined;
 let _monitor: MonitorProvider | undefined;
 // deploy removed — functionality moved to Settings panels
 let status: StatusProvider | undefined;
-let deploymentPage: DeploymentProvider | undefined;
 let barStatus: BarStatus | undefined;
 let welcome: WelcomeProvider | undefined;
 
@@ -291,8 +289,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
 				// File-less per-team deployment tabs (teams-as-environments)
-				deploymentPage = new DeploymentProvider(context);
-				context.subscriptions.push(deploymentPage);
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				const account = new AccountProvider(context);
 				const environment = new EnvironmentProvider(context);
@@ -431,9 +427,6 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand('rocketride.page.status.open', (projectId: string, sourceId: string, displayName: string) => {
 			status?.show(projectId, sourceId, displayName);
-		}),
-		vscode.commands.registerCommand('rocketride.page.deployment.open', (teamId: string, projectId: string, title?: string) => {
-			deploymentPage?.show(teamId, projectId, title);
 		}),
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();

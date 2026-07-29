@@ -31,17 +31,17 @@
 
 import React, { useCallback, useEffect, useMemo, useState, CSSProperties } from 'react';
 
-import { commonStyles } from '../../../themes/styles';
-import { Button } from '../../../components/button/Button';
-import { Modal } from '../../../components/modal/Modal';
-import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
-import { Card } from '../../../components/card/Card';
-import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import { mutedEl } from '../../../components/data-grid/defaults';
-import { formatTime } from '../../server/util/formatters';
-import type { CellComponent } from 'tabulator-tables';
-import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
-import type { DeployHistoryRow, DeployTeamRef, DeployVersionCard, TeamDeploymentRow } from '../types';
+import { commonStyles } from '../../themes/styles';
+import { Button } from '../button/Button';
+import { Modal } from '../modal/Modal';
+import { ConfirmDialog } from '../modal/ConfirmDialog';
+import { Card } from '../card/Card';
+import { formatTime, formatDayTime } from '../../modules/server/util/formatters';
+import { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
+import { VersionRecordPanel } from './VersionRecordPanel';
+import type { IVersionRecordPanelProps } from './VersionRecordPanel';
+import type { SchedulePreviewResult } from './DeploymentView';
+import type { DeployTeamRef, DeployVersionCard, TeamDeploymentRow, TeamDeploymentSource } from './types';
 
 // =============================================================================
 // PROPS
@@ -51,8 +51,6 @@ import type { DeployHistoryRow, DeployTeamRef, DeployVersionCard, TeamDeployment
 export interface DeploySnapshot {
 	/** Registry versions, newest first. */
 	versions: DeployVersionCard[];
-	/** Merged audit history, newest first. */
-	history: DeployHistoryRow[];
 }
 
 /** Props for {@link DeployPanel}. */
@@ -80,8 +78,36 @@ export interface IDeployPanelProps {
 	onPublish: (comment: string, deployTo?: string) => Promise<void>;
 	/** Point a team at a version (promotion and rollback alike). */
 	onDeploy: (version: number, teamId: string) => Promise<void>;
-	/** Open the file-less deployment tab for one team. */
-	onOpenDeployment?: (teamId: string) => void;
+	/** Open a deployment record drawer: the TEAM record (header/badge
+	    gestures, no sourceId) or one SOURCE's record (source-row gesture). */
+	onOpenDeployment?: (teamId: string, sourceId?: string) => void;
+	/** Toggle the whole-deployment kill switch from the where-live header. */
+	onSetDisabled?: (teamId: string, disabled: boolean) => Promise<void>;
+	/** Set/clear one source's schedule (the where-live pill opens the stock
+	    SchedulePanel editor; cron null clears). */
+	onSetSchedule?: (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => Promise<void>;
+	/** Pause/resume ONE source's schedule, preserving cron/ttl. */
+	onSetSchedulePaused?: (teamId: string, sourceId: string, paused: boolean) => Promise<void>;
+	/** Cron preview via the server's single evaluator (SchedulePanel). */
+	previewSchedule?: (cron: string, count: number) => Promise<SchedulePreviewResult>;
+	/** Pipeline display name (SchedulePanel context line). */
+	pipelineName?: string;
+	/** Fetch one immutable artifact's pipeline JSON (sha-verified by the
+	    server). Its presence makes the version cards clickable — each opens
+	    a readonly-canvas record drawer. */
+	fetchArtifact?: (version: number) => Promise<IVersionRecordPanelProps['pipeline']>;
+	/** Service catalog for the readonly canvas render. */
+	servicesJson?: IVersionRecordPanelProps['servicesJson'];
+	/** Pipeline validation passthrough (the canvas requires one). */
+	handleValidatePipeline?: IVersionRecordPanelProps['handleValidatePipeline'];
+	/** Whether the host is connected (canvas status affordances). */
+	isConnected?: boolean;
+	/** Whether the caller holds an active subscription (canvas gating). */
+	isSubscribed?: boolean;
+	/** Server host URL for {host} placeholder replacement. */
+	serverHost?: string;
+	/** Open an external link in the host's browser. */
+	onOpenLink?: (url: string, displayName?: string) => void;
 }
 
 // =============================================================================
@@ -96,6 +122,9 @@ const S = {
 		overflowX: 'auto',
 		padding: '4px 2px 12px',
 	} as CSSProperties,
+	// Flex column so the action row can ANCHOR to the card's bottom edge —
+	// cards stretch to equal height in the strip, and the Deploy button must
+	// sit on one line across them regardless of badge/comment content.
 	versionCard: {
 		minWidth: 168,
 		border: '1px solid var(--rr-border)',
@@ -103,6 +132,8 @@ const S = {
 		background: 'var(--rr-bg-paper)',
 		padding: '10px 12px',
 		flexShrink: 0,
+		display: 'flex',
+		flexDirection: 'column',
 	} as CSSProperties,
 	versionCardNewest: {
 		borderColor: 'var(--rr-accent-faded)',
@@ -117,10 +148,14 @@ const S = {
 		marginTop: 3,
 		lineHeight: 1.5,
 	} as CSSProperties,
+	// marginTop:auto pins the badge row (and the verbs after it) to the
+	// card's bottom — badges and buttons align across cards regardless of
+	// how tall each card's meta/comment is.
 	envTags: {
 		display: 'flex',
 		gap: 5,
-		marginTop: 8,
+		marginTop: 'auto',
+		paddingTop: 8,
 		flexWrap: 'wrap',
 	} as CSSProperties,
 	envTag: {
@@ -134,10 +169,11 @@ const S = {
 		color: 'var(--rr-color-success)',
 		border: '1px solid color-mix(in srgb, var(--rr-color-success) 40%, transparent)',
 	} as CSSProperties,
+	// Follows the bottom-pinned badge row (which carries the auto margin).
 	rowButtons: {
 		display: 'flex',
 		gap: 6,
-		marginTop: 9,
+		paddingTop: 9,
 	} as CSSProperties,
 	publishCard: (enabled: boolean): CSSProperties => ({
 		minWidth: 148,
@@ -187,6 +223,72 @@ const S = {
 	gridWrap: {
 		marginBottom: 18,
 	} as CSSProperties,
+	// ── Where-live grouped panel ─────────────────────────────────────────────
+	liveGroupHeader: (clickable: boolean): CSSProperties => ({
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+		padding: '9px 14px',
+		background: 'var(--rr-bg-surface-alt)',
+		borderTop: '1px solid var(--rr-border)',
+		cursor: clickable ? 'pointer' : 'default',
+	}),
+	liveTeam: {
+		fontWeight: 700,
+		fontSize: 13.5,
+	} as CSSProperties,
+	liveVersion: {
+		fontSize: 11.5,
+		fontWeight: 700,
+		border: '1px solid var(--rr-accent-faded)',
+		color: 'var(--rr-brand)',
+		background: 'color-mix(in srgb, var(--rr-brand) 6%, transparent)',
+		borderRadius: 10,
+		padding: '1px 8px',
+	} as CSSProperties,
+	liveState: (state: TeamDeploymentRow['state'], clickable: boolean): CSSProperties => ({
+		fontSize: 11.5,
+		fontWeight: 600,
+		color: state === 'errored' ? 'var(--rr-color-error)' : state === 'enabled' ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
+		cursor: clickable ? 'pointer' : 'inherit',
+	}),
+	liveDeployedAt: {
+		marginLeft: 'auto',
+		fontSize: 11.5,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+	liveSourceRow: (clickable: boolean): CSSProperties => ({
+		display: 'flex',
+		alignItems: 'center',
+		gap: 10,
+		padding: '7px 14px 7px 34px',
+		borderTop: '1px solid var(--rr-border)',
+		fontSize: 12.5,
+		cursor: clickable ? 'pointer' : 'default',
+	}),
+	liveSourceName: {
+		fontWeight: 600,
+		minWidth: 140,
+	} as CSSProperties,
+	// The drawer's schedule-pill grammar (green while armed).
+	livePill: (on: boolean, clickable: boolean): CSSProperties => ({
+		cursor: clickable ? 'pointer' : 'inherit',
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: 6,
+		borderRadius: 14,
+		padding: '2px 10px',
+		fontSize: 11.5,
+		fontWeight: 600,
+		border: `1px solid ${on ? 'color-mix(in srgb, var(--rr-color-success) 40%, transparent)' : 'var(--rr-border)'}`,
+		background: on ? 'color-mix(in srgb, var(--rr-color-success) 10%, transparent)' : 'transparent',
+		color: on ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
+	}),
+	liveLastRun: {
+		marginLeft: 'auto',
+		fontSize: 11.5,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -198,28 +300,6 @@ function shortSha(sha: string): string {
 	return sha ? `${sha.slice(0, 8)}…` : '';
 }
 
-/** Human wording for one audit row (mockup's history phrasing). */
-function historyWording(row: DeployHistoryRow, multiTeam: boolean): string {
-	const team = multiTeam && row.teamName ? ` to ${row.teamName}` : '';
-	switch (row.action) {
-		case 'publish':
-			return `published v${row.version}${row.comment ? ` “${row.comment}”` : ''}`;
-		case 'rollback':
-			return `rollback${multiTeam && row.teamName ? ` ${row.teamName}` : ''} → v${row.version}`;
-		case 'deploy':
-			return `deployed v${row.version}${team}`;
-		default:
-			return `${row.action} v${row.version}${team}`;
-	}
-}
-
-/** State cell colour (matches the mockup's chip palette). */
-function stateColor(state: TeamDeploymentRow['state']): string {
-	if (state === 'errored') return 'var(--rr-color-error)';
-	if (state === 'active') return 'var(--rr-color-success)';
-	return 'var(--rr-text-secondary)';
-}
-
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -228,11 +308,10 @@ function stateColor(state: TeamDeploymentRow['state']): string {
  * The DEPLOY-page lifecycle surface: version strip, where-live grid,
  * merged history grid. See the module docstring for the collapsing rules.
  */
-export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment }) => {
+export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onSetDisabled, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
 	// --- Panel-owned registry data (fetched, never passed in) -----------------
 
 	const [versions, setVersions] = useState<DeployVersionCard[]>([]);
-	const [history, setHistory] = useState<DeployHistoryRow[]>([]);
 	const [loading, setLoading] = useState(true);
 
 	/** (Re-)fetch the registry snapshot; a failed fetch keeps the last data. */
@@ -240,7 +319,6 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 		try {
 			const snapshot = await fetchLifecycle();
 			setVersions(snapshot.versions);
-			setHistory(snapshot.history);
 		} catch (err) {
 			// A project that was never published has no registry — empty strip.
 			console.log('[DeployPanel] fetch failed:', err);
@@ -282,6 +360,24 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 	// A chosen (version, team) pointer move awaiting CONFIRMATION.
 	const [pendingDeploy, setPendingDeploy] = useState<{ version: number; team: DeployTeamRef; fromVersion?: number } | null>(null);
 	const [publishOpen, setPublishOpen] = useState(false);
+	// The where-live schedule being edited in the SchedulePanel drawer.
+	const [editSchedule, setEditSchedule] = useState<{ teamId: string; teamName: string; source: TeamDeploymentSource } | null>(null);
+	// The version card opened as a readonly-canvas record drawer: the card
+	// (title/provenance render immediately) + its artifact once fetched.
+	const [openVersion, setOpenVersion] = useState<DeployVersionCard | null>(null);
+	const [versionPipeline, setVersionPipeline] = useState<IVersionRecordPanelProps['pipeline'] | null>(null);
+	const [versionError, setVersionError] = useState('');
+
+	/** Open one version's record drawer and fetch its artifact into it. */
+	const openVersionDrawer = (card: DeployVersionCard): void => {
+		if (!fetchArtifact) return;
+		setOpenVersion(card);
+		setVersionPipeline(null);
+		setVersionError('');
+		fetchArtifact(card.version)
+			.then((artifact) => setVersionPipeline(artifact))
+			.catch((err: unknown) => setVersionError(err instanceof Error ? err.message : String(err)));
+	};
 	const [publishComment, setPublishComment] = useState('');
 	const [publishAndDeploy, setPublishAndDeploy] = useState(false);
 	const [busy, setBusy] = useState(false);
@@ -316,65 +412,6 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 
 	// --- Grid columns ---------------------------------------------------------
 
-	const whereLiveColumns: GridColumnDefinition[] = useMemo(
-		() => [
-			{ title: 'Team', field: 'teamName', rrType: 'string', rrDefault: true, rrDescription: 'The team (environment) this deployment belongs to.', width: 180, widthGrow: 2 },
-			{ title: 'Version', field: 'version', rrType: 'number', rrDefault: true, rrDescription: 'The registry version this team currently points at.', width: 90, formatter: (cell: CellComponent) => `v${cell.getValue()}` },
-			{
-				title: 'State',
-				field: 'state',
-				rrType: 'enum',
-				rrDefault: true,
-				rrOptions: ['active', 'paused', 'errored'],
-				width: 110,
-				rrDescription: 'Deployment state: active (schedules fire), paused, or errored (a dispatch was denied).',
-				formatter: (cell: CellComponent) => {
-					const el = document.createElement('span');
-					el.style.color = stateColor(cell.getValue() as TeamDeploymentRow['state']);
-					el.textContent = `● ${cell.getValue()}`;
-					return el;
-				},
-			},
-			{ title: 'Schedules', field: 'schedulesSummary', rrType: 'string', rrDefault: true, rrDescription: 'Per-source cron summary, or manual when nothing is scheduled.', width: 220, widthGrow: 3 },
-			{
-				title: 'Last run',
-				field: 'lastRunAt',
-				rrType: 'date',
-				rrDefault: true,
-				width: 150,
-				rrDescription: 'When the scheduler last dispatched any source of this deployment (local time).',
-				formatter: (cell: CellComponent) => mutedEl(cell.getValue() ? formatTime(cell.getValue() as number) : '—'),
-			},
-		],
-		[]
-	);
-
-	const historyColumns: GridColumnDefinition[] = useMemo(
-		() => [
-			{
-				title: 'When',
-				field: 'at',
-				rrType: 'date',
-				rrDefault: true,
-				rrDefaultSort: 'desc',
-				rrDescription: 'When the action happened (local time); newest first.',
-				formatter: (cell: CellComponent) => formatTime(cell.getValue() as number),
-				width: 170,
-			},
-			{ title: 'Actor', field: 'actor', rrType: 'string', rrDefault: true, rrDescription: 'Who performed the action (denormalized — survives account deletion).', width: 160 },
-			{
-				title: 'Action',
-				field: 'seq',
-				rrNoPopup: true,
-				rrDefault: true,
-				rrDescription: 'What happened: publishes, deploys, rollbacks, pauses, removals.',
-				widthGrow: 3,
-				formatter: (cell: CellComponent) => historyWording(cell.getRow().getData() as DeployHistoryRow, multiTeam),
-			},
-		],
-		[multiTeam]
-	);
-
 	// --- Render ---------------------------------------------------------------
 
 	return (
@@ -406,7 +443,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 				{versions.map((v, index) => {
 					const live = liveByVersion.get(v.version) ?? [];
 					return (
-						<div key={v.version} style={{ ...S.versionCard, ...(index === 0 ? S.versionCardNewest : {}) }}>
+						<div key={v.version} style={{ ...S.versionCard, ...(index === 0 ? S.versionCardNewest : {}), ...(fetchArtifact ? { cursor: 'pointer' } : {}) }} title={fetchArtifact ? 'View this version' : undefined} onClick={() => openVersionDrawer(v)}>
 							<div style={S.versionNum}>v{v.version}</div>
 							<div style={S.versionMeta}>
 								{v.publishedBy}
@@ -420,14 +457,26 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 								) : null}
 							</div>
 							<div style={S.envTags}>
+								{/* Badge click opens the deployment record panel — the
+								    badge IS the deployment, same gesture as its
+								    where-live row. */}
 								{live.map((dep) => (
-									<span key={dep.teamId} style={S.envTag} title={`Live on ${dep.teamName} (${dep.state})`}>
+									<span
+										key={dep.teamId}
+										style={{ ...S.envTag, ...(onOpenDeployment ? { cursor: 'pointer' } : {}) }}
+										title={onOpenDeployment ? `Open the ${dep.teamName} deployment (${dep.state})` : `Live on ${dep.teamName} (${dep.state})`}
+										onClick={(e) => {
+											// The badge IS the team deployment; the card is the version.
+											e.stopPropagation();
+											onOpenDeployment?.(dep.teamId);
+										}}
+									>
 										{multiTeam ? dep.teamName : 'deployed'}
 									</span>
 								))}
 							</div>
 							{controlTeams.length > 0 && (
-								<div style={S.rowButtons}>
+								<div style={S.rowButtons} onClick={(e) => e.stopPropagation()}>
 									{singleTarget ? (
 										live.some((dep) => dep.teamId === singleTarget.id) ? null : (
 											<Button variant="secondary" small disabled={busy} onClick={() => stageDeploy(v.version, singleTarget)}>
@@ -448,21 +497,86 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			</div>
 			{error && !publishOpen && pickerVersion === null && !pendingDeploy && <div style={S.errorText}>{error}</div>}
 
-			{/* ── Where live (stock grid; hidden with a single team) ────── */}
-			{multiTeam && deployments.length > 0 && (
+			{/* ── Where live (grouped panel: team header + per-source rows) ── */}
+			{deployments.length > 0 && (
 				<div style={S.gridWrap}>
-					<Card noBodyPadding>
-						<CardDataGrid<TeamDeploymentRow & Record<string, unknown>> title="Where this project is live" columns={whereLiveColumns} data={deployments as Array<TeamDeploymentRow & Record<string, unknown>>} tableId="deploy-where-live" emptyTitle="Not deployed anywhere" emptyDescription="Deploy a published version to a team to see it here." {...(onOpenDeployment ? { onRowClick: (row: TeamDeploymentRow & Record<string, unknown>) => onOpenDeployment(row.teamId) } : {})} />
+					<Card header="Where this project is live" noBodyPadding>
+						<div>
+							{deployments.map((dep) => (
+								<React.Fragment key={dep.teamId}>
+									{/* Group header — the deployment; click opens its record. */}
+									<div style={S.liveGroupHeader(Boolean(onOpenDeployment))} title={onOpenDeployment ? 'Open the team deployment' : undefined} onClick={() => onOpenDeployment?.(dep.teamId)}>
+										<span style={S.liveTeam}>{dep.teamName}</span>
+										<span style={S.liveVersion}>v{dep.version}</span>
+										<span
+											style={S.liveState(dep.state, Boolean(onSetDisabled))}
+											title={onSetDisabled ? (dep.state === 'enabled' ? 'Click to disable' : 'Click to enable') : undefined}
+											onClick={(e) => {
+												// The dot is the kill-switch toggle; the row still
+												// opens the record everywhere else.
+												if (!onSetDisabled || busy) return;
+												e.stopPropagation();
+												void run(() => onSetDisabled(dep.teamId, dep.state === 'enabled'));
+											}}
+										>
+											&#9679; {dep.state}
+										</span>
+										<span style={S.liveDeployedAt}>{dep.deployedAt ? `deployed ${formatDayTime(dep.deployedAt)}` : ''}</span>
+									</div>
+									{/* Source rows — schedule pill + last run, drawer-pill grammar. */}
+									{dep.sources.map((src) => (
+										<div key={`${dep.teamId}.${src.sourceId}`} style={S.liveSourceRow(Boolean(onOpenDeployment))} onClick={() => onOpenDeployment?.(dep.teamId, src.sourceId)}>
+											<span style={S.liveSourceName}>{src.sourceName}</span>
+											<span
+												style={S.livePill(Boolean(src.cron) && !src.paused, Boolean(onSetSchedule))}
+												title={onSetSchedule ? 'Edit schedule' : undefined}
+												onClick={(e) => {
+													if (!onSetSchedule) return;
+													e.stopPropagation();
+													setEditSchedule({ teamId: dep.teamId, teamName: dep.teamName, source: src });
+												}}
+											>
+												{src.cron ? `${describeCron(src.cron)}${src.ttl ? ` · ${describeTtl(src.ttl)}` : ''}${src.paused ? ' · paused' : ''}` : 'manual'}
+											</span>
+											{src.lastRunAt ? <span style={S.liveLastRun}>last run {formatDayTime(src.lastRunAt)}</span> : null}
+										</div>
+									))}
+								</React.Fragment>
+							))}
+						</div>
 					</Card>
 				</div>
 			)}
 
-			{/* ── Merged history (stock grid) ───────────────────────────── */}
-			<div style={S.gridWrap}>
-				<Card noBodyPadding>
-					<CardDataGrid<DeployHistoryRow & Record<string, unknown>> title="History" columns={historyColumns} data={history as Array<DeployHistoryRow & Record<string, unknown>>} tableId="deploy-history" emptyTitle={loading ? 'Loading…' : 'No deployment history yet'} emptyDescription="Publishes and every team's deploys land here, merged and immutable." />
-				</Card>
-			</div>
+			{/* ── Where-live schedule editor (stock SchedulePanel drawer) ── */}
+			{editSchedule && onSetSchedule && (
+				<SchedulePanel
+					open
+					sourceId={editSchedule.source.sourceId}
+					sourceName={editSchedule.source.sourceName}
+					teamName={editSchedule.teamName}
+					pipelineName={pipelineName}
+					initialCron={editSchedule.source.cron}
+					{...(editSchedule.source.ttl ? { initialTtl: editSchedule.source.ttl } : {})}
+					onSave={(cron, ttl) => onSetSchedule(editSchedule.teamId, editSchedule.source.sourceId, cron, ttl)}
+					onClose={() => setEditSchedule(null)}
+					paused={editSchedule.source.paused}
+					{...(onSetSchedulePaused
+						? {
+								onSetPaused: async (paused: boolean) => {
+									await onSetSchedulePaused(editSchedule.teamId, editSchedule.source.sourceId, paused);
+									// Reflect the flip in the OPEN editor; the rows
+									// themselves refresh from the host poll.
+									setEditSchedule((prev) => (prev ? { ...prev, source: { ...prev.source, paused } } : prev));
+								},
+							}
+						: {})}
+					{...(previewSchedule ? { previewSchedule } : {})}
+				/>
+			)}
+
+			{/* ── Version record drawer (readonly canvas, no verbs) ─────── */}
+			{openVersion && fetchArtifact && servicesJson && handleValidatePipeline && <VersionRecordPanel open onClose={() => setOpenVersion(null)} card={openVersion} pipelineName={pipelineName} {...(versionPipeline ? { pipeline: versionPipeline } : {})} {...(versionError ? { loadError: versionError } : {})} servicesJson={servicesJson} handleValidatePipeline={handleValidatePipeline} isConnected={isConnected} isSubscribed={isSubscribed} serverHost={serverHost} {...(onOpenLink ? { onOpenLink } : {})} />}
 
 			{/* ── Publish dialog ────────────────────────────────────────── */}
 			{publishOpen && (

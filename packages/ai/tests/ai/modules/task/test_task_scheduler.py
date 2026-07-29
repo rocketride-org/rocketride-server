@@ -51,7 +51,7 @@ def _dep(
     *,
     team='team-1',
     project='proj-1',
-    state='active',
+    state='enabled',
     version=1,
     schedules=None,
     updated_by=None,
@@ -62,7 +62,7 @@ def _dep(
         'projectId': project,
         'state': state,
         'version': version,
-        'schedules': schedules if schedules is not None else {'src-1': {'cron': '* * * * *', 'enabled': True}},
+        'schedules': schedules if schedules is not None else {'src-1': {'cron': '* * * * *', 'paused': False}},
         'updatedBy': updated_by or {'userId': 'user-1', 'display': 'Rod', 'email': ''},
     }
 
@@ -83,7 +83,7 @@ def account_stub(monkeypatch):
         deployments_artifact=AsyncMock(return_value={'project_id': 'proj-1', 'source': 'orig', 'components': []}),
         deployments_set_state=AsyncMock(return_value=_dep(state='errored', schedules={})),
         deployments_mark_run=AsyncMock(),
-        deployments_iter_active=MagicMock(),
+        deployments_iter_enabled=MagicMock(),
     )
     monkeypatch.setattr(sched_mod, 'account', stub)
     return stub
@@ -103,14 +103,14 @@ def dispatch(monkeypatch):
 
 
 class TestSync:
-    def test_active_deployment_adds_one_entry_per_enabled_schedule(self, scheduler):
+    def test_enabled_deployment_adds_one_entry_per_unpaused_schedule(self, scheduler):
         scheduler.sync(
             'org-1',
             _dep(
                 schedules={
-                    'src-a': {'cron': '* * * * *', 'enabled': True},
-                    'src-b': {'cron': '@hourly', 'enabled': True},
-                    'src-off': {'cron': '@hourly', 'enabled': False},
+                    'src-a': {'cron': '* * * * *', 'paused': False},
+                    'src-b': {'cron': '@hourly', 'paused': False},
+                    'src-off': {'cron': '@hourly', 'paused': True},
                 }
             ),
         )
@@ -118,16 +118,16 @@ class TestSync:
         assert ('team-1', 'proj-1', 'src-b') in scheduler._entries
         assert ('team-1', 'proj-1', 'src-off') not in scheduler._entries
 
-    def test_paused_or_removed_drops_all_entries(self, scheduler):
+    def test_disabled_or_removed_drops_all_entries(self, scheduler):
         scheduler.sync('org-1', _dep())
         assert scheduler._entries
-        scheduler.sync('org-1', _dep(state='paused', schedules={}))
+        scheduler.sync('org-1', _dep(state='disabled', schedules={}))
         assert not scheduler._entries
 
     def test_resync_replaces_prior_entries(self, scheduler):
         scheduler.sync('org-1', _dep())
         first = scheduler._entries[('team-1', 'proj-1', 'src-1')]
-        scheduler.sync('org-1', _dep(schedules={'src-1': {'cron': '@daily', 'enabled': True}}))
+        scheduler.sync('org-1', _dep(schedules={'src-1': {'cron': '@daily', 'paused': False}}))
         second = scheduler._entries[('team-1', 'proj-1', 'src-1')]
         assert first.cancelled is True
         assert second.cron == '@daily'
@@ -139,7 +139,7 @@ class TestSync:
         assert ('team-prod', 'proj-1', 'src-1') in scheduler._entries
 
     def test_bad_cron_is_skipped_not_fatal(self, scheduler):
-        scheduler.sync('org-1', _dep(schedules={'src-1': {'cron': 'not a cron', 'enabled': True}}))
+        scheduler.sync('org-1', _dep(schedules={'src-1': {'cron': 'not a cron', 'paused': False}}))
         assert not scheduler._entries
 
 
@@ -150,7 +150,7 @@ class TestSync:
 
 def _entry(scheduler, org='org-1', team='team-1', project='proj-1', source='src-1'):
     """A due entry as the loop would pop it."""
-    scheduler.sync(org, _dep(team=team, project=project, schedules={source: {'cron': '* * * * *', 'enabled': True}}))
+    scheduler.sync(org, _dep(team=team, project=project, schedules={source: {'cron': '* * * * *', 'paused': False}}))
     return scheduler._entries[(team, project, source)]
 
 
@@ -168,6 +168,9 @@ class TestStartRun:
         assert kwargs['org_id'] == 'org-1'
         assert kwargs['team_id'] == 'team-1'
         assert kwargs['trigger'] == 'schedule'
+        # Execution settings ride the dispatch; unset trace defaults to FULL.
+        assert kwargs['trace_level'] == 'full'
+        assert kwargs['debug_out'] is False
         # The deploying user rides as attribution.
         assert kwargs['actor']['userId'] == 'user-1'
         # Overlap guard armed + lastRunAt stamped.
@@ -176,10 +179,11 @@ class TestStartRun:
 
     @pytest.mark.asyncio
     async def test_fire_time_reread_beats_the_heap(self, scheduler, account_stub, dispatch):
-        # Deployment was paused between ticks: the heap says fire, the store
+        # Deployment was disabled between ticks: the heap says fire, the
+        # store
         # says no — the store must win, and the stale entries must drop.
         entry = _entry(scheduler)
-        account_stub.deployments_get.return_value = _dep(state='paused', schedules={})
+        account_stub.deployments_get.return_value = _dep(state='disabled', schedules={})
         await scheduler._start_run(entry)
         dispatch.assert_not_awaited()
         assert not scheduler._entries
@@ -188,6 +192,15 @@ class TestStartRun:
     async def test_schedule_removed_between_ticks_skips(self, scheduler, account_stub, dispatch):
         entry = _entry(scheduler)
         account_stub.deployments_get.return_value = _dep(schedules={})
+        await scheduler._start_run(entry)
+        dispatch.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_schedule_paused_between_ticks_skips(self, scheduler, account_stub, dispatch):
+        # The per-source pause must win at fire time even when the heap
+        # entry predates it.
+        entry = _entry(scheduler)
+        account_stub.deployments_get.return_value = _dep(schedules={'src-1': {'cron': '* * * * *', 'paused': True}})
         await scheduler._start_run(entry)
         dispatch.assert_not_awaited()
 

@@ -42,9 +42,11 @@
 //   (no flag)  full freeze — appends the next version + re-accumulates the contract.
 //   --check    CI mode — nonzero exit if the live surface differs from the newest
 //              frozen version (no freeze committed).
-//   --regen    reapply the accumulated barrels + conformance over the EXISTING
-//              versions without appending one (used when the mechanism, not the
-//              surface, changes).
+//   --regen    RESET to a fresh v0 — drops every frozen version and re-mints v0
+//              from the CURRENT live surface (pre-1.0 policy: breaking surface
+//              changes collapse the history; no external consumers hold floors
+//              yet). CI pairs it with `git diff --exit-code`, so a committed
+//              contract that disagrees with the live surface fails the diff.
 // =============================================================================
 
 const path = require('path');
@@ -592,22 +594,59 @@ function main() {
 	const checkMode = process.argv.includes('--check');
 	const regenMode = process.argv.includes('--regen');
 
-	// --regen: reapply the accumulated barrels + conformance over the EXISTING
-	// versions without freezing a new one. Used when the contract MECHANISM
-	// changes (not the surface) — no candidate is generated, no version written.
+	// --regen: RESET the contract to a single fresh v0 frozen from the CURRENT
+	// live surface. Pre-1.0 policy: while the platform iterates, intentional
+	// breaking surface changes are absorbed by collapsing the accumulated
+	// history back to one v0 (no external consumers hold the old floors yet).
+	// CI still pairs this with `git diff --exit-code`: a committed freeze that
+	// disagrees with the live surface — including a hand-edited floor or
+	// version file — regenerates differently and fails the diff.
+	//
+	// ORDER MATTERS: the old floors/barrels must be stubbed out BEFORE the tsc
+	// pre-check — after a breaking surface change they are precisely what no
+	// longer compiles. Every stubbed file is regenerated at the end; an
+	// interrupted run is repaired by simply re-running shell:regen.
 	if (regenMode) {
-		preCheck();
-		const { prev } = determineVersions();
-		if (prev < 0) {
-			log('No frozen versions to regenerate.');
-			return;
+		// Step R1 — drop every frozen version; v0 is re-minted below.
+		if (fs.existsSync(VERSIONS_DIR)) {
+			for (const f of fs.readdirSync(VERSIONS_DIR)) {
+				if (/^v\d+\.d\.ts$/.test(f)) fs.rmSync(path.join(VERSIONS_DIR, f), { force: true });
+			}
 		}
-		regenerateBarrels(prev);
-		generateConformance(prev);
-		// Also re-stamp apiver.ts so a freeze interrupted between conformance and
-		// the version stamp is fully repairable with a single --regen run.
-		writeApiVersion(prev);
-		log(`Regenerated index.ts + contract-check.generated.ts + apiver.ts from v0..v${prev} (no new version).`);
+
+		// Step R2 — stub the generated contract files so the pre-check compiles
+		// against the LIVE surface only (no stale floors, no missing ./versions
+		// imports). All three are rewritten for real by the regeneration below.
+		const stubNote = [
+			'// =============================================================================',
+			'// RESET STUB — transient state inside `./builder shell:regen`; regenerated',
+			'// into the real file before the run completes. If you are reading this in a',
+			'// committed tree, a reset was interrupted: re-run `./builder shell:regen`.',
+			'// =============================================================================',
+		].join('\n');
+		fs.writeFileSync(CONTRACT_CHECK, `${MIT_HEADER}\n\n${stubNote}\nexport {};\n`);
+		fs.writeFileSync(
+			INDEX_TS,
+			`${MIT_HEADER}\n\n${stubNote}\n// Vacuous alias: contract-hold.ts still assigns the live surface to\n// ShellApiLatest during the pre-check; unknown accepts anything.\nexport type ShellApiLatest = unknown;\n`,
+		);
+		fs.writeFileSync(LATEST_TS, `${MIT_HEADER}\n\n${stubNote}\nexport {};\n`);
+
+		// Step R3 — the normal freeze pipeline, pinned to version 0.
+		preCheck();
+		const candidateBody = generateCandidate();
+		writeVersion(0, candidateBody);
+		try {
+			regenerateBarrels(0);
+			generateConformance(0);
+			writeApiVersion(0);
+		} catch (err) {
+			// Roll the snapshot back so a rerun regenerates EVERYTHING instead
+			// of seeing a half-written v0 as the baseline.
+			fs.rmSync(path.join(VERSIONS_DIR, 'v0.d.ts'), { force: true });
+			throw err;
+		}
+		cleanup();
+		log('Recreated the v0 freeze from the live surface (contract history reset to v0).');
 		return;
 	}
 

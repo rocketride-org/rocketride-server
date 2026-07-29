@@ -62,9 +62,10 @@ from .store import IStore, StorageError, VersionMismatchError
 # Mirrors the store's own retry posture for read-modify-write records.
 _CAS_ATTEMPTS = 5
 
-# Deployment states a team pointer can be in. 'removed' is the soft-delete
+# Deployment states a team pointer can be in. 'disabled' is the user's
+# whole-deployment kill switch (nothing runs); 'removed' is the soft-delete
 # terminal state: invisible in listings, history retained forever.
-_STATES = ('active', 'paused', 'errored', 'removed')
+_STATES = ('enabled', 'disabled', 'errored', 'removed')
 
 
 def _safe_id(value: str, what: str) -> str:
@@ -234,7 +235,7 @@ class FileDeploymentBackend:
                 dep = {
                     'teamId': team_id,
                     'version': version,
-                    'state': 'active',
+                    'state': 'enabled',
                     'createdAt': now,
                     'createdBy': who,
                     'schedules': {},
@@ -245,9 +246,12 @@ class FileDeploymentBackend:
                 action = 'rollback' if version < dep['version'] else 'deploy'
                 dep['version'] = version
                 # A pointer move revives a removed/errored deployment.
-                dep['state'] = 'active'
+                dep['state'] = 'enabled'
             dep['updatedAt'] = now
             dep['updatedBy'] = who
+            # The pointer-move stamp: "deployed on". Only deploy() writes it —
+            # disable/enable and schedule edits bump updatedAt, never this.
+            dep['deployedAt'] = now
             meta['history'].append({'at': now, 'action': action, 'teamId': team_id, 'version': version, 'actor': who})
             return self._joined(meta, project_id, dep)
 
@@ -265,7 +269,7 @@ class FileDeploymentBackend:
         state: str,
         actor: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Change a team deployment's state (pause/resume/errored/removed).
+        """Change a team deployment's state (enable/disable/errored/removed).
 
         'removed' is the soft delete: listings hide it, history and the
         registry keep everything.
@@ -278,7 +282,7 @@ class FileDeploymentBackend:
             raise ValueError(f'invalid state {state!r}')
 
         # History speaks user verbs, not raw states.
-        action = {'active': 'resume', 'paused': 'pause', 'errored': 'errored', 'removed': 'remove'}[state]
+        action = {'enabled': 'enable', 'disabled': 'disable', 'errored': 'errored', 'removed': 'remove'}[state]
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
             """Flip the state and record the action."""
@@ -307,12 +311,13 @@ class FileDeploymentBackend:
         project_id: str,
         source_id: str,
         cron: Optional[str],
-        enabled: bool,
         actor: Dict[str, Any],
         ttl: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Set (or clear, with ``cron=None``) one source's schedule.
 
+        The paused flag is NOT set here — editing cron/ttl preserves it (a
+        new schedule starts unpaused); ``schedule_set_paused`` owns the flag.
         Cron validity is the COMMAND layer's job (the single evaluator);
         this layer just persists what it is given.
         """
@@ -328,19 +333,102 @@ class FileDeploymentBackend:
             if dep is None or dep.get('state') == 'removed':
                 raise StorageError(f'No deployment of {project_id} for team {team_id}')
             now = time.time()
+            existing = dep['schedules'].get(source_id) or {}
             if cron is None:
-                dep['schedules'].pop(source_id, None)
+                # Clearing the SCHEDULE keeps the row when it still carries
+                # execution settings (the row doubles as the per-source
+                # config record; cron '' renders as 'manual' everywhere).
+                if existing.get('traceLevel') or existing.get('debugOut'):
+                    dep['schedules'][source_id] = {**existing, 'cron': '', 'ttl': None}
+                else:
+                    dep['schedules'].pop(source_id, None)
             else:
-                existing = dep['schedules'].get(source_id) or {}
                 dep['schedules'][source_id] = {
                     'cron': cron,
-                    'enabled': bool(enabled),
+                    # Pause state and execution settings survive cron/ttl
+                    # edits; new schedules start unpaused, default trace.
+                    'paused': bool(existing.get('paused', False)),
+                    'traceLevel': existing.get('traceLevel'),
+                    'debugOut': bool(existing.get('debugOut', False)),
                     # Run window: None = until the pipeline finishes; seconds =
                     # fixed window (the dispatch passes it as the task ttl).
                     'ttl': ttl,
                     'lastRunAt': existing.get('lastRunAt'),
                 }
             dep['updatedAt'] = now
+            dep['updatedBy'] = who
+            return self._joined(meta, project_id, dep)
+
+        return await self._mutate_meta(org_id, project_id, mutate)
+
+    async def source_config_set(
+        self,
+        org_id: str,
+        team_id: str,
+        project_id: str,
+        source_id: str,
+        trace_level: 'str | None',
+        debug_out: bool,
+        actor: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Set one source's execution settings (trace level + debug output).
+
+        The schedule row doubles as the per-source config record: a source
+        with settings but no cron keeps a row with cron '' (the 'manual'
+        wire semantic). Validity of trace_level is the COMMAND layer's job.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(team_id, 'team_id')
+        _safe_id(project_id, 'project_id')
+        _safe_id(source_id, 'source_id')
+        who = _actor_record(actor)
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Upsert the config fields on the (possibly new) row."""
+            dep = meta['deployments'].get(team_id)
+            if dep is None or dep.get('state') == 'removed':
+                raise StorageError(f'No deployment of {project_id} for team {team_id}')
+            existing = dep['schedules'].get(source_id) or {'cron': '', 'paused': False, 'ttl': None, 'lastRunAt': None}
+            existing['traceLevel'] = trace_level
+            existing['debugOut'] = bool(debug_out)
+            dep['schedules'][source_id] = existing
+            dep['updatedAt'] = time.time()
+            dep['updatedBy'] = who
+            return self._joined(meta, project_id, dep)
+
+        return await self._mutate_meta(org_id, project_id, mutate)
+
+    async def schedule_set_paused(
+        self,
+        org_id: str,
+        team_id: str,
+        project_id: str,
+        source_id: str,
+        paused: bool,
+        actor: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Pause or resume ONE source's schedule, preserving cron/ttl.
+
+        Raises:
+            StorageError: The deployment is missing/removed, or the source
+                has no schedule to pause.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(team_id, 'team_id')
+        _safe_id(project_id, 'project_id')
+        _safe_id(source_id, 'source_id')
+        who = _actor_record(actor)
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Flip the paused flag on the existing schedule row."""
+            dep = meta['deployments'].get(team_id)
+            if dep is None or dep.get('state') == 'removed':
+                raise StorageError(f'No deployment of {project_id} for team {team_id}')
+            sched = dep['schedules'].get(source_id)
+            if sched is None:
+                raise StorageError(f'No schedule for source {source_id} on {project_id} for team {team_id}')
+            sched['paused'] = bool(paused)
+            dep['updatedAt'] = time.time()
             dep['updatedBy'] = who
             return self._joined(meta, project_id, dep)
 
@@ -458,8 +546,8 @@ class FileDeploymentBackend:
             raise StorageError(f'{project_id} v{version}: artifact sha256 mismatch — refusing to load')
         return json.loads(data)
 
-    async def iter_active(self) -> 'AsyncGenerator[Dict[str, Any], None]':
-        """Yield every active team deployment across all orgs (scheduler feed).
+    async def iter_enabled(self) -> 'AsyncGenerator[Dict[str, Any], None]':
+        """Yield every ENABLED team deployment across all orgs (scheduler feed).
 
         Each item: {orgId, teamId, projectId, version, state, schedules}.
         """
@@ -471,7 +559,7 @@ class FileDeploymentBackend:
                 if meta is None:
                     continue
                 for team_id, dep in meta['deployments'].items():
-                    if dep.get('state') != 'active':
+                    if dep.get('state') != 'enabled':
                         continue
                     yield {
                         'orgId': org_id,
@@ -571,6 +659,9 @@ class FileDeploymentBackend:
             'createdBy': dep.get('createdBy'),
             'updatedAt': dep.get('updatedAt'),
             'updatedBy': dep.get('updatedBy'),
+            # Stamped by deploy() on every pointer move; records from before
+            # the field existed fall back to updatedAt.
+            'deployedAt': dep.get('deployedAt', dep.get('updatedAt')),
             'pipelineName': entry.get('pipelineName', ''),
             'sha256': entry.get('sha256', ''),
             'publishedAt': entry.get('publishedAt'),

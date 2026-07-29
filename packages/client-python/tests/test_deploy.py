@@ -131,7 +131,7 @@ class TestDeploy:
             assert dep['teamId'] == TEAM
             assert dep['projectId'] == project
             assert dep['version'] == 1
-            assert dep['state'] == 'active'
+            assert dep['state'] == 'enabled'
         finally:
             await self._cleanup(project)
 
@@ -183,11 +183,11 @@ class TestDeploy:
             await self._cleanup(project)
 
     @pytest.mark.asyncio
-    async def test_run_now_refuses_paused(self):
+    async def test_run_now_refuses_disabled(self):
         project = fresh_project()
         try:
             await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
-            await self.client.deploy.pause(project, TEAM)
+            await self.client.deploy.disable(project, TEAM)
             with pytest.raises(RuntimeError):
                 await self.client.deploy.run(project, 'webhook_1', TEAM)
         finally:
@@ -228,17 +228,17 @@ class TestDeploy:
         with pytest.raises(RuntimeError):
             await self.client.deploy.get('nonexistent-project', TEAM)
 
-    # ── state: pause / resume / soft remove ──────────────────────────────────
+    # ── state: enable / disable / soft remove ────────────────────────────────
 
     @pytest.mark.asyncio
-    async def test_pause_resume(self):
+    async def test_disable_enable(self):
         project = fresh_project()
         try:
             await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
-            dep = await self.client.deploy.pause(project, TEAM)
-            assert dep['state'] == 'paused'
-            dep = await self.client.deploy.resume(project, TEAM)
-            assert dep['state'] == 'active'
+            dep = await self.client.deploy.disable(project, TEAM)
+            assert dep['state'] == 'disabled'
+            dep = await self.client.deploy.enable(project, TEAM)
+            assert dep['state'] == 'enabled'
         finally:
             await self._cleanup(project)
 
@@ -266,11 +266,35 @@ class TestDeploy:
 
             dep = await self.client.deploy.set_schedule(project, 'webhook_1', '0 * * * *', TEAM)
             assert dep['schedules']['webhook_1']['cron'] == '0 * * * *'
-            assert dep['schedules']['webhook_1']['enabled'] is True
+            assert dep['schedules']['webhook_1']['paused'] is False
 
             # None clears the schedule row entirely.
             dep = await self.client.deploy.set_schedule(project, 'webhook_1', None, TEAM)
             assert 'webhook_1' not in dep['schedules']
+        finally:
+            await self._cleanup(project)
+
+    @pytest.mark.asyncio
+    async def test_pause_and_resume_one_schedule(self):
+        project = fresh_project()
+        try:
+            await self.client.deploy.publish(make_pipeline(project), deploy_to=TEAM)
+            await self.client.deploy.set_schedule(project, 'webhook_1', '0 * * * *', TEAM, ttl=600)
+
+            # Pause keeps cron/ttl; a cron edit must not unpause it.
+            dep = await self.client.deploy.pause_schedule(project, 'webhook_1', TEAM)
+            assert dep['schedules']['webhook_1']['paused'] is True
+            assert dep['schedules']['webhook_1']['cron'] == '0 * * * *'
+            assert dep['schedules']['webhook_1']['ttl'] == 600
+            dep = await self.client.deploy.set_schedule(project, 'webhook_1', '30 * * * *', TEAM)
+            assert dep['schedules']['webhook_1']['paused'] is True
+
+            dep = await self.client.deploy.resume_schedule(project, 'webhook_1', TEAM)
+            assert dep['schedules']['webhook_1']['paused'] is False
+
+            # Pausing a source with no schedule is an explicit error.
+            with pytest.raises(RuntimeError):
+                await self.client.deploy.pause_schedule(project, 'ghost_1', TEAM)
         finally:
             await self._cleanup(project)
 

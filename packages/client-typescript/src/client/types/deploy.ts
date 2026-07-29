@@ -63,9 +63,15 @@ export interface DeployArtifact {
 export interface DeploymentSchedule {
 	/** 5-field cron expression. */
 	cron?: string;
-	enabled?: boolean;
+	/** Paused schedules stay configured (cron/ttl kept) but never fire. */
+	paused?: boolean;
 	/** Run window in seconds ('fixed window'); null/absent = until finished. */
 	ttl?: number | null;
+	/** Trace verbosity for this source's deploy runs; null/absent = the
+	    deploy default (full). */
+	traceLevel?: 'none' | 'metadata' | 'summary' | 'full' | null;
+	/** Full task debug output (--trace=debugOut) for this source. */
+	debugOut?: boolean;
 	/** Unix timestamp (seconds) of the last scheduler dispatch, or null. */
 	lastRunAt?: number | null;
 }
@@ -76,7 +82,8 @@ export interface Deployment {
 	projectId?: string;
 	/** The registry version this team currently points at. */
 	version?: number;
-	state?: 'active' | 'paused' | 'errored' | 'removed';
+	/** `disabled` is the whole-deployment kill switch — nothing runs. */
+	state?: 'enabled' | 'disabled' | 'errored' | 'removed';
 	pipelineName?: string;
 	/** Per-source schedules, keyed by source id. */
 	schedules?: Record<string, DeploymentSchedule>;
@@ -84,6 +91,10 @@ export interface Deployment {
 	createdBy?: DeployActor;
 	updatedAt?: number;
 	updatedBy?: DeployActor;
+	/** Unix seconds of the latest POINTER MOVE for this team (deploy or
+	    rollback), computed from the audit trail — unlike `updatedAt`, it is
+	    NOT bumped by disable/enable or schedule edits. */
+	deployedAt?: number;
 	/** Registry-joined fields of the pointed-at version. */
 	sha256?: string;
 	publishedAt?: number;
@@ -99,7 +110,9 @@ export interface DeployHistoryEntry {
 	seq?: number;
 	/** Unix timestamp (seconds). */
 	at?: number;
-	action?: 'publish' | 'deploy' | 'rollback' | 'pause' | 'resume' | 'errored' | 'remove';
+	/** `pause`/`resume` appear only on rows written before the
+	    enable/disable vocabulary (the trail is immutable). */
+	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove';
 	/** `''` on org-wide rows (publish); the team id on pointer changes. */
 	teamId?: string;
 	version?: number;

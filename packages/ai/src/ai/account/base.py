@@ -359,7 +359,7 @@ class AccountBase(ABC):
         return await self._deployment_backend().deploy(org_id, team_id, project_id, version, actor)
 
     async def deployments_set_state(self, org_id: str, team_id: str, project_id: str, state: str, actor: dict) -> dict:
-        """Pause/resume/error/soft-remove a team deployment."""
+        """Enable/disable/error/soft-remove a team deployment."""
         return await self._deployment_backend().set_state(org_id, team_id, project_id, state, actor)
 
     async def deployments_schedule_set(
@@ -369,13 +369,37 @@ class AccountBase(ABC):
         project_id: str,
         source_id: str,
         cron: 'str | None',
-        enabled: bool,
         actor: dict,
         ttl: 'int | None' = None,
     ) -> dict:
-        """Set (or clear with cron=None) one source's schedule."""
-        return await self._deployment_backend().schedule_set(
-            org_id, team_id, project_id, source_id, cron, enabled, actor, ttl
+        """Set (or clear with cron=None) one source's schedule.
+
+        The paused flag is untouched (preserved on edit, False on create) —
+        ``deployments_schedule_set_paused`` owns it.
+        """
+        return await self._deployment_backend().schedule_set(org_id, team_id, project_id, source_id, cron, actor, ttl)
+
+    async def deployments_source_config_set(
+        self,
+        org_id: str,
+        team_id: str,
+        project_id: str,
+        source_id: str,
+        trace_level: 'str | None',
+        debug_out: bool,
+        actor: dict,
+    ) -> dict:
+        """Set one source's execution settings (trace level + debug output)."""
+        return await self._deployment_backend().source_config_set(
+            org_id, team_id, project_id, source_id, trace_level, debug_out, actor
+        )
+
+    async def deployments_schedule_set_paused(
+        self, org_id: str, team_id: str, project_id: str, source_id: str, paused: bool, actor: dict
+    ) -> dict:
+        """Pause or resume one source's schedule, preserving cron/ttl."""
+        return await self._deployment_backend().schedule_set_paused(
+            org_id, team_id, project_id, source_id, paused, actor
         )
 
     async def deployments_mark_run(self, org_id: str, team_id: str, project_id: str, source_id: str) -> None:
@@ -410,9 +434,9 @@ class AccountBase(ABC):
         """Load one artifact version, sha256-verified against the registry."""
         return await self._deployment_backend().artifact(org_id, project_id, version)
 
-    def deployments_iter_active(self):
-        """Async-generate every active team deployment (the scheduler feed)."""
-        return self._deployment_backend().iter_active()
+    def deployments_iter_enabled(self):
+        """Async-generate every ENABLED team deployment (the scheduler feed)."""
+        return self._deployment_backend().iter_enabled()
 
     # =========================================================================
     # DAP COMMAND DISPATCH — SaaS overrides all three
