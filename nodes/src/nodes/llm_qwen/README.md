@@ -119,7 +119,7 @@ Profiles are maintained by the model sync tool, see [tools/sync_models](../../..
 python tools/sync_models/src/sync_models.py --provider llm_qwen --enable-discovery --apply
 ```
 
-Discovery requires `ROCKETRIDE_QWEN_KEY`. Without it the sync falls back to OpenRouter, which lists HuggingFace-style IDs that DashScope does not accept — the source of the deprecated profiles above. The stable aliases are listed in `protected_profiles` so a non-authoritative source cannot deprecate them.
+Discovery — adding profiles — requires `ROCKETRIDE_QWEN_KEY`. Without it the command above still runs, but only enriches profiles that already exist: OpenRouter and LiteLLM can supply token counts, and neither may add a profile unless you also pass `--allow-fallback-discovery`. Avoid that flag here — it lets OpenRouter contribute the HuggingFace-style IDs DashScope does not accept, which is what the deprecated profiles above are. The stable aliases are listed in `protected_profiles` so a non-authoritative source cannot deprecate them.
 
 ---
 
