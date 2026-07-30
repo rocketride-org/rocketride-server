@@ -14,32 +14,22 @@
 	"icon": "calendar.svg",
 	"documentation": "https://docs.rocketride.org",
 	"description": [
-		"Exposes Google Calendar operations as agent tools.",
-		"List, get, create, update, move, and delete events (including recurring-series instances and natural-language quick-add); query free/busy; manage calendars and access-control (ACL) rules.",
-		"Supports incremental sync via syncToken and sends attendee invites at the write tier. Authenticates via a Google service account or user OAuth."
-	],
-	"tile": [
-		"Google Calendar (${parameters.calendar.access})"
+		"Exposes Google Calendar operations as agent tools.\n",
+		"List, get, create, update, move, and delete events (including recurring-series instances and natural-language ",
+		"quick-add); query free/busy; manage calendars and access-control (ACL) rules.\n",
+		"Supports incremental sync via syncToken and sends attendee invites at the write tier. Authenticates via a Google ",
+		"service account or user OAuth."
 	],
 	"lanes": {},
-	"preconfig": {
-		"default": "default",
-		"profiles": {
-			"default": {
-				"title": "Google Calendar",
-				"authType": "service",
-				"serviceKey": "",
-				"adminEmail": "",
-				"userToken": "",
-				"access": "write"
-			}
-		}
-	},
-	"fields": {
-		"calendar.access": {
+	"propertyDefinitions": {
+		"access": {
 			"type": "string",
 			"title": "Access level",
-			"description": "Calendar scopes to request. readonly: read events, calendars, ACLs, and free/busy only. write: full read/write (create, update, move, quick-add events; manage calendars and ACLs). Deletion additionally requires the allowDelete flag; public/domain-wide ACL sharing requires allowPublicSharing.",
+			"description": [
+				"Calendar scopes to request. readonly: read events, calendars, ACLs, and free/busy only. write: full read/write ",
+				"(create, update, move, quick-add events; manage calendars and ACLs). Deletion additionally requires the ",
+				"allowDelete flag; public/domain-wide ACL sharing requires allowPublicSharing."
+			],
 			"default": "write",
 			"enum": [
 				[
@@ -52,28 +42,25 @@
 				]
 			]
 		},
-		"calendar.allowDelete": {
+		"allowDelete": {
 			"type": "boolean",
 			"title": "Allow event / calendar deletion",
-			"description": "When off (the default), event_delete and calendar_delete are refused even at the write tier. Enable only if the agent should be able to permanently delete events and calendars — this is irreversible.",
+			"description": [
+				"When off (the default), event_delete and calendar_delete are refused even at the write tier. Enable only if the ",
+				"agent should be able to permanently delete events and calendars — this is irreversible."
+			],
 			"default": false
 		},
-		"calendar.allowPublicSharing": {
+		"allowPublicSharing": {
 			"type": "boolean",
 			"title": "Allow public / domain-wide calendar sharing",
-			"description": "Off by default. When off, acl_insert refuses rules that expose the calendar beyond individual grantees (scopeType 'default' = anyone on the internet, and 'domain' = everyone in a domain). Turn on to allow public or domain-wide sharing. Grants to individual users/groups are not gated.",
+			"description": [
+				"Off by default. When off, acl_insert refuses rules that expose the calendar beyond individual grantees ",
+				"(scopeType 'default' = anyone on the internet, and 'domain' = everyone in a domain). Turn on to allow public or ",
+				"domain-wide sharing. Grants to individual users/groups are not gated."
+			],
 			"default": false
 		}
 	},
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Google Calendar",
-			"properties": [
-				"type",
-				"google.authType",
-				"calendar.access"
-			]
-		}
-	]
+	"properties": ["type", "google.authType", "access"]
 }
