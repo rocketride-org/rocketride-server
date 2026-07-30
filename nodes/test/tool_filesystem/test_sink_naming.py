@@ -68,6 +68,24 @@ class TestServicesContract:
         # No agent-tool toggles on the store surface.
         assert not any(k.startswith('filesystem.allow') for k in f)
 
+    def test_source_variant_identity(self):
+        d = _load_services('services.source.json')
+        assert d['protocol'] == 'filestore_source://'
+        assert d['title'] == 'File Store Source'
+        assert d['classType'] == ['source']
+        assert d['register'] == 'endpoint'
+        assert d['capabilities'] == ['noinclude']
+        assert d['path'] == 'nodes.tool_filesystem'
+        # Raw objects go out on the tags lane for a downstream Parser.
+        assert d['lanes'] == {'_source': ['tags']}
+
+    def test_source_variant_fields(self):
+        d = _load_services('services.source.json')
+        f = d['fields']
+        assert f['filesystem.path']['type'] == 'string'
+        assert f['filesystem.recursive']['type'] == 'boolean'
+        assert f['filesystem.recursive']['default'] is False
+
 
 def _install_stubs():
     """Install engine + ``ai`` stubs so IGlobal/IInstance import as pure Python.
