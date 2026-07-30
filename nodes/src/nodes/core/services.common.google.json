@@ -1,56 +1,58 @@
 //
-// Common field definitions for google cloud - these will be merged into the
+// Common property definitions for google cloud - these will be merged into the
 // service definition as required by the service
 //
 {
-	"fields": {
+	"propertyDefinitions": {
 		"google.authType": {
 			"type": "string",
 			"title": "Authentication Type",
 			"default": "service",
 			"readonly": true,
-			"enum": ["service", "user"],
-			"enumNames": ["Service", "User"],
-			"conditional": [
-				{
-					"value": "service",
+			"enum": {
+				"service": {
+					"title": "Service",
 					"properties": ["google.customerId", "google.adminEmail", "google.serviceKey"]
 				},
-				{
-					"value": "user",
-					"properties": ["google.oAuthButton", "google.userToken"]
+				"user": {
+					"title": "User",
+					"properties": ["google.userAuth"]
 				}
-			]
+			}
 		},
-		"google.oAuthButton": {
+		"google.userAuth": {
 			"title": "Login with Google",
-			"type": "string",
-			"ui:widget": "GoogleButtonWidget",
-			"optional": true
+			"type": "oauth2"
 		},
 		"google.customerId": {
 			"type": "string",
 			"title": "Customer ID",
-			"description": "Enter your Google Workspace Customer ID.\n\nThis unique identifier is assigned to your organization by Google. It is used to specify the particular Google Workspace domain you want to manage."
+			"description": [
+				"Enter your Google Workspace Customer ID.\n\n",
+				"This unique identifier is assigned to your organization by Google. ",
+				"It is used to specify the particular Google ",
+				"Workspace domain you want to manage."
+			]
 		},
 		"google.adminEmail": {
 			"type": "string",
 			"title": "Administrator E-mail",
-			"description": "Enter the email address of a Google Workspace administrator.\n\nThis email should belong to a user with administrative privileges in your Google Workspace domain."
+			"description": [
+				"Enter the email address of a Google Workspace administrator.\n\n",
+				"This email should belong to a user with administrative privileges ",
+				"in your Google Workspace domain."
+			]
 		},
 		"google.serviceKey": {
-			"type": "string",
-			"format": "data-url",
+			"type": "upload",
 			"title": "Service Account Key File",
-			"description": "Upload the JSON key file for your Google Workspace service account.\n\nThis file contains the credentials necessary to authenticate API requests.",
-			"ui:options:accept": ".json"
-		},
-		"google.userToken": {
-			"type": "string",
-			"title": "Access Token",
-			"description": "It is a long term token that allows you to get new access tokens to access the Google API.",
-			"ui:widget": "password",
-			"ui:disabled": true
+			"description": [
+				"Upload the JSON key file for your Google Workspace service account.\n\n",
+				"This file contains the credentials necessary to authenticate API requests."
+			],
+			"options": {
+				"accept": ".json"
+			}
 		}
 	}
 }
