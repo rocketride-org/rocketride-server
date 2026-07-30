@@ -99,7 +99,7 @@ The tool path runs on the control plane and does not pass through the pipeline's
 
 Set `apikey` to your Pinecone API key. The key is used during both config validation (HTTP client) and runtime data operations (gRPC client). There are no additional auth modes - Pinecone uses API-key-only authentication.
 
-Changing the API key, profile, or index changes the transform key used to track ingested objects. Existing Pinecone pipelines may re-ingest once after upgrading from versions that used the legacy host/port/collection key.
+Changing the API key, profile, or collection changes the transform key used to track ingested objects. Existing Pinecone pipelines may re-ingest once after upgrading from versions that used the legacy host/port/collection key.
 
 ---
 
