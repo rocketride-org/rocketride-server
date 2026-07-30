@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sys
+import traceback
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -350,6 +351,35 @@ class TestErrors:
         mock_request.side_effect = requests.ConnectionError('dns failure')
         with pytest.raises(ValueError, match='Pipedrive request failed'):
             call(TEST_TOKEN, 'GET', '/deals')
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_transport_failure_names_the_failure_and_the_call(self, mock_request):
+        """The message has to stay useful once the exception text is dropped."""
+        mock_request.side_effect = requests.ConnectTimeout('timed out')
+        with pytest.raises(ValueError) as exc:
+            call(TEST_TOKEN, 'GET', '/deals/1')
+        assert 'ConnectTimeout' in str(exc.value)
+        assert 'GET /deals/1' in str(exc.value)
+
+    @patch('tool_pipedrive.pipedrive_client.requests.request')
+    def test_api_token_is_not_in_the_transport_error_or_its_traceback(self, mock_request):
+        """A personal token rides in the query string, so requests' exception text
+        carries it. Neither the raised message nor a printed traceback may repeat it.
+        """
+        leaky_url = f'https://api.pipedrive.com/api/v1/deals?api_token={PERSONAL_TOKEN}'
+        mock_request.side_effect = requests.ConnectionError(
+            f"HTTPSConnectionPool(host='api.pipedrive.com', port=443): "
+            f'Max retries exceeded with url: {leaky_url} (Caused by NameResolutionError)'
+        )
+
+        with pytest.raises(ValueError) as exc:
+            call(PERSONAL_TOKEN, 'GET', '/deals')
+
+        assert PERSONAL_TOKEN not in str(exc.value)
+        # `from None` is what this half pins: a chained cause would put the same URL
+        # back into any traceback the agent framework logs.
+        rendered = ''.join(traceback.format_exception(type(exc.value), exc.value, exc.value.__traceback__))
+        assert PERSONAL_TOKEN not in rendered
 
 
 # ---------------------------------------------------------------------------

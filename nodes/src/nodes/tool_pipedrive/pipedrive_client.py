@@ -289,7 +289,14 @@ def call_envelope(
                 timeout=timeout,
             )
         except requests.RequestException as exc:
-            raise ValueError(f'Pipedrive request failed: {exc}') from exc
+            # Never let this exception near the message. On the personal-token path
+            # _auth() puts the credential in the query string, so requests bakes it
+            # into the URL — and a RequestException stringifies to text carrying that
+            # URL. `from None` breaks the chain too: the cause holds the same URL and
+            # a printed traceback would re-expose it. The exception type still names
+            # the failure (ConnectTimeout / ConnectionError / SSLError / ReadTimeout),
+            # and method/path are secret-free — `path` carries no query string.
+            raise ValueError(f'Pipedrive request failed: {type(exc).__name__} on {method.upper()} {path}') from None
 
         if not resp.ok:
             if _is_rate_limited(resp):

@@ -68,6 +68,7 @@ _NOTE_WRITE_PROPS = {
     'lead_id': STR('Lead uuid the note is attached to.'),
     'project_id': INT('Project the note is attached to.'),
     'user_id': INT('Author user id. Defaults to the authenticated user.'),
+    'add_time': STR('Creation timestamp, YYYY-MM-DD HH:MM:SS. Use to backdate an imported record.'),
     'pinned_to_deal_flag': ENUM('Pin the note to the deal.', ['0', '1']),
     'pinned_to_person_flag': ENUM('Pin the note to the person.', ['0', '1']),
     'pinned_to_organization_flag': ENUM('Pin the note to the organization.', ['0', '1']),
