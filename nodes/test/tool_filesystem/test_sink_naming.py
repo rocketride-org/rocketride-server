@@ -78,6 +78,10 @@ class TestServicesContract:
         assert d['path'] == 'nodes.tool_filesystem'
         # Raw objects go out on the tags lane for a downstream Parser.
         assert d['lanes'] == {'_source': ['tags']}
+        # The shape must route the declared fields through the source-parameters
+        # wrapper (telegram/dropper convention) — fields listed directly in the
+        # Pipe section never reach serviceConfig['parameters'] at runtime.
+        assert d['shape'][0]['properties'] == ['type', 'Pipe.source.parameters']
 
     def test_source_variant_fields(self):
         d = _load_services('services.source.json')
@@ -85,6 +89,12 @@ class TestServicesContract:
         assert f['filesystem.path']['type'] == 'string'
         assert f['filesystem.recursive']['type'] == 'boolean'
         assert f['filesystem.recursive']['default'] is False
+        # Source-parameters wrapper: the engine strips the 'filesystem.' prefix
+        # and delivers these flat under serviceConfig['parameters'].
+        assert f['Pipe.source.parameters'] == {
+            'section': 'parameters',
+            'properties': ['filesystem.path', 'filesystem.recursive'],
+        }
 
 
 def _install_stubs():

@@ -459,6 +459,28 @@ class IInstance(IInstanceBase):
                 payload['url'] = ref['url']
             self.instance.writeJson(payload)
 
+    # -- source render (File Store Source variant) ---------------------
+
+    def renderObject(self, object: Entry):
+        """Deliver one scanned file for the ``filestore_source://`` variant.
+
+        In the engine's DIRECT pipeline mode, ``IEndpoint.scanObjects`` reports
+        entries through the scan callback and the engine calls back here per
+        entry with the target pipe already open. Delegates the read + raw tag
+        stream to :meth:`IEndpoint.renderStoreObject`, then prevents the C++
+        default render (which would try to re-read the object through the
+        endpoint stream API this node does not implement).
+
+        The sink/tool variants of this folder never receive ``renderObject``
+        (it is only invoked on pipeline-source pipes), but guard anyway so a
+        non-source endpoint falls through to the engine default.
+        """
+        render = getattr(self.IEndpoint, 'renderStoreObject', None)
+        if render is None:
+            return
+        render(object, self.instance)
+        return self.preventDefault()
+
     # -- lane handlers -------------------------------------------------
 
     def open(self, object: Entry):

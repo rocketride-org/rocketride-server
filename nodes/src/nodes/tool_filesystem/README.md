@@ -171,12 +171,15 @@ fully scanned — this is not a long-running server.
   resolves to a folder, every file directly inside it is streamed; with `recursive` on,
   subfolders are descended too (breadth-first). A `path` that doesn't exist in the store
   fails the task.
-- **Delivery:** each file is read in full and pushed onto the `tags` lane as a raw
-  object (`url`, `name`, `size`) for a downstream parser node to interpret; the parser
-  sniffs the file type from the extension in `name`.
-- **Size cap:** each file is read via the store's default 100 MB per-read cap. A file
-  larger than that is **skipped with a logged warning** — it does not fail the task —
-  and the scan continues with the remaining files.
+- **Delivery:** the scan reports each file to the engine (name + size), which queues
+  it and calls back into the node to render it: the file is read in full and sent onto
+  the `tags` lane as a raw object for a downstream parser node to interpret; the parser
+  sniffs the file type from the extension in the entry name. Because delivery rides the
+  engine's scan/render contract, per-object completed/failed accounting and the task
+  exit code are handled by the engine — a successful run ends with exit code 0.
+- **Read failures:** a file that cannot be read (including one over the store's default
+  100 MB per-read cap) is **marked failed with a warning** — the scan continues with
+  the remaining files, and the failure is reflected in the task's failed-object count.
 
 ---
 

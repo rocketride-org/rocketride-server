@@ -29,23 +29,27 @@ as raw objects. The configured ``path`` (relative to ``users/<client_id>/files/`
 may be a single file or a folder; with ``recursive`` on, subfolders are
 descended as well.
 
-Delivery uses the engine's target-pipe push contract (the same sequence the
-telegram source uses): per file, ``target.getPipe()`` -> ``pipe.open(entry)``
--> ``writeTagBeginObject/BeginStream`` -> ``writeTagData(bytes)`` ->
-``EndStream/EndObject`` -> ``pipe.close()``. The raw bytes ride the ``tags``
-lane to a downstream Parser. The task completes when ``scanObjects`` returns —
-this is a finite source, not a long-running server.
+Delivery uses the engine's DIRECT pipeline mode contract (see
+``engine-lib/task/pipe/Pipeline.cpp``: "Connect the scanObjects function to the
+renderObject function"): ``scanObjects`` enumerates the configured path and
+reports each file through the engine's scan callback, which feeds the scanner's
+object counter and queues the entry for processing. The engine then opens each
+entry on the target pipe and calls ``renderObject`` on the node instance
+(``IInstance.renderObject`` delegates to :meth:`IEndpoint.renderStoreObject`),
+which reads the file and sends the raw bytes as a tag stream down the ``tags``
+lane to a downstream Parser. Completed/failed accounting is done by the engine
+per rendered entry. The task completes when the scan queue drains — this is a
+finite source, not a long-running server.
 """
 
 from __future__ import annotations
 
 import asyncio
-import mimetypes
 import os
 from typing import Any, Callable, Dict
 
 from ai.account.store import Store
-from rocketlib import IEndpointBase, getObject, monitorCompleted, monitorFailed, warning
+from rocketlib import IEndpointBase
 
 
 async def _collect(store, rel: str, recursive: bool) -> list[tuple[str, int]]:
@@ -78,70 +82,59 @@ async def _collect(store, rel: str, recursive: bool) -> list[tuple[str, int]]:
 class IEndpoint(IEndpointBase):
     """Finite source endpoint over the account FileStore."""
 
-    target = None
-
     def _params(self) -> Dict[str, Any]:
         try:
             return self.endpoint.serviceConfig['parameters'] or {}
         except Exception:
             return {}
 
-    def validateConfig(self, syntaxOnly: bool) -> None:
-        if not str(self._params().get('path') or '').strip():
-            raise ValueError('File Store Source: "path" is required')
-
-    def scanObjects(self, path: str, scanCallback: Callable[[Dict[str, Any]], None]) -> None:
-        """Enumerate the configured path and push each file into the pipeline.
-
-        The engine's scan callback is not used: content is pushed through the
-        target pipe directly (telegram pattern), so enumeration and delivery
-        happen in one pass and the task completes on return.
-        """
-        params = self._params()
-        rel = str(params.get('path') or '').strip().strip('/')
-        recursive = bool(params.get('recursive', False))
-
+    @staticmethod
+    def _store():
+        """Build the account-scoped FileStore for the engine-injected client id."""
         client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
         if not client_id:
             raise ValueError(
                 'File Store Source: ROCKETRIDE_CLIENT_ID env var is missing; this source must run inside the task engine'
             )
-        store = Store.create().get_file_store(client_id)
-        self.target = self.endpoint.target
+        return Store.create().get_file_store(client_id)
 
+    def validateConfig(self, syntaxOnly: bool) -> None:
+        if not str(self._params().get('path') or '').strip():
+            raise ValueError('File Store Source: "path" is required')
+
+    def scanObjects(self, path: str, scanCallback: Callable[[Dict[str, Any]], int]) -> None:
+        """Enumerate the configured path and report each file to the engine.
+
+        Each file is passed to ``scanCallback`` as an object entry; the engine
+        queues it and delivers the content via ``renderObject`` (see
+        :meth:`renderStoreObject`). Reporting through the callback also feeds
+        the scanner's object counter, so a successful run does not end with a
+        spurious "Files not found" warning.
+        """
+        params = self._params()
+        rel = str(params.get('path') or '').strip().strip('/')
+        if not rel:
+            raise ValueError('File Store Source: "path" is required')
+        recursive = bool(params.get('recursive', False))
+
+        store = self._store()
         for file_path, size in asyncio.run(_collect(store, rel, recursive)):
-            self._push_file(store, file_path, size)
+            # A non-zero return means the engine wants the scan stopped
+            # (cancellation or license limit reached).
+            if scanCallback({'name': file_path, 'size': size}):
+                break
 
-    def _push_file(self, store, file_path: str, size: int) -> None:
-        """Read one file and stream it through a target pipe as a raw object."""
-        try:
-            data = asyncio.run(store.read(file_path))
-        except Exception as e:
-            monitorFailed(size)
-            warning(f'File Store Source: failed to read {file_path!r}: {e}')
-            return
+    def renderStoreObject(self, entry, instance) -> None:
+        """Render one scanned entry: read the file and send it as a raw tag stream.
 
-        mime = mimetypes.guess_type(file_path)[0] or 'application/octet-stream'
-        entry = getObject(
-            obj={
-                'url': f'filestore://{file_path}',
-                'name': file_path,
-                'size': len(data),
-                'mimeType': mime,
-            }
-        )
-        pipe = self.target.getPipe()
-        try:
-            pipe.open(entry)
-            pipe.writeTagBeginObject()
-            pipe.writeTagBeginStream()
-            pipe.writeTagData(data)
-            pipe.writeTagEndStream()
-            pipe.writeTagEndObject()
-            pipe.close()
-            monitorCompleted(len(data))
-        except Exception as e:
-            monitorFailed(len(data))
-            warning(f'File Store Source: failed to push {file_path!r}: {e}')
-        finally:
-            self.target.putPipe(pipe)
+        Called by ``IInstance.renderObject`` with the engine ``instance`` whose
+        ``sendTag*`` functions write into the already-open target pipe. Errors
+        propagate so the engine marks the entry failed and counts it.
+        """
+        file_path = str(entry.name).strip('/')
+        data = asyncio.run(self._store().read(file_path))
+        instance.sendTagBeginObject()
+        instance.sendTagBeginStream()
+        instance.sendTagData(data)
+        instance.sendTagEndStream()
+        instance.sendTagEndObject()

@@ -38,13 +38,17 @@
 				[true, "Yes"],
 				[false, "No"]
 			]
+		},
+		"Pipe.source.parameters": {
+			"section": "parameters",
+			"properties": ["filesystem.path", "filesystem.recursive"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "File Store Source",
-			"properties": ["type", "filesystem.path", "filesystem.recursive"]
+			"properties": ["type", "Pipe.source.parameters"]
 		}
 	]
 }
