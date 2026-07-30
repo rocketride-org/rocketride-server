@@ -47,7 +47,13 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that returns processed answers back to the requesting client. It handles the ", "response phase of the HTTP request-response cycle by returning the results as a JSON ", "object. This component ensures that data is transmitted efficiently and clearly to ", "the client, providing a standardized format for the response."],
+	"description": [
+		"A component that returns processed answers back to the requesting client. ",
+		"It handles the response phase of the HTTP request-response cycle by returning ",
+		"the results as a JSON object. This component ensures that data is transmitted ",
+		"efficiently and clearly to the client, providing a standardized format for ",
+		"the response."
+	],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -83,11 +89,11 @@
 	},
 	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
+	//		Local property definitions - these define fields only for the
+	//		current service. You may also reference global propertyDefinitions
+	//		(see services.common.json) from "properties" via "use".
 	//
-	"fields": {
+	"propertyDefinitions": {
 		"laneName": {
 			"type": "string",
 			"title": "Identifier key within result",
@@ -98,14 +104,7 @@
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the fields shown in the node's config panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Return Answers",
-			"properties": ["laneName"]
-		}
-	]
+	"properties": ["laneName"]
 }
