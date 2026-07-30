@@ -222,16 +222,19 @@ jobs:
       # RR_REQUIRE_DB_TESTS additionally turns the suites' unreachable-DB
       # skip into a hard failure, so a container that fails to start can
       # never let the safety-control tests go silently green.
-      # NB: close to, not exactly, the cloud pin (PG 16.14 + AGE 1.5.0 +
-      # pgvector 0.8.0 in ONE database); publishing that exact image to GHCR
-      # is a noted follow-up. AGE version here IS the pinned 1.5.0.
+      # Extension versions are pinned to the cloud exactly: pgvector 0.8.0
+      # (0.8.0-pg16 — the bare pg16 tag floats and had drifted to 0.8.3,
+      # which would not prove planner behaviour on the version the cloud
+      # runs) and AGE 1.5.0. The remaining drift is the PG minor inside each
+      # image and the two-images-vs-one-database split; publishing the exact
+      # single-image cloud pin to GHCR is a noted follow-up.
       - name: Start Postgres (pgvector + AGE) for tests / Linux
         if: matrix.platform == 'ubuntu' && inputs.codeql == false
         run: |
           set -euo pipefail
           docker run -d --name rr-pgvector -p 55432:5432 \
             -e POSTGRES_USER=rruser -e POSTGRES_PASSWORD=rrpass -e POSTGRES_DB=rrtenant \
-            pgvector/pgvector:pg16
+            pgvector/pgvector:0.8.0-pg16
           docker run -d --name rr-age -p 55433:5432 \
             -e POSTGRES_USER=rruser -e POSTGRES_PASSWORD=rrpass -e POSTGRES_DB=rrtenant \
             apache/age:release_PG16_1.5.0 -c shared_preload_libraries=age

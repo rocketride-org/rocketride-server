@@ -182,6 +182,24 @@ class IGlobal(GraphGlobalBase):
             firewall=self._firewall_config(),
         )
 
+    def _require_transactional_client(self) -> None:
+        """Shared precondition for every transaction-opening path.
+
+        Both server-side controls (``SET TRANSACTION READ ONLY`` and the
+        plan's ``SET LOCAL statement_timeout``) are silent no-ops outside a
+        transaction. They hold because psycopg2 opens one implicitly on the
+        first execute — which requires autocommit off. Assert the
+        precondition so a future change fails loudly instead of quietly
+        dropping the write protection and the timeout cap.
+        """
+        if self.client is None:
+            raise RuntimeError('Database connection is not initialized')
+        if self.client.autocommit:
+            raise RuntimeError(
+                'rocketride_graph requires autocommit=False: READ ONLY and SET LOCAL '
+                'statement_timeout only apply inside a transaction'
+            )
+
     def _execute_plan(self, plan: TranslatedQuery, fetch_cap: Optional[int] = None) -> List[Tuple]:
         """Run one translated plan in its own transaction; return raw rows.
 
@@ -190,19 +208,7 @@ class IGlobal(GraphGlobalBase):
         opened the transaction), giving server-side write protection on the
         safe path.
         """
-        if self.client is None:
-            raise RuntimeError('Database connection is not initialized')
-        # Both server-side controls below (SET TRANSACTION READ ONLY and the
-        # plan's SET LOCAL statement_timeout) are silent no-ops outside a
-        # transaction. They hold because psycopg2 opens one implicitly on the
-        # first execute — which requires autocommit off. Assert the
-        # precondition so a future change fails loudly instead of quietly
-        # dropping the write protection and the timeout cap.
-        if self.client.autocommit:
-            raise RuntimeError(
-                'rocketride_graph requires autocommit=False: READ ONLY and SET LOCAL '
-                'statement_timeout only apply inside a transaction'
-            )
+        self._require_transactional_client()
         rows: List[Tuple] = []
         try:
             with self.client.cursor() as cur:
@@ -249,8 +255,13 @@ class IGlobal(GraphGlobalBase):
             plan = self._translate(query, mode=TranslateMode.SAFE)
         except AgeTranslationError as e:
             return False, str(e)
-        if self.client is None:
-            return False, 'Database connection is not initialized'
+        # Same precondition as _execute_plan (this method opens an identical
+        # READ ONLY + SET LOCAL transaction), folded into this method's
+        # return-a-message contract.
+        try:
+            self._require_transactional_client()
+        except RuntimeError as e:
+            return False, str(e)
         try:
             with self.client.cursor() as cur:
                 cur.execute('SET TRANSACTION READ ONLY')
