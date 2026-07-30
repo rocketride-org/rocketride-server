@@ -180,12 +180,18 @@ discord_sync_thread() {
   else
     body="{\"archived\": ${archived}, \"applied_tags\": ${tags}}"
   fi
+  # Route through discord_curl (not a hand-rolled curl call) so this PATCH gets
+  # the same 429/5xx retry as the create path. Safe here because the PATCH sets
+  # an absolute target state (archived + full applied_tags replace), so it's
+  # idempotent and retry-safe — unlike the create POST, this must NOT pass
+  # --no-retry-5xx.
   local status
-  status=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 30 -X PATCH \
+  discord_curl -X PATCH \
     -H "Authorization: Bot ${DISCORD_GITHUB_BOT_TOKEN}" \
     -H "Content-Type: application/json" \
     -d "$body" \
-    "https://discord.com/api/v10/channels/${thread_id}") || status=""
+    "https://discord.com/api/v10/channels/${thread_id}" >/dev/null 2>&1 || true
+  status=$(cat "$DISCORD_STATUS_FILE" 2>/dev/null || echo "")
   # Best-effort: never fail the job, but surface non-2xx (e.g. missing Manage
   # Threads → 403, bad payload → 400) so it's diagnosable in the run log.
   case "$status" in
