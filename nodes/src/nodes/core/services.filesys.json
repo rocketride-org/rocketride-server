@@ -34,7 +34,13 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A source component that reads data from the local file system. It ", "enables ingestion of files and documents stored in directories for ", "further processing within the pipeline. Configurable with path settings ", "and file filters, the component supports flexible access to unstructured ", "data across various formats."],
+	"description": [
+		"A source component that reads data from the local file system. It ",
+		"enables ingestion of files and documents stored in directories for ",
+		"further processing within the pipeline. Configurable with path settings ",
+		"and file filters, the component supports flexible access to unstructured ",
+		"data across various formats."
+	],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -52,61 +58,54 @@
 	},
 	//
 	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	"fields": {
-		"include": {
-			"description": "This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername"
-		},
-		"exclude": {
-			"description": "This path defines the paths excluded for Scan, Index, Classify and OCR. By default, its empty.\n\nFormat for Windows : C:\\foldername (for local filesystem) or \\\\file.core.net\\foldername (for shared folders)\n\nFormat for Linux : /file.core.net/foldername"
-		},
+	//		Local property definitions - these define fields only for the
+	//		current service. You may also reference global propertyDefinitions
+	//		(see services.common.json) from "properties" via "use".
+	//
+	"propertyDefinitions": {
 		"excludeExternalDrives": {
-			"title": "Exclude external drives",
 			"type": "boolean",
+			"title": "Exclude external drives",
 			"default": true
 		},
 		"excludeEnableGlobal": {
-			"title": "Exclude typical OS files and directories",
 			"type": "boolean",
+			"title": "Exclude typical OS files and directories",
 			"default": true
 		},
 		"excludeSymlinks": {
-			"title": "Exclude symlinks",
 			"type": "boolean",
+			"title": "Exclude symlinks",
 			"default": true
-		},
-		"filesys.source.parameters": {
-			"section": "parameters",
-			"title": "Parameters",
-			"properties": ["excludeExternalDrives", "excludeEnableGlobal", "excludeSymlinks"]
-		},
-		"Pipe.include": {
-			"description": "Example Path: /Users/usr/Documents/product-images/*"
-		},
-		"Pipe.exclude": {
-			"description": "Example Path: /Users/usr/Documents/product-images/*"
-		},
-		"Pipe.filesys.source.parameters": {
-			"section": "parameters",
-			"properties": ["excludeExternalDrives", "excludeEnableGlobal", "excludeSymlinks"]
 		}
 	},
 	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		may be specified, or both, but at least one is required
-	"shape": [
+	//		Defines the fields shown in the node's config panel, in order
+	//
+	"properties": [
+		"type",
+		"actions",
+		"source.mode",
 		{
-			"section": "Source",
-			"title": "File System",
-			"properties": ["type", "actions", "source.mode", "filesys.source.parameters", "include", "exclude", "estimation"]
+			"name": "parameters",
+			"properties": [
+				"excludeExternalDrives",
+				"excludeEnableGlobal",
+				"excludeSymlinks"
+			]
 		},
 		{
-			"section": "Pipe",
-			"title": "File System",
-			"properties": ["type", "actions", "source.mode", "Pipe.filesys.source.parameters", "Pipe.include", "Pipe.exclude"]
+			"name": "include",
+			"type": "array",
+			"description": "Example Path: /Users/usr/Documents/product-images/*",
+			"item": "Pipe.include.path"
+		},
+		{
+			"name": "exclude",
+			"type": "array",
+			"description": "Example Path: /Users/usr/Documents/product-images/*",
+			"item": "Pipe.exclude.path"
 		}
 	]
 }
