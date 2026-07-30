@@ -34,6 +34,9 @@ when the import is unavailable.
 
 import sys
 import types
+from importlib import import_module
+from types import ModuleType
+from typing import Any
 
 
 def _stub_module(name: str, **attrs) -> None:
@@ -51,12 +54,38 @@ def _stub_module(name: str, **attrs) -> None:
     sys.modules[name] = module
 
 
-# dist/server dependency-bootstrap: a no-op satisfies the source tree.
-_stub_module('depends', depends=lambda *_args, **_kwargs: None)
+if __name__ != 'task_conftest_import_helper':
+    # dist/server dependency-bootstrap: a no-op satisfies the source tree.
+    _stub_module('depends', depends=lambda *_args, **_kwargs: None)
 
-# dist/server shared logging/args helpers used by task_engine and friends.
-_stub_module(
-    'rocketlib',
-    debug=lambda *_args, **_kwargs: None,
-    args=types.SimpleNamespace(),
-)
+    # dist/server shared logging/args helpers used by task_engine and friends.
+    _stub_module(
+        'rocketlib',
+        debug=lambda *_args, **_kwargs: None,
+        args=types.SimpleNamespace(),
+    )
+
+
+_MISSING = object()
+
+
+def import_with_engine_stubs(module_name: str, rocketlib_attrs: dict[str, Any] | None = None) -> ModuleType:
+    """Import ``module_name`` with temporary source-tree stubs for engine-only modules."""
+    stubs: dict[str, ModuleType] = {
+        'depends': types.ModuleType('depends'),
+        'rocketlib': types.ModuleType('rocketlib'),
+    }
+    stubs['depends'].depends = lambda *_args, **_kwargs: None  # type: ignore[attr-defined]
+    for key, value in (rocketlib_attrs or {}).items():
+        setattr(stubs['rocketlib'], key, value)
+
+    saved = {name: sys.modules.get(name, _MISSING) for name in stubs}
+    sys.modules.update(stubs)
+    try:
+        return import_module(module_name)
+    finally:
+        for name, module in saved.items():
+            if module is _MISSING:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module

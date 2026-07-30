@@ -15,29 +15,28 @@ External deps:
   a provider id, or None if unknown. Tests patch it via monkeypatch.
 """
 
-import importlib
-import sys
-import types
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 
-_MISSING = object()
+def _load_import_helper():
+    path = Path(__file__).parents[2] / 'modules/task/conftest.py'
+    spec = importlib.util.spec_from_file_location('task_conftest_import_helper', path)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module.import_with_engine_stubs
 
 
 def _import_pipeline_validation():
-    saved = {name: sys.modules.get(name, _MISSING) for name in ('depends', 'rocketlib')}
-    sys.modules.setdefault('depends', types.SimpleNamespace(depends=lambda *_args, **_kwargs: None))
-    sys.modules.setdefault('rocketlib', types.SimpleNamespace(getServiceDefinition=lambda _provider_id: None))
-    try:
-        return importlib.import_module('ai.common.account.pipeline_validation')
-    finally:
-        for name, module in saved.items():
-            if module is _MISSING:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
+    return _load_import_helper()(
+        'ai.common.account.pipeline_validation',
+        {'getServiceDefinition': lambda _provider_id: None},
+    )
 
 
 pv = _import_pipeline_validation()
