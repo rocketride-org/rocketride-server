@@ -67,6 +67,7 @@ Pipeline files **must** use the `.pipe` extension.
 import asyncio
 from rocketride import RocketRideClient
 
+
 async def main():
     # Client reads configuration from .env automatically
     client = RocketRideClient()
@@ -74,27 +75,28 @@ async def main():
     try:
         # Connect to server
         await client.connect()
-        print("Connected to RocketRide server")
+        print('Connected to RocketRide server')
 
         # Start pipeline
         result = await client.use(filepath='pipeline.pipe')
         token = result['token']
-        print(f"Pipeline started with token: {token}")
+        print(f'Pipeline started with token: {token}')
 
         # Send data
-        await client.send(token, "Hello, RocketRide!")
-        print("Data sent successfully")
+        await client.send(token, 'Hello, RocketRide!')
+        print('Data sent successfully')
 
         # Check status
         status = await client.get_task_status(token)
-        print(f"Pipeline state: {status['state']}")
+        print(f'Pipeline state: {status["state"]}')
 
     finally:
         # Always disconnect
         await client.disconnect()
-        print("Disconnected")
+        print('Disconnected')
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     asyncio.run(main())
 ```
 
@@ -238,6 +240,7 @@ import asyncio
 from rocketride import RocketRideClient
 from rocketride.schema import Question
 
+
 async def main():
     client = RocketRideClient()
     await client.connect()
@@ -245,11 +248,13 @@ async def main():
     token = result['token']
 
     q = Question()
-    q.addQuestion("Hello, how are you?")
+    q.addQuestion('Hello, how are you?')
     response = await client.chat(token=token, question=q)
-    print("Answer:", response.get('answers', [None])[0])
+    print('Answer:', response.get('answers', [None])[0])
 
     await client.disconnect()
+
+
 asyncio.run(main())
 ```
 

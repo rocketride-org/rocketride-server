@@ -26,7 +26,7 @@ The method returns a **token** that you use for all subsequent operations on tha
 
 ```python
 result = await client.use(
-    filepath="pipeline.json",   # or pipeline={...}
+    filepath='pipeline.json',  # or pipeline={...}
     token=None,
     source=None,
     threads=None,
@@ -133,10 +133,13 @@ config = {
     'source': 'webhook_1',
     'components': [
         {'id': 'webhook_1', 'provider': 'webhook', 'config': {}},
-        {'id': 'llm_1', 'provider': 'llm_openai', 'config': {'model': 'gpt-4'},
-         'input': [{'from': 'webhook_1', 'lane': 'output'}]},
-        {'id': 'response_1', 'provider': 'response', 'config': {},
-         'input': [{'from': 'llm_1', 'lane': 'answer'}]},
+        {
+            'id': 'llm_1',
+            'provider': 'llm_openai',
+            'config': {'model': 'gpt-4'},
+            'input': [{'from': 'webhook_1', 'lane': 'output'}],
+        },
+        {'id': 'response_1', 'provider': 'response', 'config': {}, 'input': [{'from': 'llm_1', 'lane': 'answer'}]},
     ],
 }
 result = await client.use(pipeline=config)

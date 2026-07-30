@@ -147,8 +147,13 @@ export interface SettingSchema {
 	description?: string;
 	/** Markdown variant of the description (preferred when both are present). */
 	markdownDescription?: string;
-	/** Fixed value choices — renders as a dropdown. */
-	enum?: string[];
+	/**
+	 * Fixed value choices — renders as a dropdown. Typed string[] per the
+	 * frozen v0 contract; integer/number schemas may carry numeric entries in
+	 * the manifest JSON at runtime, so render through String() and coerce the
+	 * selected value back via `type`.
+	 */
+	enum?: Array<string | number>;
 	/** Per-choice descriptions aligned with `enum`. */
 	enumDescriptions?: string[];
 	/** Ordering hint within the section (lower renders first). */

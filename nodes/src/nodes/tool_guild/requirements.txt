@@ -1,0 +1,5 @@
+requests>=2.34.2
+# idna is a transitive dep of requests; pin it explicitly to cover
+# GHSA-65pc-fj4g-8rjx (crafted input to idna.encode() can bypass the
+# CVE-2024-3651 fix), patched in 3.10.
+idna>=3.10

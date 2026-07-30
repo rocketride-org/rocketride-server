@@ -109,6 +109,8 @@ from .types import (
     PipelineConfig,
     TASK_METRICS,
     TASK_STATE,
+    TASK_STATUS_COMPONENT_STAT,
+    TASK_STATUS_SLOWEST_DOC,
     TASK_STATUS_FLOW,
     TASK_STATUS,
     TASK_TOKENS,
@@ -150,6 +152,10 @@ from .core.exceptions import AuthenticationException
 # Import identity types returned by connect()
 from .types.client import TeamInfo, OrgInfo, ConnectResult, ServerInfoResult
 
+# Import the run-log DVR session class (the codec stays internal — only the
+# session and its user-facing types are public surface).
+from .log_stream import LogEventStream
+
 # Import server/connection constants so callers can reference defaults without
 # diving into the internal core package.
 from .core.constants import (
@@ -176,6 +182,7 @@ __all__ = [
     'RocketRideClient',
     'RocketRideClientConfig',
     'RocketRideException',
+    'LogEventStream',
     'AuthenticationException',
     'CONST_DEFAULT_SERVICE',
     'CONST_DEFAULT_WEB_CLOUD',
@@ -216,6 +223,8 @@ __all__ = [
     'QuestionType',
     'TASK_METRICS',
     'TASK_STATE',
+    'TASK_STATUS_COMPONENT_STAT',
+    'TASK_STATUS_SLOWEST_DOC',
     'TASK_STATUS_FLOW',
     'TASK_STATUS',
     'TASK_TOKENS',

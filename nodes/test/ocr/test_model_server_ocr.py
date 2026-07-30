@@ -44,7 +44,7 @@ import pytest
 # either pick them up by accident or be unable to install their own.
 #
 # Mirror the snapshot/restore pattern used by
-# nodes/test/chroma/test_convert_filter_explicit_none.py.
+# nodes/test/store_chroma/test_convert_filter_explicit_none.py.
 
 _STUB_NAMES = (
     'rocketlib',
@@ -105,7 +105,7 @@ def _scoped_stubs() -> Iterator[None]:
     Install stub modules for the duration of the block, restoring on exit.
 
     Also defends against sibling-test pollution: if a previous test (e.g.
-    ``nodes/test/atlas/test_isdeleted_filter.py``) replaced ``sys.modules['numpy']``
+    ``nodes/test/store_atlas/test_isdeleted_filter.py``) replaced ``sys.modules['numpy']``
     with a ``MagicMock``, ``cv2`` (pulled in transitively by img2table) cannot
     load against it. We pop those fake numpy/cv2 entries inside the scope and
     restore them on exit, so the previous test's state is preserved for any

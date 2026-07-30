@@ -197,12 +197,12 @@ class MonitorCommands(DAPConn):
             evt_name = event.get('event', 'unknown')
             body = event.get('body', None)
 
-            # Send the event to the subscribed client using DAP protocol
-            await self.send_event(
-                evt_name,
-                id=control.id,
-                body=body,
-            )
+            # Send the event to the subscribed client using plain DAP. The
+            # continuum stamps (eventTime + logSeq) ride INSIDE the shared
+            # body, stamped once by the task — every monitor sees the SAME
+            # stamps the run log recorded, and the DAP envelope stays pure
+            # protocol (each connection mints its own header seq).
+            await self.send_event(evt_name, id=control.id, body=body)
 
         # Get the task by token
         control = self._server.get_task_control(token)

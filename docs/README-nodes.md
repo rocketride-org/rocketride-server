@@ -6,11 +6,11 @@ together through their service definitions.
 
 Every node is declared in one or more `services*.json` files under
 `nodes/src/nodes/<node>/`. A single directory may register **several services**
-(for example `core`, `webhook`, `remote`, `agent_crewai`, and `index_search`
+(for example `core`, `webhook`, `remote`, `agent_crewai`, and `store_elasticsearch`
 each expose multiple variants), which is why the catalog below lists **services**
 rather than directories.
 
-> This catalog is generated from the `services*.json` definitions on `develop`
+> This catalog is compiled by hand from the `services*.json` definitions on `develop`
 > (88 node directories → 118 services). For node testing, see
 > [README-node-testing.md](README-node-testing.md).
 
@@ -132,17 +132,17 @@ channel; they have no data lanes and **bind to an agent** (see
 
 ### Vector Databases & Stores
 
-| Service             | Data flow (in → out)                                | Description                  |
-| ------------------- | --------------------------------------------------- | ---------------------------- |
-| `chroma`            | documents, questions → answers, documents, questions | Chroma DB                    |
-| `pinecone`          | documents, questions → answers, documents, questions | Pinecone                     |
-| `milvus`            | documents, questions → answers, documents, questions | Milvus                       |
-| `qdrant`            | documents, questions → answers, documents, questions | Qdrant                       |
-| `weaviate`          | documents, questions → answers, documents, questions | Weaviate                     |
-| `astra_db`          | documents, questions → answers, documents, questions | Astra DB (DataStax)          |
-| `atlas`             | documents, questions → answers, documents, questions | MongoDB Atlas Vector Search  |
-| `vectordb_postgres` | documents, questions → answers, documents, questions | PostgreSQL pgvector          |
-| `index_search`      | text, documents, questions → answers, documents, questions, text | Elasticsearch and OpenSearch (BM25 + vector) |
+| Service               | Data flow (in → out)                                | Description                  |
+| --------------------- | --------------------------------------------------- | ---------------------------- |
+| `store_chroma`        | documents, questions → answers, documents, questions | Chroma DB                    |
+| `store_pinecone`      | documents, questions → answers, documents, questions | Pinecone                     |
+| `store_milvus`        | documents, questions → answers, documents, questions | Milvus                       |
+| `store_qdrant`        | documents, questions → answers, documents, questions | Qdrant                       |
+| `store_weaviate`      | documents, questions → answers, documents, questions | Weaviate                     |
+| `store_astra`         | documents, questions → answers, documents, questions | Astra DB (DataStax)          |
+| `store_atlas`         | documents, questions → answers, documents, questions | MongoDB Atlas Vector Search  |
+| `store_postgres`      | documents, questions → answers, documents, questions | PostgreSQL pgvector          |
+| `store_elasticsearch` | text, documents, questions → answers, documents, questions, text | Elasticsearch and OpenSearch (BM25 + vector) |
 
 ### Databases
 
@@ -283,6 +283,7 @@ standalone catalog nodes.
    from .my_node import MyNode
    from .IInstance import IInstance
    from .IGlobal import IGlobal
+
 
    # nodes/src/nodes/my_node/my_node.py
    class MyNode:

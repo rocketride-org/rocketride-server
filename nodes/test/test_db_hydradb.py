@@ -38,7 +38,7 @@ from types import SimpleNamespace
 
 import pytest
 
-NODE_DIR = os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'db_hydradb')
+NODE_DIR = os.path.join(os.path.dirname(__file__), '..', 'src', 'nodes', 'graph_hydradb')
 NODE_DIR = os.path.abspath(NODE_DIR)
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@
 // =============================================================================
 
 import React, { createContext, useContext, useCallback, useMemo, useRef, useState, useEffect } from 'react';
-import { RocketRideClient } from 'rocketride';
+import { useShellConnection } from '../connection/ConnectionContext';
 import { useWorkspaceState } from './useWorkspaceState';
 import { buildSettingsRegistry, effectiveSettings } from './settingsRegistry';
 import type { SettingsRegistry } from './settingsRegistry';
@@ -176,27 +176,44 @@ const WorkspaceContext = createContext<IWorkspaceContext | null>(null);
 // =============================================================================
 
 /**
- * Provides workspace state, lazy app descriptor loading, and the shell event
- * bus to the entire React tree beneath it.
+ * Props for {@link WorkspaceProvider}.
  *
- * @param client        - The live RocketRideClient (or null while connecting).
- * @param isConnected   - Whether the RocketRide WebSocket is currently open.
- * @param apps          - Array of lightweight app manifest entries.
- * @param workspaceDir  - Directory for workspace persistence files (default ".workspace").
- * @param startupAppId  - Optional app to activate on initial load (overrides saved state).
- * @param children      - React subtree that will receive the context.
+ * The connection (client + isConnected) is deliberately NOT a prop: the
+ * provider reads it from {@link useShellConnection} like every other shell
+ * component. Threading the client through props would put the SDK client in
+ * an input (contravariant) position on the frozen shell-api surface, where
+ * every additive SDK member would read as a breaking change.
  */
-export const WorkspaceProvider: React.FC<{
-	client: RocketRideClient | null;
-	isConnected: boolean;
+export interface IWorkspaceProviderProps {
+	/** Array of lightweight app manifest entries. */
 	apps: AppManifestEntry[];
+	/** Directory for workspace persistence files (default ".workspace"). */
 	workspaceDir?: string;
+	/** Optional app to activate on initial load (overrides saved state). */
 	startupAppId?: string;
+	/** React subtree that will receive the context. */
 	children: React.ReactNode;
+	/** Fallback app when no saved state / startup override exists. */
 	defaultAppId?: string;
+	/** Selectable UI themes surfaced in the settings page. */
 	themeOptions?: { id: string; name: string }[];
+	/** Notifies the host bootstrap when the user switches theme. */
 	onThemeChange?: (themeId: string) => void;
-}> = ({ client, isConnected, apps, workspaceDir, startupAppId, defaultAppId: defaultAppIdProp, themeOptions: themeOptionsProp, onThemeChange, children }) => {
+}
+
+/**
+ * Provides workspace state, lazy app descriptor loading, and the shell event
+ * bus to the entire React tree beneath it. Sources the RocketRide client and
+ * connection state from the ConnectionManager singleton via
+ * {@link useShellConnection} (provider-less; re-renders on connect events).
+ *
+ * @param props - See {@link IWorkspaceProviderProps}.
+ */
+export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, workspaceDir, startupAppId, defaultAppId: defaultAppIdProp, themeOptions: themeOptionsProp, onThemeChange, children }) => {
+	// The shared client + connection state, straight from the singleton — the
+	// same source Shell reads; no prop threading.
+	const { client, isConnected } = useShellConnection();
+
 	// Default app ID — use the prop from Shell (mode-aware), or fall back to hello.
 	const defaultAppId = defaultAppIdProp || 'rocketride.hello';
 

@@ -15,6 +15,7 @@
 import React, { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
+import { EmptyState } from '../empty-state/EmptyState';
 
 // =============================================================================
 // STYLES
@@ -168,13 +169,7 @@ export interface SourceTokensContentProps {
  */
 export const SourceTokensContent: React.FC<SourceTokensContentProps> = ({ tokens }) => {
 	if (!tokens) {
-		return (
-			<div style={commonStyles.empty}>
-				<div style={{ marginBottom: 8, fontSize: 24, color: 'var(--rr-text-disabled)' }}>&#9677;</div>
-				<div>No token data available</div>
-				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginTop: 4 }}>Run a pipeline to see token consumption</div>
-			</div>
-		);
+		return <EmptyState title="No token data" description="Token consumption appears here while the pipeline runs or when replaying a recorded run." />;
 	}
 
 	const maxTotal = tokens.total || 1;
@@ -230,13 +225,7 @@ export const Tokens: React.FC<TokensProps> = ({ statusMap, sources }) => {
 	}, [statusMap, sources]);
 
 	if (!hasData) {
-		return (
-			<div style={commonStyles.empty}>
-				<div style={{ marginBottom: 8, fontSize: 24, color: 'var(--rr-text-disabled)' }}>&#9677;</div>
-				<div>No token data available</div>
-				<div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginTop: 4 }}>Run a pipeline to see token consumption</div>
-			</div>
-		);
+		return <EmptyState title="No token data" description="Token consumption appears here while the pipeline runs or when replaying a recorded run." />;
 	}
 
 	const maxTotal = aggregated.total || 1;

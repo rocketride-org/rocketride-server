@@ -15,6 +15,8 @@
 
 import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from 'shell-api/versions/v0';
+import type { RocketRideClient as Frozen_RocketRideClient } from 'shell-api/versions/v0';
+import type { RocketRideClient as Current_RocketRideClient } from './api';
 import type { ShellAppProps as Frozen_ShellAppProps } from 'shell-api/versions/v0';
 import type { ShellAppProps as Current_ShellAppProps } from './api';
 import type { ShellSidebarProps as Frozen_ShellSidebarProps } from 'shell-api/versions/v0';
@@ -61,6 +63,8 @@ import type { IPrefsApi as Frozen_IPrefsApi } from 'shell-api/versions/v0';
 import type { IPrefsApi as Current_IPrefsApi } from './api';
 import type { IWorkspaceContext as Frozen_IWorkspaceContext } from 'shell-api/versions/v0';
 import type { IWorkspaceContext as Current_IWorkspaceContext } from './api';
+import type { IWorkspaceProviderProps as Frozen_IWorkspaceProviderProps } from 'shell-api/versions/v0';
+import type { IWorkspaceProviderProps as Current_IWorkspaceProviderProps } from './api';
 import type { DashboardData as Frozen_DashboardData } from 'shell-api/versions/v0';
 import type { DashboardData as Current_DashboardData } from './api';
 import type { InitOptions as Frozen_InitOptions } from 'shell-api/versions/v0';
@@ -125,6 +129,8 @@ const _floor_v0: ShellApiV0 = {} as ShellApiShape;
 void _floor_v0;
 
 // TYPE floors — each frozen exported type must still be satisfied.
+const _t_RocketRideClient: Frozen_RocketRideClient = {} as Current_RocketRideClient;
+void _t_RocketRideClient;
 const _t_ShellAppProps: Frozen_ShellAppProps = {} as Current_ShellAppProps;
 void _t_ShellAppProps;
 const _t_ShellSidebarProps: Frozen_ShellSidebarProps = {} as Current_ShellSidebarProps;
@@ -171,6 +177,8 @@ const _t_IPrefsApi: Frozen_IPrefsApi = {} as Current_IPrefsApi;
 void _t_IPrefsApi;
 const _t_IWorkspaceContext: Frozen_IWorkspaceContext = {} as Current_IWorkspaceContext;
 void _t_IWorkspaceContext;
+const _t_IWorkspaceProviderProps: Frozen_IWorkspaceProviderProps = {} as Current_IWorkspaceProviderProps;
+void _t_IWorkspaceProviderProps;
 const _t_DashboardData: Frozen_DashboardData = {} as Current_DashboardData;
 void _t_DashboardData;
 const _t_InitOptions: Frozen_InitOptions = {} as Current_InitOptions;

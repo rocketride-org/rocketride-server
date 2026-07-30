@@ -32,6 +32,7 @@ import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
+import { LogApi } from './log.js';
 import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
@@ -364,6 +365,9 @@ export class RocketRideClient extends DAPClient {
 
 	/** Lazily-created deploy API namespace. */
 	private _deploy?: DeployApi;
+
+	/** Lazily-created run-log API namespace. */
+	private _log?: LogApi;
 
 	/** Optional trace callback for observing all call() traffic. */
 	private _onTrace?: (traceType: TraceType, message: DAPMessage) => void;
@@ -2721,6 +2725,24 @@ export class RocketRideClient extends DAPClient {
 			this._deploy = new DeployApi(this);
 		}
 		return this._deploy;
+	}
+
+	/**
+	 * Run-log API namespace — chapters, ranged reads, and deletion over the
+	 * per-task event continuum.
+	 *
+	 * @example
+	 * ```typescript
+	 * const stream = { projectId: 'proj', source: 'chat_1', runKind: 'dev' as const };
+	 * const { chapters } = await client.log.chapters(stream);
+	 * const { events } = await client.log.read(stream, { fromSeq: chapters[0].beginSeq });
+	 * ```
+	 */
+	get log(): LogApi {
+		if (!this._log) {
+			this._log = new LogApi(this);
+		}
+		return this._log;
 	}
 
 	// ============================================================================

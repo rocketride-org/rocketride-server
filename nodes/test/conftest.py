@@ -318,7 +318,7 @@ def pytest_generate_tests(metafunc):
             'pose_estimation',
             'face_detection',
             # Temporarily exclude nodes with failing tests until they can be fixed and re-enabled:
-            'index_search',
+            'store_elasticsearch',
             # Require live third-party API credentials (no live calls in default CI):
             'tool_xtrace_memory',
             'tool_mem0',

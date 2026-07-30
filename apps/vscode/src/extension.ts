@@ -81,18 +81,6 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 	const logger = getLogger();
 	const config = vscode.workspace.getConfiguration('rocketride');
 
-	// Migration 1: engineArgs array → string (v1.0.0 → v1.0.2)
-	const engineArgs = config.inspect<unknown>('engineArgs');
-	const migrateArgs = async (scope: vscode.ConfigurationTarget, value: unknown) => {
-		if (Array.isArray(value)) {
-			const joined = (value as string[]).join(' ');
-			await config.update('engineArgs', joined, scope);
-			logger.output(`${icons.info} Migrated rocketride.engineArgs from array to string (${scope === vscode.ConfigurationTarget.Global ? 'global' : 'workspace'})`);
-		}
-	};
-	if (engineArgs?.globalValue !== undefined) await migrateArgs(vscode.ConfigurationTarget.Global, engineArgs.globalValue);
-	if (engineArgs?.workspaceValue !== undefined) await migrateArgs(vscode.ConfigurationTarget.Workspace, engineArgs.workspaceValue);
-
 	// Migration 2: Remove old engine directory from extensionPath (v1.0.0 stored engine inside the extension folder)
 	const oldEngineDir = path.join(context.extensionPath, 'engine');
 	try {
@@ -111,15 +99,11 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 			['hostUrl', 'development.hostUrl'],
 			['developmentTeamId', 'development.teamId'],
 			['local.engineVersion', 'development.local.engineVersion'],
-			['local.debugOutput', 'development.local.debugOutput'],
-			['engineArgs', 'development.local.engineArgs'],
 			// Deployment
 			['deployTargetMode', 'deployment.connectionMode'],
 			['deployHostUrl', 'deployment.hostUrl'],
 			['deployTargetTeamId', 'deployment.teamId'],
 			['deploy.local.engineVersion', 'deployment.local.engineVersion'],
-			['deploy.local.debugOutput', 'deployment.local.debugOutput'],
-			['deployEngineArgs', 'deployment.local.engineArgs'],
 		];
 
 		for (const [oldKey, newKey] of keyMap) {
@@ -161,6 +145,41 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 
 		await context.globalState.update('settingsMigrationV2Done', true);
 		logger.output(`${icons.success} Migrated settings to development/deployment groups`);
+	}
+
+	// Migration 3b: legacy per-connection debug-output flags fold into the ONE
+	// per-task setting — any scope that had debug output on keeps it on (OR of
+	// the old keys; same intent, wider scope). Own marker: the V2 migration
+	// shipped earlier, so users who already completed it must still get this
+	// one. engineArgs is deliberately NOT migrated: engine PROCESS flags are
+	// not per-task arguments, and silently injecting them into every .use call
+	// could break runs.
+	if (!context.globalState.get('debugOutputMigrationDone')) {
+		const legacyDebugKeys = ['local.debugOutput', 'deploy.local.debugOutput', 'development.local.debugOutput', 'deployment.local.debugOutput'];
+		for (const target of [vscode.ConfigurationTarget.Global, vscode.ConfigurationTarget.Workspace] as const) {
+			const scope = target === vscode.ConfigurationTarget.Global ? 'globalValue' : 'workspaceValue';
+			let anyOn = false;
+			let anySet = false;
+			for (const key of legacyDebugKeys) {
+				const value = config.inspect<unknown>(key)?.[scope];
+				if (value !== undefined) {
+					anySet = true;
+					if (value === true) anyOn = true;
+				}
+			}
+			// Write the replacement BEFORE deleting anything: a failure mid-way
+			// must never have destroyed the only copy of the old configuration
+			// (the whole migration is retry-safe in that order).
+			if (anySet && anyOn && config.inspect<unknown>('pipelineDebugOutput')?.[scope] === undefined) {
+				await config.update('pipelineDebugOutput', true, target);
+			}
+			for (const key of legacyDebugKeys) {
+				if (config.inspect<unknown>(key)?.[scope] !== undefined) {
+					await config.update(key, undefined, target);
+				}
+			}
+		}
+		await context.globalState.update('debugOutputMigrationDone', true);
 	}
 
 	// Migration 4: Move local engine from globalStorage to per-user dir

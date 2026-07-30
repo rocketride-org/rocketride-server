@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-20T07:35:05.366Z
-// Source commit: f834366d1d5e463bbd37624d5f0fccd99d808cbf
+// Generated:     2026-07-23T18:39:00.513Z
+// Source commit: 6fc82b1bfc6c4b38c0e03658281f9ca491aa3b4e
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -592,6 +592,147 @@ interface DeploymentRecord {
     createdAt?: number;
     /** Unix timestamp (seconds). */
     updatedAt?: number;
+}
+type LogRunKind = "dev" | "deploy";
+interface LogStreamRef {
+    projectId: string;
+    source: string;
+    runKind: LogRunKind;
+}
+interface LogChapter {
+    /** Run start (epoch seconds). */
+    beginTime: number;
+    /** First continuum seq of the run. */
+    beginSeq: number;
+    /** Run end (epoch seconds); null while the run is live. */
+    endTime?: number | null;
+    /** 'ok' | 'error' | 'cancelled'; null while the run is live. */
+    outcome?: string | null;
+}
+interface LogActivitySpan {
+    /** Segment id — the raw segment fetch / DVR cache key. */
+    id?: number;
+    /** First continuum seq recorded in this segment. */
+    seq?: number;
+    startTime?: number | null;
+    endTime?: number | null;
+    /** A run begins within this span. */
+    chapterStart: boolean;
+}
+interface LogChaptersResult {
+    chapters: LogChapter[];
+    segments: LogActivitySpan[];
+    /** Retained-window start (the horizon), epoch seconds. */
+    startTime?: number | null;
+    /** Latest activity, epoch seconds. */
+    endTime?: number | null;
+    /** First seq still retained after ring/age eviction. */
+    horizonSeq: number;
+    /** True when no run is currently writing the stream. */
+    completed: boolean;
+}
+interface LogReadParams {
+    /** Inclusive seq lower bound. */
+    fromSeq?: number;
+    /** Inclusive seq upper bound. */
+    toSeq?: number;
+    /** Inclusive eventTime lower bound (epoch seconds). */
+    fromTime?: number;
+    /** Inclusive eventTime upper bound (epoch seconds); omit for "to now". */
+    toTime?: number;
+    /** Read up to and including this segment id. */
+    toSegment?: number;
+    /** Continuation seq from a previous page's `nextSeq`. */
+    cursor?: number;
+    /** Page limit (server clamps to its maximum). */
+    maxEvents?: number;
+    /** Page byte limit (server clamps to its maximum). */
+    maxBytes?: number;
+    /** Server-side event-type filter (e.g. ['output'] for the Log page). */
+    types?: string[];
+}
+interface LogEventBody {
+    /** Continuum emission time (epoch seconds, float), stamped at engine ingress. */
+    eventTime: number;
+    /** Continuum sequence — catalog-seeded, strictly monotonic per stream. */
+    logSeq: number;
+    [key: string]: unknown;
+}
+interface LogEvent {
+    type: "event";
+    event: string;
+    body: LogEventBody;
+    [key: string]: unknown;
+}
+interface LogReadResult {
+    events: LogEvent[];
+    /** Present when paged: pass as `cursor` to continue. */
+    nextSeq?: number;
+    /** Present when the request reached below the retention horizon. */
+    truncatedAtSeq?: number;
+}
+interface LogDeleteResult {
+    deletedSegments: number;
+}
+type LogPosition = number | "live";
+interface LogTraceSummary {
+    /**
+     * Display id. For fold summaries this is the pipe SLOT (reused across
+     * requests); for getTrace results it is the begin seq. Always pass
+     * {@link beginSeq} (or a begin event's seq) to `getTrace` — that is the
+     * trace's permanent identity.
+     */
+    id: number | string;
+    /** The trace's begin-event continuum seq — its PERMANENT identity. */
+    beginSeq?: number;
+    /** Document/object name (the trace's display name). */
+    doc?: string;
+    /** Run start of this trace (epoch seconds). */
+    beginTime?: number;
+    /** Seconds from begin to close (closed traces only). */
+    elapsed?: number;
+    /** Number of component calls seen. */
+    calls?: number;
+    /** True while the trace is still in flight at the position. */
+    open: boolean;
+    /** Segment ids containing this trace's events (sparse expand list). */
+    touched?: number[];
+}
+interface LogTracesResult {
+    /** ALL in-flight traces at the position (bounded by real concurrency). */
+    open: LogTraceSummary[];
+    /** The most recently completed traces before the position (≤ n). */
+    closed: LogTraceSummary[];
+}
+interface LogTraceDetail {
+    summary: LogTraceSummary;
+    /** Every event belonging to this trace, seq-ordered, fully reconstructed. */
+    events: LogEvent[];
+}
+interface LogPlayItem {
+    /** One reconstructed event, delivered in seq order. */
+    event: LogEvent;
+}
+type LogPlayCallback = (item: LogPlayItem) => void;
+interface LogSegmentParams {
+    /** Byte offset to continue from (0 = segment start). */
+    offset?: number;
+    /** Chunk ceiling in bytes (clamped by the server; 0/omitted = server default). */
+    maxBytes?: number;
+}
+interface LogSegmentResult {
+    /** Segment id within the stream. */
+    segment: number;
+    /** Byte offset this chunk starts at. */
+    offset: number;
+    /** Raw JSONL text — every chunk ends on a line boundary, parse standalone. */
+    data: string;
+    /** Total segment size in bytes (grows while the segment is active). */
+    size: number;
+    /** Pass back as `offset` to continue; null when exhausted. */
+    nextOffset: number | null;
+    /** True when this chunk reached the end of the segment. */
+    final: boolean;
 }
 interface TraceInfo {
     /** File path where the error occurred */
@@ -2094,6 +2235,160 @@ declare class DeployApi {
         schedule?: string;
     }): Promise<void>;
 }
+declare class LogEventStream {
+    /** @param client - Owning client. @param stream - Identity tuple. */
+    constructor(client: RocketRideClient, stream: LogStreamRef);
+    /**
+     * The stream's chapters (runs) — begin/end/outcome per run.
+     *
+     * @returns The chapters list (freshly fetched when the cache aged out).
+     */
+    getChapters(): Promise<LogChaptersResult["chapters"]>;
+    /**
+     * Position the session. Subsequent `get*()` calls answer as of this
+     * position; `play()` continues from it.
+     *
+     * @param pos - Epoch seconds, or 'live' to pin to now.
+     */
+    seek(pos: LogPosition): Promise<void>;
+    /** The current position (epoch seconds); rides the wall clock when live. */
+    position(): number;
+    /**
+     * The full status snapshot at the position (pipeflow byPipe included).
+     *
+     * @returns The reconstructed status body, or null before the first status.
+     */
+    getStatus(): Promise<Record<string, unknown> | null>;
+    /**
+     * The console exactly as it read at the position (terminal semantics:
+     * the keyframe scrollback + everything printed since, last `n` lines).
+     *
+     * @param n - Number of trailing lines wanted.
+     * @returns The last `n` console lines as of the position.
+     */
+    getConsole(n: number): Promise<string[]>;
+    /**
+     * Trace state at the position: ALL in-flight traces plus the `n` most
+     * recently completed (the sliding recency window).
+     *
+     * @param n - Closed-window size; must be ≤ 50.
+     * @returns Open + recently-closed trace summaries.
+     */
+    getTraces(n: number): Promise<LogTracesResult>;
+    /**
+     * One trace's complete event set (its call tree's raw material).
+     *
+     * IDENTITY CONTRACT: a trace is identified by its BEGIN event's continuum
+     * seq — the only key that is unique forever. The flow events' `body.id`
+     * is a pipe SLOT, reused across requests, and cannot name a trace.
+     * Resolution is deterministic and position-independent: locate the
+     * segment containing the seq (the span table carries each segment's
+     * first seq), find the begin event, then collect that slot's events
+     * forward until its matching `end`, crossing segments and the live tail
+     * as needed. Fails when the seq has fallen below the retention horizon,
+     * or when no trace-begin event exists at that seq (a recycled slot id
+     * or a fold docId is NOT a trace identity).
+     *
+     * @param traceId - The trace's begin-event continuum seq.
+     * @returns Summary + every event of the trace, seq-ordered.
+     */
+    getTrace(traceId: number): Promise<LogTraceDetail>;
+    /**
+     * Stream reconstructed events to `cb`, in order, strictly after the seed
+     * watermark, paced by `speed`. Auto-pins to live on catching the wall
+     * clock; while pinned, delivery follows event arrival.
+     *
+     * @param pos - Optional position to seek first (number | 'live').
+     * @param speed - 0 = as fast as possible; 0.25/1/10 = time-scaled.
+     * @param cb - Receives `{ event }` items.
+     */
+    play(pos: LogPosition | undefined, speed: number, cb: LogPlayCallback): Promise<void>;
+    /** Freeze the position (unpins live; a later play resumes from here). */
+    pause(): void;
+    /**
+     * Feed one live event from the host's subscription. While pinned and
+     * playing, it is delivered to the callback immediately (arrival paces
+     * live delivery); otherwise it is retained for later catch-up.
+     *
+     * @param msg - A stamped event message from the live feed.
+     */
+    ingestLive(msg: LogEvent): void;
+    /** Dispose the session (stops playback, clears caches). */
+    closeEventStream(): void;
+}
+declare class LogApi {
+    /** @param client - The parent RocketRideClient that owns this namespace. */
+    constructor(client: RocketRideClient);
+    /**
+     * Opens a DVR session over one source continuum.
+     *
+     * The session is the replay/monitoring surface: position-based
+     * `seek`/`get*`/`play` over reconstructed events — storage layout
+     * (segments, keyframes, deltas) is invisible. Dispose with
+     * {@link LogEventStream.closeEventStream} when done.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @returns A new, unpositioned session (call `seek()` first).
+     */
+    openEventStream(stream: LogStreamRef): LogEventStream;
+    /**
+     * Lists a stream's chapters (tracks) and activity-bar metadata.
+     *
+     * Everything the timeline needs from one small read: per-run begin/end
+     * times + starting seq + outcome, segment activity spans, the stream's
+     * retained window, and the retention horizon.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @returns Chapters, activity spans, and stream timeline metadata.
+     */
+    chapters(stream: LogStreamRef): Promise<LogChaptersResult>;
+    /**
+     * Reads a seq/time range of events from the continuum, paged.
+     *
+     * Range forms: `fromSeq`/`toSeq`, `fromTime`/`toTime` (omit the upper
+     * bound for "to now"), or `fromTime` → `toSegment`. When the response
+     * carries `nextSeq`, pass it back as `cursor` to continue; a
+     * `truncatedAtSeq` flag means the request reached below the retention
+     * horizon.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param params - Range, paging, and filter options.
+     * @returns The page of events plus paging/truncation metadata.
+     */
+    read(stream: LogStreamRef, params?: LogReadParams): Promise<LogReadResult>;
+    /**
+     * Fetches one segment's raw JSONL bytes, chunked by byte offset.
+     *
+     * The bulk replay path: the server does no line scanning, filtering, or
+     * parsing — it hands over the immutable segment content in
+     * whole-line-aligned chunks (each response ends on a newline, so every
+     * chunk parses standalone). Repeat with the returned `nextOffset` until
+     * `final`. The active segment is served up to its current length; the
+     * live subscription covers growth past that. The segment table (ids +
+     * time extents) comes from {@link chapters}.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param segment - Segment id within the stream.
+     * @param params - Byte offset to continue from + optional chunk ceiling.
+     * @returns One raw chunk plus paging metadata.
+     */
+    segment(stream: LogStreamRef, segment: number, params?: LogSegmentParams): Promise<LogSegmentResult>;
+    /**
+     * Deletes log data for a stream (destructive).
+     *
+     * Provide `beforeTime` to drop segments wholly older than the cutoff
+     * (chapters trimmed, horizon advanced), or `all: true` to remove the
+     * entire stream including its control file.
+     *
+     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param options - Cutoff time and/or the delete-all flag.
+     * @returns The number of segments deleted.
+     */
+    delete(stream: LogStreamRef, options: {
+        beforeTime?: number;
+        all?: boolean;
+    }): Promise<LogDeleteResult>;
+}
 declare class DataPipe {
     /**
      * Creates a new DataPipe instance.
@@ -2178,7 +2473,7 @@ type MonitorKey = {
     source: string;
     pipeId?: number;
 };
-declare class RocketRideClient extends DAPClient {
+export declare class RocketRideClient extends DAPClient {
     /** Maps pipe_id → SSE callback for pipe-scoped real-time event dispatch. */
     readonly _ssePipeCallbacks: Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>;
     /**
@@ -3065,6 +3360,18 @@ declare class RocketRideClient extends DAPClient {
      */
     get deploy(): DeployApi;
     /**
+     * Run-log API namespace — chapters, ranged reads, and deletion over the
+     * per-task event continuum.
+     *
+     * @example
+     * ```typescript
+     * const stream = { projectId: 'proj', source: 'chat_1', runKind: 'dev' as const };
+     * const { chapters } = await client.log.chapters(stream);
+     * const { events } = await client.log.read(stream, { fromSeq: chapters[0].beginSeq });
+     * ```
+     */
+    get log(): LogApi;
+    /**
      * Sends a DAP command, unwraps the response body, and throws on failure.
      *
      * This is the single public entry point for all typed DAP operations.
@@ -3219,8 +3526,13 @@ export interface SettingSchema {
     description?: string;
     /** Markdown variant of the description (preferred when both are present). */
     markdownDescription?: string;
-    /** Fixed value choices — renders as a dropdown. */
-    enum?: string[];
+    /**
+     * Fixed value choices — renders as a dropdown. Typed string[] per the
+     * frozen v0 contract; integer/number schemas may carry numeric entries in
+     * the manifest JSON at runtime, so render through String() and coerce the
+     * selected value back via `type`.
+     */
+    enum?: Array<string | number>;
     /** Per-choice descriptions aligned with `enum`. */
     enumDescriptions?: string[];
     /** Ordering hint within the section (lower renders first). */
@@ -4203,6 +4515,34 @@ export interface IWorkspaceContext {
     /** Subscribe to a named event. Returns an unsubscribe function. */
     on: <K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void) => () => void;
 }
+/**
+ * Props for {@link WorkspaceProvider}.
+ *
+ * The connection (client + isConnected) is deliberately NOT a prop: the
+ * provider reads it from {@link useShellConnection} like every other shell
+ * component. Threading the client through props would put the SDK client in
+ * an input (contravariant) position on the frozen shell-api surface, where
+ * every additive SDK member would read as a breaking change.
+ */
+export interface IWorkspaceProviderProps {
+    /** Array of lightweight app manifest entries. */
+    apps: AppManifestEntry$1[];
+    /** Directory for workspace persistence files (default ".workspace"). */
+    workspaceDir?: string;
+    /** Optional app to activate on initial load (overrides saved state). */
+    startupAppId?: string;
+    /** React subtree that will receive the context. */
+    children: React$1.ReactNode;
+    /** Fallback app when no saved state / startup override exists. */
+    defaultAppId?: string;
+    /** Selectable UI themes surfaced in the settings page. */
+    themeOptions?: {
+        id: string;
+        name: string;
+    }[];
+    /** Notifies the host bootstrap when the user switches theme. */
+    onThemeChange?: (themeId: string) => void;
+}
 declare function useWorkspace(): IWorkspaceContext;
 declare function useClient(): RocketRideClient | null;
 declare function useShellEvent<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): void;
@@ -4300,8 +4640,9 @@ declare class ConnectionManager implements IConnectionManager {
      * Delegates to the auth provider's ``signIn()`` method. Falls back to
      * the legacy PKCE flow if no auth provider is configured.
      *
-     * @param register - If true, requests Zitadel's sign-up form (prompt=create)
-     *                   instead of the default sign-in form.
+     * @param register - Retained for compatibility; no longer changes the
+     *                   destination. All flows land on Zitadel's login page
+     *                   (prompt=login), which offers a Register link.
      */
     startOAuth(register?: boolean): Promise<void>;
     /**
@@ -4454,7 +4795,9 @@ declare class CloudAuthProvider implements IAuthProvider {
      * authorize endpoint.
      *
      * @param appId - Optional app ID to activate after sign-in completes.
-     * @param register - If true, shows Zitadel's signup form instead of login.
+     * @param register - Retained for compatibility; no longer changes the
+     *                   destination. All flows land on Zitadel's login page,
+     *                   which offers a Register link for new users.
      */
     signIn(appId?: string, register?: boolean): Promise<void>;
     /**
@@ -5023,20 +5366,7 @@ export declare const shellApi: {
     readonly ConnectionState: typeof ConnectionState;
     readonly CloudAuthProvider: typeof CloudAuthProvider;
     readonly ApiKeyAuthProvider: typeof ApiKeyAuthProvider;
-    readonly WorkspaceProvider: import("react").FC<{
-        client: RocketRideClient | null;
-        isConnected: boolean;
-        apps: AppManifestEntry$1[];
-        workspaceDir?: string;
-        startupAppId?: string;
-        children: import("react").ReactNode;
-        defaultAppId?: string;
-        themeOptions?: {
-            id: string;
-            name: string;
-        }[];
-        onThemeChange?: (themeId: string) => void;
-    }>;
+    readonly WorkspaceProvider: import("react").FC<IWorkspaceProviderProps>;
     readonly PrefsProvider: typeof PrefsProvider;
     readonly Documents: typeof Documents;
     readonly DocTabs: import("react").FC<DocTabsProps>;

@@ -14,10 +14,36 @@ the same canvas to shape the tool's behavior, and cap each connected branch with
 response node so results can flow back. As always, the agent binds through the `invoke`
 capability.
 
-The sub-pipeline run is fully isolated: the lane write is synchronous, so by the time it
-returns the downstream response nodes have already populated their response values. Those
-response entries are snapshotted and then removed so they don't leak into the parent
-pipeline. The node has no external Python dependencies (`requirements.txt` is empty).
+The sub-pipeline run is fully isolated. After the input is routed, the sub-pipeline is
+flushed (`closing`) and closed in **dependency order** — a join is flushed only after all
+of its upstream branches, so a diamond sub-pipeline (two branches feeding one join)
+returns the merged output of both branches, not just the first. The flush completes before
+the response value is read. Those response entries are snapshotted and then removed so
+they don't leak into the parent pipeline. The node has no external Python dependencies
+(`requirements.txt` is empty).
+
+---
+
+## The sub-pipeline must be exclusively this node's
+
+Because `tool_pipe` opens, flushes, and closes its sub-pipeline on every invocation, each
+node it reaches must have no other lifecycle owner. Three wirings break that and are
+**rejected when the pipeline opens**:
+
+- **Shared with the main flow or a second start.** If a sub-pipeline node is also
+  reachable from the source — the main flow feeds into it, or the sub-pipeline flows back
+  into a main-flow node — the main flow owns it and flushes it at end-of-object, not
+  during the invocation, so the tool reads an incomplete result. Keep each branch
+  self-contained and end it in its own response node.
+- **Shared between two `tool_pipe`s.** A node reached by two invoke nodes has ambiguous
+  ownership. Give each its own sub-pipeline.
+- **A data input on the invoke node itself.** `tool_pipe` has no input lane — it is driven
+  only through the tool control seam.
+
+Invoking the *same* `tool_pipe` from two agents is fine: that is one sub-pipeline with one
+owner, run once per invocation. Nesting is fine too — a sub-pipeline may contain an agent
+that invokes another `tool_pipe`, and each level flushes its own sub-pipeline in order.
+See `examples/incorrect/` for a runnable example of each rejection.
 
 ---
 

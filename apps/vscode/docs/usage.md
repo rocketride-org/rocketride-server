@@ -53,12 +53,14 @@ The visual editor provides:
 
 ## Pipeline Execution Defaults
 
-Trace verbosity and the idle timeout (TTL) for pipeline runs are configured once in **Settings → Pipeline** — they are workspace settings, not per-pipeline options:
+Trace verbosity, the idle timeout (TTL), task arguments, and debug output for pipeline runs are configured once in **Settings → Pipeline** — they are workspace settings, not per-pipeline options:
 
 - **Pipeline Trace Level** (`rocketride.pipelineTraceLevel`, default `summary`): how much execution-trace data the engine emits — `full`, `summary`, `metadata`, or `none`. Higher levels populate the **Flow** and **Trace** tabs, but `full` inlines entire payloads (including images), which can noticeably slow runs that process large images.
-- **Pipeline TTL** (`rocketride.pipelineTTL`, default `900` seconds): how long the engine keeps a pipeline alive without activity before stopping it (`0` = no timeout).
+- **Pipeline TTL** (`rocketride.pipelineTTL`, default `900` = 15 minutes): how long the engine keeps a pipeline alive without activity before stopping it. Fixed choices from 15 minutes to 8 hours, plus "Run forever or until you stop it" (`0` = no timeout).
+- **Task Arguments** (`rocketride.taskArguments`, default empty): additional command-line arguments passed to each pipeline task process. The engine splits the string using shell parsing rules, so quoted paths are preserved.
+- **Pipeline Debug Output** (`rocketride.pipelineDebugOutput`, default `false`): appends `--trace=debugOut` to the task arguments (unless they already contain a `--trace=` flag) for detailed task trace logging.
 
-The extension host reads both from the workspace settings and passes them to the engine on each `run`/`restart` (the `status:pipelineAction` message carries only the action and source).
+The extension host reads these from the workspace settings and passes them to the engine on each `run`/`restart` (the `status:pipelineAction` message carries only the action and source). The engine process itself starts with no extra flags — these settings apply per task, not to the server.
 
 ## `.env` Auto-Sync
 

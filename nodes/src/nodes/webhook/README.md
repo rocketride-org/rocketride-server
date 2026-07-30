@@ -4,15 +4,19 @@ A RocketRide source node that lets external input reach a pipeline over HTTP: th
 
 ## What it does
 
-Stands up its own HTTP endpoint and forwards incoming data into the attached pipeline. All three variants are `source` nodes registered as endpoints and share the same code (`nodes.webhook`); they differ only in protocol and in the surface they expose:
+Exposes an HTTP endpoint and forwards incoming data into the attached pipeline. All three variants are `source` nodes registered as endpoints and share the same code (`nodes.webhook`); they differ only in protocol and in the surface they expose:
 
 - **Webhook** (`webhook://`): a raw HTTP intake. External tools, scripts, or services POST documents, media, or data to the URL, triggering the pipeline to process the uploaded content. The same endpoint also backs the RocketRide DataToolchain (`adtoolchain`) flow.
 - **Chat** (`chat://`): serves a web-based chat UI. Users open the chat URL in a browser and type questions; each submission flows through the pipeline and results are returned in the chat window.
 - **Dropper** (`dropper://`): serves a web-based drag-and-drop file upload UI. Users drop files onto the page; each upload is sent through the pipeline, and results are displayed in the browser across JSON, text, table, and image tabs.
 
-The server is a **FastAPI / Uvicorn** wrapper (`ai.web.WebServer`). The engine passes the bind address on the command line (`--data_host`, `--data_port`, defaulting to `localhost:5567`); the node loads the `data` module, which registers a `/task/data` websocket as the data plane between the public endpoint and the pipeline. The node keeps running until the pipeline is stopped, the source task completes only when the server exits.
+The server is a **FastAPI / Uvicorn** wrapper (`ai.web.WebServer`), but the node no longer creates it. One shared server is started per pipeline subprocess by `ai/node.py`, bound to the address the engine passes on the command line (`--data_host`, `--data_port`). That server loads the `data` module, which registers a `/task/data` websocket as the data plane between the public endpoint and the pipeline; the node simply registers its target endpoint on it.
 
-After the pipeline starts, the Project Log displays the interface URL, the public authorization key, and the private token, so callers know how to reach the endpoint (the chat link form is `{host}/chat?auth={public_auth}`).
+Because the shared server only exists when `node.py` is the process entry point and `--data_port` is supplied — which is what the task manager does for every pipeline subprocess — a pipeline sourced by this node cannot run outside that path. If the shared server is missing, the node fails immediately with an error saying so rather than a `NoneType` attribute error.
+
+The node keeps running until the pipeline is stopped; the source task completes only when the process shuts down.
+
+After the pipeline starts, the Project Log displays a stable, pipe-specific interface URL, the public authorization key, and the private token, so callers know how to reach the endpoint. The URL forms are `{host}/chat/{project_id}/{source}?auth={public_auth}`, `{host}/dropper/{project_id}/{source}?auth={public_auth}`, and `{host}/webhook/{project_id}/{source}`. The legacy `/chat`, `/dropper`, `/webhook`, and `/task/data` URLs continue to work for existing integrations.
 
 ---
 

@@ -25,6 +25,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import logging
+
 import pytest
 
 from ai.modules.task.task_conn import TaskConn
@@ -282,6 +284,40 @@ def test_has_permission_swallows_permission_error(monkeypatch):
 
     conn = _make_conn(account_info=_make_account_info())
     assert conn.has_permission('task.control') is False
+
+
+def test_has_permission_logs_why_it_denied(monkeypatch, caplog):
+    """
+    The denial must say WHO, WHICH TEAM, WHICH PERMISSION and WHAT FAILED.
+
+    Asserting only the False return is not enough: that assertion passes just as
+    happily with the logging deleted, which is how the #373 incident stayed
+    invisible for a day. The silent-denial path is the whole reason this log
+    exists, so the test has to fail if the message goes away or loses a field.
+    """
+    from ai.modules.task import task_conn as tc_mod
+
+    def _raise(info, team):
+        raise PermissionError('team-1 not in organization')
+
+    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', _raise)
+
+    conn = _make_conn(account_info=_make_account_info(user_id='user-1', default_team='team-1'))
+    with caplog.at_level(logging.WARNING, logger=tc_mod.__name__):
+        assert conn.has_permission('task.control') is False
+
+    # Pin the record down before reading it. Joining every captured record would
+    # let an unrelated log satisfy these field checks, and would keep passing if
+    # the denial were downgraded to debug or raised to error — either of which
+    # changes whether we actually see it in CloudWatch, which is the entire point.
+    records = [r for r in caplog.records if r.name == tc_mod.__name__ and r.levelno == logging.WARNING]
+    assert len(records) == 1, (
+        f'expected exactly one WARNING from {tc_mod.__name__}, got {[(r.name, r.levelname) for r in caplog.records]}'
+    )
+
+    message = records[0].getMessage()
+    for expected in ('team-1', 'user-1', 'task.control', 'not in organization'):
+        assert expected in message, f'denial log omits {expected!r}: {message}'
 
 
 def test_verify_permission_raises_on_missing(monkeypatch):

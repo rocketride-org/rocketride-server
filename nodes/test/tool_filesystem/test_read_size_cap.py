@@ -66,6 +66,10 @@ def _install_rocketlib_stub() -> None:
 
     stub.IInstanceBase = _IInstanceBase
     stub.tool_function = _tool_function
+    # Transitively needed: IInstance imports ai.common.utils, whose tool_args
+    # does ``from rocketlib import warning`` when the real ai package resolves
+    # and is not already cached in this process.
+    stub.warning = lambda *a, **k: None
     sys.modules['rocketlib'] = stub
 
 

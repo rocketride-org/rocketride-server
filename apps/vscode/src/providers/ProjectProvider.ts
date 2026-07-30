@@ -157,12 +157,15 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 		}
 
-		if (event.event === 'apaevt_status_update' || event.event === 'apaevt_flow') {
-			for (const editorState of this.editorStates.values()) {
-				if (editorState.isDisposed || !editorState.isReady) continue;
-				if (editorState.projectId !== projectId) continue;
-				editorState.webviewPanel.webview.postMessage({ type: 'shell:event', event });
-			}
+		// Forward EVERY stamped task event for this project — the server stamps
+		// project_id + source into all task-scoped bodies at its forward choke
+		// point, so identity is a pure body test. The webview's live log,
+		// trace, and run-active timeline consume output/lifecycle events too;
+		// a status/flow-only whitelist left them permanently incomplete.
+		for (const editorState of this.editorStates.values()) {
+			if (editorState.isDisposed || !editorState.isReady) continue;
+			if (editorState.projectId !== projectId) continue;
+			editorState.webviewPanel.webview.postMessage({ type: 'shell:event', event });
 		}
 	}
 
@@ -251,7 +254,11 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		try {
 			const client = this.connectionManager.getClient();
 			if (!client) throw new Error('No client available');
-			await client.addMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
+			// summary/flow feed the canvas + status map; output/task feed the
+			// webview's live log and run-active timeline. The webview has no
+			// session of its own (the host bridges all events), so the host
+			// must subscribe to every class the panes consume.
+			await client.addMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow', 'output', 'task']);
 		} catch (error) {
 			this.logger.error(`Starting monitoring for project ${editorState.projectId}: ${error}`);
 		}
@@ -263,7 +270,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 		try {
 			const client = this.connectionManager.getClient();
-			if (client) await client.removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow']);
+			if (client) await client.removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow', 'output', 'task']);
 		} catch (error) {
 			this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
 		}
@@ -827,15 +834,16 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 			const project = document.pipeline;
 
-			// TTL and trace level are workspace settings; the host reads them here and
-			// passes them to the engine. There is no per-pipeline override.
+			// TTL, trace level, task arguments, and debug output are workspace
+			// settings; the host reads them here and passes them per task to the
+			// engine. There is no per-pipeline override.
 			const cfg = ConfigManager.getInstance().getConfig();
 
 			await client.use({
 				pipeline: project,
 				source: project.source,
 				pipelineTraceLevel: cfg.pipelineTraceLevel,
-				args: ConfigManager.getInstance().getEngineArgs('development'),
+				args: ConfigManager.getInstance().getTaskArgs(),
 				name,
 				// ttl comes straight from settings (0 = no timeout).
 				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),

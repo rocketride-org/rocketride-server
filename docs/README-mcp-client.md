@@ -159,15 +159,15 @@ In Claude Desktop or any MCP-compatible client, resources are listed automatical
 
 ```python
 # Example: read the pipeline list resource
-result = await session.read_resource("rocketride://pipelines")
+result = await session.read_resource('rocketride://pipelines')
 # Returns: {"pipelines": [{"name": "my-pipeline", "description": "..."}, ...]}
 
 # Example: check server status
-result = await session.read_resource("rocketride://status")
+result = await session.read_resource('rocketride://status')
 # Returns: {"connected": true, "pipeline_count": 3, "pipelines": ["pipe-a", "pipe-b", "pipe-c"]}
 
 # Example: list available node types
-result = await session.read_resource("rocketride://nodes")
+result = await session.read_resource('rocketride://nodes')
 # Returns: {"nodes": [{"name": "llm-openai", "type": "processor"}, ...]}
 ```
 
@@ -236,10 +236,9 @@ This generates the message: _"Evaluate the output quality of the RocketRide pipe
 prompts = await session.list_prompts()
 
 # Get a rendered prompt
-result = await session.get_prompt("analyze-document", arguments={
-    "pipeline": "my-pipeline",
-    "query": "Summarize the key findings"
-})
+result = await session.get_prompt(
+    'analyze-document', arguments={'pipeline': 'my-pipeline', 'query': 'Summarize the key findings'}
+)
 # result.messages[0].content.text contains the rendered message
 ```
 

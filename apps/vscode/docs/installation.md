@@ -42,13 +42,14 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 |---------|---------|-------------|
 | `rocketride.defaultPipelinePath` | - | Default directory for new pipeline files |
 | `rocketride.pipelineRestartBehavior` | - | Restart behavior: `auto`, `manual`, or `prompt` |
+| `rocketride.taskArguments` | - | Additional command-line arguments passed to each pipeline task |
+| `rocketride.pipelineDebugOutput` | `false` | Enable full debug output for pipeline tasks (`--trace=debugOut`) |
 
 ### Local Engine
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `rocketride.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
-| `rocketride.engineArgs` | - | Additional startup arguments for the local engine |
 
 ### Integrations
 

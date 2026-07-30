@@ -75,6 +75,17 @@ const TMP_DIR = path.join(SHELL_API_DIR, '.freeze-tmp');
 const BEGIN = '// ===== BEGIN FROZEN BUNDLE — do not edit =====';
 const END = '// ===== END FROZEN BUNDLE =====';
 
+// NOTE — the client must never appear in an INPUT position on the surface.
+// The RocketRideClient (an MF shared singleton the shell serves to every app)
+// is frozen INLINE in the bundle with a covariant type floor: additions pass,
+// removals fail — append-only, matching how the singleton actually evolves.
+// But if any surface member takes the client as a function parameter or
+// component prop, the contravariant VALUE floors flip direction there and
+// every additive SDK member reads as a breaking change (this bit
+// WorkspaceProvider once; it now reads the client from useShellConnection()
+// instead of props). Components should always source the client from
+// useShellConnection()/getClient(), never accept it as input.
+
 // Reusable MIT license header for the hand-shaped generated files.
 const MIT_HEADER = [
 	'// MIT License',
@@ -464,9 +475,16 @@ function regenerateBarrels(maxN) {
 /** Collect the individually-exported named types from the bundle body. */
 function parseExportedTypes(candidateBody) {
 	const names = new Set();
-	// Inline `export interface X` / `export type X` declarations.
+	// Inline `export interface X` / `export type X` declarations, plus
+	// explicitly-exported classes (`export declare class X`) — classes only
+	// become exported here when api.ts re-exports them by name (with
+	// --export-referenced-types=false merely-referenced classes stay
+	// unexported), so each collected name is importable from './api' and its
+	// covariant type floor gives the class an append-only guarantee. This is
+	// how the inlined RocketRideClient is frozen (additions pass, removals
+	// fail) without entangling the contravariant value floors.
 	let m;
-	const inlineRe = /^export (?:interface|type) (\w+)/gm;
+	const inlineRe = /^export (?:interface|type|declare (?:abstract )?class) (\w+)/gm;
 	while ((m = inlineRe.exec(candidateBody))) names.add(m[1]);
 	// Re-export blocks: `export { A as B, C }`.
 	const blockRe = /export \{([^}]*)\}/g;

@@ -173,8 +173,17 @@ export type { ShellProps } from './components/layout/Shell';
 export type { SidebarProps, NavButtonProps } from './components/layout/Sidebar';
 export type { ConfirmDialogProps } from './components/layout/ConfirmDialog';
 
-// Workspace context interface
-export type { IWorkspaceContext } from './workspace/WorkspaceContext';
+// Workspace context interface + provider props
+export type { IWorkspaceContext, IWorkspaceProviderProps } from './workspace/WorkspaceContext';
+
+// The shared RocketRide client — an MF shared singleton the shell serves to
+// every app, so its API surface is PART of this contract. Exporting the type
+// by name gives it its own per-version floor (Frozen = Current, covariant):
+// SDK additions pass, removals/narrowings of anything ever frozen fail
+// shell-ui's tsc. The client is deliberately kept INLINED in the frozen
+// bundle. It must never appear in an
+// input position on this surface — see contract-hold.ts.
+export type { RocketRideClient } from 'rocketride';
 
 // Connection manager standalone types
 export type { InitOptions, DebugLogEntry } from './connection/connection';

@@ -445,16 +445,11 @@ export class ConnectionManager extends EventEmitter {
 				}
 			},
 			onEvent: async (message: DAPMessage) => {
-				if (message.event === 'output') {
-					const body = message.body;
-					if (body?.output) {
-						const text = String(body.output).trimEnd();
-						if (text) {
-							const source = body.__id ? `[${body.__id}] ` : '';
-							this.logger.console(`    ${source}${text}`);
-						}
-					}
-				} else if (message.event?.startsWith('apaevt_')) {
+				// Server output events are NOT mirrored into an output channel:
+				// the task's Log pane (fed by the same events via shell:event)
+				// is the console now — a second copy in the Output panel was
+				// redundant. Non-output apaevt_* still log as diagnostics.
+				if (message.event?.startsWith('apaevt_')) {
 					this.logger.output(`${icons.info} ${message.event}: ${safeJSONStringify(message.body)}`);
 				}
 

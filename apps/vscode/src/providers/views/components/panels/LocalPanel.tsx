@@ -6,7 +6,8 @@
 /**
  * LocalPanel — target panel for Local connection mode.
  *
- * Renders: server version dropdown, debug output checkbox, server arguments input.
+ * Renders: server version dropdown. Debug output and task arguments are
+ * pipeline settings (passed per task via `.use`), not connection options.
  * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
@@ -23,10 +24,6 @@ export interface LocalPanelProps {
 	onVersionChange: (version: string) => void;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
-	debugOutput: boolean;
-	onDebugOutputChange: (checked: boolean) => void;
-	engineArgs: string;
-	onEngineArgsChange: (args: string) => void;
 	idPrefix: string;
 	simplified?: boolean;
 }
@@ -41,7 +38,7 @@ const displayVersion = (tagName: string): string => tagName.replace(/^server-/, 
 // COMPONENT
 // =============================================================================
 
-export const LocalPanel: React.FC<LocalPanelProps> = ({ engineVersion, onVersionChange, engineVersions, engineVersionsLoading, debugOutput, onDebugOutputChange, engineArgs, onEngineArgsChange, idPrefix, simplified }) => {
+export const LocalPanel: React.FC<LocalPanelProps> = ({ engineVersion, onVersionChange, engineVersions, engineVersionsLoading, idPrefix, simplified }) => {
 	const id = (name: string) => `${idPrefix}-${name}`;
 
 	// Simplified: just the description, no config fields
@@ -80,26 +77,6 @@ export const LocalPanel: React.FC<LocalPanelProps> = ({ engineVersion, onVersion
 					</optgroup>
 				</select>
 				<div style={S.helpText}>Choose which server version to download. &lt;Latest&gt; gets the newest stable release.</div>
-			</div>
-
-			{/* Debug output */}
-			<div style={S.formGroup}>
-				<div>
-					<input type="checkbox" id={id('debugOutput')} checked={debugOutput} onChange={(e) => onDebugOutputChange(e.target.checked)} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-					<label htmlFor={id('debugOutput')} style={{ display: 'inline', fontWeight: 'normal', margin: 0, verticalAlign: 'middle', cursor: 'pointer' }}>
-						Full debug output
-					</label>
-				</div>
-				<div style={S.helpText}>Enable detailed server trace logging (see Output&#8594;RocketRide: Console)</div>
-			</div>
-
-			{/* Server arguments */}
-			<div style={S.formGroup}>
-				<label htmlFor={id('engineArgs')} style={S.label}>
-					Server Arguments
-				</label>
-				<input type="text" id={id('engineArgs')} value={engineArgs} placeholder="--option=value --flag" onChange={(e) => onEngineArgsChange(e.target.value)} />
-				<div style={S.helpText}>Additional command-line arguments passed to the server</div>
 			</div>
 		</>
 	);
