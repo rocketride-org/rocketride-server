@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-29
 **Status:** Approved (design review with Dylan, 2026-07-29)
-**Executor skill:** to be named in the implementation plan (see `plan.md` when written)
+**Executor skill:** superpowers:subagent-driven-development (see `plan.md`)
 **Follow-up to:** PR #1651 (`feat(nodes): tool_filesystem pipeline-sink lanes`, merged to `develop` as `f862d814`)
 
 ## Problem
@@ -73,8 +73,10 @@ tool discovery. Code changes are limited to:
 
 ## Error handling
 
-- Source: nonexistent configured path → `validateConfig` failure. Empty folder →
-  clean zero-object run.
+- Source: empty configured path → `validateConfig` failure; nonexistent path →
+  raises at `scanObjects` time (existence needs store access, which config-time
+  validation doesn't have — see open-questions.md). Empty folder → clean
+  zero-object run.
 - Sink and tool: unchanged from #1651 behavior (path whitelist, size caps, media
   stream abort handling all stay).
 
