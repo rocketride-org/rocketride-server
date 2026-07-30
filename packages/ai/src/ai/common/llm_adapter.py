@@ -221,9 +221,10 @@ class LangChainAdapter:
 class NativeOpenAIResponsesAdapter:
     """Bridges the OpenAI Responses reasoning stream (create/stream=True) to Events."""
 
-    def __init__(self, chat: Any, history: list[Any] | None = None):
+    def __init__(self, chat: Any):
+        # Single-turn: history is not accepted (the request is built from user_text, not history).
         self.chat = chat
-        self.history: list[Any] = history if history is not None else []
+        self.history: list[Any] = []
         self.finish_reason: Optional[str] = None
 
     def stream(self, user_text: str) -> Iterator[Event]:

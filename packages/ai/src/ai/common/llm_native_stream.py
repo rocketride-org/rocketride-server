@@ -175,9 +175,10 @@ class NativeAnthropicAdapter:
     Same payload + raw create(stream=True) path as before; now yields normalized Events.
     """
 
-    def __init__(self, chat: Any, history: Optional[list] = None):
+    def __init__(self, chat: Any):
+        # Single-turn: history is not accepted (the request is built from user_text, not history).
         self.chat = chat
-        self.history = history if history is not None else []
+        self.history: list = []
         self.finish_reason: Optional[str] = None
 
     def stream(self, user_text: str):

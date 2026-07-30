@@ -325,14 +325,14 @@ def _repair_field_objects(fields: Dict[str, Any], profiles: Dict[str, Any] | Non
 
         # extendedThinking toggle: present iff the model reasons (capabilities.reasoning).
         # Only managed for nodes that DEFINE the field (today: llm_anthropic) so it never
-        # leaks into providers that neither define nor read it. Skips 'custom'/non-model objects.
+        # leaks into providers that neither define nor read it. 'custom' has no capabilities,
+        # so it is treated as non-reasoning and the toggle is removed (it would be inert).
         obj = value.get('object')
         if (
             profiles is not None
             and _EXTENDED_THINKING in fields
             and has_apikey
             and isinstance(obj, str)
-            and obj != 'custom'
             and obj in profiles
         ):
             reasons = bool(((profiles.get(obj) or {}).get('capabilities') or {}).get('reasoning'))

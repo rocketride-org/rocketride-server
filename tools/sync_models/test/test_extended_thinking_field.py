@@ -42,7 +42,8 @@ def test_toggle_never_added_when_field_undefined():
     assert fields['ns.r']['properties'] == ['llm.cloud.apikey', 'llm.cloud.modelSource']
 
 
-def test_repair_skips_custom():
+def test_repair_removes_inert_toggle_from_custom():
+    # 'custom' has no capabilities → non-reasoning → the toggle would be inert, so it is removed.
     fields = {
         **_FIELD_DEF,
         'ns.custom': {
@@ -51,7 +52,7 @@ def test_repair_skips_custom():
         },
     }
     _repair_field_objects(fields, {'custom': {}})
-    assert 'extendedThinking' in fields['ns.custom']['properties']
+    assert fields['ns.custom']['properties'] == ['llm.cloud.apikey', 'llm.cloud.modelSource']
 
 
 def test_repair_without_profiles_leaves_toggle_untouched():

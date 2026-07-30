@@ -344,48 +344,47 @@
 				"model",
 				"modelTotalTokens",
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-sonnet-4-6": {
 			"object": "claude-sonnet-4-6",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-4-6": {
 			"object": "claude-opus-4-6",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-haiku-4-5": {
 			"object": "claude-haiku-4-5",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-sonnet-4-5": {
 			"object": "claude-sonnet-4-5",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-4-5": {
 			"object": "claude-opus-4-5",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.profile": {
@@ -535,8 +534,8 @@
 			"object": "claude-opus-4-7",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-3-haiku": {
@@ -550,102 +549,103 @@
 			"object": "claude-fable-5",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-fable-latest": {
 			"object": "claude-fable-latest",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-haiku-latest": {
 			"object": "claude-haiku-latest",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-4": {
 			"object": "claude-opus-4",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-4-1": {
 			"object": "claude-opus-4-1",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-4-7-fast": {
 			"object": "claude-opus-4-7-fast",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-4-8": {
 			"object": "claude-opus-4-8",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-4-8-fast": {
 			"object": "claude-opus-4-8-fast",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-latest": {
 			"object": "claude-opus-latest",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-sonnet-4": {
 			"object": "claude-sonnet-4",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-sonnet-5": {
 			"object": "claude-sonnet-5",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-sonnet-latest": {
 			"object": "claude-sonnet-latest",
 			"properties": [
 				"llm.cloud.apikey",
-				"llm.cloud.modelSource",
-				"extendedThinking"
+				"extendedThinking",
+				"llm.cloud.modelSource"
 			]
 		},
 		"anthropic.claude-opus-5": {
 			"object": "claude-opus-5",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -653,6 +653,7 @@
 			"object": "claude-opus-5-fast",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		}

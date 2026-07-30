@@ -33,6 +33,7 @@ from typing import Any, Dict
 from ai.common.chat import ChatBase
 from ai.common.config import Config
 from ai.common.llm_native_stream import build_anthropic_thinking_kwargs, gate_model_name
+from ai.common.utils import parse_bool
 from langchain_anthropic import ChatAnthropic
 
 
@@ -75,7 +76,7 @@ class Chat(ChatBase):
         # it per call, so thinking activates on the interactive streaming path only — never on the
         # agent / expectJson path (which has no streaming and stays on the plain LangChain client).
         self._thinking_mode_kwargs: Dict[str, Any] = {}
-        if self._is_reasoning and bool(config.get('extendedThinking')):
+        if self._is_reasoning and parse_bool(config.get('extendedThinking')):
             self._thinking_mode_kwargs = build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens)
         self._extended_thinking = bool(self._thinking_mode_kwargs)
         if self._extended_thinking:

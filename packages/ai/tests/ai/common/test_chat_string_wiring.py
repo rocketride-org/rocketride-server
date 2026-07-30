@@ -89,3 +89,21 @@ def test_chat_nonstreaming_invokes_via_adapter():
     finally:
         STOP_SEQUENCES_VAR.reset(token)
     assert llm.kwargs == {'stop': ['\nObservation:']}
+
+
+def test_responses_no_text_falls_back_to_invoke():
+    # response.failed with no text → the no-text guard raises → non-streaming invoke fallback.
+    class _FailEvent:
+        type = 'response.failed'
+
+    class _Responses:
+        def create(self, **kwargs):
+            return iter([_FailEvent()])
+
+    class _RawClient:
+        responses = _Responses()
+
+    chat = _Chat(_FakeLLM([_Piece('fallback answer')]))
+    chat._raw_client = _RawClient()
+    result = chat._chat_string_responses('q', on_chunk=lambda t: None, emitted={'any': False})
+    assert result == 'fallback answer'

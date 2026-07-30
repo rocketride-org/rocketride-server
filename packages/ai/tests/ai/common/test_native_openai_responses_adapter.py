@@ -72,3 +72,15 @@ def test_incomplete_maps_to_reason():
     adapter = NativeOpenAIResponsesAdapter(_Chat(events))
     list(adapter.stream('q'))
     assert adapter.finish_reason == 'max_output_tokens'
+
+
+def test_failed_response_sets_error_finish():
+    adapter = NativeOpenAIResponsesAdapter(_Chat([_Ev('response.failed')]))
+    list(adapter.stream('q'))
+    assert adapter.finish_reason == 'error'
+
+
+def test_passes_store_false():
+    chat = _Chat([_Ev('response.output_text.delta', delta='x')])
+    list(NativeOpenAIResponsesAdapter(chat).stream('q'))
+    assert chat._raw_client.responses.seen['store'] is False
