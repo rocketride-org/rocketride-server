@@ -127,7 +127,14 @@ def test_single_file_pushed_with_tag_stream_sequence(monkeypatch):
     assert entry.name == 'inbox/a.pdf'
     assert entry.url == 'filestore://inbox/a.pdf'
     assert entry.size == 7
-    assert entry.mimeType == 'application/pdf'
+    # Not asserted: entry.mimeType. The real engLib.Entry (see
+    # rocketlib/__init__.pyi) has no mimeType field, so getObject's obj-copy
+    # loop (`if hasattr(entry, key)`) silently drops it — same as the
+    # telegram source's identical 'mimeType' key. Only the permissive
+    # SimpleNamespace test stub exposes arbitrary kwargs as attributes, which
+    # is why this assertion passed here but raised AttributeError under
+    # `./builder nodes:test` (real rocketlib). Downstream parsing relies on
+    # the file extension in `entry.name`, which is asserted above.
     target.putPipe.assert_called_once_with(pipes[0])
 
 
