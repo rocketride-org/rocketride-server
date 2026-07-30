@@ -53,6 +53,11 @@ CLIENT_ID_ENV = 'ROCKETRIDE_CLIENT_ID'
 # pipelines that contain RocketRide cloud DB nodes.
 DB_DSN_ENV = 'ROCKETRIDE_DB_DSN'
 
+# When server-side resolution fails (e.g. a broker outage), the task engine
+# passes the reason down here instead of a DSN, so the node can report the
+# real cause rather than the misleading "sign into RocketRide cloud" error.
+DB_RESOLVE_ERROR_ENV = 'ROCKETRIDE_DB_RESOLVE_ERROR'
+
 
 def _run_async(coro):
     """Run a coroutine from synchronous node lifecycle code.
@@ -128,6 +133,14 @@ def resolve_rocketride_dsn() -> str:
     injected = os.environ.get(DB_DSN_ENV, '').strip()
     if injected:
         return injected
+
+    # Server-side resolution was attempted and failed: report that failure,
+    # not the sign-in error the account fallback below would produce (the
+    # task engine scrubs the broker env from node subprocesses, so the
+    # fallback cannot succeed here anyway).
+    resolve_error = os.environ.get(DB_RESOLVE_ERROR_ENV, '').strip()
+    if resolve_error:
+        raise ValueError(f'RocketRide cloud database resolution failed at task start: {resolve_error}')
 
     # Lazy import: ai.common is imported very early, and ai.account pulls in the
     # OSS/SaaS overlay — importing at module load risks a cycle.

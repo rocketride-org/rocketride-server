@@ -162,6 +162,35 @@ class TestFirewall:
         with pytest.raises(age.AgeFirewallRejected, match='max_query_length'):
             age.translate('MATCH (averylongvariablename) RETURN averylongvariablename', graph_name='g', firewall=config)
 
+    def test_length_cap_checked_before_parse(self):
+        # An oversize query full of syntactically invalid text must produce the
+        # LENGTH error, not a syntax error — proving the cap precedes the parse
+        # (the parse is the expensive step the cap exists to bound).
+        config = age.FirewallConfig(max_query_length=100)
+        garbage = ':::not cypher at all::: ' * 50
+        with pytest.raises(age.AgeFirewallRejected, match='max_query_length'):
+            age.translate(garbage, graph_name='g', firewall=config)
+
+    def test_deep_nesting_rejected_pre_parse(self):
+        # ~14 stack frames per nesting level in the ANTLR parser; 100 levels
+        # used to escape as a bare RecursionError (reviewer-reproduced).
+        query = 'RETURN ' + '(' * 100 + '1' + ')' * 100
+        with pytest.raises(age.AgeFirewallRejected, match='max_nesting_depth'):
+            age.translate(query, graph_name='g')
+
+    def test_deep_nesting_backstop_is_translation_error(self):
+        # Even with the pre-parse cap lifted, deep nesting must surface as
+        # AgeTranslationError (the layer's contract), never RecursionError.
+        query = 'RETURN ' + '(' * 300 + '1' + ')' * 300
+        config = age.FirewallConfig(max_nesting_depth=10_000)
+        with pytest.raises(age.AgeTranslationError, match='nested too deeply'):
+            age.translate(query, graph_name='g', firewall=config)
+
+    def test_moderate_nesting_still_translates(self):
+        query = 'RETURN ' + '(' * 10 + '1' + ')' * 10
+        plan = age.translate(query, graph_name='g')
+        assert plan.has_return is True
+
 
 # ---------------------------------------------------------------------------
 # capabilities

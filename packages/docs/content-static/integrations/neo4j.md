@@ -101,7 +101,8 @@ prompt so Cypher is generated against the real structure.
 ## Agent tools
 
 When connected to an agent, the node exposes three functions under the node's
-prefix (e.g. `graph_neo4j.get_data`):
+ID as a prefix (`<node-id>.get_data` — e.g. `graph_1.get_data` for the sample
+config above):
 
 | Tool | What it does |
 | --- | --- |

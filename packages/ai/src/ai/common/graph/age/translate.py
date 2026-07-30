@@ -46,7 +46,7 @@ from .analysis import analyze
 from .capabilities import DEFAULT_AGE_VERSION, apply_capabilities
 from .decode import decode_agtype
 from .emit import TranslatedQuery, emit
-from .firewall import FirewallConfig, check_resource_caps, check_semantics_readonly
+from .firewall import FirewallConfig, check_pre_parse, check_resource_caps, check_semantics_readonly
 
 
 class TranslateMode(enum.Enum):
@@ -76,6 +76,11 @@ def translate(
         AgeFirewallRejected: a resource cap or (safe path) semantic rule fires.
     """
     config = firewall or FirewallConfig()
+
+    # Length/nesting caps run BEFORE the parse — the parse is the expensive
+    # step they bound, so an oversize query is rejected in O(n) scan time
+    # instead of after seconds of ANTLR work.
+    check_pre_parse(cypher, config)
 
     facts = analyze(cypher)
 

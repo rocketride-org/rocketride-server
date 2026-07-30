@@ -175,7 +175,16 @@ def analyze(query: str) -> CypherFacts:
     parser.removeErrorListeners()
     parser.addErrorListener(listener)
 
-    tree = parser.oC_Cypher()
+    # The recursive-descent parse (and the walk below) burn stack per nesting
+    # level. The firewall's pre-parse nesting cap keeps normal input far from
+    # the limit; this backstop keeps the layer's contract — every failure is
+    # an AgeTranslationError — even for input that slips past the scan.
+    try:
+        tree = parser.oC_Cypher()
+    except RecursionError:
+        raise AgeTranslationError(
+            'Cypher expression is nested too deeply to parse (reduce parenthesis/expression nesting)'
+        ) from None
     if listener.errors:
         raise AgeTranslationError('Cypher syntax error: ' + '; '.join(listener.errors[:5]))
 
@@ -226,7 +235,12 @@ def analyze(query: str) -> CypherFacts:
             sort_items.append(node.oC_Expression().getText())
 
     sort_items: List[str] = []
-    _walk(tree, visit)
+    try:
+        _walk(tree, visit)
+    except RecursionError:
+        raise AgeTranslationError(
+            'Cypher expression is nested too deeply to analyze (reduce parenthesis/expression nesting)'
+        ) from None
 
     if returns:
         # Multiple RETURNs at the same (shallowest) depth = UNION branches; all

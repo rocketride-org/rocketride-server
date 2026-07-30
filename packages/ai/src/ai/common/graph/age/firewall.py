@@ -34,8 +34,10 @@ Two rule families, applied per the design:
   transaction the node runs safe queries in (server-side, like FalkorDB's
   RO_QUERY), with this check giving precise, pre-flight errors.
 
-Caps are constructor arguments so the node can expose them as config; the
-defaults were sanity-checked against the pinned AGE 1.5.0 container.
+Caps are constructor arguments; the node currently wires only
+``statement_timeout_ms`` through its config (``query_timeout_ms`` in
+services.json) and leaves the rest at these defaults, which were
+sanity-checked against the pinned AGE 1.5.0 container.
 """
 
 from __future__ import annotations
@@ -51,15 +53,51 @@ from .errors import AgeFirewallRejected
 DEFAULT_MAX_QUERY_LENGTH = 10_000
 DEFAULT_MAX_VAR_LENGTH_DEPTH = 10
 DEFAULT_STATEMENT_TIMEOUT_MS = 30_000
+# The ANTLR parser burns ~14 stack frames per expression nesting level, so
+# Python's default recursion limit trips around 70 nested parens. 50 keeps a
+# deterministic, well-messaged rejection comfortably below that cliff.
+DEFAULT_MAX_NESTING_DEPTH = 50
 
 
 @dataclass(frozen=True)
 class FirewallConfig:
     max_query_length: int = DEFAULT_MAX_QUERY_LENGTH
     max_var_length_depth: int = DEFAULT_MAX_VAR_LENGTH_DEPTH
+    max_nesting_depth: int = DEFAULT_MAX_NESTING_DEPTH
     # Applied by the emitter as SET LOCAL statement_timeout in the query's
     # transaction — the database-side resource backstop for both paths.
     statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS
+
+
+def check_pre_parse(cypher: str, config: FirewallConfig) -> None:
+    """Caps that must run BEFORE the parse — both paths.
+
+    The ANTLR parse is the expensive step these caps exist to bound (linear
+    CPU in query length; stack depth in expression nesting), so checking them
+    after ``analyze()`` would defeat their purpose. Character scans only —
+    no parser involvement. Raises AgeFirewallRejected on violation.
+
+    The nesting scan counts brackets inside string literals too; a legitimate
+    string containing 50+ consecutive open brackets is contrived enough that
+    the deterministic pre-parse rejection is the better trade.
+    """
+    if len(cypher) > config.max_query_length:
+        raise AgeFirewallRejected(
+            'max_query_length',
+            f'query is {len(cypher)} chars (limit {config.max_query_length})',
+        )
+    depth = 0
+    for ch in cypher:
+        if ch in '([{':
+            depth += 1
+            if depth > config.max_nesting_depth:
+                raise AgeFirewallRejected(
+                    'max_nesting_depth',
+                    f'expression nesting exceeds {config.max_nesting_depth} levels '
+                    '(reduce parenthesis/bracket nesting)',
+                )
+        elif ch in ')]}':
+            depth = max(0, depth - 1)
 
 
 def check_resource_caps(facts: CypherFacts, config: FirewallConfig) -> None:

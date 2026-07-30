@@ -27,7 +27,8 @@
 import os
 from depends import depends  # type: ignore
 
-# Install psycopg2-binary and SQLAlchemy before importing any driver code.
+# Install psycopg2-binary before importing any driver code (this node drives
+# psycopg2 directly; it does not use SQLAlchemy).
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 

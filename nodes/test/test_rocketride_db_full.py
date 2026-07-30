@@ -70,10 +70,21 @@ TEST_DSN = os.environ.get('RR_TEST_PG_DSN', 'postgresql://rruser:rrpass@localhos
 TEST_DB_NAME = urllib.parse.urlparse(TEST_DSN).path.lstrip('/')
 TEST_CLIENT_ID = 'tenant-integration-test'
 
-psycopg2 = pytest.importorskip('psycopg2')
-pytest.importorskip('pgvector')
-pytest.importorskip('sqlalchemy')
-np = pytest.importorskip('numpy')
+# RR_REQUIRE_DB_TESTS (set by CI once its DB containers are healthy) turns
+# every skip in this module into a hard failure: a broken container or missing
+# dependency must never let the safety-control tests silently go green.
+_DB_TESTS_REQUIRED = bool(os.environ.get('RR_REQUIRE_DB_TESTS'))
+
+if _DB_TESTS_REQUIRED:
+    import numpy as np
+    import pgvector  # noqa: F401
+    import psycopg2
+    import sqlalchemy  # noqa: F401
+else:
+    psycopg2 = pytest.importorskip('psycopg2')
+    pytest.importorskip('pgvector')
+    pytest.importorskip('sqlalchemy')
+    np = pytest.importorskip('numpy')
 
 
 def _db_reachable() -> bool:
@@ -84,6 +95,9 @@ def _db_reachable() -> bool:
     except Exception:
         return False
 
+
+if _DB_TESTS_REQUIRED and not _db_reachable():
+    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but the test database is not reachable at {TEST_DSN}', pytrace=False)
 
 pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide test database not reachable at {TEST_DSN}')
 

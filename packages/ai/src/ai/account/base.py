@@ -368,10 +368,36 @@ class AccountBase(ABC):
             raise NotImplementedError('RocketRide cloud DB nodes require signing into RocketRide cloud')
         if not client_id or not client_id.strip():
             raise ValueError('resolve_db_dsn requires a non-empty client_id')
+        self._check_broker_url(broker_url)
 
         import asyncio
 
         return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, client_id.strip())
+
+    @staticmethod
+    def _check_broker_url(url: str) -> None:
+        """Refuse to send the broker token over anything but HTTPS.
+
+        The token can resolve ANY tenant's DSN, so a deployment typo like an
+        ``http://`` broker URL must fail loudly, not silently ship the token
+        (and every returned DSN) in cleartext. Plain http is allowed only for
+        localhost — the local dev/test rig runs the provisioner there.
+        """
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(url)
+            scheme, host = parsed.scheme.lower(), parsed.hostname
+        except ValueError:
+            scheme, host = '', None
+        if scheme == 'https':
+            return
+        if scheme == 'http' and host in ('localhost', '127.0.0.1', '::1'):
+            return
+        raise RuntimeError(
+            f'ROCKETRIDE_DB_BROKER_URL must use https (got {scheme or "no"} scheme): '
+            'the broker token must never travel unencrypted; plain http is allowed only for localhost'
+        )
 
     @staticmethod
     def _call_db_broker(url: str, token: str, tenant_id: str) -> str:
@@ -405,7 +431,25 @@ class AccountBase(ABC):
         dsn = body.get('dsn') if isinstance(body, dict) else None
         if not dsn or not isinstance(dsn, str):
             raise RuntimeError('DB broker response did not include a DSN')
-        return dsn
+        return AccountBase._pin_dsn_tls(dsn)
+
+    @staticmethod
+    def _pin_dsn_tls(dsn: str) -> str:
+        """Validate the broker's DSN and guarantee it carries an sslmode.
+
+        The broker contract sends ``sslmode=require``; this pins that
+        guarantee client-side so a broker regression cannot silently
+        downgrade every tenant connection to cleartext.
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(dsn)
+        if parsed.scheme.lower() not in ('postgres', 'postgresql'):
+            raise RuntimeError(f'DB broker returned a non-PostgreSQL DSN (scheme {parsed.scheme!r})')
+        if 'sslmode' in parse_qs(parsed.query):
+            return dsn
+        separator = '&' if parsed.query else '?'
+        return f'{dsn}{separator}sslmode=require'
 
     # =========================================================================
     # DAP COMMAND DISPATCH — SaaS overrides all three

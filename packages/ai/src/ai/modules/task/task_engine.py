@@ -386,6 +386,52 @@ class Task(DAPBase):
             for component in components
         )
 
+    async def _build_subprocess_env(self) -> Dict[str, str]:
+        """Build the environment for the task subprocess.
+
+        Credential hygiene for the RocketRide cloud DB path:
+
+        - The broker credential can resolve ANY tenant's DSN — it must never
+          reach node subprocesses, which run user pipeline code.
+        - A DSN inherited from the parent environment must not leak into
+          pipelines that didn't resolve one (and must not survive a broker
+          failure as a stale value pointing at who-knows-which tenant).
+
+        Children only ever get the single DSN resolved here, for pipelines
+        that actually contain one of the DB nodes.
+        """
+        subprocess_env = os.environ.copy()
+        subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
+
+        subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
+        subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
+        subprocess_env.pop('ROCKETRIDE_DB_DSN', None)
+        subprocess_env.pop('ROCKETRIDE_DB_RESOLVE_ERROR', None)
+
+        # Resolve the per-tenant DSN server-side (the SaaS account context
+        # exists only in this process) and hand it to the node subprocess via
+        # env — the same delivery mechanism as ROCKETRIDE_CLIENT_ID. Scoped to
+        # pipelines that actually contain one of the DB nodes so unrelated
+        # tasks never trigger provisioning. Resolution failure is non-fatal
+        # here: the node surfaces its own clear error, with the failure reason
+        # passed down so it isn't misreported as a sign-in problem.
+        if self._pipeline_uses_rocketride_db():
+            try:
+                from ai.account import account
+
+                dsn = await account.resolve_db_dsn(self.client_id)
+                subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
+            except NotImplementedError:
+                # Broker env not configured (open-source default) — the
+                # node raises the sign-in message itself.
+                pass
+            except Exception as e:
+                self.debug_message(f'RocketRide DB DSN resolution failed: {e}')
+                reason = (str(e).strip().splitlines() or [repr(e)])[0]
+                subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = reason
+
+        return subprocess_env
+
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
         Validate pipeline configuration and extract metadata.
@@ -1940,35 +1986,10 @@ class Task(DAPBase):
 
             await self._send_status_update()
 
-            # Launch subprocess - pass environment with account context for store access
-            subprocess_env = os.environ.copy()
-            subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
-
-            # The broker credential can resolve ANY tenant's DSN — it must
-            # never reach node subprocesses, which run user pipeline code.
-            # Children only ever get the single resolved DSN below.
-            subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
-            subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
-
-            # RocketRide cloud DB nodes: resolve the per-tenant DSN server-side
-            # (the SaaS account context exists only in this process) and hand it
-            # to the node subprocess via env — the same delivery mechanism as
-            # ROCKETRIDE_CLIENT_ID. Scoped to pipelines that actually contain
-            # one of the DB nodes so unrelated tasks never trigger provisioning.
-            # Resolution failure is non-fatal here: the node surfaces its own
-            # clear error (and the env-less fallback path keeps OSS behavior).
-            if self._pipeline_uses_rocketride_db():
-                try:
-                    from ai.account import account
-
-                    dsn = await account.resolve_db_dsn(self.client_id)
-                    subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
-                except NotImplementedError:
-                    # Broker env not configured (open-source default) — the
-                    # node raises the sign-in message itself.
-                    pass
-                except Exception as e:
-                    self.debug_message(f'RocketRide DB DSN resolution failed: {e}')
+            # Launch subprocess - pass environment with account context for
+            # store access (and RocketRide DB credential hygiene — see
+            # _build_subprocess_env).
+            subprocess_env = await self._build_subprocess_env()
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):

@@ -71,6 +71,11 @@ class _FakeBroker(BaseHTTPRequestHandler):
             return
         if tenant == 'no-dsn-tenant':
             payload = {'database': 't_broken', 'role': 't_broken_rw', 'created': False}
+        elif tenant == 'no-sslmode-tenant':
+            bare = 'postgresql://r_t1_ab:secret@pooler.internal:5432/t_t1_ab'
+            payload = {'database': 't_t1_ab', 'role': 't_t1_ab_rw', 'dsn': bare, 'created': False}
+        elif tenant == 'bad-scheme-tenant':
+            payload = {'database': 't_t1_ab', 'role': 't_t1_ab_rw', 'dsn': 'mysql://u:p@h/db', 'created': False}
         else:
             payload = {'database': 't_t1_ab', 'role': 't_t1_ab_rw', 'dsn': TEST_DSN, 'created': False}
         raw = json.dumps(payload).encode('utf-8')
@@ -155,3 +160,46 @@ def test_unreachable_broker_raises(monkeypatch):
 def test_empty_client_id_rejected(broker):
     with pytest.raises(ValueError, match='non-empty client_id'):
         _resolve('   ')
+
+
+# ---------------------------------------------------------------------------
+# Transport security guards
+# ---------------------------------------------------------------------------
+
+
+def test_http_broker_url_rejected_for_non_localhost(monkeypatch):
+    """The broker token can resolve any tenant's DSN — never send it over
+    plain http to a remote host (a deployment typo must fail loudly).
+    """
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'http://broker.internal/provision')
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', TEST_TOKEN)
+    with pytest.raises(RuntimeError, match='must use https'):
+        _resolve('tenant-1')
+
+
+def test_https_and_localhost_http_broker_urls_accepted():
+    # https anywhere; plain http only on the loopback (local rig / this suite).
+    AccountBase._check_broker_url('https://api.rocketride.ai/db/provision')
+    AccountBase._check_broker_url('http://localhost:8090/provision')
+    AccountBase._check_broker_url('http://127.0.0.1:8090/provision')
+    with pytest.raises(RuntimeError, match='must use https'):
+        AccountBase._check_broker_url('ftp://broker.internal/provision')
+    with pytest.raises(RuntimeError, match='must use https'):
+        AccountBase._check_broker_url('file:///etc/passwd')
+
+
+def test_dsn_without_sslmode_gets_require_pinned(broker):
+    """A broker regression that drops sslmode must not silently downgrade
+    every tenant connection to cleartext.
+    """
+    dsn = _resolve('no-sslmode-tenant')
+    assert dsn == 'postgresql://r_t1_ab:secret@pooler.internal:5432/t_t1_ab?sslmode=require'
+
+
+def test_dsn_with_existing_sslmode_passes_through_unchanged(broker):
+    assert _resolve('tenant-1') == TEST_DSN
+
+
+def test_non_postgres_dsn_rejected(broker):
+    with pytest.raises(RuntimeError, match='non-PostgreSQL DSN'):
+        _resolve('bad-scheme-tenant')

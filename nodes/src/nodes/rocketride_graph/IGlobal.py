@@ -40,6 +40,7 @@ transaction ``READ ONLY`` — server-side write protection, with the base's
 ``is_cypher_safe`` regex and the layer's semantic firewall as defence-in-depth.
 """
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
@@ -65,6 +66,10 @@ DEFAULT_QUERY_TIMEOUT_MS = 30000
 # Reflection fan-out bounds (mirrors graph_falkordb's sampling posture).
 SCHEMA_LABEL_LIMIT = 200
 SCHEMA_REL_LIMIT = 100
+
+# Same identifier rule the translation layer applies to graph names — labels
+# interpolated into Cypher text must conform (see _sample_edge_endpoints).
+VALID_LABEL = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
 
 
 class IGlobal(GraphGlobalBase):
@@ -187,6 +192,17 @@ class IGlobal(GraphGlobalBase):
         """
         if self.client is None:
             raise RuntimeError('Database connection is not initialized')
+        # Both server-side controls below (SET TRANSACTION READ ONLY and the
+        # plan's SET LOCAL statement_timeout) are silent no-ops outside a
+        # transaction. They hold because psycopg2 opens one implicitly on the
+        # first execute — which requires autocommit off. Assert the
+        # precondition so a future change fails loudly instead of quietly
+        # dropping the write protection and the timeout cap.
+        if self.client.autocommit:
+            raise RuntimeError(
+                'rocketride_graph requires autocommit=False: READ ONLY and SET LOCAL '
+                'statement_timeout only apply inside a transaction'
+            )
         rows: List[Tuple] = []
         try:
             with self.client.cursor() as cur:
@@ -308,6 +324,13 @@ class IGlobal(GraphGlobalBase):
 
     def _sample_edge_endpoints(self, etype: str) -> Tuple[str, str]:
         """Start/end labels for one sampled edge of the given type."""
+        # The one Cypher string the node assembles itself, so hold the label
+        # to the same identifier rule the layer applies to graph names: AGE
+        # allows backtick-quoted labels with arbitrary characters, and those
+        # must not be spliced into query text.
+        if not VALID_LABEL.fullmatch(etype or ''):
+            warning(f'rocketride_graph: skipping relationship sample for non-identifier label {etype!r}')
+            return '', ''
         try:
             plan = self._translate(
                 f'MATCH (a)-[r:{etype}]->(b) RETURN label(a) AS s, label(b) AS e',

@@ -63,8 +63,17 @@ TEST_DSN = os.environ.get('RR_TEST_AGE_DSN', 'postgresql://rruser:rrpass@localho
 TEST_CLIENT_ID = 'tenant-graph-test'
 GRAPH = 'rr_graph_e2e'
 
-psycopg2 = pytest.importorskip('psycopg2')
-pytest.importorskip('antlr4')
+# RR_REQUIRE_DB_TESTS (set by CI once its DB containers are healthy) turns
+# every skip in this module into a hard failure: a broken container or missing
+# dependency must never let the safety-control tests silently go green.
+_DB_TESTS_REQUIRED = bool(os.environ.get('RR_REQUIRE_DB_TESTS'))
+
+if _DB_TESTS_REQUIRED:
+    import antlr4  # noqa: F401
+    import psycopg2
+else:
+    psycopg2 = pytest.importorskip('psycopg2')
+    pytest.importorskip('antlr4')
 
 
 def _db_reachable() -> bool:
@@ -75,6 +84,9 @@ def _db_reachable() -> bool:
     except Exception:
         return False
 
+
+if _DB_TESTS_REQUIRED and not _db_reachable():
+    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but the AGE test database is not reachable at {TEST_DSN}', pytrace=False)
 
 pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide AGE test database not reachable at {TEST_DSN}')
 
@@ -261,6 +273,27 @@ class TestSafePath:
         try:
             rows = glb._run_query('MATCH (p:Person) RETURN p.name AS name', limit=1)
             assert len(rows) == 2  # limit + 1 => the base detects truncation
+        finally:
+            glb.endGlobal()
+
+    def test_read_only_transaction_enforced_at_database(self, rr_env, age_graph):
+        """Read back SHOW transaction_read_only inside a safe plan: it must be
+        'on'. Outside a transaction both SET TRANSACTION READ ONLY and SET
+        LOCAL are silent no-ops, so this pins the precondition (autocommit
+        off -> implicit transaction) that the write protection and the
+        statement_timeout cap both hang on.
+        """
+        age = sys.modules['ai.common.graph.age']
+        glb = _begin(rr_env)
+        try:
+            assert glb.client.autocommit is False
+            plan = age.TranslatedQuery(columns=['ro'], has_return=True)
+            plan.statements.append('SHOW transaction_read_only')
+            plan.binds.append(())
+            plan.result_index = 0
+            plan.read_only = True
+            rows = glb._execute_plan(plan, fetch_cap=1)
+            assert rows and rows[0][0] == 'on'
         finally:
             glb.endGlobal()
 

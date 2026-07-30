@@ -571,21 +571,20 @@ class Store(DocumentStoreBase):
             if not results:
                 break
 
-            # Size the buffer from what was actually fetched, not the chunk
-            # window — sparse batches would otherwise allocate the full window.
-            rows = [(chunkId - offset, content) for content, chunkId in results]
-            rows = [(index, content) for index, content in rows if index >= 0]
-            if not rows:
+            # Assemble by chunk index, bounded by the rows actually fetched —
+            # a single row with a high chunkId must not size a buffer.
+            content_by_index = {chunkId - offset: content for content, chunkId in results if chunkId >= offset}
+            if not content_by_index:
                 break
 
-            lastIndex = max(index for index, _ in rows)
-            text = [''] * (lastIndex + 1)
-            for index, content in rows:
-                text[index] = content
-
-            fullText = ''.join(text)
+            fullText = ''.join(content_by_index[index] for index in sorted(content_by_index))
             callback(fullText)
 
+            # NB: len(results) is a row count while renderChunkSize is a
+            # chunkId window width — different units (inherited from
+            # store_postgres). With the default window everything fits in one
+            # pass, so this exit is effectively always taken; the real fix
+            # belongs in the shared store base (dedup follow-up PR).
             if len(results) < self.renderChunkSize:
                 break
 

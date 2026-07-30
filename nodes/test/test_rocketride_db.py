@@ -159,6 +159,18 @@ class TestResolveRocketrideDsn:
         monkeypatch.delenv(rrdb.CLIENT_ID_ENV, raising=False)
         assert rrdb.resolve_rocketride_dsn() == TEST_DSN
 
+    def test_resolve_error_env_surfaces_broker_failure(self, monkeypatch):
+        """A server-side resolution failure names the real cause, not sign-in."""
+
+        async def fake(client_id):  # pragma: no cover — must not be reached
+            raise AssertionError('account must not be consulted when a resolve error is present')
+
+        self._install_fake_account(monkeypatch, fake)
+        monkeypatch.delenv(rrdb.DB_DSN_ENV, raising=False)
+        monkeypatch.setenv(rrdb.DB_RESOLVE_ERROR_ENV, 'DB broker request failed: HTTP 503')
+        with pytest.raises(ValueError, match='HTTP 503'):
+            rrdb.resolve_rocketride_dsn()
+
     def test_empty_env_dsn_falls_back_to_account(self, monkeypatch):
         async def fake(client_id):
             return TEST_DSN
@@ -335,11 +347,19 @@ class TestRocketrideSqlConnection:
 
 
 class _FakeCursor:
-    def __init__(self, executed):
+    def __init__(self, executed, fetch_batches):
         self._executed = executed
+        self._fetch_batches = fetch_batches
 
     def execute(self, sql, params=None):
         self._executed.append(sql)
+
+    def fetchone(self):
+        # Existence probes (_doesCollectionExist) read a single boolean.
+        return (True,)
+
+    def fetchall(self):
+        return self._fetch_batches.pop(0) if self._fetch_batches else []
 
     def __enter__(self):
         return self
@@ -352,9 +372,11 @@ class _FakeClient:
     def __init__(self):
         self.executed: list[str] = []
         self.commits = 0
+        # Queue of row batches returned by successive fetchall() calls.
+        self.fetch_batches: list[list] = []
 
     def cursor(self):
-        return _FakeCursor(self.executed)
+        return _FakeCursor(self.executed, self.fetch_batches)
 
     def commit(self):
         self.commits += 1
@@ -492,6 +514,34 @@ class TestRocketrideVectorStore:
         index_sql = [sql for sql in store.client.executed if 'USING hnsw' in sql]
         assert 'm = 32' in index_sql[0]
         assert 'ef_construction = 128' in index_sql[0]
+
+    def test_render_orders_chunks_and_bridges_gaps(self, monkeypatch):
+        """Chunks at 0, 1 and 3 (gap at 2): index order preserved, gap skipped."""
+        cls, _ = _vector_store_cls(monkeypatch)
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store.client.fetch_batches = [[('A', 0), ('D', 3), ('B', 1)]]
+        out: list[str] = []
+        store.render('obj-1', out.append)
+        assert out == ['ABD']
+
+    def test_render_empty_batch_emits_nothing(self, monkeypatch):
+        cls, _ = _vector_store_cls(monkeypatch)
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store.client.fetch_batches = [[]]
+        out: list[str] = []
+        store.render('obj-1', out.append)
+        assert out == []
+
+    def test_render_single_high_chunk_id(self, monkeypatch):
+        """One row with a high chunkId renders that row — allocation is bounded
+        by rows fetched, never by the chunkId value.
+        """
+        cls, _ = _vector_store_cls(monkeypatch)
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+        store.client.fetch_batches = [[('X', 999_999)]]
+        out: list[str] = []
+        store.render('obj-1', out.append)
+        assert out == ['X']
 
     def test_hnsw_params_clamped_to_pgvector_bounds(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)

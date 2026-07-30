@@ -97,6 +97,16 @@ class IGlobal(IGlobalTransform):
             # No host/user/password fields — resolve the per-tenant DSN.
             dsn = resolve_rocketride_dsn()
 
+            # Load deps on demand: in CONFIG mode beginGlobal never imports
+            # .rocketride_vector (where the node's other depends() lives), so
+            # this is the only thing that installs the driver at save time —
+            # same pattern as store_postgres and the other DB nodes.
+            import os
+
+            from depends import depends  # type: ignore
+
+            depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
+
             import psycopg2  # type: ignore
 
             conn = None

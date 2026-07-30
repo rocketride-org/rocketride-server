@@ -215,6 +215,46 @@ jobs:
             echo "ROCKETRIDE_TEST_AZURE_CONTAINER=rocketride-test"
           } >> "$GITHUB_ENV"
 
+      # Postgres for the RocketRide cloud DB node integration suites (Linux
+      # only): pgvector for rocketride_sql/vector, Apache AGE for
+      # rocketride_graph. Same pattern as MinIO/Azurite above — env vars are
+      # exported to $GITHUB_ENV only after both databases are healthy, and
+      # RR_REQUIRE_DB_TESTS additionally turns the suites' unreachable-DB
+      # skip into a hard failure, so a container that fails to start can
+      # never let the safety-control tests go silently green.
+      # NB: close to, not exactly, the cloud pin (PG 16.14 + AGE 1.5.0 +
+      # pgvector 0.8.0 in ONE database); publishing that exact image to GHCR
+      # is a noted follow-up. AGE version here IS the pinned 1.5.0.
+      - name: Start Postgres (pgvector + AGE) for tests / Linux
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false
+        run: |
+          set -euo pipefail
+          docker run -d --name rr-pgvector -p 55432:5432 \
+            -e POSTGRES_USER=rruser -e POSTGRES_PASSWORD=rrpass -e POSTGRES_DB=rrtenant \
+            pgvector/pgvector:pg16
+          docker run -d --name rr-age -p 55433:5432 \
+            -e POSTGRES_USER=rruser -e POSTGRES_PASSWORD=rrpass -e POSTGRES_DB=rrtenant \
+            apache/age:release_PG16_1.5.0 -c shared_preload_libraries=age
+          for name in rr-pgvector rr-age; do
+            ready=
+            for i in $(seq 1 30); do
+              if docker exec "$name" pg_isready -U rruser -d rrtenant >/dev/null 2>&1; then ready=1; break; fi
+              sleep 2
+            done
+            [ "${ready:-}" = "1" ] || { echo "$name did not become ready"; docker logs "$name" || true; exit 1; }
+          done
+          docker exec rr-pgvector psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+          docker exec rr-age psql -U rruser -d rrtenant -c 'CREATE EXTENSION IF NOT EXISTS age;'
+          # Smoke both: a vector literal and an AGE graph round-trip.
+          docker exec rr-pgvector psql -U rruser -d rrtenant -c "SELECT '[1,2,3]'::vector;"
+          docker exec rr-age psql -U rruser -d rrtenant -c "SET search_path=ag_catalog,\"\$user\",public; SELECT create_graph('ci_smoke'); SELECT drop_graph('ci_smoke', true);"
+          # Export test vars only once both databases are live.
+          {
+            echo "RR_TEST_PG_DSN=postgresql://rruser:rrpass@localhost:55432/rrtenant"
+            echo "RR_TEST_AGE_DSN=postgresql://rruser:rrpass@localhost:55433/rrtenant"
+            echo "RR_REQUIRE_DB_TESTS=1"
+          } >> "$GITHUB_ENV"
+
       - name: Test
         if: inputs.codeql == false
         # Integration tests boot a local server on :5565 and connect a test
