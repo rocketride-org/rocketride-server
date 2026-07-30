@@ -29,7 +29,17 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A document parsing component that extracts rich content from a wide variety ", "of document types. It automatically identifies and processes embedded content, ", "producing structured outputs including plain text, tables, images, audio, and ", "video. This enables comprehensive analysis of complex documents and media files ", "by making their contents accessible for downstream processing in the pipeline. ", "Note: output is flattened to Markdown and does not preserve cell-level provenance ", "(page boundaries, bbox coordinates, or the table-HTML cell grid), so it is not suitable ", "for audit-grade or provenance-bearing extraction; use the datalab_parse node for ", "structure-preserving parsing with page and coordinate data."],
+	"description": [
+		"A document parsing component that extracts rich content from a wide variety ",
+		"of document types. It automatically identifies and processes embedded content, ",
+		"producing structured outputs including plain text, tables, images, audio, and ",
+		"video. This enables comprehensive analysis of complex documents and media files ",
+		"by making their contents accessible for downstream processing in the pipeline. ",
+		"Note: output is flattened to Markdown and does not preserve cell-level provenance ",
+		"(page boundaries, bbox coordinates, or the table-HTML cell grid), so it is not suitable ",
+		"for audit-grade or provenance-bearing extraction; use the datalab_parse node for ",
+		"structure-preserving parsing with page and coordinate data."
+	],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -46,28 +56,8 @@
 		"tags": ["text", "table", "image", "video", "audio"]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {},
-	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {},
-	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the fields shown in the node's config panel, in order
 	//
-	"shape": [
-		{
-			"section": "Pipe",
-			"title": "Parse",
-			"properties": []
-		}
-	]
+	"properties": []
 }
