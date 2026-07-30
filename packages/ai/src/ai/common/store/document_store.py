@@ -760,8 +760,25 @@ class VectorStoreToolMixin:
                 },
                 'filter': {
                     'type': 'object',
-                    'description': 'Optional metadata filter. Keys are metadata field names, values are the required values. Example: {"nodeId": "my-node", "parent": "/docs"}',
-                    'additionalProperties': True,
+                    'description': 'Optional metadata filter. Only objectId, nodeId and parent are supported; unrecognized keys are rejected. Example: {"nodeId": "my-node", "parent": "/docs"}',
+                    'properties': {
+                        'objectId': {
+                            'description': 'Match documents with this object ID. A string or an array of strings.',
+                            'anyOf': [
+                                {'type': 'string'},
+                                {'type': 'array', 'items': {'type': 'string'}},
+                            ],
+                        },
+                        'nodeId': {
+                            'type': 'string',
+                            'description': 'Match documents written by this node ID.',
+                        },
+                        'parent': {
+                            'type': 'string',
+                            'description': 'Match documents under this parent path.',
+                        },
+                    },
+                    'additionalProperties': False,
                 },
             },
         },
@@ -899,8 +916,22 @@ class VectorStoreToolMixin:
                             },
                             'metadata': {
                                 'type': 'object',
-                                'description': 'Optional metadata key-value pairs to store with the document.',
-                                'additionalProperties': True,
+                                'description': 'Optional metadata. Only nodeId, parent and chunkId are stored; unrecognized keys are rejected.',
+                                'properties': {
+                                    'nodeId': {
+                                        'type': 'string',
+                                        'description': 'Writing node ID recorded on the document (default: "vectordb_tool").',
+                                    },
+                                    'parent': {
+                                        'type': 'string',
+                                        'description': 'Parent path recorded on the document (default: "/").',
+                                    },
+                                    'chunkId': {
+                                        'type': 'integer',
+                                        'description': 'Chunk index recorded on the document (default: 0).',
+                                    },
+                                },
+                                'additionalProperties': False,
                             },
                             'embedding': {
                                 'type': 'array',
