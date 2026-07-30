@@ -24,6 +24,18 @@ from ai.modules.task.commands.cmd_task import TaskCommands
 from ai.modules.task.commands.cmd_store import StoreCommands
 
 
+def _patch_store_file_store(monkeypatch, fs):
+    """Route the Store.file_store classmethod (the singleton one-liner the
+    handlers call) at the mocked FileStore for this test.
+    """
+    from ai.account.store import Store
+
+    # Mirrors the real classmethod signature (ctx, client_id=None, root=None)
+    # so a call site passing the engine storage anchor exercises the handler
+    # instead of dying in the patch with an opaque TypeError.
+    monkeypatch.setattr(Store, 'file_store', classmethod(lambda cls, ctx, client_id=None, root=None: fs))
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -38,11 +50,25 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn.build_response = MagicMock(side_effect=lambda req, body=None: {'type': 'response', 'body': body})
     conn.debug_message = MagicMock()
     conn.verify_permission = MagicMock()  # granted by default
+    conn.verify_team_permission = MagicMock()  # granted by default
     conn.verify_plans = MagicMock(return_value=True)
     conn.get_task = MagicMock()
-    # File-store access lives on StoreCommands; bind the real method so the
-    # fs_* handlers can resolve _get_file_store on this __init__-bypassed stub.
+    # Bind the REAL org resolver (defined on TaskConn, next to
+    # verify_team_permission) so on_execute exercises real membership-based
+    # resolution against the stub AccountInfo's organization.
+    from ai.modules.task.task_conn import TaskConn
+
+    conn.resolve_org_for_team = MethodType(TaskConn.resolve_org_for_team, conn)
+    # Identity context builder (TaskConn.request_context) — the file store is
+    # mocked in these tests, so a stub ctx suffices.
+    conn.request_context = MagicMock(return_value=SimpleNamespace(account_info=account_info))
+    # File-store access lives on StoreCommands; bind the real methods so the
+    # fs_* handlers can resolve them on this __init__-bypassed stub.
     conn._get_file_store = MethodType(StoreCommands._get_file_store, conn)
+    conn._virtual_scope_mounts = MethodType(StoreCommands._virtual_scope_mounts, conn)
+    conn._list_scope_mount = MethodType(StoreCommands._list_scope_mount, conn)
+    conn._is_scope_root = StoreCommands._is_scope_root  # staticmethod — no binding
+
     # Re-build the dispatch table that StoreCommands.__init__ would have created.
     conn._store_subcommand_handlers = {
         'fs_open': lambda req, args: StoreCommands._store_fs_open(conn, req, args),
@@ -61,13 +87,18 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
 
 
 def _account_info(*, user_id='user-1', auth='ak_x', default_team='team-1', organization=None):
-    """Build an AccountInfo-shaped stub."""
+    """Build an AccountInfo-shaped stub.
+
+    The default organization contains the default team so the real org
+    resolver (resolve_org_for_team) succeeds via membership; pass an explicit
+    organization to model other shapes.
+    """
     return SimpleNamespace(
         userId=user_id,
         auth=auth,
         userToken='token-' + user_id,
         defaultTeam=default_team,
-        organization=organization,
+        organization=organization if organization is not None else {'id': 'org-1', 'teams': [{'id': default_team}]},
         sysPermissions=[],
     )
 
@@ -100,12 +131,56 @@ async def test_on_execute_starts_task_with_resolved_org_id():
 
 @pytest.mark.asyncio
 async def test_on_execute_requires_task_control_permission():
-    """A PermissionError from verify_permission bubbles up after logging."""
+    """A PermissionError from the team permission check bubbles up after logging."""
     conn = _make_conn(account_info=_account_info())
-    conn.verify_permission = MagicMock(side_effect=PermissionError('no control'))
+    conn.verify_team_permission = MagicMock(side_effect=PermissionError('no control'))
     with pytest.raises(PermissionError, match='no control'):
         await TaskCommands.on_execute(conn, {'arguments': {}})
     conn.debug_message.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_on_execute_checks_permission_on_the_target_team(monkeypatch):
+    """The task.control check runs against the CLIENT-SUPPLIED teamId (not
+    defaultTeam) so a foreign team cannot be targeted.
+    """
+    from ai.account import account as account_mod
+
+    # The stubbed permission check grants, so execution continues into the
+    # secret merge — patch it out so this test asserts only the check target.
+    monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
+
+    organization = {'id': 'org-1', 'teams': [{'id': 'team-1'}, {'id': 'team-target'}]}
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(default_team='team-1', organization=organization), server=server)
+
+    await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-target'}})
+
+    conn.verify_team_permission.assert_called_once_with('team-target', 'task.control')
+
+
+@pytest.mark.asyncio
+async def test_on_execute_foreign_team_denied_before_secret_merge(monkeypatch):
+    """A denied teamId aborts BEFORE the env/secret merge and before start_task —
+    the cross-team secret-exfiltration hole this check closes.
+    """
+    from ai.account import account as account_mod
+
+    merged_env = AsyncMock()
+    monkeypatch.setattr(account_mod, 'get_merged_env', merged_env)
+
+    server = MagicMock()
+    server.start_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_team_permission = MagicMock(side_effect=PermissionError('denied'))
+
+    with pytest.raises(PermissionError, match='denied'):
+        await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
+
+    # Neither the secret merge nor the task start may have been reached.
+    merged_env.assert_not_awaited()
+    server.start_task.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -158,6 +233,25 @@ async def test_on_restart_propagates_server_errors():
     with pytest.raises(RuntimeError, match='cannot restart'):
         await TaskCommands.on_restart(conn, {'arguments': {}})
     conn.debug_message.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_on_restart_authorizes_against_the_tasks_team():
+    """on_restart routes authorization through get_task (task-team resolution)
+    and never reaches restart_task when the caller lacks task.control on the
+    TASK's team — the cross-team restart hole this closes.
+    """
+    server = MagicMock()
+    server.restart_task = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.get_task = MagicMock(side_effect=PermissionError('denied for this task'))
+
+    with pytest.raises(PermissionError, match='denied for this task'):
+        await TaskCommands.on_restart(conn, {'arguments': {'token': 'tk_other_team'}})
+
+    conn.get_task.assert_called_once()
+    assert conn.get_task.call_args.args[1] == 'task.control'
+    server.restart_task.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -285,13 +379,13 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_store_dispatches_to_known_subcommand():
+async def test_on_rrext_store_dispatches_to_known_subcommand(monkeypatch):
     """A known subcommand is dispatched via _store_subcommand_handlers."""
     server = MagicMock()
     server.store = MagicMock()
     fs = MagicMock()
     fs.stat = AsyncMock(return_value={'exists': True, 'size': 0})
-    server.store.get_file_store = MagicMock(return_value=fs)
+    _patch_store_file_store(monkeypatch, fs)
 
     conn = _make_conn(account_info=_account_info(), server=server)
     response = await StoreCommands.on_rrext_store(conn, {'arguments': {'subcommand': 'fs_stat', 'path': 'foo.txt'}})
@@ -320,41 +414,41 @@ async def test_on_rrext_store_missing_subcommand_raises():
 
 
 @pytest.mark.asyncio
-async def test_store_fs_open_write_returns_handle_id():
+async def test_store_fs_open_write_returns_handle_id(monkeypatch):
     """fs_open with mode='w' creates a write handle and returns its id."""
     server = MagicMock()
     fs = MagicMock()
     fs.open_write = AsyncMock(return_value='h-123')
-    server.store.get_file_store = MagicMock(return_value=fs)
+    _patch_store_file_store(monkeypatch, fs)
 
     conn = _make_conn(account_info=_account_info(), server=server, connection_id=42)
     args = {'path': 'foo.txt', 'mode': 'w'}
     response = await StoreCommands._store_fs_open(conn, {}, args)
-    fs.open_write.assert_awaited_once_with('foo.txt', 42)
+    fs.open_write.assert_awaited_once_with('foo.txt')
     assert response['body'] == {'handle': 'h-123'}
 
 
 @pytest.mark.asyncio
-async def test_store_fs_open_read_returns_metadata():
+async def test_store_fs_open_read_returns_metadata(monkeypatch):
     """fs_open default mode opens for reading and returns the metadata dict."""
     server = MagicMock()
     fs = MagicMock()
     fs.open_read = AsyncMock(return_value={'handle': 'h-456', 'size': 1024})
-    server.store.get_file_store = MagicMock(return_value=fs)
+    _patch_store_file_store(monkeypatch, fs)
 
     conn = _make_conn(account_info=_account_info(), server=server, connection_id=7)
     response = await StoreCommands._store_fs_open(conn, {}, {'path': 'foo.txt'})
-    fs.open_read.assert_awaited_once_with('foo.txt', 7)
+    fs.open_read.assert_awaited_once_with('foo.txt')
     assert response['body'] == {'handle': 'h-456', 'size': 1024}
 
 
 @pytest.mark.asyncio
-async def test_store_fs_read_clamps_negative_offset():
+async def test_store_fs_read_clamps_negative_offset(monkeypatch):
     """Negative offset is reset to 0 before forwarding to FileStore."""
     server = MagicMock()
     fs = MagicMock()
     fs.read_chunk = AsyncMock(return_value=b'data')
-    server.store.get_file_store = MagicMock(return_value=fs)
+    _patch_store_file_store(monkeypatch, fs)
 
     conn = _make_conn(account_info=_account_info(), server=server)
     args = {'handle': 'h-1', 'offset': -50, 'length': 100}
@@ -366,6 +460,202 @@ async def test_store_fs_read_clamps_negative_offset():
         assert call_args.kwargs['offset'] == 0
     else:
         assert call_args.args[1] == 0
+
+
+# ---------------------------------------------------------------------------
+# Virtual scope mounts ('@' / '@/Team') in fs_list_dir / fs_stat
+# ---------------------------------------------------------------------------
+
+
+def _org_account(*, teams=None, org_perms=()):
+    """Account stub with an organization for scope-mount tests."""
+    return _account_info(
+        organization={
+            'id': 'org-1',
+            'name': 'Acme',
+            'permissions': list(org_perms),
+            'teams': teams
+            if teams is not None
+            else [{'id': 'team-1', 'name': 'Development', 'permissions': ['task.store']}],
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_root_listing_is_pure_and_filters_reserved_names(monkeypatch):
+    """Simple mode: the root listing is the caller's own tree ONLY — no
+    injected mounts — and reserved '@'/'=' physical names are dropped.
+    """
+    server = MagicMock()
+    fs = MagicMock()
+    fs.list_dir = AsyncMock(
+        return_value={
+            'entries': [
+                {'name': 'docs', 'type': 'dir'},
+                {'name': '@legacy', 'type': 'dir'},
+                {'name': '=old', 'type': 'file'},
+            ],
+            'count': 3,
+        }
+    )
+    _patch_store_file_store(monkeypatch, fs)
+
+    conn = _make_conn(account_info=_org_account(org_perms=['org.admin']), server=server)
+    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': ''})
+
+    names = [e['name'] for e in response['body']['entries']]
+    assert names == ['docs']
+    assert response['body']['count'] == 1
+
+
+@pytest.mark.asyncio
+async def test_at_listing_shows_mounts_by_capability(monkeypatch):
+    """Joined mode: '@' lists User/Team always, Org only for org.admin."""
+    server = MagicMock()
+    fs = MagicMock()
+    fs.list_dir = AsyncMock()
+    _patch_store_file_store(monkeypatch, fs)
+
+    conn = _make_conn(account_info=_org_account(org_perms=['org.admin']), server=server)
+    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@'})
+    assert [e['name'] for e in response['body']['entries']] == ['User', 'Team', 'Org']
+
+    conn = _make_conn(account_info=_org_account(), server=server)
+    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@'})
+    assert [e['name'] for e in response['body']['entries']] == ['User', 'Team']
+
+    # The mounts are virtual — the store is never consulted.
+    fs.list_dir.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_listing_team_mount_returns_memberships_not_storage(monkeypatch):
+    """Listing '@/Team' is VIRTUAL: the caller's teams by display name with the
+    id in the entry body — never a physical teams/ listing.
+    """
+    server = MagicMock()
+    fs = MagicMock()
+    fs.list_dir = AsyncMock()
+    _patch_store_file_store(monkeypatch, fs)
+
+    conn = _make_conn(account_info=_org_account(), server=server)
+    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@/Team'})
+
+    fs.list_dir.assert_not_called()
+    assert response['body']['entries'] == [{'name': 'Development', 'type': 'dir', 'id': 'team-1', 'virtual': True}]
+
+
+@pytest.mark.asyncio
+async def test_stat_scope_mounts_synthesize_directories(monkeypatch):
+    """fs_stat on the bare mounts reports a virtual directory."""
+    server = MagicMock()
+    fs = MagicMock()
+    fs.stat = AsyncMock()
+    _patch_store_file_store(monkeypatch, fs)
+
+    conn = _make_conn(account_info=_org_account(), server=server)
+    for path in ('@', '@/User', '@/Team', '@/Org', '/@/Team/'):
+        response = await StoreCommands._store_fs_stat(conn, {}, {'path': path})
+        assert response['body'] == {'exists': True, 'type': 'dir', 'virtual': True}
+    fs.stat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_no_org_session_at_listing(monkeypatch):
+    """A session without an organization still gets User/Team (its team
+    list is simply empty) but never Org.
+    """
+    server = MagicMock()
+    fs = MagicMock()
+    fs.list_dir = AsyncMock()
+    _patch_store_file_store(monkeypatch, fs)
+
+    conn = _make_conn(account_info=_account_info(), server=server)
+    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@'})
+
+    assert [e['name'] for e in response['body']['entries']] == ['User', 'Team']
+
+
+# ---------------------------------------------------------------------------
+# System trees (.logs / .deployments) hidden from listings
+# ---------------------------------------------------------------------------
+
+
+def _fs_with_system_entries():
+    """File-store mock whose listing includes the system trees."""
+    fs = MagicMock()
+    fs.list_dir = AsyncMock(
+        return_value={
+            'entries': [
+                {'name': '.logs', 'type': 'dir'},
+                {'name': '.deployments', 'type': 'dir'},
+                {'name': 'docs', 'type': 'dir'},
+            ],
+            'count': 3,
+        }
+    )
+    return fs
+
+
+@pytest.mark.asyncio
+async def test_listing_hides_system_trees_from_ordinary_sessions(monkeypatch):
+    """.logs/.deployments are system-owned: invisible at every scope root
+    for callers without sys.admin.
+    """
+    fs = _fs_with_system_entries()
+    _patch_store_file_store(monkeypatch, fs)
+
+    conn = _make_conn(account_info=_org_account(), server=MagicMock())
+    # The tail of the matrix is the normalization-bypass family: spellings
+    # that reach a scope root only AFTER normalize_path collapses them
+    # ('@//User', '@/./User', '\\@\\User', '/'). The filter and the store
+    # must judge the SAME normalized path — filtering on the raw spelling
+    # would let these list the user root with the system trees visible.
+    for path in (
+        '',
+        '@/User',
+        '@/Org',
+        '@/Team/=team-1',
+        '@/User/=other-user',
+        '@//User',
+        '@/./User',
+        '\\@\\User',
+        '/',
+    ):
+        response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': path})
+        names = [e['name'] for e in response['body']['entries']]
+        assert '.logs' not in names and '.deployments' not in names
+        assert 'docs' in names
+
+
+@pytest.mark.asyncio
+async def test_listing_shows_system_trees_to_sys_admin(monkeypatch):
+    """sys.admin may do anything with the system trees — including see them."""
+    fs = _fs_with_system_entries()
+    _patch_store_file_store(monkeypatch, fs)
+
+    account = _org_account()
+    account.sysPermissions = ['sys.admin']
+    conn = _make_conn(account_info=account, server=MagicMock())
+    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': ''})
+
+    names = [e['name'] for e in response['body']['entries']]
+    assert '.logs' in names and '.deployments' in names
+
+
+@pytest.mark.asyncio
+async def test_nested_listing_keeps_user_dirs_named_like_system_trees(monkeypatch):
+    """Only SCOPE ROOTS host system trees — a nested dir a user happened to
+    name '.logs' stays visible (the store would resolve it normally too).
+    """
+    fs = _fs_with_system_entries()
+    _patch_store_file_store(monkeypatch, fs)
+
+    conn = _make_conn(account_info=_org_account(), server=MagicMock())
+    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': 'docs/sub'})
+
+    names = [e['name'] for e in response['body']['entries']]
+    assert '.logs' in names and '.deployments' in names
 
 
 # ---------------------------------------------------------------------------

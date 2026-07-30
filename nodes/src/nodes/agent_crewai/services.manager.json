@@ -30,7 +30,8 @@
 				"instructions": [],
 				"advanced_mode": false,
 				"goal": "",
-				"backstory": ""
+				"backstory": "",
+				"require_tool_call": false
 			}
 		}
 	},
@@ -53,6 +54,12 @@
 				"type": "string",
 				"format": "textarea"
 			}
+		},
+		"require_tool_call": {
+			"type": "boolean",
+			"title": "Require tool call",
+			"default": false,
+			"description": "Require at least one tool call (including calls delegated to sub-agents) before answering. When on, a run that answers without any tool invocation fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
 		"advanced_mode": {
 			"type": "boolean",
@@ -87,7 +94,7 @@
 		{
 			"section": "Pipe",
 			"title": "CrewAI Manager",
-			"properties": ["agent_description", "instructions", "advanced_mode"]
+			"properties": ["agent_description", "instructions", "require_tool_call", "advanced_mode"]
 		}
 	]
 }

@@ -430,6 +430,48 @@ Example:
 }
 ```
 
+#### Lifecycle guarantee (open / flush / close)
+
+Each component runs its lifecycle exactly once per object, in dependency order:
+
+- A component is **opened before any upstream component may emit to it** (including data
+  emitted during an upstream's own open).
+- A component is **flushed (`closing`) only after ALL of its upstream inputs have
+  flushed**, and closed after they close.
+
+This matters for a **merging (join)** component that buffers its inputs and emits on flush
+(for example an embedder or chunker that accumulates and writes on `closing`): it is
+guaranteed to receive every upstream branch's flush-time output before it flushes itself,
+so no branch is dropped regardless of the order components were added on the canvas.
+
+The same guarantee applies **inside a control node's sub-pipeline**, to any depth. A
+control node (for example `tool_pipe`) that drives an inline sub-pipeline flushes and
+closes that sub-pipeline in dependency order on each invocation — a join in the
+sub-pipeline receives every branch's flush-time output before it flushes, exactly as at
+the top level. The flush completes before the tool reads its result, so a diamond
+sub-pipeline returns the merged output of all branches, not just the first. Nesting works
+the same way: a sub-pipeline may itself contain an agent that invokes another `tool_pipe`,
+and each level flushes its own sub-pipeline in order.
+
+For this guarantee to hold, each sub-pipeline node has exactly one lifecycle owner. Three
+wirings break that and are **rejected when the pipeline opens** (`Ec::InvalidParam`):
+
+- **A node that drives a sub-pipeline must not also be data-fed.** Do not wire a data
+  input into an invoke node (e.g. `tool_pipe`) that also has output lanes connected to a
+  sub-pipeline — its owning region and its per-invocation run would both drive that
+  sub-pipeline. (An invoke node with *no* sub-pipeline may be data-fed; there is nothing to
+  double-drive.)
+- **A sub-pipeline node must not be shared between two control nodes.** A node reachable
+  from two different invoke nodes has ambiguous ownership and is rejected. Give each invoke
+  node its own sub-pipeline.
+- **A sub-pipeline must not merge into the main pipeline (or a second start).** Every node
+  a control node's sub-pipeline reaches must belong to that sub-pipeline only. If a
+  sub-pipeline node is also reachable from the source — because the main flow (or another
+  start) feeds into it, or the sub-pipeline flows back into a main-flow node — the main
+  flow owns it and flushes it at end-of-object, not during the invocation, so the tool
+  would read an incomplete result. Keep the sub-pipeline self-contained; end each branch in
+  its own response node.
+
 ### Rule 5: Lane Compatibility
 
 - The output lane type of one component must match the input lane type of the next

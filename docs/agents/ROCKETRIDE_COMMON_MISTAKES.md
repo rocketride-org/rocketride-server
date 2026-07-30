@@ -264,6 +264,65 @@ The `source` field must reference an actual component ID that exists in the comp
 
 ---
 
+### Mistake 9: Sharing a Control Node's Sub-Pipeline
+
+**Problem:**
+
+```json
+{
+	"id": "pipe_tool_1",
+	"provider": "tool_pipe",
+	"control": [{ "classType": "tool", "from": "agent_1" }]
+},
+{
+	"id": "sub_a",
+	"provider": "prompt",
+	"input": [
+		{ "lane": "text", "from": "pipe_tool_1" },
+		{ "lane": "questions", "from": "chat_1" } // ERROR: also fed by the main flow
+	]
+}
+```
+
+**Why This Happens:**
+A control node (`tool_pipe`) runs its sub-pipeline on every invocation: it opens, writes,
+flushes, and closes those nodes itself. A node that is *also* reachable from the source is
+owned by the main flow instead, and is flushed at end-of-object — not during the
+invocation — so the tool would read an incomplete result. Each node can have only one
+lifecycle owner, so the engine rejects the pipeline when it opens:
+
+```text
+Control node "Pipeline Tool" (pipe_tool_1) reaches node "Prompt" (sub_a) that the main
+flow owns; a control node's sub-pipeline must not be shared with the main pipeline or
+another start
+```
+
+**Solution:** keep the sub-pipeline self-contained — remove the second input and end the
+branch in its own response node:
+
+```json
+{
+	"id": "sub_a",
+	"provider": "prompt",
+	"input": [{ "lane": "text", "from": "pipe_tool_1" }] // CORRECT: only the tool feeds it
+}
+```
+
+**Rule:** every node a control node's sub-pipeline reaches must belong to that
+sub-pipeline only. Three wirings break this and are rejected at open:
+
+| Wiring | Message contains |
+|---|---|
+| Sub-pipeline shared with the main flow or a second start | `must not be shared with the main pipeline or another start` |
+| One sub-pipeline node reached by two control nodes | `is reachable from two control roots` |
+| An invoke node that is itself data-fed | `drives a sub-pipeline and is also data-fed` |
+
+Invoking the **same** tool from two agents is fine — that is one sub-pipeline with one
+owner. Only *sharing nodes* between sub-pipelines is rejected. Runnable examples of each
+rejection live in `examples/incorrect/`.
+
+---
+
 ## SDK Mistakes (Python & TypeScript)
 
 These mistakes apply to both Python and TypeScript SDKs. Examples are shown in both languages.

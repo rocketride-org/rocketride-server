@@ -472,7 +472,8 @@ class TestRocketrideVectorStore:
     def test_connects_via_resolved_dsn(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
         store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
-        assert store.client_id == 'tenant-42'
+        # No client_id on the store: identity rides the task file (#1686);
+        # tenant scoping keys on the DSN's database (see IGlobal's subKey).
         assert store.host == 'localhost'
         assert store.port == 55432
         assert store.database == 'rrtenant'

@@ -32,20 +32,25 @@ gives the three nodes one identical seam — and one place for tests to inject a
 fake resolver — so node code is byte-for-byte independent of which
 ``Account.resolve_db_dsn`` implementation (OSS stub, real SaaS, or fake) is live.
 
-Identity comes from ``ROCKETRIDE_CLIENT_ID`` (injected into the node subprocess
-by the task engine, the same accessor ``tool_filesystem`` uses).  The account
-call is async while node lifecycle code (``beginGlobal`` / ``Store.__init__``)
-is synchronous, so it is bridged with ``asyncio.run`` — safe only from a thread
-with no running loop, which is exactly how nodes are constructed.
+In the hosted path the task engine resolves the DSN server-side and injects it
+as ``ROCKETRIDE_DB_DSN``; nodes never resolve identity themselves (identity
+rides the task file since #1686 — the task engine does NOT set
+``ROCKETRIDE_CLIENT_ID``).  The env-based ``current_client_id`` accessor
+remains for the account fallback used by server-process callers and tests.
+The account call is async while node lifecycle code (``beginGlobal`` /
+``Store.__init__``) is synchronous, so it is bridged with ``asyncio.run`` —
+safe only from a thread with no running loop, which is exactly how nodes are
+constructed.
 """
 
 import asyncio
 import os
 import urllib.parse
 
-# The task engine injects the authenticated connection identity here (userId ==
-# client_id).  Same env accessor as tool_filesystem (nodes run in a subprocess
-# and cannot see the server-side AccountInfo directly).
+# Identity override consumed only by the account fallback (server-process
+# callers and tests). The task engine does NOT set this in node subprocesses:
+# identity rides the task file (#1686) and the ROCKETRIDE_* env namespace is
+# caller-influenced by design.
 CLIENT_ID_ENV = 'ROCKETRIDE_CLIENT_ID'
 
 # The task engine resolves the per-tenant DSN server-side at task start (only
@@ -121,7 +126,7 @@ def resolve_rocketride_dsn() -> str:
     1. ``ROCKETRIDE_DB_DSN`` env — the production path. The task engine
        resolves the DSN server-side at task start (the SaaS account context
        exists only in the server process; node subprocesses always see the
-       OSS account) and injects it here, exactly like ``ROCKETRIDE_CLIENT_ID``.
+       OSS account) and injects it here at task start.
     2. ``Account.resolve_db_dsn(client_id)`` — fallback for callers running
        inside the server process (or tests injecting a fake account). On an
        unconfigured open-source build this raises the cloud-sign-in error.

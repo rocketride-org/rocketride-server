@@ -1,0 +1,77 @@
+{
+	"project_id": "c9d4e2f1-7a3b-4c8e-9d21-5f6a8b3c2e10",
+	"source": "chat_1",
+	"components": [
+		{ "id": "chat_1", "provider": "chat", "config": {} },
+
+		{
+			"id": "agent_1",
+			"provider": "agent_crewai",
+			"config": {
+				"instructions": [
+					"You are a helpful assistant. For every user message you MUST call the run_pipe tool exactly once, passing the user's text as the `data` argument, and return the tool's result as your answer."
+				]
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }]
+		},
+		{
+			"id": "agent_1_llm",
+			"provider": "llm_openai_api",
+			"config": { "profile": "custom", "custom": { "model": "${ROCKETRIDE_OLLAMA_MODEL}", "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}", "apikey": "ollama", "modelTotalTokens": 32768 } },
+			"control": [{ "classType": "llm", "from": "agent_1" }]
+		},
+		{ "id": "agent_1_mem", "provider": "memory_internal", "config": {}, "control": [{ "classType": "memory", "from": "agent_1" }] },
+
+		{
+			"id": "tp1",
+			"provider": "tool_pipe",
+			"config": { "profile": "default", "default": { "tool_description": "Runs the input through an inner agent pipeline and returns its answer. Call this for every message.", "return_type": "answers" } },
+			"control": [{ "classType": "tool", "from": "agent_1" }]
+		},
+
+		{
+			"id": "agent_2",
+			"provider": "agent_crewai",
+			"config": {
+				"instructions": [
+					"You are a helpful assistant. For every user message you MUST call the run_pipe tool exactly once, passing the user's text as the `data` argument, and return the tool's result as your answer."
+				]
+			},
+			"input": [{ "lane": "questions", "from": "tp1" }]
+		},
+		{
+			"id": "agent_2_llm",
+			"provider": "llm_openai_api",
+			"config": { "profile": "custom", "custom": { "model": "${ROCKETRIDE_OLLAMA_MODEL}", "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}", "apikey": "ollama", "modelTotalTokens": 32768 } },
+			"control": [{ "classType": "llm", "from": "agent_2" }]
+		},
+		{ "id": "agent_2_mem", "provider": "memory_internal", "config": {}, "control": [{ "classType": "memory", "from": "agent_2" }] },
+
+		{
+			"id": "tp2",
+			"provider": "tool_pipe",
+			"config": { "profile": "default", "default": { "tool_description": "Runs the input through a two-branch (diamond) sub-pipeline and returns a merged answer. Call this for every message.", "return_type": "answers" } },
+			"control": [{ "classType": "tool", "from": "agent_2" }]
+		},
+
+		{ "id": "branch_a", "provider": "prompt", "config": { "instructions": ["Branch A of the diamond saw the input."] }, "input": [{ "lane": "text", "from": "tp2" }] },
+		{ "id": "branch_b", "provider": "prompt", "config": { "instructions": ["Branch B of the diamond saw the input."] }, "input": [{ "lane": "text", "from": "tp2" }] },
+		{
+			"id": "join",
+			"provider": "prompt",
+			"config": { "instructions": ["Combine both branch contributions and answer the original question."] },
+			"input": [{ "lane": "questions", "from": "branch_a" }, { "lane": "questions", "from": "branch_b" }]
+		},
+		{
+			"id": "sub_llm2",
+			"provider": "llm_openai_api",
+			"config": { "profile": "custom", "custom": { "model": "${ROCKETRIDE_OLLAMA_MODEL}", "base_url": "${ROCKETRIDE_OLLAMA_BASE_URL}", "apikey": "ollama", "modelTotalTokens": 32768 } },
+			"input": [{ "lane": "questions", "from": "join" }]
+		},
+		{ "id": "sub_resp2", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "sub_llm2" }] },
+
+		{ "id": "sub_resp1", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "agent_2" }] },
+
+		{ "id": "response_1", "provider": "response_answers", "config": {}, "input": [{ "lane": "answers", "from": "agent_1" }] }
+	]
+}

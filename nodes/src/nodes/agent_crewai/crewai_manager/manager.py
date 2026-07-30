@@ -226,6 +226,9 @@ class CrewManager(CrewBase):
                 pipe_id=context.pipe_id,
                 framework=context.framework,
                 started_at=context.started_at,
+                # Share the parent's tool tally so a host tool a sub-agent
+                # invokes counts toward the manager's require_tool_call guard.
+                invoked_tools=context.invoked_tools,
             )
 
             sub_tool_descs = sub_context.tools.list

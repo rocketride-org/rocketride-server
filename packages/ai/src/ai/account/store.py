@@ -6,7 +6,8 @@ Unified storage abstraction supporting multiple backends:
 - AWS S3: Amazon S3 object storage
 - Azure Blob: Azure Blob Storage
 
-Configuration via STORE_URL environment variable.
+Configuration via RR_STORE_URL environment variable (the legacy STORE_URL
+name hard-fails at startup so a stale deployment cannot silently fall back).
 Defaults to filesystem://~/.rocketlib/dtc if not set (user home directory).
 Falls back to temp directory if home directory cannot be determined.
 """
@@ -15,6 +16,7 @@ import io
 import os
 import re
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -415,7 +417,7 @@ class Store:
     from ai.account.store import Store
     from ai.account import AccountInfo
 
-    # Create store (uses STORE_URL env var or defaults to filesystem)
+    # Create store (uses RR_STORE_URL env var or defaults to filesystem)
     store = Store.create()
 
     # Or specify backend explicitly
@@ -447,18 +449,133 @@ class Store:
     # Initialization
     # =========================================================================
 
+    # The process-wide singleton. A server has exactly ONE store (one
+    # RR_STORE_URL) — production code accesses it via Store.instance() /
+    # Store.file_store(ctx), never by constructing stores ad hoc. The
+    # constructor stays reachable for backend-specific tests only.
+    _instance: 'Optional[Store]' = None
+
+    # Guards lazy creation: two threads racing instance() (e.g. node init in
+    # the engine subprocess via engine_file_store) must never each build a
+    # Store — the loser's copy would carry its own _shared_handles /
+    # _shared_write_locks and silently defeat cross-instance write exclusion.
+    _instance_lock = threading.Lock()
+
     def __init__(self, store: IStore):
         """
         Initialize Store wrapper with an IStore backend.
 
-        Note: Typically you should use Store.create() factory method instead
-        of calling this constructor directly.
+        Note: Production code uses the process singleton (Store.instance() /
+        Store.file_store(ctx)); constructing directly is for backend-specific
+        tests and tools.
 
         Args:
             store: Backend storage implementation (FilesystemStore, S3Store, AzureBlobStore)
         """
         self._store = store
-        self._file_stores: dict = {}
+        # SHARED single-process guards for every FileStore constructed from
+        # this Store: the open-handle registry and the set of physical paths
+        # currently open for writing. They live HERE (not on FileStore)
+        # because instances are per-consumer and identity-bound — two users'
+        # instances addressing the same team file must still exclude each
+        # other. NOT distributed locks: cross-node consistency remains the
+        # backend's whole-object atomicity / CAS.
+        self._shared_handles: dict = {}
+        self._shared_write_locks: set = set()
+
+    # =========================================================================
+    # Singleton access
+    # =========================================================================
+
+    @classmethod
+    def instance(cls) -> 'Store':
+        """
+        The process-wide store singleton, connected lazily on first use.
+
+        Resolves the backend from RR_STORE_URL / RR_STORE_SECRET_KEY (see
+        create() for the resolution and failure rules). Both the server and
+        the engine subprocess use this — the subprocess inherits the env, so
+        the SAME mechanism works on both sides of the process boundary.
+        """
+        # Double-checked locking: the fast path stays lock-free once built;
+        # the lock only serializes first-use creation so exactly one Store
+        # (and one shared handle/lock registry) ever exists per process.
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls.create()
+        return cls._instance
+
+    @classmethod
+    def reset(cls) -> None:
+        """
+        Drop the process singleton (next instance() reconnects from the env).
+
+        Lifecycle hook: used between test cases and by any future
+        reconfigure-on-the-fly path. Does not close backend connections —
+        backends are stateless per-operation.
+        """
+        cls._instance = None
+
+    @classmethod
+    def file_store(cls, ctx, client_id: Optional[str] = None, root: Optional[str] = None) -> 'FileStore':
+        """
+        The one-liner every call site uses: an identity-bound FileStore view
+        over the process singleton.
+
+        Args:
+            ctx: The per-request RequestContext (the handler's ctx, or
+                 RequestContext.internal()/engine() for server subsystems).
+            client_id: Whose plain-path namespace the view anchors to.
+                 Sessions may omit it (derived from ctx.account_info.userId)
+                 and may NOT name a foreign one (mismatch raises) — only
+                 internal/engine identities address other users' namespaces,
+                 and must pass it explicitly.
+            root: ENGINE contexts only — the task-file storage anchor
+                 (``storage.root``) all plain paths resolve under; see
+                 FileStore.__init__.
+
+        Returns:
+            A new FileStore bound to (singleton store, client_id, ctx).
+        """
+        return cls.instance()._file_store(ctx, client_id, root)
+
+    @staticmethod
+    def _get_current_task() -> 'Optional[dict]':
+        """The engine's currently-executing task file (rocketlib.getTask).
+
+        Isolated for testability and for running outside the engine (plain
+        python has no rocketlib) — both simply report 'no task'.
+        """
+        try:
+            from rocketlib import getTask
+        except ImportError:
+            return None
+        return getTask()
+
+    @classmethod
+    def engine_file_store(cls) -> 'Optional[FileStore]':
+        """A FileStore for the CURRENT engine task — fully transparent to
+        nodes: identity and the storage anchor come from the task file the
+        engine published (rocketlib.getTask), never from the environment
+        and never from per-node jobConfig plumbing.
+
+        Returns:
+            An engine-context FileStore anchored at the task's
+            ``storage.root`` (the owner's tree for dev runs, a
+            task-specific team subtree for deploy runs), or None when no
+            task is running or it carries no identity.
+        """
+        from .file_store import FileStore  # noqa: F401  (return type)
+        from .models import RequestContext
+
+        task = cls._get_current_task() or {}
+        identity = task.get('identity') or {}
+        client_id = str(identity.get('userId') or '').strip()
+        if not client_id:
+            return None
+        root = str((task.get('storage') or {}).get('root') or '').strip() or None
+        return cls.file_store(RequestContext.engine(client_id), client_id=client_id, root=root)
 
     # =========================================================================
     # Public Static Methods
@@ -473,10 +590,16 @@ class Store:
         Create storage instance.
 
         Args:
-            url: Storage URL (overrides STORE_URL env var)
+            url: Storage URL (overrides the RR_STORE_URL env var)
                  Default: filesystem://~/.rocketlib/dtc (user home directory)
                  Fallback: filesystem://<temp>/.rocketlib/dtc (if home unavailable)
-            secret_key: Authentication credentials (overrides STORE_SECRET_KEY env var)
+            secret_key: Authentication credentials (overrides RR_STORE_SECRET_KEY)
+
+        Raises:
+            EnvironmentError: If the LEGACY variable (STORE_URL /
+                STORE_SECRET_KEY) is set while its RR_-prefixed replacement is
+                not — a hard fail so stale deployments get updated instead of
+                silently flipping to the default directory.
 
         Returns:
             Store instance wrapping the appropriate storage backend
@@ -484,16 +607,28 @@ class Store:
         Raises:
             ValueError: If URL format is invalid or backend not supported
         """
-        # Get configuration from environment if not provided
+        # Get configuration from environment if not provided. The variables
+        # live in the RR_* server-internal tier; the LEGACY unprefixed names
+        # are a HARD ERROR (no fallback — a fallback would never get updated,
+        # and silently ignoring the legacy value would flip that deployment
+        # onto the default directory, which is worse than failing).
         if url is None:
-            url = os.environ.get('STORE_URL')
+            url = os.environ.get('RR_STORE_URL')
+            if url is None and os.environ.get('STORE_URL'):
+                raise EnvironmentError(
+                    'STORE_URL has been renamed to RR_STORE_URL — update the deployment configuration.'
+                )
 
         # Use default if not provided
         if url is None:
             url = Store._get_default_storage_url()
 
         if secret_key is None:
-            secret_key = os.environ.get('STORE_SECRET_KEY')
+            secret_key = os.environ.get('RR_STORE_SECRET_KEY')
+            if secret_key is None and os.environ.get('STORE_SECRET_KEY'):
+                raise EnvironmentError(
+                    'STORE_SECRET_KEY has been renamed to RR_STORE_SECRET_KEY — update the deployment configuration.'
+                )
 
         # Expand environment variables
         url = Store._expand_url_path(url)
@@ -527,24 +662,111 @@ class Store:
         # Wrap backend in Store instance
         return Store(backend)
 
-    def get_file_store(self, client_id: str) -> 'FileStore':
+    def _file_store(self, ctx, client_id: 'Optional[str]' = None, root: 'Optional[str]' = None) -> 'FileStore':
         """
-        Get a FileStore instance scoped to a specific account.
+        Construct an identity-bound FileStore view (see Store.file_store).
 
-        FileStore instances are cached per client_id to avoid repeated
-        instantiation for the same account.
+        Instances are cheap per-consumer wrappers and identity must NEVER be
+        cached — a user's concurrent sessions can carry different permission
+        envelopes (PAT-scoped sessions, synthetic tk_/pk_ sessions). The
+        shared write-lock/handle registries live on this Store, so
+        non-caching loses no coordination.
+
+        The client_id rules make cross-namespace mistakes unwritable:
+          - session ctx: client_id is DERIVED from ctx.account_info.userId;
+            an explicit value must match (a session can never anchor to a
+            foreign user's namespace).
+          - internal/engine ctx: client_id is REQUIRED (whose namespace the
+            subsystem operates in — e.g. the run-log writer targets the task
+            owner's area while acting as 'internal').
+        """
+        from .file_store import FileStore
+        from .models import RequestContext
+
+        if not isinstance(ctx, RequestContext):
+            raise TypeError('ctx must be a RequestContext')
+
+        sys_perms = (ctx.account_info.sysPermissions or []) if ctx.account_info else []
+        # Trusted (engine/internal) contexts name the namespace they operate
+        # in. Account-LESS contexts also take the explicit-client_id branch:
+        # they stay constructible (pre-auth paths, backend tests) because
+        # resolve_scope already denies their every operation with
+        # 'Not authenticated' — nothing is reachable through them.
+        is_session = ctx.account_info is not None and ctx.source != 'engine' and 'internal' not in sys_perms
+
+        if is_session:
+            # Sessions anchor to their own namespace, always — derived from
+            # the authenticated identity, never from an explicit client_id.
+            # A session-shaped ctx with no userId (e.g. a task-scoped
+            # AccountInfo built from an empty control.userId) is rejected
+            # outright: accepting a client_id for it would unlock an
+            # arbitrary user's store.
+            session_user = getattr(ctx.account_info, 'userId', '') or ''
+            if not session_user:
+                raise PermissionError('Session identity carries no userId — cannot anchor a file store')
+            if client_id and client_id != session_user:
+                raise PermissionError('A session cannot anchor to a foreign user namespace')
+            client_id = session_user
+        elif not client_id:
+            raise ValueError('internal/engine contexts must pass an explicit client_id')
+
+        return FileStore(self, client_id, ctx, root)
+
+    async def close_all_handles(self, connection_id) -> None:
+        """
+        Force-close every open file handle owned by a connection.
+
+        Disconnect-time cleanup over the SHARED handle registry (handles are
+        recorded store-wide, so this covers every FileStore instance the
+        connection ever constructed). Write handles commit whatever was
+        written; failures are logged and swallowed (best-effort, mirrors
+        FileStore._force_close_handle).
 
         Args:
-            client_id: Account identifier for path scoping.
-
-        Returns:
-            FileStore instance scoped to the given account.
+            connection_id: The ctx.conn_id string (or legacy int, coerced).
         """
-        if client_id not in self._file_stores:
-            from .file_store import FileStore
+        conn_id = str(connection_id)
+        doomed = [h for h in self._shared_handles.values() if h.connection_id == conn_id]
+        for handle in doomed:
+            await self._teardown_handle(handle)
 
-            self._file_stores[client_id] = FileStore(self._store, client_id)
-        return self._file_stores[client_id]
+    async def _teardown_handle(self, handle) -> None:
+        """
+        Force-close ONE handle: commit/close at the backend, then drop its
+        registry entry and release any write lock. Best-effort — backend
+        failures are logged and swallowed.
+
+        THE single per-handle teardown sequence: both disconnect-time cleanup
+        (close_all_handles above) and FileStore._force_close_handle delegate
+        here so the close/commit/mark-closed/release-lock steps cannot drift.
+
+        Args:
+            handle: A FileHandle from the shared registry (None/closed = no-op).
+        """
+        from rocketlib import debug
+
+        from .file_store import FileHandleMode
+
+        if handle is None or handle.closed:
+            return
+        try:
+            # Commit/close at the backend according to the handle mode.
+            if handle.mode == FileHandleMode.WRITE:
+                await self._store.close_write(handle.path, handle.context)
+            else:
+                await self._store.close_read(handle.path, handle.context)
+        except Exception as exc:
+            # Best-effort cleanup — log at debug level so commit failures are
+            # traceable rather than silently lost.
+            debug(
+                f'Store._teardown_handle: failed to close {handle.handle_id} mode={handle.mode.value} path={handle.path}: {exc}'
+            )
+        finally:
+            # Drop the registry entry and release any write lock.
+            handle.closed = True
+            self._shared_handles.pop(handle.handle_id, None)
+            if handle.mode == FileHandleMode.WRITE:
+                self._shared_write_locks.discard(handle.path)
 
     # =========================================================================
     # Private Static Methods

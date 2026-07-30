@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 import fnmatch
-from ..store import IStore, StorageError, VersionMismatchError
+from ...store import IStore, StorageError, VersionMismatchError
 
 # Import platform-specific locking
 if sys.platform == 'win32':

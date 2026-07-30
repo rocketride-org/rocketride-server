@@ -25,6 +25,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+import logging
+
 import pytest
 
 from ai.modules.task.task_conn import TaskConn
@@ -284,6 +286,40 @@ def test_has_permission_swallows_permission_error(monkeypatch):
     assert conn.has_permission('task.control') is False
 
 
+def test_has_permission_logs_why_it_denied(monkeypatch, caplog):
+    """
+    The denial must say WHO, WHICH TEAM, WHICH PERMISSION and WHAT FAILED.
+
+    Asserting only the False return is not enough: that assertion passes just as
+    happily with the logging deleted, which is how the #373 incident stayed
+    invisible for a day. The silent-denial path is the whole reason this log
+    exists, so the test has to fail if the message goes away or loses a field.
+    """
+    from ai.modules.task import task_conn as tc_mod
+
+    def _raise(info, team):
+        raise PermissionError('team-1 not in organization')
+
+    monkeypatch.setattr(tc_mod, 'resolve_team_permissions', _raise)
+
+    conn = _make_conn(account_info=_make_account_info(user_id='user-1', default_team='team-1'))
+    with caplog.at_level(logging.WARNING, logger=tc_mod.__name__):
+        assert conn.has_permission('task.control') is False
+
+    # Pin the record down before reading it. Joining every captured record would
+    # let an unrelated log satisfy these field checks, and would keep passing if
+    # the denial were downgraded to debug or raised to error — either of which
+    # changes whether we actually see it in CloudWatch, which is the entire point.
+    records = [r for r in caplog.records if r.name == tc_mod.__name__ and r.levelno == logging.WARNING]
+    assert len(records) == 1, (
+        f'expected exactly one WARNING from {tc_mod.__name__}, got {[(r.name, r.levelname) for r in caplog.records]}'
+    )
+
+    message = records[0].getMessage()
+    for expected in ('team-1', 'user-1', 'task.control', 'not in organization'):
+        assert expected in message, f'denial log omits {expected!r}: {message}'
+
+
 def test_verify_permission_raises_on_missing(monkeypatch):
     """verify_permission turns a missing permission into a PermissionError."""
     from ai.modules.task import task_conn as tc_mod
@@ -301,6 +337,81 @@ def test_verify_permission_passes_when_present(monkeypatch):
     monkeypatch.setattr(tc_mod, 'resolve_team_permissions', lambda info, team: {'task.control'})
     conn = _make_conn(account_info=_make_account_info())
     conn.verify_permission('task.control')  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# verify_team_permission — real resolver, real org shapes
+# ---------------------------------------------------------------------------
+
+
+def _org(team_perms, *, team_id='team-1', org_perms=()):
+    """One-org/one-team organization dict in the AccountInfo session shape."""
+    return {
+        'id': 'org-1',
+        'permissions': list(org_perms),
+        'teams': [{'id': team_id, 'name': 'Team One', 'permissions': list(team_perms)}],
+    }
+
+
+def test_verify_team_permission_grants_on_that_team():
+    """The permission is resolved against the ADDRESSED team, not defaultTeam."""
+    account = _make_account_info(default_team='team-other')
+    account.organization = _org(['task.control'], team_id='team-1')
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-1', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_denies_missing_permission():
+    """Membership without the required permission is denied."""
+    account = _make_account_info()
+    account.organization = _org(['task.monitor'])
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match="'task.control' denied"):
+        conn.verify_team_permission('team-1', 'task.control')
+
+
+def test_verify_team_permission_denies_foreign_team_uniformly():
+    """A team outside the caller's org denies exactly like a no-permission team
+    (no existence leak).
+    """
+    account = _make_account_info()
+    account.organization = _org(['task.control'])
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match='no permissions for team'):
+        conn.verify_team_permission('team-foreign', 'task.control')
+
+
+def test_verify_team_permission_denies_without_org():
+    """A no-org session holds no team permissions at all."""
+    account = _make_account_info()
+    account.organization = None
+    conn = _make_conn(account_info=account)
+    with pytest.raises(PermissionError, match='no permissions for team'):
+        conn.verify_team_permission('team-1', 'task.control')
+
+
+def test_verify_team_permission_org_admin_expands():
+    """org.admin implies the full team permission set (resolver expansion)."""
+    account = _make_account_info()
+    account.organization = _org([], org_perms=['org.admin'])
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-1', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_sys_admin_bypasses():
+    """sys.admin bypasses team scoping entirely, even for foreign teams."""
+    account = _make_account_info()
+    account.organization = None
+    account.sysPermissions = ['sys.admin']
+    conn = _make_conn(account_info=account)
+    conn.verify_team_permission('team-anything', 'task.control')  # must not raise
+
+
+def test_verify_team_permission_requires_authentication():
+    """No account info -> PermissionError before any resolution."""
+    conn = _make_conn(authenticated=False, account_info=None)
+    with pytest.raises(PermissionError, match='Not authenticated'):
+        conn.verify_team_permission('team-1', 'task.control')
 
 
 # ---------------------------------------------------------------------------

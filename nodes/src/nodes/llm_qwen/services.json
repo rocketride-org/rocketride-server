@@ -105,7 +105,7 @@
 				"title": "Qwen2.5 72B Instruct",
 				"model": "qwen-2.5-72b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
+				"modelTotalTokens": 32768, // openrouter
 				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
@@ -113,7 +113,7 @@
 				"title": "Qwen: Qwen2.5 7B Instruct",
 				"model": "qwen-2.5-7b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
+				"modelTotalTokens": 32768, // openrouter
 				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
@@ -121,7 +121,7 @@
 				"title": "Qwen2.5 Coder 32B Instruct",
 				"model": "qwen-2.5-coder-32b-instruct",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
+				"modelTotalTokens": 32768, // openrouter
 				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},

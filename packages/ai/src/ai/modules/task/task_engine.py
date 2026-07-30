@@ -217,6 +217,8 @@ class Task(DAPBase):
         provider: str = None,
         ttl: int = 900,
         client_id: str = '',
+        team_id: str = '',
+        org_id: str = '',
         env: Dict[str, str] = None,
         **kwargs,
     ) -> None:
@@ -231,6 +233,8 @@ class Task(DAPBase):
             launch_type: Task creation mode (launch/attach)
             ttl: Time-to-live in seconds for idle tasks (default: 900 = 15 minutes; 0 = no timeout)
             client_id: Account identifier for store access scoping
+            team_id: Owning team id (rides the task file as trusted identity)
+            org_id: Owning org id (rides the task file as trusted identity)
             **kwargs: Additional DAP configuration
         """
         # Store authentication
@@ -240,6 +244,8 @@ class Task(DAPBase):
         self.token = token
         self.public_auth = public_auth
         self.client_id = client_id
+        self.team_id = team_id
+        self.org_id = org_id
 
         # TTL management - count-up timer approach
         self._ttl = ttl  # Maximum idle time in seconds
@@ -398,10 +404,11 @@ class Task(DAPBase):
           failure as a stale value pointing at who-knows-which tenant).
 
         Children only ever get the single DSN resolved here, for pipelines
-        that actually contain one of the DB nodes.
+        that actually contain one of the DB nodes. Identity is NOT delivered
+        through the environment (it rides the task file's 'identity' block —
+        the ROCKETRIDE_* env namespace is caller-influenced by design).
         """
         subprocess_env = os.environ.copy()
-        subprocess_env['ROCKETRIDE_CLIENT_ID'] = self.client_id
 
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
         subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
@@ -505,7 +512,49 @@ class Task(DAPBase):
             'nodeId': '9a0b9f66-f693-4b3b-a85b-bb810261c26e',
             'taskId': self.token,
             'type': 'pipeline',
+            # Trusted identity for in-process tools (surfaced to nodes as
+            # IEndpoint.endpoint.jobConfig['identity']). Rides the 0600 task
+            # file — point-to-point, never the environment, so caller env can
+            # never pollute it and descendants never inherit it.
+            'identity': {
+                'userId': self.client_id,
+                'teamId': self.team_id,
+                'orgId': self.org_id,
+            },
+            # Storage anchor for in-process tools (chroot semantics): node
+            # paths are always plain and relative, and resolve under this
+            # root — dev runs get the owner's whole tree (today's behavior);
+            # deploy runs get a task-specific subtree of TEAM storage so a
+            # deployed task has no user dependency and concurrent
+            # deployments never share working storage. Node-level paths are
+            # therefore identical in both modes.
+            'storage': {
+                'root': self._storage_root(),
+            },
         }
+
+    def _storage_root(self) -> str:
+        """The task's storage anchor (see the 'storage' task-file block).
+
+        Validated HERE so a malformed component — project_id is
+        client-supplied and only uuid-defaulted when absent — fails the
+        launch with a clear error instead of surfacing later inside the
+        subprocess as tool_filesystem disabling itself mid-run.
+        """
+        from ai.account.file_store import validate_storage_root
+
+        if self._run_kind == 'deploy':
+            if not self.team_id:
+                raise ValueError('deploy runs require a team_id for their storage anchor')
+            return validate_storage_root(f'teams/{self.team_id}/files/tasks/{self.project_id}')
+        # Anonymous dev runs (client_id='' — OSS/standalone launches) carry
+        # NO anchor instead of failing the launch: identity.userId rides
+        # empty too, so engine_file_store() yields None and the storage
+        # tools disable themselves — the same degradable posture as the
+        # run-log writer ('users//files' must never be composed).
+        if not self.client_id:
+            return ''
+        return validate_storage_root(f'users/{self.client_id}/files')
 
     async def _write_task_file(self, pipeline: Dict[str, Any]) -> str:
         """
@@ -1986,9 +2035,11 @@ class Task(DAPBase):
 
             await self._send_status_update()
 
-            # Launch subprocess - pass environment with account context for
-            # store access (and RocketRide DB credential hygiene — see
-            # _build_subprocess_env).
+            # Launch subprocess. Identity travels in the TASK FILE (see
+            # _build_task's 'identity' block), never the environment — the
+            # ROCKETRIDE_* env namespace is caller-influenced by design.
+            # _build_subprocess_env additionally scrubs the RocketRide DB
+            # broker credentials and injects the resolved per-tenant DSN.
             subprocess_env = await self._build_subprocess_env()
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
@@ -2027,8 +2078,13 @@ class Task(DAPBase):
                 # The account-scoped FileStore handles user path scoping (and
                 # REFUSES an empty client_id — such a task runs unlogged and
                 # says so, rather than writing into a collapsed users/ path).
+                # Internal identity: the run-log writer is the ONLY legal
+                # writer of .logs content (the store's policy denies every
+                # user identity — internal-only entry).
+                from ai.account import RequestContext, Store
+
                 self._run_log = RunLogWriter(
-                    self._server.store.get_file_store(self.client_id),
+                    Store.file_store(RequestContext.internal('run-log'), client_id=self.client_id),
                     self.client_id,
                     self.project_id,
                     self.source,

@@ -34,6 +34,7 @@
 
 from typing import TYPE_CHECKING, Any, Dict
 
+from ai.account import Store
 from ai.common.dap import DAPConn, TransportBase
 from ai.modules.task.run_log import RunLogReader
 
@@ -145,11 +146,15 @@ class LogCommands(DAPConn):
             raise ValueError(f'runKind must be one of {sorted(_VALID_RUN_KINDS)}')
 
         # Store scoping comes from the AUTHENTICATED user, never from input:
-        # v1 serves each caller their own streams only. The account-scoped
-        # FileStore owns the users/<id>/files/ prefix (and refuses an empty
-        # user id), so log paths stay relative ('.logs/…').
+        # v1 serves each caller their own streams only. .logs is a SYSTEM
+        # TREE — the file API denies it to every session identity — so the
+        # reader acts through an INTERNAL identity anchored at the caller's
+        # namespace. The DOMAIN permission gate is this command layer's own
+        # verify_permission('task.monitor'/'task.control') checks above.
+        from ai.account import RequestContext
+
         return RunLogReader(
-            self._server.store.get_file_store(self._account_info.userId),
+            Store.file_store(RequestContext.internal('log-reader'), client_id=self._account_info.userId),
             self._account_info.userId,
             project_id,
             source,

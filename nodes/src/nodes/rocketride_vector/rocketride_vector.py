@@ -26,8 +26,8 @@
 #
 # Mirrors the generic ``vectordb_postgres`` driver in every respect except two:
 #   1. Connection — instead of reading host/user/password from config, it
-#      resolves a ready per-tenant DSN from the account layer, keyed by the
-#      authenticated client_id (see ``ai.common.rocketride_db``).
+#      resolves a ready per-tenant DSN via ``ai.common.rocketride_db``
+#      (injected by the task engine, or via the account broker).
 #   2. Default index — it creates an HNSW index at first write so semantic
 #      search uses the index instead of a sequential scan (the generic node
 #      creates no index at all). The operator class is derived from the
@@ -50,7 +50,7 @@ from rocketlib import warning
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
-from ai.common.rocketride_db import current_client_id, parse_dsn_fields, resolve_rocketride_dsn
+from ai.common.rocketride_db import parse_dsn_fields, resolve_rocketride_dsn
 from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
@@ -92,7 +92,6 @@ class Store(DocumentStoreBase):
     apikey: str | None = None
     node: str = 'rocketride'
     collection: str = ''
-    client_id: str = ''
     host: str = ''
     port: int = 0
     vectorSize: int = 0
@@ -153,13 +152,13 @@ class Store(DocumentStoreBase):
             self.hnsw_ef_construction = 64
         self.hnsw_ef_construction = max(self.hnsw_ef_construction, 2 * self.hnsw_m)
 
-        # RocketRide cloud: no host/user/password fields. Resolve the per-tenant
-        # DSN from the account layer, keyed by the authenticated client_id, and
+        # RocketRide cloud: no host/user/password fields. Resolve the
+        # per-tenant DSN (task-engine injected, or via the account broker) and
         # connect directly. host/port/database are parsed only for bookkeeping
-        # (the connection subKey); the DSN is the source of truth.
+        # (the connection subKey keys on database); the DSN is the source of
+        # truth.
         dsn = resolve_rocketride_dsn()
         fields = parse_dsn_fields(dsn)
-        self.client_id = current_client_id()
         self.host = fields['host']
         self.port = fields['port'] or DEFAULT_POSTGRES_PORT
         self.database = fields['database']

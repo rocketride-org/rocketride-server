@@ -208,15 +208,29 @@ def test_get_task_control_unknown_token_raises_runtime():
         ts.get_task_control('tk_unknown')
 
 
-def test_get_task_control_with_require_enforces_permission(monkeypatch):
-    """When account_info+require are provided, missing perms raise PermissionError."""
+def test_get_task_control_with_require_denies_without_membership(monkeypatch):
+    """No permissions on the task's team -> uniform access-denied error."""
     from ai.modules.task import task_server as ts_mod
 
-    monkeypatch.setattr(ts_mod, 'resolve_team_permissions', lambda info, team: set())
+    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', lambda info, team: [])
 
     ts = _make_server()
     ts._task_control['tk_1'] = _make_control()
-    account = SimpleNamespace(userId='u', defaultTeam='t')
+    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=[])
+
+    with pytest.raises(PermissionError, match='no permissions for this task'):
+        ts.get_task_control('tk_1', account_info=account, require='task.debug')
+
+
+def test_get_task_control_with_require_enforces_permission(monkeypatch):
+    """Membership without the required permission raises PermissionError."""
+    from ai.modules.task import task_server as ts_mod
+
+    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', lambda info, team: ['task.monitor'])
+
+    ts = _make_server()
+    ts._task_control['tk_1'] = _make_control()
+    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=[])
 
     with pytest.raises(PermissionError, match="'task.debug' denied"):
         ts.get_task_control('tk_1', account_info=account, require='task.debug')
@@ -226,12 +240,26 @@ def test_get_task_control_with_require_passes_when_granted(monkeypatch):
     """A granted permission lets get_task_control return the control unmodified."""
     from ai.modules.task import task_server as ts_mod
 
-    monkeypatch.setattr(ts_mod, 'resolve_team_permissions', lambda info, team: {'task.debug'})
+    monkeypatch.setattr(ts_mod, 'resolve_task_permissions', lambda info, team: ['task.debug'])
 
     ts = _make_server()
     control = _make_control()
     ts._task_control['tk_1'] = control
-    account = SimpleNamespace(userId='u', defaultTeam='t')
+    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=[])
+
+    assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
+
+
+def test_get_task_control_with_require_sys_admin_bypasses():
+    """sys.admin is granted INSIDE resolve_task_permissions (it returns the
+    full permission set) — deliberately no outer short-circuit to keep in
+    sync (parity with get_task).
+    """
+    ts = _make_server()
+    control = _make_control()
+    ts._task_control['tk_1'] = control
+    # No organization at all: only the resolver's sys.admin expansion grants.
+    account = SimpleNamespace(userId='u', defaultTeam='t', sysPermissions=['sys.admin'], organization=None)
 
     assert ts.get_task_control('tk_1', account_info=account, require='task.debug') is control
 
@@ -389,21 +417,18 @@ async def test_broadcast_task_event_logs_other_exceptions():
 # ---------------------------------------------------------------------------
 
 
-def test_store_property_creates_once_and_caches(monkeypatch):
-    """First access creates a Store via Store.create(); subsequent access reuses it."""
+def test_store_property_returns_process_singleton(monkeypatch):
+    """TaskServer.store IS the process singleton — server code and
+    Store.file_store(ctx) call sites can never diverge onto different stores.
+    """
     from ai.modules.task import task_server as ts_mod
 
     fake_store = MagicMock(name='store')
-    create_mock = MagicMock(return_value=fake_store)
-    monkeypatch.setattr(ts_mod.Store, 'create', create_mock)
+    monkeypatch.setattr(ts_mod.Store, '_instance', fake_store)
 
     ts = _make_server()
-    s1 = ts.store
-    s2 = ts.store
-
-    assert s1 is fake_store
-    assert s2 is fake_store
-    create_mock.assert_called_once()  # cached
+    assert ts.store is fake_store
+    assert ts.store is ts_mod.Store.instance()
 
 
 # ---------------------------------------------------------------------------

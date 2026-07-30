@@ -26,7 +26,7 @@ import re
 from typing import Optional
 import posixpath
 
-from ..store import IStore, StorageError, VersionMismatchError
+from ...store import IStore, StorageError, VersionMismatchError
 
 
 class MemoryStore(IStore):

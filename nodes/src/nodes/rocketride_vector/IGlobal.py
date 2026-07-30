@@ -64,10 +64,14 @@ class IGlobal(IGlobalTransform):
             # Get the info about our store
             collection = self.store.collection
 
-            # Scope the subKey by tenant: the DSN is per-client, so the store
-            # must not be shared across clients even when the pooler host/port
-            # are identical.
-            subKey = f'{self.store.client_id}/{collection}'
+            # Scope the subKey by tenant: the resolved DSN points at the
+            # per-tenant database, so key on that database — the store must
+            # not be shared across tenants even when the pooler host/port are
+            # identical. (Identity rides the task file since #1686; env
+            # identity is untrusted, and the tenant DB is the actual
+            # isolation unit.)
+            tenant_scope = self.store.database or f'{self.store.host}:{self.store.port}'
+            subKey = f'{tenant_scope}/{collection}'
 
             # Call the base
             super().beginGlobal(subKey)
