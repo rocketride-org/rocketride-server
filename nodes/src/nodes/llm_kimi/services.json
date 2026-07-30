@@ -173,8 +173,19 @@
 				"title": "MoonshotAI Kimi Latest",
 				"model": "kimi-latest",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 262144, // openrouter
-				"modelOutputTokens": 262144, // openrouter
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 131072, // litellm
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"kimi-k3": {
+				"title": "MoonshotAI: Kimi K3",
+				"model": "kimi-k3",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 4096, // default
 				"capabilities": {
 					"reasoning": true
 				},
@@ -297,6 +308,12 @@
 					"properties": [
 						"kimi.kimi-latest"
 					]
+				},
+				{
+					"value": "kimi-k3",
+					"properties": [
+						"kimi.kimi-k3"
+					]
 				}
 			]
 		},
@@ -330,6 +347,13 @@
 		},
 		"kimi.kimi-latest": {
 			"object": "kimi-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"kimi.kimi-k3": {
+			"object": "kimi-k3",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

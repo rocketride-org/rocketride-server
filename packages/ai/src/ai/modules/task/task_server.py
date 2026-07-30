@@ -83,7 +83,7 @@ from ai.constants import (
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
-from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
+from ai.account.models import AccountInfo, resolve_task_permissions
 from ai.account.store import Store
 from ai.account.deployment_store import DeploymentStore
 from .task_conn import TaskConn
@@ -214,7 +214,6 @@ class TaskServer(DAPBase):
         self._allocated_ports: List[int] = []
 
         # Shared store instance (lazy-loaded via property)
-        self._store_instance: Optional[Store] = None
         self._deployments_instance: Optional[DeploymentStore] = None
 
         # Start background tasks that must be cancelled on shutdown.
@@ -247,9 +246,10 @@ class TaskServer(DAPBase):
         Returns:
             Store: The shared store instance
         """
-        if self._store_instance is None:
-            self._store_instance = Store.create()
-        return self._store_instance
+        # The process-wide singleton — TaskServer no longer owns a private
+        # instance, so server code and Store.file_store(ctx) call sites can
+        # never diverge onto different stores.
+        return Store.instance()
 
     @property
     def deployments(self) -> DeploymentStore:
@@ -515,14 +515,13 @@ class TaskServer(DAPBase):
                 # Log cleanup errors but continue processing other tasks
                 self.debug_message(f'Error during disconnection cleanup for task "{control.id}": {e}')
 
-        # Close any open file store handles for this connection
-        if hasattr(conn, '_account_info') and conn._account_info:
-            try:
-                client_id = conn._account_info.userId
-                if client_id in self.store._file_stores:
-                    await self.store._file_stores[client_id].close_all_handles(connection_id)
-            except Exception as e:
-                self.debug_message(f'Error closing file handles for connection {connection_id}: {e}')
+        # Close any open file store handles for this connection. The handle
+        # registry is Store-wide (shared across all FileStore instances), so
+        # this covers every store the connection ever constructed.
+        try:
+            await self.store.close_all_handles(connection_id)
+        except Exception as e:
+            self.debug_message(f'Error closing file handles for connection {connection_id}: {e}')
 
         # Log successful disconnection cleanup
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
@@ -660,8 +659,14 @@ class TaskServer(DAPBase):
         if not control:
             raise RuntimeError('Your pipeline is not running')
 
+        # Resolve against the TASK'S team (the old resolve_team_permissions
+        # call raised on foreign teams instead of denying uniformly).
+        # sys.admin and internal identities bypass INSIDE the resolver — it
+        # returns the full permission set for them — so no outer short-circuit.
         if account_info is not None and require:
-            perms = resolve_team_permissions(account_info, control.teamId)
+            perms = resolve_task_permissions(account_info, control.teamId)
+            if not perms:
+                raise PermissionError('Access denied: no permissions for this task')
             if require not in perms:
                 raise PermissionError(f'Permission {require!r} denied for this task')
 
@@ -1151,6 +1156,8 @@ class TaskServer(DAPBase):
                 provider=control.provider,
                 ttl=ttl,
                 client_id=control.client_id,
+                team_id=control.teamId,
+                org_id=control.orgId,
                 env=env or {},
             )
 

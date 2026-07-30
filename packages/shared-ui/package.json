@@ -72,7 +72,7 @@
 		"@rsbuild/plugin-sass": "~1.5.3",
 		"@rsbuild/plugin-svgr": "^2.0.3",
 		"@rslib/core": "~0.22.0",
-		"@types/react": "~18.3.29",
+		"@types/react": "~18.3.31",
 		"@types/react-dom": "~18.3.7",
 		"@types/react-syntax-highlighter": "^15.5.13",
 		"@types/tabulator-tables": "~6.2.0",

@@ -62,6 +62,9 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t = Task.__new__(Task)
     t.id = 'task-test'
     t.token = 'tk_test'
+    t.client_id = 'user-1'
+    t.team_id = 'team-1'
+    t.org_id = 'org-1'
     t.source = source
     # Real tasks always carry their project id; _forward_task_event stamps
     # it into every forwarded body (identity safety net).
@@ -70,6 +73,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t._pipeline = pipeline if pipeline is not None else {}
     t._threads = 4
     t._pipelineTraceLevel = None
+    t._run_kind = 'dev'
     t._status = status if status is not None else SimpleNamespace(name='', state=0, exitMessage='')
     t._debugger = None
     t._debug_port = None
@@ -190,6 +194,53 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
         'components': [{'id': 'src'}],
     }
     assert config['config']['keystore'] == 'kvsfile://data/keystore.json'
+    # Trusted identity travels IN THE TASK FILE (never the environment).
+    assert config['identity'] == {'userId': 'user-1', 'teamId': 'team-1', 'orgId': 'org-1'}
+    # Dev runs anchor node storage at the owner's whole tree.
+    assert config['storage'] == {'root': 'users/user-1/files'}
+
+
+def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
+    """Deploy runs anchor node storage at a task-specific TEAM subtree —
+    no user dependency, and concurrent deployments never share storage.
+    """
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    pipeline = {'source': 'src', 'components': []}
+    t = _task(pipeline=pipeline)
+    t._run_kind = 'deploy'
+    config = Task._build_task(t, pipeline)
+    assert config['storage'] == {'root': 'teams/team-1/files/tasks/proj-test'}
+
+
+def test_build_task_deploy_without_team_refuses(monkeypatch, tmp_path):
+    """A deploy run with no team has no valid anchor — fail loudly."""
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    t = _task(pipeline={'components': []})
+    t._run_kind = 'deploy'
+    t.team_id = ''
+    with pytest.raises(ValueError, match='team_id'):
+        Task._build_task(t, {'components': []})
+
+
+def test_build_task_dev_without_client_gets_no_anchor(monkeypatch, tmp_path):
+    """An anonymous dev run (client_id='' — OSS/standalone launch) carries NO
+    anchor rather than failing the launch: identity.userId rides empty too,
+    so the subprocess's engine_file_store() yields None and the storage
+    tools disable themselves. The pin: the shared 'users//files' prefix must
+    never be composed as an anchor.
+    """
+    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
+    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
+
+    pipeline = {'source': 'src', 'components': []}
+    t = _task(pipeline=pipeline)
+    t.client_id = ''
+    config = Task._build_task(t, pipeline)
+    assert config['storage'] == {'root': ''}
 
 
 def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):

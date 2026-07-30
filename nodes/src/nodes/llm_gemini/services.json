@@ -95,7 +95,7 @@
 				"model": "models/gemini-3.1-flash-image-preview",
 				"modelSource": "manual",
 				"modelTotalTokens": 131072, // sync_models.config.json
-				"modelOutputTokens": 32768, // openrouter
+				"modelOutputTokens": 65536, // openrouter
 				"apikey": ""
 			},
 			"gemini-3_1-flash-lite-preview": {
@@ -151,7 +151,7 @@
 				"model": "models/gemini-2.5-flash-image",
 				"modelSource": "manual",
 				"modelTotalTokens": 32768, // sync_models.config.json
-				"modelOutputTokens": 32768, // openrouter
+				"modelOutputTokens": 8192, // openrouter
 				"apikey": ""
 			},
 			"gemini-3-pro-preview": {
@@ -168,7 +168,7 @@
 				"title": "Gemini 3 Pro Image",
 				"model": "models/gemini-3-pro-image",
 				"modelSource": "manual",
-				"modelTotalTokens": 65536, // openrouter
+				"modelTotalTokens": 131072, // openrouter
 				"modelOutputTokens": 32768, // openrouter
 				"deprecated": true,
 				"migration": "Please use 'gemini-3-pro-image-preview' instead",
@@ -270,6 +270,22 @@
 			"models-gemini-3-5-flash": {
 				"title": "Google: Gemini 3.5 Flash",
 				"model": "models/gemini-3.5-flash",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-5-flash-lite": {
+				"title": "Google: Gemini 3.5 Flash Lite",
+				"model": "models/gemini-3.5-flash-lite",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 65536, // openrouter
+				"apikey": ""
+			},
+			"models-gemini-3-6-flash": {
+				"title": "Google: Gemini 3.6 Flash",
+				"model": "models/gemini-3.6-flash",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
@@ -562,6 +578,18 @@
 					"properties": [
 						"gemini.models-gemini-3-5-flash"
 					]
+				},
+				{
+					"value": "models-gemini-3-5-flash-lite",
+					"properties": [
+						"gemini.models-gemini-3-5-flash-lite"
+					]
+				},
+				{
+					"value": "models-gemini-3-6-flash",
+					"properties": [
+						"gemini.models-gemini-3-6-flash"
+					]
 				}
 			]
 		},
@@ -630,6 +658,20 @@
 		},
 		"gemini.models-gemini-3-5-flash": {
 			"object": "models-gemini-3-5-flash",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-5-flash-lite": {
+			"object": "models-gemini-3-5-flash-lite",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"gemini.models-gemini-3-6-flash": {
+			"object": "models-gemini-3-6-flash",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

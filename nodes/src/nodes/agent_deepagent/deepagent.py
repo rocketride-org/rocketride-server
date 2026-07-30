@@ -449,6 +449,9 @@ class DeepAgentDriver(AgentBase):
                         pipe_id=context.pipe_id,
                         framework=context.framework,
                         started_at=context.started_at,
+                        # Share the parent's tool tally so a host tool a sub-agent
+                        # invokes counts toward the parent run's require_tool_call guard.
+                        invoked_tools=context.invoked_tools,
                     )
 
                     sub_llm = _build_deepagent_llm(self, sub_context)

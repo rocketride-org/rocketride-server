@@ -114,7 +114,7 @@ const config: Config = {
 			},
 			items: [
 				{ to: '/', label: 'Home', position: 'left', className: 'navbar__link--colored' },
-				{ type: 'custom-discord', href: 'https://discord.gg/9hr3tdZmEG', label: 'Discord', position: 'right' },
+				{ type: 'custom-discord', href: 'https://discord.gg/PMXrtenMsY', label: 'Discord', position: 'right' },
 				{ type: 'custom-githubStars', href: 'https://github.com/rocketride-org/rocketride-server', label: 'GitHub', position: 'right' },
 			],
 		},

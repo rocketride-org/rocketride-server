@@ -125,27 +125,28 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Verify permission
-            self.verify_permission('task.control')
+            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            args = request.get('arguments') or {}
+            team_id = args.get('teamId') or self._account_info.defaultTeam
+
+            # Verify task.control ON THE TARGET TEAM — not defaultTeam — and
+            # BEFORE any secret handling. A client-supplied teamId outside the
+            # caller's permissions previously slipped through with org_id=''
+            # and pulled that team's secrets in the env merge below.
+            self.verify_team_permission(team_id, 'task.control')
 
             # Verify required pipeline plans
-            args = request.get('arguments') or {}
             pipeline = args.get('pipeline')
             if pipeline is not None:
                 # Check that the pipeline's required plan is available for this account.
                 self.verify_plans(self._account_info, pipeline)
 
-            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
-            team_id = args.get('teamId') or self._account_info.defaultTeam
-
-            # Resolve org_id from the user's single organization.
-            org_id = ''
-            org = self._account_info.organization
-            if org:
-                for team in org.get('teams', []):
-                    if team.get('id') == team_id:
-                        org_id = org.get('id', '')
-                        break
+            # Resolve the org that owns the TARGET team (same resolution as
+            # on_launch): members via their own org, sys.admin/internal via
+            # the account backend — the task file must never carry an empty
+            # orgId as trusted identity, and the secret merge below must pull
+            # the TARGET team's real org layer.
+            org_id = await self.resolve_org_for_team(team_id)
 
             # Build merged environment for pipeline variable resolution.
             # Combines .env → org → team → user secrets (SaaS) or just .env (OSS).
@@ -210,8 +211,12 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Verify permission
-            self.verify_permission('task.control')
+            # Authorize against the TASK'S team, not defaultTeam: get_task
+            # resolves the token to its control entry and requires
+            # task.control on that team (sys.admin bypasses). A defaultTeam
+            # check alone let any task.control holder restart other teams'
+            # token-addressed tasks.
+            self.get_task(request, 'task.control')
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(

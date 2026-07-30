@@ -67,7 +67,7 @@ from .keystore import KeyStore
 from .report import Reporter
 from .store import Store, IStore, StorageError, VersionMismatchError, STORE_MAX_RETRY_ATTEMPTS, LOG_PAGE_SIZE
 from .deployment_store import DeploymentStore
-from .models import AccountInfo, DeploymentRecord, resolve_team_permissions
+from .models import AccountInfo, DeploymentRecord, RequestContext, resolve_team_permissions
 
 __all__ = [
     'Account',
@@ -79,6 +79,7 @@ __all__ = [
     'KeyStore',
     'Reporter',
     'Store',
+    'RequestContext',
     'IStore',
     'StorageError',
     'VersionMismatchError',
