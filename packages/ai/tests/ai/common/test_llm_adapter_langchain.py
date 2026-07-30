@@ -26,6 +26,12 @@ class _FakeLLM:
         for p in self._pieces:
             yield p if isinstance(p, _Piece) else _Piece(p)
 
+    def invoke(self, messages, **kwargs):
+        self.seen = list(messages)
+        self.kwargs = kwargs
+        p = self._pieces[0]
+        return p if isinstance(p, _Piece) else _Piece(p)
+
 
 def test_normalizes_blocks_and_records_history():
     llm = _FakeLLM([[{'type': 'thinking', 'thinking': 'r'}, {'type': 'text', 'text': 'Hi there'}]])
@@ -62,3 +68,20 @@ def test_passes_stream_kwargs_and_tracks_finish_reason():
     list(adapter.stream('q'))
     assert llm.kwargs == {'stop': ['\nObservation:']}
     assert adapter.finish_reason == 'stop'
+
+
+def test_collect_uses_invoke_and_normalizes():
+    # collect() is the non-streaming drain: invoke() + shared normalization, thinking dropped.
+    llm = _FakeLLM([[{'type': 'thinking', 'thinking': 'r'}, {'type': 'text', 'text': 'answer'}]])
+    adapter = LangChainAdapter(llm, stream_kwargs={'stop': ['x']})
+
+    text, items = adapter.collect('q')
+
+    assert text == 'answer'
+    assert items == [{'role': 'assistant', 'content': 'answer'}]
+    assert llm.seen == [{'role': 'user', 'content': 'q'}]  # invoke received the history
+    assert llm.kwargs == {'stop': ['x']}  # stop kwargs threaded to invoke
+    assert adapter.history == [
+        {'role': 'user', 'content': 'q'},
+        {'role': 'assistant', 'content': 'answer'},
+    ]

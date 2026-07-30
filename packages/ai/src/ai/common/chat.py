@@ -185,15 +185,10 @@ class ChatBase:
             Should raise appropriate exceptions for API failures, authentication
             errors, or other provider-specific issues
         """
-        # Non-streaming: drain the adapter with no display sinks — same iterator and
-        # normalization as streaming, so item capture is structural on every path.
-        _llm = self._llm
-        if hasattr(_llm, 'stream'):
-            adapter = LangChainAdapter(_llm, stream_kwargs=_stop_kwargs())
-            text, _items = drive_adapter(adapter, prompt)
-            return text
-        # Backends/mocks without .stream: invoke and normalize the content to a string.
-        return flatten_content(_llm.invoke(prompt, **_stop_kwargs()).content)
+        # Non-streaming: invoke through the adapter — same shared normalization as streaming,
+        # but a genuinely different mechanism, so the streaming fallback can still recover.
+        text, _items = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs()).collect(prompt)
+        return text
 
     def getTokens(self, value: str) -> int:
         """

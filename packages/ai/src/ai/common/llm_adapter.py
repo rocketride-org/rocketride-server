@@ -206,6 +206,17 @@ class LangChainAdapter:
         self.history.append(assistant)
         yield Event('done', items=[assistant])
 
+    def collect(self, user_text: str) -> tuple[str, list[Any]]:
+        """Non-streaming drain: invoke() + shared normalization. A genuinely different
+        mechanism from stream(), so it can still recover when streaming fails.
+        """
+        self.history.append({'role': 'user', 'content': user_text})
+        result = self.llm.invoke(self.history, **self.stream_kwargs)
+        text = flatten_content(getattr(result, 'content', ''))
+        assistant = {'role': 'assistant', 'content': text}
+        self.history.append(assistant)
+        return text, [assistant]
+
 
 class NativeOpenAIResponsesAdapter:
     """Bridges the OpenAI Responses reasoning stream (create/stream=True) to Events."""

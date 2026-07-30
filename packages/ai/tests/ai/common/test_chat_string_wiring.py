@@ -23,6 +23,10 @@ class _FakeLLM:
         self.kwargs = kwargs
         yield from self._pieces
 
+    def invoke(self, messages, **kwargs):
+        self.kwargs = kwargs
+        return self._pieces[0]
+
 
 class _Chat(ChatBase):
     # Bypass the config-driven __init__; wire only what chat_string reads.
@@ -72,8 +76,16 @@ def test_stop_sequences_reach_the_model():
     assert llm.kwargs == {'stop': ['\nObservation:']}
 
 
-def test_chat_nonstreaming_drains_adapter():
-    # The unify: _chat (no display callbacks) drains the same adapter and returns text.
+def test_chat_nonstreaming_invokes_via_adapter():
+    # _chat drains via collect() → invoke() (a different mechanism than stream(), so the
+    # streaming fallback can recover); content is normalized (thinking dropped) and stop passes.
+    from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
+
     llm = _FakeLLM([_Piece([{'type': 'thinking', 'thinking': 'x'}, {'type': 'text', 'text': 'plain answer'}])])
     chat = _Chat(llm)
-    assert chat._chat('q') == 'plain answer'
+    token = STOP_SEQUENCES_VAR.set(['\nObservation:'])
+    try:
+        assert chat._chat('q') == 'plain answer'
+    finally:
+        STOP_SEQUENCES_VAR.reset(token)
+    assert llm.kwargs == {'stop': ['\nObservation:']}
