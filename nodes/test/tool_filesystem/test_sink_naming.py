@@ -280,7 +280,7 @@ def _sink_instance(
     url_expires_in=3600,
     allow_write=True,
     path_patterns=None,
-    listeners=('documents',),
+    listeners=('json',),
 ):
     """Build an IInstance wired to a stub IGlobal + mocked engine ``instance``."""
     _install_iinstance_stubs()

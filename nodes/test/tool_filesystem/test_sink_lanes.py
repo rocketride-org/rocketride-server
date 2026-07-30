@@ -33,19 +33,15 @@ def test_documents_nameless_uses_object_id_txt():
     assert path_arg == 'output/d7.txt'
 
 
-def test_documents_multi_doc_index_disambiguates_and_chunkids_increment():
+def test_documents_multi_doc_emits_one_json_ref_per_file():
     fs = _fs()
     inst = _sink_instance(fs, name='a.txt', object_id='obj-x')
     result = inst.writeDocuments([MagicMock(page_content='one'), MagicMock(page_content='two')])
     assert result == 'PREVENT_DEFAULT'
     paths = [c.args[0] for c in fs.write.await_args_list]
     assert paths == ['output/a_0.txt', 'output/a_1.txt']
-    (emitted,), _ = inst.instance.writeDocuments.call_args
-    assert [d.page_content for d in emitted] == ['output/a_0.txt', 'output/a_1.txt']
-    # Distinct chunkIds so vector stores keyed on (objectId, chunkId) don't overwrite.
-    assert [d.metadata.chunkId for d in emitted] == [0, 1]
-    assert all(d.metadata.objectId == 'obj-x' for d in emitted)
-    assert emitted[0].metadata.parent == 'output/a_0.txt'
+    payloads = [c.args[0] for c in inst.instance.writeJson.call_args_list]
+    assert payloads == [{'path': 'output/a_0.txt'}, {'path': 'output/a_1.txt'}]
 
 
 def test_documents_single_doc_has_no_index_suffix():
@@ -61,7 +57,7 @@ def test_documents_persists_without_listener_but_does_not_emit():
     inst = _sink_instance(fs, name='a.txt', listeners=())
     inst.writeDocuments([MagicMock(page_content='hello')])
     fs.write.assert_awaited_once()  # still persisted
-    inst.instance.writeDocuments.assert_not_called()  # nothing to emit to
+    inst.instance.writeJson.assert_not_called()  # nothing to emit to
 
 
 # ---------------------------------------------------------------------------
@@ -118,8 +114,8 @@ def test_image_streams_to_store_and_emits_on_end():
     ((_handle, stream),) = fs.streams.items()
     assert stream['path'] == 'output/img1.png'
     assert b''.join(stream['chunks']) == b'\x89PNGrest'
-    (emitted,), _ = inst.instance.writeDocuments.call_args
-    assert emitted[0].page_content == 'output/img1.png'
+    (payload,), _ = inst.instance.writeJson.call_args
+    assert payload == {'path': 'output/img1.png'}
 
 
 def test_audio_uses_mime_extension():
@@ -159,7 +155,7 @@ def test_empty_media_stream_writes_no_file():
     inst.writeImage(AVI_ACTION.END, 'image/png', b'')
     fs.open_write.assert_not_awaited()  # nothing was ever opened
     fs.close_write.assert_not_awaited()
-    inst.instance.writeDocuments.assert_not_called()
+    inst.instance.writeJson.assert_not_called()
 
 
 def test_new_begin_discards_half_written_prior_stream():
@@ -185,18 +181,18 @@ def test_open_discards_stream_the_previous_object_left_unfinished():
     inst.open(MagicMock())  # engine opens the next object
     fs.close_write.assert_awaited_once()  # stale handle released
     fs.delete.assert_awaited_once_with('output/track.wav')  # partial removed
-    inst.instance.writeDocuments.assert_not_called()
+    inst.instance.writeJson.assert_not_called()
 
 
-def test_open_restarts_chunk_ids_for_the_next_object():
+def test_open_does_not_leak_state_between_objects():
     fs = _fs()
     inst = _sink_instance(fs, name='a.txt', object_id='obj-a')
     inst.writeText('one')
-    inst.open(MagicMock())  # next object: chunkIds must start at 0 again
+    inst.open(MagicMock())  # engine opens the next object
     inst.writeText('two')
-    first, second = [c.args[0][0] for c in inst.instance.writeDocuments.call_args_list]
-    assert first.metadata.chunkId == 0
-    assert second.metadata.chunkId == 0
+    payloads = [c.args[0]['path'] for c in inst.instance.writeJson.call_args_list]
+    # _fs() reports no existing paths, so both writes resolve the same name.
+    assert payloads == ['output/a.md', 'output/a.md']
 
 
 def test_media_blank_mime_falls_back_to_source_extension():
@@ -243,9 +239,17 @@ def test_named_source_with_conflicting_mime_mime_wins():
 # ---------------------------------------------------------------------------
 
 
-def test_emit_url_lands_on_emitted_doc_metadata():
+def test_emit_url_lands_in_json_payload():
     fs = _fs()
     inst = _sink_instance(fs, name='report.pdf', object_id='obj-1', emit_url=True)
     inst.writeText('# heading')
-    (emitted,), _ = inst.instance.writeDocuments.call_args
-    assert emitted[0].metadata.url == 'https://x/task/fetch?token=t'
+    (payload,), _ = inst.instance.writeJson.call_args
+    assert payload == {'path': 'output/report.md', 'url': 'https://x/task/fetch?token=t'}
+
+
+def test_no_url_key_when_emit_url_off():
+    fs = _fs()
+    inst = _sink_instance(fs, name='report.pdf', object_id='obj-1', emit_url=False)
+    inst.writeText('# heading')
+    (payload,), _ = inst.instance.writeJson.call_args
+    assert 'url' not in payload

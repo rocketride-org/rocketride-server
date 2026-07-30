@@ -367,7 +367,7 @@ class IInstance(IInstanceBase):
     # Pipeline sink (lanes)
     #
     # The node doubles as a pipeline sink: data arriving on a lane is written to
-    # the account-scoped FileStore and a reference Doc is emitted downstream.
+    # the account-scoped FileStore and a JSON reference is emitted downstream.
     # Each lane owns its own filename rule — text/table are markdown, documents
     # keep the source extension, media derive from the mime — instead of one
     # tangled precedence chain.
@@ -442,40 +442,32 @@ class IInstance(IInstanceBase):
         return self._sink_ref(path)
 
     def _sink_emit(self, refs: list[dict]) -> None:
-        """Emit persisted-file references as ``Doc``s on the documents lane.
+        """Emit one JSON reference per persisted file on the ``json`` lane.
 
-        Metadata is built via ``DocMetadata(self, ...)`` so objectId, nodeId,
-        permissionId, and signature are inherited from the current object. Each
-        ref gets a distinct, monotonically increasing chunkId so downstream
-        vector stores (keyed on objectId+chunkId) never overwrite one another.
+        The payload is ``{'path': <store-relative path>}`` plus a ``'url'`` key
+        when a signed download URL was resolved (``emitUrl`` on). Plain JSON —
+        no Doc/chunkId semantics — so downstream JSON consumers get the refs
+        without vector-store metadata riding along.
         """
         if not refs:
             return
-        if 'documents' not in self.instance.getListeners():
+        if 'json' not in self.instance.getListeners():
             return
-        from ai.common.schema import Doc, DocMetadata
-
-        if not hasattr(self, '_sink_chunk_id'):
-            self._sink_chunk_id = 0
-        docs = []
         for ref in refs:
-            overrides = {'chunkId': self._sink_chunk_id, 'parent': ref['storePath']}
+            payload = {'path': ref['storePath']}
             if ref.get('url'):
-                overrides['url'] = ref['url']
-            docs.append(Doc(page_content=ref['storePath'], metadata=DocMetadata(self, **overrides)))
-            self._sink_chunk_id += 1
-        self.instance.writeDocuments(docs)
+                payload['url'] = ref['url']
+            self.instance.writeJson(payload)
 
     # -- lane handlers -------------------------------------------------
 
     def open(self, object: Entry):
-        """Per-object reset: chunkIds restart at 0 and stale streams are dropped.
+        """Per-object reset: stale media streams are dropped.
 
         A stream aborted before END (upstream error, dropped object) would
         otherwise keep its write handle and half-written file alive, and the
         next object's chunks would land in it.
         """
-        self._sink_chunk_id = 0
         for kind in list(getattr(self, '_media_streams', None) or {}):
             self._media_abort(kind)
 
