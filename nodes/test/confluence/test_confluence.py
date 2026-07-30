@@ -20,10 +20,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# _emit_page calls the real convert_storage_html (which needs bs4) on real
-# HTML in several tests below — skip cleanly rather than failing with a
-# confusing assertion error if bs4 truly isn't installed.
-pytest.importorskip('bs4')
+try:
+    import bs4  # noqa: F401
+
+    _HAS_BS4 = True
+except ImportError:
+    _HAS_BS4 = False
+
+# Only the tests that push real HTML through _emit_page need bs4 — config
+# validation, pagination, and the mocked-conversion test don't touch it, so
+# they keep running (and providing real coverage) even where bs4 is missing.
+requires_bs4 = pytest.mark.skipif(not _HAS_BS4, reason='bs4 not installed')
 
 _NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
 if str(_NODES_SRC) not in sys.path:
@@ -87,6 +94,7 @@ def test_run_bails_out_when_config_incomplete(monkeypatch):
     build_session.assert_not_called()
 
 
+@requires_bs4
 def test_run_surfaces_pagination_error_as_a_failure(monkeypatch):
     ep = _make_endpoint(
         {'baseUrl': 'https://x.atlassian.net/wiki', 'email': 'a@b.com', 'apiToken': 'tok', 'spaceKey': 'ENG'}
@@ -154,6 +162,7 @@ def test_run_defaults_max_pages_when_unset(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+@requires_bs4
 def test_emit_page_writes_text_and_tables():
     ep = _make_endpoint({})
     pipe = MagicMock()
@@ -193,6 +202,7 @@ def test_emit_page_skips_on_conversion_error(monkeypatch):
     ep.target.getPipe.assert_not_called()
 
 
+@requires_bs4
 def test_emit_page_puts_pipe_back_even_on_write_failure():
     ep = _make_endpoint({})
     pipe = MagicMock()
@@ -208,6 +218,7 @@ def test_emit_page_puts_pipe_back_even_on_write_failure():
     ep.target.putPipe.assert_called_once_with(pipe)
 
 
+@requires_bs4
 def test_emit_page_does_not_double_close_on_success():
     ep = _make_endpoint({})
     pipe = MagicMock()

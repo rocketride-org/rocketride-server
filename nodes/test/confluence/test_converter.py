@@ -21,11 +21,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-# converter.py now imports bs4 lazily (inside convert_storage_html), so
-# importing the module never requires it — but these tests all call the
-# function, so skip cleanly here rather than erroring if bs4 truly isn't
-# installed in whatever environment runs this file.
-pytest.importorskip('bs4')
+try:
+    import bs4  # noqa: F401
+
+    _HAS_BS4 = True
+except ImportError:
+    _HAS_BS4 = False
+
+# converter.py imports bs4 lazily (inside convert_storage_html) only once the
+# input is non-empty — so the empty-input test keeps running regardless, and
+# only the tests that push real HTML through the parser need to skip.
+requires_bs4 = pytest.mark.skipif(not _HAS_BS4, reason='bs4 not installed')
 
 _NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
 if str(_NODES_SRC) not in sys.path:
@@ -67,12 +73,14 @@ def test_empty_body_returns_empty():
     assert tables == []
 
 
+@requires_bs4
 def test_plain_paragraph_becomes_text():
     text, tables = converter.convert_storage_html('<p>Hello team</p>')
     assert 'Hello team' in text
     assert tables == []
 
 
+@requires_bs4
 def test_table_extracted_and_removed_from_text():
     html = (
         '<p>Intro</p><table><tr><th>Name</th><th>Owner</th></tr><tr><td>API</td><td>Alice</td></tr></table><p>Outro</p>'
@@ -90,6 +98,7 @@ def test_table_extracted_and_removed_from_text():
     assert '| API | Alice |' in tables[0]
 
 
+@requires_bs4
 def test_multiple_tables_each_rendered_separately():
     html = '<table><tr><th>A</th></tr><tr><td>1</td></tr></table><table><tr><th>B</th></tr><tr><td>2</td></tr></table>'
     _, tables = converter.convert_storage_html(html)
@@ -99,6 +108,7 @@ def test_multiple_tables_each_rendered_separately():
     assert '| B |' in tables[1]
 
 
+@requires_bs4
 def test_ragged_row_is_padded_to_header_width():
     # A row with fewer cells than the header shouldn't misalign columns.
     html = '<table><tr><th>A</th><th>B</th><th>C</th></tr><tr><td>1</td></tr></table>'
@@ -108,6 +118,7 @@ def test_ragged_row_is_padded_to_header_width():
     assert body_line == '| 1 |  |  |'
 
 
+@requires_bs4
 def test_wider_body_row_is_not_truncated():
     # A body row with MORE cells than the header must not silently lose data —
     # the source table is already gone from the text lane by this point.
@@ -121,6 +132,7 @@ def test_wider_body_row_is_not_truncated():
     assert lines[2] == '| 1 | 2 | 3 |'
 
 
+@requires_bs4
 def test_pipe_and_backslash_in_cell_are_escaped():
     html = '<table><tr><th>Note</th></tr><tr><td>a | b \\ c</td></tr></table>'
     _, tables = converter.convert_storage_html(html)
@@ -128,6 +140,7 @@ def test_pipe_and_backslash_in_cell_are_escaped():
     assert '| a \\| b \\\\ c |' in tables[0]
 
 
+@requires_bs4
 def test_table_with_no_rows_is_skipped():
     html = '<p>Text</p><table></table>'
     text, tables = converter.convert_storage_html(html)
@@ -135,6 +148,7 @@ def test_table_with_no_rows_is_skipped():
     assert 'Text' in text
 
 
+@requires_bs4
 def test_excess_blank_lines_collapsed():
     html = '<p>One</p><p></p><p></p><p></p><p>Two</p>'
     text, _ = converter.convert_storage_html(html)
