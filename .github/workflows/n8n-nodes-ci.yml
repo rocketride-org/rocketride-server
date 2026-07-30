@@ -53,7 +53,7 @@ jobs:
 
       - name: Install (npm ci against the committed lockfile — isolated from the pnpm workspace)
         run: |
-          npm install -g npm@11.5.1
+          npm install -g npm@11.19.0
           npm ci --no-audit --no-fund
 
       - name: Build

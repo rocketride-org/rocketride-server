@@ -61,7 +61,7 @@ jobs:
 
       - name: Install + verify
         run: |
-          npm install -g npm@11.5.1
+          npm install -g npm@11.19.0
           npm ci --no-audit --no-fund
           npm run build
           npm run lint
@@ -69,5 +69,5 @@ jobs:
 
       - name: Publish to npm (OIDC trusted publishing + provenance)
         run: |
-          # npm >= 11.5.1 (required for OIDC trusted publishing) was installed in the step above.
+          # npm 11.19.0 supports OIDC trusted publishing and npm trust configuration (npm trust requires >= 11.15.0).
           npm publish --provenance --access public
