@@ -407,12 +407,15 @@ class StoreCommands(DAPConn):
         # The scope mounts stat as directories: '@' and '@/Team' have no
         # physical existence at all, and '@/User'/'@/Org' roots always
         # exist conceptually (access control applies on ENTRY, not on the
-        # mount).
-        path = (args.get('path') or '').strip('/')
+        # mount). Same rule as _store_fs_list_dir: ONE normalization (the
+        # store's own) drives BOTH the mount decision and the store
+        # resolution below — and it rejects traversal outright instead of
+        # letting a raw spelling slide through to the resolver.
+        path = normalize_path(args.get('path') or '')
         if path in ('@', '@/User', '@/Team', '@/Org'):
             return self.build_response(request, body={'exists': True, 'type': 'dir', 'virtual': True})
 
-        result = await self._get_file_store().stat(args.get('path'))
+        result = await self._get_file_store().stat(path)
         return self.build_response(request, body=result)
 
     async def _store_fs_rename(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:

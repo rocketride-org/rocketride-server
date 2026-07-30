@@ -611,3 +611,77 @@ class TestSharedWriteLocks:
         # Lock released — reopening succeeds.
         handle = await fs.open_write('@/Team/=team-1/dangling.bin')
         await fs.close_write(handle)
+
+
+# ============================================================================
+# Signed fetch URLs (get_url -> /task/fetch capability contract)
+# ============================================================================
+
+
+class TestSignedFetchUrls:
+    """get_url signs the RESOLVED physical path — the /task/fetch capability.
+
+    Regression for PR #1686: the claim used to carry the WIRE spelling, which
+    the fetch handler re-resolved under an internal identity — an identity
+    with no name dictionary and no org context, so '@/Team/<name>' and
+    '@/Org' URLs died with an unhandled PermissionError (HTTP 500). The
+    claim now IS the physical path; the handler serves it without resolving.
+    """
+
+    @staticmethod
+    def _claim(url: str) -> dict:
+        """Decode the JWT claim out of a generated fetch URL."""
+        import jwt
+
+        token = url.split('token=', 1)[1]
+        return jwt.decode(token, 'test-signing-key', algorithms=['HS256'])
+
+    @pytest.fixture(autouse=True)
+    def _signing_env(self, monkeypatch):
+        """The env get_url's local-JWT branch requires."""
+        monkeypatch.setenv('RR_SIGNING_KEY', 'test-signing-key')
+        monkeypatch.setenv('RR_BASE_URL', 'http://localhost:5565')
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('wire_path', 'physical'),
+        [
+            # The reviewer's failure matrix: every wire spelling must sign
+            # its RESOLVED location — including the two that used to 500.
+            ('reports/q1.csv', 'users/user-1/files/reports/q1.csv'),
+            ('@/User/reports/q1.csv', 'users/user-1/files/reports/q1.csv'),
+            ('@/Team/Development/q1.csv', 'teams/team-1/files/q1.csv'),
+            ('@/Team/=team-1/q1.csv', 'teams/team-1/files/q1.csv'),
+        ],
+    )
+    async def test_claim_carries_resolved_path(self, store, wire_path, physical):
+        fs = _fs(store, _account())
+        url = await fs.get_url(wire_path)
+        assert self._claim(url)['path'] == physical
+
+    @pytest.mark.asyncio
+    async def test_org_claim_carries_resolved_path(self, store):
+        # '@/Org' needs org.admin — the second spelling that used to 500.
+        fs = _fs(store, _account(org_perms=('org.admin',)))
+        url = await fs.get_url('@/Org/q1.csv')
+        assert self._claim(url)['path'] == 'orgs/org-1/files/q1.csv'
+
+    @pytest.mark.asyncio
+    async def test_claim_serves_without_scope_resolution(self, store):
+        # The fetch handler's whole job now: backend._get_full_path(claim).
+        # Write through the scope grammar, then locate the file the way the
+        # handler does — no FileStore, no identity, no resolve_scope.
+        fs = _fs(store, _account())
+        await fs.write('@/Team/Development/q1.csv', b'data')
+        url = await fs.get_url('@/Team/Development/q1.csv')
+        abs_path = store._store._get_full_path(self._claim(url)['path'])
+        assert abs_path.is_file()
+        assert abs_path.read_bytes() == b'data'
+
+    @pytest.mark.asyncio
+    async def test_authorization_still_gates_issuance(self, store):
+        # Signing the physical path must not weaken issuance: a session
+        # without org.admin cannot mint an @/Org capability at all.
+        fs = _fs(store, _account())
+        with pytest.raises(PermissionError):
+            await fs.get_url('@/Org/q1.csv')

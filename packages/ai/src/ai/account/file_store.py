@@ -290,11 +290,13 @@ def resolve_scope(
     client_id: str,
     normalized: str,
     engine_root: 'Optional[str]' = None,
-) -> 'tuple[str, str]':
+) -> 'tuple[str, str, str]':
     """Authorize and resolve a normalized path to its physical scope root.
 
     THE enforcement point: called for every path of every operation, against
-    the bound RequestContext. Returns ``(scope_root, rest)``.
+    the bound RequestContext. Returns ``(kind, scope_root, rest)`` — kind is
+    the parsed scope kind ('own'/'user'/'team'/'org'), returned so callers
+    never re-parse a path this function already parsed.
 
     Identity handling:
       - ``ctx.source == 'engine'`` (subprocess tool nodes): plain paths only;
@@ -331,7 +333,7 @@ def resolve_scope(
             raise PermissionError('Scoped (@) paths are not available in the engine context')
         if _system_tree(rest):
             raise PermissionError(f'{_system_tree(rest)}/ is not available in the engine context')
-        return (engine_root or f'users/{client_id}/files', rest)
+        return (kind, engine_root or f'users/{client_id}/files', rest)
 
     account_info = ctx.account_info
     if account_info is None:
@@ -348,14 +350,14 @@ def resolve_scope(
     # pinned by test_internal_identity_writes_logs.
     if is_internal:
         if kind == 'own' or (kind == 'user' and ref is None):
-            return (f'users/{client_id}/files', rest)
+            return (kind, f'users/{client_id}/files', rest)
         if ref is None:
             raise PermissionError(_DENIED)  # internal has no org context
         is_id, value = _split_ref(ref)
         if not is_id:
             raise PermissionError(_DENIED)  # internal has no name dictionary
         root = {'team': 'teams', 'org': 'orgs', 'user': 'users'}[kind]
-        return (f'{root}/{value}/files', rest)
+        return (kind, f'{root}/{value}/files', rest)
 
     # -- System trees: sys.admin may do anything, everyone else nothing ------
     # (Checked before scope resolution so the denial is uniform and early.)
@@ -365,7 +367,7 @@ def resolve_scope(
     # -- Own namespace: plain paths and their joined-mode alias @/User/<rest> -
     if kind == 'own' or (kind == 'user' and ref is None):
         if is_sys_admin:
-            return (f'users/{client_id}/files', rest)
+            return (kind, f'users/{client_id}/files', rest)
         # The caller's OWN tree must not hinge on the defaultTeam pointer —
         # an unset or stale defaultTeam would deny a user their own storage.
         # The file-storage permission is granted when ANY membership carries
@@ -377,7 +379,7 @@ def resolve_scope(
             if team.get('id')
         ):
             raise PermissionError(f'Permission {_DEFAULT_PERMISSION!r} denied')
-        return (f'users/{client_id}/files', rest)
+        return (kind, f'users/{client_id}/files', rest)
 
     # -- @/Org: implicitly MY org — org.admin only; =id crosses for sys.admin -
     if kind == 'org':
@@ -387,13 +389,13 @@ def resolve_scope(
             if value != org.get('id'):
                 if is_sys_admin:
                     _audit_crossing(ctx, client_id, f'orgs/{value}')
-                    return (f'orgs/{value}/files', rest)
+                    return (kind, f'orgs/{value}/files', rest)
                 raise PermissionError(_DENIED)
         if not org.get('id'):
             raise PermissionError(_DENIED)
         if 'org.admin' not in (org.get('permissions') or []) and not is_sys_admin:
             raise PermissionError(_DENIED)
-        return (f'orgs/{org["id"]}/files', rest)
+        return (kind, f'orgs/{org["id"]}/files', rest)
 
     is_id, value = _split_ref(ref)
 
@@ -402,7 +404,7 @@ def resolve_scope(
         if not is_sys_admin:
             raise PermissionError(_DENIED)
         _audit_crossing(ctx, client_id, f'users/{value}')
-        return (f'users/{value}/files', rest)
+        return (kind, f'users/{value}/files', rest)
 
     # -- @/Team -----------------------------------------------------------------
     if is_id:
@@ -419,12 +421,12 @@ def resolve_scope(
         team_id = _resolve_team_name(account_info, ref)
 
     if is_sys_admin:
-        return (f'teams/{team_id}/files', rest)
+        return (kind, f'teams/{team_id}/files', rest)
 
     perms = resolve_task_permissions(account_info, team_id)
     if _DEFAULT_PERMISSION not in perms:
         raise PermissionError(_DENIED)
-    return (f'teams/{team_id}/files', rest)
+    return (kind, f'teams/{team_id}/files', rest)
 
 
 def _sanitize_download_name(name: str) -> str:
@@ -1113,9 +1115,16 @@ class FileStore:
         if not signing_key:
             raise ValueError('RR_SIGNING_KEY not configured — cannot generate fetch URL')
 
+        # The claim carries the RESOLVED physical store path, not the wire
+        # spelling: authorization already ran above (_full_path under THIS
+        # session's identity), and the signed JWT is the capability. The
+        # fetch handler serves the claim verbatim — it re-resolves nothing,
+        # because its internal identity has no name dictionary and no org
+        # context, so a name-based '@/Team/<name>' or '@/Org' wire path
+        # could never resolve there (it would 500 instead of serving).
         payload = {
             'sub': self._client_id,
-            'path': path,
+            'path': full_path,
             'exp': int(time.time()) + expires_in,
         }
         # Carry the download filename in the signed claim so /task/fetch can set
@@ -1148,26 +1157,16 @@ class FileStore:
             mutating callers (rmdir/rename) apply scope-root guards.
         """
         validated = self._validate_path(path)
-        scope_root, rest = resolve_scope(self._ctx, self._client_id, validated, engine_root=self._root)
+        # resolve_scope hands back the kind it parsed — no second parse; the
+        # scope-root guards key off (kind, rest).
+        kind, scope_root, rest = resolve_scope(self._ctx, self._client_id, validated, engine_root=self._root)
         full = f'{scope_root}/{rest}' if rest else scope_root
-        # Re-parse for the kind (cannot fail — resolve_scope just parsed it);
-        # the scope-root guards key off (kind, rest).
-        kind = parse_scope(validated)[0]
         return full, kind, rest
 
     def _full_path(self, path: str) -> str:
         """Authorize + resolve ``path`` to its full physical storage path."""
         full, _kind, _rest = self._resolve(path)
         return full
-
-    def resolve(self, path: str) -> str:
-        """PUBLIC resolver: authorize ``path`` and return its physical path.
-
-        For the rare caller that needs the storage-backend location itself
-        (e.g. the JWT fetch route serving a local file) instead of doing I/O
-        through this API — the supported alternative to touching _full_path.
-        """
-        return self._full_path(path)
 
 
 __all__ = [

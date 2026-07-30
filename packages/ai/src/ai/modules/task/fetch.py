@@ -45,8 +45,9 @@ async def handle_fetch(request: Request):
     Serve a file from the filesystem store, authenticated via JWT query param.
 
     The JWT payload must contain:
-        - ``sub``: userId (scopes the file store)
-        - ``path``: relative file path within the user's store
+        - ``sub``: userId that the URL was issued to (audit trail only)
+        - ``path``: RESOLVED physical store path (the capability — scope
+          resolution and authorization ran at issuance, in FileStore.get_url)
         - ``exp``: expiration timestamp (standard JWT claim)
     """
     # ── Extract and validate JWT ─────────────────────────────────────────
@@ -73,22 +74,20 @@ async def handle_fetch(request: Request):
     if not user_id or not path:
         return JSONResponse({'error': 'Token missing required claims'}, status_code=400)
 
-    # ── Resolve the absolute file path via the store ─────────────────────
-    # Internal identity: authorization happened at URL ISSUANCE (get_url ran
-    # under the requesting session's identity); the signed JWT is the capability.
-    from ai.account import RequestContext, Store
+    # ── Map the signed store path to its filesystem location ─────────────
+    # The `path` claim is the RESOLVED physical store path: authorization
+    # happened at URL ISSUANCE (FileStore.get_url resolved+authorized under
+    # the requesting session's identity), and the signed JWT is the
+    # capability. Nothing is re-resolved here — scope re-resolution under an
+    # internal identity would deny name-based '@/Team/<name>' and '@/Org'
+    # spellings (no name dictionary, no org context) and 500 the fetch.
+    from ai.account import Store
 
-    file_store = Store.file_store(RequestContext.internal('fetch'), client_id=user_id)
-
-    # Build the full storage path and resolve it through the filesystem backend.
-    # A malformed `path` claim can raise ValueError; return 400 rather than 500.
+    backend = Store.instance()._store
+    # _get_full_path guards traversal (raises on escape); a malformed claim
+    # is indistinguishable from a missing file to the caller.
     try:
-        full_store_path = file_store.resolve(path)
-    except ValueError:
-        return JSONResponse({'error': 'Invalid path'}, status_code=400)
-    backend = file_store._store
-    try:
-        abs_path = backend._get_full_path(full_store_path)
+        abs_path = backend._get_full_path(path)
     except Exception:
         return JSONResponse({'error': 'File not found'}, status_code=404)
 

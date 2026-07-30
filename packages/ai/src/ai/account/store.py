@@ -6,7 +6,8 @@ Unified storage abstraction supporting multiple backends:
 - AWS S3: Amazon S3 object storage
 - Azure Blob: Azure Blob Storage
 
-Configuration via STORE_URL environment variable.
+Configuration via RR_STORE_URL environment variable (the legacy STORE_URL
+name hard-fails at startup so a stale deployment cannot silently fall back).
 Defaults to filesystem://~/.rocketlib/dtc if not set (user home directory).
 Falls back to temp directory if home directory cannot be determined.
 """
@@ -416,7 +417,7 @@ class Store:
     from ai.account.store import Store
     from ai.account import AccountInfo
 
-    # Create store (uses STORE_URL env var or defaults to filesystem)
+    # Create store (uses RR_STORE_URL env var or defaults to filesystem)
     store = Store.create()
 
     # Or specify backend explicitly
