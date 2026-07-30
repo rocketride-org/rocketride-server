@@ -5,7 +5,7 @@ sidebar_position: 4
 
 # Neo4j
 
-The `db_neo4j` node answers natural-language questions against a Neo4j graph
+The `graph_neo4j` node answers natural-language questions against a Neo4j graph
 database by translating them to Cypher with a connected LLM. It plays two roles:
 a **pipeline node** that takes questions on the `questions` lane and emits
 results downstream, and an **agent tool** that exposes graph retrieval directly
@@ -122,6 +122,6 @@ fast rather than mid-pipeline.
 
 ## Related
 
-- [`db_neo4j` node reference](/nodes/db_neo4j)
+- [`graph_neo4j` node reference](/nodes/graph_neo4j)
 - [Qdrant integration](/integrations/qdrant) — vector retrieval for RAG
 - [Concepts: Agents & Tools](/concepts/agents-tools-skills)
