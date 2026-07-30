@@ -47,7 +47,15 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A source component that listens for incoming HTTP requests and accepts ", "uploaded documents or data from external systems or processes. It enables ", "seamless integration for document ingestion, allowing external systems to ", "trigger the component and send files for further processing. Configurable ", "with endpoint and authentication settings, it ensures secure and reliable ", "document transfer for pipeline processing. Ideal for receiving documents, ", "images, or other files from external platforms via HTTP-based communication."],
+	"description": [
+		"A source component that listens for incoming HTTP requests and accepts ",
+		"uploaded documents or data from external systems or processes. It enables ",
+		"seamless integration for document ingestion, allowing external systems to ",
+		"trigger the component and send files for further processing. Configurable ",
+		"with endpoint and authentication settings, it ensures secure and reliable ",
+		"document transfer for pipeline processing. Ideal for receiving documents, ",
+		"images, or other files from external platforms via HTTP-based communication."
+	],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -83,27 +91,16 @@
 		}
 	},
 	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {
-		"parameters": {
-			"object": "parameters",
-			"properties": []
-		}
-	},
-	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the fields shown in the node's config panel, in order
 	//
-	"shape": [
+	"properties": [
+		"hideForm",
+		"type",
+		"source.mode",
 		{
-			"section": "Pipe",
-			"title": "Webhook",
-			"properties": ["hideForm", "type", "source.mode", "parameters"]
+			"name": "parameters",
+			"properties": []
 		}
 	]
 }

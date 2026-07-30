@@ -47,7 +47,14 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A user interface component that provides a web-based chat experience. It ", "creates its own HTTP endpoint, configured by host and port, to serve a simple ", "chat UI. Users can interact with the interface to submit questions, which ", "are routed through the attached pipeline for processing. Designed for easy ", "integration, it enables the addition of conversational capabilities to any ", "pipeline workflow."],
+	"description": [
+		"A user interface component that provides a web-based chat experience. It ",
+		"creates its own HTTP endpoint, configured by host and port, to serve a simple ",
+		"chat UI. Users can interact with the interface to submit questions, which ",
+		"are routed through the attached pipeline for processing. Designed for easy ",
+		"integration, it enables the addition of conversational capabilities to any ",
+		"pipeline workflow."
+	],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -83,27 +90,16 @@
 		}
 	},
 	//
-	// Optional:
-	//		Local fields definitions - these define fields only for the
-	//		current service. You may specify them here, or directly
-	//		in the shape
-	//
-	"fields": {
-		"Pipe.source.parameters": {
-			"section": "parameters",
-			"properties": []
-		}
-	},
-	//
 	// Required:
-	//		Defines the fields (shape) of the service. Either source or target
-	//		map be specified, or both, but at least one is required
+	//		Defines the fields shown in the node's config panel, in order
 	//
-	"shape": [
+	"properties": [
+		"hideForm",
+		"type",
+		"source.mode",
 		{
-			"section": "Pipe",
-			"title": "Chat",
-			"properties": ["hideForm", "type", "source.mode", "Pipe.source.parameters"]
+			"name": "parameters",
+			"properties": []
 		}
 	]
 }
