@@ -48,19 +48,17 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A vector database component for Qdrant, enabling efficient storage and ", "retrieval of vector embeddings. It supports similarity search, filtering, ", "and management of vector data with high performance and advanced matching capabilities."],
+	"description": [
+		"A vector database component for Qdrant, enabling efficient storage and ",
+		"retrieval of vector embeddings. It supports similarity search, filtering, ",
+		"and management of vector data with high performance and advanced matching capabilities."
+	],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
 	//
 	"icon": "qdrant.svg",
 	"documentation": "https://docs.rocketride.org",
-	//
-	//
-	//  Optional:
-	//      Rendering hints to the UI which indicate which fields of
-	//      the configuration should be used to display information
-	"tile": ["Host/Port: ${parameters.qdrant.${profile}.host}:${parameters.qdrant.${profile}.port}", "Collection: ${parameters.qdrant.${profile}.collection}"],
 	//
 	//	Optional:
 	//		As a pipe component, define what this pipe component takes
@@ -125,124 +123,70 @@
 		]
 	},
 	//
-	//	Optional:
-	//		Profile section are configuration optoins used by the driver
-	//		itself
-	//
-	"preconfig": {
-		// Define the values that will be merged into any profile configuration
-		// specified, unless the profile is 'absolute'
-		"default": "cloud",
-		// Defines profiles used with the "profile": key
-		"profiles": {
-			"local": {
-				"mode": "local",
-				"title": "Your own Qdrant server",
-				"host": "localhost",
-				"port": 6333,
-				"collection": "ROCKETRIDE",
-				"serverName": "qdrant"
-			},
-			"cloud": {
-				"mode": "cloud",
-				"title": "Qdrant cloud server",
-				"host": "",
-				"port": 6333,
-				"apikey": "",
-				"collection": "ROCKETRIDE",
-				"serverName": "qdrant"
-			}
-		}
-	},
-	//
 	// Optional:
-	//     Local fields definitions - these define fields only for the
-	//     current service. You may specify them here, or directly
-	//     in the shape
+	//     Local property definitions - these define fields only for the
+	//     current service. You may also reference global propertyDefinitions
+	//     (see services.common.*.json) from "properties" via "use".
 	//
-	"fields": {
-		"vector.cloud.host": {
+	"propertyDefinitions": {
+		"qdrant.cloud.host": {
+			"use": "vector.host",
 			"description": "Enter the server IP address e.g. <your-instance-name>.<region>.qdrant.io"
 		},
-		"vector.cloud.port": {
-			"default": 6333
-		},
-		"vector.local.host": {
+		"qdrant.local.host": {
+			"use": "vector.host",
 			"default": "localhost"
 		},
-		"vector.local.port": {
+		"qdrant.port": {
+			"use": "vector.port",
 			"default": 6333
 		},
 		"qdrant.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
-			"description": "Namespace for agent-facing tool names, e.g. 'qdrant' exposes tools as qdrant.search / qdrant.upsert / qdrant.delete. Change this when running multiple Qdrant nodes in the same pipeline so their tool names do not collide.",
+			"description": [
+				"Namespace for agent-facing tool names, e.g. 'qdrant' exposes tools as ",
+				"qdrant.search / qdrant.upsert / qdrant.delete. Change this when running ",
+				"multiple Qdrant nodes in the same pipeline so their tool names do not collide."
+			],
 			"default": "qdrant",
 			"minLength": 1
-		},
-		"qdrant.cloud": {
-			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "qdrant.serverName"]
-		},
-		"qdrant.local": {
-			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "qdrant.serverName"]
-		},
-		"qdrant.profile": {
-			"title": "Type of Qdrant host",
-			"description": "Connect to...",
-			"type": "string",
-			"default": "cloud",
-			"enum": ["*>preconfig.profiles.*.title"],
-			"conditional": [
-				{
-					"value": "cloud",
-					"properties": ["qdrant.cloud"]
-				},
-				{
-					"value": "local",
-					"properties": ["qdrant.local"]
-				}
-			]
-		},
-		"qdrant.provider": {
-			"type": "string",
-			"const": "qdrant",
-			"default": "qdrant"
-		},
-		"qdrant.qdrant": {
-			"object": "qdrant",
-			"properties": ["qdrant.profile"]
-		},
-		"qdrant.store": {
-			"object": "store",
-			"title": "Store",
-			"properties": ["qdrant.provider", "qdrant.qdrant"]
-		},
-		"qdrant.target.autopipe": {
-			"object": "parameters",
-			"properties": ["remote", "qdrant.store", "all.embedding"]
-		},
-		"qdrant.target.parameters": {
-			"object": "parameters",
-			"properties": ["qdrant.target.autopipe"]
 		}
 	},
 	//
 	// Required:
-	//     Defines the fields (shape) of the service. Either source or target
-	//     map be specified, or both, but at least one is required
+	//     Defines the fields shown in the node's config panel, in order
 	//
-	"shape": [
+	"properties": [
 		{
-			"section": "Pipe",
-			"title": "Qdrant Vector Store",
-			"properties": ["qdrant.profile"]
-		},
-		{
-			"section": "Transform",
-			"title": "Qdrant",
-			"properties": ["type", "qdrant.target.parameters", "target.mode"]
+			"name": "qdrant.profile",
+			"title": "Type of Qdrant host",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "cloud",
+			"enum": {
+				"cloud": {
+					"title": "Qdrant cloud server",
+					"properties": [
+						"qdrant.cloud.host",
+						"qdrant.port",
+						"vector.apikey",
+						"vector.score",
+						"vector.collection",
+						"qdrant.serverName"
+					]
+				},
+				"local": {
+					"title": "Your own Qdrant server",
+					"properties": [
+						"qdrant.local.host",
+						"qdrant.port",
+						"vector.score",
+						"vector.collection",
+						"qdrant.serverName"
+					]
+				}
+			}
 		}
 	]
 }
