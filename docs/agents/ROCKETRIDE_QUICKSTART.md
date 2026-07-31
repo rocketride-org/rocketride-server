@@ -4,11 +4,10 @@
 
 ### Step 1: Set Up the `.env` File
 
-When you connect to a **self-hosted engine** (local, docker, service, or on-prem) using the extension's **development connection group**, the extension auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
+The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. Server-managed env (org/team/user secrets) is configured separately from the Environment page.
 
 ```env
-# Development-group self-hosted engines: auto-filled on connect (local uses the real dynamic port).
-# live engine address (auto-filled)
+# live engine address
 ROCKETRIDE_URI=http://localhost:54123
 # self-hosted default; set your own for cloud
 ROCKETRIDE_APIKEY=MYAPIKEY
@@ -112,11 +111,10 @@ python main.py
 
 ### Step 1: Set Up the `.env` File
 
-When you connect to a **self-hosted engine** (local, docker, service, or on-prem) using the extension's **development connection group**, the extension auto-populates `.env` in your workspace with the live server URI and key — preserving any other variables you've added. In **local** mode the engine listens on a dynamically assigned port, so the extension writes the *actual* resolved address (not a fixed port). In **cloud** mode, set `ROCKETRIDE_APIKEY` yourself (cloud sign-in uses a short-lived OAuth token, which is not a usable SDK key).
+The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. Server-managed env (org/team/user secrets) is configured separately from the Environment page.
 
 ```env
-# Development-group self-hosted engines: auto-filled on connect (local uses the real dynamic port).
-# live engine address (auto-filled)
+# live engine address
 ROCKETRIDE_URI=http://localhost:54123
 # self-hosted default; set your own for cloud
 ROCKETRIDE_APIKEY=MYAPIKEY
@@ -284,7 +282,7 @@ await client.disconnect();
 ### Always Do This:
 
 1. Configure server URL in extension settings (`rocketride.hostUrl` and API key)
-2. When the extension's development connection group connects to a self-hosted engine, it auto-populates `.env` with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` (for cloud, set `ROCKETRIDE_APIKEY` manually)
+2. Create `.env` yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` — the extension does not write this file
 3. Use empty constructor: `RocketRideClient()` or `new RocketRideClient()`
 4. Use literal GUID for `project_id` - generate a new one per pipeline
 5. Use `${ROCKETRIDE_*}` variables in component `config` fields

@@ -62,13 +62,11 @@ Trace verbosity, the idle timeout (TTL), task arguments, and debug output for pi
 
 The extension host reads these from the workspace settings and passes them to the engine on each `run`/`restart` (the `status:pipelineAction` message carries only the action and source). The engine process itself starts with no extra flags — these settings apply per task, not to the server.
 
-## `.env` Auto-Sync
+## Environment Variables
 
-After a successful engine connection, the extension syncs the workspace `.env` only for the **development** connection group using a self-hosted mode (local, Docker, service, or direct/on-prem connection). It writes the resolved `ROCKETRIDE_URI` (including a dynamic local port when applicable) and `ROCKETRIDE_APIKEY`, preserves existing comments and variables, and does not rewrite the file when its contents are already current. The RocketRide **Python SDK** reads the workspace `.env` automatically from its process working directory; the TypeScript SDK and CLIs read only process environment variables, so export the values first (for example, `set -a; source .env`).
+The extension does not write or sync a workspace `.env` file. You must create `.env` yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. The RocketRide **Python SDK** reads the workspace `.env` automatically from its process working directory; the TypeScript SDK and CLIs read only process environment variables, so export the values first (for example, `set -a; source .env`).
 
-Cloud connections are not synced because their OAuth token is not an SDK API key. Deployment connections, workspaces with no folder open, and unreadable `.env` files are also skipped; a sync failure never affects the connection itself. Keep `.env` gitignored.
-
-The extension never automatically removes these keys: disconnecting, engine exit, or switching to cloud leaves the last-synced values in place. Remove them by hand if you no longer want them. Each development-group self-hosted connection syncs again, so a hand-edited `ROCKETRIDE_APIKEY` is overwritten on the next successful connection.
+Server-managed env (org/team/user secrets) is configured separately from the **Environment** page and merged server-side during pipeline execution — it does not require a local `.env` file.
 
 ## Monitoring Execution
 
