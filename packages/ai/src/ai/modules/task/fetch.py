@@ -71,13 +71,13 @@ async def handle_fetch(request: Request):
     except jwt.InvalidTokenError as e:
         return JSONResponse({'error': f'Invalid token: {e}'}, status_code=401)
 
-    user_id = payload.get('sub')
-    path = payload.get('path')
-    download_name = payload.get('download_name')
-    if not user_id or not path:
-        return JSONResponse({'error': 'Token missing required claims'}, status_code=400)
-
     # ── Claim generation gate ────────────────────────────────────────────
+    # FIRST, before any other claim is read: `v` states how to interpret the
+    # REST of the payload, so validating fields whose meaning is not yet
+    # established is backwards. A future generation may not even carry the
+    # same claim set, and an unsupported one must fail closed as 401 rather
+    # than fall out of an earlier check with a different status.
+    #
     # `path` means something DIFFERENT per generation, and both generations
     # are in flight at once during an upgrade (tokens outlive a deploy by
     # design — up to an hour). A v1 claim is a WIRE path from a pre-#1686
@@ -95,6 +95,13 @@ async def handle_fetch(request: Request):
 
     if payload.get('v') != FETCH_CLAIM_VERSION:
         return JSONResponse({'error': 'Token format no longer supported'}, status_code=401)
+
+    # Everything below reads the payload under THIS generation's rules.
+    user_id = payload.get('sub')
+    path = payload.get('path')
+    download_name = payload.get('download_name')
+    if not user_id or not path:
+        return JSONResponse({'error': 'Token missing required claims'}, status_code=400)
 
     # ── Map the signed store path to its filesystem location ─────────────
     # The `path` claim is the RESOLVED physical store path: authorization

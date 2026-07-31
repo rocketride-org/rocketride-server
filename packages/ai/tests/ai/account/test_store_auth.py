@@ -705,6 +705,12 @@ class TestSignedFetchUrls:
             ('v1 (no marker)', {'sub': 'user-1', 'path': 'users/victim/files/secret.txt'}),
             # A newer generation must fail closed on today's handler too.
             ('newer generation', {'sub': 'user-1', 'path': 'users/user-1/files/q1.csv', 'v': 99}),
+            # ORDERING: the generation gate runs before the required-claim
+            # check, so a wrong-generation claim is refused as 401 even when
+            # it is ALSO missing 'sub'/'path' — 'v' says how to read the rest
+            # of the payload, so it cannot be validated second.
+            ('wrong generation, no sub', {'path': 'users/victim/files/secret.txt'}),
+            ('wrong generation, no path', {'sub': 'user-1'}),
         ],
     )
     async def test_handler_refuses_other_claim_generations(self, label, claim):
