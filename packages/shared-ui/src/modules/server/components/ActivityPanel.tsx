@@ -129,6 +129,10 @@ function getTaskEventDisplay(body: TaskEvent): { tone: EventTone; label: string;
 		case 'restart':
 			return { tone: 'task', label: 'task', message: `Task ${body.name} restarted` };
 	}
+	// An action outside the known lifecycle set (a newer server) — render
+	// it generically rather than returning undefined display fields.
+	const unknown = body as { action?: string; name?: string };
+	return { tone: 'task', label: 'task', message: `Task ${unknown.name ?? ''} ${unknown.action ?? 'event'}`.replace(/\s+/g, ' ').trim() };
 }
 
 /**

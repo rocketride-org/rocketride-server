@@ -242,6 +242,10 @@ function getTickerSummary(event: ActivityEvent): { highlight: string; rest: stri
 			case 'running':
 				return { highlight: `${body.tasks.length} task(s)`, rest: 'running' };
 		}
+		// An action outside the known lifecycle set (a newer server) must
+		// never fall through to the dashboard-event shape below.
+		const unknown = body as { action?: string; name?: string };
+		return { highlight: unknown.name ?? 'task', rest: unknown.action ?? 'event' };
 	}
 	const body = event.body as DashboardEvent;
 	switch (body.action) {

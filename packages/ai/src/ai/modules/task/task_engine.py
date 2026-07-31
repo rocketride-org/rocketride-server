@@ -276,6 +276,8 @@ class Task(DAPBase):
         team_id: str = '',
         org_id: str = '',
         env: Dict[str, str] = None,
+        run_kind: str = 'dev',
+        trigger: str = 'manual',
         **kwargs,
     ) -> None:
         """
@@ -291,7 +293,11 @@ class Task(DAPBase):
             client_id: Account identifier for store access scoping
             team_id: Owning team id (rides the task file as trusted identity)
             org_id: Owning org id (rides the task file as trusted identity)
-            **kwargs: Additional DAP configuration
+            run_kind: Run classification ('dev' | 'deploy') — picks the
+                run-log continuum; only the trusted dispatch sets 'deploy'
+            trigger: What fired the run ('manual' | 'schedule'); stamped on
+                the run-begin marker
+            **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication
         self.id = id
@@ -410,8 +416,8 @@ class Task(DAPBase):
         # run_kind separates the dev and deploy continua; the deploy feature's
         # trusted dispatch path sets 'deploy', everything else logs as 'dev'.
         self._run_log: Optional[RunLogWriter] = None
-        self._run_kind: str = kwargs.get('run_kind', 'dev')
-        self._run_trigger: str = kwargs.get('trigger', 'manual')
+        self._run_kind: str = run_kind
+        self._run_trigger: str = trigger
 
         # Subprocess debugging flag
         self._debug_subprocess = False

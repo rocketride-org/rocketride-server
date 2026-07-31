@@ -262,7 +262,9 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 			cancelled = true;
 			clearInterval(timer);
 		};
-	}, [source.id, runKind]);
+		// projectId rides the deps like the DVR-session effect below: a
+		// project switch must refresh chapters for the new stream identity.
+	}, [source.id, runKind, projectId]);
 
 	// --- The DVR session over this source's continuum ------------------------
 	// One session per stream identity, host-created via the factory and
@@ -281,7 +283,7 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [source.id, runKind, projectId, openSession === null]);
 
-	const { statusAt, trackEvents, rangeEvents, chartSeries, trackStats, ingestLive, player, controller } = useTaskEvents({
+	const { statusAt, trackEvents, chartSeries, trackStats, ingestLive, player, controller } = useTaskEvents({
 		session,
 		timeline,
 	});

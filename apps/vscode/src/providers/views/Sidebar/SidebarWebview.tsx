@@ -223,14 +223,15 @@ const SidebarViewWebview: React.FC = () => {
 					break;
 
 				case 'statusUpdate': {
-					// Update errors/warnings for a specific source
+					// Update errors/warnings for a specific source. Advance the
+					// sync refs FIRST (same rule as handleTaskEvent): a task event
+					// in the same tick folds from the refs, not from state.
 					const statusKey = `${msg.projectId}.${msg.sourceId}`;
-					setActiveTasks((prev) => {
-						const next = new Map(prev);
-						const existing = next.get(statusKey) ?? { running: false, errors: [], warnings: [] };
-						next.set(statusKey, { ...existing, errors: msg.errors, warnings: msg.warnings });
-						return next;
-					});
+					const nextActive = new Map(activeTasksRef.current);
+					const existing = nextActive.get(statusKey) ?? { running: false, errors: [], warnings: [] };
+					nextActive.set(statusKey, { ...existing, errors: msg.errors, warnings: msg.warnings });
+					activeTasksRef.current = nextActive;
+					setActiveTasks(nextActive);
 					break;
 				}
 
@@ -246,6 +247,10 @@ const SidebarViewWebview: React.FC = () => {
 							unknown.push({ projectId: t.projectId, sourceId: t.source, displayName: t.name || t.source, projectLabel: t.projectId.substring(0, 8) });
 						}
 					}
+					// Advance the sync refs FIRST (same rule as handleTaskEvent)
+					// so an event in the same tick folds from the seeded state.
+					activeTasksRef.current = taskMap;
+					unknownTasksRef.current = unknown;
 					setActiveTasks(taskMap);
 					setUnknownTasks(unknown);
 					break;
