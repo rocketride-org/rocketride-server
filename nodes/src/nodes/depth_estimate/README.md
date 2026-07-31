@@ -12,7 +12,7 @@ Pair this with the **Object Detection** (`detect`) node to get a rough distance 
 detected object.
 
 Before inference the input is downscaled so its long edge is at most `maxEdge`, which
-bounds memory use; the dense output is restored to the original resolution afterwards.
+bounds memory use; the dense output is restored to the original resolution afterward.
 Runs on CPU, Apple Silicon (MPS), and CUDA.
 
 ---

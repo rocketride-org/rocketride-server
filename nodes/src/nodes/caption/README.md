@@ -5,8 +5,8 @@ A RocketRide image-filter node that generates a natural-language caption for an 
 ## What it does
 
 Receives an image and runs **Florence-2 Base** (MIT) locally to produce a descriptive
-caption on the text lane. Three granularities are exposed via `task`: short, detailed,
-and more detailed.
+caption on the text lane. Three granularities are exposed via `task`, from shortest to
+longest: `caption` (the default), `detailed_caption`, and `more_detailed_caption`.
 
 Runs on CPU, Apple Silicon (MPS), and CUDA with **no API key required** — inference is
 local, so images never leave the host.
@@ -30,5 +30,5 @@ transcribe.
 
 | Field | Type | Description |
 |---|---|---|
-| `task` | string | Default `"caption"`. How detailed the caption should be (short / detailed / more detailed) |
+| `task` | string | Default `"caption"`. How detailed the caption should be — one of `caption`, `detailed_caption`, `more_detailed_caption` |
 | `profile` | string | Default `"florence-base"`. Model variant to load |

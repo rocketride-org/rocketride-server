@@ -20,14 +20,24 @@ Authenticates via a **Google service account** or **user OAuth**.
 This is a tool node, not a filter: it has no image or text lanes. It is invoked by an
 agent rather than placed in a streaming path.
 
-### Destructive operations are opt-in
+### What is gated, and what is not
 
-Every irreversible or externally-visible capability is gated behind its own flag and is
-**off by default**. Permanent deletion (`allowHardDelete` on Gmail and Drive,
-`allowDelete` on Calendar) and public or domain-wide sharing (`allowPublicSharing` on
-Drive and Calendar) must each be turned on deliberately. The per-service `access` field
-bounds what the agent can reach at all — narrow it to read-only when the pipeline only
-needs to read.
+Two different mechanisms, and only one of them defaults to safe.
+
+**Irreversible and public-facing operations are opt-in.** Permanent deletion
+(`allowHardDelete` on Gmail and Drive, `allowDelete` on Calendar) and public or
+domain-wide sharing (`allowPublicSharing` on Drive and Calendar) are separate booleans,
+each defaulting to `false`. They must be turned on deliberately.
+
+**Ordinary writes are not.** The per-service `access` field defaults to `write` on
+Drive, Calendar, Docs, and Sheets, and to `modify` (read + organize) on Gmail. So an
+agent can create, update, and move files, edit documents, and create calendar events
+without any flag being enabled — and calendar writes send invitations to attendees,
+which is externally visible. Gmail is the exception in one direction: `send` is a
+higher level than the `modify` default, so sending mail does require raising `access`.
+
+Set `access` to `readonly` for any service the pipeline only needs to read from. That
+field, not the boolean flags, is what bounds the agent's day-to-day reach.
 
 ---
 
