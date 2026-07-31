@@ -30,7 +30,7 @@ namespace engine::store {
 //-------------------------------------------------------------------------
 class IServices {
 public:
-    _const int VERSION = 2;
+    _const int VERSION = 3;
 
     //-----------------------------------------------------------------
     /// @details
@@ -147,11 +147,6 @@ public:
         //---------------------------------------------------------
         json::Value serviceSchema;
 
-        //---------------------------------------------------------
-        ///	@details
-        ///		Has this driver been resolved?
-        //---------------------------------------------------------
-        bool isResolved = false;
     };
     using ServiceDefinitionPtr = ServiceDefinition *;
     using ServiceDefinitions = std::map<iText, ServiceDefinition>;
@@ -188,53 +183,21 @@ private:
     };
 
     //-------------------------------------------------------------
-    // This is used when recursing the defintion tree
-    //-------------------------------------------------------------
-    struct ServiceSchema;
-    struct ServiceSchemaConditional {
-        json::Value value;
-        std::vector<ServiceSchema> fields;
-    };
-
-    //-------------------------------------------------------------
-    // This is used when recursing the defintion tree
-    //-------------------------------------------------------------
-    struct ServiceSchema {
-        ServiceSchema(TextView name) : name(name) {}
-        const Text name;
-        bool isRequired = false;
-        bool isReadonly = false;
-        bool isSecured = false;
-        bool isSection = false;
-        bool isArray = false;
-        bool isCombo = false;
-        bool isResolved = true;
-        json::Value field;
-        json::Value ui;
-        std::vector<ServiceSchema> children;
-        std::vector<ServiceSchema> arrayItem;
-        std::vector<ServiceSchemaConditional> conditionals;
-    };
-
-    //-------------------------------------------------------------
     // Private API
     //-------------------------------------------------------------
     static Error declareDefaultUrlMappers() noexcept;
     static Error loadGlobalFields(json::Value &definition) noexcept;
-    static Text getFieldName(TextView fieldName) noexcept;
     static ErrorOr<json::Value> lookupField(ServiceContext &context,
                                             TextView fieldId) noexcept;
-    static ErrorOr<IServices::ServiceSchema> getField(
-        ServiceContext &context, TextView fieldName,
-        json::Value &field) noexcept;
-    static ErrorOr<IServices::ServiceSchema> getFields(
-        ServiceContext &context, json::Value &section) noexcept;
+    static ErrorOr<json::Value> expandProperty(ServiceContext &context,
+                                               json::Value &property) noexcept;
+    static ErrorOr<json::Value> expandChildren(ServiceContext &context,
+                                               json::Value property) noexcept;
+    static Error requireUniqueName(std::vector<Text> &seen, const Text &name,
+                                   ServiceContext &context) noexcept;
     static Error updateDefinitions() noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
-    static std::list<Text> getFieldNames(const ServiceSchema &schema) noexcept;
-    static json::Value getChildConditionalUIElements(
-        const ServiceSchema &schema) noexcept;
 
     //-----------------------------------------------------------------
     /// @details
