@@ -66,7 +66,7 @@ The extension host reads these from the workspace settings and passes them to th
 
 The extension does not write or sync a workspace `.env` file. You must create `.env` yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. The RocketRide **Python SDK** reads the workspace `.env` automatically from its process working directory; the TypeScript SDK and CLIs read only process environment variables, so export the values first (for example, `set -a; source .env`).
 
-Server-managed env (org/team/user secrets) is configured separately from the **Environment** page and merged server-side during pipeline execution — it does not require a local `.env` file.
+Server-managed env (org/team/user secrets) is configured on the **Environment** page, separately from the local `.env` file, and merged server-side during pipeline execution — it does not require a local `.env` file.
 
 ## Monitoring Execution
 

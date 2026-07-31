@@ -4,7 +4,7 @@
 
 ### Step 1: Set Up the `.env` File
 
-The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. Server-managed env (org/team/user secrets) is configured separately from the Environment page.
+The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. Server-managed env (org/team/user secrets) is configured on the Environment page, separately from the local `.env` file.
 
 ```env
 # live engine address
@@ -17,7 +17,7 @@ ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** For self-hosted engines in the development connection group, the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. Add any additional custom variables as needed. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
+> **Note:** Add any additional custom variables as needed. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
 
 ### Step 2: Install Client
 
@@ -111,7 +111,7 @@ python main.py
 
 ### Step 1: Set Up the `.env` File
 
-The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. Server-managed env (org/team/user secrets) is configured separately from the Environment page.
+The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. Server-managed env (org/team/user secrets) is configured on the Environment page, separately from the local `.env` file.
 
 ```env
 # live engine address
@@ -124,7 +124,7 @@ ROCKETRIDE_INPUT_PATH=/data/input
 ROCKETRIDE_OUTPUT_PATH=/data/output
 ```
 
-> **Note:** For self-hosted engines in the development connection group, the extension re-syncs `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` on every connect while leaving your other variables untouched. For cloud, provide your own API key. The TypeScript client reads `process.env`; it does not load `.env` itself, so load the file when starting the process as shown below. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
+> **Note:** The TypeScript client reads `process.env`; it does not load `.env` itself, so load the file when starting the process as shown below. Because `.env` can contain credentials, add it to `.gitignore` and never commit it.
 
 ### Step 2: Install Client
 
@@ -293,7 +293,7 @@ await client.disconnect();
 
 1. Hardcode `uri` or `auth` in the constructor (load `ROCKETRIDE_*` values into the process environment instead)
 2. Use variables in `project_id` field (must be literal GUID)
-3. Hand-edit `ROCKETRIDE_URI`/`ROCKETRIDE_APIKEY` for a self-hosted engine in the development connection group — the extension re-syncs them on connect (change them via extension settings; for cloud, set `ROCKETRIDE_APIKEY` manually)
+3. Assume the extension writes or syncs `.env` for you — it doesn't; create and maintain it yourself
 4. Skip `connect()` or `disconnect()`
 5. Use non-ROCKETRIDE\_\* variables in pipelines
 6. Use `.json` extension for pipeline files (use `.pipe`)
