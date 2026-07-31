@@ -159,15 +159,20 @@ def _make_stream_content_parser(has_reasoning_sink: bool):
     return feed
 
 
+def flatten_content_parts(content: Any) -> tuple[str, str]:
+    """Collapse a full (non-streamed) message content into (visible_text, reasoning)."""
+    parse = _make_stream_content_parser(False)
+    text, thinking = parse(content)
+    tail, tail_thinking = parse.flush()
+    return text + tail, thinking + tail_thinking
+
+
 def flatten_content(content: Any) -> str:
     """Collapse a full (non-streamed) message content to visible text, dropping thinking.
 
     Non-streaming callers (agents, expectJson) must get a string, never a block list.
     """
-    parse = _make_stream_content_parser(False)
-    text, _thinking = parse(content)
-    tail, _ = parse.flush()
-    return text + tail
+    return flatten_content_parts(content)[0]
 
 
 class LangChainAdapter:
@@ -181,6 +186,8 @@ class LangChainAdapter:
         self.history: list[Any] = history if history is not None else []
         self.stream_kwargs = stream_kwargs or {}
         self.finish_reason: Optional[str] = None
+        # Reasoning drained by the last collect(); kept off the visible text.
+        self.reasoning: str = ''
 
     def stream(self, user_text: str) -> Iterator[Event]:
         self.history.append({'role': 'user', 'content': user_text})
@@ -212,7 +219,7 @@ class LangChainAdapter:
         """
         self.history.append({'role': 'user', 'content': user_text})
         result = self.llm.invoke(self.history, **self.stream_kwargs)
-        text = flatten_content(getattr(result, 'content', ''))
+        text, self.reasoning = flatten_content_parts(getattr(result, 'content', ''))
         assistant = {'role': 'assistant', 'content': text}
         self.history.append(assistant)
         return text, [assistant]

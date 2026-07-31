@@ -18,7 +18,6 @@ from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.util import parseJson
-from ai.common.utils.content_blocks import flatten_content_blocks
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
@@ -413,7 +412,11 @@ class ChatBase:
             # Only retry non-streaming if nothing reached the UI; otherwise the full
             # fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
-                content_text, _items = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs()).collect(prompt)
+                adapter = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs())
+                content_text, _items = adapter.collect(prompt)
+                # Reasoning reaches its own lane; it must never land in the visible text.
+                if adapter.reasoning and on_reasoning_chunk is not None:
+                    on_reasoning_chunk(adapter.reasoning)
                 if content_text and on_chunk is not None:
                     on_chunk(content_text)
                 if on_finish is not None:
