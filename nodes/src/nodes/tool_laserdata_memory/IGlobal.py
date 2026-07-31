@@ -27,6 +27,7 @@ from ai.common.config import Config
 from rocketlib import IGlobalBase, OPEN_MODE, debug, error, warning
 
 # Defaults / bounds (avoid magic constants scattered in the code).
+_DEFAULT_STREAM = 'rocketride-memory'
 _DEFAULT_RECALL_LIMIT = 10
 _MAX_RECALL_LIMIT = 200
 _DEFAULT_OP_TIMEOUT = 30
@@ -40,7 +41,7 @@ class IGlobal(IGlobalBase):
     """Global state for tool_laserdata_memory."""
 
     connection_string: str = ''
-    token: str = ''
+    stream: str = _DEFAULT_STREAM
     namespace: str = ''
     allow_namespace_override: bool = True
     folded: bool = True
@@ -76,8 +77,9 @@ class IGlobal(IGlobalBase):
             raise ValueError('laserdata: connection_string is required')
         self.connection_string = connection_string
 
-        # Optional LaserData Cloud token; a plain self-hosted Iggy needs none.
-        self.token = str(cfg.get('token') or os.environ.get('LASER_TOKEN', '')).strip()
+        # The Iggy stream the memory topics live in; the SDK requires a default
+        # stream pinned at connect before laser.memory() can be used.
+        self.stream = str(cfg.get('stream') or _DEFAULT_STREAM).strip() or _DEFAULT_STREAM
 
         self.namespace = str(cfg.get('namespace') or '').strip()
 
@@ -133,11 +135,7 @@ class IGlobal(IGlobalBase):
         if laser is None:
             with self._connect_lock:
                 if self._laser is None:
-                    # The SDK's env contract: a Cloud token travels via
-                    # LASER_TOKEN. Never overwrite one the operator exported.
-                    if self.token and not os.environ.get('LASER_TOKEN'):
-                        os.environ['LASER_TOKEN'] = self.token
-                    self._laser = self.run(_connect(self.connection_string))
+                    self._laser = self.run(_connect(self.connection_string, self.stream))
                     debug('laserdata: connected')
                 laser = self._laser
         return laser
@@ -175,18 +173,18 @@ class IGlobal(IGlobalBase):
             loop.close()
 
         self.connection_string = ''
-        self.token = ''
 
 
-async def _connect(connection_string: str) -> Any:
-    """Open the Laser connection (runs on the bridge loop).
+async def _connect(connection_string: str, stream: str) -> Any:
+    """Open the Laser connection with a pinned default stream (bridge loop).
 
     laser-sdk is imported here — after ``depends()`` has installed it and only
-    when a tool call actually needs the connection.
+    when a tool call actually needs the connection. The default stream must be
+    pinned at connect for ``laser.memory(namespace)`` to resolve its topics.
     """
     import laser_sdk
 
-    return await laser_sdk.Laser.connect(connection_string)
+    return await laser_sdk.Laser.connect(connection_string, stream=stream)
 
 
 async def _close(laser: Any) -> None:

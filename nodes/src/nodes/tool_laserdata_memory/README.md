@@ -36,7 +36,14 @@ destructive clear/reset tool.
 
 ## SDK contract provenance
 
-Built against **`laser-sdk==0.0.1rc20`** (PyPI, pinned in `requirements.txt`), verified by
+Built against **`laser-sdk==0.0.1rc19`** (PyPI, pinned in `requirements.txt`). The pin is
+deliberate: rc20+ wheels speak only Apache Iggy's VSR cluster protocol, which neither LaserData
+Cloud deployments nor stock Apache Iggy served as of 2026-07-30 (VSR requests time out; verified
+live against a free-tier Cloud deployment, whose own quickstart uses the classic protocol). rc19
+speaks the classic protocol, connects to both, and its memory API is signature-identical to
+rc21's — re-pin upward once LaserData's deployments answer VSR. The full
+remember → recall → improve → forget round-trip was verified live against LaserData Cloud on
+2026-07-30. The SDK surface itself was verified by
 introspection on 2026-07-29: `Laser.connect(connection_string)`, `laser.memory(namespace)`, and
 async `Memory.remember/recall/improve/forget`. The SDK is a native (PyO3) async client whose
 futures must be created on a running event loop, so the node keeps one persistent bridge loop in
@@ -45,20 +52,38 @@ connection opens lazily on the first tool call and closes on pipe teardown.
 
 ## Setup
 
-Configure these node settings:
+The **LaserData deployment** dropdown selects a connection mode (a preconfig profile, same
+pattern as the Qdrant node) and switches the visible fields and defaults:
 
-- `connection_string`: `user:password@host:port`, e.g. `iggy:laser@localhost:8090` for a local
-  Apache Iggy server. Secure field; falls back to the `LASER_CONNECTION_STRING` environment
-  variable. A containerized engine needs an address reachable from the container
-  (e.g. `host.docker.internal`).
-- `token`: optional LaserData Cloud token (secure; falls back to `LASER_TOKEN`). Not needed for
-  plain self-hosted Iggy.
+**Your own Apache Iggy server** (`local`, the default):
+
+- `connection_string`: `user:password@host:port`, e.g. `iggy:laser@localhost:8090` (Iggy's
+  default dev credentials). Secure field; falls back to the `LASER_CONNECTION_STRING`
+  environment variable. A containerized engine needs an address reachable from the container
+  (e.g. `host.docker.internal`). No token exists in this mode.
+- `folded` defaults to `true` — recall folds the memory topic in-process, which plain Iggy
+  requires.
+
+**LaserData Cloud** (`cloud`):
+
+- `connection_string`: `user:password@<deployment-domain>:8090?tls=true` — the user/password from
+  the deployment's **Credentials** tab, the domain and TCP port from its **Overview** tab (secure;
+  same env fallback). Keep `?tls=true`: Cloud endpoints are TLS and the SDK ships LaserData's
+  root CA, so no certificate file is needed. There is no separate API token — all auth travels in
+  the connection string (verified against a live Cloud deployment, 2026-07-30).
+- `folded` defaults to `true` — the folded (in-process) recall path is the one verified live
+  against Cloud; turn it off only on a deployment serving a managed KV view.
+
+Shared by both modes:
+
 - `namespace`: default memory scope for all connected agents; required here or per call.
-- `allow_namespace_override`: permit per-call namespaces. Defaults to `true`.
-- `folded`: fold the memory topic in-process on recall (works against plain Apache Iggy).
-  Defaults to `true`; turn off to read a managed KV view on LaserData Cloud.
-- `recall_limit`: default recall result limit, 1–200. Defaults to 10.
-- `op_timeout`: per-operation timeout (including first connect), 5–600 seconds. Defaults to 30.
+- `stream` (advanced): the Iggy stream the memory topics live in, pinned as the connection's
+  default stream at connect. Defaults to `rocketride-memory`; nodes sharing one memory must match.
+- `allow_namespace_override` (advanced): permit per-call namespaces. Defaults to `true`.
+- `folded` (advanced): overridable per the mode notes above.
+- `recall_limit` (advanced): default recall result limit, 1–200. Defaults to 10.
+- `op_timeout` (advanced): per-operation timeout (including first connect), 5–600 seconds.
+  Defaults to 30.
 
 ## Upstream docs
 

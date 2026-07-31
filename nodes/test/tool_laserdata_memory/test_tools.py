@@ -16,7 +16,7 @@ Covers:
 * ``beginGlobal`` — CONFIG-mode skip, required connection string (+ env
   fallback), numeric clamps, boolean guards.
 * the async→sync bridge — real daemon-thread loop, timeout mapping,
-  not-open guard, single-flight lazy connect, token env export.
+  not-open guard, single-flight lazy connect.
 * ``endGlobal`` — connection close, loop shutdown, secret clearing.
 * ``remember`` / ``recall`` / ``improve`` / ``forget`` — input validation,
   namespace resolution (config default, override gating), verbatim payload,
@@ -26,7 +26,6 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import os
 import sys
 import threading
 import types
@@ -201,7 +200,6 @@ class StubGlobal:
     def __init__(self, state, **overrides):
         self.state = state
         self.connection_string = 'iggy:laser@localhost:8090'
-        self.token = ''
         self.namespace = 'ns-default'
         self.allow_namespace_override = True
         self.folded = True
@@ -310,6 +308,21 @@ def test_begin_global_clamps_and_guards(bridge):
     assert glb.op_timeout == 5
     assert glb.folded is True  # non-bool falls back to default
     assert glb.allow_namespace_override is True
+    assert glb.stream == 'rocketride-memory'  # default when unset
+
+
+def test_begin_global_reads_stream(bridge, monkeypatch):
+    glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090', 'stream': 'shared-memory'})
+    assert glb.stream == 'shared-memory'
+    streams = []
+
+    async def fake_connect(_conn, stream):
+        streams.append(stream)
+        return FakeLaser({'calls': []})
+
+    monkeypatch.setattr(IGlobalMod, '_connect', fake_connect)
+    glb.get_laser()
+    assert streams == ['shared-memory']  # pinned at connect for laser.memory()
 
 
 def test_validate_config_warns_without_raising(monkeypatch):
@@ -368,7 +381,7 @@ def test_get_laser_connects_once_across_threads(bridge, monkeypatch):
     state = {'calls': [], 'connects': 0}
     lock = threading.Lock()
 
-    async def fake_connect(_conn):
+    async def fake_connect(_conn, _stream):
         with lock:
             state['connects'] += 1
         await asyncio.sleep(0.05)  # widen the race window
@@ -385,39 +398,20 @@ def test_get_laser_connects_once_across_threads(bridge, monkeypatch):
     assert len(results) == 4 and all(r is results[0] for r in results)
 
 
-def test_get_laser_exports_token_env(bridge, monkeypatch):
-    monkeypatch.delenv('LASER_TOKEN', raising=False)
-    glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090', 'token': 'tok-123'})
-    monkeypatch.setattr(IGlobalMod, '_connect', lambda _c: _immediate(FakeLaser({'calls': []})))
-    try:
-        glb.get_laser()
-        assert os.environ.get('LASER_TOKEN') == 'tok-123'
-    finally:
-        os.environ.pop('LASER_TOKEN', None)
-
-
-def test_get_laser_never_overwrites_operator_token(bridge, monkeypatch):
-    monkeypatch.setenv('LASER_TOKEN', 'operator-token')
-    glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090', 'token': 'tok-123'})
-    monkeypatch.setattr(IGlobalMod, '_connect', lambda _c: _immediate(FakeLaser({'calls': []})))
-    glb.get_laser()
-    assert os.environ['LASER_TOKEN'] == 'operator-token'
-
-
 async def _immediate(value):
     """Coroutine resolving immediately to `value`."""
     return value
 
 
 def test_end_global_closes_and_clears(bridge, monkeypatch):
-    glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090', 'token': 't'})
+    glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090'})
     state = {'calls': [], 'closed': False}
-    monkeypatch.setattr(IGlobalMod, '_connect', lambda _c: _immediate(FakeLaser(state)))
+    monkeypatch.setattr(IGlobalMod, '_connect', lambda _c, _s: _immediate(FakeLaser(state)))
     glb.get_laser()
     loop = glb._loop
     glb.endGlobal()
     assert state['closed'] is True
-    assert glb.connection_string == '' and glb.token == ''
+    assert glb.connection_string == ''
     assert glb._laser is None and glb._loop is None
     assert loop.is_closed()
     glb.endGlobal()  # idempotent

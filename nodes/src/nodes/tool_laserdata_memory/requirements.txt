@@ -1,1 +1,6 @@
-laser-sdk==0.0.1rc20
+# Pinned to rc19 deliberately: rc20+ wheels speak only Apache Iggy's VSR
+# cluster protocol, which neither LaserData Cloud deployments nor stock
+# Apache Iggy serve today (verified live 2026-07-30). rc19 speaks the classic
+# protocol and its memory API is signature-identical to rc21. Re-pin to the
+# newest rc once LaserData's deployments answer VSR.
+laser-sdk==0.0.1rc19

@@ -49,12 +49,7 @@
 	// Optional:
 	//		Description of this node shown in the pipeline builder
 	//
-	"description": ["Durable, shared agent memory exposed as tools, backed by LaserData (Apache Iggy) via the Laser SDK.", "Exposes four agent tools: 'remember' stores a statement, 'recall' returns the most relevant items, 'improve' reinforces a memory with feedback, and 'forget' deletes one. Set the connection string and a namespace and it works; point several agents at the same namespace to share one durable memory."],
-	//
-	// Optional:
-	//		Rendering hints for the UI: which config fields to surface on the node tile
-	//
-	"tile": ["Namespace: ${parameters.laserdata.namespace}"],
+	"description": ["Durable, shared agent memory exposed as tools, backed by LaserData (Apache Iggy) via the Laser SDK.", "Exposes four agent tools: 'remember' stores a statement, 'recall' returns the most relevant items, 'improve' reinforces a memory with feedback, and 'forget' deletes one. Pick your deployment (local Apache Iggy or LaserData Cloud), set the connection string and a namespace, and it works; point several agents at the same namespace to share one durable memory."],
 	//
 	// Optional:
 	//		As a pipe component, define what this component takes and produces.
@@ -64,17 +59,33 @@
 	//
 	// Optional:
 	//		Profile section - configuration options used by the driver itself.
-	//		The default profile is applied when the node is first added to a pipeline.
+	//		One profile per deployment mode (qdrant pattern): the "LaserData
+	//		deployment" dropdown selects the profile, which switches the visible
+	//		fields and the connection help text. All auth travels in the
+	//		connection string — Cloud has no separate token.
 	//
 	"preconfig": {
-		"default": "default",
+		"default": "local",
 		"profiles": {
-			"default": {
-				"title": "LaserData Memory",
+			"local": {
+				"mode": "local",
+				"title": "Your own Apache Iggy server",
 				"connection_string": "",
-				"token": "",
 				"namespace": "",
 				"show_advanced": false,
+				"stream": "rocketride-memory",
+				"allow_namespace_override": true,
+				"folded": true,
+				"recall_limit": 10,
+				"op_timeout": 30
+			},
+			"cloud": {
+				"mode": "cloud",
+				"title": "LaserData Cloud",
+				"connection_string": "",
+				"namespace": "",
+				"show_advanced": false,
+				"stream": "rocketride-memory",
 				"allow_namespace_override": true,
 				"folded": true,
 				"recall_limit": 10,
@@ -84,33 +95,34 @@
 	},
 	//
 	// Optional:
-	//		Local field definitions. These define the config fields exposed in the UI.
-	//		Only connection_string is required; the rest are optional and revealed by
-	//		the "Advanced settings" toggle. "secure: true" fields are encrypted at
-	//		rest and masked in the UI.
+	//		Local field definitions. The deployment dropdown (laserdata.profile)
+	//		reveals the per-mode group; each group shares the namespace and
+	//		advanced fields but has its own connection fields. "secure: true"
+	//		fields are encrypted at rest and masked in the UI.
 	//
 	"fields": {
-		"laserdata.connection_string": {
+		// --- Per-mode connection fields ---
+		"laserdata.local.connection_string": {
 			"type": "string",
 			"title": "Connection string",
-			"description": "LaserData / Apache Iggy connection string in the form <code>user:password@host:port</code>, e.g. <code>iggy:laser@localhost:8090</code>. Falls back to the LASER_CONNECTION_STRING environment variable when blank.",
+			"description": "Apache Iggy connection string in the form <code>user:password@host:port</code>, e.g. <code>iggy:laser@localhost:8090</code> (Iggy's default dev credentials). A containerized engine needs an address reachable from the container, e.g. <code>host.docker.internal</code>. Falls back to the LASER_CONNECTION_STRING environment variable when blank. No token is needed for a local server.",
 			"default": "",
 			"secure": true,
 			"ui": {
 				"ui:widget": "ApiKeyWidget"
 			}
 		},
-		"laserdata.token": {
+		"laserdata.cloud.connection_string": {
 			"type": "string",
-			"optional": true,
-			"title": "Token",
-			"description": "Optional LaserData Cloud token. Falls back to the LASER_TOKEN environment variable when blank; not needed for a plain self-hosted Apache Iggy server.",
+			"title": "Connection string",
+			"description": "LaserData Cloud endpoint in the form <code>user:password@host:port?tls=true</code> — the user and password from your deployment's <b>Credentials</b> tab, the domain and TCP port from its <b>Overview</b> tab. Keep <code>?tls=true</code>: Cloud endpoints are TLS and the SDK ships the LaserData root CA. Falls back to the LASER_CONNECTION_STRING environment variable when blank.",
 			"default": "",
 			"secure": true,
 			"ui": {
 				"ui:widget": "ApiKeyWidget"
 			}
 		},
+		// --- Shared fields (both modes) ---
 		"laserdata.namespace": {
 			"type": "string",
 			"optional": true,
@@ -132,11 +144,18 @@
 			"conditional": [
 				{
 					"value": true,
-					"properties": ["laserdata.allow_namespace_override", "laserdata.folded", "laserdata.recall_limit", "laserdata.op_timeout"]
+					"properties": ["laserdata.stream", "laserdata.allow_namespace_override", "laserdata.folded", "laserdata.recall_limit", "laserdata.op_timeout"]
 				}
 			]
 		},
 		// --- Advanced fields (hidden unless "Advanced settings" is on) ---
+		"laserdata.stream": {
+			"type": "string",
+			"optional": true,
+			"title": "Stream",
+			"description": "The Iggy stream the memory topics live in, pinned as the connection's default stream. All nodes sharing one memory must use the same stream.",
+			"default": "rocketride-memory"
+		},
 		"laserdata.allow_namespace_override": {
 			"type": "boolean",
 			"optional": true,
@@ -152,7 +171,7 @@
 			"type": "boolean",
 			"optional": true,
 			"title": "Folded recall",
-			"description": "When on (default), 'recall' folds the durable memory topic in-process, which works against a plain Apache Iggy server. Turn off to read the managed KV view on a LaserData Cloud deployment.",
+			"description": "When on (default), 'recall' folds the durable memory topic in-process — works against plain Apache Iggy and LaserData Cloud alike (verified live). Turn off only to read a managed KV view on a deployment that serves one.",
 			"default": true,
 			"enum": [
 				[true, "Yes"],
@@ -176,6 +195,32 @@
 			"default": 30,
 			"minimum": 5,
 			"maximum": 600
+		},
+		// --- Per-mode groups + deployment dropdown (qdrant pattern) ---
+		"laserdata.local": {
+			"object": "local",
+			"properties": ["laserdata.local.connection_string", "laserdata.namespace", "laserdata.show_advanced"]
+		},
+		"laserdata.cloud": {
+			"object": "cloud",
+			"properties": ["laserdata.cloud.connection_string", "laserdata.namespace", "laserdata.show_advanced"]
+		},
+		"laserdata.profile": {
+			"title": "LaserData deployment",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "local",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "local",
+					"properties": ["laserdata.local"]
+				},
+				{
+					"value": "cloud",
+					"properties": ["laserdata.cloud"]
+				}
+			]
 		}
 	},
 	//
@@ -187,11 +232,11 @@
 	//
 	"test": {
 		"requires": ["LASER_CONNECTION_STRING"],
-		"profiles": ["default"],
+		"profiles": ["local"],
 		"outputs": [],
 		"cases": [
 			{
-				"name": "Config validation with placeholder credentials",
+				"name": "Config validation with env-provided connection string",
 				"text": "test"
 			}
 		]
@@ -204,7 +249,7 @@
 		{
 			"section": "Pipe",
 			"title": "LaserData Memory",
-			"properties": ["type", "laserdata.connection_string", "laserdata.token", "laserdata.namespace", "laserdata.show_advanced"]
+			"properties": ["type", "laserdata.profile"]
 		}
 	]
 }
