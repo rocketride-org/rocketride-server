@@ -174,6 +174,7 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 - [Kimi (Moonshot)](/nodes/llm_kimi.md)
 - [MiniMax](/nodes/llm_minimax.md)
 - [Mistral AI](/nodes/llm_mistral.md)
+- [Nemotron (NVIDIA)](/nodes/llm_nemotron.md)
 - [Ollama](/nodes/llm_ollama.md)
 - [OpenAI](/nodes/llm_openai.md)
 - [OpenAI-Compatible API](/nodes/llm_openai_api.md)
