@@ -84,3 +84,53 @@ def test_passes_store_false():
     chat = _Chat([_Ev('response.output_text.delta', delta='x')])
     list(NativeOpenAIResponsesAdapter(chat).stream('q'))
     assert chat._raw_client.responses.seen['store'] is False
+
+
+class _ClosableStream:
+    """Iterator that records close() and can raise mid-iteration."""
+
+    def __init__(self, events, raise_at=None):
+        self._events = list(events)
+        self._i = 0
+        self._raise_at = raise_at
+        self.closed = False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._raise_at is not None and self._i == self._raise_at:
+            raise RuntimeError('boom')
+        if self._i >= len(self._events):
+            raise StopIteration
+        ev = self._events[self._i]
+        self._i += 1
+        return ev
+
+    def close(self):
+        self.closed = True
+
+
+class _ChatStream:
+    def __init__(self, stream):
+        responses = type('R', (), {'create': lambda _self, **kw: stream})()
+        self._raw_client = type('C', (), {'responses': responses})()
+        self._model = 'gpt-5.6'
+        self._modelOutputTokens = 4096
+
+
+def test_closes_stream_on_exception():
+    stream = _ClosableStream([_Ev('response.output_text.delta', delta='x')], raise_at=1)
+    try:
+        list(NativeOpenAIResponsesAdapter(_ChatStream(stream)).stream('q'))
+    except RuntimeError:
+        pass
+    assert stream.closed is True
+
+
+def test_closes_stream_on_early_break():
+    stream = _ClosableStream([_Ev('response.output_text.delta', delta=str(i)) for i in range(5)])
+    gen = NativeOpenAIResponsesAdapter(_ChatStream(stream)).stream('q')
+    next(gen)  # consume one event, then abandon
+    gen.close()  # GeneratorExit → finally closes the stream
+    assert stream.closed is True

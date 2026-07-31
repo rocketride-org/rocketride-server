@@ -6,7 +6,11 @@
 """Pins NativeAnthropicAdapter: native Messages stream → Events, same payload path."""
 
 from ai.common.llm_adapter import Event
-from ai.common.llm_native_stream import NativeAnthropicAdapter, try_anthropic_native_chat_stream
+from ai.common.llm_native_stream import (
+    NativeAnthropicAdapter,
+    build_anthropic_thinking_kwargs,
+    try_anthropic_native_chat_stream,
+)
 
 
 class _Delta:
@@ -102,3 +106,17 @@ def test_no_thinking_in_payload_when_mode_empty():
     chat = _Chat(_LLM({'model': 'm', 'max_tokens': 10}, client))  # no thinking mode
     list(NativeAnthropicAdapter(chat).stream('q'))
     assert 'thinking' not in client.messages.seen
+
+
+def test_haiku_45_gets_extended_thinking():
+    kw = build_anthropic_thinking_kwargs('claude-haiku-4-5', 8192)
+    assert kw.get('thinking', {}).get('type') == 'enabled'
+    assert kw['thinking']['budget_tokens'] >= 1024
+
+
+def test_haiku_latest_gets_extended_thinking():
+    assert build_anthropic_thinking_kwargs('claude-haiku-latest', 8192).get('thinking')
+
+
+def test_legacy_claude3_haiku_has_no_thinking():
+    assert build_anthropic_thinking_kwargs('claude-3-haiku', 8192) == {}

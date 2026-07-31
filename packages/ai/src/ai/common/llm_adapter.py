@@ -239,27 +239,37 @@ class NativeOpenAIResponsesAdapter:
             max_output_tokens=chat._modelOutputTokens,
             stream=True,
         )
-        for event in stream:
-            etype = getattr(event, 'type', '') or ''
-            if etype == 'response.reasoning_summary_text.delta':
-                delta = getattr(event, 'delta', '') or ''
-                if delta:
-                    yield Event('thinking', delta)
-            elif etype == 'response.output_text.delta':
-                delta = getattr(event, 'delta', '') or ''
-                if delta:
-                    parts.append(delta)
-                    yield Event('text', delta)
-            elif etype == 'response.completed':
-                resp = getattr(event, 'response', None)
-                status = getattr(resp, 'status', None) if resp is not None else None
-                if status == 'incomplete':
-                    details = getattr(resp, 'incomplete_details', None)
-                    self.finish_reason = (getattr(details, 'reason', None) if details else None) or 'length'
-                else:
-                    self.finish_reason = 'stop' if status == 'completed' else (status or 'stop')
-            elif etype in ('response.failed', 'response.error'):
-                self.finish_reason = 'error'
+        # try/finally + close() so a raise or early GeneratorExit releases the HTTP
+        # stream, matching NativeAnthropicAdapter's cleanup.
+        try:
+            for event in stream:
+                etype = getattr(event, 'type', '') or ''
+                if etype == 'response.reasoning_summary_text.delta':
+                    delta = getattr(event, 'delta', '') or ''
+                    if delta:
+                        yield Event('thinking', delta)
+                elif etype == 'response.output_text.delta':
+                    delta = getattr(event, 'delta', '') or ''
+                    if delta:
+                        parts.append(delta)
+                        yield Event('text', delta)
+                elif etype == 'response.completed':
+                    resp = getattr(event, 'response', None)
+                    status = getattr(resp, 'status', None) if resp is not None else None
+                    if status == 'incomplete':
+                        details = getattr(resp, 'incomplete_details', None)
+                        self.finish_reason = (getattr(details, 'reason', None) if details else None) or 'length'
+                    else:
+                        self.finish_reason = 'stop' if status == 'completed' else (status or 'stop')
+                elif etype in ('response.failed', 'response.error'):
+                    self.finish_reason = 'error'
+        finally:
+            closer = getattr(stream, 'close', None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    pass
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])
