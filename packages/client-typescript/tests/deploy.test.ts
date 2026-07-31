@@ -184,7 +184,9 @@ describe('Deploy API Integration Tests', () => {
 				const result = await client.deploy.run(project, 'webhook_1', TEAM);
 				expect(result.token).toBeTruthy();
 				// The UI's stop path: resolve the live task and terminate it.
-				const token = await client.getTaskToken({ projectId: project, source: 'webhook_1' });
+				// The lookup is TEAM-scoped — without teamId it would address
+				// the caller's own dev run of this pipeline (and find none).
+				const token = await client.getTaskToken({ projectId: project, source: 'webhook_1', teamId: TEAM });
 				expect(token).toBe(result.token);
 				if (token) await client.terminate(token);
 

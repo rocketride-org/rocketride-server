@@ -101,11 +101,6 @@ export interface IDeploymentViewProps {
 	sourceConfig?: { traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut: boolean };
 	/** Stage an execution-settings change (the PANEL owns dirty/Save). */
 	onSourceConfigChange?: (next: { traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut: boolean }) => void;
-	/** The focused source's EFFECTIVE execution settings (panel-staged over
-	    server truth); absent hides the Execution card. */
-	sourceConfig?: { traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut: boolean };
-	/** Stage an execution-settings change (the PANEL owns dirty/Save). */
-	onSourceConfigChange?: (next: { traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut: boolean }) => void;
 	/** This team's audit history, newest first. */
 	history: DeployHistoryRow[];
 	/** Next scheduled occurrence (host-previewed), if any schedule is armed. */
@@ -205,36 +200,6 @@ const S = {
 		background: on ? 'color-mix(in srgb, var(--rr-color-success) 10%, transparent)' : 'transparent',
 		color: on ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
 	}),
-	configRow: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 12,
-		padding: '10px 14px',
-		borderBottom: '1px solid var(--rr-border)',
-		fontSize: 12.5,
-	} as CSSProperties,
-	configLabel: {
-		fontWeight: 600,
-		minWidth: 110,
-	} as CSSProperties,
-	configSelect: {
-		padding: '4px 8px',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 4,
-		background: 'var(--rr-bg-paper)',
-		color: 'var(--rr-text-primary)',
-		fontSize: 12.5,
-	} as CSSProperties,
-	configHint: {
-		fontSize: 11.5,
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
-	configCheck: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: 7,
-		cursor: 'pointer',
-	} as CSSProperties,
 	configRow: {
 		display: 'flex',
 		alignItems: 'center',
@@ -433,7 +398,7 @@ export const DeploymentView: React.FC<IDeploymentViewProps> = ({ teamName, docum
 					const row = cell.getRow().getData() as DeployHistoryRow;
 					// Past-tense verbs; 'pause'/'resume' appear only on rows
 					// written before the enable/disable vocabulary.
-					const verb = { publish: 'published', deploy: 'deployed', enable: 'enabled', disable: 'disabled', remove: 'removed', pause: 'paused', resume: 'resumed' }[row.action] ?? row.action;
+					const verb = { publish: 'published', deploy: 'deployed', rollback: 'rolled back', enable: 'enabled', disable: 'disabled', errored: 'errored', remove: 'removed', pause: 'paused', resume: 'resumed' }[row.action] ?? row.action;
 					return `${verb} v${row.version}${row.comment ? ` “${row.comment}”` : ''}`;
 				},
 			},

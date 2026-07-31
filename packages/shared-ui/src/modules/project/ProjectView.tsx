@@ -23,7 +23,7 @@
  * player, and DVR session (sorted A→Z by source name).
  */
 
-import React, { useState, useCallback, useRef, useMemo, CSSProperties, ReactNode } from 'react';
+import React, { useState, useCallback, useRef, useMemo, ComponentProps, CSSProperties, ReactNode } from 'react';
 
 import { TabPanel } from '../../components/tab-panel/TabPanel';
 import { ContentHeader } from '../../components/content-header/ContentHeader';
@@ -597,7 +597,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			content: renderDocPanel(
 				'deploy',
 				fetchDeployLifecycle && onDeployPublish && onDeployVersion ? (
-					<DeployPanel fetchLifecycle={fetchDeployLifecycle} deployments={teamDeploymentRows} teams={deployTeams} pipelineName={project?.name ?? ''} {...(onDeploySetDisabled ? { onSetDisabled: onDeploySetDisabled } : {})} {...(onDeploySetSchedule ? { onSetSchedule: onDeploySetSchedule } : {})} {...(onDeploySetSchedulePaused ? { onSetSchedulePaused: onDeploySetSchedulePaused } : {})} {...(fetchDeployArtifact ? { fetchArtifact: fetchDeployArtifact, servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})} {...(onDeployPreviewSchedule ? { previewSchedule: onDeployPreviewSchedule } : {})} canPublish={!isDirty && !isNew} {...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})} requiresSave={isDirty && !isNew} {...(onSaveDocument ? { onSaveDocument } : {})} onPublish={onDeployPublish} onDeploy={onDeployVersion} {...(onOpenDeployment ? { onOpenDeployment } : {})} />
+					<DeployPanel fetchLifecycle={fetchDeployLifecycle} deployments={teamDeploymentRows} teams={deployTeams} pipelineName={project?.name ?? ''} {...(onDeploySetDisabled ? { onSetDisabled: onDeploySetDisabled } : {})} {...(onDeploySetSchedule ? { onSetSchedule: onDeploySetSchedule } : {})} {...(onDeploySetSchedulePaused ? { onSetSchedulePaused: onDeploySetSchedulePaused } : {})} {...(fetchDeployArtifact ? { fetchArtifact: fetchDeployArtifact as ComponentProps<typeof DeployPanel>['fetchArtifact'], servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})} {...(onDeployPreviewSchedule ? { previewSchedule: onDeployPreviewSchedule } : {})} canPublish={!isDirty && !isNew} {...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})} requiresSave={isDirty && !isNew} {...(onSaveDocument ? { onSaveDocument } : {})} onPublish={onDeployPublish} onDeploy={onDeployVersion} {...(onOpenDeployment ? { onOpenDeployment } : {})} />
 				) : (
 					<div style={commonStyles.empty}>Deployment lifecycle is not available in this host yet</div>
 				)
