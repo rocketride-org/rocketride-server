@@ -86,5 +86,4 @@ class Chat(ChatBase):
 
     def _chat(self, prompt: str) -> str:
         """Invoke the LLM and strip any <think>...</think> reasoning block from the response."""
-        results = self._llm.invoke(prompt)
-        return _THINK_BLOCK_RE.sub('', results.content)
+        return _THINK_BLOCK_RE.sub('', super()._chat(prompt))
