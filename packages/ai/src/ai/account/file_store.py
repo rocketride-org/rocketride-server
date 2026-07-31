@@ -46,6 +46,19 @@ MAX_READ_SIZE = 100 * 1024 * 1024  # 100 MB
 # ctx conn_id is non-empty — '' means "unowned", used by tests.
 MAX_HANDLES_PER_CONNECTION = 64
 
+# Generation marker for the /task/fetch capability claim (get_url below,
+# consumed by ai.modules.task.fetch). BUMP THIS whenever the meaning of any
+# claim changes, and teach the handler to refuse the older generation.
+#
+# Tokens live up to an hour, which outlasts a deploy, so both generations
+# meet at every upgrade. v1 (pre-#1686) carried the WIRE path and the handler
+# re-resolved it under the caller's namespace; v2 carries the RESOLVED
+# physical path and the handler serves it verbatim. The payloads are
+# otherwise identical in shape, so without this marker a v1 claim is
+# indistinguishable from a v2 one and gets read as a store-root-relative
+# path — reaching another user's, team's or org's files (issue #1767).
+FETCH_CLAIM_VERSION = 2
+
 # Characters forbidden inside any single path segment. ':' blocks Windows
 # drive-letter syntax (C:\...) from leaking through after the '\\' -> '/'
 # conversion in _validate_path.
@@ -1122,9 +1135,15 @@ class FileStore:
         # because its internal identity has no name dictionary and no org
         # context, so a name-based '@/Team/<name>' or '@/Org' wire path
         # could never resolve there (it would 500 instead of serving).
+        #
+        # 'v' states WHICH of those two meanings this claim carries. It is
+        # what lets the handler refuse a v1 token minted by a pre-#1686
+        # server during the upgrade window, instead of reading its wire path
+        # as a physical one (see FETCH_CLAIM_VERSION).
         payload = {
             'sub': self._client_id,
             'path': full_path,
+            'v': FETCH_CLAIM_VERSION,
             'exp': int(time.time()) + expires_in,
         }
         # Carry the download filename in the signed claim so /task/fetch can set
@@ -1176,5 +1195,6 @@ __all__ = [
     'MAX_CHUNK_SIZE',
     'MAX_READ_SIZE',
     'MAX_HANDLES_PER_CONNECTION',
+    'FETCH_CLAIM_VERSION',
     'DIR_MARKER',
 ]

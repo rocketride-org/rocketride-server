@@ -48,6 +48,9 @@ async def handle_fetch(request: Request):
         - ``sub``: userId that the URL was issued to (audit trail only)
         - ``path``: RESOLVED physical store path (the capability — scope
           resolution and authorization ran at issuance, in FileStore.get_url)
+        - ``v``: claim generation, which states what ``path`` MEANS. Only
+          ``FETCH_CLAIM_VERSION`` is served; anything else is refused (see
+          the version gate below)
         - ``exp``: expiration timestamp (standard JWT claim)
     """
     # ── Extract and validate JWT ─────────────────────────────────────────
@@ -73,6 +76,25 @@ async def handle_fetch(request: Request):
     download_name = payload.get('download_name')
     if not user_id or not path:
         return JSONResponse({'error': 'Token missing required claims'}, status_code=400)
+
+    # ── Claim generation gate ────────────────────────────────────────────
+    # `path` means something DIFFERENT per generation, and both generations
+    # are in flight at once during an upgrade (tokens outlive a deploy by
+    # design — up to an hour). A v1 claim is a WIRE path from a pre-#1686
+    # server, which that server's handler resolved and scoped to the user;
+    # reading it here, where the claim is served as a store-root-relative
+    # physical path, would hand out another user's / team's / org's files.
+    #
+    # Refusing is the right trade over trying to resolve v1: the worst case
+    # is that URLs minted in the hour before an upgrade need one more click.
+    #
+    # Deferred import: ai.account instantiates the Account singleton on
+    # import, and this module is imported during bootstrap (same reason
+    # Store is imported inside the function below).
+    from ai.account.file_store import FETCH_CLAIM_VERSION
+
+    if payload.get('v') != FETCH_CLAIM_VERSION:
+        return JSONResponse({'error': 'Token format no longer supported'}, status_code=401)
 
     # ── Map the signed store path to its filesystem location ─────────────
     # The `path` claim is the RESOLVED physical store path: authorization

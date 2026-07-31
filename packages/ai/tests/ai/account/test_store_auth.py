@@ -685,3 +685,51 @@ class TestSignedFetchUrls:
         fs = _fs(store, _account())
         with pytest.raises(PermissionError):
             await fs.get_url('@/Org/q1.csv')
+
+    @pytest.mark.asyncio
+    async def test_claim_states_its_generation(self, store):
+        # The marker is what makes the two meanings of 'path' separable.
+        from ai.account.file_store import FETCH_CLAIM_VERSION
+
+        fs = _fs(store, _account())
+        url = await fs.get_url('reports/q1.csv')
+        assert self._claim(url)['v'] == FETCH_CLAIM_VERSION
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('label', 'claim'),
+        [
+            # A pre-#1686 token: no marker, and 'path' is the WIRE spelling.
+            # Served under today's meaning it is a store-root-relative
+            # PHYSICAL path — i.e. straight into another user's tree.
+            ('v1 (no marker)', {'sub': 'user-1', 'path': 'users/victim/files/secret.txt'}),
+            # A newer generation must fail closed on today's handler too.
+            ('newer generation', {'sub': 'user-1', 'path': 'users/user-1/files/q1.csv', 'v': 99}),
+        ],
+    )
+    async def test_handler_refuses_other_claim_generations(self, label, claim):
+        """Issue #1767: tokens outlive a deploy, so both generations meet at
+        every upgrade. A claim that is not THIS generation must be refused,
+        never read under the current meaning of 'path'.
+
+        The gate runs before anything is resolved or served, so these never
+        reach the store; that the current generation gets PAST it is what
+        the rest of this class covers.
+        """
+        import time
+        from types import SimpleNamespace
+
+        import jwt
+
+        from ai.modules.task.fetch import handle_fetch
+
+        token = jwt.encode(
+            {**claim, 'exp': int(time.time()) + 600},
+            'test-signing-key',
+            algorithm='HS256',
+        )
+        # handle_fetch reads only request.query_params — no ASGI plumbing.
+        request = SimpleNamespace(query_params={'token': token})
+
+        response = await handle_fetch(request)
+        assert response.status_code == 401, label
