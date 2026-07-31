@@ -37,6 +37,14 @@ _MAX_OP_TIMEOUT = 600
 _CLOSE_TIMEOUT = 5
 
 
+def _int_or(value: Any, default: int) -> int:
+    """Coerce a config value to int, falling back to `default` when malformed."""
+    try:
+        return int(value) if value is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
 class IGlobal(IGlobalBase):
     """Global state for tool_laserdata_memory."""
 
@@ -54,6 +62,11 @@ class IGlobal(IGlobalBase):
     # unsynchronized check-then-act would open two connections and leak one.
     _connect_lock: threading.Lock | None = None
     _laser: Any = None
+    # Teardown coordination: endGlobal flips _closing and cancels the futures
+    # still in _pending so concurrent tool calls fail fast instead of waiting
+    # out their full op_timeout against a stopped loop.
+    _closing: bool = False
+    _pending: Any = None
 
     def beginGlobal(self) -> None:
         """Validate config and start the bridge loop (once per pipe)."""
@@ -89,17 +102,15 @@ class IGlobal(IGlobalBase):
         raw_folded = cfg.get('folded', True)
         self.folded = raw_folded if isinstance(raw_folded, bool) else True
 
-        raw_limit = cfg.get('recall_limit', _DEFAULT_RECALL_LIMIT)
-        self.recall_limit = max(
-            1, min(_MAX_RECALL_LIMIT, int(raw_limit if raw_limit is not None else _DEFAULT_RECALL_LIMIT))
-        )
-
-        raw_timeout = cfg.get('op_timeout', _DEFAULT_OP_TIMEOUT)
+        # A malformed number (e.g. a stray string from a hand-edited config)
+        # falls back to the default rather than crashing pipe startup.
+        self.recall_limit = max(1, min(_MAX_RECALL_LIMIT, _int_or(cfg.get('recall_limit'), _DEFAULT_RECALL_LIMIT)))
         self.op_timeout = max(
-            _MIN_OP_TIMEOUT,
-            min(_MAX_OP_TIMEOUT, int(raw_timeout if raw_timeout is not None else _DEFAULT_OP_TIMEOUT)),
+            _MIN_OP_TIMEOUT, min(_MAX_OP_TIMEOUT, _int_or(cfg.get('op_timeout'), _DEFAULT_OP_TIMEOUT))
         )
 
+        self._closing = False
+        self._pending = set()
         self._connect_lock = threading.Lock()
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, name='tool_laserdata_memory-loop', daemon=True)
@@ -118,16 +129,24 @@ class IGlobal(IGlobalBase):
         configured ``op_timeout``.
         """
         loop = self._loop
-        if loop is None or not loop.is_running():
+        if self._closing or loop is None or not loop.is_running():
             coro.close()
             raise RuntimeError('laserdata: node is not open')
         budget = self.op_timeout if timeout is None else timeout
         future = asyncio.run_coroutine_threadsafe(coro, loop)
+        pending = self._pending
+        if pending is not None:
+            pending.add(future)
         try:
             return future.result(budget)
+        except concurrent.futures.CancelledError:
+            raise RuntimeError('laserdata: node is closing') from None
         except concurrent.futures.TimeoutError:
             future.cancel()
             raise RuntimeError(f'laserdata: operation timed out after {budget}s') from None
+        finally:
+            if pending is not None:
+                pending.discard(future)
 
     def get_laser(self) -> Any:
         """Return the shared Laser connection, opening it on first use."""
@@ -154,9 +173,17 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self) -> None:
         """Close the connection, stop the bridge loop, and clear secrets."""
+        self._closing = True
         laser, self._laser = self._laser, None
         loop, self._loop = self._loop, None
         thread, self._loop_thread = self._loop_thread, None
+        pending, self._pending = self._pending, None
+
+        # Fail concurrent in-flight tool calls fast: a cancelled future raises
+        # in its waiting thread immediately instead of sitting out op_timeout
+        # against a loop that is about to stop.
+        for future in list(pending or ()):
+            future.cancel()
 
         if loop is not None and loop.is_running():
             if laser is not None:

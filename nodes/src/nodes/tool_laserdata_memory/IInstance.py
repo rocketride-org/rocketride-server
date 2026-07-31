@@ -34,7 +34,7 @@ from rocketlib import IInstanceBase, tool_function
 
 from ai.common.utils import normalize_tool_input
 
-from .IGlobal import IGlobal
+from .IGlobal import _MAX_RECALL_LIMIT, IGlobal
 
 
 class IInstance(IInstanceBase):
@@ -155,7 +155,7 @@ class IInstance(IInstanceBase):
         raw_limit = args.get('limit', cfg.recall_limit)
         if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
             raw_limit = cfg.recall_limit
-        limit = max(1, min(200, raw_limit))
+        limit = max(1, min(_MAX_RECALL_LIMIT, raw_limit))
 
         laser = self._laser('recall')
         items = _run(

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+import time
 import types
 from pathlib import Path
 from types import SimpleNamespace
@@ -311,6 +312,18 @@ def test_begin_global_clamps_and_guards(bridge):
     assert glb.stream == 'rocketride-memory'  # default when unset
 
 
+def test_begin_global_malformed_numbers_fall_back(bridge):
+    glb = bridge(
+        cfg={
+            'connection_string': 'iggy:laser@localhost:8090',
+            'recall_limit': 'lots',
+            'op_timeout': 'forever',
+        }
+    )
+    assert glb.recall_limit == 10  # malformed config must not crash beginGlobal
+    assert glb.op_timeout == 30
+
+
 def test_begin_global_reads_stream(bridge, monkeypatch):
     glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090', 'stream': 'shared-memory'})
     assert glb.stream == 'shared-memory'
@@ -401,6 +414,44 @@ def test_get_laser_connects_once_across_threads(bridge, monkeypatch):
 async def _immediate(value):
     """Coroutine resolving immediately to `value`."""
     return value
+
+
+def test_end_global_cancels_in_flight_calls(bridge):
+    glb = bridge()
+    results = []
+
+    async def stuck():
+        await asyncio.sleep(60)
+
+    def call():
+        t0 = time.monotonic()
+        try:
+            glb.run(stuck(), timeout=30)
+            results.append(('returned', time.monotonic() - t0))
+        except RuntimeError as exc:
+            results.append((str(exc), time.monotonic() - t0))
+
+    worker = threading.Thread(target=call)
+    worker.start()
+    while not glb._pending:  # wait until the call is actually in flight
+        time.sleep(0.01)
+    glb.endGlobal()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    message, elapsed = results[0]
+    assert message == 'laserdata: node is closing'
+    assert elapsed < 5  # failed fast, not after the 30s op budget
+
+
+def test_run_rejected_while_closing(bridge):
+    glb = bridge()
+    glb.endGlobal()
+
+    async def noop():
+        return 1
+
+    with pytest.raises(RuntimeError, match='not open'):
+        glb.run(noop())
 
 
 def test_end_global_closes_and_clears(bridge, monkeypatch):
