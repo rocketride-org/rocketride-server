@@ -27,9 +27,11 @@ from docs_audit.citations import (  # noqa: E402
     classify,
     extract,
 )
+from docs_audit.cli import main  # noqa: E402
 from docs_audit.coverage import (  # noqa: E402
     MISSING_DOC,
     STALE_PARAMS,
+    UNREADABLE,
     audit_node,
     schema_params,
     strip_jsonc,
@@ -193,6 +195,41 @@ def test_jsonc_services_file_is_parsed(tmp_path: Path) -> None:
         encoding='utf-8',
     )
     assert schema_params(node) == {'a'}
+
+
+def test_malformed_schema_is_reported_not_skipped(tmp_path: Path) -> None:
+    """Regression: a broken services.json yielded zero declared params, which is
+    indistinguishable from a node with nothing to document -- so the audit
+    reported the node as clean while hiding whatever the schema really said.
+    """
+    node = tmp_path / 'nodes' / 'src' / 'nodes' / 'broken'
+    node.mkdir(parents=True)
+    (node / 'impl.py').write_text('x = 1\n', encoding='utf-8')
+    (node / 'services.json').write_text('{"fields": {', encoding='utf-8')
+    (node / 'README.md').write_text(_block('a'), encoding='utf-8')
+
+    (gap,) = audit_node(node, tmp_path)
+    assert gap.kind == UNREADABLE
+    assert 'services.json' in gap.detail
+
+
+def test_dotfile_paths_keep_their_leading_dot(tmp_path: Path) -> None:
+    """Regression: `.lstrip('./')` strips a character SET, not a prefix, so
+    `.env` was indexed as `env` and citations to hidden files looked orphaned.
+    """
+    (tmp_path / '.env').write_text('K=v\n', encoding='utf-8')
+    (tmp_path / '.github' / 'workflows').mkdir(parents=True)
+    (tmp_path / '.github' / 'workflows' / 'ci.yml').write_text('on: push\n', encoding='utf-8')
+
+    index = CodeIndex.build(tmp_path)
+    assert index.has_path('.env')
+    assert index.has_path('.github/workflows/ci.yml')
+    assert not index.has_path('env')
+
+
+def test_nonexistent_root_fails_instead_of_passing_green(tmp_path: Path) -> None:
+    """A typo in --root must not look like a clean audit."""
+    assert main(['--root', str(tmp_path / 'nope'), '--fail-on-orphaned']) == 2
 
 
 def test_strip_jsonc_keeps_urls_inside_strings() -> None:

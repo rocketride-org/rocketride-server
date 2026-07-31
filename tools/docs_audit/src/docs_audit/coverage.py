@@ -8,6 +8,10 @@ Three findings, ordered by how loudly they mislead a reader:
 ``MISSING_PARAMS`` a node README with no generated block at all, contrary to
                    the co-located documentation rule in AGENTS.md.
 ``MISSING_DOC``    a node that ships Python but no README whatsoever.
+``UNREADABLE``     a schema or README that could not be read or parsed. Reported
+                   rather than skipped: a malformed ``services*.json`` yields no
+                   declared fields, which would otherwise look identical to a
+                   node with nothing to document and hide real drift.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from pathlib import Path
 STALE_PARAMS = 'STALE_PARAMS'
 MISSING_PARAMS = 'MISSING_PARAMS'
 MISSING_DOC = 'MISSING_DOC'
+UNREADABLE = 'UNREADABLE'
 
 _GENERATED_BLOCK = re.compile(
     r'<!--\s*ROCKETRIDE:GENERATED:PARAMS START\s*-->(.*?)<!--\s*ROCKETRIDE:GENERATED:PARAMS END\s*-->',
@@ -110,12 +115,34 @@ def schema_params(node_dir: Path) -> set[str]:
     return keys
 
 
+def unreadable_schemas(node_dir: Path) -> list[str]:
+    """Names of ``services*.json`` files that could not be read or parsed.
+
+    Separate from :func:`schema_params` so that a broken schema is reported as
+    a finding instead of quietly contributing zero declared params -- which
+    reads exactly like a node that has nothing to document.
+    """
+    broken = []
+    for services in sorted(node_dir.glob('services*.json')):
+        try:
+            json.loads(strip_jsonc(services.read_text(encoding='utf-8', errors='replace')))
+        except (OSError, json.JSONDecodeError) as exc:
+            broken.append(f'{services.name} ({type(exc).__name__})')
+    return broken
+
+
 def audit_node(node_dir: Path, root: Path) -> list[Gap]:
     """Every documentation gap for a single node directory."""
     name = node_dir.name
     has_python = any(node_dir.glob('*.py'))
     if not has_python:
         return []
+
+    broken = unreadable_schemas(node_dir)
+    if broken:
+        # Stop here: declared params are unknowable, so any STALE/MISSING
+        # verdict computed from them would be noise on top of a real problem.
+        return [Gap(UNREADABLE, name, 'unparseable schema: ' + '; '.join(broken))]
 
     readme = node_dir / 'README.md'
     if not readme.exists():
@@ -124,8 +151,8 @@ def audit_node(node_dir: Path, root: Path) -> list[Gap]:
 
     try:
         text = readme.read_text(encoding='utf-8', errors='replace')
-    except OSError:
-        return []
+    except OSError as exc:
+        return [Gap(UNREADABLE, name, f'README.md could not be read ({type(exc).__name__})')]
 
     declared = schema_params(node_dir)
     documented = documented_params(text)

@@ -4,21 +4,28 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from .citations import ORPHANED, audit_doc
-from .coverage import MISSING_DOC, MISSING_PARAMS, STALE_PARAMS, audit_nodes
-from .index import CodeIndex, is_excluded
+from .coverage import MISSING_DOC, MISSING_PARAMS, STALE_PARAMS, UNREADABLE, audit_nodes
+from .index import EXCLUDED_PARTS, CodeIndex, is_excluded
 
 DOC_SUFFIXES = ('.md', '.mdx')
 
 
 def _docs(root: Path):
-    for suffix in DOC_SUFFIXES:
-        for path in root.rglob(f'*{suffix}'):
-            if not is_excluded(path.relative_to(root)):
-                yield path
+    # os.walk with in-place pruning, not rglob: rglob descends node_modules and
+    # every vendored tree in full before the filter discards what it yielded.
+    for dirpath, dirnames, filenames in os.walk(root):
+        rel_dir = Path(dirpath).relative_to(root)
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_PARTS]
+        if is_excluded(rel_dir):
+            continue
+        for name in filenames:
+            if name.endswith(DOC_SUFFIXES):
+                yield Path(dirpath) / name
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -39,6 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root = Path(args.root).resolve()
+
+    # A typo in --root would otherwise audit nothing, find nothing, and exit 0 --
+    # green CI that never ran. Fail loudly instead.
+    if not root.is_dir():
+        print(f'docs-audit: --root is not a directory: {root}', file=sys.stderr)
+        return 2
 
     index = CodeIndex.build(root)
     verdicts = [verdict for path in _docs(root) for verdict in audit_doc(path, root, index)]
@@ -87,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if gaps:
         print(f'\nUndocumented / drifted code ({len(gaps)}):\n')
-        for kind in (STALE_PARAMS, MISSING_PARAMS, MISSING_DOC):
+        for kind in (UNREADABLE, STALE_PARAMS, MISSING_PARAMS, MISSING_DOC):
             matching = [g for g in gaps if g.kind == kind]
             if not matching:
                 continue
@@ -96,3 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f'    {gap.node}: {gap.detail}')
 
     return 1 if (args.fail_on_orphaned and orphaned) else 0
+
+
+if __name__ == '__main__':  # `python -m docs_audit.cli` printed nothing without this
+    raise SystemExit(main())

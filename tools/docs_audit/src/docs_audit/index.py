@@ -80,7 +80,10 @@ class CodeIndex:
             if is_excluded(rel_dir):
                 continue
             for name in list(dirnames) + filenames:
-                rel = (rel_dir / name).as_posix().lstrip('./')
+                # No lstrip('./') here: it strips a character SET, not a prefix,
+                # so `.env` becomes `env` and `.github/...` loses its dot.
+                # `Path('.') / name` already yields a clean relative path.
+                rel = (rel_dir / name).as_posix()
                 index.paths.add(rel)
                 index.basenames.setdefault(name, []).append(rel)
             for name in filenames:
@@ -93,7 +96,7 @@ class CodeIndex:
                     text = path.read_text(encoding='utf-8', errors='replace')
                 except OSError:
                     continue
-                index._sources[(rel_dir / name).as_posix().lstrip('./')] = text
+                index._sources[(rel_dir / name).as_posix()] = text
         return index
 
     def has_path(self, relpath: str) -> bool:
