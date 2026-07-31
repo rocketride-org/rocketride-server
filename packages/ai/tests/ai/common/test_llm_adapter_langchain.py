@@ -27,7 +27,8 @@ class _FakeLLM:
             yield p if isinstance(p, _Piece) else _Piece(p)
 
     def invoke(self, messages, **kwargs):
-        self.seen = list(messages)
+        # Recorded verbatim: collect() hands a str on a single turn, a message list after.
+        self.seen = messages if isinstance(messages, str) else list(messages)
         self.kwargs = kwargs
         p = self._pieces[0]
         return p if isinstance(p, _Piece) else _Piece(p)
@@ -79,9 +80,23 @@ def test_collect_uses_invoke_and_normalizes():
 
     assert text == 'answer'
     assert items == [{'role': 'assistant', 'content': 'answer'}]
-    assert llm.seen == [{'role': 'user', 'content': 'q'}]  # invoke received the history
+    assert llm.seen == 'q'  # single turn: the backend gets the prompt string, as before
     assert llm.kwargs == {'stop': ['x']}  # stop kwargs threaded to invoke
     assert adapter.history == [
         {'role': 'user', 'content': 'q'},
         {'role': 'assistant', 'content': 'answer'},
+    ]
+
+
+def test_collect_sends_the_history_once_the_turn_is_not_the_first():
+    # Multi-turn: the prior turns are the point, so invoke() gets the message list.
+    llm = _FakeLLM([[{'type': 'text', 'text': 'second'}]])
+    adapter = LangChainAdapter(llm, history=[{'role': 'assistant', 'content': 'first'}])
+
+    text, _items = adapter.collect('q2')
+
+    assert text == 'second'
+    assert llm.seen == [
+        {'role': 'assistant', 'content': 'first'},
+        {'role': 'user', 'content': 'q2'},  # the current turn is included
     ]

@@ -12,6 +12,8 @@ Design: repo discussion #1679 (RFC — virtualized provider Adapter).
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
+from ai.common.utils import flatten_content_blocks
+
 
 @dataclass
 class Event:
@@ -123,36 +125,18 @@ def _make_stream_content_parser(has_reasoning_sink: bool):
     state = {'signature_noted': False}
 
     def feed(content):
-        text = ''
-        thinking = ''
-        if isinstance(content, list):
-            for b in content:
-                if not isinstance(b, dict):
-                    continue
-                btype = b.get('type', '')
-                if btype == 'thinking':
-                    # carries either text deltas or a signature-only final delta.
-                    piece_text = b.get('thinking') or b.get('text') or ''
-                    if piece_text:
-                        thinking += piece_text
-                    elif b.get('signature') and not state['signature_noted'] and has_reasoning_sink:
-                        thinking += (
-                            '_Extended thinking ran, but this stream only delivered the '
-                            'block verification signature, not the readable chain-of-thought '
-                            'text. The answer below still reflects internal reasoning._\n\n'
-                        )
-                        state['signature_noted'] = True
-                elif btype == 'reasoning':
-                    # LangChain v1 standard block (thinking → reasoning).
-                    piece_text = b.get('reasoning') or b.get('text') or ''
-                    if piece_text:
-                        thinking += piece_text
-                elif btype == 'text' or not btype:
-                    text += b.get('text', '')
-        elif isinstance(content, str):
-            text, thinking_inline = think_split(content)
-            if thinking_inline:
-                thinking += thinking_inline
+        # Inline `<think>` tags are a stateful concern owned by this streaming path;
+        # the block vocabulary is not, so it stays in flatten_content_blocks.
+        if isinstance(content, str):
+            return think_split(content)
+        text, thinking, sig_only = flatten_content_blocks(content)
+        if sig_only and not state['signature_noted'] and has_reasoning_sink:
+            thinking += (
+                '_Extended thinking ran, but this stream only delivered the '
+                'block verification signature, not the readable chain-of-thought '
+                'text. The answer below still reflects internal reasoning._\n\n'
+            )
+            state['signature_noted'] = True
         return text, thinking
 
     feed.flush = think_split.flush  # type: ignore[attr-defined]
@@ -217,8 +201,12 @@ class LangChainAdapter:
         """Non-streaming drain: invoke() + shared normalization. A genuinely different
         mechanism from stream(), so it can still recover when streaming fails.
         """
+        had_history = bool(self.history)
         self.history.append({'role': 'user', 'content': user_text})
-        result = self.llm.invoke(self.history, **self.stream_kwargs)
+        # Single-turn callers keep the historical contract: the backend is handed the
+        # prompt string it was given, not a one-element message list.
+        payload = self.history if had_history else user_text
+        result = self.llm.invoke(payload, **self.stream_kwargs)
         text, self.reasoning = flatten_content_parts(getattr(result, 'content', ''))
         assistant = {'role': 'assistant', 'content': text}
         self.history.append(assistant)
