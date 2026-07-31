@@ -272,6 +272,16 @@
 					"type": "string",
 					"default": "",
 					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+				},
+				"rocketride.appdev.shellUrl": {
+					"type": "string",
+					"default": "",
+					"description": "App Builder: override the preview shell base URL (empty = the Development Mode engine). For monorepo developers running the shell dev server."
+				},
+				"rocketride.appdev.autoWatch": {
+					"type": "boolean",
+					"default": true,
+					"description": "App Builder: start the app watch/rebuild session automatically when an App Builder screen opens."
 				}
 			}
 		},
@@ -418,6 +428,21 @@
 			{
 				"command": "rocketride.agents.uninstall",
 				"title": "Remove Agent Documentation",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.create",
+				"title": "New App",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.open",
+				"title": "Open App Builder",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.debug",
+				"title": "Debug App (external browser)",
 				"category": "RocketRide"
 			}
 		],

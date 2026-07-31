@@ -33,6 +33,20 @@ import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
 import { getProjectProvider } from '../extension';
+import { scanWorkspaceApps } from '../appdev/appScan';
+import type { ScannedApp } from '../appdev/appScan';
+
+// =============================================================================
+// TYPES — App Builder sidebar rows (structural mirror of shared AppListItem)
+// =============================================================================
+
+/** One MY APPS row sent to the webview (shared AppListItem shape). */
+interface AppRowDTO {
+	id: string;
+	name: string;
+	status: 'local' | 'dev' | 'draft' | 'pending' | 'approved' | 'rejected' | 'live';
+	folder?: string;
+}
 
 // =============================================================================
 // TYPES — serialisable ProjectEntry sent to webview
@@ -64,6 +78,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
 
+	// ── App Builder state ────────────────────────────────────────────────────
+	// Cached workspace scan (re-run on package.json events) and the current
+	// sidebar mode (session-scoped; the webview restores it from updates).
+	private scannedApps: ScannedApp[] = [];
+	private sidebarMode: 'pipelines' | 'apps' = 'pipelines';
+
 	private logger = getLogger();
 
 	/**
@@ -74,6 +94,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		this.setupFileWatching();
 		this.setupEventListeners();
 		this.loadPipelineFiles();
+		void this.rescanApps();
 	}
 
 	// =========================================================================
@@ -134,6 +155,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					case 'openUnknownTask':
 						vscode.commands.executeCommand('rocketride.page.status.open', message.projectId, message.sourceId, message.displayName);
 						break;
+					case 'openApp':
+						vscode.commands.executeCommand('rocketride.app.open', message.appId);
+						break;
+					case 'setSidebarMode':
+						// Session-scoped persistence: included in every full update
+						// so a reloaded webview restores the user's last mode.
+						this.sidebarMode = message.mode;
+						break;
 					case 'setDevelopmentMode':
 						await this.configManager.updateConnectionMode('development', message.mode);
 						this.sendFullUpdate();
@@ -180,6 +209,63 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			watcherPipeJson.onDidDelete((uri) => this.handleFileDeleted(uri)),
 			watcherPipeJson.onDidChange((uri) => this.handleFileChanged(uri))
 		);
+
+		// App bindings live in package.json appManifest blocks — any
+		// package.json event can add/remove/rename an app. node_modules is
+		// excluded (its package.json churn is enormous and never a binding).
+		const watcherPkg = vscode.workspace.createFileSystemWatcher('**/package.json');
+		const onPkgEvent = (uri: vscode.Uri): void => {
+			if (uri.fsPath.includes('node_modules')) return;
+			void this.rescanApps();
+		};
+		this.disposables.push(watcherPkg, watcherPkg.onDidCreate(onPkgEvent), watcherPkg.onDidDelete(onPkgEvent), watcherPkg.onDidChange(onPkgEvent));
+	}
+
+	// =========================================================================
+	// APP BUILDER (MY APPS)
+	// =========================================================================
+
+	/** Re-scans the workspace for app bindings and pushes the merged list. */
+	private async rescanApps(): Promise<void> {
+		this.scannedApps = await scanWorkspaceApps();
+		if (this._view) {
+			this._view.webview.postMessage({ type: 'appsUpdate', apps: await this.buildAppRows() });
+		}
+	}
+
+	/**
+	 * Builds the MY APPS rows: the workspace scan merged with the server's
+	 * list_mine statuses when cloud-signed-in. Merge key is the app id
+	 * (bind, don't sync). Local-only rows read 'local'; server statuses win
+	 * for bound apps; server-only apps appear without a folder.
+	 */
+	private async buildAppRows(): Promise<AppRowDTO[]> {
+		const rows = new Map<string, AppRowDTO>();
+		for (const app of this.scannedApps) {
+			rows.set(app.id, { id: app.id, name: app.name, status: 'local', folder: app.folder });
+		}
+
+		// Server statuses — best-effort: OSS engines reject the marketplace
+		// command (NotImplementedError) and signed-out sessions have no org.
+		try {
+			const client = this.connectionManager.getClient();
+			if (client && this.connectionManager.isConnected() && isCloudConnected()) {
+				const res = (await client.call('rrext_app_catalog', { subcommand: 'list_mine' })) as { apps?: Array<{ id: string; name?: string; status?: string }> };
+				for (const server of res?.apps ?? []) {
+					const status = (server.status ?? 'draft') as AppRowDTO['status'];
+					const bound = rows.get(server.id);
+					if (bound) {
+						bound.status = status;
+					} else {
+						rows.set(server.id, { id: server.id, name: server.name ?? server.id, status });
+					}
+				}
+			}
+		} catch {
+			/* marketplace unavailable (OSS / signed out) — workspace rows stand */
+		}
+
+		return [...rows.values()];
 	}
 
 	/** Handles a newly created .pipe file — assigns a project_id if missing. */
@@ -413,6 +499,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// Pipeline data
 				entries: this.buildEntries(),
 				unknownTasks: [],
+				// App Builder (MY APPS)
+				apps: await this.buildAppRows(),
+				sidebarMode: this.sidebarMode,
 			},
 		});
 	}

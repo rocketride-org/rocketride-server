@@ -46,7 +46,7 @@ export type { IOverviewPanelProps, IOverviewGridProps, IConnectionsPanelProps, I
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
-export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
+export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, AppBuilderSidebar } from './modules/sidebar/types';
 export { foldTaskEvent, foldDeployRunState, foldProjectDeployRuns } from './modules/sidebar/taskFold';
 export type { TaskLifecycleEvent, TaskFoldResult } from './modules/sidebar/taskFold';
 

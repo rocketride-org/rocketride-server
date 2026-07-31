@@ -72,6 +72,43 @@ export interface UnknownTask {
 }
 
 // =============================================================================
+// APP BUILDER SIDEBAR (MY APPS)
+// =============================================================================
+
+/** One MY APPS row in the App Builder sidebar mode. */
+export interface AppListItem {
+	/** App id (the appManifest.id binding key, e.g. 'acme.brandy'). */
+	id: string;
+	/** Display name. */
+	name: string;
+	/**
+	 * Lifecycle badge state: 'local' = bound folder with no server record,
+	 * 'dev' = live dev-overlay entry, then the marketplace lifecycle
+	 * ('pending' renders as "in review"; 'live' = approved with an active
+	 * public version).
+	 */
+	status: 'local' | 'dev' | 'draft' | 'pending' | 'approved' | 'rejected' | 'live';
+	/** Bound workspace folder (VSCode hosts; absent for server-only rows). */
+	folder?: string;
+}
+
+/**
+ * App Builder sidebar content. PRESENCE of this prop enables the
+ * `Pipelines | App Builder` mode strip at the top of the sidebar; hosts
+ * that omit it (or pre-App-Builder hosts) render exactly as before.
+ */
+export interface AppBuilderSidebar {
+	/** Merged MY APPS list (workspace scan ∪ server list_mine, by id). */
+	apps: AppListItem[];
+	/** The app whose App Builder screen is open/focused, if any. */
+	activeAppId?: string;
+	/** Create a new app (runs the scaffolder / new-app flow). */
+	onNewApp: () => void;
+	/** Open an app's App Builder screen. */
+	onOpenApp: (appId: string) => void;
+}
+
+// =============================================================================
 // CONNECTION STATE
 // =============================================================================
 
@@ -141,4 +178,15 @@ export interface ISidebarViewProps {
 	// ── Tree UI ─────────────────────────────────────────────────────────────
 	/** Currently open file path (for active highlight). */
 	activeFilePath?: string;
+
+	// ── App Builder mode ────────────────────────────────────────────────────
+	/**
+	 * App Builder sidebar content — presence renders the Pipelines|App Builder
+	 * mode strip and enables the MY APPS mode. Omitted → legacy layout.
+	 */
+	appBuilder?: AppBuilderSidebar;
+	/** Active sidebar mode when the strip is shown. Defaults to 'pipelines'. */
+	sidebarMode?: 'pipelines' | 'apps';
+	/** Mode strip selection callback (hosts persist the choice). */
+	onSidebarModeChange?: (mode: 'pipelines' | 'apps') => void;
 }
