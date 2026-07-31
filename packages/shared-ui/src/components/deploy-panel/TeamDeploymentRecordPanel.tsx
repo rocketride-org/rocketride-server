@@ -30,11 +30,10 @@ import { CardDataGrid } from '../data-grid/CardDataGrid';
 import { commonStyles } from '../../themes/styles';
 import { formatTime, formatDayTime } from '../../modules/server/util/formatters';
 import { describeCron, describeTtl } from './SchedulePanel';
-import type { CellComponent } from 'tabulator-tables';
 import type { GridColumnDefinition } from '../data-grid/defaults';
 import type { TaskTimeline } from '../../modules/project/hooks/useTaskEvents';
 import type { DeploymentInfo } from './DeploymentView';
-import { DEPLOY_ACTION_VERBS } from './types';
+import { DEPLOY_STATE_COLOR, createDeployHistoryColumns } from './types';
 import type { DeployHistoryRow, DeployScheduleRow, DeployVersionCard } from './types';
 
 // =============================================================================
@@ -44,14 +43,6 @@ import type { DeployHistoryRow, DeployScheduleRow, DeployVersionCard } from './t
 /** Default drawer width as a fraction of the viewport (the wide-record
     standard shared with DeploymentRecordPanel). */
 const DEFAULT_HOST_FRACTION = 0.75;
-
-/** State → chip color for the header state chip. */
-const STATE_COLOR: Record<DeploymentInfo['state'], string> = {
-	enabled: 'var(--rr-color-success)',
-	disabled: 'var(--rr-text-secondary)',
-	errored: 'var(--rr-color-error)',
-	removed: 'var(--rr-text-disabled)',
-};
 
 // =============================================================================
 // PROPS
@@ -292,7 +283,7 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 					} catch {
 						// Isolated per-source failure — leave this source empty.
 					}
-				}),
+				})
 			);
 			if (!cancelled) setTimelines(next);
 		})();
@@ -324,37 +315,9 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 
 	// --- History grid columns (stock CardDataGrid) ----------------------------
 
-	const historyColumns: GridColumnDefinition[] = useMemo(
-		() => [
-			{
-				title: 'When',
-				field: 'at',
-				rrType: 'date',
-				rrDefault: true,
-				rrDefaultSort: 'desc',
-				rrDescription: 'When the action happened (local time); newest first.',
-				formatter: (cell: CellComponent) => formatTime(cell.getValue() as number),
-				width: 170,
-			},
-			{ title: 'Actor', field: 'actor', rrType: 'string', rrDefault: true, rrDescription: 'Who performed the action (denormalized — survives account deletion).', width: 160 },
-			{
-				title: 'Action',
-				field: 'seq',
-				rrNoPopup: true,
-				rrDefault: true,
-				rrDescription: 'What happened to this team deployment: deploys, rollbacks, enables/disables, removals; publishes ride along org-wide.',
-				widthGrow: 3,
-				formatter: (cell: CellComponent) => {
-					const row = cell.getRow().getData() as DeployHistoryRow;
-					// Past-tense verbs; 'pause'/'resume' appear only on rows
-					// written before the enable/disable vocabulary.
-					const verb = DEPLOY_ACTION_VERBS[row.action] ?? row.action;
-					return `${verb} v${row.version}${row.comment ? ` “${row.comment}”` : ''}`;
-				},
-			},
-		],
-		[]
-	);
+	// THE shared audit-trail column set (types.ts) — one per mount because
+	// Tabulator mutates column definition objects.
+	const historyColumns: GridColumnDefinition[] = useMemo(() => createDeployHistoryColumns(), []);
 
 	if (!open) return null;
 
@@ -414,7 +377,7 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 							v{versions[0].version} available
 						</span>
 					)}
-					<span style={{ ...S.chip, color: STATE_COLOR[deployment.state] }}>&#9679; {deployment.state}</span>
+					<span style={{ ...S.chip, color: DEPLOY_STATE_COLOR[deployment.state] }}>&#9679; {deployment.state}</span>
 					<span style={S.who}>
 						deployed by {deployment.deployedBy} &middot; {formatDayTime(deployment.deployedAt)}
 					</span>

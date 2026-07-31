@@ -29,6 +29,7 @@ import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
 import { getProjectProvider } from '../extension';
@@ -342,11 +343,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				});
 			} else if (event?.event === 'apaevt_status_update') {
 				// Forward status updates (errors/warnings) to webview.
-				// Deploy runs never touch the dev lists (same classification
-				// the shared fold applies) — their status belongs to the
-				// deployment surfaces, and the '*' subscription delivers them
-				// here whenever a team-scoped run is visible.
-				if (event.body?.runKind === 'deploy') return;
+				// Deploy runs never touch the dev lists (THE one host-side
+				// classifier, shared with ProjectProvider's status cache) —
+				// their status belongs to the deployment surfaces, and the '*'
+				// subscription delivers them here whenever a team-scoped run
+				// is visible.
+				if (isDeployRunBody(event.body)) return;
 				const projectId = event.body?.project_id;
 				const sourceId = event.body?.source;
 				if (projectId && sourceId) {

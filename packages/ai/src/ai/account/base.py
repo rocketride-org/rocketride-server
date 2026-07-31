@@ -336,13 +336,17 @@ class AccountBase(ABC):
     # domain API over its system tree).
     # =========================================================================
 
+    # Cache slot for the lazily-created OSS file backend — declared here so
+    # the attribute is part of the documented class state.
+    _deployments_backend = None
+
     def _deployment_backend(self):
         """The lazily-created file backend used by the OSS defaults."""
-        if getattr(self, '_deployments_backend', None) is None:
+        if self._deployments_backend is None:
             from .deployment_backend import FileDeploymentBackend
             from .store import Store
 
-            self._deployments_backend = FileDeploymentBackend(Store.instance()._store)
+            self._deployments_backend = FileDeploymentBackend(Store.instance().raw_store())
         return self._deployments_backend
 
     async def deployments_publish(

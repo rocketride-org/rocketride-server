@@ -41,12 +41,11 @@ import CanvasPanel from '../canvas';
 import { SourcePanel } from '../../modules/project/components/SourcePanel';
 import { describeCron } from './SchedulePanel';
 import { OAUTH_ROOT_URL } from '../../config/oauth';
-import { formatTime } from '../../modules/server/util/formatters';
-import type { CellComponent } from 'tabulator-tables';
+import { formatDayTime, formatTime } from '../../modules/server/util/formatters';
 import type { GridColumnDefinition } from '../data-grid/defaults';
 import type { ViewMenu } from '../../types/viewMenu';
 import type { TaskEventMessage, TaskEventSession, TaskTimeline } from '../../modules/project/hooks/useTaskEvents';
-import { DEPLOY_ACTION_VERBS } from './types';
+import { DEPLOY_STATE_COLOR, createDeployHistoryColumns } from './types';
 import type { DeployHistoryRow } from './types';
 
 // =============================================================================
@@ -180,27 +179,6 @@ const S = {
 		color: 'var(--rr-text-secondary)',
 		marginTop: 2,
 	} as CSSProperties,
-	scheduleRow: (clickable: boolean): CSSProperties => ({
-		display: 'flex',
-		alignItems: 'center',
-		gap: 10,
-		padding: '8px 14px',
-		borderBottom: '1px solid var(--rr-border)',
-		fontSize: 12.5,
-		cursor: clickable ? 'pointer' : 'default',
-	}),
-	schedulePill: (on: boolean): CSSProperties => ({
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: 6,
-		borderRadius: 14,
-		padding: '3px 11px',
-		fontSize: 11.5,
-		fontWeight: 600,
-		border: `1px solid ${on ? 'color-mix(in srgb, var(--rr-color-success) 40%, transparent)' : 'var(--rr-border)'}`,
-		background: on ? 'color-mix(in srgb, var(--rr-color-success) 10%, transparent)' : 'transparent',
-		color: on ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
-	}),
 	configRow: {
 		display: 'flex',
 		alignItems: 'center',
@@ -231,22 +209,6 @@ const S = {
 		gap: 7,
 		cursor: 'pointer',
 	} as CSSProperties,
-	pickerRow: (enabled: boolean): CSSProperties => ({
-		display: 'flex',
-		alignItems: 'center',
-		gap: 10,
-		padding: '9px 12px',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 6,
-		marginBottom: 8,
-		cursor: enabled ? 'pointer' : 'default',
-		opacity: enabled ? 1 : 0.55,
-	}),
-	errorText: {
-		color: 'var(--rr-color-error)',
-		fontSize: 12.5,
-		marginTop: 8,
-	} as CSSProperties,
 	container: {
 		display: 'flex',
 		flexDirection: 'column',
@@ -265,23 +227,6 @@ const S = {
 		height: '100%',
 		minHeight: 480,
 	} as CSSProperties,
-	previewList: {
-		margin: '10px 0 0',
-		padding: '10px 12px',
-		background: 'var(--rr-bg-surface-alt)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 6,
-		fontSize: 12.5,
-		lineHeight: 1.7,
-	} as CSSProperties,
-};
-
-/** State → chip color for the header state chip. */
-const STATE_COLOR: Record<DeploymentInfo['state'], string> = {
-	enabled: 'var(--rr-color-success)',
-	disabled: 'var(--rr-text-secondary)',
-	errored: 'var(--rr-color-error)',
-	removed: 'var(--rr-text-disabled)',
 };
 
 // =============================================================================
@@ -375,37 +320,9 @@ export const DeploymentView: React.FC<IDeploymentViewProps> = ({ teamName, docum
 
 	// --- History grid columns (stock CardDataGrid) ----------------------------
 
-	const historyColumns: GridColumnDefinition[] = useMemo(
-		() => [
-			{
-				title: 'When',
-				field: 'at',
-				rrType: 'date',
-				rrDefault: true,
-				rrDefaultSort: 'desc',
-				rrDescription: 'When the action happened (local time); newest first.',
-				formatter: (cell: CellComponent) => formatTime(cell.getValue() as number),
-				width: 170,
-			},
-			{ title: 'Actor', field: 'actor', rrType: 'string', rrDefault: true, rrDescription: 'Who performed the action (denormalized — survives account deletion).', width: 160 },
-			{
-				title: 'Action',
-				field: 'seq',
-				rrNoPopup: true,
-				rrDefault: true,
-				rrDescription: 'What happened to this team deployment: deploys, rollbacks, enables/disables, removals; publishes ride along org-wide.',
-				widthGrow: 3,
-				formatter: (cell: CellComponent) => {
-					const row = cell.getRow().getData() as DeployHistoryRow;
-					// Past-tense verbs; 'pause'/'resume' appear only on rows
-					// written before the enable/disable vocabulary.
-					const verb = DEPLOY_ACTION_VERBS[row.action] ?? row.action;
-					return `${verb} v${row.version}${row.comment ? ` “${row.comment}”` : ''}`;
-				},
-			},
-		],
-		[]
-	);
+	// THE shared audit-trail column set (types.ts) — one per mount because
+	// Tabulator mutates column definition objects.
+	const historyColumns: GridColumnDefinition[] = useMemo(() => createDeployHistoryColumns(), []);
 
 	// --- Page strip -----------------------------------------------------------
 
@@ -428,10 +345,10 @@ export const DeploymentView: React.FC<IDeploymentViewProps> = ({ teamName, docum
 			<div style={S.header}>
 				<h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>{deployment.pipelineName}</h3>
 				<span style={{ ...S.chip, ...S.chipVersion }}>v{deployment.version}</span>
-				<span style={{ ...S.chip, color: STATE_COLOR[deployment.state] }}>&#9679; {deployment.state}</span>
+				<span style={{ ...S.chip, color: DEPLOY_STATE_COLOR[deployment.state] }}>&#9679; {deployment.state}</span>
 				<span style={S.chip}>{sourceName || sourceId}</span>
 				<span style={S.who}>
-					deployed by {deployment.deployedBy} &middot; {formatTime(deployment.deployedAt)}
+					deployed by {deployment.deployedBy} &middot; {formatDayTime(deployment.deployedAt)}
 				</span>
 			</div>
 

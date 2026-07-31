@@ -64,6 +64,11 @@ if TYPE_CHECKING:
 # (e.g. marking it errored after a failed dispatch).
 _SCHEDULER_ACTOR = {'userId': 'system:scheduler', 'display': 'Scheduler', 'email': ''}
 
+# Placeholder token held in _active_tokens while a dispatch is starting up.
+# It closes the guard gap between "tick decided to fire" and "dispatch
+# returned a real token" — a tick due in that window must still skip.
+_DISPATCHING = '__dispatching__'
+
 # (team_id, project_id, source_id) — the schedule identity.
 RunKey = Tuple[str, str, str]
 
@@ -138,6 +143,23 @@ class TaskScheduler:
             entry = ScheduledRun(next_run=next_run, key=(team_id, project_id, source_id), org_id=org_id, cron=cron)
             self._entries[entry.key] = entry
             heapq.heappush(self._schedule, entry)
+
+    def is_run_active(self, team_id: str, project_id: str, source_id: str) -> bool:
+        """True while a dispatched run of the source is starting or running.
+
+        The manual run path (cmd_deploy) asks this BEFORE dispatching so a
+        run-now can never overlap a scheduled run of the same source — both
+        would share the team storage anchor.
+        """
+        return self._is_previous_run_active((team_id, project_id, source_id))
+
+    def register_manual_run(self, team_id: str, project_id: str, source_id: str, token: str) -> None:
+        """Record a manually-dispatched run under the overlap guard.
+
+        Without this the next cron tick would not see the manual token and
+        could dispatch a second concurrent run of the same source.
+        """
+        self._active_tokens[(team_id, project_id, source_id)] = token
 
     def start(self) -> None:
         """Start the scheduler in the background: load deployments, then run the loop."""
@@ -238,13 +260,15 @@ class TaskScheduler:
 
                     # Skip if the previous run for this (team, project, source)
                     # is still active — schedules never overlap themselves.
-                    prev_token = self._active_tokens.get(entry.key)
-                    if prev_token:
-                        ctrl = self._server._task_control.get(prev_token)
-                        if ctrl and not ctrl.task.is_task_complete():
-                            debug(f'[SCHEDULER] {entry.key}: previous run still active, skipping')
-                            continue
+                    if self._is_previous_run_active(entry.key):
+                        debug(f'[SCHEDULER] {entry.key}: previous run still active, skipping')
+                        continue
 
+                    # Mark the key in-flight BEFORE the dispatch task exists,
+                    # so a tick due during startup sees the guard closed.
+                    # _start_run replaces it with the real token (or clears
+                    # it when the dispatch does not happen).
+                    self._active_tokens[entry.key] = _DISPATCHING
                     task_start = asyncio.create_task(self._start_run(entry))
                     self._inflight_starts.add(task_start)
                     task_start.add_done_callback(self._inflight_starts.discard)
@@ -265,70 +289,92 @@ class TaskScheduler:
     # DISPATCH
     # =========================================================================
 
+    def _is_previous_run_active(self, key: RunKey) -> bool:
+        """THE overlap guard: is the last run for ``key`` still going?
+
+        True while a dispatch is in flight (the ``_DISPATCHING`` marker) or
+        the dispatched task has not completed. One predicate shared by the
+        tick loop and the manual run path, so the two can never disagree.
+        """
+        token = self._active_tokens.get(key)
+        if not token:
+            return False
+        if token == _DISPATCHING:
+            return True
+        ctrl = self._server._task_control.get(token)
+        return bool(ctrl and not ctrl.task.is_task_complete())
+
     async def _start_run(self, entry: ScheduledRun) -> None:
         """Fire one (team, project, source) occurrence via trusted dispatch."""
         team_id, project_id, source_id = entry.key
         org_id = entry.org_id
 
-        # Re-read the deployment at fire time: a disable/remove/pointer-move
-        # or schedule pause between ticks must always win over the in-memory
-        # heap.
         try:
-            dep = await account.deployments_get(org_id, team_id, project_id)
-        except Exception as e:
-            error(f'[SCHEDULER] {entry.key}: failed to load deployment: {e}')
-            return
-        if dep is None or dep.get('state') != 'enabled':
-            self.sync(org_id, dep or {'teamId': team_id, 'projectId': project_id, 'state': 'removed'})
-            return
-        sched = (dep.get('schedules') or {}).get(source_id)
-        if not sched or sched.get('paused', False):
-            self.sync(org_id, dep)
-            return
+            # Re-read the deployment at fire time: a disable/remove/pointer-move
+            # or schedule pause between ticks must always win over the in-memory
+            # heap.
+            try:
+                dep = await account.deployments_get(org_id, team_id, project_id)
+            except Exception as e:
+                error(f'[SCHEDULER] {entry.key}: failed to load deployment: {e}')
+                return
+            if dep is None or dep.get('state') != 'enabled':
+                self.sync(org_id, dep or {'teamId': team_id, 'projectId': project_id, 'state': 'removed'})
+                return
+            sched = (dep.get('schedules') or {}).get(source_id)
+            if not sched or sched.get('paused', False):
+                self.sync(org_id, dep)
+                return
 
-        # Load the pointed-at artifact — sha256-verified; a tampered or
-        # missing artifact must never run.
-        try:
-            pipeline = await account.deployments_artifact(org_id, project_id, dep['version'])
-        except Exception as e:
-            error(f'[SCHEDULER] {entry.key}: artifact v{dep.get("version")} unusable: {e}; marking errored')
-            await self._mark_errored(org_id, team_id, project_id)
-            return
+            # Load the pointed-at artifact — sha256-verified; a tampered or
+            # missing artifact must never run.
+            try:
+                pipeline = await account.deployments_artifact(org_id, project_id, dep['version'])
+            except Exception as e:
+                error(f'[SCHEDULER] {entry.key}: artifact v{dep.get("version")} unusable: {e}; marking errored')
+                await self._mark_errored(org_id, team_id, project_id)
+                return
 
-        # Per-source execution: a task IS project.source — the schedule's
-        # source becomes the pipeline entry point for this run.
-        pipeline = dict(pipeline)
-        pipeline['source'] = source_id
+            # Per-source execution: a task IS project.source — the schedule's
+            # source becomes the pipeline entry point for this run.
+            pipeline = dict(pipeline)
+            pipeline['source'] = source_id
 
-        try:
-            ttl = sched.get('ttl')
-            # The run executes AS THE TEAM and carries no human identity —
-            # who deployed lives in the deployment history, not on the run.
-            task_token = await start_server_task_as_team(
-                self._server,
-                pipeline,
-                org_id=org_id,
-                team_id=team_id,
-                trigger='schedule',
-                ttl=int(ttl) if isinstance(ttl, (int, float)) and ttl else None,
-                # Per-source execution settings ride the schedule record.
-                trace_level=sched.get('traceLevel') or 'full',
-                debug_out=bool(sched.get('debugOut')),
-            )
-        except PermissionError as e:
-            # Permission-shaped failures are permanent until a human acts —
-            # mark errored instead of retrying every tick.
-            error(f'[SCHEDULER] {entry.key}: dispatch denied: {e}; marking errored')
-            await self._mark_errored(org_id, team_id, project_id)
-            return
-        except Exception as e:
-            error(f'[SCHEDULER] {entry.key}: dispatch failed: {e}')
-            return
+            try:
+                ttl = sched.get('ttl')
+                # The run executes AS THE TEAM and carries no human identity —
+                # who deployed lives in the deployment history, not on the run.
+                task_token = await start_server_task_as_team(
+                    self._server,
+                    pipeline,
+                    org_id=org_id,
+                    team_id=team_id,
+                    trigger='schedule',
+                    ttl=int(ttl) if isinstance(ttl, (int, float)) and ttl else None,
+                    # Per-source execution settings ride the schedule record.
+                    trace_level=sched.get('traceLevel') or 'full',
+                    debug_out=bool(sched.get('debugOut')),
+                )
+            except PermissionError as e:
+                # Permission-shaped failures are permanent until a human acts —
+                # mark errored instead of retrying every tick.
+                error(f'[SCHEDULER] {entry.key}: dispatch denied: {e}; marking errored')
+                await self._mark_errored(org_id, team_id, project_id)
+                return
+            except Exception as e:
+                error(f'[SCHEDULER] {entry.key}: dispatch failed: {e}')
+                return
 
-        self._active_tokens[entry.key] = task_token
-        await account.deployments_mark_run(org_id, team_id, project_id, source_id)
-        await self._notify_deploy_changed(org_id, team_id, project_id, 'run')
-        debug(f'[SCHEDULER] {entry.key}: dispatched -> task {task_token}')
+            self._active_tokens[entry.key] = task_token
+            await account.deployments_mark_run(org_id, team_id, project_id, source_id)
+            await self._notify_deploy_changed(org_id, team_id, project_id, 'run')
+            debug(f'[SCHEDULER] {entry.key}: dispatched -> task {task_token}')
+        finally:
+            # A dispatch that succeeded replaced the in-flight marker with
+            # the real token above; every other exit clears the marker so
+            # the guard reopens for the next tick.
+            if self._active_tokens.get(entry.key) == _DISPATCHING:
+                self._active_tokens.pop(entry.key, None)
 
     async def _mark_errored(self, org_id: str, team_id: str, project_id: str) -> None:
         """Flip a deployment to 'errored' and drop its schedule entries.

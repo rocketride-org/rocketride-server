@@ -652,8 +652,11 @@ class FileDeploymentBackend:
 
             try:
                 if cas_version is None:
-                    # First writer wins; a concurrent creator surfaces as a
-                    # mismatch on the next loop's read.
+                    # CREATE path: the store contract has no create-if-absent
+                    # precondition, so this write is unguarded — two racing
+                    # first creators would last-write-win. Acceptable for the
+                    # single-process OSS backend (SaaS overrides with DB CAS);
+                    # serializing creates here is a parked follow-up.
                     await self._store.write_file(path, json.dumps(meta, indent=1))
                 else:
                     await self._store.write_file_atomic(path, json.dumps(meta, indent=1), expected_version=cas_version)

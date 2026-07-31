@@ -1455,9 +1455,7 @@ class Task(DAPBase):
             total_pipes = body.get('total_pipes', 0)
             pipe_index = body.get('id', '')
             component_name = body.get('pipe_id', '')
-            # Clamp oversized payloads HERE, before the rebuilt body fans out
-            # to the broadcast, the derived flow, and the run-log continuum.
-            trace = cap_trace_payload(body.get('trace', {}))
+            raw_trace = body.get('trace', {})
 
             # total_pipes=0 marks a synthetic trace (tool-call events emit it
             # as "unknown") — keep the data lane's real pipe count.
@@ -1481,13 +1479,21 @@ class Task(DAPBase):
                 'op': operation,
                 'pipes': pipes,
                 'component': component_name,
-                'trace': trace or {},
+                # Filled below only when tracing is on — the clamp
+                # serializes the whole trace, wasted work for a body that
+                # never leaves this method (synthetic tool-call traces
+                # arrive regardless of trace level).
+                'trace': {},
             }
             # Send out a status update when needed
             self._status_updated = True
 
             # If this task is started with tracing
             if self._pipelineTraceLevel:
+                # Clamp oversized payloads HERE, before the rebuilt body
+                # fans out to the broadcast, the derived flow, and the
+                # run-log continuum.
+                body['trace'] = cap_trace_payload(raw_trace) or {}
                 # Build the derived flow event only when it will actually be
                 # delivered — build_event assigns its continuum seq, and a
                 # built-but-unsent event would leave a gap. It inherits the

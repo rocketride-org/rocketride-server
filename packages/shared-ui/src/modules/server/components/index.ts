@@ -6,6 +6,7 @@
 export { StatCard } from './StatCard';
 export { StatusPill } from './StatusPill';
 export { OverviewPanel } from './OverviewPanel';
+export type { IOverviewPanelProps } from './OverviewPanel';
 export { OverviewGrid } from './OverviewGrid';
 export type { IOverviewGridProps } from './OverviewGrid';
 export { ConnectionsPanel } from './ConnectionsPanel';

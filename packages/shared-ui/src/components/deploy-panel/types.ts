@@ -13,6 +13,11 @@
  * (rocket-ui, VS Code) can reuse them.
  */
 
+import type { CellComponent } from 'tabulator-tables';
+
+import type { GridColumnDefinition } from '../data-grid/defaults';
+import { formatTime } from '../../modules/server/util/formatters';
+
 // =============================================================================
 // DATA TYPES
 // =============================================================================
@@ -139,3 +144,50 @@ export const DEPLOY_ACTION_VERBS: Record<string, string> = {
 	pause: 'paused',
 	resume: 'resumed',
 };
+
+/** State → chip color — THE one state palette for the deploy surfaces
+    (DeploymentView and TeamDeploymentRecordPanel render the same header
+    chip; two hand-copied maps would drift when a state is recolored). */
+export const DEPLOY_STATE_COLOR: Record<TeamDeployment['state'], string> = {
+	enabled: 'var(--rr-color-success)',
+	disabled: 'var(--rr-text-secondary)',
+	errored: 'var(--rr-color-error)',
+	removed: 'var(--rr-text-disabled)',
+};
+
+/**
+ * The audit-trail grid's column set — THE one definition for the history
+ * grids (DeploymentView and TeamDeploymentRecordPanel render the identical
+ * trail). A factory rather than a shared const because Tabulator treats
+ * column definition objects as its own mutable state.
+ *
+ * @returns Fresh column definitions for a CardDataGrid history table.
+ */
+export const createDeployHistoryColumns = (): GridColumnDefinition[] => [
+	{
+		title: 'When',
+		field: 'at',
+		rrType: 'date',
+		rrDefault: true,
+		rrDefaultSort: 'desc',
+		rrDescription: 'When the action happened (local time); newest first.',
+		formatter: (cell: CellComponent) => formatTime(cell.getValue() as number),
+		width: 170,
+	},
+	{ title: 'Actor', field: 'actor', rrType: 'string', rrDefault: true, rrDescription: 'Who performed the action (denormalized — survives account deletion).', width: 160 },
+	{
+		title: 'Action',
+		field: 'seq',
+		rrNoPopup: true,
+		rrDefault: true,
+		rrDescription: 'What happened to this team deployment: deploys, rollbacks, enables/disables, removals; publishes ride along org-wide.',
+		widthGrow: 3,
+		formatter: (cell: CellComponent) => {
+			const row = cell.getRow().getData() as DeployHistoryRow;
+			// Past-tense verbs; 'pause'/'resume' appear only on rows
+			// written before the enable/disable vocabulary.
+			const verb = DEPLOY_ACTION_VERBS[row.action] ?? row.action;
+			return `${verb} v${row.version}${row.comment ? ` “${row.comment}”` : ''}`;
+		},
+	},
+];

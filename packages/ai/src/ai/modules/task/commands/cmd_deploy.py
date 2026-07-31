@@ -223,6 +223,25 @@ class DeployCommands(DAPConn):
         self.verify_team_permission(team_id, perm)
         return team_id
 
+    async def _require_source_in_artifact(
+        self, org_id: str, team_id: str, project_id: str, source_id: str
+    ) -> Dict[str, Any]:
+        """The team's deployment, after proving ``source_id`` is in its artifact.
+
+        A schedule or per-source setting for a component id the deployed
+        version does not contain would otherwise fail on every cron tick
+        with nothing but a server log line — reject it at write time, where
+        the caller gets a real error.
+        """
+        dep = await account.deployments_get(org_id, team_id, project_id)
+        if dep is None or dep.get('state') == 'removed':
+            raise ValueError(f'No deployment of {project_id} for team {team_id}')
+        pipeline = await account.deployments_artifact(org_id, project_id, dep['version'])
+        components = pipeline.get('components') or []
+        if source_id not in {c.get('id') for c in components if isinstance(c, dict)}:
+            raise ValueError(f'sourceId {source_id!r} is not a component of version {dep["version"]}')
+        return dep
+
     async def _notify_deploy_changed(self, org_id: str, team_id: str, project_id: str, action: str) -> None:
         """Push an org-scoped invalidation event for a deployment mutation.
 
@@ -472,6 +491,10 @@ class DeployCommands(DAPConn):
         team_id = self._require_team(args, 'task.control')
         org_id = self._org_id()
 
+        # The source must exist in the deployed artifact — a schedule for a
+        # phantom source would fail on every tick.
+        await self._require_source_in_artifact(org_id, team_id, project_id, source_id)
+
         # The paused flag is NOT part of this call: editing cron/ttl keeps
         # it, and schedule_pause/schedule_resume own flipping it.
         dep = await account.deployments_schedule_set(org_id, team_id, project_id, source_id, cron, self._actor(), ttl)
@@ -535,6 +558,9 @@ class DeployCommands(DAPConn):
         team_id = self._require_team(args, 'task.control')
         org_id = self._org_id()
 
+        # Same artifact-membership guard as schedule_set (shared argument).
+        await self._require_source_in_artifact(org_id, team_id, project_id, source_id)
+
         dep = await account.deployments_source_config_set(
             org_id, team_id, project_id, source_id, trace_level, debug_out, self._actor()
         )
@@ -593,6 +619,12 @@ class DeployCommands(DAPConn):
         if dep.get('state') != 'enabled':
             raise ValueError(f'Deployment is {dep.get("state")} — enable it first')
 
+        # The manual path honors the SAME overlap guard as the cron loop:
+        # two concurrent runs of one source would share the team storage
+        # anchor (teams/<team>/files/tasks/<project>).
+        if self._scheduler.is_run_active(team_id, project_id, source_id):
+            raise ValueError(f'A run of {project_id}/{source_id} is already active for team {team_id}')
+
         # The pointed-at artifact, sha256-verified: what was published is
         # what runs. The chosen source becomes the run's entry point.
         pipeline = dict(await account.deployments_artifact(org_id, project_id, dep['version']))
@@ -616,6 +648,9 @@ class DeployCommands(DAPConn):
             trace_level=sched.get('traceLevel') or 'full',
             debug_out=bool(sched.get('debugOut')),
         )
+        # Register the token with the scheduler so the next cron tick sees
+        # this run and skips instead of dispatching a second one.
+        self._scheduler.register_manual_run(team_id, project_id, source_id, token)
         await account.deployments_mark_run(org_id, team_id, project_id, source_id)
         await account.audit(
             self._account_info.userId,
@@ -654,6 +689,12 @@ class DeployCommands(DAPConn):
 
         occurrences: List[float] = []
         if schedule != 'manual':
-            it = croniter(schedule, datetime.now())
-            occurrences = [it.get_next(datetime).timestamp() for _ in range(count)]
+            # croniter accepts some calendar-impossible expressions at
+            # construction and only fails in get_next — report those as
+            # invalid schedules too, never as a DAP error.
+            try:
+                it = croniter(schedule, datetime.now())
+                occurrences = [it.get_next(datetime).timestamp() for _ in range(count)]
+            except Exception as e:
+                return self.build_response(request, body={'valid': False, 'error': str(e), 'next': []})
         return self.build_response(request, body={'valid': True, 'next': occurrences})

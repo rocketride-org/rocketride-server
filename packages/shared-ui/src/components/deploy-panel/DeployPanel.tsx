@@ -37,6 +37,7 @@ import { Modal } from '../modal/Modal';
 import { ConfirmDialog } from '../modal/ConfirmDialog';
 import { Card } from '../card/Card';
 import { formatTime, formatDayTime } from '../../modules/server/util/formatters';
+import { buttonize } from '../../utils/buttonize';
 import { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
 import { VersionRecordPanel } from './VersionRecordPanel';
 import type { IVersionRecordPanelProps } from './VersionRecordPanel';
@@ -421,6 +422,15 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 		}
 	};
 
+	/** Close any open dialog and drop the error it displayed — a canceled
+	    verb must not leave its failure text under the version strip. */
+	const closeDialogs = (): void => {
+		setError('');
+		setPublishOpen(false);
+		setPickerVersion(null);
+		setPendingDeploy(null);
+	};
+
 	/** Stage a pointer move for confirmation (deploy and rollback alike). */
 	const stageDeploy = (version: number, team: DeployTeamRef): void => {
 		const current = deployments.find((dep) => dep.teamId === team.id && dep.state !== 'removed');
@@ -449,7 +459,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 						const clickable = (canPublish || (requiresSave && Boolean(onSaveDocument))) && !busy;
 						const hint = canPublish ? 'snapshot current pipeline' : requiresSave && onSaveDocument ? 'saves your changes, then publishes' : (publishDisabledReason ?? 'unavailable');
 						return (
-							<div style={S.publishCard(clickable)} onClick={() => clickable && setPublishOpen(true)} title={hint}>
+							<div style={S.publishCard(clickable)} {...buttonize(() => setPublishOpen(true), clickable)} title={hint}>
 								<div style={{ fontSize: 20, fontWeight: 300 }}>+</div>
 								<div>
 									<b>Publish v{nextVersion}</b>
@@ -461,7 +471,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 				{versions.map((v, index) => {
 					const live = liveByVersion.get(v.version) ?? [];
 					return (
-						<div key={v.version} style={{ ...S.versionCard, ...(index === 0 ? S.versionCardNewest : {}), ...(fetchArtifact ? { cursor: 'pointer' } : {}) }} title={fetchArtifact ? 'View this version' : undefined} onClick={() => openVersionDrawer(v)}>
+						<div key={v.version} style={{ ...S.versionCard, ...(index === 0 ? S.versionCardNewest : {}), ...(fetchArtifact ? { cursor: 'pointer' } : {}) }} title={fetchArtifact ? 'View this version' : undefined} {...buttonize(() => openVersionDrawer(v), Boolean(fetchArtifact))}>
 							<div style={S.versionNum}>v{v.version}</div>
 							<div style={S.versionMeta}>
 								{v.publishedBy}
@@ -483,18 +493,20 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 										key={dep.teamId}
 										style={{ ...S.envTag, ...(onOpenDeployment ? { cursor: 'pointer' } : {}) }}
 										title={onOpenDeployment ? `Open the ${dep.teamName} deployment (${dep.state})` : `Live on ${dep.teamName} (${dep.state})`}
-										onClick={(e) => {
+										{...buttonize((e) => {
 											// The badge IS the team deployment; the card is the version.
 											e.stopPropagation();
 											onOpenDeployment?.(dep.teamId);
-										}}
+										}, Boolean(onOpenDeployment))}
 									>
 										{multiTeam ? dep.teamName : 'deployed'}
 									</span>
 								))}
 							</div>
 							{controlTeams.length > 0 && (
-								<div style={S.rowButtons} onClick={(e) => e.stopPropagation()}>
+								// Nested real buttons: keep both event paths from
+								// bubbling into the card's buttonized activation.
+								<div style={S.rowButtons} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
 									{singleTarget ? (
 										live.some((dep) => dep.teamId === singleTarget.id) ? null : (
 											<Button variant="secondary" small disabled={busy} onClick={() => stageDeploy(v.version, singleTarget)}>
@@ -523,19 +535,22 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 							{liveDeployments.map((dep) => (
 								<React.Fragment key={dep.teamId}>
 									{/* Group header — the deployment; click opens its record. */}
-									<div style={S.liveGroupHeader(Boolean(onOpenDeployment))} title={onOpenDeployment ? 'Open the team deployment' : undefined} onClick={() => onOpenDeployment?.(dep.teamId)}>
+									<div style={S.liveGroupHeader(Boolean(onOpenDeployment))} title={onOpenDeployment ? 'Open the team deployment' : undefined} {...buttonize(() => onOpenDeployment?.(dep.teamId), Boolean(onOpenDeployment))}>
 										<span style={S.liveTeam}>{dep.teamName}</span>
 										<span style={S.liveVersion}>v{dep.version}</span>
 										<span
 											style={S.liveState(dep.state, Boolean(onSetDisabled))}
 											title={onSetDisabled ? (dep.state === 'enabled' ? 'Click to disable' : 'Click to enable') : undefined}
-											onClick={(e) => {
-												// The dot is the kill-switch toggle; the row still
-												// opens the record everywhere else.
-												if (!onSetDisabled || busy) return;
-												e.stopPropagation();
-												void run(() => onSetDisabled(dep.teamId, dep.state === 'enabled'));
-											}}
+											{...buttonize(
+												(e) => {
+													// The dot is the kill-switch toggle; the row still
+													// opens the record everywhere else (a disabled dot
+													// lets the gesture fall through to the header).
+													e.stopPropagation();
+													void run(() => onSetDisabled!(dep.teamId, dep.state === 'enabled'));
+												},
+												Boolean(onSetDisabled) && !busy
+											)}
 										>
 											&#9679; {dep.state}
 										</span>
@@ -545,17 +560,16 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 									</div>
 									{/* Source rows — schedule pill + last run, drawer-pill grammar. */}
 									{dep.sources.map((src) => (
-										<div key={`${dep.teamId}.${src.sourceId}`} style={S.liveSourceRow(Boolean(onOpenDeployment))} onClick={() => onOpenDeployment?.(dep.teamId, src.sourceId)}>
+										<div key={`${dep.teamId}.${src.sourceId}`} style={S.liveSourceRow(Boolean(onOpenDeployment))} {...buttonize(() => onOpenDeployment?.(dep.teamId, src.sourceId), Boolean(onOpenDeployment))}>
 											<span style={S.liveSourceName}>{src.sourceName}</span>
 											{src.running && <span style={S.liveRunning}>&#9679; running</span>}
 											<span
 												style={S.livePill(Boolean(src.cron) && !src.paused, Boolean(onSetSchedule))}
 												title={onSetSchedule ? 'Edit schedule' : undefined}
-												onClick={(e) => {
-													if (!onSetSchedule) return;
+												{...buttonize((e) => {
 													e.stopPropagation();
 													setEditSchedule({ teamId: dep.teamId, teamName: dep.teamName, source: src });
-												}}
+												}, Boolean(onSetSchedule))}
 											>
 												{src.cron ? `${describeCron(src.cron)}${src.ttl ? ` · ${describeTtl(src.ttl)}` : ''}${src.paused ? ' · paused' : ''}` : 'manual'}
 											</span>
@@ -603,10 +617,10 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			{publishOpen && (
 				<Modal
 					title={`Publish v${nextVersion}`}
-					onClose={() => setPublishOpen(false)}
+					onClose={closeDialogs}
 					footer={
 						<>
-							<Button variant="secondary" disabled={busy} onClick={() => setPublishOpen(false)}>
+							<Button variant="secondary" disabled={busy} onClick={closeDialogs}>
 								Cancel
 							</Button>
 							<Button
@@ -647,9 +661,9 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			{pickerVersion !== null && (
 				<Modal
 					title={`Deploy v${pickerVersion} to…`}
-					onClose={() => setPickerVersion(null)}
+					onClose={closeDialogs}
 					footer={
-						<Button variant="secondary" disabled={busy} onClick={() => setPickerVersion(null)}>
+						<Button variant="secondary" disabled={busy} onClick={closeDialogs}>
 							Cancel
 						</Button>
 					}
@@ -659,7 +673,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 						const current = deployments.find((dep) => dep.teamId === team.id && dep.state !== 'removed');
 						const isCurrent = current?.version === pickerVersion;
 						return (
-							<div key={team.id} style={S.pickerRow(!busy && !isCurrent)} onClick={() => !busy && !isCurrent && stageDeploy(pickerVersion, team)}>
+							<div key={team.id} style={S.pickerRow(!busy && !isCurrent)} {...buttonize(() => stageDeploy(pickerVersion, team), !busy && !isCurrent)}>
 								<span style={{ fontWeight: 600 }}>{team.name}</span>
 								<span style={{ ...commonStyles.textMuted, fontSize: 11.5, marginLeft: 'auto' }}>{current ? (isCurrent ? `already on v${current.version}` : current.version > pickerVersion ? `rollback from v${current.version}` : `upgrade from v${current.version}`) : 'not deployed yet'}</span>
 							</div>
@@ -686,7 +700,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 					confirmLabel={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? 'Rollback' : 'Deploy'}
 					cancelLabel="Cancel"
 					onConfirm={() => void run(() => onDeploy(pendingDeploy.version, pendingDeploy.team.id))}
-					onCancel={() => setPendingDeploy(null)}
+					onCancel={closeDialogs}
 				/>
 			)}
 		</div>

@@ -42,7 +42,7 @@ export type { IMonitorViewProps } from './modules/server';
 export { parseActivityEvent } from './modules/server';
 export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from './modules/server';
 export { OverviewPanel, OverviewGrid, ConnectionsPanel, TasksPanel, ActivityPanel, ConnectionRecordPanel, TaskRecordPanel, taskStatusText, taskStatusVariant, getEventDisplay } from './modules/server/components';
-export type { IOverviewGridProps, IConnectionsPanelProps, ITasksPanelProps, IActivityPanelProps, IConnectionRecordPanelProps, ITaskRecordPanelProps, IEventDisplay, EventTone } from './modules/server/components';
+export type { IOverviewPanelProps, IOverviewGridProps, IConnectionsPanelProps, ITasksPanelProps, IActivityPanelProps, IConnectionRecordPanelProps, ITaskRecordPanelProps, IEventDisplay, EventTone } from './modules/server/components';
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';

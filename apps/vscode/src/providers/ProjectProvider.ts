@@ -25,6 +25,7 @@ import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { isDeployRunBody } from '../shared/util/runClassification';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
 import { resolveDeployTeams, mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, teamNameOf, mapDeploymentInfo } from '../shared/util/deployMapping';
 import type { DeploymentWebviewToHost, DeploymentLoadPayload } from './views/deployTypes';
@@ -41,6 +42,11 @@ const LAYOUTS_KEY = 'rocketride.layouts';
 // reload. Long enough to cover a slow consent flow, short enough that stale
 // tokens don't linger.
 const OAUTH_REDELIVERY_TTL_MS = 5 * 60 * 1000;
+
+// Runtime allowlist for logsession:call — the webview message crosses a
+// process boundary, so the typed 'method' union guarantees nothing; only
+// these proxy methods may be invoked on the session object.
+const LOG_SESSION_METHODS = ['seek', 'getStatus', 'getTrace'] as const;
 
 // =============================================================================
 // TYPES
@@ -168,7 +174,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			// statuses (delivered here whenever a team-scoped subscription is
 			// open) must not enter it.
 			const source = event.body?.source;
-			if (source && (event.body as { runKind?: string }).runKind !== 'deploy') {
+			if (source && !isDeployRunBody(event.body)) {
 				for (const editorState of this.editorStates.values()) {
 					if (!editorState.isDisposed && editorState.projectId === projectId) {
 						editorState.cachedStatuses[source] = event.body as TaskStatus;
@@ -895,31 +901,6 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// DEPLOY LIFECYCLE DATA
 	// =========================================================================
 
-	/**
-	 * Fetches this project's deploy lifecycle (registry versions, team
-	 * deployments, merged history, team roster) through the deploy API, maps
-	 * everything into serialisable view models HOST-side (mirroring
-	 * rocket-ui's ProjectProvider deploy closures + useDeployments), and pushes one
-	 * deploy:data snapshot to the webview.
-	 *
-	 * A project that was never published has no registry — the snapshot
-	 * degrades to empty arrays rather than an error state, so the DEPLOY
-	 * page renders its empty strip.
-	 *
-	 * @param webview - The editor webview to push the snapshot to.
-	 * @param editorState - The editor whose projectId scopes the fetch.
-	 */
-	/**
-	 * Dispatches one deployment-drawer message (deployment:*). Mutations run
-	 * through the deploy API, ack with deployment:actionResult (the drawer's
-	 * pending promise), then re-push a fresh deployment:load so the drawer
-	 * reflects the server's truth. Ported from the retired DeploymentProvider;
-	 * the drawer replaces its WebviewPanel.
-	 *
-	 * @param webview - The project panel's webview (drawer host).
-	 * @param editorState - The panel's editor state (project identity).
-	 * @param message - The incoming typed message.
-	 */
 	/** Open run-log sessions per webview, keyed by the bridge's session id.
 	    Closed on logsession:close and swept when the panel disposes. */
 	private logSessions = new Map<vscode.Webview, Map<string, ReturnType<RocketRideClient['log']['openEventStream']>>>();
@@ -956,6 +937,12 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 				const session = sessions.get(message.sessionId);
 				try {
 					if (!session) throw new Error('Session is closed');
+					// The cast on the incoming message gives NO runtime guarantee
+					// at this process boundary — gate the dynamic dispatch on the
+					// explicit allowlist so only the proxy methods are reachable.
+					if (!(LOG_SESSION_METHODS as readonly string[]).includes(message.method)) {
+						throw new Error(`Unsupported session method: ${message.method}`);
+					}
 					const result = await (session[message.method] as (...a: unknown[]) => Promise<unknown>)(...message.args);
 					webview.postMessage({ type: 'logsession:result', requestId: message.requestId, result });
 				} catch (error) {
@@ -1014,6 +1001,17 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		this.logSessions.delete(webview);
 	}
 
+	/**
+	 * Dispatches one deployment-drawer message (deployment:*). Mutations run
+	 * through the deploy API, ack with deployment:actionResult (the drawer's
+	 * pending promise), then re-push a fresh deployment:load so the drawer
+	 * reflects the server's truth. Ported from the retired DeploymentProvider;
+	 * the drawer replaces its WebviewPanel.
+	 *
+	 * @param webview - The project panel's webview (drawer host).
+	 * @param editorState - The panel's editor state (project identity).
+	 * @param message - The incoming typed message.
+	 */
 	private async handleDeploymentMessage(webview: vscode.Webview, editorState: EditorState, message: DeploymentWebviewToHost): Promise<void> {
 		const projectId = editorState.projectId ?? '';
 		const teamId = message.teamId;
@@ -1202,18 +1200,25 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			}
 
 			// TEAM record: every armed schedule's next occurrence (the status
-			// grid's Next-run column) through the same single evaluator.
+			// grid's Next-run column) through the same single evaluator. The
+			// previews fan out concurrently — serialized round-trips would
+			// stall the drawer by one RTT per scheduled source.
 			const nextRuns: Record<string, number> = {};
 			if (!sourceId && dep.state === 'enabled') {
-				for (const [sid, entry] of Object.entries(allScheds)) {
-					if (!entry.cron || entry.paused) continue;
-					try {
-						const preview = await client.deploy.preview(entry.cron, 1);
-						const firstAt = preview.valid ? preview.next?.[0] : undefined;
-						if (typeof firstAt === 'number') nextRuns[sid] = firstAt;
-					} catch {
-						// An unpreviewable cron just leaves the cell empty.
-					}
+				const armedSources = Object.entries(allScheds).filter(([, entry]) => entry.cron && !entry.paused);
+				const previews = await Promise.all(
+					armedSources.map(async ([sid, entry]) => {
+						try {
+							const preview = await client.deploy.preview(entry.cron as string, 1);
+							return [sid, preview.valid ? preview.next?.[0] : undefined] as const;
+						} catch {
+							// An unpreviewable cron just leaves the cell empty.
+							return [sid, undefined] as const;
+						}
+					})
+				);
+				for (const [sid, firstAt] of previews) {
+					if (typeof firstAt === 'number') nextRuns[sid] = firstAt;
 				}
 			}
 
@@ -1264,6 +1269,20 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		}
 	}
 
+	/**
+	 * Fetches this project's deploy lifecycle (registry versions, team
+	 * deployments, merged history, team roster) through the deploy API, maps
+	 * everything into serialisable view models HOST-side (mirroring
+	 * rocket-ui's ProjectProvider deploy closures + useDeployments), and pushes one
+	 * deploy:data snapshot to the webview.
+	 *
+	 * A project that was never published has no registry — the snapshot
+	 * degrades to empty arrays rather than an error state, so the DEPLOY
+	 * page renders its empty strip.
+	 *
+	 * @param webview - The editor webview to push the snapshot to.
+	 * @param editorState - The editor whose projectId scopes the fetch.
+	 */
 	private async sendDeployData(webview: vscode.Webview, editorState: EditorState): Promise<void> {
 		const projectId = editorState.projectId;
 		const client = this.connectionManager.getClient();

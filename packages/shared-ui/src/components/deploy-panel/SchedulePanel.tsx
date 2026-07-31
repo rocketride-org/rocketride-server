@@ -399,9 +399,26 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 	const invalidCron = Boolean(cron) && preview !== null && preview.valid === false;
 	const clearing = picker.kind === 'demand' && Boolean(initialCron.trim());
 
-	/** One selectable option row (mockup .opt/.radio grammar). */
+	/** One selectable option row (mockup .opt/.radio grammar). Carries real
+	    radio semantics — role/aria-checked/tab stop and Enter/Space — so the
+	    form is keyboard-completable. The keydown ignores events bubbling out
+	    of the row's embedded inputs (Space typed in the cron box must never
+	    flip the trigger). */
 	const option = (kind: TriggerKind, title: ReactNode, sub: ReactNode, dashed = false): ReactNode => (
-		<div style={{ ...S.option(picker.kind === kind, !busy), ...(dashed ? S.optionDashed : {}) }} onClick={() => !busy && setPicker((prev) => ({ ...prev, kind }))}>
+		<div
+			style={{ ...S.option(picker.kind === kind, !busy), ...(dashed ? S.optionDashed : {}) }}
+			role="radio"
+			aria-checked={picker.kind === kind}
+			tabIndex={busy ? -1 : 0}
+			onClick={() => !busy && setPicker((prev) => ({ ...prev, kind }))}
+			onKeyDown={(e) => {
+				if (busy || e.target !== e.currentTarget) return;
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault();
+					setPicker((prev) => ({ ...prev, kind }));
+				}
+			}}
+		>
 			<span style={S.radio(picker.kind === kind)} />
 			<div style={{ flex: 1 }}>
 				<div style={S.optionTitle}>{title}</div>
@@ -461,100 +478,147 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 			>
 				<div>
 					{/* ── SCHEDULE — the trigger ────────────────────────────── */}
-					<div style={S.sectionLabel}>Schedule</div>
-					{option('demand', 'On demand', <div style={S.optionSub}>Stored on the server; runs only when you trigger it.</div>)}
-					{option(
-						'interval',
-						'Repeating interval',
-						picker.kind === 'interval' ? (
-							<div style={S.optionForm}>
-								Every
-								<input style={S.numBox} type="number" min={1} max={59} value={picker.intervalN} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, intervalN: Math.max(1, parseInt(e.target.value, 10) || 1) }))} />
-								<select style={S.unitSelect} value={picker.intervalUnit} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, intervalUnit: e.target.value as IntervalUnit }))}>
-									<option value="minutes">minutes</option>
-									<option value="hours">hours</option>
-								</select>
-							</div>
-						) : (
-							<div style={S.optionSub}>Every N minutes or hours.</div>
-						)
-					)}
-					{option(
-						'daily',
-						'Daily',
-						picker.kind === 'daily' ? (
-							<div style={S.optionForm}>
-								Run at
-								<input style={{ ...S.numBox, width: 118 }} type="time" value={picker.time} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, time: e.target.value || prev.time }))} />
-							</div>
-						) : (
-							<div style={S.optionSub}>Once a day at a set time.</div>
-						)
-					)}
-					{option(
-						'weekly',
-						'Weekly',
-						picker.kind === 'weekly' ? (
-							<div style={S.optionForm}>
-								{DAY_CHIPS.map((day, index) => (
-									<span
-										key={index}
-										style={S.dayChip(picker.days.includes(day.cron))}
-										onClick={(e) => {
-											e.stopPropagation();
-											if (busy) return;
-											setPicker((prev) => ({ ...prev, days: prev.days.includes(day.cron) ? prev.days.filter((d) => d !== day.cron) : [...prev.days, day.cron] }));
-										}}
-									>
-										{day.label}
-									</span>
-								))}
-								<span>at</span>
-								<input style={{ ...S.numBox, width: 118 }} type="time" value={picker.time} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, time: e.target.value || prev.time }))} />
-							</div>
-						) : (
-							<div style={S.optionSub}>On chosen weekdays at a set time.</div>
-						)
-					)}
-					{option(
-						'cron',
-						<span style={{ color: 'var(--rr-text-secondary)' }}>Advanced: cron expression</span>,
-						picker.kind === 'cron' ? (
-							<div style={S.optionForm}>
-								<InputField value={picker.cron} placeholder="*/30 * * * *" disabled={busy} style={{ width: '100%' }} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, cron: e.target.value }))} />
-							</div>
-						) : (
-							<div style={S.optionSub}>Last resort for shapes the pickers cannot express. Validated and previewed by the server before it can be saved.</div>
-						),
-						true
-					)}
-
-					{/* ── RUN FOR — duration is part of the schedule ─────────── */}
-					<div style={S.sectionLabel}>Run for</div>
-					<div style={S.option(runFor === 'finish', !busy)} onClick={() => !busy && setRunFor('finish')}>
-						<span style={S.radio(runFor === 'finish')} />
-						<div style={{ flex: 1 }}>
-							<div style={S.optionTitle}>Until the pipeline finishes</div>
-							<div style={S.optionSub}>The task ends when the source completes — right for batch sources.</div>
-						</div>
+					<div style={S.sectionLabel} id="schedule-trigger-label">
+						Schedule
 					</div>
-					<div style={S.option(runFor === 'window', !busy)} onClick={() => !busy && setRunFor('window')}>
-						<span style={S.radio(runFor === 'window')} />
-						<div style={{ flex: 1 }}>
-							<div style={S.optionTitle}>Fixed window</div>
-							{runFor === 'window' ? (
+					<div role="radiogroup" aria-labelledby="schedule-trigger-label">
+						{option('demand', 'On demand', <div style={S.optionSub}>Stored on the server; runs only when you trigger it.</div>)}
+						{option(
+							'interval',
+							'Repeating interval',
+							picker.kind === 'interval' ? (
 								<div style={S.optionForm}>
-									Stay up for
-									<input style={S.numBox} type="number" min={1} max={999} value={windowN} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setWindowN(Math.max(1, parseInt(e.target.value, 10) || 1))} />
-									<select style={S.unitSelect} value={windowUnit} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setWindowUnit(e.target.value as 'minutes' | 'hours')}>
+									Every
+									<input style={S.numBox} type="number" min={1} max={59} value={picker.intervalN} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, intervalN: Math.max(1, parseInt(e.target.value, 10) || 1) }))} />
+									<select style={S.unitSelect} value={picker.intervalUnit} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, intervalUnit: e.target.value as IntervalUnit }))}>
 										<option value="minutes">minutes</option>
 										<option value="hours">hours</option>
 									</select>
-									then shut down — essential for endpoint-style sources that never terminate on their own.
 								</div>
 							) : (
-								<div style={S.optionSub}>Stay up for a set window, then shut down — endpoint-style sources that never terminate on their own.</div>
-							)}
+								<div style={S.optionSub}>Every N minutes or hours.</div>
+							)
+						)}
+						{option(
+							'daily',
+							'Daily',
+							picker.kind === 'daily' ? (
+								<div style={S.optionForm}>
+									Run at
+									<input style={{ ...S.numBox, width: 118 }} type="time" value={picker.time} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, time: e.target.value || prev.time }))} />
+								</div>
+							) : (
+								<div style={S.optionSub}>Once a day at a set time.</div>
+							)
+						)}
+						{option(
+							'weekly',
+							'Weekly',
+							picker.kind === 'weekly' ? (
+								<div style={S.optionForm}>
+									{DAY_CHIPS.map((day, index) => (
+										<span
+											key={index}
+											style={S.dayChip(picker.days.includes(day.cron))}
+											role="checkbox"
+											aria-checked={picker.days.includes(day.cron)}
+											aria-label={day.label}
+											tabIndex={busy ? -1 : 0}
+											onClick={(e) => {
+												e.stopPropagation();
+												if (busy) return;
+												setPicker((prev) => ({ ...prev, days: prev.days.includes(day.cron) ? prev.days.filter((d) => d !== day.cron) : [...prev.days, day.cron] }));
+											}}
+											onKeyDown={(e) => {
+												// Chip toggles never reach the row radio (stop both paths).
+												e.stopPropagation();
+												if (busy) return;
+												if (e.key === 'Enter' || e.key === ' ') {
+													e.preventDefault();
+													setPicker((prev) => ({ ...prev, days: prev.days.includes(day.cron) ? prev.days.filter((d) => d !== day.cron) : [...prev.days, day.cron] }));
+												}
+											}}
+										>
+											{day.label}
+										</span>
+									))}
+									<span>at</span>
+									<input style={{ ...S.numBox, width: 118 }} type="time" value={picker.time} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, time: e.target.value || prev.time }))} />
+								</div>
+							) : (
+								<div style={S.optionSub}>On chosen weekdays at a set time.</div>
+							)
+						)}
+						{option(
+							'cron',
+							<span style={{ color: 'var(--rr-text-secondary)' }}>Advanced: cron expression</span>,
+							picker.kind === 'cron' ? (
+								<div style={S.optionForm}>
+									<InputField value={picker.cron} placeholder="*/30 * * * *" disabled={busy} style={{ width: '100%' }} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, cron: e.target.value }))} />
+								</div>
+							) : (
+								<div style={S.optionSub}>Last resort for shapes the pickers cannot express. Validated and previewed by the server before it can be saved.</div>
+							),
+							true
+						)}
+					</div>
+
+					{/* ── RUN FOR — duration is part of the schedule ─────────── */}
+					<div style={S.sectionLabel} id="schedule-runfor-label">
+						Run for
+					</div>
+					<div role="radiogroup" aria-labelledby="schedule-runfor-label">
+						<div
+							style={S.option(runFor === 'finish', !busy)}
+							role="radio"
+							aria-checked={runFor === 'finish'}
+							tabIndex={busy ? -1 : 0}
+							onClick={() => !busy && setRunFor('finish')}
+							onKeyDown={(e) => {
+								if (busy || e.target !== e.currentTarget) return;
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									setRunFor('finish');
+								}
+							}}
+						>
+							<span style={S.radio(runFor === 'finish')} />
+							<div style={{ flex: 1 }}>
+								<div style={S.optionTitle}>Until the pipeline finishes</div>
+								<div style={S.optionSub}>The task ends when the source completes — right for batch sources.</div>
+							</div>
+						</div>
+						<div
+							style={S.option(runFor === 'window', !busy)}
+							role="radio"
+							aria-checked={runFor === 'window'}
+							tabIndex={busy ? -1 : 0}
+							onClick={() => !busy && setRunFor('window')}
+							onKeyDown={(e) => {
+								if (busy || e.target !== e.currentTarget) return;
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									setRunFor('window');
+								}
+							}}
+						>
+							<span style={S.radio(runFor === 'window')} />
+							<div style={{ flex: 1 }}>
+								<div style={S.optionTitle}>Fixed window</div>
+								{runFor === 'window' ? (
+									<div style={S.optionForm}>
+										Stay up for
+										<input style={S.numBox} type="number" min={1} max={999} value={windowN} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setWindowN(Math.max(1, parseInt(e.target.value, 10) || 1))} />
+										<select style={S.unitSelect} value={windowUnit} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setWindowUnit(e.target.value as 'minutes' | 'hours')}>
+											<option value="minutes">minutes</option>
+											<option value="hours">hours</option>
+										</select>
+										then shut down — essential for endpoint-style sources that never terminate on their own.
+									</div>
+								) : (
+									<div style={S.optionSub}>Stay up for a set window, then shut down — endpoint-style sources that never terminate on their own.</div>
+								)}
+							</div>
 						</div>
 					</div>
 

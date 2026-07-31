@@ -22,7 +22,7 @@
  * deployment, so the hosted view gets no `documentTitle` (no double title).
  */
 
-import React, { useMemo, useState, CSSProperties } from 'react';
+import React, { useEffect, useMemo, useRef, useState, CSSProperties } from 'react';
 
 import { Button } from '../button/Button';
 import { Modal } from '../modal/Modal';
@@ -128,8 +128,9 @@ export interface IDeploymentRecordPanelProps {
  * @returns The drawer element, or null while closed.
  */
 export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ open, onClose, fallbackTitle, loadError, data }) => {
-	// Default width per open: 75% of the current viewport (the DetailPanel
-	// clamps to its usable band and a persisted drag width overrides).
+	// Default width per MOUNT: 75% of the viewport at first render (the
+	// DetailPanel clamps to its usable band and a persisted drag width
+	// overrides, so a later host resize only moves the clamp).
 	const width = useMemo(() => Math.round(window.innerWidth * DEFAULT_HOST_FRACTION), []);
 
 	// --- Verb flow state (dialog-guarded; the record panel owns its verbs) ---
@@ -142,6 +143,22 @@ export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ o
 	const [stagedConfig, setStagedConfig] = useState<{ traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut: boolean } | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
+
+	// Identity of the focused record. ONE drawer instance persists across
+	// selections (sibling precedent), so the verb state above is cleared
+	// whenever the focused record changes — a staged edit, an open confirm
+	// dialog, or an error from the PREVIOUS record must never arm a verb
+	// against the NEXT one.
+	const recordKey = data ? `${data.teamName}:${data.deployment.pipelineName}:${data.sourceId}` : null;
+	const prevRecordKeyRef = useRef<string | null>(null);
+	useEffect(() => {
+		if (recordKey !== null && recordKey !== prevRecordKeyRef.current) {
+			prevRecordKeyRef.current = recordKey;
+			setStagedConfig(null);
+			setStopOpen(false);
+			setError('');
+		}
+	}, [recordKey]);
 
 	/** Run one verb with shared busy/error handling (dialogs close first). */
 	const run = async (action: () => Promise<void>): Promise<void> => {

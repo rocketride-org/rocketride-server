@@ -125,12 +125,12 @@ async def start_server_task_as_team(
     conn._trusted_trigger = trigger
 
     # The schedule's run window rides the execute arguments: start_task
-    # reads 'ttl', and a deploy run ALWAYS sends it — 0 means no window.
-    # The per-source execution settings ride the same way as a dev run:
-    # 'pipelineTraceLevel' plus '--trace=debugOut' in the task args.
-    # (run until the pipeline exits), N means seconds until shutdown (the
+    # reads 'ttl', and a deploy run ALWAYS sends it. 0 means no window
+    # (run until the pipeline exits); N means seconds until shutdown (the
     # 'fixed window' schedule option). Omitting it would silently apply
     # the server's DEFAULT idle timeout, which is a dev-task policy.
+    # The per-source execution settings ride the same way as a dev run:
+    # 'pipelineTraceLevel' plus '--trace=debugOut' in the task args.
     arguments: Dict[str, Any] = {'pipeline': pipeline, 'teamId': team_id, 'ttl': int(ttl) if ttl else 0}
     if trace_level:
         arguments['pipelineTraceLevel'] = trace_level

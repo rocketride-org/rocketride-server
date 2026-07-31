@@ -407,3 +407,10 @@ class TestIterEnabled:
         assert ('org-1', 'team-a', 'proj-1') in seen
         assert ('org-2', 'team-z', 'proj-9') in seen
         assert all(t != 'team-b' for _, t, _p in seen)
+
+    @pytest.mark.asyncio
+    async def test_fresh_store_yields_nothing(self, backend):
+        # A store with no orgs/ tree yet (fresh install) must not break the
+        # scheduler feed — iter_enabled swallows the StorageError and yields
+        # nothing instead of raising.
+        assert [d async for d in backend.iter_enabled()] == []

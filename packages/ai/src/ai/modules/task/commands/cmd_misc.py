@@ -482,13 +482,14 @@ class MiscCommands(DAPConn):
                 self.debug_message(f'Error reading task status for connection map "{control.id}": {e}')
                 continue
             task_name = getattr(status, 'name', None) or control.source
+            # Monitor keys are owner-scoped — build from the control's owner
+            # (once per control; they do not vary per connection).
+            project_key = owner_key(control.owner_id, control.project_id, control.source)
+            project_wildcard_key = f'p.{control.owner_id}.{control.project_id}.*'
+            pipe_prefix = f'{project_key}.'
             for cid, conn in conn_items:
                 if not hasattr(conn, '_monitors'):
                     continue
-                # Monitor keys are owner-scoped — build from the control's owner
-                project_key = owner_key(control.owner_id, control.project_id, control.source)
-                project_wildcard_key = f'p.{control.owner_id}.{control.project_id}.*'
-                pipe_prefix = f'{project_key}.'
                 if (
                     project_key in conn._monitors
                     or project_wildcard_key in conn._monitors

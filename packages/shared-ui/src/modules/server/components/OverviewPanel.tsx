@@ -265,7 +265,7 @@ function getTickerSummary(event: ActivityEvent): { highlight: string; rest: stri
 // =============================================================================
 
 /** Props for the {@link OverviewPanel} component. */
-interface OverviewPanelProps {
+export interface IOverviewPanelProps {
 	/** Full dashboard snapshot (the hosting view gates on it being loaded). */
 	data: DashboardResponse;
 	/** Activity events pushed from the server (newest first). */
@@ -278,10 +278,10 @@ interface OverviewPanelProps {
  * The Overview page body: stat tiles, ticker, the shared unified grid, and
  * the activity / resources cards.
  *
- * @param props - {@link OverviewPanelProps}.
+ * @param props - {@link IOverviewPanelProps}.
  * @returns The overview page content.
  */
-export const OverviewPanel: React.FC<OverviewPanelProps> = ({ data, events, onRefresh }) => {
+export const OverviewPanel: React.FC<IOverviewPanelProps> = ({ data, events, onRefresh }) => {
 	// Snapshot-derived slices (small arrays; recomputed per poll).
 	const { overview, connections, tasks } = data;
 	const runningTasks = tasks.filter((t) => !t.completed);

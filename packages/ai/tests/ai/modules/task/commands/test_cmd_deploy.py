@@ -82,6 +82,11 @@ def _make_conn(account_info, scheduler=None):
     # The _scheduler property walks self._server._server.app.state.scheduler —
     # satisfy the chain on the stub server instead of mutating the class.
     sched = scheduler or MagicMock()
+    if scheduler is None:
+        # The manual-run overlap guard defaults OPEN (a bare MagicMock would
+        # return a truthy mock and refuse every run); tests exercising the
+        # refusal flip it to True themselves.
+        sched.is_run_active.return_value = False
     server = MagicMock()
     # broadcast_server_event is AWAITED by the deploy-change notifier; a
     # plain MagicMock attribute returns a non-awaitable, the await raises,
@@ -108,7 +113,11 @@ def account_stub(monkeypatch):
         deployments_list=AsyncMock(return_value=[dep]),
         deployments_get=AsyncMock(return_value=dep),
         deployments_versions=AsyncMock(return_value=[{'version': 3}]),
-        deployments_artifact=AsyncMock(return_value={'project_id': 'proj-1', 'components': []}),
+        # The artifact carries the source components schedule_set/source_config
+        # validate against (and _deploy_run injects its source into).
+        deployments_artifact=AsyncMock(
+            return_value={'project_id': 'proj-1', 'components': [{'id': 's1'}, {'id': 'webhook_1'}]}
+        ),
         deployments_mark_run=AsyncMock(),
         deployments_history=AsyncMock(
             return_value={'rows': [{'action': 'publish', 'seq': 1}], 'total': 1, 'page': 1, 'pageSize': 50}
@@ -305,6 +314,22 @@ class TestReads:
         assert dispatched['trace_level'] == 'summary'
         assert dispatched['debug_out'] is True
         account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'team-1', 'proj-1', 'webhook_1')
+        # The manual token lands under the scheduler's overlap guard so the
+        # next cron tick sees this run and skips.
+        conn._test_scheduler.register_manual_run.assert_called_once_with('team-1', 'proj-1', 'webhook_1', 'tk_manual')
+
+    @pytest.mark.asyncio
+    async def test_run_refuses_while_source_run_active(self, account_stub, monkeypatch):
+        # The manual path honors the scheduler's overlap guard: a live run of
+        # the same (team, project, source) refuses the run-now.
+        async def fake_dispatch(*a, **k):
+            raise AssertionError('must not dispatch')
+
+        monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
+        conn = _make_conn(_account_info())
+        conn._test_scheduler.is_run_active.return_value = True
+        with pytest.raises(ValueError, match='already active'):
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': 'team-1'})
 
     @pytest.mark.asyncio
     async def test_run_refuses_disabled_and_needs_control(self, account_stub, monkeypatch):
@@ -328,7 +353,7 @@ class TestReads:
         # IS — the read-only DESIGN render is built from this body.
         conn = _make_conn(_account_info())
         result = await conn._deploy_artifact({}, {'projectId': 'proj-1', 'version': 3})
-        assert result['body'] == {'project_id': 'proj-1', 'components': []}
+        assert result['body'] == {'project_id': 'proj-1', 'components': [{'id': 's1'}, {'id': 'webhook_1'}]}
         assert account_stub.deployments_artifact.await_args.args == ('org-1', 'proj-1', 3)
 
     @pytest.mark.asyncio
@@ -400,6 +425,23 @@ class TestStateAndSchedules:
             {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1', 'schedule': 'manual'}
         )
         assert account_stub.deployments_schedule_set.await_args.args[4] is None
+
+    @pytest.mark.asyncio
+    async def test_schedule_set_rejects_source_not_in_artifact(self, account_stub):
+        # A schedule for a source the deployed artifact does not contain
+        # would fail on every cron tick — refused at write time instead.
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='not a component'):
+            await conn._deploy_schedule_set(
+                {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 'ghost', 'schedule': '@hourly'}
+            )
+        account_stub.deployments_schedule_set.assert_not_awaited()
+        # source_config shares the guard (same argument, same failure mode).
+        with pytest.raises(ValueError, match='not a component'):
+            await conn._deploy_source_config(
+                {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 'ghost', 'traceLevel': 'none'}
+            )
+        account_stub.deployments_source_config_set.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_schedule_pause_resume_flip_the_flag(self, account_stub):

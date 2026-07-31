@@ -50,7 +50,6 @@ const LIVE_EVENTS_KEEP = 10000;
 /** Safety timeout for deploy host round-trips so a lost reply never hangs (ms). */
 const DEPLOY_REQUEST_TIMEOUT_MS = 30000;
 
-/** Refresh cadence for the open deployment drawer (ms) — matches cloud. */
 /** Coalescing window for push-triggered deployment re-fetches (ms). */
 const DEPLOYMENT_REFETCH_COALESCE_MS = 400;
 

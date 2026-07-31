@@ -593,8 +593,12 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			// TAB (screen A): a file no longer identifies ONE deploy continuum —
 			// teams are the environments, and several teams may run this
 			// project concurrently.
+			// TabPanel mounts EVERY panel and hides the inactive ones, so a
+			// readonly host (which removes the Deploy tab and clamps the mode)
+			// must not mount DeployPanel at all — its mount-time refresh()
+			// would fetch a lifecycle the user can never open.
 			content: renderDocPanel(
-				fetchDeployLifecycle && onDeployPublish && onDeployVersion ? (
+				!isReadonly && fetchDeployLifecycle && onDeployPublish && onDeployVersion ? (
 					<DeployPanel fetchLifecycle={fetchDeployLifecycle} deployments={teamDeploymentRows} teams={deployTeams} pipelineName={project?.name ?? ''} {...(onDeploySetDisabled ? { onSetDisabled: onDeploySetDisabled } : {})} {...(onDeploySetSchedule ? { onSetSchedule: onDeploySetSchedule } : {})} {...(onDeploySetSchedulePaused ? { onSetSchedulePaused: onDeploySetSchedulePaused } : {})} {...(fetchDeployArtifact ? { fetchArtifact: fetchDeployArtifact, servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})} {...(onDeployPreviewSchedule ? { previewSchedule: onDeployPreviewSchedule } : {})} canPublish={!isDirty && !isNew} {...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})} requiresSave={isDirty && !isNew} {...(onSaveDocument ? { onSaveDocument } : {})} onPublish={onDeployPublish} onDeploy={onDeployVersion} {...(onOpenDeployment ? { onOpenDeployment } : {})} />
 				) : (
 					<div style={commonStyles.empty}>Deployment lifecycle is not available in this host yet</div>

@@ -319,6 +319,8 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         source='reader',
         project_id='proj-1',
         run_kind='dev',
+        # Real controls always expose owner_id (dev run -> the user).
+        owner_id='user-1',
         provider='node-x',
         task=own_task,
         launch_type=SimpleNamespace(value='LAUNCH'),
@@ -331,6 +333,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         source='other-source',
         project_id='proj-2',
         run_kind='dev',
+        owner_id='other-user',
         provider='node-y',
         task=MagicMock(),
         launch_type=SimpleNamespace(value='EXECUTE'),
@@ -377,6 +380,8 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
             source='s',
             project_id='p',
             run_kind='dev',
+            # Real controls always expose owner_id (dev run -> the user).
+            owner_id='user-1',
             provider='node-x',
             task=SimpleNamespace(
                 get_status=lambda: SimpleNamespace(

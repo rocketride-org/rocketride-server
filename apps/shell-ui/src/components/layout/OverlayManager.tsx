@@ -149,8 +149,10 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 			    or Escape — clicking the backdrop must NOT close the dialog. */}
 			{overlay !== null && (
 				<div style={styles.backdrop}>
-					<div style={styles.dialog}>
-						<button style={styles.dialogClose} onClick={closeOverlay}>
+					{/* aria-label carries the overlay id (account/settings/…): the
+					    dialog itself has no visible heading to reference. */}
+					<div style={styles.dialog} role="dialog" aria-modal="true" aria-label={overlay}>
+						<button style={styles.dialogClose} onClick={closeOverlay} aria-label="Close" title="Close">
 							✕
 						</button>
 						{overlay === 'account' && <AccountProvider />}

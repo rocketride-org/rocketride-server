@@ -272,7 +272,27 @@ class TestOverlapGuard:
         running.task.is_task_complete.return_value = False
         scheduler._server._task_control['tk_dispatched'] = running
 
-        # The loop's guard consults _active_tokens + the control registry.
-        prev = scheduler._active_tokens.get(entry.key)
-        ctrl = scheduler._server._task_control.get(prev)
-        assert ctrl and not ctrl.task.is_task_complete()
+        # Assert the scheduler's OWN predicate — the exact guard the tick
+        # loop and the manual run path evaluate.
+        assert scheduler._is_previous_run_active(entry.key)
+
+        # And it reopens once the task completes.
+        running.task.is_task_complete.return_value = True
+        assert not scheduler._is_previous_run_active(entry.key)
+
+    @pytest.mark.asyncio
+    async def test_inflight_dispatch_closes_the_guard(self, scheduler):
+        # The tick loop marks the key BEFORE the dispatch task exists; the
+        # guard must already be closed in that window.
+        key = ('team-1', 'proj-1', 'src-1')
+        scheduler._active_tokens[key] = sched_mod._DISPATCHING
+        assert scheduler._is_previous_run_active(key)
+
+    def test_manual_run_registers_under_the_guard(self, scheduler):
+        # A registered manual token with a live control entry closes the
+        # guard for the next cron tick.
+        running = MagicMock()
+        running.task.is_task_complete.return_value = False
+        scheduler._server._task_control['tk_manual'] = running
+        scheduler.register_manual_run('team-1', 'proj-1', 'src-1', 'tk_manual')
+        assert scheduler.is_run_active('team-1', 'proj-1', 'src-1')

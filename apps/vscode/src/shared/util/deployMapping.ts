@@ -123,22 +123,26 @@ export function mapHistoryRows(rows: DeployHistoryEntry[], teams: DeployTeamRefD
  * @returns The "where live" rows for the lifecycle panel.
  */
 export function mapTeamDeploymentRows(deployments: Deployment[], projectId: string, teams: DeployTeamRefDTO[]): TeamDeploymentRowDTO[] {
-	return deployments
-		.filter((dep) => dep.projectId === projectId && dep.state !== 'removed')
-		.map((dep) => {
-			// Normalize the schedule records (cron string, enabled default).
-			const schedules = (dep.schedules ?? {}) as Record<string, { cron?: string; paused?: boolean; ttl?: number; lastRunAt?: number }>;
-			return {
-				teamId: dep.teamId as string,
-				teamName: teamNameOf(teams, dep.teamId as string),
-				version: dep.version ?? 0,
-				// A record without a state stamp is a live pointer — 'enabled'
-				// is the only default inside the state vocabulary.
-				state: (dep.state ?? 'enabled') as TeamDeploymentRowDTO['state'],
-				deployedAt: dep.deployedAt ?? dep.updatedAt ?? 0,
-				schedules: Object.fromEntries(Object.entries(schedules).map(([sourceId, sched]) => [sourceId, { cron: sched.cron ?? '', paused: sched.paused === true, ...(sched.ttl ? { ttl: sched.ttl } : {}), ...(sched.lastRunAt ? { lastRunAt: sched.lastRunAt } : {}) }])),
-			};
-		});
+	return (
+		deployments
+			// A row without a teamId has no identity to key or address in the
+			// where-live panel — drop it (same guard resolveDeployTeams applies).
+			.filter((dep) => dep.projectId === projectId && dep.state !== 'removed' && Boolean(dep.teamId))
+			.map((dep) => {
+				// Normalize the schedule records (cron string, enabled default).
+				const schedules = (dep.schedules ?? {}) as Record<string, { cron?: string; paused?: boolean; ttl?: number; lastRunAt?: number }>;
+				return {
+					teamId: dep.teamId as string,
+					teamName: teamNameOf(teams, dep.teamId as string),
+					version: dep.version ?? 0,
+					// A record without a state stamp is a live pointer — 'enabled'
+					// is the only default inside the state vocabulary.
+					state: (dep.state ?? 'enabled') as TeamDeploymentRowDTO['state'],
+					deployedAt: dep.deployedAt ?? dep.updatedAt ?? 0,
+					schedules: Object.fromEntries(Object.entries(schedules).map(([sourceId, sched]) => [sourceId, { cron: sched.cron ?? '', paused: sched.paused === true, ...(sched.ttl ? { ttl: sched.ttl } : {}), ...(sched.lastRunAt ? { lastRunAt: sched.lastRunAt } : {}) }])),
+				};
+			})
+	);
 }
 
 /**
