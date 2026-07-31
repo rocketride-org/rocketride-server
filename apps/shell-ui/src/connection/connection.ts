@@ -299,6 +299,23 @@ export class ConnectionManager implements IConnectionManager {
 					this.emit('shell:accountUpdate', message.body);
 					return;
 				}
+				// Typed pass-throughs for app-platform push events — the server
+				// emits these names on the wire (dev overlay changes, review
+				// decisions, store writes); re-emit them typed so consumers
+				// subscribe via ShellConnectionEventMap instead of parsing the
+				// generic shell:event envelope.
+				if (message.event === 'shell:manifestRefresh') {
+					this.emit('shell:manifestRefresh', (message.body ?? { source: 'server' }) as ShellConnectionEventMap['shell:manifestRefresh']);
+					return;
+				}
+				if (message.event === 'app:statusChanged') {
+					this.emit('app:statusChanged', (message.body ?? {}) as ShellConnectionEventMap['app:statusChanged']);
+					return;
+				}
+				if (message.event === 'store:changed') {
+					this.emit('store:changed', (message.body ?? {}) as ShellConnectionEventMap['store:changed']);
+					return;
+				}
 				// Broadcast all other server events
 				this.emit('shell:event', { event: message });
 			},

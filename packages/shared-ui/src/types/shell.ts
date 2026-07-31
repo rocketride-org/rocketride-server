@@ -228,6 +228,33 @@ export interface ShellConnectionEventMap {
 	 * (re)initialize when their tab is activated.
 	 */
 	'shell:viewActivated': { viewId: string };
+
+	// ── App development platform ─────────────────────────────────────────
+
+	/**
+	 * The server-side app manifest changed for this user — a dev overlay was
+	 * registered/expired or an app version was published/deployed. The server
+	 * pushes the rebuilt account (shell:accountUpdate) alongside this signal;
+	 * consumers that maintain their own app caches use `source` to decide
+	 * whether/how to refresh (e.g. 'dev-overlay', 'publish', 'expiry').
+	 */
+	'shell:manifestRefresh': { source: string };
+
+	/**
+	 * An app's marketplace review status changed (submitted, approved,
+	 * rejected). Pushed to the developer org's connections so App Builder
+	 * surfaces update badges and show the decision toast. Optional `notes`
+	 * carries reviewer notes on rejection.
+	 */
+	'app:statusChanged': { appId: string; status: string; notes?: string };
+
+	/**
+	 * Files changed under a watched store prefix (app-dev project sources,
+	 * install-task outputs). Debounced server-side; `paths` is the coalesced
+	 * set of changed paths under `prefix`. App Builder file views and type
+	 * caches invalidate on this.
+	 */
+	'store:changed': { prefix: string; paths: string[] };
 }
 
 // =============================================================================

@@ -290,7 +290,14 @@ class Account(AccountBase):
         if public_only:
             # Default is public (True) — only exclude explicitly private apps
             apps = [a for a in apps if a.get('public', True)]
-        return apps
+
+        # Apply the dev overlay for the single implicit OSS user: a developer
+        # who register_dev'd a local bundle sees it override (or extend) the
+        # static apps.json manifest on every assembly path (authenticate,
+        # probe, get_apps_for_user).
+        from ai.account.dev_overlay import apply_overlay
+
+        return apply_overlay('local', apps)
 
     # =========================================================================
     # HANDLE ACCOUNT — env-only support for OSS

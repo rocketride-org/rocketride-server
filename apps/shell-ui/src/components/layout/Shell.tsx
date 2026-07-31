@@ -50,7 +50,7 @@ import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
-import { registerAndMapApps } from '../../lib/appLoader';
+import { registerAndMapApps, getRegisteredEntry, invalidateAppDescriptor } from '../../lib/appLoader';
 import type { ServerAppEntry } from '../../lib/appLoader';
 
 // =============================================================================
@@ -272,6 +272,26 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// =====================================================================
 	// EVENT LISTENERS
 	// =====================================================================
+
+	// Re-register remotes whose entry URL changed and evict their cached
+	// descriptors. The apps memo above only registers apps ABSENT from the
+	// probe set — an account push that repoints an EXISTING app's entry (dev
+	// overlay upsert/expiry, a newly published version) would otherwise leave
+	// the old MF container registered and the stale descriptor cached. Runs
+	// as an effect (not in the memo) because invalidation sets state.
+	useEffect(() => {
+		const identityApps = (identity?.apps ?? []) as ServerAppEntry[];
+		const changed = identityApps.filter((a) => {
+			if (!a.entry || !a.moduleId) return false;
+			const registered = getRegisteredEntry(a.moduleId);
+			return registered !== undefined && registered !== a.entry;
+		});
+		if (changed.length === 0) return;
+		// Force re-register the MF containers at their new entry URLs, then
+		// evict descriptors so the next activation loads the new container.
+		registerAndMapApps(changed);
+		for (const a of changed) invalidateAppDescriptor(a.id);
+	}, [identity?.apps]);
 
 	// Refresh identity on account update
 	useEffect(() => {

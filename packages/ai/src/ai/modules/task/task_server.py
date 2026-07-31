@@ -494,6 +494,19 @@ class TaskServer(DAPBase):
             self.release_unauthed_slot(getattr(conn, '_client_ip', ''))
 
         conn_user_id = getattr(getattr(conn, '_account_info', None), 'userId', None)
+
+        # Expire this connection's dev-overlay entries (a closed dev session
+        # must not leave a stale bundle override in the user's manifest) and
+        # refresh the user's REMAINING connections so their shells drop it.
+        if conn_user_id:
+            try:
+                from ai.account.dev_overlay import drop_connection, push_refresh
+
+                if drop_connection(conn_user_id, connection_id):
+                    await push_refresh(self, conn_user_id, source='expiry')
+            except Exception as e:
+                self.debug_message(f'dev overlay disconnect cleanup failed: {e}')
+
         await self.broadcast_server_event(
             EVENT_TYPE.DASHBOARD,
             {

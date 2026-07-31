@@ -130,3 +130,77 @@ async def handle_fetch(request: Request):
             'Accept-Ranges': 'bytes',
         },
     )
+
+
+async def handle_fetch_dir(request: Request):
+    """
+    Serve one file from a signed DIRECTORY capability (app bundles).
+
+    Route shape: ``/task/fetch/{token}/{subpath:path}``. Module Federation
+    remotes are multi-file — ``remoteEntry.js`` fetches async chunks RELATIVE
+    to its own URL — so the token rides the PATH (not a query param): every
+    relative chunk request the browser derives from the entry URL then
+    carries the same token automatically.
+
+    The JWT payload must contain:
+        - ``sub``: issuing subject (audit trail only)
+        - ``dir``: RESOLVED physical store path of the authorized DIRECTORY
+          (the capability — authorization ran at issuance, see
+          ``file_store.mint_directory_url``)
+        - ``v``:  claim generation gate (``FETCH_CLAIM_VERSION``)
+        - ``exp``: expiration timestamp
+    """
+    token = request.path_params.get('token', '')
+    subpath = request.path_params.get('subpath', '')
+    if not token or not subpath:
+        return JSONResponse({'error': 'Missing token or path'}, status_code=401)
+
+    signing_key = os.environ.get('RR_SIGNING_KEY', '')
+    if not signing_key:
+        return JSONResponse({'error': 'Server signing key not configured'}, status_code=500)
+
+    try:
+        payload = jwt.decode(token, signing_key, algorithms=['HS256'], options={'require': ['exp']})
+    except jwt.ExpiredSignatureError:
+        return JSONResponse({'error': 'Token expired'}, status_code=401)
+    except jwt.InvalidTokenError as e:
+        return JSONResponse({'error': f'Invalid token: {e}'}, status_code=401)
+
+    # Same generation gate as handle_fetch: `v` states what the claim MEANS.
+    from ai.account.file_store import FETCH_CLAIM_VERSION  # deferred: Account singleton
+
+    if payload.get('v') != FETCH_CLAIM_VERSION:
+        return JSONResponse({'error': 'Token format no longer supported'}, status_code=401)
+
+    dir_claim = payload.get('dir')
+    if not payload.get('sub') or not dir_claim or not isinstance(dir_claim, str):
+        return JSONResponse({'error': 'Token missing required claims'}, status_code=400)
+
+    # The subpath must stay INSIDE the signed directory: reject absolute
+    # forms and any '..' segment before joining. (_get_full_path guards the
+    # store root; this guards the capability's own boundary.)
+    segments = [s for s in subpath.replace('\\', '/').split('/') if s not in ('', '.')]
+    if not segments or any(s == '..' for s in segments):
+        return JSONResponse({'error': 'File not found'}, status_code=404)
+
+    from ai.account import Store
+
+    backend = Store.instance()._store
+    try:
+        abs_path = backend._get_full_path(f'{dir_claim.rstrip("/")}/{"/".join(segments)}')
+    except Exception:
+        return JSONResponse({'error': 'File not found'}, status_code=404)
+
+    if not abs_path.is_file():
+        return JSONResponse({'error': 'File not found'}, status_code=404)
+
+    # Bundle directories are immutable (one upload, one hash) — cache hard.
+    # Content-Type comes from the file extension (remoteEntry.js → JS).
+    return FileResponse(
+        path=str(abs_path),
+        content_disposition_type='inline',
+        headers={
+            'Cache-Control': 'private, max-age=86400, immutable',
+            'Accept-Ranges': 'bytes',
+        },
+    )

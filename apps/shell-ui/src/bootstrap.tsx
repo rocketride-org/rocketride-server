@@ -25,6 +25,7 @@ import Shell from './components/layout/Shell';
 import type { AppManifestEntry } from './workspace/types';
 import { buildShellConfig } from './createShellConfig';
 import { registerAndMapApps } from './lib/appLoader';
+import { installDevHooks } from './lib/devMode';
 
 // =============================================================================
 // BOOTSTRAP
@@ -54,6 +55,12 @@ async function main() {
 		console.error('[bootstrap] Server probe failed:', err);
 		// Shell will render with no apps — user can retry after server is up
 	}
+
+	// Install the app-dev hooks (registerLocalApp / __rrShellDev / dev share
+	// scope). No-ops entirely unless this is a dev build or the URL carries
+	// rrdev=1 — production sessions expose nothing. Fire-and-forget: the
+	// hooks signal readiness to embedders themselves via shell:devReady.
+	void installDevHooks();
 
 	// Assemble the shell configuration with server capabilities
 	const config = buildShellConfig(apps, capabilities);

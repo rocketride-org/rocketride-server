@@ -79,6 +79,96 @@ export interface ServerAppEntry {
 // having to thread the entry URL through.
 const registeredEntries = new Map<string, string>();
 
+// =============================================================================
+// LOCAL APP OVERRIDES (DEV HOOKS)
+// =============================================================================
+
+// Local descriptor loaders keyed by APP id (not moduleId). Consulted at
+// load() CALL TIME rather than at mapping time, so a local registration made
+// AFTER the manifest was mapped still wins, and a manifest-driven
+// re-registration can never clobber it. Exposure to embedders is dev-gated
+// via window.__rrShellDev (see lib/devMode.ts); the functions themselves are
+// ungated so in-tree dev tooling can import them directly.
+const localOverrides = new Map<string, () => Promise<AppDescriptor>>();
+
+/**
+ * Registers a local (non-Module-Federation) descriptor loader for an app.
+ *
+ * The app must already exist in the manifest (probe or ConnectResult) — this
+ * override replaces HOW its descriptor is produced, not WHETHER the app
+ * exists. Call invalidateAppDescriptor() afterwards to evict any cached
+ * descriptor so the next activation uses the local loader. The loader should
+ * return a FRESH descriptor object per call: new component identities are
+ * what force React to fully remount the app.
+ *
+ * @param id - The app id (e.g. "rocketride.hello").
+ * @param load - Loader producing the app's AppDescriptor.
+ */
+export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>): void {
+	localOverrides.set(id, load);
+	console.log(`[appLoader] Local override registered for "${id}"`);
+}
+
+/**
+ * Removes a local descriptor loader, returning the app to its Module
+ * Federation entry. Call invalidateAppDescriptor() afterwards to drop the
+ * locally produced descriptor from the cache.
+ *
+ * @param id - The app id whose local override should be removed.
+ */
+export function unregisterLocalApp(id: string): void {
+	if (localOverrides.delete(id)) {
+		console.log(`[appLoader] Local override removed for "${id}"`);
+	}
+}
+
+/**
+ * Returns the entry URL currently registered for an MF remote, or undefined
+ * when the module has never been registered. Used by Shell to detect apps
+ * whose entry URL changed (dev overlay repoint, new published version) and
+ * need force re-registration + descriptor invalidation.
+ *
+ * @param moduleId - The MF container name (AppManifestEntry.moduleId).
+ */
+export function getRegisteredEntry(moduleId: string): string | undefined {
+	return registeredEntries.get(moduleId);
+}
+
+// =============================================================================
+// DESCRIPTOR INVALIDATION BRIDGE
+// =============================================================================
+
+// WorkspaceContext registers its invalidateDescriptor callback here so
+// non-React code (Shell's entry-change reconciliation, __rrShellDev) can
+// evict cached descriptors without holding a React context reference. NOT
+// dev-gated: manifest-driven entry changes must invalidate in production too.
+let descriptorInvalidator: ((appId: string) => void) | null = null;
+
+/**
+ * Registers (or clears, with null) the descriptor invalidation callback.
+ * Called by WorkspaceProvider on mount/unmount.
+ *
+ * @param fn - Callback evicting one app's cached descriptor, or null.
+ */
+export function setDescriptorInvalidator(fn: ((appId: string) => void) | null): void {
+	descriptorInvalidator = fn;
+}
+
+/**
+ * Evicts an app's cached descriptor (and reloads it if the app is active)
+ * via the registered WorkspaceContext callback. Safe to call before the
+ * provider mounts — the eviction is simply skipped (nothing is cached yet).
+ *
+ * @param appId - The app whose descriptor should be evicted.
+ */
+export function invalidateAppDescriptor(appId: string): void {
+	if (descriptorInvalidator) {
+		descriptorInvalidator(appId);
+	} else {
+		console.warn(`[appLoader] invalidateAppDescriptor("${appId}") before WorkspaceProvider mounted — nothing to evict`);
+	}
+}
+
 /**
  * Tear down a remote's (possibly half-initialized) MF container and register
  * it fresh. Used by the app-load retry path: a failed first load leaves the
@@ -128,8 +218,14 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		showHeader:    a.showHeader,
 		showStatusBar: a.showStatusBar,
 		public:        a.public,
-		load: () =>
-			(loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
-				.then((m) => m.default),
+		load: () => {
+			// Local override wins over the MF remote — checked per CALL so a
+			// dev registration made after mapping still takes effect (and its
+			// removal restores the remote) without re-mapping the manifest.
+			const local = localOverrides.get(a.id);
+			if (local) return local();
+			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
+				.then((m) => m.default);
+		},
 	}));
 }
