@@ -36,14 +36,14 @@ destructive clear/reset tool.
 
 ## SDK contract provenance
 
-Built against **`laser-sdk==0.0.1rc19`** (PyPI, pinned in `requirements.txt`). The pin is
-deliberate: rc20+ wheels speak only Apache Iggy's VSR cluster protocol, which neither LaserData
-Cloud deployments nor stock Apache Iggy served as of 2026-07-30 (VSR requests time out; verified
-live against a free-tier Cloud deployment, whose own quickstart uses the classic protocol). rc19
-speaks the classic protocol, connects to both, and its memory API is signature-identical to
-rc21's — re-pin upward once LaserData's deployments answer VSR. The full
-remember → recall → improve → forget round-trip was verified live against LaserData Cloud on
-2026-07-30. The SDK surface itself was verified by
+Built against **`laser-sdk==0.0.1rc21`** (PyPI, pinned in `requirements.txt`). rc20+ speaks only
+Apache Iggy's VSR cluster protocol (the upcoming clustering wire format), so the server must be a
+VSR-enabled build: LaserData Cloud deployments **created on/after 2026-07-31** serve it (older
+deployments must be recreated — confirmed with the LaserData team), as does
+[laserdata/laser-stack](https://github.com/laserdata/laser-stack) locally. The full
+remember → recall → improve → forget round-trip was verified live against a LaserData Cloud
+free-tier deployment on rc21/VSR (2026-07-31), including TLS auto-attach with the SDK's embedded
+root CA. The SDK surface itself was verified by
 introspection on 2026-07-29: `Laser.connect(connection_string)`, `laser.memory(namespace)`, and
 async `Memory.remember/recall/improve/forget`. The SDK is a native (PyO3) async client whose
 futures must be created on a running event loop, so the node keeps one persistent bridge loop in
@@ -57,20 +57,25 @@ pattern as the Qdrant node) and switches the visible fields and defaults:
 
 **Your own Apache Iggy server** (`local`, the default):
 
-- `connection_string`: `user:password@host:port`, e.g. `iggy:laser@localhost:8090` (Iggy's
+- `connection_string`: `user:password@host:port`, e.g. `iggy:iggy@localhost:8090` (Iggy's
   default dev credentials). Secure field; falls back to the `LASER_CONNECTION_STRING`
   environment variable. A containerized engine needs an address reachable from the container
   (e.g. `host.docker.internal`). No token exists in this mode.
-- `folded` defaults to `true` — recall folds the memory topic in-process, which plain Iggy
-  requires.
+- The server must be a **VSR-enabled** Iggy build (rc20+ wheels speak only the VSR clustering
+  protocol): use [laserdata/laser-stack](https://github.com/laserdata/laser-stack)
+  (`./scripts/up`, which also prints a ready `LASER_CONNECTION_STRING`). Stock pre-VSR
+  `iggyrs/iggy` images cannot talk to this SDK.
+- `folded` defaults to `true` — recall folds the memory topic in-process, which a plain Iggy
+  server (no managed backend) requires.
 
 **LaserData Cloud** (`cloud`):
 
-- `connection_string`: `user:password@<deployment-domain>:8090?tls=true` — the user/password from
-  the deployment's **Credentials** tab, the domain and TCP port from its **Overview** tab (secure;
-  same env fallback). Keep `?tls=true`: Cloud endpoints are TLS and the SDK ships LaserData's
-  root CA, so no certificate file is needed. There is no separate API token — all auth travels in
-  the connection string (verified against a live Cloud deployment, 2026-07-30).
+- `connection_string`: `user:password@<deployment-domain>:8090` — the user/password from the
+  deployment's **Credentials** tab, the domain and TCP port from its **Overview** tab (secure;
+  same env fallback). TLS is automatic for `*.laserdata.cloud` hosts (the SDK ships LaserData's
+  root CA — no certificate file, no extra flags). There is no separate API token — all auth
+  travels in the connection string. The deployment must serve VSR: created on/after 2026-07-31;
+  recreate older ones (all verified against a live Cloud deployment).
 - `folded` defaults to `true` — the folded (in-process) recall path is the one verified live
   against Cloud; turn it off only on a deployment serving a managed KV view.
 

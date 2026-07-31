@@ -105,7 +105,7 @@
 		"laserdata.local.connection_string": {
 			"type": "string",
 			"title": "Connection string",
-			"description": "Apache Iggy connection string in the form <code>user:password@host:port</code>, e.g. <code>iggy:laser@localhost:8090</code> (Iggy's default dev credentials). A containerized engine needs an address reachable from the container, e.g. <code>host.docker.internal</code>. Falls back to the LASER_CONNECTION_STRING environment variable when blank. No token is needed for a local server.",
+			"description": "Apache Iggy connection string in the form <code>user:password@host:port</code>, e.g. <code>iggy:iggy@localhost:8090</code>. The server must be a VSR-enabled Iggy build — use <a href='https://github.com/laserdata/laser-stack' target='_blank'>laser-stack</a> (its <code>./scripts/up</code> prints a ready connection string); stock pre-VSR Iggy images cannot talk to this SDK. A containerized engine needs an address reachable from the container, e.g. <code>host.docker.internal</code>. Falls back to the LASER_CONNECTION_STRING environment variable when blank.",
 			"default": "",
 			"secure": true,
 			"ui": {
@@ -115,7 +115,7 @@
 		"laserdata.cloud.connection_string": {
 			"type": "string",
 			"title": "Connection string",
-			"description": "LaserData Cloud endpoint in the form <code>user:password@host:port?tls=true</code> — the user and password from your deployment's <b>Credentials</b> tab, the domain and TCP port from its <b>Overview</b> tab. Keep <code>?tls=true</code>: Cloud endpoints are TLS and the SDK ships the LaserData root CA. Falls back to the LASER_CONNECTION_STRING environment variable when blank.",
+			"description": "LaserData Cloud endpoint in the form <code>user:password@host:port</code> — the user and password from your deployment's <b>Credentials</b> tab, the domain and TCP port from its <b>Overview</b> tab. TLS is automatic for <code>*.laserdata.cloud</code> hosts (the SDK ships the LaserData root CA). The deployment must serve VSR — created on/after 2026-07-31; recreate older ones. Falls back to the LASER_CONNECTION_STRING environment variable when blank.",
 			"default": "",
 			"secure": true,
 			"ui": {
