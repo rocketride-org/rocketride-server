@@ -1,0 +1,294 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Nemotron (NVIDIA)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "llm_nemotron://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["llm"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.llm_nemotron",
+	//
+	// Required:
+	//		The prefix map when added/removed when convertting URLs <=> paths
+	//
+	"prefix": "llm",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A component that connects to NVIDIA's Nemotron large language models for ", "advanced natural language processing. The Nemotron 3 family are open-weight ", "hybrid Mamba-Transformer MoE reasoning models with configurable thinking ", "budgets and up to a 1M-token context window: Ultra for frontier multi-agent ", "reasoning, Super for the best efficiency/accuracy balance, and Nano for ", "fast sub-agent workloads. Models are served through NVIDIA's OpenAI-compatible ", "cloud API (build.nvidia.com) or self-hosted via NIM containers, vLLM, or ", "SGLang using the same model IDs."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "nemotron.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": ["Model: ${parameters.llm_nemotron.profile}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["answers"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration optoins used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "nemotron-3-super",
+		// Defines profiles used with the "profile": key
+		"profiles": {
+			"custom": {
+				"title": "Custom Model",
+				"model": "",
+				"modelTotalTokens": 131072,
+				"modelOutputTokens": 8192,
+				"serverbase": "https://integrate.api.nvidia.com/v1",
+				"apikey": ""
+			},
+			"nemotron-3-super": {
+				"title": "Nemotron 3 Super 120B",
+				"model": "nvidia/nemotron-3-super-120b-a12b",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // manual - NVIDIA model card
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://integrate.api.nvidia.com/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"nemotron-3-ultra": {
+				"title": "Nemotron 3 Ultra 550B",
+				"model": "nvidia/nemotron-3-ultra-550b-a55b",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // manual - NVIDIA model card
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://integrate.api.nvidia.com/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"nemotron-3-nano": {
+				"title": "Nemotron 3 Nano 30B",
+				"model": "nvidia/nemotron-3-nano-30b-a3b",
+				"modelSource": "provider",
+				"modelTotalTokens": 262144, // manual - NVIDIA model card
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "https://integrate.api.nvidia.com/v1",
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			// Self-hosted NIM containers serve the same model IDs as the hosted
+			// NVIDIA API, so local profiles reuse the cloud model strings.
+			"nemotron-3-super-local": {
+				"title": "Nemotron 3 Super 120B (Local)",
+				"model": "nvidia/nemotron-3-super-120b-a12b",
+				"modelSource": "provider",
+				"modelTotalTokens": 1000000, // manual
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "http://localhost:8000/v1",
+				"capabilities": {
+					"reasoning": true
+				}
+			},
+			"nemotron-3-nano-local": {
+				"title": "Nemotron 3 Nano 30B (Local)",
+				"model": "nvidia/nemotron-3-nano-30b-a3b",
+				"modelSource": "provider",
+				"modelTotalTokens": 262144, // manual
+				"modelOutputTokens": 32768, // manual
+				"serverbase": "http://localhost:8000/v1",
+				"capabilities": {
+					"reasoning": true
+				}
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"model": {
+			"type": "string",
+			"title": "Model",
+			"description": "NVIDIA Nemotron model"
+		},
+		"modelTotalTokens": {
+			"type": "number",
+			"title": "Tokens",
+			"description": "Total Tokens"
+		},
+		"nemotron.serverbase": {
+			"type": "string",
+			"title": "Server base URL",
+			"description": "OpenAI-compatible base URL for the Nemotron endpoint (e.g. https://integrate.api.nvidia.com/v1 for NVIDIA's cloud API, http://localhost:8000/v1 for a self-hosted NIM / vLLM server).",
+			"default": "https://integrate.api.nvidia.com/v1"
+		},
+		"nemotron.custom": {
+			"object": "custom",
+			"properties": [
+				"model",
+				"modelTotalTokens",
+				"nemotron.serverbase",
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"nemotron.nemotron-3-super": {
+			"object": "nemotron-3-super",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"nemotron.nemotron-3-ultra": {
+			"object": "nemotron-3-ultra",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"nemotron.nemotron-3-nano": {
+			"object": "nemotron-3-nano",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"nemotron.nemotron-3-super-local": {
+			"object": "nemotron-3-super-local",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"nemotron.nemotron-3-nano-local": {
+			"object": "nemotron-3-nano-local",
+			"properties": [
+				"llm.local.serverbase"
+			]
+		},
+		"nemotron.profile": {
+			"title": "Model",
+			"description": "NVIDIA Nemotron LLM model",
+			"type": "string",
+			"default": "nemotron-3-super",
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
+			"conditional": [
+				{
+					"value": "custom",
+					"properties": [
+						"nemotron.custom"
+					]
+				},
+				{
+					"value": "nemotron-3-super",
+					"properties": [
+						"nemotron.nemotron-3-super"
+					]
+				},
+				{
+					"value": "nemotron-3-ultra",
+					"properties": [
+						"nemotron.nemotron-3-ultra"
+					]
+				},
+				{
+					"value": "nemotron-3-nano",
+					"properties": [
+						"nemotron.nemotron-3-nano"
+					]
+				},
+				{
+					"value": "nemotron-3-super-local",
+					"properties": [
+						"nemotron.nemotron-3-super-local"
+					]
+				},
+				{
+					"value": "nemotron-3-nano-local",
+					"properties": [
+						"nemotron.nemotron-3-nano-local"
+					]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Nemotron (NVIDIA)",
+			"properties": ["nemotron.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["nemotron-3-super"],
+		"outputs": ["answers"],
+		"cases": [
+			{
+				"name": "LLM returns mock response",
+				"text": "What is 2+2?",
+				"expect": {
+					"answers": {
+						"contains": "Mock LLM response"
+					}
+				}
+			}
+		]
+	}
+}

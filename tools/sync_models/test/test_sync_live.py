@@ -33,6 +33,7 @@ from markers import (
     requires_minimax,
     requires_baidu_qianfan,
     requires_glm,
+    requires_nvidia,
 )
 from core.patcher import get_profiles
 
@@ -325,3 +326,24 @@ def test_glm_profiles_exist_in_api():
         base_url='https://api.z.ai/api/paas/v4',
     )
     _check_missing_models(profiles, live_ids, 'llm_glm')
+
+
+# ---------------------------------------------------------------------------
+# NVIDIA Nemotron
+# ---------------------------------------------------------------------------
+
+
+@requires_nvidia
+def test_nemotron_profiles_exist_in_api():
+    """Every non-deprecated llm_nemotron profile model ID must be in the live API.
+
+    Local NIM profiles reuse the cloud model IDs, so they resolve against the
+    live NVIDIA API as well.
+    """
+    api_key = os.environ['ROCKETRIDE_NVIDIA_KEY']
+    profiles = _load_profiles('llm_nemotron')
+    live_ids = _fetch_openai_model_ids(
+        api_key,
+        base_url='https://integrate.api.nvidia.com/v1',
+    )
+    _check_missing_models(profiles, live_ids, 'llm_nemotron')
