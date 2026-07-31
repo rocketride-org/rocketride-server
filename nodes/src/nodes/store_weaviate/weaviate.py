@@ -42,9 +42,18 @@ from weaviate.classes.init import AdditionalConfig, Timeout, Auth
 from weaviate.classes.query import Filter, MetadataQuery
 from weaviate.collections.collection import Collection
 from weaviate.classes.config import VectorDistances
-from weaviate.exceptions import UnexpectedStatusCodeError
 from weaviate.util import generate_uuid5
 import weaviate.classes.config as wc
+
+try:
+    from weaviate.exceptions import UnexpectedStatusCodeError
+except ImportError:
+    # Test stubs of the weaviate package may not provide the exceptions
+    # module; this fallback is never raised by a real client, it only keeps
+    # the except clause below valid when the package is stubbed
+    class UnexpectedStatusCodeError(Exception):
+        status_code: int | None = None
+
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
