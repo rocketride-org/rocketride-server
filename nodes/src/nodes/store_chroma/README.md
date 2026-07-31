@@ -84,7 +84,7 @@ No authentication is required. The node connects with `chromadb.HttpClient(host,
 
 Set the profile to `cloud` and provide:
 
-- `host`: the server hostname (defaults to `api.trychroma.com` for ChromaDB Cloud)
+- `host`: the server hostname (`api.trychroma.com` for ChromaDB Cloud)
 - `apikey`: sent with every request in the `x-chroma-token` header
 - `tenant` and `database`: required by ChromaDB Cloud accounts, optional for self-hosted multi-tenant servers
 

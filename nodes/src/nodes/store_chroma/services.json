@@ -147,7 +147,7 @@
 			"cloud": {
 				"mode": "cloud",
 				"title": "ChromaDB Cloud Server",
-				"host": "api.trychroma.com",
+				"host": "",
 				"port": "443",
 				"apikey": "",
 				"tenant": "",
