@@ -37,6 +37,14 @@ jobs:
         with:
           ref: ${{ inputs.ref }}
 
+      # `github.sha` is the workflow-file's trigger SHA, not necessarily the
+      # commit checked out above (e.g. prerelease.yaml passes a workflow_run
+      # head_sha as `ref`). Resolve the actual checked-out commit instead, so
+      # the label always matches what was built. See #1759.
+      - name: Resolve checked-out commit SHA
+        id: revision
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Download server artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -74,6 +82,8 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository_owner }}/rocketride-engine:${{ inputs.server_version }}${{ inputs.prerelease && '-prerelease' || '' }}
             ${{ inputs.prerelease == false && format('ghcr.io/{0}/rocketride-engine:latest', github.repository_owner) || '' }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.revision.outputs.sha }}
 
       # Cosign keyless signing via GitHub OIDC. Signs the image manifest by
       # digest, which covers every tag pointing at it. Verification:
