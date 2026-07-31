@@ -34,8 +34,10 @@ from langchain_openai import ChatOpenAI
 # Nemotron reasoning models can return chain-of-thought wrapped in
 # <think>...</think> inside the `content` field on the OpenAI-compatible
 # endpoint. The block is stripped here so downstream pipeline nodes only see
-# the final answer. Mirrors the llm_minimax pattern.
-_THINK_BLOCK_RE = re.compile(r'<think>.*?</think>\s*', re.DOTALL | re.IGNORECASE)
+# the final answer. The closing tag is optional: a generation truncated at
+# max_tokens mid-reasoning has no </think>, and the partial reasoning must
+# not leak downstream either.
+_THINK_BLOCK_RE = re.compile(r'<think>.*?(?:</think>|$)\s*', re.DOTALL | re.IGNORECASE)
 
 
 class Chat(ChatBase):
