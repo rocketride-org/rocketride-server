@@ -517,6 +517,17 @@ class Store:
         """
         cls._instance = None
 
+    def raw_store(self) -> IStore:
+        """
+        The underlying IStore backend, for subsystems that operate on raw
+        store paths (e.g. the deployment backend's org-registry tree).
+
+        Public accessor so callers never reach into the private ``_store``
+        attribute — identity-bound file access still goes through
+        ``file_store()``.
+        """
+        return self._store
+
     @classmethod
     def file_store(cls, ctx, client_id: Optional[str] = None, root: Optional[str] = None) -> 'FileStore':
         """

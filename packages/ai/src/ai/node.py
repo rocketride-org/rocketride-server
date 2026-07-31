@@ -4,7 +4,6 @@ import os
 import asyncio
 import threading
 from typing import Optional, Tuple, Any
-from ai.logo import LOGO
 
 # Remove auto-added script directory to avoid import conflicts with the ai package
 if sys.path and (sys.path[0].endswith('ai') or sys.path[0].endswith('ai\\') or sys.path[0].endswith('ai/')):
@@ -233,11 +232,6 @@ def run():
     Execute the script.
     """
     import os
-
-    # The RocketRide banner, first thing on stdout — the node's console IS
-    # the run log's console, so every recorded run opens with it (the same
-    # art the EaaS server prints at startup).
-    print(LOGO, flush=True)
 
     # Inject mock modules path if set (for testing)
     mock_path = os.environ.get('ROCKETRIDE_MOCK')

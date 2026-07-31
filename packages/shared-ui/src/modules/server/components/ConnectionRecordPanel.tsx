@@ -41,14 +41,7 @@ export interface IConnectionRecordPanelProps {
  * Avatar background palette — the six categorical chart tokens, cycled by
  * connection id so avatars stay theme-aware (no raw hex).
  */
-const AVATAR_COLORS = [
-	'var(--rr-chart-blue)',
-	'var(--rr-chart-green)',
-	'var(--rr-chart-yellow)',
-	'var(--rr-chart-purple)',
-	'var(--rr-chart-orange)',
-	'var(--rr-chart-red)',
-];
+const AVATAR_COLORS = ['var(--rr-chart-blue)', 'var(--rr-chart-green)', 'var(--rr-chart-yellow)', 'var(--rr-chart-purple)', 'var(--rr-chart-orange)', 'var(--rr-chart-red)'];
 
 // =============================================================================
 // STYLES
@@ -175,23 +168,20 @@ export const ConnectionRecordPanel: React.FC<IConnectionRecordPanelProps> = ({ c
 	const maskedKey = record.apikey ? `${record.apikey.slice(0, 4)}${'•'.repeat(8)}${record.apikey.slice(-4)}` : '—';
 
 	return (
-		<DetailPanel
-			persistKey="panelDetailConnectionWidth"
-			open
-			onClose={onClose}
-			avatar={<div style={styles.avatar(AVATAR_COLORS[record.id % AVATAR_COLORS.length])}>#{record.id}</div>}
-			title={`#${record.id} — ${clientName}`}
-			subtitle={record.clientId ?? undefined}
-		>
+		<DetailPanel persistKey="panelDetailConnectionWidth" open onClose={onClose} avatar={<div style={styles.avatar(AVATAR_COLORS[record.id % AVATAR_COLORS.length])}>#{record.id}</div>} title={`#${record.id} — ${clientName}`} subtitle={record.clientId ?? undefined}>
 			{/* ── Connection Info ──────────────────────────────────────────── */}
 			<Section label="Connection Info">
-				<LabelValue label="Connected at" mono>{formatTime(record.connectedAt)}</LabelValue>
+				<LabelValue label="Connected at" mono>
+					{formatTime(record.connectedAt)}
+				</LabelValue>
 				{/* User identity resolved server-side; '--' = not authenticated.
 				    Name only — the raw userId is redundant next to it. */}
 				<LabelValue label="User">{record.userName ?? '--'}</LabelValue>
 				{/* Org membership resolved server-side; '--' = unauthenticated or no org. */}
 				<LabelValue label="Organization">{record.orgName ?? '--'}</LabelValue>
-				<LabelValue label="API Key" mono>{maskedKey}</LabelValue>
+				<LabelValue label="API Key" mono>
+					{maskedKey}
+				</LabelValue>
 				{record.clientInfo?.name && (
 					<LabelValue label="Client">
 						{record.clientInfo.name} {record.clientInfo.version ?? ''}
@@ -230,8 +220,12 @@ export const ConnectionRecordPanel: React.FC<IConnectionRecordPanelProps> = ({ c
 
 			{/* ── Traffic counters ─────────────────────────────────────────── */}
 			<Section label="Traffic">
-				<LabelValue label="Messages In" mono>{formatNumber(record.messagesIn)}</LabelValue>
-				<LabelValue label="Messages Out" mono>{formatNumber(record.messagesOut)}</LabelValue>
+				<LabelValue label="Messages In" mono>
+					{formatNumber(record.messagesIn)}
+				</LabelValue>
+				<LabelValue label="Messages Out" mono>
+					{formatNumber(record.messagesOut)}
+				</LabelValue>
 			</Section>
 		</DetailPanel>
 	);

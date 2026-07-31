@@ -33,7 +33,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai.modules.task.task_engine import Task
+from ai.modules.task.task_engine import CONST_TRACE_PAYLOAD_CAP, CONST_TRACE_PREVIEW_BYTES, Task, cap_trace_payload
 
 
 # ---------------------------------------------------------------------------
@@ -1037,3 +1037,76 @@ def test_analytics_idle_reset():
     assert t._status.idleLongestSeconds == 0.0
     assert t._status.idleLongestAt == 0.0
     assert t._an_idle_total == 0.0 and t._an_idle_since == 0.0
+
+
+# ---------------------------------------------------------------------------
+# cap_trace_payload — the 1MB trace/flow payload clamp
+# ---------------------------------------------------------------------------
+
+
+def test_task_rejects_unknown_run_classifications():
+    """run_kind/trigger are a CLOSED vocabulary, validated at construction.
+
+    Both gate storage anchors, run-log scoping, and token ownership — a
+    value outside the vocabulary must fail before it can pick a scope.
+    ('' trigger is the interactive-dev spelling and stays valid.)
+    """
+    from unittest.mock import MagicMock
+
+    common = dict(
+        server=MagicMock(), id='t-1', project_id='p-1', source='s-1', token='tk', public_auth='pk', pipeline={}
+    )
+    with pytest.raises(ValueError, match='run_kind'):
+        Task(**common, run_kind='prod')
+    with pytest.raises(ValueError, match='trigger'):
+        Task(**common, trigger='cron')
+
+
+def test_cap_trace_payload_passes_small_payloads_through():
+    """Payloads under the cap pass through IDENTICALLY (same object)."""
+    payload = {'op': 'x', 'data': 'y' * 1000}
+    assert cap_trace_payload(payload) is payload
+    # Falsy payloads are untouched too (no marker for nothing).
+    assert cap_trace_payload({}) == {}
+    assert cap_trace_payload(None) is None
+
+
+def test_cap_trace_payload_truncates_oversized_payloads():
+    """An over-cap payload becomes the honest marker with a bounded preview."""
+    blob = {'data': 'z' * (CONST_TRACE_PAYLOAD_CAP + 100)}
+    capped = cap_trace_payload(blob)
+    assert capped['truncated'] is True
+    assert capped['originalBytes'] > CONST_TRACE_PAYLOAD_CAP
+    assert len(capped['preview']) == CONST_TRACE_PREVIEW_BYTES
+    # The marker CLIPS to the cap — consumers still get (just under) the
+    # full megabyte, and the marker never exceeds the cap itself.
+    import json as _json
+
+    assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
+
+
+def test_cap_trace_payload_bound_holds_for_escape_heavy_payloads():
+    """The cap must hold for the marker AS SERIALIZED, not the raw slice.
+
+    `preview` holds already-serialized JSON text; re-serializing escapes
+    every quote and backslash in it, so an object-heavy payload (unlike the
+    plain-'z' fixture above, which needs no escaping) inflates the marker.
+    The clamp must size the SERIALIZED marker under the cap.
+    """
+    import json as _json
+
+    # Thousands of tiny dicts full of quotes and backslashes — every one
+    # of the preview's structural characters re-escapes on serialization.
+    blob = {'data': [{'k': 'v"\\'}] * (CONST_TRACE_PAYLOAD_CAP // 12)}
+    assert len(_json.dumps(blob)) > CONST_TRACE_PAYLOAD_CAP
+    capped = cap_trace_payload(blob)
+    assert capped['truncated'] is True
+    assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
+    # The trimmed preview still carries real content, not an empty husk.
+    assert len(capped['preview']) > CONST_TRACE_PAYLOAD_CAP // 4
+
+
+def test_cap_trace_payload_leaves_unserializable_payloads_alone():
+    """Unserializable payloads pass through — the transport owns that error."""
+    payload = {'bad': object()}
+    assert cap_trace_payload(payload) is payload

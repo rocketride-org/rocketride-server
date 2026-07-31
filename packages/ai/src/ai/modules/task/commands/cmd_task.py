@@ -125,14 +125,21 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            # The run team is ALWAYS the session's team context: the user's
+            # profile-assigned development team for client connections, or the
+            # deployment's team for the trusted in-process dispatch (which
+            # synthesizes an AccountInfo with defaultTeam = the run's team).
+            # Clients do not choose a team at launch; a stray teamId is
+            # rejected rather than silently ignored so the caller is never
+            # surprised by which team a run was billed/authorized under.
             args = request.get('arguments') or {}
-            team_id = args.get('teamId') or self._account_info.defaultTeam
+            team_id = self._account_info.defaultTeam
+            requested_team = args.get('teamId')
+            if requested_team and requested_team != team_id:
+                raise PermissionError('Tasks run in your assigned development team; change it in your profile')
 
-            # Verify task.control ON THE TARGET TEAM — not defaultTeam — and
-            # BEFORE any secret handling. A client-supplied teamId outside the
-            # caller's permissions previously slipped through with org_id=''
-            # and pulled that team's secrets in the env merge below.
+            # Verify task.control on the run team BEFORE any secret handling,
+            # since the env merge below pulls that team's secrets.
             self.verify_team_permission(team_id, 'task.control')
 
             # Verify required pipeline plans
@@ -162,10 +169,19 @@ class TaskCommands(DAPConn):
             else:
                 merged_env = {}
 
-            # Layer org → team → user secrets on top
+            # Run classification comes ONLY from the trusted in-process
+            # dispatch (start_server_task_as_team sets these attributes on
+            # its connection) — never from DAP arguments, so remote clients
+            # cannot spoof a deploy run into the team continuum.
+            run_kind = getattr(self, '_trusted_run_kind', 'dev')
+            trigger = getattr(self, '_trusted_trigger', '') or ''
+
+            # Layer org → team → user secrets on top. Deploy runs skip the
+            # USER layer deliberately: a deployment's configuration must not
+            # depend on which human deployed it (org+team only).
             merged_env.update(
                 await account.get_merged_env(
-                    user_id=self._account_info.userId,
+                    user_id='' if run_kind == 'deploy' else self._account_info.userId,
                     org_id=org_id,
                     team_id=team_id,
                 )
@@ -183,6 +199,8 @@ class TaskCommands(DAPConn):
                 team_id=team_id,
                 org_id=org_id,
                 env=merged_env,
+                run_kind=run_kind,
+                trigger=trigger,
             )
 
             # Confirm successful task execution startup
@@ -326,6 +344,9 @@ class TaskCommands(DAPConn):
                 - args (Dict[str, Any]): Additional arguments for the request
                     - projectId (str)): The project id
                     - source (str): The source id
+                    - teamId (str, optional): Address the team's DEPLOY run;
+                      absent addresses the caller's own DEV run (the scope
+                      IS the kind — there is no run-kind argument)
 
         Returns:
             Dict[str, Any]: DAP response with token
@@ -334,17 +355,23 @@ class TaskCommands(DAPConn):
             Exception: If task does not exist
         """
         try:
-            # Verify permission
-            self.verify_permission('task.monitor')
-
             # Get the arguments
             args = request.get('arguments', {})
             project_id = args.get('projectId', None)
             source = args.get('source', None)
+            team_id = args.get('teamId') or ''
 
-            # Get the task control (ownership + permission check inside)
+            # Verify permission against the requested scope: the named team
+            # for a deploy lookup, the caller's default context otherwise
+            # (prior art: cmd_log._verify_log_access).
+            if team_id:
+                self.verify_team_permission(team_id, 'task.monitor')
+            else:
+                self.verify_permission('task.monitor')
+
+            # Get the task control (owner scoping + permission check inside)
             control = self._server.get_task_control_by_project(
-                project_id, source, self._account_info, require='task.monitor'
+                project_id, source, self._account_info, require='task.monitor', team_id=team_id
             )
 
             # Return successful response with status data
@@ -414,6 +441,13 @@ class TaskCommands(DAPConn):
                             'source': control.source,
                             'token': control.token,
                             'status': status.status,
+                            # Owning team — lets clients attribute a task to a
+                            # TEAM deployment vs a dev run of the same project.
+                            'teamId': control.teamId,
+                            # Run classification straight from the control —
+                            # clients must not infer deploy-ness from teamId
+                            # (dev runs carry an attribution team too).
+                            'runKind': control.run_kind,
                             'pipeline': control.pipeline,
                         }
                     )

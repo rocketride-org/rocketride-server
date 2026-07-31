@@ -86,10 +86,10 @@ class _StubLogApi:
     def __init__(self, reader):
         self._reader = reader
 
-    async def chapters(self, project_id, source, run_kind):
+    async def chapters(self, project_id, source, *, team_id=''):
         return await self._reader.chapters()
 
-    async def segment(self, project_id, source, run_kind, segment, *, offset=0, max_bytes=None):
+    async def segment(self, project_id, source, segment, *, team_id='', offset=0, max_bytes=None):
         if max_bytes is None:
             return await self._reader.segment_raw(segment, offset=offset)
         return await self._reader.segment_raw(segment, offset=offset, max_bytes=max_bytes)
@@ -104,7 +104,7 @@ class _StubClient:
 
 def open_session(reader):
     """A session bound to the stub client over the standard test stream."""
-    return LogEventStream(_StubClient(reader), PROJECT, SOURCE, KIND)
+    return LogEventStream(_StubClient(reader), PROJECT, SOURCE)
 
 
 async def seed_rich(istore, spool_root, monkeypatch):

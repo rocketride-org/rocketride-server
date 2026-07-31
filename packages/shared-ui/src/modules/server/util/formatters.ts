@@ -28,6 +28,22 @@ export function formatTime(timestamp: number): string {
 	return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+/**
+ * Format a Unix timestamp as a short day-aware stamp: "Today at 4:55 PM"
+ * for the current local day, "6/28/2026 at 1:30 PM" otherwise (browser
+ * locale, like every other time in the product).
+ *
+ * @param timestamp - Unix seconds.
+ * @returns The day-aware stamp.
+ */
+export function formatDayTime(timestamp: number): string {
+	const date = new Date(timestamp * 1000);
+	const now = new Date();
+	const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+	const sameDay = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+	return sameDay ? `Today at ${time}` : `${date.toLocaleDateString()} at ${time}`;
+}
+
 /** Format a Unix timestamp as a relative "X ago" string. */
 export function formatTimeAgo(timestamp: number): string {
 	const now = Date.now() / 1000;

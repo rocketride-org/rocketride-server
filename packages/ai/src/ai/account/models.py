@@ -26,11 +26,10 @@
 # Placed here to avoid circular imports between account/auth and modules/task.
 # =============================================================================
 
-import time
 from dataclasses import dataclass
-from typing import Literal, Optional, TypedDict
+from typing import Optional, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from rocketride.types.client import AppManifestEntry
 
@@ -224,31 +223,6 @@ class RequestContext:
             client_id: The task owner's client id (path scoping only).
         """
         return cls(account_info=None, conn_id=f'engine:{client_id}', source='engine')
-
-
-# =============================================================================
-# DEPLOYMENT RECORD
-# =============================================================================
-
-
-class DeploymentRecord(BaseModel):
-    """Persistent deployment control record — single source of truth on disk."""
-
-    pipeline: dict
-
-    # Cron expression (e.g. "*/15 * * * *") or "manual" for on-demand only.
-    schedule: str = 'manual'
-
-    state: Literal['active', 'paused', 'errored'] = 'active'
-
-    userId: str
-    userToken: str
-
-    createdAt: float = Field(default_factory=time.time)
-    updatedAt: float = Field(default_factory=time.time)
-
-    def to_client_record(self) -> dict:
-        return self.model_dump(exclude={'userToken'})
 
 
 # =============================================================================

@@ -4,14 +4,14 @@
 // =============================================================================
 
 /**
- * Canvas component — Pipeline canvas editor.
+ * CanvasPanel component — Pipeline canvas editor.
  *
  * ```tsx
- * import Canvas from '@shared-ui/components/canvas';
- * <Canvas project={...} servicesJson={...} ... />
+ * import CanvasPanel from '@shared-ui/components/canvas';
+ * <CanvasPanel project={...} servicesJson={...} ... />
  * ```
  */
 
-export { default } from './Canvas';
-export type { IFlowProps } from './Canvas';
+export { default } from './CanvasPanel';
+export type { ICanvasPanelProps } from './CanvasPanel';
 export * from './types';

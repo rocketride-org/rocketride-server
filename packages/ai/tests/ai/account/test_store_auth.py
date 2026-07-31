@@ -685,3 +685,40 @@ class TestSignedFetchUrls:
         fs = _fs(store, _account())
         with pytest.raises(PermissionError):
             await fs.get_url('@/Org/q1.csv')
+
+    @pytest.mark.asyncio
+    async def test_claim_states_its_generation(self, store):
+        from ai.account.file_store import FETCH_CLAIM_VERSION
+
+        fs = _fs(store, _account())
+        url = await fs.get_url('reports/q1.csv')
+        assert self._claim(url)['v'] == FETCH_CLAIM_VERSION
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('label', 'claim'),
+        [
+            ('v1 — wire path, no marker', {'sub': 'user-1', 'path': 'users/victim/files/secret.txt'}),
+            ('newer generation', {'sub': 'user-1', 'path': 'users/user-1/files/q1.csv', 'v': 99}),
+            # The gate precedes the required-claim check, so these are 401 and not 400.
+            ('wrong generation, no sub', {'path': 'users/victim/files/secret.txt'}),
+            ('wrong generation, no path', {'sub': 'user-1'}),
+        ],
+    )
+    async def test_handler_refuses_other_claim_generations(self, label, claim):
+        """Issue #1767: tokens outlive a deploy, so both generations meet at every
+        upgrade. Anything but the current one must be refused, never read under
+        today's meaning of 'path'.
+        """
+        import time
+        from types import SimpleNamespace
+
+        import jwt
+
+        from ai.modules.task.fetch import handle_fetch
+
+        token = jwt.encode({**claim, 'exp': int(time.time()) + 600}, 'test-signing-key', algorithm='HS256')
+        request = SimpleNamespace(query_params={'token': token})  # handle_fetch reads only query_params
+
+        response = await handle_fetch(request)
+        assert response.status_code == 401, label

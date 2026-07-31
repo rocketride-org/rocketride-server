@@ -539,7 +539,6 @@ typedef Text Backtrace;
 #include <apLib/plat/win/Usn.hpp>
 #elif ROCKETRIDE_PLAT_LIN
 #include <apLib/plat/lin/api.hpp>
-#include <apLib/plat/lin/minidump_lifetime.h>
 #elif ROCKETRIDE_PLAT_MAC
 #include <apLib/plat/mac/api.hpp>
 
@@ -548,6 +547,8 @@ typedef Text Backtrace;
 #ifdef ROCKETRIDE_PLAT_UNX
 #include <apLib/dev/unx/api.hpp>
 #include <apLib/plat/unx/api.hpp>
+// Out-of-process Crashpad crash handler façade, shared by Linux and macOS.
+#include <apLib/plat/unx/minidump_lifetime.h>
 #endif
 
 #include <apLib/file/api.hpp>

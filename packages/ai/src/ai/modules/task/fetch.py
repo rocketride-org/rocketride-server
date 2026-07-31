@@ -48,6 +48,9 @@ async def handle_fetch(request: Request):
         - ``sub``: userId that the URL was issued to (audit trail only)
         - ``path``: RESOLVED physical store path (the capability — scope
           resolution and authorization ran at issuance, in FileStore.get_url)
+        - ``v``: claim generation, which states what ``path`` MEANS. Only
+          ``FETCH_CLAIM_VERSION`` is served; anything else is refused (see
+          the version gate below)
         - ``exp``: expiration timestamp (standard JWT claim)
     """
     # ── Extract and validate JWT ─────────────────────────────────────────
@@ -67,6 +70,15 @@ async def handle_fetch(request: Request):
         return JSONResponse({'error': 'Token expired'}, status_code=401)
     except jwt.InvalidTokenError as e:
         return JSONResponse({'error': f'Invalid token: {e}'}, status_code=401)
+
+    # Gate on generation before reading anything else: `v` says how to
+    # interpret the rest of the payload. A v1 claim (pre-#1686) holds a WIRE
+    # path; served under today's meaning it would be a store-root-relative
+    # physical path into another user's tree — see FETCH_CLAIM_VERSION.
+    from ai.account.file_store import FETCH_CLAIM_VERSION  # deferred: Account singleton
+
+    if payload.get('v') != FETCH_CLAIM_VERSION:
+        return JSONResponse({'error': 'Token format no longer supported'}, status_code=401)
 
     user_id = payload.get('sub')
     path = payload.get('path')

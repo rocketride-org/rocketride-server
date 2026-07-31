@@ -14,10 +14,11 @@ import importlib.util
 import json
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
-import _sys_modules_guard as guard
+from . import _sys_modules_guard as guard
 
 
 class Module:
@@ -88,6 +89,40 @@ def test_guard_blames_the_leaker_not_an_earlier_clean_module():
             sys.modules.pop('rocketlib', None)
         else:
             sys.modules['rocketlib'] = saved
+
+
+def test_test_root_is_not_on_sys_path():
+    """nodes/test must stay off sys.path (see #1687).
+
+    Its subdirectories are named after node packages (text_output/, response/,
+    telegram/, tool_git/, ...). With nodes/test on sys.path ahead of src/nodes,
+    `import text_output` resolves to the *test* package, whose __path__ holds no
+    node module — so every `from text_output.instance import ...` dies with
+    ModuleNotFoundError. Import test-root helpers package-relative instead.
+    """
+    test_root = str(Path(__file__).resolve().parent)
+    assert test_root not in sys.path, (
+        f'{test_root} is on sys.path; it shadows node packages of the same name. '
+        'Import test-root modules as `from .<mod> import ...` instead of inserting the dir.'
+    )
+
+
+def test_node_packages_resolve_under_src_nodes():
+    """A node package imported by name resolves to src/nodes, not the same-named test dir."""
+    nodes_src = Path(__file__).resolve().parent.parent / 'src' / 'nodes'
+    while str(nodes_src) in sys.path:
+        sys.path.remove(str(nodes_src))
+    sys.path.insert(0, str(nodes_src))
+
+    saved = sys.modules.pop('text_output', None)
+    try:
+        import text_output
+
+        assert Path(text_output.__path__[0]).resolve() == (nodes_src / 'text_output').resolve()
+    finally:
+        sys.modules.pop('text_output', None)
+        if saved is not None:
+            sys.modules['text_output'] = saved
 
 
 def test_is_stub_module_detects_stub_built_via_module_from_spec():

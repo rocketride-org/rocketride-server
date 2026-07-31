@@ -261,6 +261,7 @@ def test_broker_refresh_read_timeout_raises_refresh_error(monkeypatch, service):
 def test_broker_refresh_invalid_expiry_raises_and_keeps_credentials_unchanged(service, monkeypatch):
     pytest.importorskip('googleapiclient.discovery')
     pytest.importorskip('google.oauth2.credentials')
+    pytest.importorskip('google.auth.exceptions')
     from google.auth.exceptions import RefreshError
 
     class _Response:

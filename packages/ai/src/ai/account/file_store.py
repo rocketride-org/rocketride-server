@@ -46,6 +46,13 @@ MAX_READ_SIZE = 100 * 1024 * 1024  # 100 MB
 # ctx conn_id is non-empty — '' means "unowned", used by tests.
 MAX_HANDLES_PER_CONNECTION = 64
 
+# Generation of the /task/fetch claim (issue #1767). v1 carried the WIRE
+# path and the handler re-resolved it; v2 carries the RESOLVED physical path
+# and the handler serves it verbatim. Tokens outlive a deploy, so both meet
+# at every upgrade — BUMP THIS whenever a claim's meaning changes, and the
+# handler will refuse the older generation instead of misreading it.
+FETCH_CLAIM_VERSION = 2
+
 # Characters forbidden inside any single path segment. ':' blocks Windows
 # drive-letter syntax (C:\...) from leaking through after the '\\' -> '/'
 # conversion in _validate_path.
@@ -1125,6 +1132,7 @@ class FileStore:
         payload = {
             'sub': self._client_id,
             'path': full_path,
+            'v': FETCH_CLAIM_VERSION,
             'exp': int(time.time()) + expires_in,
         }
         # Carry the download filename in the signed claim so /task/fetch can set
@@ -1176,5 +1184,6 @@ __all__ = [
     'MAX_CHUNK_SIZE',
     'MAX_READ_SIZE',
     'MAX_HANDLES_PER_CONNECTION',
+    'FETCH_CLAIM_VERSION',
     'DIR_MARKER',
 ]
