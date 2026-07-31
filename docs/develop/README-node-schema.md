@@ -5,8 +5,8 @@ A node lives in `nodes/src/nodes/<node>/` and is defined by one or more
 
 1. **Registers** the node with the engine (protocol, class, executable).
 2. **Declares how it connects** to other nodes (`lanes`).
-3. **Describes its configuration UI**, which the visual canvas renders
-   automatically (`preconfig`, `profiles`, `fields`, `shape`).
+3. **Describes its configuration UI** via `propertyDefinitions` and
+   `properties`.
 
 A directory may contain several definitions (`services.chat.json`,
 `services.manager.json`, …); each registers a separate service/variant. The files
@@ -21,23 +21,21 @@ read with a strict JSON parser.
 
 ## Top-level keys
 
-| Key             | Required | Purpose                                                                 |
-| --------------- | :------: | ----------------------------------------------------------------------- |
-| `title`         |    ✓     | Display name shown on the canvas tile.                                   |
-| `protocol`      |    ✓     | Endpoint protocol, e.g. `llm_openai://`.                                 |
-| `classType`     |    ✓     | What the node is, e.g. `["llm"]`, `["tool"]`, `["store"]`. Drives catalog grouping and behavior. |
-| `capabilities`  |    ✓     | Engine behavior flags, e.g. `["invoke"]`.                               |
-| `register`      |          | `filter`, `endpoint`, or omitted. Registers a factory of that type.      |
-| `node` / `path` |          | Runtime (`python`) and module path (`nodes.llm_openai`).                |
-| `prefix`        |    ✓     | Prefix added/removed when converting URLs ⇄ paths.                       |
-| `description`   |          | Array of strings (joined) describing the node.                          |
-| `icon`          |          | SVG filename next to the definition (auto-discovered, auto-themed).     |
-| `tile`          |          | Rendering hints shown on the canvas tile.                               |
-| `lanes`         |          | **Data-flow ports** (see below). Absent for `tool` nodes.              |
-| `preconfig`     |          | Default profile + named `profiles` merged into config.                 |
-| `fields`        |          | Config field schema the canvas renders (RJSF).                         |
-| `shape`         |          | Layout of fields into UI sections.                                     |
-| `test`          |          | Automated test cases (see README-node-testing.md).                     |
+| Key                    | Required | Purpose                                                                 |
+| ---------------------- | :------: | ----------------------------------------------------------------------- |
+| `title`                |    ✓     | Display name shown on the canvas tile.                                   |
+| `protocol`             |    ✓     | Endpoint protocol, e.g. `llm_openai://`.                                 |
+| `classType`            |    ✓     | What the node is, e.g. `["llm"]`, `["tool"]`, `["store"]`. Drives catalog grouping and behavior. |
+| `capabilities`         |    ✓     | Engine behavior flags, e.g. `["invoke"]`.                               |
+| `register`             |          | `filter`, `endpoint`, or omitted. Registers a factory of that type.      |
+| `node` / `path`        |          | Runtime (`python`) and module path (`nodes.llm_openai`).                |
+| `prefix`               |    ✓     | Prefix added/removed when converting URLs ⇄ paths.                       |
+| `description`          |          | A string, or an array of strings concatenated as-is (embed `\n` where a line break is wanted). |
+| `icon`                 |          | SVG filename next to the definition (auto-discovered, auto-themed).     |
+| `lanes`                |          | **Data-flow ports** (see below). Absent for `tool` nodes.              |
+| `propertyDefinitions`  |          | Named property definitions, global and/or local (see below).           |
+| `properties`           |    ✓     | Ordered list of properties shown in the node's config panel (see below). |
+| `test`                 |          | Automated test cases (see README-node-testing.md).                     |
 
 ---
 
@@ -59,100 +57,85 @@ ontology and the wire-vs-bind rule live in
 
 ---
 
-## `preconfig` and `profiles`: preset configurations
+## `propertyDefinitions`: named property definitions
 
-`preconfig` holds the default profile name and a map of named **profiles**. A
-profile is a preset bundle of values (model, token limits, etc.) merged into the
-node config unless the profile is `absolute`:
+`propertyDefinitions` is a map of name → property definition. The name is the
+map key; it is never repeated inside the definition itself.
 
-```jsonc
-"preconfig": {
-  "default": "gemini-2.5-flash",
-  "profiles": {
-    "gemini-2.5-flash": { "title": "Gemini 2.5 Flash", "model": "gemini-2.5-flash", "modelTotalTokens": 1048576, "apikey": "" },
-    "gemini-2.5-pro":   { "title": "Gemini 2.5 Pro",   "model": "gemini-2.5-pro",   "modelTotalTokens": 1048576, "apikey": "" }
-  }
-}
-```
+- **Global** definitions live in `nodes/src/nodes/core/services.common*.json`
+  and are available to every node.
+- **Local** definitions live in the node's own `services*.json`, under its own
+  `propertyDefinitions`, and are only visible to that node.
+
+On a name collision, the **local** definition wins.
+
+A definition may be a plain field, or one of the structural forms described
+under [Property notations](#property-notations) below.
 
 ---
 
-## `fields`: the configuration schema (rendered by the canvas)
+## `properties`: the config panel
 
-`fields` is a JSON-Schema-flavored description of every configurable value. The
-canvas renders it with **RJSF (React JSON Schema Form)**, so each field becomes a
-form control automatically. Supported per-field keys include `type`, `title`,
-`description`, `default`, `format` (e.g. `textarea`), and `enum`:
+`properties` is the ordered list of what's shown in the node's config panel.
+Each entry is one of:
+
+- **a bare string** — a reference to a `propertyDefinitions` entry by name.
+- **`{"use": "name", ...overrides}`** — same, with the listed members merged
+  on top of the referenced definition (overrides win).
+- **an inline object carrying its own `"name"`** — a fully authored property,
+  not resolved via lookup.
+
+A `propertyDefinitions` entry may itself be written as `{"use": "name",
+...overrides}` to alias another property under a locally unique name, e.g.:
 
 ```jsonc
-"accessibility.spatialFormat": {
-  "type": "string",
-  "title": "Spatial Format",
-  "default": "clock",
-  "enum": [
-    ["clock", "Clock positions (12 o'clock, 3 o'clock)"],
-    ["relative", "Relative (left, right, ahead, behind)"]
-  ]
+"propertyDefinitions": {
+  "qdrant.cloud.host": { "use": "vector.host", "description": "Enter the server IP address e.g. <your-instance-name>.<region>.qdrant.io" }
 }
 ```
 
-Two dynamic features are used heavily:
+The final property name is always the **last dot-separated component** of
+whatever reference produced it (`vector.host` → `host`, `qdrant.cloud.host` →
+`host`) — the dotted prefix exists only to keep `propertyDefinitions` keys
+globally unique, and is dropped for the name shown in the final schema. Names
+must be unique among siblings within the same `properties` list (or the same
+group/branch — see below).
 
-- **Profile selector**: a field (commonly `<node>.profile`) whose options are
-  generated from the profiles via a reference pattern, and which swaps the visible
-  fields with `conditional`:
+---
 
+## Property notations
+
+- **Plain field** — `type`, `title`, `description`, `default`, plus the flags
+  `hidden`, `secret`, `readonly`, `required`. Standard constraints also apply:
+  `minLength`/`maxLength` for strings, `minimum`/`maximum` for numbers.
+- **Enum** — `"enum": [["value", "Label"], ...]`.
+- **Enum with property sets** — when different values expose different
+  sub-properties, `"enum"` is an object keyed by value instead of an array:
   ```jsonc
-  "accessibility_describe.profile": {
-    "title": "Vision Model",
-    "type": "string",
-    "default": "gemini-2.5-flash",
-    "enum": ["*>preconfig.profiles.*.title"],          // options pulled from profiles
-    "conditional": [
-      { "value": "gemini-2.5-flash", "properties": ["accessibility_describe.gemini-2.5-flash"] },
-      { "value": "gemini-2.5-pro",   "properties": ["accessibility_describe.gemini-2.5-pro"] }
-    ]
+  "enum": {
+    "cloud": { "title": "Cloud", "properties": ["vector.host", "vector.port"] },
+    "local": { "title": "Local", "properties": ["vector.host"] }
   }
   ```
-
-- **Property groups**: an entry whose `properties` array lists which fields to
-  show together for a given profile/object.
-
----
-
-## `shape`: UI layout
-
-`shape` arranges fields into labeled sections in the node's config panel:
-
-```jsonc
-"shape": [
-  { "section": "Pipe", "title": "Accessibility Describe", "properties": ["accessibility_describe.profile"] }
-]
-```
-
----
-
-## How the canvas consumes this
-
-The visual builder (`packages/shared/src/components/canvas/`) turns these
-definitions into the editor:
-
-- The node graph is rendered with **ReactFlow**; config panels with **RJSF**.
-- `NodeConfigPanel` renders `fields`/`shape` into the side panel, wires up custom
-  widgets (API-key, select, OAuth, …) from `canvas/components/rjsf-widgets/`, and
-  validates server-side.
-- Field defaults are resolved from the schema (`getDefaultFormState`) rather than
-  hardcoded, so `default` values in `fields`/`profiles` are what the user starts
-  with.
-
-You do **not** register nodes anywhere central: dropping a `services*.json` (plus
-its SVG) under `nodes/src/nodes/<node>/` is enough for the build to discover it.
+- **Grouped subsection** — `{"name": "...", "properties": [...]}`, groups
+  related fields together.
+- **Array** — `{"name": "...", "type": "array", "item": <property specifier>}`,
+  a repeatable list of a single field (the item can itself be a reference or
+  an inline definition). `"type": "array"` is required.
+- **`type: "constant"`** — a fixed, non-editable value baked into the schema
+  (e.g. a discriminator field).
+- **`type: "oauth2"`** — an OAuth login action; the UI drives the flow and
+  supplies the resulting credentials. `"options"` may carry hints such as
+  `scopes`.
+- **`type: "upload"`** — a file upload; `"options": {"accept": "..."}`
+  restricts the accepted file type.
 
 ---
 
 ## Full example
 
-`nodes/src/nodes/accessibility_describe/services.json` is a compact, complete
-example: metadata + `lanes` (`image → text`) + three Gemini `profiles` + `fields`
-with a conditional profile selector + a one-section `shape` + `test` cases. Read
-it alongside this document.
+`examples/services.example.json` demonstrates every notation above in one
+file. `nodes/src/nodes/store_qdrant/services.json` is a complete real-world
+example: metadata + `lanes` + local `propertyDefinitions` that alias global
+`vector.*` properties under node-specific names + a `properties` list built
+around an enum-with-property-sets profile selector.
