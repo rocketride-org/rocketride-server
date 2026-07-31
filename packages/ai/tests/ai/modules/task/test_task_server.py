@@ -590,6 +590,9 @@ async def test_remove_task_calls_stop_and_broadcasts():
         token='tk_rm',
         userId='u1',
         teamId='t1',
+        run_kind='dev',
+        # Monitor-key cleanup builds the owner-scoped key from the control.
+        owner_id='u1',
         task=task,
         project_id='proj-1',
         source='src-1',

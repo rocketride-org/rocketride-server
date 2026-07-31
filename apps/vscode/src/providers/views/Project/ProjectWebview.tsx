@@ -21,7 +21,9 @@ import type { ThemeTokens } from 'shared/themes/tokens';
 // Project module is imported via subpath (not the 'shared' barrel): the
 // barrel is the shell's MF share and must stay canvas-free; this webview
 // bundles the project module directly.
-import { ProjectView, parseServerEvent } from 'shared/modules/project';
+import { ProjectView, parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from 'shared/modules/project';
+import { foldProjectDeployRuns } from 'shared';
+import type { TaskLifecycleEvent } from 'shared';
 import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, ViewState } from 'shared/modules/project';
 import { CheckoutModal } from 'shared';
 import type { CheckoutPlan, PlanAction } from 'shared';
@@ -49,7 +51,8 @@ const LIVE_EVENTS_KEEP = 10000;
 const DEPLOY_REQUEST_TIMEOUT_MS = 30000;
 
 /** Refresh cadence for the open deployment drawer (ms) — matches cloud. */
-const DEPLOYMENT_POLL_INTERVAL_MS = 10_000;
+/** Coalescing window for push-triggered deployment re-fetches (ms). */
+const DEPLOYMENT_REFETCH_COALESCE_MS = 400;
 
 // =============================================================================
 // COMPONENT
@@ -82,6 +85,12 @@ const ProjectWebview: React.FC = () => {
 	// the panel's registry snapshot resolves through pendingLifecycleFetches.
 	const [deployTeams, setDeployTeams] = useState<DeployTeamRefDTO[]>([]);
 	const [teamDeployments, setTeamDeployments] = useState<TeamDeploymentRowDTO[]>([]);
+
+	// Live deploy-run state per team (the where-live running badges), folded
+	// from relayed task events — the catch-up snapshot on panel open seeds
+	// it; begin/end flip it. Ref advances synchronously for event bursts.
+	const [deployRunsByTeam, setDeployRunsByTeam] = useState<Record<string, Record<string, boolean>>>({});
+	const deployRunsRef = useRef<Record<string, Record<string, boolean>>>({});
 	// Outstanding fetchDeployLifecycle promises — deploy:data is the full
 	// snapshot (not requestId'd), so ONE push settles every waiter.
 	const pendingLifecycleFetches = useRef<Array<{ resolve: (s: DeploySnapshot) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>>([]);
@@ -197,25 +206,57 @@ const ProjectWebview: React.FC = () => {
 				const pid = projectIdRef.current;
 				// statusMap keeps feeding the canvas (per-node badges + page
 				// error counts); the raw stamped envelope goes to the sections.
-				const parsed = parseServerEvent(msg.event, pid);
+				// The firehose parse is DEV-scoped: deploy events ride this
+				// connection whenever a team-scoped subscription is open.
+				const parsed = parseServerEvent(msg.event, pid, 'dev');
 				if (parsed.statusUpdate) {
 					setStatusMap((prev) => ({ ...prev, [parsed.statusUpdate!.source]: parsed.statusUpdate!.status }));
 				}
 
-				// Accumulate this project's STAMPED task events. Both the
-				// identity (project_id + source) and the continuum stamps
-				// (eventTime + logSeq) ride in the BODY — the only place
-				// they exist (the DAP envelope is pure protocol; its seq is
-				// per-connection bookkeeping). Membership and stamp presence
-				// are one pure body test; consumers read the body directly.
+				// Accumulate this project's STAMPED task events for the DEV
+				// sections. Membership (stamps present + project match + not
+				// a deploy run) is the shared classification — deploy events
+				// ride this connection whenever a team-scoped subscription is
+				// open and must never enter the dev feed.
 				const raw = msg.event as TaskEventMessage;
-				const body = (raw?.body ?? {}) as Record<string, unknown>;
-				if (Number.isFinite(body.eventTime) && Number.isFinite(body.logSeq) && body.project_id === pid) {
+				if (isDevLiveEvent(raw, pid)) {
 					setLiveLogEvents((prev) => {
 						const next = [...prev, raw];
 						// Rare chunky trim; sections re-feed (seq-deduped) on shrink.
 						return next.length > LIVE_EVENTS_MAX ? next.slice(next.length - LIVE_EVENTS_KEEP) : next;
 					});
+				}
+
+				// Where-live running badges: fold every deploy-run lifecycle
+				// event for THIS project into the per-team run map.
+				if (raw?.event === 'apaevt_task' && raw.body) {
+					const foldedRuns = foldProjectDeployRuns(raw.body as TaskLifecycleEvent, deployRunsRef.current, pid);
+					if (foldedRuns) {
+						deployRunsRef.current = foldedRuns;
+						setDeployRunsByTeam(foldedRuns);
+					}
+				}
+
+				// Deployment drawer push wiring: invalidations and this team's
+				// task lifecycle events schedule a coalesced record re-fetch
+				// (replacing the old poll), and the team's stamped events feed
+				// the record's live report cards.
+				{
+					const open = openDeploymentRef.current;
+					const ev = raw as { event?: string; body?: { projectId?: string; teamId?: string; action?: string; runKind?: string } };
+					if (open) {
+						if (ev.event === 'apaevt_deploy' && ev.body?.projectId === pid && (ev.body.teamId === open.teamId || ev.body.action === 'publish')) {
+							scheduleDeploymentRefetch();
+						} else if (ev.event === 'apaevt_task' && ev.body?.runKind === 'deploy' && ev.body.teamId === open.teamId) {
+							scheduleDeploymentRefetch();
+						}
+						if (isTeamLiveEvent(raw, pid, open.teamId)) {
+							setDeployLiveEvents((prev) => {
+								const next = [...prev, raw];
+								return next.length > LIVE_EVENTS_MAX ? next.slice(next.length - LIVE_EVENTS_KEEP) : next;
+							});
+						}
+					}
 				}
 				break;
 			}
@@ -589,15 +630,32 @@ const ProjectWebview: React.FC = () => {
 		sendMessageRef.current({ type: 'deployment:fetch', teamId, ...(sourceId ? { sourceId } : {}) });
 	}, []);
 
-	// Refresh the open drawer on a cadence (scheduled runs, state flips,
-	// history growth) — poll-based until the monitoring refactor lands push.
+	// The open drawer refreshes on PUSH, not on a cadence: apaevt_deploy
+	// invalidations and this team's task lifecycle events (relayed through
+	// shell:event, see the message handler) schedule a coalesced re-fetch.
+	const deployRefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const scheduleDeploymentRefetch = useCallback((): void => {
+		if (deployRefetchTimer.current) return; // A re-fetch is already pending.
+		deployRefetchTimer.current = setTimeout(() => {
+			deployRefetchTimer.current = null;
+			const open = openDeploymentRef.current;
+			if (!open) return;
+			sendMessageRef.current({ type: 'deployment:fetch', teamId: open.teamId, ...(open.sourceId ? { sourceId: open.sourceId } : {}) });
+		}, DEPLOYMENT_REFETCH_COALESCE_MS);
+	}, []);
+	useEffect(
+		() => () => {
+			if (deployRefetchTimer.current) clearTimeout(deployRefetchTimer.current);
+		},
+		[]
+	);
+
+	// The open drawer's live feed: this team's stamped deploy-run events,
+	// routed into the record's report cards (cleared on drawer switch).
+	const [deployLiveEvents, setDeployLiveEvents] = useState<TaskEventMessage[]>([]);
 	useEffect(() => {
-		if (!openDeployment) return undefined;
-		const timer = setInterval(() => {
-			sendMessageRef.current({ type: 'deployment:fetch', teamId: openDeployment.teamId, ...(openDeployment.sourceId ? { sourceId: openDeployment.sourceId } : {}) });
-		}, DEPLOYMENT_POLL_INTERVAL_MS);
-		return () => clearInterval(timer);
-	}, [openDeployment]);
+		setDeployLiveEvents([]);
+	}, [openDeployment?.teamId, openDeployment?.sourceId]);
 
 	/** One requestId-correlated deployment round-trip (actionResult /
 	    previewResult / validateResult settle it; lost replies time out). */
@@ -720,7 +778,9 @@ const ProjectWebview: React.FC = () => {
 				{...(!isReadonly && projectId
 					? {
 							fetchDeployLifecycle,
-							teamDeployments,
+							// Where-live rows enriched with the folded run state
+							// (the running badges track live without polling).
+							teamDeployments: teamDeployments.map((d) => ({ ...d, ...(deployRunsByTeam[d.teamId] ? { runningSources: deployRunsByTeam[d.teamId] } : {}) })),
 							deployTeams,
 							onDeployPublish: handleDeployPublish,
 							onDeployVersion: handleDeployVersion,
@@ -827,6 +887,7 @@ const ProjectWebview: React.FC = () => {
 									isConnected,
 									openSession: (sourceId: string) => openLogSession(sourceId, openDeployment.teamId),
 									fetchTimeline: (sourceId: string) => fetchLogTimeline(sourceId, openDeployment.teamId),
+									liveEvents: deployLiveEvents,
 									// Verbs ack, then THIS webview re-fetches the record
 									// (host refresh died with the source-scoped payload).
 									...(deploymentData.sourcePaused !== undefined ? { sourcePaused: deploymentData.sourcePaused } : {}),

@@ -2088,8 +2088,17 @@ class Task(DAPBase):
                 # user identity — internal-only entry).
                 from ai.account import RequestContext, Store
 
+                # The store view anchors at the run's OWNER namespace: the
+                # TEAM for deploy runs (which carry no user identity — every
+                # path they write is '@/Team/=<id>/'-prefixed anyway), the
+                # user for dev runs. An internal-context store REQUIRES a
+                # concrete anchor — an empty one raises, and the except below
+                # would silently disable the run log for the whole run.
                 self._run_log = RunLogWriter(
-                    Store.file_store(RequestContext.internal('run-log'), client_id=self.client_id),
+                    Store.file_store(
+                        RequestContext.internal('run-log'),
+                        client_id=self.team_id if self._run_kind == 'deploy' else self.client_id,
+                    ),
                     self.client_id,
                     self.project_id,
                     self.source,

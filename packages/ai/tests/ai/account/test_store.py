@@ -1287,6 +1287,20 @@ class TestStoreFileStore:
         assert await fs1.read('shared-name.txt') == b'user-1 data'
         assert await fs2.read('shared-name.txt') == b'user-2 data'
 
+    def test_internal_context_rejects_empty_client_id(self, store):
+        """An internal-context view with NO anchor raises loudly.
+
+        Regression pin: actor-free deploy runs carry an empty userId — a
+        subsystem that anchors its store view at the run's user identity
+        (instead of the run's OWNER, e.g. the team for a deploy run) hits
+        this guard, and callers that swallow the error run WITHOUT their
+        storage (the run-log writer did exactly that, leaving deploy runs
+        unrecorded). The guard must stay loud so the anchor choice is made
+        deliberately at every call site.
+        """
+        with pytest.raises(ValueError, match='explicit client_id'):
+            store._file_store(RequestContext.internal('run-log'), client_id='')
+
 
 class TestStoreIntegration:
     """Integration tests using real filesystem via Store + FileStore."""

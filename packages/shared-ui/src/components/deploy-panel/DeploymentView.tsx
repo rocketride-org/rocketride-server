@@ -45,7 +45,7 @@ import { formatTime } from '../../modules/server/util/formatters';
 import type { CellComponent } from 'tabulator-tables';
 import type { GridColumnDefinition } from '../data-grid/defaults';
 import type { ViewMenu } from '../../types/viewMenu';
-import type { TaskEventSession, TaskTimeline } from '../../modules/project/hooks/useTaskEvents';
+import type { TaskEventMessage, TaskEventSession, TaskTimeline } from '../../modules/project/hooks/useTaskEvents';
 import type { DeployHistoryRow } from './types';
 
 // =============================================================================
@@ -121,6 +121,12 @@ export interface IDeploymentViewProps {
 	openSession?: (sourceId: string) => TaskEventSession;
 	/** Team-scoped chapters fetch for one source's deploy continuum. */
 	fetchTimeline?: (sourceId: string) => Promise<TaskTimeline>;
+	/**
+	 * Host-fed live events for THIS team's deploy runs (stamped bodies,
+	 * already team-filtered via isTeamLiveEvent) — the RUNS page routes
+	 * them per source so the report cards track live without polling.
+	 */
+	liveEvents?: TaskEventMessage[];
 	onOpenLink?: (url: string, displayName?: string) => void;
 }
 
@@ -320,7 +326,7 @@ const STATE_COLOR: Record<DeploymentInfo['state'], string> = {
  * The deployment tab: STATUS | RUNS | DESIGN (READONLY) over one team's
  * deployment. See the module docstring.
  */
-export const DeploymentView: React.FC<IDeploymentViewProps> = ({ teamName, documentTitle, deployment, pipeline, servicesJson, handleValidatePipeline, sourceId, sourceName, sourceConfig, onSourceConfigChange, history, nextRun, runningSources = {}, canControl, isConnected, isSubscribed, serverHost, openSession, fetchTimeline, onOpenLink }) => {
+export const DeploymentView: React.FC<IDeploymentViewProps> = ({ teamName, documentTitle, deployment, pipeline, servicesJson, handleValidatePipeline, sourceId, sourceName, sourceConfig, onSourceConfigChange, history, nextRun, runningSources = {}, canControl, isConnected, isSubscribed, serverHost, openSession, fetchTimeline, liveEvents, onOpenLink }) => {
 	const [mode, setMode] = useState<'status' | 'runs' | 'design'>('status');
 	// The canvas must NOT initialize inside a hidden panel: a display:none
 	// container measures 0x0 and the viewport fit computes garbage. Mount
@@ -522,7 +528,22 @@ export const DeploymentView: React.FC<IDeploymentViewProps> = ({ teamName, docum
 
 	// --- RUNS page ------------------------------------------------------------
 
-	const runsPage = <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src: { id: string; name: string }) => <SourcePanel key={`${src.id}.deploy`} source={src} runKind="deploy" projectId={projectId} liveEvents={[]} openSession={openSession ? () => openSession(src.id) : null} fetchTimeline={fetchTimeline ? () => fetchTimeline(src.id) : null} componentNames={componentNames} isConnected={isConnected} isSubscribed={isSubscribed} isReadonly serverHost={serverHost} onOpenLink={onOpenLink} />) : <div style={commonStyles.empty}>No source components found</div>}</div>;
+	// Route the host's team-scoped live feed per source (the dev pages'
+	// liveBySource precedent) so each report card folds only its own run.
+	const liveBySource = useMemo(() => {
+		const bySource = new Map<string, TaskEventMessage[]>();
+		for (const message of liveEvents ?? []) {
+			const body = (message.body ?? {}) as Record<string, unknown>;
+			if (typeof body.source === 'string') {
+				const bucket = bySource.get(body.source) ?? [];
+				bucket.push(message);
+				bySource.set(body.source, bucket);
+			}
+		}
+		return bySource;
+	}, [liveEvents]);
+
+	const runsPage = <div style={commonStyles.tabContent}>{sources.length > 0 ? sources.map((src: { id: string; name: string }) => <SourcePanel key={`${src.id}.deploy`} source={src} runKind="deploy" projectId={projectId} liveEvents={liveBySource.get(src.id) ?? []} openSession={openSession ? () => openSession(src.id) : null} fetchTimeline={fetchTimeline ? () => fetchTimeline(src.id) : null} componentNames={componentNames} isConnected={isConnected} isSubscribed={isSubscribed} isReadonly serverHost={serverHost} onOpenLink={onOpenLink} />) : <div style={commonStyles.empty}>No source components found</div>}</div>;
 
 	// --- DESIGN page (readonly artifact render) -------------------------------
 

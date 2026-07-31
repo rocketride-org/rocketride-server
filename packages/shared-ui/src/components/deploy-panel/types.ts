@@ -66,6 +66,8 @@ export interface TeamDeployment {
 	deployedAt: number;
 	/** Schedule records keyed by sourceId. */
 	schedules: Record<string, TeamDeploymentSchedule>;
+	/** Sources with a LIVE run right now (host-fed from task events). */
+	runningSources?: Record<string, boolean>;
 }
 
 /** One source line under a where-live deployment group (derived). */
@@ -73,6 +75,8 @@ export interface TeamDeploymentSource extends TeamDeploymentSchedule {
 	sourceId: string;
 	/** Display name (resolved from the pipeline; falls back to the id). */
 	sourceName: string;
+	/** True while this source has a live run (drives the running badge). */
+	running?: boolean;
 }
 
 /** One team's live deployment of the project (a where-live GROUP: the team

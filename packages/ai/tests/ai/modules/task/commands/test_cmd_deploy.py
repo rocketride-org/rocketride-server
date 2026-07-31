@@ -235,20 +235,20 @@ class TestReads:
 
     @pytest.mark.asyncio
     async def test_run_dispatches_as_the_team_with_manual_trigger(self, account_stub, monkeypatch):
-        # Run-now = the scheduler's trusted dispatch with trigger='manual'
-        # and the CALLER as attribution; lastRunAt is stamped. The source's
+        # Run-now = the scheduler's trusted dispatch with trigger='manual';
+        # the run carries NO human identity (who fired it is recorded by the
+        # audit call, not on the run); lastRunAt is stamped. The source's
         # execution settings ride along, but its ttl window does NOT — a
         # manual run has no window (the user stops it).
         dispatched = {}
 
         async def fake_dispatch(
-            server, pipeline, *, org_id, team_id, actor, trigger, ttl=None, trace_level=None, debug_out=False
+            server, pipeline, *, org_id, team_id, trigger, ttl=None, trace_level=None, debug_out=False
         ):
             dispatched.update(
                 pipeline=pipeline,
                 org_id=org_id,
                 team_id=team_id,
-                actor=actor,
                 trigger=trigger,
                 ttl=ttl,
                 trace_level=trace_level,
@@ -275,7 +275,8 @@ class TestReads:
         assert dispatched['trigger'] == 'manual'
         assert dispatched['team_id'] == 'team-1'
         assert dispatched['pipeline']['source'] == 'webhook_1'
-        assert dispatched['actor']['userId'] == 'user-1'
+        # No actor rides the dispatch — the run is owned by the team alone.
+        assert 'actor' not in dispatched
         # The schedule's 900s window is ignored; its execution settings are not.
         assert dispatched['ttl'] is None
         assert dispatched['trace_level'] == 'summary'

@@ -341,7 +341,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					event: event.body,
 				});
 			} else if (event?.event === 'apaevt_status_update') {
-				// Forward status updates (errors/warnings) to webview
+				// Forward status updates (errors/warnings) to webview.
+				// Deploy runs never touch the dev lists (same classification
+				// the shared fold applies) — their status belongs to the
+				// deployment surfaces, and the '*' subscription delivers them
+				// here whenever a team-scoped run is visible.
+				if (event.body?.runKind === 'deploy') return;
 				const projectId = event.body?.project_id;
 				const sourceId = event.body?.source;
 				if (projectId && sourceId) {

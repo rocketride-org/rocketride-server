@@ -67,7 +67,6 @@ async def start_server_task_as_team(
     *,
     org_id: str,
     team_id: str,
-    actor: Dict[str, Any],
     trigger: str = 'schedule',
     ttl: Optional[int] = None,
     trace_level: Optional[str] = None,
@@ -82,8 +81,9 @@ async def start_server_task_as_team(
 
       - The env merge uses org+team layers only (no user layer) — a deploy
         run's configuration never depends on which human deployed it.
-      - ``actor`` (the deploying user, from the deployment record) rides as
-        billing/attribution identity, not as authentication.
+      - The run carries NO human identity at all: the team owns it. Billing
+        debits attribute to org+team; who deployed or fired the run lives
+        exclusively in the audit log and deployment history.
       - ``run_kind='deploy'`` and ``trigger`` travel as TRUSTED connection
         attributes read by on_execute — never as DAP arguments, so remote
         clients cannot spoof a deploy run.
@@ -97,11 +97,12 @@ async def start_server_task_as_team(
     conn = _InProcessConn(server)
 
     # Server-constructed team identity: full task permissions on the ONE
-    # team, nothing else. No userToken — deploy runs hold no credential.
+    # team, nothing else. No userToken — deploy runs hold no credential,
+    # and no user identity: the team is the owner.
     conn._account_info = AccountInfo(
-        userId=str(actor.get('userId') or ''),
-        displayName=str(actor.get('display') or ''),
-        email=str(actor.get('email') or ''),
+        userId='',
+        displayName='',
+        email='',
         defaultTeam=team_id,
         organization={
             'id': org_id,

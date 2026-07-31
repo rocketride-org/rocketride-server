@@ -52,6 +52,7 @@ from ai.account import account
 from ai.account.models import resolve_team_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
+from rocketride import EVENT_TYPE
 
 if TYPE_CHECKING:
     from ..task_scheduler import TaskScheduler
@@ -221,6 +222,26 @@ class DeployCommands(DAPConn):
         self.verify_team_permission(team_id, perm)
         return team_id
 
+    async def _notify_deploy_changed(self, org_id: str, team_id: str, project_id: str, action: str) -> None:
+        """Push an org-scoped invalidation event for a deployment mutation.
+
+        Clients treat this as CACHE INVALIDATION, never as data: the body
+        carries only the identity of what changed, and receivers re-fetch
+        the record — this is what replaces the deploy surfaces' polling.
+        Best-effort: a failed broadcast must never fail the mutation.
+        """
+        try:
+            await self._server.broadcast_server_event(
+                EVENT_TYPE.DEPLOY,
+                {
+                    'event': 'apaevt_deploy',
+                    'body': {'orgId': org_id, 'teamId': team_id, 'projectId': project_id, 'action': action},
+                },
+                org_id=org_id,
+            )
+        except Exception as e:
+            self.debug_message(f'Deploy-change broadcast failed: {e}')
+
     # =========================================================================
     # PUBLISH / DEPLOY
     # =========================================================================
@@ -262,6 +283,7 @@ class DeployCommands(DAPConn):
         )
 
         body: Dict[str, Any] = {'artifact': entry}
+        await self._notify_deploy_changed(org_id, '', project_id, 'publish')
         if args.get('deployTo'):
             # One-step publish+deploy — same checks as the deploy subcommand.
             team_id = str(args['deployTo'])
@@ -269,6 +291,7 @@ class DeployCommands(DAPConn):
             dep = await account.deployments_deploy(org_id, team_id, project_id, entry['version'], self._actor())
             self._scheduler.sync(org_id, dep)
             body['deployment'] = dep
+            await self._notify_deploy_changed(org_id, team_id, project_id, 'deploy')
         return self.build_response(request, body=body)
 
     async def _deploy_deploy(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -292,6 +315,7 @@ class DeployCommands(DAPConn):
             request_data={'projectId': project_id, 'teamId': team_id, 'version': version},
             org_id=org_id,
         )
+        await self._notify_deploy_changed(org_id, team_id, project_id, 'deploy')
         return self.build_response(request, body=dep)
 
     # =========================================================================
@@ -415,6 +439,7 @@ class DeployCommands(DAPConn):
             request_data={'projectId': project_id, 'teamId': team_id},
             org_id=org_id,
         )
+        await self._notify_deploy_changed(org_id, team_id, project_id, state)
         return self.build_response(request, body=dep)
 
     async def _deploy_disable(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -464,6 +489,7 @@ class DeployCommands(DAPConn):
             request_data={'projectId': project_id, 'teamId': team_id, 'sourceId': source_id, 'schedule': cron},
             org_id=org_id,
         )
+        await self._notify_deploy_changed(org_id, team_id, project_id, 'schedule')
         return self.build_response(request, body=dep)
 
     async def _set_schedule_paused(
@@ -489,6 +515,9 @@ class DeployCommands(DAPConn):
             reason,
             request_data={'projectId': project_id, 'teamId': team_id, 'sourceId': source_id},
             org_id=org_id,
+        )
+        await self._notify_deploy_changed(
+            org_id, team_id, project_id, 'schedule_pause' if paused else 'schedule_resume'
         )
         return self.build_response(request, body=dep)
 
@@ -528,6 +557,7 @@ class DeployCommands(DAPConn):
             },
             org_id=org_id,
         )
+        await self._notify_deploy_changed(org_id, team_id, project_id, 'source_config')
         return self.build_response(request, body=dep)
 
     async def _deploy_schedule_pause(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -546,10 +576,11 @@ class DeployCommands(DAPConn):
         """Start one deployed source NOW.
 
         The same trusted team dispatch the scheduler uses (no stored
-        credential — the run executes AS THE TEAM), with trigger='manual'
-        and the CALLER as the billing-attribution actor. Without this a
-        deployment could only ever run from a cron tick — no way to
-        smoke-test a version or fire an unscheduled source on demand.
+        credential — the run executes AS THE TEAM and carries no human
+        identity; billing attributes to org+team, and who fired it is
+        recorded by the audit call below). Without this a deployment could
+        only ever run from a cron tick — no way to smoke-test a version or
+        fire an unscheduled source on demand.
         """
         project_id = args.get('projectId')
         source_id = args.get('sourceId')
@@ -586,7 +617,6 @@ class DeployCommands(DAPConn):
             pipeline,
             org_id=org_id,
             team_id=team_id,
-            actor=self._actor(),
             trigger='manual',
             ttl=None,
             trace_level=sched.get('traceLevel') or 'full',
@@ -600,6 +630,7 @@ class DeployCommands(DAPConn):
             request_data={'projectId': project_id, 'teamId': team_id, 'sourceId': source_id, 'version': dep['version']},
             org_id=org_id,
         )
+        await self._notify_deploy_changed(org_id, team_id, project_id, 'run')
         return self.build_response(request, body={'token': token, 'version': dep['version']})
 
     # =========================================================================

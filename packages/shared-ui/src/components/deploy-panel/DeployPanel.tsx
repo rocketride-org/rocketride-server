@@ -257,6 +257,20 @@ const S = {
 		fontSize: 11.5,
 		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
+	// Running badge — the live-run indicator on group headers + source rows
+	// (the schedule-pill grammar, always in its armed/green form).
+	liveRunning: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: 6,
+		borderRadius: 14,
+		padding: '2px 10px',
+		fontSize: 11.5,
+		fontWeight: 600,
+		border: '1px solid color-mix(in srgb, var(--rr-color-success) 40%, transparent)',
+		background: 'color-mix(in srgb, var(--rr-color-success) 10%, transparent)',
+		color: 'var(--rr-color-success)',
+	} as CSSProperties,
 	liveSourceRow: (clickable: boolean): CSSProperties => ({
 		display: 'flex',
 		alignItems: 'center',
@@ -521,12 +535,15 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 										>
 											&#9679; {dep.state}
 										</span>
+										{/* Live-run roll-up: any source running lights the group. */}
+										{dep.sources.some((src) => src.running) && <span style={S.liveRunning}>&#9679; running</span>}
 										<span style={S.liveDeployedAt}>{dep.deployedAt ? `deployed ${formatDayTime(dep.deployedAt)}` : ''}</span>
 									</div>
 									{/* Source rows — schedule pill + last run, drawer-pill grammar. */}
 									{dep.sources.map((src) => (
 										<div key={`${dep.teamId}.${src.sourceId}`} style={S.liveSourceRow(Boolean(onOpenDeployment))} onClick={() => onOpenDeployment?.(dep.teamId, src.sourceId)}>
 											<span style={S.liveSourceName}>{src.sourceName}</span>
+											{src.running && <span style={S.liveRunning}>&#9679; running</span>}
 											<span
 												style={S.livePill(Boolean(src.cron) && !src.paused, Boolean(onSetSchedule))}
 												title={onSetSchedule ? 'Edit schedule' : undefined}

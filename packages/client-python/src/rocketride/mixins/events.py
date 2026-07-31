@@ -380,9 +380,14 @@ class EventMixin(DAPClient):
         Add a monitor subscription. If the key already exists, the new types
         are merged via reference counting and the merged set is sent to the server.
 
+        The scope IS the kind: a ``"team_id"`` in the key addresses the
+        team's DEPLOYED run; without it the server binds the subscription to
+        the caller's own dev run — there is no run-kind argument.
+
         Args:
             key: Monitor key — ``{"token": "..."}`` for a running task,
-                 or ``{"project_id": "...", "source": "..."}`` (optionally with ``"pipe_id"``).
+                 or ``{"project_id": "...", "source": "..."}`` (optionally
+                 with ``"pipe_id"`` and/or ``"team_id"``).
             types: Event types to subscribe to (e.g. ``['summary', 'flow']``).
         """
         key_str = self._monitor_key_to_string(key)
@@ -484,6 +489,10 @@ class EventMixin(DAPClient):
             }
             if 'pipe_id' in key and key['pipe_id'] is not None:
                 args['pipeId'] = key['pipe_id']
+            # The scope IS the kind: teamId addresses the team's deploy run,
+            # absent addresses the caller's own dev run.
+            if key.get('team_id'):
+                args['teamId'] = key['team_id']
             await self.call('rrext_monitor', **args)
 
     async def _resubscribe_all_monitors(self) -> None:
@@ -503,12 +512,21 @@ class EventMixin(DAPClient):
 
     @staticmethod
     def _monitor_key_to_string(key: Dict[str, Any]) -> str:
-        """Convert a monitor key dict to a stable string for map lookup."""
+        """Convert a monitor key dict to a stable string for map lookup.
+
+        The team scope rides as an ``@`` suffix so the project/source/pipe
+        parse stays untouched. MUST stay symmetric with
+        :meth:`_monitor_string_to_key` — reconnect round-trips keys through
+        the pair, and an encoder-only change would silently drop the team
+        scope.
+        """
         if 'token' in key:
             return f't:{key["token"]}'
         s = f'p:{key["project_id"]}.{key["source"]}'
         if 'pipe_id' in key and key['pipe_id'] is not None:
             s += f'.{key["pipe_id"]}'
+        if key.get('team_id'):
+            s += f'@{key["team_id"]}'
         return s
 
     @staticmethod
@@ -518,13 +536,20 @@ class EventMixin(DAPClient):
             return {'token': key_str[2:]}
         if key_str.startswith('p:'):
             rest = key_str[2:]
+            # Strip the team-scope suffix first (see _monitor_key_to_string)
+            team_id = None
+            at_idx = rest.rfind('@')
+            if at_idx != -1:
+                team_id = rest[at_idx + 1 :]
+                rest = rest[:at_idx]
             dot_idx = rest.index('.') if '.' in rest else -1
             if dot_idx == -1:
                 return None
             project_id = rest[:dot_idx]
             remaining = rest[dot_idx + 1 :]
             parts = remaining.split('.')
+            team = {'team_id': team_id} if team_id else {}
             if len(parts) == 2 and parts[1].isdigit():
-                return {'project_id': project_id, 'source': parts[0], 'pipe_id': int(parts[1])}
-            return {'project_id': project_id, 'source': remaining}
+                return {'project_id': project_id, 'source': parts[0], 'pipe_id': int(parts[1]), **team}
+            return {'project_id': project_id, 'source': remaining, **team}
         return None

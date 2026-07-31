@@ -334,6 +334,7 @@ class ExecutionMixin(DAPClient):
         source: str,
         pipeline: PipelineConfig,
         token: Optional[str] = None,
+        team_id: str = '',
     ) -> None:
         """
         Restart a running pipeline with a new configuration.
@@ -341,23 +342,30 @@ class ExecutionMixin(DAPClient):
         Looks up the existing task by project/source, terminates it, and starts
         a new execution in one server round-trip.
 
+        The scope IS the kind: pass ``team_id`` to address the team's
+        DEPLOYED run; omit it to address your own dev run.
+
         Args:
             project_id: The project identifier.
             source: The source component identifier.
             pipeline: The pipeline configuration to restart with.
             token: Existing task token (optional; resolved server-side if omitted).
+            team_id: Address the team's deploy run; empty for your own dev run.
 
         Raises:
             RuntimeError: If the restart fails.
         """
+        arguments: Dict[str, Any] = {
+            'token': token,
+            'projectId': project_id,
+            'source': source,
+            'pipeline': pipeline,
+        }
+        if team_id:
+            arguments['teamId'] = team_id
         request = self.build_request(
             command='restart',
-            arguments={
-                'token': token,
-                'projectId': project_id,
-                'source': source,
-                'pipeline': pipeline,
-            },
+            arguments=arguments,
         )
         response = await self.request(request)
         if self.did_fail(response):
@@ -431,22 +439,29 @@ class ExecutionMixin(DAPClient):
         # Send status request
         return await self.call('rrext_get_task_status', token=token)
 
-    async def get_task_token(self, project_id: str, source: str) -> str | None:
+    async def get_task_token(self, project_id: str, source: str, *, team_id: str = '') -> str | None:
         """
         Resolve a running task's token from its project ID and source component.
 
         The token is required for operations like terminate and restart.
         Returns None if no task is currently running for the given project/source.
 
+        The scope IS the kind: pass ``team_id`` to resolve the team's
+        DEPLOYED run; omit it to resolve your own dev run.
+
         Args:
             project_id: The project identifier.
             source: The source component identifier.
+            team_id: Address the team's deploy run; empty for your own dev run.
 
         Returns:
             The task token string, or None if no running task was found.
         """
         try:
-            body = await self.call('rrext_get_token', projectId=project_id, source=source)
+            args: Dict[str, Any] = {'projectId': project_id, 'source': source}
+            if team_id:
+                args['teamId'] = team_id
+            body = await self.call('rrext_get_token', **args)
             return body.get('token')
         except RuntimeError:
             return None

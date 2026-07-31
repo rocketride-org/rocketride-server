@@ -344,6 +344,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 						paused: sched?.paused === true,
 						...(sched?.ttl ? { ttl: sched.ttl } : {}),
 						...(sched?.lastRunAt ? { lastRunAt: sched.lastRunAt } : {}),
+						...(dep.runningSources?.[sourceId] ? { running: true } : {}),
 					};
 				}),
 			};

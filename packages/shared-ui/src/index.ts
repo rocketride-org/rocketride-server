@@ -47,6 +47,8 @@ export type { IOverviewGridProps, IConnectionsPanelProps, ITasksPanelProps, IAct
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
 export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
+export { foldTaskEvent, foldDeployRunState, foldProjectDeployRuns } from './modules/sidebar/taskFold';
+export type { TaskLifecycleEvent, TaskFoldResult } from './modules/sidebar/taskFold';
 
 // --- Deploy panel family (teams-as-environments deployment surfaces) ---------
 // Deliberately NOT exported from this barrel: DeploymentView drags the canvas

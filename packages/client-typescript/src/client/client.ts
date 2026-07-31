@@ -325,9 +325,14 @@ export class DataPipe {
  * Identifies a monitor subscription key.
  *
  * - `{ token }` — monitors a specific running task by its session token.
- * - `{ projectId, source }` — monitors a project/source regardless of task.
+ * - `{ projectId, source }` — monitors the CALLER's own dev run of the
+ *   project/source (the server binds the connection's user identity).
+ * - `{ teamId, projectId, source }` — monitors the team's DEPLOYED run.
+ *
+ * The scope IS the kind: teamId present addresses the deploy continuum,
+ * absent addresses your dev run — there is no run-kind argument.
  */
-export type MonitorKey = { token: string } | { projectId: string; source: string; pipeId?: number };
+export type MonitorKey = { token: string } | { teamId?: string; projectId: string; source: string; pipeId?: number };
 
 export class RocketRideClient extends DAPClient {
 	private _uri!: string;
@@ -1202,8 +1207,15 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.projectId - The project identifier.
 	 * @param options.source - The source component identifier.
 	 * @param options.pipeline - The pipeline configuration to restart with.
+	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void> {
+	async restart(options: {
+		token?: string;
+		projectId: string;
+		source: string;
+		pipeline: Record<string, unknown>;
+		teamId?: string;
+	}): Promise<void> {
 		try {
 			await this.call(
 				'restart',
@@ -1212,6 +1224,7 @@ export class RocketRideClient extends DAPClient {
 					projectId: options.projectId,
 					source: options.source,
 					pipeline: options.pipeline,
+					...(options.teamId ? { teamId: options.teamId } : {}),
 				},
 			);
 		} catch (err) {
@@ -1250,13 +1263,18 @@ export class RocketRideClient extends DAPClient {
 	 * The token is required for operations like terminate and restart.
 	 * Returns undefined if no task is currently running for the given project/source.
 	 *
+	 * The scope IS the kind: pass teamId to resolve the team's DEPLOYED run;
+	 * omit it to resolve your own dev run.
+	 *
 	 * @param options.projectId - The project identifier.
 	 * @param options.source - The source component identifier.
+	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async getTaskToken(options: { projectId: string; source: string }): Promise<string | undefined> {
+	async getTaskToken(options: { projectId: string; source: string; teamId?: string }): Promise<string | undefined> {
 		const body = await this.call('rrext_get_token', {
 			projectId: options.projectId,
 			source: options.source,
+			...(options.teamId ? { teamId: options.teamId } : {}),
 		});
 		return body?.token as string | undefined;
 	}
@@ -1840,6 +1858,11 @@ export class RocketRideClient extends DAPClient {
 			if (key.pipeId !== undefined) {
 				args.pipeId = key.pipeId;
 			}
+			// The scope IS the kind: teamId addresses the team's deploy run,
+			// absent addresses the caller's own dev run.
+			if (key.teamId) {
+				args.teamId = key.teamId;
+			}
 			await this.call('rrext_monitor', args);
 		}
 	}
@@ -1873,6 +1896,13 @@ export class RocketRideClient extends DAPClient {
 		if (key.pipeId !== undefined) {
 			s += `.${key.pipeId}`;
 		}
+		// Team scope rides as a suffix so the projectId/source/pipeId parse
+		// below stays untouched. MUST stay symmetric with
+		// _monitorStringToKey — reconnect round-trips keys through the pair,
+		// and an encoder-only change would silently drop the team scope.
+		if (key.teamId) {
+			s += `@${key.teamId}`;
+		}
 		return s;
 	}
 
@@ -1884,16 +1914,24 @@ export class RocketRideClient extends DAPClient {
 			return { token: keyStr.slice(2) };
 		}
 		if (keyStr.startsWith('p:')) {
-			const rest = keyStr.slice(2);
+			let rest = keyStr.slice(2);
+			// Strip the team-scope suffix first (see _monitorKeyToString)
+			let teamId: string | undefined;
+			const atIdx = rest.lastIndexOf('@');
+			if (atIdx !== -1) {
+				teamId = rest.slice(atIdx + 1);
+				rest = rest.slice(0, atIdx);
+			}
 			const dotIdx = rest.indexOf('.');
 			if (dotIdx === -1) return null;
 			const projectId = rest.slice(0, dotIdx);
 			const remaining = rest.slice(dotIdx + 1);
 			const parts = remaining.split('.');
+			const team = teamId ? { teamId } : {};
 			if (parts.length === 2 && !isNaN(Number(parts[1]))) {
-				return { projectId, source: parts[0], pipeId: Number(parts[1]) };
+				return { projectId, source: parts[0], pipeId: Number(parts[1]), ...team };
 			}
-			return { projectId, source: remaining };
+			return { projectId, source: remaining, ...team };
 		}
 		return null;
 	}

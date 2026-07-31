@@ -229,12 +229,17 @@ class LogEventStream:
             return
         self._monitor_registered = True
         try:
-            await self._client.call(
-                'rrext_monitor',
-                projectId=self._project_id,
-                source=self._source,
-                types=['all'],
-            )
+            # The stream's team scope rides the registration — a deploy
+            # stream must subscribe the TEAM's run, not the caller's dev run
+            # (the scope IS the kind).
+            args = {
+                'projectId': self._project_id,
+                'source': self._source,
+                'types': ['all'],
+            }
+            if self._team_id:
+                args['teamId'] = self._team_id
+            await self._client.call('rrext_monitor', **args)
         except Exception:
             pass
 

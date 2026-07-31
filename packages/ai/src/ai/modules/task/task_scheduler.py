@@ -299,18 +299,15 @@ class TaskScheduler:
         pipeline = dict(pipeline)
         pipeline['source'] = source_id
 
-        # The deploying user (from the pointer's audit trail) is the billing
-        # attribution identity; the run itself executes as the team.
-        actor = dep.get('updatedBy') or dep.get('createdBy') or _SCHEDULER_ACTOR
-
         try:
             ttl = sched.get('ttl')
+            # The run executes AS THE TEAM and carries no human identity —
+            # who deployed lives in the deployment history, not on the run.
             task_token = await start_server_task_as_team(
                 self._server,
                 pipeline,
                 org_id=org_id,
                 team_id=team_id,
-                actor=actor,
                 trigger='schedule',
                 ttl=int(ttl) if isinstance(ttl, (int, float)) and ttl else None,
                 # Per-source execution settings ride the schedule record.
@@ -329,6 +326,7 @@ class TaskScheduler:
 
         self._active_tokens[entry.key] = task_token
         await account.deployments_mark_run(org_id, team_id, project_id, source_id)
+        await self._notify_deploy_changed(org_id, team_id, project_id, 'run')
         debug(f'[SCHEDULER] {entry.key}: dispatched -> task {task_token}')
 
     async def _mark_errored(self, org_id: str, team_id: str, project_id: str) -> None:
@@ -341,5 +339,27 @@ class TaskScheduler:
         try:
             dep = await account.deployments_set_state(org_id, team_id, project_id, 'errored', _SCHEDULER_ACTOR)
             self.sync(org_id, dep)
+            await self._notify_deploy_changed(org_id, team_id, project_id, 'errored')
         except Exception as e:
             error(f'[SCHEDULER] {team_id}/{project_id}: failed to persist errored state: {e}')
+
+    async def _notify_deploy_changed(self, org_id: str, team_id: str, project_id: str, action: str) -> None:
+        """Push the org-scoped deployment-change invalidation event.
+
+        Same contract as the DAP handlers' notifier (cmd_deploy): receivers
+        re-fetch on receipt; the body is identity only. Best-effort — a
+        failed broadcast must never fail the scheduler's bookkeeping.
+        """
+        try:
+            from rocketride import EVENT_TYPE
+
+            await self._server.broadcast_server_event(
+                EVENT_TYPE.DEPLOY,
+                {
+                    'event': 'apaevt_deploy',
+                    'body': {'orgId': org_id, 'teamId': team_id, 'projectId': project_id, 'action': action},
+                },
+                org_id=org_id,
+            )
+        except Exception as e:
+            error(f'[SCHEDULER] {team_id}/{project_id}: deploy-change broadcast failed: {e}')

@@ -27,7 +27,7 @@ import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import 'shared/themes/rocketride-default.css';
 import 'shared/themes/rocketride-vscode.css';
 
-import { SidebarView, BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shared';
+import { SidebarView, BxUser, BxCog, BxExport, BxLock, BxRocket, foldTaskEvent } from 'shared';
 import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from 'shared';
@@ -50,7 +50,8 @@ interface TaskEventBody {
 	name?: string;
 	projectId: string;
 	source: string;
-	tasks?: { id: string; name: string; projectId: string; source: string }[];
+	/** Bulk snapshot rows — each row carries its OWN runKind stamp. */
+	tasks?: { id: string; name: string; projectId: string; source: string; runKind?: string }[];
 }
 
 type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' };
@@ -115,6 +116,19 @@ const SidebarViewWebview: React.FC = () => {
 	const [activeTasks, setActiveTasks] = useState<Map<string, ActiveTaskState>>(new Map());
 	const [unknownTasks, setUnknownTasks] = useState<UnknownTask[]>([]);
 
+	// Synchronously-updated mirrors: the shared foldTaskEvent needs BOTH
+	// collections atomically, and relayed events can burst faster than a
+	// render — refs advance in the handler itself so successive folds never
+	// read stale state; the effects re-anchor them after any other mutation.
+	const activeTasksRef = useRef(activeTasks);
+	const unknownTasksRef = useRef(unknownTasks);
+	useEffect(() => {
+		activeTasksRef.current = activeTasks;
+	}, [activeTasks]);
+	useEffect(() => {
+		unknownTasksRef.current = unknownTasks;
+	}, [unknownTasks]);
+
 	// ── Engine progress log (last N lines for popup display) ───────────────
 	const MAX_PROGRESS_LINES = 15;
 	const [devProgressLog, setDevProgressLog] = useState<string[]>([]);
@@ -141,84 +155,18 @@ const SidebarViewWebview: React.FC = () => {
 	/** Process an apaevt_task event to update activeTasks and unknownTasks. */
 	const handleTaskEvent = useCallback(
 		(event: TaskEventBody) => {
-			const { action, projectId, source: sourceId } = event;
-			const key = `${projectId}.${sourceId}`;
-
-			// Deploy runs never enter the dev active/ad-hoc lists — they are
-			// represented by the DEPLOYMENTS tree.
-			if (event.runKind === 'deploy') return;
-
-			setActiveTasks((prev) => {
-				const next = new Map(prev);
-
-				switch (action) {
-					case 'begin':
-					case 'restart':
-						if (!next.has(key)) {
-							next.set(key, { running: true, errors: [], warnings: [] });
-						} else {
-							const existing = next.get(key)!;
-							next.set(key, { ...existing, running: true });
-						}
-						break;
-
-					case 'running':
-						// Full resync — clear and rebuild from task list
-						next.clear();
-						for (const task of event.tasks ?? []) {
-							const k = `${task.projectId}.${task.source}`;
-							next.set(k, { running: true, errors: [], warnings: [] });
-						}
-						break;
-
-					case 'end':
-						next.delete(key);
-						break;
-				}
-
-				return next;
-			});
-
-			// Update unknown tasks
-			setUnknownTasks((prev) => {
-				switch (action) {
-					case 'begin':
-					case 'restart':
-						if (!isKnownTask(projectId, sourceId)) {
-							if (!prev.some((ut) => ut.projectId === projectId && ut.sourceId === sourceId)) {
-								return [
-									...prev,
-									{
-										projectId,
-										sourceId,
-										displayName: event.name || sourceId,
-										projectLabel: projectId.substring(0, 8),
-									},
-								];
-							}
-						}
-						return prev;
-
-					case 'running': {
-						// Full resync
-						const tasks = event.tasks ?? [];
-						return tasks
-							.filter((t) => !isKnownTask(t.projectId, t.source))
-							.map((t) => ({
-								projectId: t.projectId,
-								sourceId: t.source,
-								displayName: t.name || t.source,
-								projectLabel: t.projectId.substring(0, 8),
-							}));
-					}
-
-					case 'end':
-						return prev.filter((ut) => !(ut.projectId === projectId && ut.sourceId === sourceId));
-
-					default:
-						return prev;
-				}
-			});
+			// The dev-view classification and the whole lifecycle fold live in
+			// shared code (foldTaskEvent) — one implementation for this webview
+			// and the rocket-ui sidebar. Deploy runs never enter the active/
+			// ad-hoc lists; the fold filters every path, including each row of
+			// a bulk 'running' snapshot.
+			const folded = foldTaskEvent(event, activeTasksRef.current, unknownTasksRef.current, isKnownTask);
+			if (folded) {
+				activeTasksRef.current = folded.activeTasks;
+				unknownTasksRef.current = folded.unknownTasks;
+				setActiveTasks(folded.activeTasks);
+				setUnknownTasks(folded.unknownTasks);
+			}
 		},
 		[isKnownTask]
 	);

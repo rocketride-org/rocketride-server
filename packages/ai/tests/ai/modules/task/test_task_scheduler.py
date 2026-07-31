@@ -171,8 +171,9 @@ class TestStartRun:
         # Execution settings ride the dispatch; unset trace defaults to FULL.
         assert kwargs['trace_level'] == 'full'
         assert kwargs['debug_out'] is False
-        # The deploying user rides as attribution.
-        assert kwargs['actor']['userId'] == 'user-1'
+        # No actor rides the dispatch — the run is owned by the team alone;
+        # who deployed lives in the deployment history, not on the run.
+        assert 'actor' not in kwargs
         # Overlap guard armed + lastRunAt stamped.
         assert scheduler._active_tokens[entry.key] == 'tk_dispatched'
         account_stub.deployments_mark_run.assert_awaited_once()

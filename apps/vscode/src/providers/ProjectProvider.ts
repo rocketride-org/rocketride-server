@@ -146,12 +146,29 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	// =========================================================================
 
 	private handleEvent(event: GenericEvent): void {
+		// Deployment-change invalidations carry their identity as projectId
+		// (a server event, not a stamped task body) — relay to the project's
+		// editors so the drawer can re-fetch, then stop (nothing below
+		// applies to a non-task event).
+		if (event.event === 'apaevt_deploy') {
+			const deployProject = (event.body as { projectId?: string } | undefined)?.projectId;
+			for (const editorState of this.editorStates.values()) {
+				if (editorState.isDisposed || !editorState.isReady) continue;
+				if (deployProject && editorState.projectId !== deployProject) continue;
+				editorState.webviewPanel.webview.postMessage({ type: 'shell:event', event });
+			}
+			return;
+		}
+
 		const projectId = event.body?.project_id;
 		if (!projectId) return;
 
 		if (event.event === 'apaevt_status_update') {
+			// The status cache feeds the DEV canvas on load — deploy-run
+			// statuses (delivered here whenever a team-scoped subscription is
+			// open) must not enter it.
 			const source = event.body?.source;
-			if (source) {
+			if (source && (event.body as { runKind?: string }).runKind !== 'deploy') {
 				for (const editorState of this.editorStates.values()) {
 					if (!editorState.isDisposed && editorState.projectId === projectId) {
 						editorState.cachedStatuses[source] = event.body as TaskStatus;
@@ -260,8 +277,15 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			// summary/flow feed the canvas + status map; output/task feed the
 			// webview's live log and run-active timeline. The webview has no
 			// session of its own (the host bridges all events), so the host
-			// must subscribe to every class the panes consume.
+			// must subscribe to every class the panes consume. The 'deploy'
+			// class rides the global registration: deployment-change
+			// invalidations that let the drawer re-fetch instead of polling.
 			await client.addMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow', 'output', 'task']);
+			// Global classes: 'deploy' = deployment-change invalidations;
+			// '*' task = ALL visible runs' lifecycle (the where-live running
+			// badges) — each registration also triggers the server's catch-up
+			// snapshot, seeding the webview's fold on panel open.
+			await client.addMonitor({ token: '*' }, ['deploy', 'task']);
 		} catch (error) {
 			this.logger.error(`Starting monitoring for project ${editorState.projectId}: ${error}`);
 		}
@@ -273,7 +297,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 
 		try {
 			const client = this.connectionManager.getClient();
-			if (client) await client.removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow', 'output', 'task']);
+			if (client) {
+				await client.removeMonitor({ projectId: editorState.projectId, source: '*' }, ['summary', 'flow', 'output', 'task']);
+				await client.removeMonitor({ token: '*' }, ['deploy', 'task']);
+			}
 		} catch (error) {
 			this.logger.error(`Stopping monitoring for project ${editorState.projectId}: ${error}`);
 		}
@@ -282,6 +309,38 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 	private onConnectedClearStaleData(): void {
 		for (const editorState of this.editorStates.values()) {
 			editorState.cachedStatuses = {};
+		}
+		// Team task monitors are per-connection server-side — a reconnect
+		// starts clean, so drop the registration memory and re-register on
+		// the next drawer fetch.
+		this._deployTaskMonitors.clear();
+	}
+
+	/** Team task monitors registered this connection (key: teamId.projectId). */
+	private _deployTaskMonitors = new Set<string>();
+
+	/**
+	 * Register the team-scoped 'task' monitor a deployment drawer relies on.
+	 *
+	 * The catch-up snapshot + begin/end pushes are what let the drawer track
+	 * run state without polling. Registered once per (team, project) per
+	 * connection; the registration lives until disconnect — release is
+	 * implicit (per-connection server-side), matching the drawer's
+	 * open-again-later usage.
+	 *
+	 * @param teamId - The deployment's team.
+	 * @param projectId - The deployed project.
+	 */
+	private async ensureDeployTaskMonitor(teamId: string, projectId: string): Promise<void> {
+		const key = `${teamId}.${projectId}`;
+		if (this._deployTaskMonitors.has(key)) return;
+		try {
+			const client = this.connectionManager.getClient();
+			if (!client) return;
+			await client.addMonitor({ projectId, source: '*', teamId }, ['task']);
+			this._deployTaskMonitors.add(key);
+		} catch (error) {
+			this.logger.error(`Registering deploy task monitor for ${key}: ${error}`);
 		}
 	}
 
@@ -953,8 +1012,12 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		const teamId = message.teamId;
 
 		switch (message.type) {
-			// -- Snapshot (drawer open, its poll, and post-mutation refresh) ------
+			// -- Snapshot (drawer open, push-triggered and post-mutation refresh) --
 			case 'deployment:fetch': {
+				// The drawer's run state is push-driven from here on: the
+				// team-scoped task monitor's events trigger the webview's
+				// re-fetches instead of an interval.
+				await this.ensureDeployTaskMonitor(teamId, projectId);
 				await this.fetchAndPushDeployment(webview, teamId, projectId, message.sourceId);
 				break;
 			}
@@ -995,9 +1058,10 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			// -- Stop one source's live run ---------------------------------------
 			case 'deployment:stopSource': {
 				await this.runDeploymentAction(webview, teamId, projectId, message.requestId, async (client) => {
-					// Existing task machinery: resolve the live task, terminate it —
-					// permissions resolve against the task's TEAM server-side.
-					const token = await client.getTaskToken({ projectId, source: message.sourceId });
+					// Existing task machinery: resolve the live task, terminate it.
+					// teamId scopes the lookup to the TEAM's deploy run — without
+					// it the server would resolve the caller's own dev run.
+					const token = await client.getTaskToken({ projectId, source: message.sourceId, teamId });
 					if (token) await client.terminate(token);
 				});
 				break;

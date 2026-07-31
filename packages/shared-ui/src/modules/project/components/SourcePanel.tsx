@@ -437,17 +437,19 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 
 	// Trace fold: same parse as live, over the track's flow events; the
 	// track identity keys the fold so a track flip restarts it cleanly.
+	// The parse is scoped to THIS section's continuum — a deploy section's
+	// session delivers deploy-stamped events, which must fold here.
 	const foldedTraceEvents = useMemo<TraceEvent[]>(() => {
 		const folded: TraceEvent[] = [];
 		for (const message of track.events) {
 			if (message.event !== 'apaevt_flow') continue;
-			const parsed = parseServerEvent(message, projectId);
+			const parsed = parseServerEvent(message, projectId, runKind);
 			if (parsed.traceEvent && parsed.traceEvent.source === source.id) {
 				folded.push(parsed.traceEvent);
 			}
 		}
 		return folded;
-	}, [track, projectId, source.id]);
+	}, [track, projectId, source.id, runKind]);
 
 	const { rows: traceRows } = useTraceState(foldedTraceEvents, track.chapter?.beginSeq ?? -1);
 

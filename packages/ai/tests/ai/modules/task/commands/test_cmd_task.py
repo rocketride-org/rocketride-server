@@ -352,7 +352,25 @@ async def test_on_rrext_get_token_returns_token_from_server():
     response = await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
     assert response == {'type': 'response', 'body': {'token': 'tk_found'}}
     server.get_task_control_by_project.assert_called_once_with(
-        'proj-1', 'src-1', conn._account_info, require='task.monitor'
+        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id=''
+    )
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_get_token_team_scope_resolves_deploy_run():
+    """A teamId argument scopes the lookup (and permission check) to that team."""
+    server = MagicMock()
+    server.get_task_control_by_project = MagicMock(return_value=SimpleNamespace(token='tk_deploy'))
+
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_team_permission = MagicMock()
+    response = await TaskCommands.on_rrext_get_token(
+        conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1', 'teamId': 'team-1'}}
+    )
+    assert response == {'type': 'response', 'body': {'token': 'tk_deploy'}}
+    conn.verify_team_permission.assert_called_once_with('team-1', 'task.monitor')
+    server.get_task_control_by_project.assert_called_once_with(
+        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='team-1'
     )
 
 
@@ -377,6 +395,7 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
             token=token,
             userId='user-1',
             teamId=team_id,
+            run_kind='dev',
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
@@ -401,6 +420,9 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     tokens = [t['token'] for t in response['body']['tasks']]
     assert tokens == ['tk_running_mine']
     assert response['body']['tasks'][0]['name'] == 'my-pipeline'
+    # Run classification rides every row — clients must not infer deploy-ness
+    # from a non-empty teamId (dev runs carry an attribution team too).
+    assert response['body']['tasks'][0]['runKind'] == 'dev'
 
 
 @pytest.mark.asyncio
@@ -415,6 +437,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         token='tk_1',
         userId='user-1',
         teamId='team-1',
+        run_kind='dev',
         source='my-source',
         pipeline=None,
         task=task,

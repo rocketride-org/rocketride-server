@@ -344,6 +344,9 @@ class TaskCommands(DAPConn):
                 - args (Dict[str, Any]): Additional arguments for the request
                     - projectId (str)): The project id
                     - source (str): The source id
+                    - teamId (str, optional): Address the team's DEPLOY run;
+                      absent addresses the caller's own DEV run (the scope
+                      IS the kind — there is no run-kind argument)
 
         Returns:
             Dict[str, Any]: DAP response with token
@@ -352,17 +355,23 @@ class TaskCommands(DAPConn):
             Exception: If task does not exist
         """
         try:
-            # Verify permission
-            self.verify_permission('task.monitor')
-
             # Get the arguments
             args = request.get('arguments', {})
             project_id = args.get('projectId', None)
             source = args.get('source', None)
+            team_id = args.get('teamId') or ''
 
-            # Get the task control (ownership + permission check inside)
+            # Verify permission against the requested scope: the named team
+            # for a deploy lookup, the caller's default context otherwise
+            # (prior art: cmd_log._verify_log_access).
+            if team_id:
+                self.verify_team_permission(team_id, 'task.monitor')
+            else:
+                self.verify_permission('task.monitor')
+
+            # Get the task control (owner scoping + permission check inside)
             control = self._server.get_task_control_by_project(
-                project_id, source, self._account_info, require='task.monitor'
+                project_id, source, self._account_info, require='task.monitor', team_id=team_id
             )
 
             # Return successful response with status data
@@ -435,6 +444,10 @@ class TaskCommands(DAPConn):
                             # Owning team — lets clients attribute a task to a
                             # TEAM deployment vs a dev run of the same project.
                             'teamId': control.teamId,
+                            # Run classification straight from the control —
+                            # clients must not infer deploy-ness from teamId
+                            # (dev runs carry an attribution team too).
+                            'runKind': control.run_kind,
                             'pipeline': control.pipeline,
                         }
                     )
