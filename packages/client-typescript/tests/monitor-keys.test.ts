@@ -89,6 +89,19 @@ describe('monitor key scope', () => {
 		expect(roundTrip({ token: 'tk_abc' })).toEqual({ token: 'tk_abc' });
 	});
 
+	it('round-trips ids containing the former delimiters', () => {
+		// '@' and '.' are free text in ids — a delimiter-joined encoding
+		// decoded 'chat@legacy' as source 'chat' + teamId 'legacy', silently
+		// rewriting the subscription scope on reconnect.
+		expect(roundTrip({ projectId: 'proj.dotted', source: 'chat@legacy' })).toEqual({ projectId: 'proj.dotted', source: 'chat@legacy' });
+		expect(roundTrip({ projectId: 'proj-1', source: 'a.b@c', pipeId: 7, teamId: 'team@x' })).toEqual({
+			projectId: 'proj-1',
+			source: 'a.b@c',
+			pipeId: 7,
+			teamId: 'team@x',
+		});
+	});
+
 	it('dev and team keys of the same project/source are distinct entries', () => {
 		const proto = RocketRideClient.prototype as unknown as { _monitorKeyToString(key: MonitorKey): string };
 		const dev = proto._monitorKeyToString({ projectId: 'proj-1', source: 'src-1' });

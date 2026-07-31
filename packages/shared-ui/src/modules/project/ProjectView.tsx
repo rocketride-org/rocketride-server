@@ -185,8 +185,10 @@ export interface IProjectViewProps {
 	/** Cron preview via the server's single evaluator (schedule editor). */
 	onDeployPreviewSchedule?: (cron: string, count: number) => Promise<SchedulePreviewResult>;
 	/** Fetch one immutable artifact's pipeline JSON — makes the DEPLOY
-	    page's version cards open a readonly-canvas record drawer. */
-	fetchDeployArtifact?: (version: number) => Promise<unknown>;
+	    page's version cards open a readonly-canvas record drawer. Typed
+	    with DeployPanel's own artifact shape so drift between the host
+	    contract and the panel surfaces at compile time, not via a cast. */
+	fetchDeployArtifact?: NonNullable<ComponentProps<typeof DeployPanel>['fetchArtifact']>;
 	/** Save the document and resolve when it is on disk — the DEPLOY page's
 	    'Save & publish' path for a dirty document. */
 	onSaveDocument?: () => Promise<void>;
@@ -593,7 +595,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			// project concurrently.
 			content: renderDocPanel(
 				fetchDeployLifecycle && onDeployPublish && onDeployVersion ? (
-					<DeployPanel fetchLifecycle={fetchDeployLifecycle} deployments={teamDeploymentRows} teams={deployTeams} pipelineName={project?.name ?? ''} {...(onDeploySetDisabled ? { onSetDisabled: onDeploySetDisabled } : {})} {...(onDeploySetSchedule ? { onSetSchedule: onDeploySetSchedule } : {})} {...(onDeploySetSchedulePaused ? { onSetSchedulePaused: onDeploySetSchedulePaused } : {})} {...(fetchDeployArtifact ? { fetchArtifact: fetchDeployArtifact as ComponentProps<typeof DeployPanel>['fetchArtifact'], servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})} {...(onDeployPreviewSchedule ? { previewSchedule: onDeployPreviewSchedule } : {})} canPublish={!isDirty && !isNew} {...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})} requiresSave={isDirty && !isNew} {...(onSaveDocument ? { onSaveDocument } : {})} onPublish={onDeployPublish} onDeploy={onDeployVersion} {...(onOpenDeployment ? { onOpenDeployment } : {})} />
+					<DeployPanel fetchLifecycle={fetchDeployLifecycle} deployments={teamDeploymentRows} teams={deployTeams} pipelineName={project?.name ?? ''} {...(onDeploySetDisabled ? { onSetDisabled: onDeploySetDisabled } : {})} {...(onDeploySetSchedule ? { onSetSchedule: onDeploySetSchedule } : {})} {...(onDeploySetSchedulePaused ? { onSetSchedulePaused: onDeploySetSchedulePaused } : {})} {...(fetchDeployArtifact ? { fetchArtifact: fetchDeployArtifact, servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})} {...(onDeployPreviewSchedule ? { previewSchedule: onDeployPreviewSchedule } : {})} canPublish={!isDirty && !isNew} {...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})} requiresSave={isDirty && !isNew} {...(onSaveDocument ? { onSaveDocument } : {})} onPublish={onDeployPublish} onDeploy={onDeployVersion} {...(onOpenDeployment ? { onOpenDeployment } : {})} />
 				) : (
 					<div style={commonStyles.empty}>Deployment lifecycle is not available in this host yet</div>
 				)

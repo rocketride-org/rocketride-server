@@ -49,6 +49,7 @@ Usage:
     await client.set_events(token, ['apaevt_status_upload', 'apaevt_status_processing'])
 """
 
+import json
 import sys
 from typing import Callable, Dict, Any, Optional, List
 from ..core import DAPClient
@@ -514,20 +515,18 @@ class EventMixin(DAPClient):
     def _monitor_key_to_string(key: Dict[str, Any]) -> str:
         """Convert a monitor key dict to a stable string for map lookup.
 
-        The team scope rides as an ``@`` suffix so the project/source/pipe
-        parse stays untouched. MUST stay symmetric with
-        :meth:`_monitor_string_to_key` — reconnect round-trips keys through
-        the pair, and an encoder-only change would silently drop the team
-        scope.
+        Project keys use a JSON-array encoding because the ids are free
+        text: a delimiter-joined string cannot round-trip a source that
+        contains the delimiter (a source like 'chat@legacy' would decode
+        as a team scope) — and reconnect round-trips EVERY key through
+        this pair, so a misparse silently rewrites the subscription. MUST
+        stay symmetric with :meth:`_monitor_string_to_key`. The string is
+        private registry state; it never travels on the wire.
         """
         if 'token' in key:
             return f't:{key["token"]}'
-        s = f'p:{key["project_id"]}.{key["source"]}'
-        if 'pipe_id' in key and key['pipe_id'] is not None:
-            s += f'.{key["pipe_id"]}'
-        if key.get('team_id'):
-            s += f'@{key["team_id"]}'
-        return s
+        payload = [key['project_id'], key['source'], key.get('pipe_id'), key.get('team_id') or '']
+        return f'p:{json.dumps(payload)}'
 
     @staticmethod
     def _monitor_string_to_key(key_str: str) -> Optional[Dict[str, Any]]:
@@ -535,21 +534,15 @@ class EventMixin(DAPClient):
         if key_str.startswith('t:'):
             return {'token': key_str[2:]}
         if key_str.startswith('p:'):
-            rest = key_str[2:]
-            # Strip the team-scope suffix first (see _monitor_key_to_string)
-            team_id = None
-            at_idx = rest.rfind('@')
-            if at_idx != -1:
-                team_id = rest[at_idx + 1 :]
-                rest = rest[:at_idx]
-            dot_idx = rest.index('.') if '.' in rest else -1
-            if dot_idx == -1:
+            try:
+                project_id, source, pipe_id, team_id = json.loads(key_str[2:])
+            except (ValueError, TypeError):
+                # A malformed registry string has no valid key — skip it.
                 return None
-            project_id = rest[:dot_idx]
-            remaining = rest[dot_idx + 1 :]
-            parts = remaining.split('.')
-            team = {'team_id': team_id} if team_id else {}
-            if len(parts) == 2 and parts[1].isdigit():
-                return {'project_id': project_id, 'source': parts[0], 'pipe_id': int(parts[1]), **team}
-            return {'project_id': project_id, 'source': remaining, **team}
+            key: Dict[str, Any] = {'project_id': project_id, 'source': source}
+            if pipe_id is not None:
+                key['pipe_id'] = pipe_id
+            if team_id:
+                key['team_id'] = team_id
+            return key
         return None

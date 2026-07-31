@@ -180,9 +180,12 @@ def execute_sandboxed(
         # 'printed' variable") for ANY code that prints without reading the
         # collector variable. Stdout is collected via PrintCollector below,
         # so the hint is meaningless noise for every sandboxed script —
-        # suppress exactly that category around the compile.
+        # suppress exactly that message around the compile; any OTHER
+        # SyntaxWarning a script provokes still surfaces.
         with warnings.catch_warnings():
-            warnings.simplefilter('ignore', SyntaxWarning)
+            warnings.filterwarnings(
+                'ignore', category=SyntaxWarning, message=r".*Prints, but never reads 'printed' variable"
+            )
             compiled = compile_restricted(
                 code,
                 filename='<agent_script>',

@@ -26,10 +26,11 @@ implementation shares.
 
 Model (teams-as-environments):
   - PUBLISH creates an IMMUTABLE artifact version in the ORG registry:
-        orgs/<org_id>/files/.deployments/<project_id>/v000N.json
+        orgs/<org_id>/files/.deployments/<project_id>/v000N-<sha8>.json
     The artifact is the pipeline JSON exactly as published; its sha256 is
     recorded and re-verified on every load, so what was tested is provably
-    what runs.
+    what runs. The hash in the filename keeps racing publishers on
+    different files (see artifact_path).
   - DEPLOY points a TEAM at a registry version (a pointer move). Promotion
     and rollback are the same gesture aimed at different versions/teams.
   - Every publish and every pointer change is recorded immutably (who, what,
@@ -39,9 +40,9 @@ Model (teams-as-environments):
 Storage layout, one directory per project under the org's system-owned
 ``.deployments`` tree (raw file access is internal/sys.admin only — the
 store's system-tree rule — while this backend is the domain API):
-    <project_id>/v000001.json   immutable artifact (never overwritten)
-    <project_id>/meta.json      registry index + per-team deployments +
-                                history + schedules (CAS-guarded)
+    <project_id>/v000001-<sha8>.json   immutable artifact (never overwritten)
+    <project_id>/meta.json             registry index + per-team deployments +
+                                       history + schedules (CAS-guarded)
 
 Uses IStore directly (the trusted, in-server layer): paths are constructed
 here from validated ids, never from caller-supplied path strings.
@@ -115,9 +116,18 @@ def _actor_record(actor: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def artifact_path(org_id: str, project_id: str, version: int) -> str:
-    """Physical store path of one immutable artifact version."""
-    return f'orgs/{org_id}/files/.deployments/{project_id}/v{version:06d}.json'
+def artifact_path(org_id: str, project_id: str, version: int, sha256: str) -> str:
+    """Physical store path of one immutable artifact version.
+
+    The content hash rides in the filename so two publishers racing on the
+    same version number write DIFFERENT files: the CAS loser's artifact
+    can never overwrite the winner's, and the winner's registry entry
+    (which stores this path) always references its own intact bytes. A
+    version+hash collision implies identical bytes, where an overwrite is
+    a no-op. Readers never derive this path — they use the entry's stored
+    ``artifactPath``.
+    """
+    return f'orgs/{org_id}/files/.deployments/{project_id}/v{version:06d}-{sha256[:8]}.json'
 
 
 def artifact_sha256(data: str) -> str:
@@ -183,11 +193,13 @@ class FileDeploymentBackend:
                 'publishedBy': who,
                 'publishedAt': time.time(),
                 'comment': str(comment or ''),
-                'artifactPath': artifact_path(org_id, project_id, version),
+                'artifactPath': artifact_path(org_id, project_id, version, sha),
             }
             # Write the artifact BEFORE committing the meta: an orphaned
             # artifact file is harmless; a registry entry without its
-            # artifact would be a broken deploy target.
+            # artifact would be a broken deploy target. The content hash in
+            # the path makes a CAS retry write a NEW file, never overwrite
+            # a committed one.
             await self._store.write_file(entry['artifactPath'], data)
             meta['versions'].append(entry)
             meta['history'].append(

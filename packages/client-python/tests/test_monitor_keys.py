@@ -93,6 +93,17 @@ def test_round_trips_token_key():
     assert _round_trip({'token': 'tk_abc'}) == {'token': 'tk_abc'}
 
 
+def test_round_trips_ids_containing_former_delimiters():
+    """'@' and '.' are free text in ids — the delimiter-joined encoding
+    decoded 'chat@legacy' as source 'chat' + team 'legacy', silently
+    rewriting the subscription scope on reconnect.
+    """
+    key = {'project_id': 'proj.dotted', 'source': 'chat@legacy'}
+    assert _round_trip(key) == key
+    key = {'project_id': 'proj-1', 'source': 'a.b@c', 'pipe_id': 7, 'team_id': 'team@x'}
+    assert _round_trip(key) == key
+
+
 def test_dev_and_team_keys_are_distinct_entries():
     """The same project/source in dev vs team scope must not share a map slot."""
     dev = EventMixin._monitor_key_to_string({'project_id': 'proj-1', 'source': 'src-1'})

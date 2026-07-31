@@ -353,7 +353,9 @@ const ProjectWebview: React.FC = () => {
 				break;
 			}
 			case 'deployment:error': {
-				if (msg.teamId !== openDeploymentRef.current?.teamId) break;
+				// Same record guard as deployment:load — a stale source fetch's
+				// error must not land on a different drawer of the same team.
+				if (msg.teamId !== openDeploymentRef.current?.teamId || (msg.sourceId ?? null) !== (openDeploymentRef.current?.sourceId ?? null)) break;
 				setDeploymentError(msg.error);
 				break;
 			}

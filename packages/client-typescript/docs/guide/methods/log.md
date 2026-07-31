@@ -208,8 +208,12 @@ the single `rrext_log` command, dispatched by a `subcommand` argument:
 | `segment()` | `rrext_log` | `segment` |
 | `delete()` | `rrext_log` | `delete` |
 
-Reads require `task.monitor`; `delete` requires `task.control`. All access is
-scoped to the authenticated user's own streams.
+Reads require `task.monitor`; `delete` requires `task.control`. The scope
+the request addresses picks whose streams those rights are resolved
+against: without `teamId` you access your OWN dev streams; with `teamId`
+you access that team's deploy continua, and the permission is checked
+against the TARGET team — membership is the read/write right (a foreign or
+unknown team reads the same as a permission miss).
 
 `openEventStream()` is client-side composition: the session it returns
 issues `chapters` and `segment` calls under the hood and reconstructs the

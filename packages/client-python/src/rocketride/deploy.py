@@ -125,7 +125,10 @@ class DeployApi:
         step, the small-team convenience).
 
         Args:
-            pipeline: The full pipeline definition dict to snapshot.
+            pipeline: The full pipeline definition dict to snapshot. Its
+                ``name`` is REQUIRED (server-enforced): artifacts are
+                immutable and pipelineName renders on every deploy surface
+                — a nameless publish would show as a project GUID forever.
             comment: Optional "what changed" note kept in the registry.
             deploy_to: Optional team id to deploy the new version to
                 immediately (one-step publish+deploy).

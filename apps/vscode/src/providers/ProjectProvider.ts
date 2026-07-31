@@ -806,17 +806,21 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 							const saved = await document.save();
 							if (!saved) throw new Error('Save failed — publish cancelled');
 						}
-						const pipeline = JSON.parse(document.getText()) as PipelineConfig;
+						const parsed = JSON.parse(document.getText()) as PipelineConfig;
 						// The registry renders pipelineName on every deploy surface;
 						// .pipe JSON rarely carries one (names live in FILENAMES), so
-						// the snapshot takes the file's basename when the JSON has none.
-						if (!pipeline.name) {
-							pipeline.name =
+						// the snapshot takes the file's basename when the JSON has
+						// none — building the publish() signature's required name.
+						const pipeline = {
+							...parsed,
+							name:
+								parsed.name ||
 								document.uri.path
 									.split('/')
 									.pop()
-									?.replace(/\.pipe(?:\.json)?$/, '') || document.uri.path;
-						}
+									?.replace(/\.pipe(?:\.json)?$/, '') ||
+								document.uri.path,
+						};
 						await deployClient.deploy.publish(pipeline, { ...(data.comment ? { comment: data.comment as string } : {}), ...(data.deployTo ? { deployTo: data.deployTo as string } : {}) });
 						webview.postMessage({ type: 'deploy:actionResult', requestId: data.requestId });
 						// Re-push the lifecycle so the strip/history show the new truth.
@@ -1254,7 +1258,9 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 			webview.postMessage({ type: 'deployment:load', teamId, ...payload });
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
-			webview.postMessage({ type: 'deployment:error', teamId, error: msg });
+			// Stamp the addressed record (team + optional source) so the
+			// webview can drop errors from a stale fetch after switching.
+			webview.postMessage({ type: 'deployment:error', teamId, ...(sourceId ? { sourceId } : {}), error: msg });
 		}
 	}
 

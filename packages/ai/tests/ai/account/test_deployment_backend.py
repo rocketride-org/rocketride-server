@@ -76,8 +76,9 @@ class TestPublish:
         assert (v1['version'], v2['version']) == (1, 2)
 
         # Both artifacts exist independently — publishing never overwrites.
-        assert await store.read_file(artifact_path('org-1', 'proj-1', 1))
-        assert await store.read_file(artifact_path('org-1', 'proj-1', 2))
+        # Read via the entries' STORED paths: that is the reader contract.
+        assert await store.read_file(v1['artifactPath'])
+        assert await store.read_file(v2['artifactPath'])
 
         # Registry keeps both entries, newest first via versions().
         versions = await backend.versions('org-1', 'proj-1')
@@ -364,10 +365,10 @@ class TestArtifact:
 
     @pytest.mark.asyncio
     async def test_tampered_artifact_refuses_to_load(self, backend, store):
-        await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
+        entry = await backend.publish('org-1', 'proj-1', PIPE, ACTOR)
         # Tamper with the stored bytes AFTER publish — the registry sha256
         # must catch it, because what was tested must be what runs.
-        await store.write_file(artifact_path('org-1', 'proj-1', 1), '{"project_id": "proj-1", "evil": true}')
+        await store.write_file(entry['artifactPath'], '{"project_id": "proj-1", "evil": true}')
         with pytest.raises(StorageError, match='sha256 mismatch'):
             await backend.artifact('org-1', 'proj-1', 1)
 
@@ -375,6 +376,15 @@ class TestArtifact:
     async def test_unknown_version_refuses(self, backend):
         with pytest.raises(StorageError, match='not in the registry'):
             await backend.artifact('org-1', 'proj-1', 3)
+
+    def test_artifact_paths_are_content_unique(self):
+        # The content hash in the filename is what makes concurrent
+        # publishers race-safe: two racers allocating the SAME version
+        # number with different pipelines write DIFFERENT files, so the
+        # CAS loser's artifact can never overwrite the winner's.
+        a = artifact_path('org-1', 'proj-1', 1, 'a' * 64)
+        b = artifact_path('org-1', 'proj-1', 1, 'b' * 64)
+        assert a != b
 
 
 # ============================================================================

@@ -93,14 +93,17 @@ export class DeployApi {
 	 * with {@link deploy} (or pass `deployTo` to do both in one step, the
 	 * small-team convenience).
 	 *
-	 * @param pipeline - The full pipeline definition to snapshot.
+	 * @param pipeline - The full pipeline definition to snapshot. `name` is
+	 *   REQUIRED here (narrowed at compile time, enforced by the server):
+	 *   artifacts are immutable and pipelineName renders on every deploy
+	 *   surface — a nameless publish would show as a project GUID forever.
 	 * @param options - Optional publish options.
 	 * @param options.comment - "What changed" note kept in the registry.
 	 * @param options.deployTo - Team id to deploy the new version to
 	 *   immediately (one-step publish+deploy).
 	 * @returns The artifact entry, plus the deployment when `deployTo` was given.
 	 */
-	async publish(pipeline: PipelineConfig, options: { comment?: string; deployTo?: string } = {}): Promise<PublishResult> {
+	async publish(pipeline: PipelineConfig & { name: string }, options: { comment?: string; deployTo?: string } = {}): Promise<PublishResult> {
 		return this.client.call<PublishResult>('rrext_deploy', {
 			subcommand: 'publish',
 			pipeline,

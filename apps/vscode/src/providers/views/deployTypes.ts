@@ -244,6 +244,10 @@ export type DeploymentHostToWebview =
 			/** The deployment could not be loaded (rendered as the drawer state). */
 			type: 'deployment:error';
 			teamId: string;
+			/** The source record the fetch addressed; absent = the TEAM record.
+			    Lets the webview drop errors from a stale source fetch after
+			    switching records within the same team. */
+			sourceId?: string;
 			error: string;
 	  }
 	| {

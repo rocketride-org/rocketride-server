@@ -1887,23 +1887,20 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Convert a MonitorKey to a stable string for map lookup.
+	 *
+	 * Project keys use a JSON-array encoding because the ids are free text:
+	 * a delimiter-joined string cannot round-trip a source containing the
+	 * delimiter (a source like 'chat@legacy' would decode as a team scope)
+	 * — and reconnect round-trips EVERY key through this pair, so a
+	 * misparse silently rewrites the subscription. MUST stay symmetric
+	 * with _monitorStringToKey. The string is private registry state; it
+	 * never travels on the wire.
 	 */
 	private _monitorKeyToString(key: MonitorKey): string {
 		if ('token' in key) {
 			return `t:${key.token}`;
 		}
-		let s = `p:${key.projectId}.${key.source}`;
-		if (key.pipeId !== undefined) {
-			s += `.${key.pipeId}`;
-		}
-		// Team scope rides as a suffix so the projectId/source/pipeId parse
-		// below stays untouched. MUST stay symmetric with
-		// _monitorStringToKey — reconnect round-trips keys through the pair,
-		// and an encoder-only change would silently drop the team scope.
-		if (key.teamId) {
-			s += `@${key.teamId}`;
-		}
-		return s;
+		return `p:${JSON.stringify([key.projectId, key.source, key.pipeId ?? null, key.teamId ?? ''])}`;
 	}
 
 	/**
@@ -1914,24 +1911,18 @@ export class RocketRideClient extends DAPClient {
 			return { token: keyStr.slice(2) };
 		}
 		if (keyStr.startsWith('p:')) {
-			let rest = keyStr.slice(2);
-			// Strip the team-scope suffix first (see _monitorKeyToString)
-			let teamId: string | undefined;
-			const atIdx = rest.lastIndexOf('@');
-			if (atIdx !== -1) {
-				teamId = rest.slice(atIdx + 1);
-				rest = rest.slice(0, atIdx);
+			try {
+				const [projectId, source, pipeId, teamId] = JSON.parse(keyStr.slice(2)) as [string, string, number | null, string];
+				return {
+					projectId,
+					source,
+					...(pipeId !== null ? { pipeId } : {}),
+					...(teamId ? { teamId } : {}),
+				};
+			} catch {
+				// A malformed registry string has no valid key — skip it.
+				return null;
 			}
-			const dotIdx = rest.indexOf('.');
-			if (dotIdx === -1) return null;
-			const projectId = rest.slice(0, dotIdx);
-			const remaining = rest.slice(dotIdx + 1);
-			const parts = remaining.split('.');
-			const team = teamId ? { teamId } : {};
-			if (parts.length === 2 && !isNaN(Number(parts[1]))) {
-				return { projectId, source: parts[0], pipeId: Number(parts[1]), ...team };
-			}
-			return { projectId, source: remaining, ...team };
 		}
 		return null;
 	}
