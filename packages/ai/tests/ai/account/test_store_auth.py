@@ -688,7 +688,6 @@ class TestSignedFetchUrls:
 
     @pytest.mark.asyncio
     async def test_claim_states_its_generation(self, store):
-        # The marker is what makes the two meanings of 'path' separable.
         from ai.account.file_store import FETCH_CLAIM_VERSION
 
         fs = _fs(store, _account())
@@ -699,28 +698,17 @@ class TestSignedFetchUrls:
     @pytest.mark.parametrize(
         ('label', 'claim'),
         [
-            # A pre-#1686 token: no marker, and 'path' is the WIRE spelling.
-            # Served under today's meaning it is a store-root-relative
-            # PHYSICAL path — i.e. straight into another user's tree.
-            ('v1 (no marker)', {'sub': 'user-1', 'path': 'users/victim/files/secret.txt'}),
-            # A newer generation must fail closed on today's handler too.
+            ('v1 — wire path, no marker', {'sub': 'user-1', 'path': 'users/victim/files/secret.txt'}),
             ('newer generation', {'sub': 'user-1', 'path': 'users/user-1/files/q1.csv', 'v': 99}),
-            # ORDERING: the generation gate runs before the required-claim
-            # check, so a wrong-generation claim is refused as 401 even when
-            # it is ALSO missing 'sub'/'path' — 'v' says how to read the rest
-            # of the payload, so it cannot be validated second.
+            # The gate precedes the required-claim check, so these are 401 and not 400.
             ('wrong generation, no sub', {'path': 'users/victim/files/secret.txt'}),
             ('wrong generation, no path', {'sub': 'user-1'}),
         ],
     )
     async def test_handler_refuses_other_claim_generations(self, label, claim):
-        """Issue #1767: tokens outlive a deploy, so both generations meet at
-        every upgrade. A claim that is not THIS generation must be refused,
-        never read under the current meaning of 'path'.
-
-        The gate runs before anything is resolved or served, so these never
-        reach the store; that the current generation gets PAST it is what
-        the rest of this class covers.
+        """Issue #1767: tokens outlive a deploy, so both generations meet at every
+        upgrade. Anything but the current one must be refused, never read under
+        today's meaning of 'path'.
         """
         import time
         from types import SimpleNamespace
@@ -729,13 +717,8 @@ class TestSignedFetchUrls:
 
         from ai.modules.task.fetch import handle_fetch
 
-        token = jwt.encode(
-            {**claim, 'exp': int(time.time()) + 600},
-            'test-signing-key',
-            algorithm='HS256',
-        )
-        # handle_fetch reads only request.query_params — no ASGI plumbing.
-        request = SimpleNamespace(query_params={'token': token})
+        token = jwt.encode({**claim, 'exp': int(time.time()) + 600}, 'test-signing-key', algorithm='HS256')
+        request = SimpleNamespace(query_params={'token': token})  # handle_fetch reads only query_params
 
         response = await handle_fetch(request)
         assert response.status_code == 401, label

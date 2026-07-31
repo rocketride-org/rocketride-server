@@ -71,32 +71,15 @@ async def handle_fetch(request: Request):
     except jwt.InvalidTokenError as e:
         return JSONResponse({'error': f'Invalid token: {e}'}, status_code=401)
 
-    # ── Claim generation gate ────────────────────────────────────────────
-    # FIRST, before any other claim is read: `v` states how to interpret the
-    # REST of the payload, so validating fields whose meaning is not yet
-    # established is backwards. A future generation may not even carry the
-    # same claim set, and an unsupported one must fail closed as 401 rather
-    # than fall out of an earlier check with a different status.
-    #
-    # `path` means something DIFFERENT per generation, and both generations
-    # are in flight at once during an upgrade (tokens outlive a deploy by
-    # design — up to an hour). A v1 claim is a WIRE path from a pre-#1686
-    # server, which that server's handler resolved and scoped to the user;
-    # reading it here, where the claim is served as a store-root-relative
-    # physical path, would hand out another user's / team's / org's files.
-    #
-    # Refusing is the right trade over trying to resolve v1: the worst case
-    # is that URLs minted in the hour before an upgrade need one more click.
-    #
-    # Deferred import: ai.account instantiates the Account singleton on
-    # import, and this module is imported during bootstrap (same reason
-    # Store is imported inside the function below).
-    from ai.account.file_store import FETCH_CLAIM_VERSION
+    # Gate on generation before reading anything else: `v` says how to
+    # interpret the rest of the payload. A v1 claim (pre-#1686) holds a WIRE
+    # path; served under today's meaning it would be a store-root-relative
+    # physical path into another user's tree — see FETCH_CLAIM_VERSION.
+    from ai.account.file_store import FETCH_CLAIM_VERSION  # deferred: Account singleton
 
     if payload.get('v') != FETCH_CLAIM_VERSION:
         return JSONResponse({'error': 'Token format no longer supported'}, status_code=401)
 
-    # Everything below reads the payload under THIS generation's rules.
     user_id = payload.get('sub')
     path = payload.get('path')
     download_name = payload.get('download_name')
