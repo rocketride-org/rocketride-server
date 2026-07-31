@@ -22,17 +22,18 @@ async def main():
     await client.connect()
 
     # The stream's chapters (runs): begin/end/outcome per run.
-    timeline = await client.log.chapters('proj-1', 'chat_1', 'dev')
+    timeline = await client.log.chapters('proj-1', 'chat_1')
     for chapter in timeline['chapters']:
         print(chapter['beginTime'], chapter.get('outcome'))
 
     # Ranged event read over the continuum (paged).
-    page = await client.log.read('proj-1', 'chat_1', 'dev', from_seq=0, types=['output'])
+    page = await client.log.read('proj-1', 'chat_1', from_seq=0, types=['output'])
     for event in page['events']:
         print(event['body'].get('output', ''), end='')
 
     # The DVR session — live + replay through one surface.
-    session = client.log.open_event_stream('proj-1', 'chat_1', 'dev')
+    # Own dev stream; pass team_id='team-prod' for a team's deploy continuum.
+    session = client.log.open_event_stream('proj-1', 'chat_1')
     await session.seek('live')
     status = await session.get_status()  # state as of the position
     console = await session.get_console(500)  # exactly what the console showed

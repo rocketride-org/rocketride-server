@@ -52,7 +52,8 @@ from ai.account import account
 from ai.account.models import resolve_team_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
-from rocketride import EVENT_TYPE
+
+from ..deploy_events import broadcast_deploy_changed
 
 if TYPE_CHECKING:
     from ..task_scheduler import TaskScheduler
@@ -225,22 +226,13 @@ class DeployCommands(DAPConn):
     async def _notify_deploy_changed(self, org_id: str, team_id: str, project_id: str, action: str) -> None:
         """Push an org-scoped invalidation event for a deployment mutation.
 
-        Clients treat this as CACHE INVALIDATION, never as data: the body
-        carries only the identity of what changed, and receivers re-fetch
-        the record — this is what replaces the deploy surfaces' polling.
-        Best-effort: a failed broadcast must never fail the mutation.
+        Delegates to the ONE shared builder (``deploy_events``) so the
+        event body can never drift from the scheduler's producer. Clients
+        treat it as CACHE INVALIDATION, never as data — receivers re-fetch
+        the record; this is what replaces the deploy surfaces' polling.
+        Best-effort: a failed broadcast never fails the mutation.
         """
-        try:
-            await self._server.broadcast_server_event(
-                EVENT_TYPE.DEPLOY,
-                {
-                    'event': 'apaevt_deploy',
-                    'body': {'orgId': org_id, 'teamId': team_id, 'projectId': project_id, 'action': action},
-                },
-                org_id=org_id,
-            )
-        except Exception as e:
-            self.debug_message(f'Deploy-change broadcast failed: {e}')
+        await broadcast_deploy_changed(self._server, org_id, team_id, project_id, action)
 
     # =========================================================================
     # PUBLISH / DEPLOY
@@ -258,14 +250,16 @@ class DeployCommands(DAPConn):
             raise PermissionError("Permission 'task.control' denied")
 
         pipeline = args.get('pipeline')
+        # Shape first, then content: a missing/empty pipeline must report
+        # itself, not a misleading "name is required".
+        if not isinstance(pipeline, dict) or not pipeline:
+            raise ValueError('pipeline is required and must be an object')
         # A name is REQUIRED: pipelineName is what every deploy surface
         # (tabs, sidebar, version strip, grids) renders — a nameless
         # artifact would show as a project GUID forever, since artifacts
         # are immutable.
-        if isinstance(pipeline, dict) and not str(pipeline.get('name') or '').strip():
+        if not str(pipeline.get('name') or '').strip():
             raise ValueError('pipeline.name is required — the registry renders it on every deploy surface')
-        if not isinstance(pipeline, dict) or not pipeline:
-            raise ValueError('pipeline is required and must be an object')
         project_id = pipeline.get('project_id')
         if not project_id:
             raise ValueError('pipeline.project_id is required')

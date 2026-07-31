@@ -353,17 +353,21 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 	const singleTarget = controlTeams.length === 1 ? controlTeams[0] : null;
 	const multiTeam = teams.length > 1;
 
+	// Soft-removed deployments never render: the where-live grid and the
+	// badges share this filter so a removed row can't be re-enabled by its
+	// (still clickable) state dot.
+	const liveDeployments = useMemo(() => deployments.filter((dep) => dep.state !== 'removed'), [deployments]);
+
 	// version -> live teams (for the env badges on each card).
 	const liveByVersion = useMemo(() => {
 		const map = new Map<number, TeamDeploymentRow[]>();
-		for (const dep of deployments) {
-			if (dep.state === 'removed') continue;
+		for (const dep of liveDeployments) {
 			const rows = map.get(dep.version) ?? [];
 			rows.push(dep);
 			map.set(dep.version, rows);
 		}
 		return map;
-	}, [deployments]);
+	}, [liveDeployments]);
 
 	const nextVersion = (versions[0]?.version ?? 0) + 1;
 
@@ -512,11 +516,11 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			{error && !publishOpen && pickerVersion === null && !pendingDeploy && <div style={S.errorText}>{error}</div>}
 
 			{/* ── Where live (grouped panel: team header + per-source rows) ── */}
-			{deployments.length > 0 && (
+			{liveDeployments.length > 0 && (
 				<div style={S.gridWrap}>
 					<Card header="Where this project is live" noBodyPadding>
 						<div>
-							{deployments.map((dep) => (
+							{liveDeployments.map((dep) => (
 								<React.Fragment key={dep.teamId}>
 									{/* Group header — the deployment; click opens its record. */}
 									<div style={S.liveGroupHeader(Boolean(onOpenDeployment))} title={onOpenDeployment ? 'Open the team deployment' : undefined} onClick={() => onOpenDeployment?.(dep.teamId)}>
@@ -661,11 +665,30 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 							</div>
 						);
 					})}
+					{error && <div style={S.errorText}>{error}</div>}
 				</Modal>
 			)}
 
-			{/* ── Pointer-move confirmation (deploy and rollback alike) ─── */}
-			{pendingDeploy && <ConfirmDialog title={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? `Roll ${pendingDeploy.team.name} back to v${pendingDeploy.version}?` : `Deploy v${pendingDeploy.version} to ${pendingDeploy.team.name}?`} message={pendingDeploy.fromVersion !== undefined ? `${pendingDeploy.team.name} currently runs v${pendingDeploy.fromVersion}. Its next runs will execute v${pendingDeploy.version} — schedules and history carry over.` : `${pendingDeploy.team.name} is not running this project yet. Its runs will execute v${pendingDeploy.version}.`} confirmLabel={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? 'Rollback' : 'Deploy'} cancelLabel="Cancel" onConfirm={() => void run(() => onDeploy(pendingDeploy.version, pendingDeploy.team.id))} onCancel={() => setPendingDeploy(null)} />}
+			{/* ── Pointer-move confirmation (deploy and rollback alike) ───
+			    The message node carries the failure text: a rejected move
+			    keeps this dialog open, and the strip's error line is
+			    suppressed while any dialog is up — without this the dialog
+			    would fail silently and look inert. */}
+			{pendingDeploy && (
+				<ConfirmDialog
+					title={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? `Roll ${pendingDeploy.team.name} back to v${pendingDeploy.version}?` : `Deploy v${pendingDeploy.version} to ${pendingDeploy.team.name}?`}
+					message={
+						<>
+							{pendingDeploy.fromVersion !== undefined ? `${pendingDeploy.team.name} currently runs v${pendingDeploy.fromVersion}. Its next runs will execute v${pendingDeploy.version} — schedules and history carry over.` : `${pendingDeploy.team.name} is not running this project yet. Its runs will execute v${pendingDeploy.version}.`}
+							{error && <div style={S.errorText}>{error}</div>}
+						</>
+					}
+					confirmLabel={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? 'Rollback' : 'Deploy'}
+					cancelLabel="Cancel"
+					onConfirm={() => void run(() => onDeploy(pendingDeploy.version, pendingDeploy.team.id))}
+					onCancel={() => setPendingDeploy(null)}
+				/>
+			)}
 		</div>
 	);
 };

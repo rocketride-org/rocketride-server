@@ -34,8 +34,10 @@ export interface TaskLifecycleEvent {
 	name?: string;
 	/** Run classification stamp: deploy runs never enter the dev lists. */
 	runKind?: string;
-	/** Bulk `running` snapshot rows (each row carries its own runKind). */
-	tasks?: Array<{ projectId: string; source: string; name?: string; runKind?: string }>;
+	/** Owning team of a deploy run (the stamped body carries the OWNER). */
+	teamId?: string;
+	/** Bulk `running` snapshot rows (each row carries its own stamps). */
+	tasks?: Array<{ projectId: string; source: string; name?: string; runKind?: string; teamId?: string }>;
 }
 
 /** The fold's output: the next task state, or null when nothing changed. */
@@ -102,7 +104,11 @@ export function foldTaskEvent(
 			const rows = (event.tasks ?? []).filter((t) => t.runKind !== 'deploy');
 			nextActive.clear();
 			for (const t of rows) {
-				nextActive.set(`${t.projectId}.${t.source}`, { running: true, errors: [], warnings: [] });
+				// Preserve accumulated errors/warnings for a task that was
+				// already tracked — the snapshot confirms it is still running,
+				// it does not reset its indicators (same rule as begin/restart).
+				const prev = activeTasks.get(`${t.projectId}.${t.source}`);
+				nextActive.set(`${t.projectId}.${t.source}`, { running: true, errors: prev?.errors ?? [], warnings: prev?.warnings ?? [] });
 			}
 			nextUnknown = rows
 				.filter((t) => !isKnownTask(t.projectId, t.source))
@@ -160,8 +166,7 @@ export function foldDeployRunState(
 	// each row carries its own runKind/teamId stamps.
 	if (action === 'running') {
 		const next: Record<string, boolean> = {};
-		for (const t of event.tasks ?? []) {
-			const row = t as { projectId: string; source: string; runKind?: string; teamId?: string };
+		for (const row of event.tasks ?? []) {
 			if (row.runKind === 'deploy' && row.teamId === teamId && row.projectId === projectId && row.source) {
 				next[row.source] = true;
 			}
@@ -171,16 +176,15 @@ export function foldDeployRunState(
 
 	// Lifecycle flips: only THIS deployment's runs apply. The stamped body
 	// carries the OWNER team for deploy runs.
-	const body = event as TaskLifecycleEvent & { teamId?: string };
-	if (body.runKind !== 'deploy' || body.teamId !== teamId || body.projectId !== projectId || !body.source) {
+	if (event.runKind !== 'deploy' || event.teamId !== teamId || event.projectId !== projectId || !event.source) {
 		return null;
 	}
 	if (action === 'begin' || action === 'restart') {
-		return { ...running, [body.source]: true };
+		return { ...running, [event.source]: true };
 	}
 	if (action === 'end') {
 		const next = { ...running };
-		delete next[body.source];
+		delete next[event.source];
 		return next;
 	}
 	return null;
@@ -210,8 +214,7 @@ export function foldProjectDeployRuns(
 	// Bulk snapshot: rebuild the whole map from this project's deploy rows.
 	if (action === 'running') {
 		const next: Record<string, Record<string, boolean>> = {};
-		for (const t of event.tasks ?? []) {
-			const row = t as { projectId: string; source: string; runKind?: string; teamId?: string };
+		for (const row of event.tasks ?? []) {
 			if (row.runKind === 'deploy' && row.teamId && row.projectId === projectId && row.source) {
 				(next[row.teamId] ??= {})[row.source] = true;
 			}
@@ -220,17 +223,16 @@ export function foldProjectDeployRuns(
 	}
 
 	// Lifecycle flips: only this project's deploy runs apply.
-	const body = event as TaskLifecycleEvent & { teamId?: string };
-	if (body.runKind !== 'deploy' || !body.teamId || body.projectId !== projectId || !body.source) {
+	if (event.runKind !== 'deploy' || !event.teamId || event.projectId !== projectId || !event.source) {
 		return null;
 	}
 	if (action === 'begin' || action === 'restart') {
-		return { ...runsByTeam, [body.teamId]: { ...runsByTeam[body.teamId], [body.source]: true } };
+		return { ...runsByTeam, [event.teamId]: { ...runsByTeam[event.teamId], [event.source]: true } };
 	}
 	if (action === 'end') {
-		const team = { ...runsByTeam[body.teamId] };
-		delete team[body.source];
-		return { ...runsByTeam, [body.teamId]: team };
+		const team = { ...runsByTeam[event.teamId] };
+		delete team[event.source];
+		return { ...runsByTeam, [event.teamId]: team };
 	}
 	return null;
 }

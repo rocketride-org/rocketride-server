@@ -51,7 +51,8 @@ session.closeEventStream();    // dispose
 ```
 
 ```python
-session = client.log.open_event_stream('proj-1', 'chat_1', 'dev')
+# Own dev stream; pass team_id='team-prod' for a team's deploy continuum.
+session = client.log.open_event_stream('proj-1', 'chat_1')
 
 await session.seek('live')
 status = await session.get_status()
@@ -90,7 +91,7 @@ for (const track of timeline.chapters) {
 ```
 
 ```python
-timeline = await client.log.chapters('proj-1', 'chat_1', 'dev')
+timeline = await client.log.chapters('proj-1', 'chat_1')
 for track in timeline['chapters']:
     print(track['beginTime'], track.get('endTime'), track.get('outcome'))
 ```
@@ -124,7 +125,7 @@ do {
 ```python
 cursor = None
 while True:
-    page = await client.log.read('proj-1', 'chat_1', 'dev', from_seq=0, cursor=cursor, types=['output'])
+    page = await client.log.read('proj-1', 'chat_1', from_seq=0, cursor=cursor, types=['output'])
     for event in page['events']:
         print(event['body'].get('output', ''), end='')
     cursor = page.get('nextSeq')
@@ -166,7 +167,7 @@ for (;;) {
 ```python
 offset = 0
 while True:
-    chunk = await client.log.segment('proj-1', 'chat_1', 'dev', 0, offset=offset)
+    chunk = await client.log.segment('proj-1', 'chat_1', 0, offset=offset)
     for line in chunk['data'].splitlines():
         if line.strip():
             handle_event(json.loads(line))
@@ -191,8 +192,8 @@ await client.log.delete(stream, { all: true });
 ```
 
 ```python
-await client.log.delete('proj-1', 'chat_1', 'dev', before_time=time.time() - 86400)
-await client.log.delete('proj-1', 'chat_1', 'dev', all=True)
+await client.log.delete('proj-1', 'chat_1', before_time=time.time() - 86400)
+await client.log.delete('proj-1', 'chat_1', all=True)
 ```
 
 ## **API Endpoints**

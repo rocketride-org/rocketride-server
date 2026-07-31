@@ -189,8 +189,9 @@ export class DeployApi {
 	 * Starts one deployed source NOW (manual trigger).
 	 *
 	 * The same trusted team dispatch the scheduler uses — the run executes
-	 * as the team, with the caller as the billing-attribution actor. The
-	 * deployment must be enabled.
+	 * as the team and carries NO human identity; billing attributes to the
+	 * org and team, and who fired it is recorded only in the deployment's
+	 * audit history. The deployment must be enabled.
 	 *
 	 * @param projectId - The deployed project.
 	 * @param sourceId - The pipeline source to fire.

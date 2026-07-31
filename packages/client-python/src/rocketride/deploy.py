@@ -188,7 +188,7 @@ class DeployApi:
             page: 1-based page number.
             page_size: Rows per page (server-clamped).
             search: Free-text search over projectId/pipelineName/teamId.
-            filters: Column filters (e.g. ``{'state': 'active'}``).
+            filters: Column filters (e.g. ``{'state': 'enabled'}``).
             sort: ``[{'field': ..., 'dir': 'asc'|'desc'}]`` sorters.
 
         Returns:
@@ -244,9 +244,10 @@ class DeployApi:
         """
         Start one deployed source NOW (manual trigger).
 
-        The same trusted team dispatch the scheduler uses — the run executes
-        as the team, with you as the billing-attribution actor. The
-        deployment must be enabled.
+        The same trusted team dispatch the scheduler uses — the run
+        executes as the team and carries NO human identity; billing
+        attributes to the org and team, and who fired it is recorded only
+        in the deployment's audit history. The deployment must be enabled.
 
         Args:
             project_id: The deployed project.

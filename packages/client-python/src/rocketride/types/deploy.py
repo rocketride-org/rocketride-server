@@ -76,14 +76,14 @@ class DeploymentSchedule(TypedDict, total=False):
     # Paused schedules stay configured (cron/ttl kept) but never fire.
     paused: bool
     # Run window in seconds ('fixed window'); absent/None = until finished.
-    ttl: int
+    ttl: int | None
     # Trace verbosity for this source's deploy runs; absent/None = the
     # deploy default (full).
-    traceLevel: Literal['none', 'metadata', 'summary', 'full']
+    traceLevel: Literal['none', 'metadata', 'summary', 'full'] | None
     # Full task debug output (--trace=debugOut) for this source.
     debugOut: bool
     # Unix timestamp (seconds) of the last scheduler dispatch, or None.
-    lastRunAt: float
+    lastRunAt: float | None
 
 
 class Deployment(TypedDict, total=False):

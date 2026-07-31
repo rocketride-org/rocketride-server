@@ -327,13 +327,16 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 					// server's list by equality (announcement seq is the
 					// fallback for older servers).
 					const announced = (message.body as Record<string, unknown> | undefined)?.beginSeq;
+					const stampedTrace = (message.body as Record<string, unknown>).traceLevel;
 					const begin = {
 						beginTime: message.body.eventTime,
 						beginSeq: typeof announced === 'number' ? announced : message.body.logSeq,
 						endTime: null,
 						outcome: null,
-						// The run-begin marker carries its trace level.
-						traceLevel: ((message.body as Record<string, unknown>).traceLevel as string | undefined) ?? null,
+						// The run-begin marker carries its trace level. Spread it
+						// conditionally: an ABSENT key means "no stamp" (older
+						// server) and must stay absent — null claims tracing OFF.
+						...(typeof stampedTrace === 'string' ? { traceLevel: stampedTrace } : {}),
 					};
 					setTimeline((prev) => {
 						const base = prev ?? { chapters: [], segments: [], horizonSeq: 0, completed: false };

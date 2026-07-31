@@ -272,9 +272,9 @@ export type DeploymentHostToWebview =
 /** All messages the Deployment webview can send to the extension host. */
 export type DeploymentWebviewToHost =
 	| {
-			/** (Re-)fetch the deployment snapshot — sent on drawer open, by the
-			    drawer's own poll, and after every mutation (the WEBVIEW drives
-			    refresh). The record is (team, project, source). */
+			/** (Re-)fetch the deployment snapshot — sent on drawer open, on an
+			    apaevt_deploy invalidation event, and after every mutation (the
+			    WEBVIEW drives refresh). The record is (team, project, source). */
 			type: 'deployment:fetch';
 			teamId: string;
 			/** Absent = the TEAM record (team operations drawer). */

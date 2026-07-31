@@ -168,11 +168,18 @@ def scope_paths(run_kind: str, client_id: str, team_id: str) -> 'tuple[str, str]
     function — writer and reader cannot disagree about where a stream lives.
 
     Raises:
-        ValueError: A deploy run without a team has no valid scope.
+        ValueError: A deploy run without a team has no valid scope, or the
+            team id is not usable as a path segment.
     """
     if run_kind == 'deploy':
         if not team_id:
             raise ValueError('deploy continua are team-scoped: team_id is required')
+        # team_id is embedded into the store's id-reference grammar below —
+        # reject anything that could escape the '=<id>' segment (same rule
+        # the deployment backend applies to path-segment ids). Upstream
+        # callers validate membership, so this is defense in depth.
+        if '/' in team_id or '\\' in team_id or team_id in ('.', '..') or team_id.startswith(('@', '=', '.')):
+            raise ValueError(f'team_id contains invalid characters: {team_id!r}')
         return (f'@/Team/={team_id}/', team_id)
     return ('', client_id)
 

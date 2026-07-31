@@ -139,6 +139,15 @@ class TestScopePaths:
         with pytest.raises(ValueError):
             scope_paths('deploy', CLIENT, '')
 
+    @pytest.mark.parametrize('bad', ['../x', './x', '/x', 'a/b', 'a\\b', '.', '..', '@x', '=x', '.x'])
+    def test_deploy_rejects_path_unsafe_team_ids(self, bad):
+        # team_id is embedded into the '=<id>' segment of the store's
+        # id-reference grammar — separators, traversal, and reserved
+        # sigils must never reach the path (defense in depth; upstream
+        # callers validate membership first).
+        with pytest.raises(ValueError):
+            scope_paths('deploy', CLIENT, bad)
+
 
 # =============================================================================
 # TEAM-SCOPED WRITER

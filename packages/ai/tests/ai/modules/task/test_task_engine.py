@@ -962,6 +962,27 @@ def test_cap_trace_payload_truncates_oversized_payloads():
     assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
 
 
+def test_cap_trace_payload_bound_holds_for_escape_heavy_payloads():
+    """The cap must hold for the marker AS SERIALIZED, not the raw slice.
+
+    `preview` holds already-serialized JSON text; re-serializing escapes
+    every quote and backslash in it, so an object-heavy payload (unlike the
+    plain-'z' fixture above, which needs no escaping) inflates the marker.
+    The clamp must size the SERIALIZED marker under the cap.
+    """
+    import json as _json
+
+    # Thousands of tiny dicts full of quotes and backslashes — every one
+    # of the preview's structural characters re-escapes on serialization.
+    blob = {'data': [{'k': 'v"\\'}] * (CONST_TRACE_PAYLOAD_CAP // 12)}
+    assert len(_json.dumps(blob)) > CONST_TRACE_PAYLOAD_CAP
+    capped = cap_trace_payload(blob)
+    assert capped['truncated'] is True
+    assert len(_json.dumps(capped)) <= CONST_TRACE_PAYLOAD_CAP
+    # The trimmed preview still carries real content, not an empty husk.
+    assert len(capped['preview']) > CONST_TRACE_PAYLOAD_CAP // 4
+
+
 def test_cap_trace_payload_leaves_unserializable_payloads_alone():
     """Unserializable payloads pass through — the transport owns that error."""
     payload = {'bad': object()}

@@ -83,6 +83,11 @@ def _make_conn(account_info, scheduler=None):
     # satisfy the chain on the stub server instead of mutating the class.
     sched = scheduler or MagicMock()
     server = MagicMock()
+    # broadcast_server_event is AWAITED by the deploy-change notifier; a
+    # plain MagicMock attribute returns a non-awaitable, the await raises,
+    # and the notifier's best-effort catch swallows it — the apaevt_deploy
+    # contract would then have zero coverage here.
+    server.broadcast_server_event = AsyncMock()
     server._server.app.state.scheduler = sched
     conn._server = server
     conn._test_scheduler = sched
@@ -185,6 +190,24 @@ class TestDeploy:
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='version'):
             await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': '3', 'teamId': 'team-1'})
+
+    @pytest.mark.asyncio
+    async def test_deploy_broadcasts_the_invalidation_event(self, account_stub):
+        # The apaevt_deploy push replaces the deploy surfaces' polling —
+        # pin the org-scoped envelope and the identity-only body so the
+        # cache-invalidation contract cannot regress silently.
+        from rocketride import EVENT_TYPE
+
+        conn = _make_conn(_account_info())
+        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': 'team-1'})
+        conn._server.broadcast_server_event.assert_awaited_once_with(
+            EVENT_TYPE.DEPLOY,
+            {
+                'event': 'apaevt_deploy',
+                'body': {'orgId': 'org-1', 'teamId': 'team-1', 'projectId': 'proj-1', 'action': 'deploy'},
+            },
+            org_id='org-1',
+        )
 
 
 # ============================================================================

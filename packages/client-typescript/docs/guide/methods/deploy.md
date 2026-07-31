@@ -48,6 +48,9 @@ their logs land in the team's run-log continuum, readable by teammates via
 | `deploy.setSchedule(projectId, sourceId, schedule, teamId, options?)` | Set (or clear with `null`) one source's cron schedule; the paused flag is untouched |
 | `deploy.pauseSchedule(projectId, sourceId, teamId)` | Pause ONE schedule — cron/ttl kept, it just stops firing |
 | `deploy.resumeSchedule(projectId, sourceId, teamId)` | Resume a paused schedule |
+| `deploy.setSourceConfig(projectId, sourceId, teamId, options?)` | Per-source execution settings for deploy runs (`traceLevel`, `debugOut`) |
+| `deploy.run(projectId, sourceId, teamId)` | Start one deployed source NOW (manual trigger) — the same trusted, actor-free team dispatch the scheduler uses; returns `{ token, version }` |
+| `deploy.artifact(projectId, version)` | One immutable version's pipeline JSON, sha256-verified server-side |
 | `deploy.preview(schedule, count?)` | THE single cron evaluator: validity + next occurrences |
 
 ### Python (async)
@@ -208,6 +211,9 @@ argument:
 | `enable()` / `disable()` / `remove()` | `rrext_deploy` | `enable` / `disable` / `remove` |
 | `pauseSchedule()` / `resumeSchedule()` | `rrext_deploy` | `schedule_pause` / `schedule_resume` |
 | `setSchedule()` | `rrext_deploy` | `schedule_set` |
+| `setSourceConfig()` | `rrext_deploy` | `source_config` |
+| `run()` | `rrext_deploy` | `run` |
+| `artifact()` | `rrext_deploy` | `artifact` |
 | `preview()` | `rrext_deploy` | `preview` |
 
 ## **Related Methods**

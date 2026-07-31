@@ -942,6 +942,9 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 		switch (message.type) {
 			case 'logsession:open': {
 				const client = this.requireDeployClient();
+				// A reused session id must release its old stream first — the
+				// overwrite would otherwise leak the stream and its monitor.
+				sessions.get(message.sessionId)?.closeEventStream();
 				sessions.set(message.sessionId, client.log.openEventStream({ projectId, source: message.source, ...(message.teamId ? { teamId: message.teamId } : {}) }));
 				break;
 			}

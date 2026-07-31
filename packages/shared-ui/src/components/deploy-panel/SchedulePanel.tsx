@@ -284,14 +284,6 @@ function summaryWording(state: PickerState): string {
 }
 
 /**
- * Human wording for a stored cron — THE one mapper every surface uses
- * (schedule rows, tiles, where-live summaries). Reverse-maps the picker
- * shapes; anything else renders the raw expression (the Advanced case).
- *
- * @param cron - The stored 5-field expression ('' = manual).
- * @returns Short human wording, e.g. 'every 30 minutes', 'daily at 08:00'.
- */
-/**
  * Human wording for a stored run window.
  *
  * @param ttl - Seconds, or undefined for finish-bounded runs.
@@ -304,6 +296,14 @@ export function describeTtl(ttl?: number): string {
 	return `up to ${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
 }
 
+/**
+ * Human wording for a stored cron — THE one mapper every surface uses
+ * (schedule rows, tiles, where-live summaries). Reverse-maps the picker
+ * shapes; anything else renders the raw expression (the Advanced case).
+ *
+ * @param cron - The stored 5-field expression ('' = manual).
+ * @returns Short human wording, e.g. 'every 30 minutes', 'daily at 08:00'.
+ */
 export function describeCron(cron: string): string {
 	const state = fromCron(cron);
 	if (state.kind === 'demand') return 'manual';
@@ -448,7 +448,7 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 						</span>
 						{dirty && (
 							<>
-								<Button variant="primary" small disabled={busy || invalidCron || (picker.kind === 'cron' && !picker.cron.trim())} onClick={() => (clearing ? setClearConfirm(true) : void save())}>
+								<Button variant="primary" small disabled={busy || invalidCron || (picker.kind === 'cron' && !picker.cron.trim()) || (picker.kind === 'weekly' && picker.days.length === 0)} onClick={() => (clearing ? setClearConfirm(true) : void save())}>
 									{busy ? 'Saving…' : 'Save schedule'}
 								</Button>
 								<Button variant="ghost" small disabled={busy} onClick={() => setDiscardConfirm(true)}>

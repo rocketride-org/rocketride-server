@@ -72,6 +72,11 @@ def scheduler():
     """A TaskScheduler over a stub server (no loop started)."""
     server = MagicMock()
     server._task_control = {}
+    # broadcast_server_event is AWAITED by the deploy-change notifier; a
+    # plain MagicMock attribute returns a non-awaitable, the await raises,
+    # and the notifier's best-effort catch swallows it — the apaevt_deploy
+    # contract would then have zero coverage here.
+    server.broadcast_server_event = AsyncMock()
     return TaskScheduler(server)
 
 
@@ -177,6 +182,18 @@ class TestStartRun:
         # Overlap guard armed + lastRunAt stamped.
         assert scheduler._active_tokens[entry.key] == 'tk_dispatched'
         account_stub.deployments_mark_run.assert_awaited_once()
+        # The apaevt_deploy push replaces the deploy surfaces' polling — pin
+        # the org-scoped envelope and the identity-only body.
+        from rocketride import EVENT_TYPE
+
+        scheduler._server.broadcast_server_event.assert_awaited_once_with(
+            EVENT_TYPE.DEPLOY,
+            {
+                'event': 'apaevt_deploy',
+                'body': {'orgId': 'org-1', 'teamId': 'team-1', 'projectId': 'proj-1', 'action': 'run'},
+            },
+            org_id='org-1',
+        )
 
     @pytest.mark.asyncio
     async def test_fire_time_reread_beats_the_heap(self, scheduler, account_stub, dispatch):

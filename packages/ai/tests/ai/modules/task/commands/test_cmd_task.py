@@ -163,11 +163,17 @@ async def test_on_execute_rejects_client_team_override(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_execute_accepts_team_id_matching_session_team():
+async def test_on_execute_accepts_team_id_matching_session_team(monkeypatch):
     """A teamId EQUAL to the session's team passes (the trusted in-process
     dispatch sends teamId = the synthesized defaultTeam) and task.control is
     verified on that team.
     """
+    from ai.account import account as account_mod
+
+    # The check passes, so execution continues into the secret merge —
+    # stub it out so the test never depends on the ambient account backend.
+    monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
+
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
     conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
@@ -200,11 +206,17 @@ async def test_on_execute_foreign_team_denied_before_secret_merge(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_on_execute_run_kind_cannot_be_spoofed_via_dap():
+async def test_on_execute_run_kind_cannot_be_spoofed_via_dap(monkeypatch):
     """arguments.run_kind/trigger are IGNORED: run classification comes only
     from the trusted in-process dispatch attributes, so a remote client can
     never write into the deploy continuum or claim a scheduled trigger.
     """
+    from ai.account import account as account_mod
+
+    # The dev path merges the user env layer — stub it out so the test
+    # never depends on the ambient account backend.
+    monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
+
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
     conn = _make_conn(account_info=_account_info(), server=server)

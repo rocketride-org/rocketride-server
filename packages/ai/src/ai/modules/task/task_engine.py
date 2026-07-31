@@ -111,11 +111,21 @@ def cap_trace_payload(trace: Any) -> Any:
         return trace
     if len(raw) <= CONST_TRACE_PAYLOAD_CAP:
         return trace
-    return {
-        'truncated': True,
-        'originalBytes': len(raw),
-        'preview': raw[:CONST_TRACE_PREVIEW_BYTES],
-    }
+    # The bound must hold for the marker AS IT TRAVELS: `preview` holds
+    # already-serialized JSON text, and re-serializing it escapes every
+    # quote/backslash (control chars become 6-byte \uXXXX escapes), so an
+    # object-heavy preview inflates well past its slice length. Size the
+    # serialized marker and trim proportionally until it fits.
+    preview = raw[:CONST_TRACE_PREVIEW_BYTES]
+    while preview:
+        marker = {'truncated': True, 'originalBytes': len(raw), 'preview': preview}
+        size = len(json.dumps(marker))
+        if size <= CONST_TRACE_PAYLOAD_CAP:
+            return marker
+        # Proportional trim converges in a couple of passes; the -1 makes
+        # progress even when the ratio rounds to no change.
+        preview = preview[: max(0, len(preview) * CONST_TRACE_PAYLOAD_CAP // size - 1)]
+    return {'truncated': True, 'originalBytes': len(raw), 'preview': ''}
 
 
 if TYPE_CHECKING:

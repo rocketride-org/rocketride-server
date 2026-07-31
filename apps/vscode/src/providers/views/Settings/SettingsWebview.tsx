@@ -469,7 +469,8 @@ export const Settings: React.FC = () => {
 		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
 		pipelineTtl: 900,
-		pipelineTraceLevel: 'summary',
+		// Must match package.json's rocketride.pipelineTraceLevel default.
+		pipelineTraceLevel: 'full',
 		taskArguments: '',
 		pipelineDebugOutput: false,
 		envVars: {},

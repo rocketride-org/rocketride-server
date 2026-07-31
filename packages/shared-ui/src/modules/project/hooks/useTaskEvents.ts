@@ -667,8 +667,11 @@ export function useTaskEvents(options: UseTaskEventsOptions): UseTaskEventsResul
 						break;
 					}
 				}
+				// traceLevel spreads conditionally: an ABSENT key means "no
+				// stamp" (pre-stamp marker, or the non-marker fallback event)
+				// and must stay absent — null would claim tracing was OFF.
 				return {
-					chapter: { beginTime: first.body.eventTime, beginSeq: first.body.logSeq, endTime: null, outcome: null, traceLevel: (first.body.traceLevel as string | undefined) ?? null },
+					chapter: { beginTime: first.body.eventTime, beginSeq: first.body.logSeq, endTime: null, outcome: null, ...(typeof first.body.traceLevel === 'string' ? { traceLevel: first.body.traceLevel } : {}) },
 					active: true,
 				};
 			}

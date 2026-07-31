@@ -132,7 +132,9 @@ export function mapTeamDeploymentRows(deployments: Deployment[], projectId: stri
 				teamId: dep.teamId as string,
 				teamName: teamNameOf(teams, dep.teamId as string),
 				version: dep.version ?? 0,
-				state: (dep.state ?? 'active') as TeamDeploymentRowDTO['state'],
+				// A record without a state stamp is a live pointer — 'enabled'
+				// is the only default inside the state vocabulary.
+				state: (dep.state ?? 'enabled') as TeamDeploymentRowDTO['state'],
 				deployedAt: dep.deployedAt ?? dep.updatedAt ?? 0,
 				schedules: Object.fromEntries(Object.entries(schedules).map(([sourceId, sched]) => [sourceId, { cron: sched.cron ?? '', paused: sched.paused === true, ...(sched.ttl ? { ttl: sched.ttl } : {}), ...(sched.lastRunAt ? { lastRunAt: sched.lastRunAt } : {}) }])),
 			};
@@ -150,7 +152,8 @@ export function mapDeploymentInfo(deployment: Deployment, projectId: string): De
 	return {
 		pipelineName: deployment.pipelineName || projectId,
 		version: deployment.version ?? 0,
-		state: (deployment.state ?? 'active') as DeploymentInfoDTO['state'],
+		// Same default rule as mapTeamDeploymentRows: no stamp = 'enabled'.
+		state: (deployment.state ?? 'enabled') as DeploymentInfoDTO['state'],
 		deployedBy: deployment.updatedBy?.display || deployment.updatedBy?.userId || '',
 		deployedAt: deployment.updatedAt ?? 0,
 	};

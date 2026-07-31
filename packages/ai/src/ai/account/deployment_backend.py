@@ -551,7 +551,12 @@ class FileDeploymentBackend:
 
         Each item: {orgId, teamId, projectId, version, state, schedules}.
         """
-        orgs = await self._store.list_entries('orgs/', recursive=False, include_files=False)
+        # Same guard as _project_ids: a fresh store has no orgs/ tree yet —
+        # the scheduler feed yields nothing rather than raising.
+        try:
+            orgs = await self._store.list_entries('orgs/', recursive=False, include_files=False)
+        except StorageError:
+            return
         for org_prefix in orgs:
             org_id = org_prefix.rstrip('/').rsplit('/', 1)[-1]
             for project_id in await self._project_ids(org_id):

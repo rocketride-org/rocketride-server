@@ -279,14 +279,20 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 		if (!fetchTimeline || !schedules) return;
 		let cancelled = false;
 		void (async () => {
+			// Fetch every source's continuum concurrently — the effect re-runs
+			// on each host refresh, so N serial round trips would stack up.
+			// Per-source failures stay isolated (a never-run source has no
+			// continuum — an empty timeline).
 			const next = new Map<string, TaskTimeline>();
-			for (const row of schedules) {
-				try {
-					next.set(row.sourceId, await fetchTimeline(row.sourceId));
-				} catch {
-					// A never-run source has no continuum — an empty timeline.
-				}
-			}
+			await Promise.all(
+				schedules.map(async (row) => {
+					try {
+						next.set(row.sourceId, await fetchTimeline(row.sourceId));
+					} catch {
+						// Isolated per-source failure — leave this source empty.
+					}
+				}),
+			);
 			if (!cancelled) setTimelines(next);
 		})();
 		return () => {

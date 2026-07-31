@@ -82,8 +82,10 @@ export interface TeamDeploymentSource extends TeamDeploymentSchedule {
 /** One team's live deployment of the project (a where-live GROUP: the team
     header line plus one sub-row per source). Derived by ProjectView from
     {@link TeamDeployment} + the pipeline's source nodes — hosts never
-    build this shape. */
-export interface TeamDeploymentRow extends Omit<TeamDeployment, 'schedules'> {
+    build this shape. `runningSources` is omitted because the derivation
+    folds the running fact into each source row's `running` flag — the row
+    carries exactly one representation of it. */
+export interface TeamDeploymentRow extends Omit<TeamDeployment, 'schedules' | 'runningSources'> {
 	/** Per-source lines (pipeline sources ∪ schedule records). */
 	sources: TeamDeploymentSource[];
 }

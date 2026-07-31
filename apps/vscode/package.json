@@ -252,6 +252,26 @@
 					"type": "string",
 					"default": "latest",
 					"deprecationMessage": "Migrated to rocketride.deployment.local.engineVersion"
+				},
+				"rocketride.development.teamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — the development team is assigned by your server profile"
+				},
+				"rocketride.deployment.teamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+				},
+				"rocketride.developmentTeamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — the development team is assigned by your server profile"
+				},
+				"rocketride.deployTargetTeamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
 				}
 			}
 		},

@@ -511,17 +511,14 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 	);
 
 	/**
-	 * Wraps a non-canvas page's body in the standard page grammar: an
-	 * optional {@link ContentHeader} (rendered only when the host supplies a
-	 * `documentTitle`; VS Code omits it) above the 24px-gutter tab-content
-	 * body. Save lives ONLY on the Design page (inside the canvas) — the
-	 * monitoring pages carry no document actions.
+	 * Wraps a non-canvas page's body in the standard page grammar: the
+	 * 24px-gutter tab-content body. Save lives ONLY on the Design page
+	 * (inside the canvas) — the monitoring pages carry no document actions.
 	 *
-	 * @param subView - The page whose header subtitle to show.
-	 * @param inner   - The page's body content.
+	 * @param inner - The page's body content.
 	 * @returns The composed panel node.
 	 */
-	const renderDocPanel = (subView: DocSubView, inner: ReactNode): ReactNode => (
+	const renderDocPanel = (inner: ReactNode): ReactNode => (
 		// The page title is PINNED above the scroll region (rendered once at
 		// the view level, not here) — panels carry only their scrolling body.
 		<div style={commonStyles.tabContent}>{inner}</div>
@@ -581,7 +578,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 		development: {
 			// The dev environment: one self-contained section per source (its
 			// own pills, panes, and player over the dev continuum).
-			content: renderDocPanel('development', renderSections('dev')),
+			content: renderDocPanel(renderSections('dev')),
 		},
 		deploy: {
 			// The deploy LIFECYCLE surface (mockup v5 screen B): version strip,
@@ -595,7 +592,6 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			// teams are the environments, and several teams may run this
 			// project concurrently.
 			content: renderDocPanel(
-				'deploy',
 				fetchDeployLifecycle && onDeployPublish && onDeployVersion ? (
 					<DeployPanel fetchLifecycle={fetchDeployLifecycle} deployments={teamDeploymentRows} teams={deployTeams} pipelineName={project?.name ?? ''} {...(onDeploySetDisabled ? { onSetDisabled: onDeploySetDisabled } : {})} {...(onDeploySetSchedule ? { onSetSchedule: onDeploySetSchedule } : {})} {...(onDeploySetSchedulePaused ? { onSetSchedulePaused: onDeploySetSchedulePaused } : {})} {...(fetchDeployArtifact ? { fetchArtifact: fetchDeployArtifact as ComponentProps<typeof DeployPanel>['fetchArtifact'], servicesJson, handleValidatePipeline: handleValidate, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})} {...(onDeployPreviewSchedule ? { previewSchedule: onDeployPreviewSchedule } : {})} canPublish={!isDirty && !isNew} {...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})} requiresSave={isDirty && !isNew} {...(onSaveDocument ? { onSaveDocument } : {})} onPublish={onDeployPublish} onDeploy={onDeployVersion} {...(onOpenDeployment ? { onOpenDeployment } : {})} />
 				) : (
