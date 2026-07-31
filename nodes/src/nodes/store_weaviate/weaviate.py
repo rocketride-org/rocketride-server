@@ -42,6 +42,7 @@ from weaviate.classes.init import AdditionalConfig, Timeout, Auth
 from weaviate.classes.query import Filter, MetadataQuery
 from weaviate.collections.collection import Collection
 from weaviate.classes.config import VectorDistances
+from weaviate.exceptions import UnexpectedStatusCodeError
 from weaviate.util import generate_uuid5
 import weaviate.classes.config as wc
 
@@ -174,27 +175,45 @@ class Store(DocumentStoreBase):
 
         Function has the same parameters for consistency
         """
-        self.collectionObj = self.client.collections.create(
-            name=self.collection,
-            properties=[
-                wc.Property(name='content', data_type=wc.DataType.TEXT),
-                wc.Property(name='objectId', data_type=wc.DataType.TEXT),
-                wc.Property(name='nodeId', data_type=wc.DataType.TEXT),
-                wc.Property(name='parent', data_type=wc.DataType.TEXT),
-                wc.Property(name='permissionId', data_type=wc.DataType.INT),
-                wc.Property(name='isDeleted', data_type=wc.DataType.BOOL),
-                wc.Property(name='chunkId', data_type=wc.DataType.INT),
-                wc.Property(name='isTable', data_type=wc.DataType.BOOL),
-                wc.Property(name='tableId', data_type=wc.DataType.INT),
-                wc.Property(name='vectorSize', data_type=wc.DataType.INT),
-                wc.Property(name='modelName', data_type=wc.DataType.TEXT),
-            ],
-            # Define the vectorizer module (none, as we will add our own vectors)
-            vectorizer_config=wc.Configure.Vectorizer.none(),
-            vector_index_config=wc.Configure.VectorIndex.hnsw(
-                distance_metric=self.similarity,
-            ),
-        )
+        properties = [
+            wc.Property(name='content', data_type=wc.DataType.TEXT),
+            wc.Property(name='objectId', data_type=wc.DataType.TEXT),
+            wc.Property(name='nodeId', data_type=wc.DataType.TEXT),
+            wc.Property(name='parent', data_type=wc.DataType.TEXT),
+            wc.Property(name='permissionId', data_type=wc.DataType.INT),
+            wc.Property(name='isDeleted', data_type=wc.DataType.BOOL),
+            wc.Property(name='chunkId', data_type=wc.DataType.INT),
+            wc.Property(name='isTable', data_type=wc.DataType.BOOL),
+            wc.Property(name='tableId', data_type=wc.DataType.INT),
+            wc.Property(name='vectorSize', data_type=wc.DataType.INT),
+            wc.Property(name='modelName', data_type=wc.DataType.TEXT),
+        ]
+
+        try:
+            self.collectionObj = self.client.collections.create(
+                name=self.collection,
+                properties=properties,
+                # Define the vectorizer module (none, as we will add our own vectors)
+                vectorizer_config=wc.Configure.Vectorizer.none(),
+                vector_index_config=wc.Configure.VectorIndex.hnsw(
+                    distance_metric=self.similarity,
+                ),
+            )
+        except UnexpectedStatusCodeError as e:
+            # Newer Weaviate Cloud clusters restrict the vector index type and
+            # reject hnsw with 422 CONFIG_NOT_ALLOWED (only their hfresh index
+            # is allowed). Retry with hfresh, keeping the distance metric.
+            hfresh = getattr(wc.Configure.VectorIndex, 'hfresh', None)
+            if e.status_code != 422 or hfresh is None:
+                raise
+            self.collectionObj = self.client.collections.create(
+                name=self.collection,
+                properties=properties,
+                vectorizer_config=wc.Configure.Vectorizer.none(),
+                vector_index_config=hfresh(
+                    distance_metric=self.similarity,
+                ),
+            )
 
     def _convertFilter(self, docFilter: DocFilter) -> Filter:
         """

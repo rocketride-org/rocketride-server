@@ -1,10 +1,14 @@
 authlib
-grpcio<=1.81.1
-grpcio-health-checking<=1.81.1
-grpcio-tools<=1.81.1
+# weaviate-client 4.17+ requires grpcio<1.80; keep the three grpc packages in
+# lockstep below that bound so a modern client can resolve
+grpcio<1.80.0
+grpcio-health-checking<1.80.0
+grpcio-tools<1.80.0
 httpx
 pydantic
 requests
 validators
-weaviate-client
+# 4.20.0 is the first version with the hfresh vector index config, which
+# new-generation Weaviate Cloud clusters require
+weaviate-client>=4.20.0
 numpy
