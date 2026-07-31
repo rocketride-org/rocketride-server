@@ -16,6 +16,12 @@ from pathlib import Path
 
 
 def _load_nemotron(monkeypatch, response_content: str):
+    """Load nemotron.py from source with stubbed dependencies.
+
+    Installs fake ai.common.chat / ai.common.config / langchain_openai
+    modules in sys.modules, with the stubbed LLM's invoke() returning
+    ``response_content``, then imports the node module for testing.
+    """
     ai_module = types.ModuleType('ai')
     common_module = types.ModuleType('ai.common')
     chat_module = types.ModuleType('ai.common.chat')
