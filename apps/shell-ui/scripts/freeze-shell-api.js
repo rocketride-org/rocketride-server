@@ -156,6 +156,160 @@ const ts = require(require.resolve('typescript', { paths: [APP_ROOT] }));
 const { stripNonPublicMembers } = require('../../../scripts/lib/stripDts');
 
 // =============================================================================
+// MAP-GENERIC EXPANSION — freeze growth-tolerant snapshots
+// =============================================================================
+//
+// A signature generic over a key map — `emit<K extends keyof M>(e: K, p: M[K])`
+// — is INVARIANT in M under plain assignability: TypeScript cannot relate the
+// abstract indexed accesses `LiveM[K]` / `FrozenM[K]` per key and falls back to
+// comparing the whole maps, so ADDING a key to the live map reads as a breaking
+// change against every frozen floor. That contradicts the contract's semantics
+// (frozen versions are compatibility FLOORS; additive growth must pass with no
+// special syntax in the live code).
+//
+// The fix is in the SNAPSHOT ENCODING, not the live surface: at freeze time,
+// every map-generic call signature is expanded into per-key CONCRETE overloads
+// — one per key the map held when frozen:
+//
+//     emit(event: 'shell:connected', payload: M['shell:connected']): void;
+//     emit(event: 'shell:login',     payload: M['shell:login']): void;   ...
+//
+// The frozen contract then pins exactly what it knew: the live generic
+// signature satisfies each concrete overload (K instantiates to the literal;
+// the indexed accesses become real types), a live map that has GROWN passes,
+// while removing a frozen key or changing its payload still fails the floor.
+
+/**
+ * Expand map-generic call signatures in a d.ts bundle into per-key concrete
+ * overloads (see the block comment above for why).
+ *
+ * Handles the three declaration forms the surface uses:
+ *   - interface / type-literal METHOD signatures
+ *   - class method declarations (inlined `declare class` members)
+ *   - PROPERTY signatures whose type is a generic function type (arrow form) —
+ *     these become an intersection of concrete function types.
+ *
+ * Only signatures with exactly ONE type parameter constrained to
+ * `keyof <MapName>` are expanded, and only when <MapName> is an interface
+ * declared in the same bundle whose members are all literal-keyed properties.
+ *
+ * @param {string} dtsText - The bundle body (post stripNonPublicMembers).
+ * @param {object} tsApi - The TypeScript compiler API module.
+ * @returns {string} The bundle with map-generic signatures expanded.
+ */
+function expandMapGenerics(dtsText, tsApi) {
+	const sf = tsApi.createSourceFile('bundle.d.ts', dtsText, tsApi.ScriptTarget.Latest, true);
+	const printer = tsApi.createPrinter({ newLine: tsApi.NewLineKind.LineFeed });
+
+	// ── Pass 1: collect literal-keyed interface maps: name -> keys ───────
+	const maps = new Map();
+	(function collect(node) {
+		if (tsApi.isInterfaceDeclaration(node)) {
+			const keys = [];
+			let allLiteral = node.members.length > 0;
+			for (const m of node.members) {
+				if (tsApi.isPropertySignature(m) && m.name && (tsApi.isStringLiteral(m.name) || tsApi.isIdentifier(m.name))) {
+					keys.push(m.name.text);
+				} else {
+					allLiteral = false;
+				}
+			}
+			if (allLiteral) maps.set(node.name.text, keys);
+		}
+		tsApi.forEachChild(node, collect);
+	})(sf);
+
+	/**
+	 * If the signature-like node is generic over `keyof <map>`, return the
+	 * expansion facts; else null.
+	 *
+	 * @param {object} node - A node with optional typeParameters.
+	 * @returns {{ paramName: string, keys: string[] } | null}
+	 */
+	function mapGenericOf(node) {
+		const tps = node.typeParameters;
+		if (!tps || tps.length !== 1) return null;
+		const constraint = tps[0].constraint;
+		if (!constraint || !tsApi.isTypeOperatorNode(constraint)) return null;
+		if (constraint.operator !== tsApi.SyntaxKind.KeyOfKeyword) return null;
+		const target = constraint.type;
+		if (!tsApi.isTypeReferenceNode(target) || !tsApi.isIdentifier(target.typeName)) return null;
+		const keys = maps.get(target.typeName.text);
+		if (!keys || keys.length === 0) return null;
+		return { paramName: tps[0].name.text, keys };
+	}
+
+	/**
+	 * Produce a copy of a signature node with its type parameter substituted
+	 * by a string-literal key and the typeParameters list dropped.
+	 *
+	 * @param {object} node - The generic signature-like node.
+	 * @param {string} paramName - The type parameter to substitute.
+	 * @param {string} key - The literal key to substitute in.
+	 * @returns {object} The substituted, non-generic node.
+	 */
+	function substitute(node, paramName, key) {
+		const f = tsApi.factory;
+		const visit = (n) => {
+			// Replace every TYPE REFERENCE to the type parameter with 'key'
+			if (tsApi.isTypeReferenceNode(n) && tsApi.isIdentifier(n.typeName) && n.typeName.text === paramName && !n.typeArguments) {
+				return f.createLiteralTypeNode(f.createStringLiteral(key, true));
+			}
+			return tsApi.visitEachChild(n, visit, undefined);
+		};
+		const substituted = tsApi.visitEachChild(node, visit, undefined);
+		// Drop the now-unused type parameter list per node kind
+		if (tsApi.isMethodSignature(substituted)) {
+			return f.updateMethodSignature(substituted, substituted.modifiers, substituted.name, substituted.questionToken, undefined, substituted.parameters, substituted.type);
+		}
+		if (tsApi.isMethodDeclaration(substituted)) {
+			return f.updateMethodDeclaration(substituted, substituted.modifiers, substituted.asteriskToken, substituted.name, substituted.questionToken, undefined, substituted.parameters, substituted.type, substituted.body);
+		}
+		if (tsApi.isFunctionTypeNode(substituted)) {
+			return f.createFunctionTypeNode(undefined, substituted.parameters, substituted.type);
+		}
+		return substituted;
+	}
+
+	// ── Pass 2: record text splices [start, end, replacement] ────────────
+	const splices = [];
+	(function scan(node) {
+		// Interface/type-literal methods and class methods: N overloads
+		if ((tsApi.isMethodSignature(node) || tsApi.isMethodDeclaration(node)) && node.name) {
+			const mg = mapGenericOf(node);
+			if (mg) {
+				const lines = mg.keys.map((k) => printer.printNode(tsApi.EmitHint.Unspecified, substitute(node, mg.paramName, k), sf));
+				splices.push([node.getStart(sf), node.getEnd(), lines.join('\n')]);
+				return; // no need to descend into a replaced signature
+			}
+		}
+		// Property whose type is a generic function type: intersection form
+		if (tsApi.isPropertySignature(node) && node.type && tsApi.isFunctionTypeNode(node.type)) {
+			const mg = mapGenericOf(node.type);
+			if (mg) {
+				const parts = mg.keys.map((k) => `(${printer.printNode(tsApi.EmitHint.Unspecified, substitute(node.type, mg.paramName, k), sf)})`);
+				const name = printer.printNode(tsApi.EmitHint.Unspecified, node.name, sf);
+				const q = node.questionToken ? '?' : '';
+				splices.push([node.getStart(sf), node.getEnd(), `${name}${q}: ${parts.join(' & ')};`]);
+				return;
+			}
+		}
+		tsApi.forEachChild(node, scan);
+	})(sf);
+
+	// ── Apply splices back-to-front so earlier offsets stay valid ────────
+	splices.sort((a, b) => b[0] - a[0]);
+	let out = dtsText;
+	for (const [start, end, replacement] of splices) {
+		out = out.slice(0, start) + replacement + out.slice(end);
+	}
+	if (splices.length > 0) {
+		log(`Expanded ${splices.length} map-generic signature(s) into per-key overloads.`);
+	}
+	return out;
+}
+
+// =============================================================================
 // PROCESS HELPERS
 // =============================================================================
 
@@ -252,9 +406,12 @@ function generateCandidate() {
 		process.exit(1);
 	}
 	// Strip non-public class members so inlined classes compare structurally,
-	// then normalize trailing whitespace so the no-op comparison is stable.
+	// expand map-generic signatures into per-key overloads so frozen floors
+	// tolerate additive map growth (see expandMapGenerics), then normalize
+	// trailing whitespace so the no-op comparison is stable.
 	const stripped = stripNonPublicMembers(fs.readFileSync(candidatePath, 'utf8'), ts);
-	return `${stripped.replace(/\s+$/, '')}\n`;
+	const expanded = expandMapGenerics(stripped, ts);
+	return `${expanded.replace(/\s+$/, '')}\n`;
 }
 
 /**
