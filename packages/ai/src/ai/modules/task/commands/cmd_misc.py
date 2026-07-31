@@ -605,6 +605,9 @@ class MiscCommands(DAPConn):
                         'name': getattr(task_status, 'name', control.source),
                         'projectId': control.project_id,
                         'source': control.source,
+                        # Run classification stamp: dashboards and sidebars
+                        # filter deploy runs out of dev views by this field.
+                        'runKind': control.run_kind,
                         'provider': control.provider,
                         'launchType': control.launch_type.value,
                         'startTime': start,

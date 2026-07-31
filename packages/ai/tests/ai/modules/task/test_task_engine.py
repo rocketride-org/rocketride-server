@@ -939,6 +939,24 @@ def test_analytics_idle_reset():
 # ---------------------------------------------------------------------------
 
 
+def test_task_rejects_unknown_run_classifications():
+    """run_kind/trigger are a CLOSED vocabulary, validated at construction.
+
+    Both gate storage anchors, run-log scoping, and token ownership — a
+    value outside the vocabulary must fail before it can pick a scope.
+    ('' trigger is the interactive-dev spelling and stays valid.)
+    """
+    from unittest.mock import MagicMock
+
+    common = dict(
+        server=MagicMock(), id='t-1', project_id='p-1', source='s-1', token='tk', public_auth='pk', pipeline={}
+    )
+    with pytest.raises(ValueError, match='run_kind'):
+        Task(**common, run_kind='prod')
+    with pytest.raises(ValueError, match='trigger'):
+        Task(**common, trigger='cron')
+
+
 def test_cap_trace_payload_passes_small_payloads_through():
     """Payloads under the cap pass through IDENTICALLY (same object)."""
     payload = {'op': 'x', 'data': 'y' * 1000}

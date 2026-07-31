@@ -318,6 +318,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         token='tk_1',
         source='reader',
         project_id='proj-1',
+        run_kind='dev',
         provider='node-x',
         task=own_task,
         launch_type=SimpleNamespace(value='LAUNCH'),
@@ -329,6 +330,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         token='tk_2',
         source='other-source',
         project_id='proj-2',
+        run_kind='dev',
         provider='node-y',
         task=MagicMock(),
         launch_type=SimpleNamespace(value='EXECUTE'),
@@ -374,6 +376,7 @@ async def test_on_rrext_dashboard_tk_auth_locks_to_owning_task(monkeypatch):
             token=token,
             source='s',
             project_id='p',
+            run_kind='dev',
             provider='node-x',
             task=SimpleNamespace(
                 get_status=lambda: SimpleNamespace(
@@ -461,6 +464,7 @@ def _list_control(task_id, *, name=None, start=900.0, provider='node-x', team_id
         token=f'tk_{task_id}',
         source='reader',
         project_id='proj-1',
+        run_kind='dev',
         provider=provider,
         task=SimpleNamespace(
             get_status=lambda: status,

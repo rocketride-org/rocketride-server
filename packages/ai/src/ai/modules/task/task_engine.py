@@ -415,6 +415,15 @@ class Task(DAPBase):
         # start; None if logging setup failed, which must never break the run).
         # run_kind separates the dev and deploy continua; the deploy feature's
         # trusted dispatch path sets 'deploy', everything else logs as 'dev'.
+        # Both classifications gate storage anchors, run-log scoping, and
+        # token ownership downstream — reject anything outside the closed
+        # vocabulary HERE, the one construction choke point, so a bad value
+        # can never pick a storage scope. ('' trigger = an interactive dev
+        # run: only the trusted dispatch stamps manual/schedule.)
+        if run_kind not in ('dev', 'deploy'):
+            raise ValueError(f'invalid run_kind: {run_kind!r}')
+        if trigger not in ('', 'manual', 'schedule'):
+            raise ValueError(f'invalid trigger: {trigger!r}')
         self._run_log: Optional[RunLogWriter] = None
         self._run_kind: str = run_kind
         self._run_trigger: str = trigger

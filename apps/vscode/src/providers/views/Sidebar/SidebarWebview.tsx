@@ -63,6 +63,8 @@ interface DashboardTaskDTO {
 	source: string;
 	completed: boolean;
 	state: number;
+	/** Run classification stamp: deploy runs never enter the dev lists. */
+	runKind?: string;
 }
 
 type IncomingMessage =
@@ -241,6 +243,9 @@ const SidebarViewWebview: React.FC = () => {
 					const unknown: UnknownTask[] = [];
 					for (const t of msg.tasks) {
 						if (t.completed) continue;
+						// Same classification the shared fold applies on every event
+						// path: deploy runs never seed the dev sidebar.
+						if (t.runKind === 'deploy') continue;
 						const k = `${t.projectId}.${t.source}`;
 						taskMap.set(k, { running: true, errors: [], warnings: [] });
 						if (!isKnownTask(t.projectId, t.source)) {
