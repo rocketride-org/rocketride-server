@@ -48,6 +48,19 @@ test('tolerates a missing trailing newline', () => {
 	assert.equal(appendGitignoreEntries('node_modules/', ENTRIES), 'node_modules/\n.rocketride/\n.env\n');
 });
 
+test('whitespace-only content does not gain a leading blank line', () => {
+	// Regression: trimming the content but testing the UNtrimmed string for the
+	// separator emitted a leading newline here.
+	assert.equal(appendGitignoreEntries('   ', ENTRIES), '   \n.rocketride/\n.env\n');
+});
+
+test("preserves the user's trailing blank lines verbatim", () => {
+	// A hand-edited .gitignore is the user's file. Adding one entry must not
+	// silently reformat the rest of it.
+	const existing = 'node_modules/\n\n\n';
+	assert.equal(appendGitignoreEntries(existing, ENTRIES), `${existing}.rocketride/\n.env\n`);
+});
+
 test('matches entries despite surrounding whitespace', () => {
 	assert.deepEqual(missingGitignoreEntries('  .env  \n', ENTRIES), ['.rocketride/']);
 });

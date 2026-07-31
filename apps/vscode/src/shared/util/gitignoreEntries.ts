@@ -44,11 +44,18 @@ export function missingGitignoreEntries(content: string, entries: readonly strin
  * `content` with any missing entries appended, or `null` when nothing is
  * missing (so the caller can skip the write entirely rather than rewriting a
  * byte-identical file).
+ *
+ * The user's existing text is preserved byte-for-byte, including any blank
+ * lines they left at the end — this file is hand-edited, and silently
+ * reformatting someone's `.gitignore` while adding one line to it is the kind
+ * of thing that makes a tool untrustworthy. A separating newline is added only
+ * when the content does not already end in one.
  */
 export function appendGitignoreEntries(content: string, entries: readonly string[]): string | null {
 	const missing = missingGitignoreEntries(content, entries);
 	if (missing.length === 0) {
 		return null;
 	}
-	return content.trimEnd() + (content ? '\n' : '') + missing.join('\n') + '\n';
+	const separator = content === '' || content.endsWith('\n') ? '' : '\n';
+	return content + separator + missing.join('\n') + '\n';
 }
