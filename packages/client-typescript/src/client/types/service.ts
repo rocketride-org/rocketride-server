@@ -82,8 +82,8 @@ export interface ServiceSummary {
 	protocol: string;
 	/** URL prefix used for default URL mapping. */
 	prefix: string;
-	/** Account plans this driver is available for (null = all plans). */
-	plans: string[] | null;
+	/** Account plans this driver is available for (absent = all plans). */
+	plans?: string[];
 	/** Bitmask of {@link PROTOCOL_CAPS} flags. */
 	capabilities: number;
 	/** Categorisation tags (e.g. ["source"], ["agent", "tool"]). */
