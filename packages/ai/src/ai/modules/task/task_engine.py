@@ -295,8 +295,10 @@ class Task(DAPBase):
             org_id: Owning org id (rides the task file as trusted identity)
             run_kind: Run classification ('dev' | 'deploy') — picks the
                 run-log continuum; only the trusted dispatch sets 'deploy'
-            trigger: What fired the run ('manual' | 'schedule'); stamped on
-                the run-begin marker
+            trigger: What fired the run ('' | 'manual' | 'schedule');
+                '' is the interactive-dev spelling (only the trusted
+                dispatch stamps manual/schedule); stamped on the
+                run-begin marker
             **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication

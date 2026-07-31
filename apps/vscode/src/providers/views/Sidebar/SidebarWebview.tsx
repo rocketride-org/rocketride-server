@@ -247,7 +247,12 @@ const SidebarViewWebview: React.FC = () => {
 						// path: deploy runs never seed the dev sidebar.
 						if (t.runKind === 'deploy') continue;
 						const k = `${t.projectId}.${t.source}`;
-						taskMap.set(k, { running: true, errors: [], warnings: [] });
+						// Preserve accumulated diagnostics for a task that was
+						// already tracked — the snapshot confirms it is still
+						// running, it does not reset its indicators (same rule as
+						// the shared fold's bulk 'running' rebuild).
+						const prev = activeTasksRef.current.get(k);
+						taskMap.set(k, { running: true, errors: prev?.errors ?? [], warnings: prev?.warnings ?? [] });
 						if (!isKnownTask(t.projectId, t.source)) {
 							unknown.push({ projectId: t.projectId, sourceId: t.source, displayName: t.name || t.source, projectLabel: t.projectId.substring(0, 8) });
 						}

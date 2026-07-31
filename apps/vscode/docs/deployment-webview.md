@@ -22,9 +22,16 @@ Conventions shared by both protocols:
   `packages/shared-ui/src/components/deploy-panel/types.ts` — the contract
   of record — field-for-field, so the webview hands them to the shared
   `DeployPanel` / `DeploymentView` components unchanged.
-- **Request correlation**: every mutation and fetch-style request carries a
-  `requestId`; the host's reply (`…Result`) echoes it, with an optional
-  `error` string when the action failed.
+- **Two correlation styles**: MUTATION and RPC-style requests
+  (`deploy:artifact`/`deploy:publish`/`deploy:deploy`, every
+  `deployment:*` mutation, `deployment:preview`, `deployment:validate`)
+  carry a `requestId`, and their `…Result` reply echoes it with an
+  optional `error` string — nothing else rides those replies. FETCH
+  messages (`deploy:fetch`, `deployment:fetch`) carry NO `requestId`:
+  their answer is a scoped push (`deploy:data`; `deployment:load` /
+  `deployment:error` stamped with `teamId` + optional `sourceId`) that
+  the host also re-sends after mutations, so it cannot be
+  request-correlated by design.
 - **Push-driven refresh**: nothing on these surfaces polls. The host relays
   `apaevt_deploy` invalidation events and live `apaevt_task` folds; the
   WEBVIEW then drives its own re-fetch.
@@ -45,9 +52,13 @@ Conventions shared by both protocols:
 
 ## Deployment record drawer (rides the Project webview channel)
 
-The drawer lives INSIDE the Project webview, so every message carries the
-TEAM identity (the project identity is the panel's own); replies stamp it
-back so a switched drawer ignores stale pushes.
+The drawer lives INSIDE the Project webview, so every webview-to-host
+message carries the TEAM identity (the project identity is the panel's
+own). The scoped pushes (`deployment:load`, `deployment:error`) stamp it
+back so a switched drawer ignores stale ones; the requestId-correlated
+replies (`deployment:actionResult`, `deployment:previewResult`,
+`deployment:validateResult`) and `shell:connectionChange` carry no
+`teamId` — correlation or broadcast semantics make it unnecessary.
 
 `DeploymentWebviewToHost` / `DeploymentHostToWebview`:
 
