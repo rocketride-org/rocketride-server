@@ -34,6 +34,7 @@ import type { CellComponent } from 'tabulator-tables';
 import type { GridColumnDefinition } from '../data-grid/defaults';
 import type { TaskTimeline } from '../../modules/project/hooks/useTaskEvents';
 import type { DeploymentInfo } from './DeploymentView';
+import { DEPLOY_ACTION_VERBS } from './types';
 import type { DeployHistoryRow, DeployScheduleRow, DeployVersionCard } from './types';
 
 // =============================================================================
@@ -347,7 +348,7 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 					const row = cell.getRow().getData() as DeployHistoryRow;
 					// Past-tense verbs; 'pause'/'resume' appear only on rows
 					// written before the enable/disable vocabulary.
-					const verb = { publish: 'published', deploy: 'deployed', rollback: 'rolled back', enable: 'enabled', disable: 'disabled', errored: 'errored', remove: 'removed', pause: 'paused', resume: 'resumed' }[row.action] ?? row.action;
+					const verb = DEPLOY_ACTION_VERBS[row.action] ?? row.action;
 					return `${verb} v${row.version}${row.comment ? ` “${row.comment}”` : ''}`;
 				},
 			},

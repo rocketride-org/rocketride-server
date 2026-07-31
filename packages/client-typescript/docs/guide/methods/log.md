@@ -28,6 +28,11 @@ covered — no gap, no duplicate. Speed `0` delivers as fast as possible,
 live on catching the wall clock; live is just the position pinned to now
 (`seek('live')`), not a separate mode.
 
+The stream identity carries the scope: omit `teamId` to open your OWN
+development stream; pass `teamId` to open that team's DEPLOY continuum,
+which requires `task.monitor` membership on the TARGET team (see
+[API Endpoints](#api-endpoints)).
+
 ```typescript
 const session = client.log.openEventStream(stream);
 

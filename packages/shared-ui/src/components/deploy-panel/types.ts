@@ -122,3 +122,20 @@ export interface DeployScheduleRow {
 	/** Run window in seconds ('fixed window'); absent = until finished. */
 	ttl?: number;
 }
+
+/** Past-tense verb per audit action — THE one display vocabulary for the
+    history grids (DeploymentView and TeamDeploymentRecordPanel render the
+    same trail; two hand-copied maps would drift when an action is added).
+    'pause'/'resume' appear only on rows written before the enable/disable
+    vocabulary. Unknown actions fall back to the raw action string. */
+export const DEPLOY_ACTION_VERBS: Record<string, string> = {
+	publish: 'published',
+	deploy: 'deployed',
+	rollback: 'rolled back',
+	enable: 'enabled',
+	disable: 'disabled',
+	errored: 'errored',
+	remove: 'removed',
+	pause: 'paused',
+	resume: 'resumed',
+};
