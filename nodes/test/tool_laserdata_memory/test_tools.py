@@ -73,6 +73,56 @@ def _passthrough(args, tool_name=None):
     return args if isinstance(args, dict) else {}
 
 
+def _require_str(args, key, *, tool_name=''):
+    """Faithful stub of ai.common.utils.require_str (same contract + wording)."""
+    val = args.get(key)
+    if not isinstance(val, str) or not val.strip():
+        prefix = f'{tool_name}: ' if tool_name else ''
+        raise ValueError(f'{prefix}"{key}" is required and must be a non-empty string')
+    return val.strip()
+
+
+def _optional_str(args, key, *, default=None, tool_name=''):
+    """Faithful stub of ai.common.utils.optional_str."""
+    if key not in args or args[key] is None:
+        return default
+    val = args[key]
+    if not isinstance(val, str):
+        prefix = f'{tool_name}: ' if tool_name else ''
+        raise ValueError(f'{prefix}"{key}" must be a string')
+    return val
+
+
+def _int_arg(args, key, *, default, lo, hi, tool_name=''):
+    """Faithful stub of ai.common.utils.int_arg (clamps; rejects bool/non-int)."""
+    value = args.get(key)
+    if value is None:
+        value = default
+    if isinstance(value, bool) or not isinstance(value, int):
+        prefix = f'{tool_name}: ' if tool_name else ''
+        raise ValueError(f'{prefix}"{key}" must be an integer')
+    return max(lo, min(value, hi))
+
+
+def _config_int(cfg, key, default, *, min_value=None, max_value=None):
+    """Faithful stub of ai.common.utils.config_int (<=0/malformed -> default, then clamp)."""
+    raw = cfg.get(key)
+    if raw is None:
+        val = default
+    else:
+        try:
+            val = int(raw)
+            if val <= 0:
+                val = default
+        except (TypeError, ValueError):
+            val = default
+    if min_value is not None:
+        val = max(val, min_value)
+    if max_value is not None:
+        val = min(val, max_value)
+    return val
+
+
 def _ensure_ai_common() -> None:
     """Install fresh ``ai.common.*`` stubs so the node imports without the engine."""
     for name in ('ai', 'ai.common', 'ai.common.utils', 'ai.common.config'):
@@ -80,7 +130,12 @@ def _ensure_ai_common() -> None:
     # Mark containers as packages so sub-imports resolve even if not pre-inserted.
     sys.modules['ai'].__path__ = []
     sys.modules['ai.common'].__path__ = []
-    sys.modules['ai.common.utils'].normalize_tool_input = _passthrough
+    utils = sys.modules['ai.common.utils']
+    utils.normalize_tool_input = _passthrough
+    utils.require_str = _require_str
+    utils.optional_str = _optional_str
+    utils.int_arg = _int_arg
+    utils.config_int = _config_int
 
     class _Config:
         """Minimal Config stub returning an empty node config."""
@@ -324,6 +379,12 @@ def test_begin_global_malformed_numbers_fall_back(bridge):
     assert glb.op_timeout == 30
 
 
+def test_begin_global_zero_means_default(bridge):
+    glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090', 'op_timeout': 0, 'recall_limit': 0})
+    assert glb.op_timeout == 30  # config_int semantics: <=0 is "unspecified"
+    assert glb.recall_limit == 10
+
+
 def test_begin_global_reads_stream(bridge, monkeypatch):
     glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090', 'stream': 'shared-memory'})
     assert glb.stream == 'shared-memory'
@@ -433,8 +494,10 @@ def test_end_global_cancels_in_flight_calls(bridge):
 
     worker = threading.Thread(target=call)
     worker.start()
-    while not glb._pending:  # wait until the call is actually in flight
+    deadline = time.monotonic() + 5
+    while not glb._pending and time.monotonic() < deadline:
         time.sleep(0.01)
+    assert glb._pending, 'call never registered as in-flight'
     glb.endGlobal()
     worker.join(timeout=5)
     assert not worker.is_alive()
@@ -535,10 +598,10 @@ def test_recall_passes_query_strategy_conversation_and_clamps_limit():
     assert kwargs['limit'] == 200
 
 
-def test_recall_non_int_limit_falls_back_to_config():
-    inst, state = _instance(recall_limit=3)
-    inst.recall({'limit': True})  # bool must not be treated as 1
-    assert state['calls'][0][2]['limit'] == 3
+def test_recall_non_int_limit_rejected():
+    inst, _ = _instance(recall_limit=3)
+    with pytest.raises(ValueError, match='"limit" must be an integer'):
+        inst.recall({'limit': True})  # bool must not be treated as 1 (int_arg contract)
 
 
 def test_recall_shapes_items():
@@ -603,6 +666,17 @@ def test_sdk_error_maps_to_runtime_error():
     inst, _ = _instance({'calls': [], 'raise': Exception('iggy unreachable')})
     with pytest.raises(RuntimeError, match=r'laserdata\.recall: iggy unreachable'):
         inst.recall({})
+
+
+def test_sdk_error_scrubbed_of_credentials():
+    cs = 'root:s3cretPW@laser.example.com:8090'
+    state = {'calls': [], 'raise': Exception(f'dial failed for {cs} (auth s3cretPW rejected)')}
+    inst, _ = _instance(state, connection_string=cs)
+    with pytest.raises(RuntimeError) as ei:
+        inst.recall({})
+    text = str(ei.value)
+    assert 's3cretPW' not in text  # secure-field password never reaches tool results/logs
+    assert '<connection-string>' in text
 
 
 def test_connect_failure_maps_to_runtime_error():

@@ -24,6 +24,7 @@ import threading
 from typing import Any, Coroutine
 
 from ai.common.config import Config
+from ai.common.utils import config_int
 from rocketlib import IGlobalBase, OPEN_MODE, debug, error, warning
 
 # Defaults / bounds (avoid magic constants scattered in the code).
@@ -35,14 +36,6 @@ _MIN_OP_TIMEOUT = 5
 _MAX_OP_TIMEOUT = 600
 # endGlobal must not hang a pipe teardown on a wedged connection close.
 _CLOSE_TIMEOUT = 5
-
-
-def _int_or(value: Any, default: int) -> int:
-    """Coerce a config value to int, falling back to `default` when malformed."""
-    try:
-        return int(value) if value is not None else default
-    except (TypeError, ValueError):
-        return default
 
 
 class IGlobal(IGlobalBase):
@@ -102,11 +95,14 @@ class IGlobal(IGlobalBase):
         raw_folded = cfg.get('folded', True)
         self.folded = raw_folded if isinstance(raw_folded, bool) else True
 
-        # A malformed number (e.g. a stray string from a hand-edited config)
-        # falls back to the default rather than crashing pipe startup.
-        self.recall_limit = max(1, min(_MAX_RECALL_LIMIT, _int_or(cfg.get('recall_limit'), _DEFAULT_RECALL_LIMIT)))
-        self.op_timeout = max(
-            _MIN_OP_TIMEOUT, min(_MAX_OP_TIMEOUT, _int_or(cfg.get('op_timeout'), _DEFAULT_OP_TIMEOUT))
+        # A malformed or non-positive number (e.g. a stray string from a
+        # hand-edited config, or 0 meaning "use default") falls back to the
+        # default rather than crashing pipe startup.
+        self.recall_limit = config_int(
+            cfg, 'recall_limit', _DEFAULT_RECALL_LIMIT, min_value=1, max_value=_MAX_RECALL_LIMIT
+        )
+        self.op_timeout = config_int(
+            cfg, 'op_timeout', _DEFAULT_OP_TIMEOUT, min_value=_MIN_OP_TIMEOUT, max_value=_MAX_OP_TIMEOUT
         )
 
         self._closing = False

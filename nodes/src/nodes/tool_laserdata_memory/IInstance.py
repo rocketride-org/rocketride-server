@@ -32,7 +32,7 @@ from typing import Any, Dict, List
 
 from rocketlib import IInstanceBase, tool_function
 
-from ai.common.utils import normalize_tool_input
+from ai.common.utils import int_arg, normalize_tool_input, optional_str, require_str
 
 from .IGlobal import _MAX_RECALL_LIMIT, IGlobal
 
@@ -83,8 +83,8 @@ class IInstance(IInstanceBase):
         if not isinstance(content, str) or not content.strip():
             raise ValueError('laserdata.remember: "content" is required and must be a non-empty string')
 
-        namespace = self._namespace(args.get('namespace'), 'remember')
-        conversation = _opt_str(args.get('conversation'), 'remember', 'conversation')
+        namespace = self._namespace(args, 'remember')
+        conversation = _opt_str(args, 'remember', 'conversation')
 
         cfg = self.IGlobal
         laser = self._laser('remember')
@@ -147,15 +147,14 @@ class IInstance(IInstanceBase):
         args = normalize_tool_input(args, tool_name='recall')
         cfg = self.IGlobal
 
-        namespace = self._namespace(args.get('namespace'), 'recall')
-        conversation = _opt_str(args.get('conversation'), 'recall', 'conversation')
-        query = _opt_str(args.get('query'), 'recall', 'query')
-        strategy = _opt_str(args.get('strategy'), 'recall', 'strategy')
+        namespace = self._namespace(args, 'recall')
+        conversation = _opt_str(args, 'recall', 'conversation')
+        query = _opt_str(args, 'recall', 'query')
+        strategy = _opt_str(args, 'recall', 'strategy')
 
-        raw_limit = args.get('limit', cfg.recall_limit)
-        if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
-            raw_limit = cfg.recall_limit
-        limit = max(1, min(_MAX_RECALL_LIMIT, raw_limit))
+        limit = int_arg(
+            args, 'limit', default=cfg.recall_limit, lo=1, hi=_MAX_RECALL_LIMIT, tool_name='laserdata.recall'
+        )
 
         laser = self._laser('recall')
         items = _run(
@@ -211,13 +210,13 @@ class IInstance(IInstanceBase):
         """Record feedback on a memory item."""
         args = normalize_tool_input(args, tool_name='improve')
 
-        memory_id = _req_str(args.get('memory_id'), 'improve', 'memory_id')
+        memory_id = require_str(args, 'memory_id', tool_name='laserdata.improve')
         weight = args.get('weight')
         if isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight):
             raise ValueError('laserdata.improve: "weight" is required and must be a finite number')
 
-        namespace = self._namespace(args.get('namespace'), 'improve')
-        conversation = _opt_str(args.get('conversation'), 'improve', 'conversation')
+        namespace = self._namespace(args, 'improve')
+        conversation = _opt_str(args, 'improve', 'conversation')
 
         cfg = self.IGlobal
         laser = self._laser('improve')
@@ -256,9 +255,9 @@ class IInstance(IInstanceBase):
         """Append a tombstone for a memory item."""
         args = normalize_tool_input(args, tool_name='forget')
 
-        memory_id = _req_str(args.get('memory_id'), 'forget', 'memory_id')
-        namespace = self._namespace(args.get('namespace'), 'forget')
-        conversation = _opt_str(args.get('conversation'), 'forget', 'conversation')
+        memory_id = require_str(args, 'memory_id', tool_name='laserdata.forget')
+        namespace = self._namespace(args, 'forget')
+        conversation = _opt_str(args, 'forget', 'conversation')
 
         cfg = self.IGlobal
         laser = self._laser('forget')
@@ -269,10 +268,10 @@ class IInstance(IInstanceBase):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _namespace(self, override: Any, tool_name: str) -> str:
+    def _namespace(self, args: Dict[str, Any], tool_name: str) -> str:
         """Resolve the namespace: per-call override falling back to config."""
         cfg = self.IGlobal
-        ns = _opt_str(override, tool_name, 'namespace')
+        ns = _opt_str(args, tool_name, 'namespace')
         if ns and ns != cfg.namespace and not cfg.allow_namespace_override:
             raise ValueError(
                 f'laserdata.{tool_name}: per-call namespace override is disabled — '
@@ -292,7 +291,7 @@ class IInstance(IInstanceBase):
         except RuntimeError:
             raise
         except Exception as exc:
-            raise RuntimeError(f'laserdata.{tool_name}: connect failed: {exc}') from None
+            raise RuntimeError(f'laserdata.{tool_name}: connect failed: {_safe_error(self.IGlobal, exc)}') from None
 
 
 # ---------------------------------------------------------------------------
@@ -307,23 +306,38 @@ def _run(cfg: IGlobal, tool_name: str, coro) -> Any:
     except (ValueError, RuntimeError):
         raise
     except Exception as exc:
-        raise RuntimeError(f'laserdata.{tool_name}: {exc}') from None
+        raise RuntimeError(f'laserdata.{tool_name}: {_safe_error(cfg, exc)}') from None
 
 
-def _req_str(value: Any, tool_name: str, field: str) -> str:
-    """Validate a required non-empty string argument (identifier-like: stripped)."""
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f'laserdata.{tool_name}: "{field}" is required and must be a non-empty string')
-    return value.strip()
+def _safe_error(cfg: IGlobal, exc: BaseException) -> str:
+    """Render an SDK exception without leaking connection-string credentials.
+
+    The connection string is a secure field of the form ``user:password@host``;
+    a native client error could echo the DSN it was given, so both the full
+    string and the bare password are scrubbed before the text reaches tool
+    results or logs.
+    """
+    msg = str(exc) or type(exc).__name__
+    cs = getattr(cfg, 'connection_string', '') or ''
+    if cs:
+        msg = msg.replace(cs, '<connection-string>')
+        userinfo = cs.split('@', 1)[0]
+        if '@' in cs and ':' in userinfo:
+            password = userinfo.split(':', 1)[1]
+            if password:
+                msg = msg.replace(password, '****')
+    return msg
 
 
-def _opt_str(value: Any, tool_name: str, field: str) -> str:
-    """Validate an optional string argument; absent/empty normalizes to ''."""
-    if value is None:
-        return ''
-    if not isinstance(value, str):
-        raise ValueError(f'laserdata.{tool_name}: "{field}" must be a string')
-    return value.strip()
+def _opt_str(args: Dict[str, Any], tool_name: str, key: str) -> str:
+    """Optional identifier-like string arg via the shared validator, stripped.
+
+    Thin wrapper over :func:`ai.common.utils.optional_str` that normalizes the
+    absent/None case to ``''`` and strips — these args (namespace, conversation,
+    query, strategy) are identifiers or search text where surrounding
+    whitespace is never meaningful.
+    """
+    return (optional_str(args, key, default='', tool_name=f'laserdata.{tool_name}') or '').strip()
 
 
 def _shape_items(items: Any) -> List[Dict[str, Any]]:
