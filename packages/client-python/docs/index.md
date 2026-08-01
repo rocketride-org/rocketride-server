@@ -304,6 +304,21 @@ stream_url = await client.fs_get_url('uploads/video.mp4', expires_in=600)
 download_url = await client.fs_get_url('uploads/video.mp4', download_name='my video.mp4')
 ```
 
+
+### App publish ladder
+
+Typed wrappers over `rrext_app_deploy` — the publish ladder for RocketRide apps.
+**Publish** snapshots an immutable version (never activates anything); **Deploy**
+pins a rung (`@user`, `@team/<name>`, `@org`) to a version — first publish,
+update, promote, and rollback are all this one verb.
+
+| Method | Signature | Description |
+| ------ | --------- | ----------- |
+| `app_publish` | `async def app_publish(self, app_id, version, bundle, message='', module_id=None, name=None) -> dict` | Publish an immutable version to the org registry (single-file `remoteEntry.js` bundle; commit-style `message` shows on the version card). |
+| `app_versions` | `async def app_versions(self, app_id) -> list[dict]` | The version rail, newest first; each entry carries `rungs` naming the rungs currently pinned to it. |
+| `app_deploy` | `async def app_deploy(self, app_id, registry_version, target) -> dict` | Pin a rung to a version. Personal deploys resolve into your own manifest immediately. |
+| `app_where` | `async def app_where(self, app_id) -> list[dict]` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per rung. |
+
 ### Events
 
 | Method       | Signature                                                                | Returns | Description                                                                                                                                                          |

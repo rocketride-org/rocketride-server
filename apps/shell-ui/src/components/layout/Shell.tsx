@@ -50,7 +50,7 @@ import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
-import { registerAndMapApps, getRegisteredEntry, invalidateAppDescriptor } from '../../lib/appLoader';
+import { registerAndMapApps, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener } from '../../lib/appLoader';
 import type { ServerAppEntry } from '../../lib/appLoader';
 
 // =============================================================================
@@ -184,13 +184,29 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── Connection state ──────────────────────────────────────────────────
 	const { isConnected, statusMessage } = useShellConnection();
 
+	// ── Local dev apps — synthetic client-side entries ────────────────────
+	// registerLocalApp with meta creates manifest presence for apps the
+	// server has never heard of (in-browser compile + inject, zero server
+	// round trips). The listener bumps this seq so the memo re-merges.
+	const [localAppsSeq, setLocalAppsSeq] = useState(0);
+	useEffect(() => {
+		setLocalAppsListener(() => setLocalAppsSeq((n) => n + 1));
+		return () => setLocalAppsListener(null);
+	}, []);
+
 	// ── Apps — probe catalog + post-auth merge ────────────────────────────
 	// The pre-auth probe registers public MF remotes. Post-auth, the
 	// ConnectResult may include additional apps the user is entitled to
 	// (e.g. apps gated by requiredPermissions). Those need to be registered
 	// as MF remotes and merged into the app list so they can be launched.
 	const apps = useMemo(() => {
-		if (!identity?.apps?.length) return config.apps;
+		// Synthetic local entries first computed so both return paths merge them
+		const withLocal = (list: typeof config.apps): typeof config.apps => {
+			const present = new Set(list.map((a) => a.id));
+			const locals = getLocalAppEntries().filter((e) => !present.has(e.id));
+			return locals.length > 0 ? [...list, ...locals] : list;
+		};
+		if (!identity?.apps?.length) return withLocal(config.apps);
 
 		// Index ConnectResult apps by id
 		const identityApps = identity.apps as Array<ServerAppEntry & { appStatus?: string; onDesktop?: boolean }>;
@@ -213,8 +229,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			}
 		}
 
-		return merged;
-	}, [identity?.apps, config.apps]);
+		return withLocal(merged);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- localAppsSeq re-merges synthetic entries
+	}, [identity?.apps, config.apps, localAppsSeq]);
 
 	// =====================================================================
 	// BOOTSTRAP — one-time auth sequence on mount

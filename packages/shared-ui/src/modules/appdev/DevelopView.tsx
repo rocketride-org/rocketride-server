@@ -137,6 +137,31 @@ const styles: Record<string, React.CSSProperties> = {
 		flex: 1,
 		minHeight: 0,
 		position: 'relative',
+		display: 'flex',
+		flexDirection: 'column',
+	},
+	// CRT-tube framing: a grayish bezel with generous rounding around the
+	// preview, the "glass" clipped inside it so the app's corners round too.
+	previewBezel: {
+		flex: 1,
+		minHeight: 0,
+		margin: '10px 12px 12px',
+		padding: 10,
+		background: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 18,
+		boxShadow: 'inset 0 1px 4px rgba(0,0,0,0.14)',
+		display: 'flex',
+		flexDirection: 'column',
+	},
+	previewScreen: {
+		flex: 1,
+		minHeight: 0,
+		position: 'relative',
+		borderRadius: 10,
+		overflow: 'hidden',
+		border: '1px solid var(--rr-border)',
+		background: 'var(--rr-bg-default)',
 	},
 	devBadge: {
 		position: 'absolute',
@@ -301,14 +326,19 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 								</span>
 							</div>
 						)}
-						{previewPane}
+						<div style={styles.previewBezel}>
+							<div style={styles.previewScreen}>{previewPane}</div>
+						</div>
 					</div>
 				</div>
 			)}
 
-			{/* PANE: CODE — host slot (web only) */}
-			{pane === 'code' && caps.hasCodePane && (
-				<div style={styles.paneHost}>{codePane}</div>
+			{/* PANE: CODE — host slot (web only). KEPT MOUNTED while other
+			    panes are active: the compiler/linker live inside it, and the
+			    preview needs the project compiled without ever visiting the
+			    Code pill (RocketApp's keep-editors-mounted pattern). */}
+			{caps.hasCodePane && (
+				<div style={{ ...styles.paneHost, display: pane === 'code' ? 'flex' : 'none' }}>{codePane}</div>
 			)}
 
 			{/* PANE: EVENTS */}

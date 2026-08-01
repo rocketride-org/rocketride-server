@@ -2343,6 +2343,72 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	// ============================================================================
+	// APP PUBLISH LADDER (rrext_app_deploy)
+	// ============================================================================
+
+	/**
+	 * Publish an immutable app version to the org registry.
+	 *
+	 * Publishing never activates anything — pin a rung with {@link appDeploy}
+	 * to make the version live somewhere.
+	 *
+	 * @param options.appId - App id (appManifest.id, e.g. 'acme.brandy')
+	 * @param options.version - Semver label (e.g. '0.5.0')
+	 * @param options.bundle - The built remoteEntry.js bytes (single-file v1)
+	 * @param options.message - Commit-style "what changed" note (version card)
+	 * @param options.moduleId - MF container name (derived when omitted)
+	 * @param options.name - Display name (defaults to appId)
+	 * @returns The version-rail entry (registryVersion, appVersion, sha256, ...)
+	 */
+	async appPublish(options: { appId: string; version: string; bundle: Uint8Array; message?: string; moduleId?: string; name?: string }): Promise<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string }> {
+		const body = await this.call('rrext_app_deploy', {
+			subcommand: 'publish',
+			appId: options.appId,
+			version: options.version,
+			message: options.message ?? '',
+			moduleId: options.moduleId,
+			name: options.name,
+			data: options.bundle,
+		});
+		return (body as any)?.entry ?? {};
+	}
+
+	/**
+	 * List an app's published versions, newest first (the version rail).
+	 *
+	 * @param appId - App id
+	 * @returns Rail entries; each carries `rungs` naming the rungs pinned to it
+	 */
+	async appVersions(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; rungs: string[] }>> {
+		const body = await this.call('rrext_app_deploy', { subcommand: 'versions', appId });
+		return (body as any)?.versions ?? [];
+	}
+
+	/**
+	 * Pin a rung to a published version — deploy, promote, and rollback are
+	 * all this one verb ("repoint, never rebuild").
+	 *
+	 * @param appId - App id
+	 * @param registryVersion - Registry version number from the rail
+	 * @param target - '@user', '@team/<name-or-id>', or '@org'
+	 * @returns The updated deployment record and the rung word
+	 */
+	async appDeploy(appId: string, registryVersion: number, target: string): Promise<{ deployment: Record<string, unknown>; rung: string }> {
+		return (await this.call('rrext_app_deploy', { subcommand: 'deploy', appId, version: registryVersion, target })) as any;
+	}
+
+	/**
+	 * The reverse index: which rungs run which version of an app.
+	 *
+	 * @param appId - App id
+	 * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
+	 */
+	async appWhere(appId: string): Promise<Array<{ rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }>> {
+		const body = await this.call('rrext_app_deploy', { subcommand: 'where', appId });
+		return (body as any)?.pins ?? [];
+	}
+
+	// ============================================================================
 	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
 	// ============================================================================
 

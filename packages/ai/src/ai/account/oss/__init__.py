@@ -254,7 +254,9 @@ class Account(AccountBase):
         Return all apps for an authenticated OSS user.
 
         In OSS mode, APIKEY grants full access — all apps are returned
-        regardless of the ``public`` flag.
+        regardless of the ``public`` flag, plus the publish ladder's pins
+        (org < team < personal scope walk over the single 'local' scopes),
+        with the dev overlay applied on top inside the reader.
 
         Args:
             user_id:       Internal user ID (always 'local' in OSS).
@@ -263,7 +265,20 @@ class Account(AccountBase):
         Returns:
             List of all app manifest dicts.
         """
-        return self._read_apps_json(public_only=False)
+        apps = self._read_apps_json(public_only=False)
+        # Deployed apps (kind:'app' registry pins) — OSS single-scope walk
+        try:
+            from ai.account.app_deploy import resolve_app_pins
+
+            pinned = await resolve_app_pins('local', 'local', ['local'])
+            if pinned:
+                by_id = {a.get('id'): a for a in apps}
+                for entry in pinned:
+                    by_id[entry['id']] = {**by_id.get(entry['id'], {}), **entry}
+                apps = list(by_id.values())
+        except Exception:
+            pass  # registry empty/unavailable — the static manifest stands
+        return apps
 
     def _read_apps_json(self, public_only: bool = False) -> list:
         """

@@ -91,35 +91,110 @@ const registeredEntries = new Map<string, string>();
 // ungated so in-tree dev tooling can import them directly.
 const localOverrides = new Map<string, () => Promise<AppDescriptor>>();
 
+// Synthetic manifest entries for local apps the server has never heard of:
+// a purely CLIENT-SIDE presence, so an in-browser-compiled app previews with
+// ZERO server round trips. Shell merges these into its app list via the
+// listener below.
+const localAppMetas = new Map<string, { id: string; moduleId: string; name: string }>();
+let localAppsListener: (() => void) | null = null;
+
+/**
+ * Registers (or clears, with null) the local-apps change listener. Shell
+ * installs it so synthetic local entries re-render the app list.
+ *
+ * @param fn - Change callback, or null on unmount.
+ */
+export function setLocalAppsListener(fn: (() => void) | null): void {
+	localAppsListener = fn;
+}
+
+/**
+ * The synthetic manifest entries for locally registered apps, mapped to
+ * runtime AppManifestEntry objects whose load() resolves the local
+ * override. Shell appends the ones its list does not already contain.
+ */
+export function getLocalAppEntries(): AppManifestEntry[] {
+	return [...localAppMetas.values()].map((meta) => ({
+		id: meta.id,
+		moduleId: meta.moduleId,
+		name: meta.name,
+		description: 'Local development app',
+		authenticated: false,
+		public: false,
+		load: () => {
+			const local = localOverrides.get(meta.id);
+			if (!local) return Promise.reject(new Error(`Local app "${meta.id}" has no registered loader`));
+			return local();
+		},
+	}));
+}
+
 /**
  * Registers a local (non-Module-Federation) descriptor loader for an app.
  *
- * The app must already exist in the manifest (probe or ConnectResult) — this
- * override replaces HOW its descriptor is produced, not WHETHER the app
- * exists. Call invalidateAppDescriptor() afterwards to evict any cached
- * descriptor so the next activation uses the local loader. The loader should
- * return a FRESH descriptor object per call: new component identities are
- * what force React to fully remount the app.
+ * For an app the manifest already knows, this overrides HOW its descriptor
+ * is produced. For a BRAND-NEW app, pass `meta` — a synthetic manifest
+ * entry is created client-side so the app is resolvable at all (no server
+ * involvement: the preview loop is compile-in-browser + inject). Call
+ * invalidateAppDescriptor() afterwards to evict any cached descriptor; the
+ * loader should return a FRESH descriptor object per call — new component
+ * identities are what force React to fully remount the app.
  *
  * @param id - The app id (e.g. "rocketride.hello").
  * @param load - Loader producing the app's AppDescriptor.
+ * @param meta - Display facts for the synthetic entry (new apps only).
  */
-export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>): void {
+export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>, meta?: { name?: string; moduleId?: string }): void {
 	localOverrides.set(id, load);
+	if (meta) {
+		localAppMetas.set(id, {
+			id,
+			moduleId: meta.moduleId || id.replace(/[^a-zA-Z0-9_$]/g, '_'),
+			name: meta.name || id,
+		});
+		localAppsListener?.();
+	}
 	console.log(`[appLoader] Local override registered for "${id}"`);
 }
 
 /**
- * Removes a local descriptor loader, returning the app to its Module
- * Federation entry. Call invalidateAppDescriptor() afterwards to drop the
- * locally produced descriptor from the cache.
+ * Removes a local descriptor loader (and its synthetic entry, if any),
+ * returning the app to its Module Federation entry. Call
+ * invalidateAppDescriptor() afterwards to drop the locally produced
+ * descriptor from the cache.
  *
  * @param id - The app id whose local override should be removed.
  */
 export function unregisterLocalApp(id: string): void {
-	if (localOverrides.delete(id)) {
+	const hadOverride = localOverrides.delete(id);
+	if (localAppMetas.delete(id)) localAppsListener?.();
+	if (hadOverride) {
 		console.log(`[appLoader] Local override removed for "${id}"`);
 	}
+}
+
+/**
+ * Registers a dev-server-hosted MF remote as a local app: the embedding App
+ * Builder panel knows its rsbuild dev server's address and hands it straight
+ * to this shell (no server round trip, no dev-overlay dependency — the shell
+ * can belong to ANY environment). The remote is force-registered so a
+ * repointed entry URL replaces a stale container, and the synthetic manifest
+ * entry makes brand-new apps resolvable.
+ *
+ * @param appId - The app id ("org.myapp").
+ * @param moduleId - The MF container name ("org_myapp").
+ * @param name - Display name for the synthetic manifest entry.
+ * @param entry - The dev server's remoteEntry.js URL.
+ */
+export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string): void {
+	registerRemotes([{ name: moduleId, entry }], { force: true });
+	registeredEntries.set(moduleId, entry);
+	registerLocalApp(
+		appId,
+		() => (loadRemote(`${moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>).then((m) => m.default),
+		{ name, moduleId },
+	);
+	invalidateAppDescriptor(appId);
 }
 
 /**

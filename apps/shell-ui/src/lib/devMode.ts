@@ -40,7 +40,7 @@
 
 import React from 'react';
 import * as ReactDom from 'react-dom';
-import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor } from './appLoader';
+import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote } from './appLoader';
 
 // =============================================================================
 // TYPES
@@ -150,10 +150,87 @@ export async function installDevHooks(): Promise<void> {
 		getShareScope: () => Reflect.get(globalThis, DEV_SHARE_SCOPE_KEY) as Record<string, unknown> | undefined,
 	};
 
+	// Embedded previews: mirror this shell's console + errors to the parent
+	// embedder so hosts without same-origin access (the VSCode webview) can
+	// render them in the App Builder's Console/Errors panes. postMessage is
+	// origin-agnostic, so this is the one channel that works everywhere.
+	installConsoleForwarding();
+
+	// Embedded previews: accept dev-remote registrations from the embedder.
+	// The App Builder panel KNOWS its rsbuild dev server's address — it posts
+	// it here and this shell wires the remote itself. No server overlay, no
+	// environment coupling: whatever shell the preview shows, it previews.
+	window.addEventListener('message', (e: MessageEvent) => {
+		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string } | undefined;
+		if (data?.type !== 'rrdev:registerRemote') return;
+		if (!data.appId || !data.moduleId || !data.entry) return;
+		registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry);
+	});
+
 	// Tell a parent embedder the hooks are ready so it doesn't have to poll.
 	try {
 		window.parent?.postMessage({ type: 'shell:devReady' }, '*');
 	} catch { /* sandboxed/parentless — console users just call the API */ }
 
 	console.log('[devMode] Dev hooks installed (window.__rrShellDev)');
+
+	// Boot forensics for embedded previews: the href reveals WHY this boot
+	// happened (?code= OAuth return, stripped params, plain reload) and the
+	// unload hook reveals WHEN something navigates the page away — both
+	// mirrored to the embedder's Console pane by the forwarding above.
+	if (window.parent !== window) {
+		console.log(`[devMode] boot href=${window.location.href} referrer=${document.referrer || '(none)'}`);
+		window.addEventListener('beforeunload', () => {
+			console.warn(`[devMode] page unloading from ${window.location.href}`);
+		});
+	}
+}
+
+// =============================================================================
+// CONSOLE FORWARDING (EMBEDDED PREVIEWS)
+// =============================================================================
+
+/**
+ * Wraps console.log/warn/error and taps window error events, forwarding each
+ * entry to the parent embedder as `shell:devConsole` / `shell:devError`
+ * postMessages. Installed only when dev hooks are on AND the shell is
+ * actually embedded (window.parent !== window) — a top-level dev shell
+ * forwards nothing.
+ */
+function installConsoleForwarding(): void {
+	if (window.parent === window) return;
+
+	/** Serializes one console argument (objects JSON-ified, cycles tagged). */
+	const asText = (value: unknown): string => {
+		if (typeof value === 'string') return value;
+		try {
+			return JSON.stringify(value) ?? String(value);
+		} catch {
+			return String(value);
+		}
+	};
+
+	/** Posts one row to the embedder; never throws into app code. */
+	const forward = (type: string, payload: Record<string, unknown>): void => {
+		try {
+			window.parent.postMessage({ type, ...payload }, '*');
+		} catch { /* embedder gone — drop the row */ }
+	};
+
+	// Wrap the three mirrored levels; every other console method stays native
+	for (const level of ['log', 'warn', 'error'] as const) {
+		const native = console[level].bind(console);
+		console[level] = (...args: unknown[]): void => {
+			native(...args);
+			forward('shell:devConsole', { level, text: args.map(asText).join(' ').slice(0, 2000) });
+		};
+	}
+
+	// Uncaught errors + unhandled rejections → the Errors pane
+	window.addEventListener('error', (e) => {
+		forward('shell:devError', { message: e.message, source: e.filename ? `${e.filename.split('/').pop()}:${e.lineno}` : undefined });
+	});
+	window.addEventListener('unhandledrejection', (e) => {
+		forward('shell:devError', { message: `Unhandled rejection: ${asText(e.reason instanceof Error ? e.reason.message : e.reason)}` });
+	});
 }

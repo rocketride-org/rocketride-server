@@ -209,7 +209,7 @@ export interface AppErrorRow {
 /** Watch/build state for the DEV badge over the preview. */
 export interface WatchStatus {
 	/** Watch state word. */
-	state: 'idle' | 'building' | 'ok' | 'error';
+	state: 'idle' | 'installing' | 'building' | 'ok' | 'error';
 	/** Last build duration in ms, when known. */
 	durationMs?: number;
 	/** Where the dev bundle is served from ("localhost:3011"). */

@@ -49,6 +49,8 @@ interface WatchSession {
 
 export class WatchManager {
 	private sessions = new Map<string, WatchSession>();
+	/** Apps mid-install (pre-session) — guards duplicate concurrent starts. */
+	private starting = new Set<string>();
 	private connectionManager = ConnectionManager.getInstance();
 	private logger = getLogger();
 
@@ -66,15 +68,33 @@ export class WatchManager {
 	/**
 	 * Starts (or reuses) the watch session for an app.
 	 *
+	 * Always runs `pnpm install` first: package.json may have changed since
+	 * the last session (or the app may be freshly scaffolded/cloned with no
+	 * node_modules at all), and an up-to-date tree makes the install a
+	 * ~1s no-op. Only then does `rsbuild dev` spawn.
+	 *
 	 * @param app - The scanned workspace app to watch.
 	 */
 	public async start(app: ScannedApp): Promise<void> {
-		if (this.sessions.has(app.id)) return;
+		if (this.sessions.has(app.id) || this.starting.has(app.id)) return;
+
+		// Dependencies first — guarded so a second open during the install
+		// doesn't race a duplicate session.
+		this.starting.add(app.id);
+		try {
+			const installed = await this.runInstall(app);
+			if (!installed) return;
+			// A session that appeared while installing wins — never double-spawn
+			if (this.sessions.has(app.id)) return;
+		} finally {
+			this.starting.delete(app.id);
+		}
 
 		// Resolve the app-local rsbuild binary; the scaffolder pins it as a
 		// devDependency. Falling back to `pnpm exec` covers hoisted setups.
 		const spawnArgs = this.resolveRsbuild(app.folder);
 		this.logger.output(`[appdev] watch start: ${app.id} (${spawnArgs.cmd} ${spawnArgs.args.join(' ')})`);
+		this.console(app.id, 'log', '$ rsbuild dev');
 
 		const proc = spawn(spawnArgs.cmd, [...spawnArgs.args, 'dev'], {
 			cwd: app.folder,
@@ -115,7 +135,14 @@ export class WatchManager {
 		this.sessions.delete(appId);
 		if (session.reloadTimer) clearTimeout(session.reloadTimer);
 		try {
-			session.proc.kill();
+			// Windows: kill() only reaches the immediate process — rsbuild's
+			// children (the dev server) survive and squat the port across
+			// reloads. taskkill /T fells the whole tree.
+			if (process.platform === 'win32' && session.proc.pid) {
+				spawn('taskkill', ['/PID', String(session.proc.pid), '/T', '/F']);
+			} else {
+				session.proc.kill();
+			}
 		} catch { /* already gone */ }
 
 		// Drop the overlay entry so the shell returns to the published bundle
@@ -128,9 +155,92 @@ export class WatchManager {
 		this.notify(appId, { state: 'idle' });
 	}
 
+	/**
+	 * Full session restart: kill the running dev server, reinstall deps, and
+	 * spawn a fresh `rsbuild dev`. The preview Reload button routes here so a
+	 * package.json edit (or a wedged dev server) is one click away from a
+	 * clean state; the rebuilt bundle triggers the normal debounced preview
+	 * reload when the new server reports its first successful build.
+	 *
+	 * @param app - The app whose session should restart.
+	 */
+	public async restart(app: ScannedApp): Promise<void> {
+		await this.stop(app.id);
+		await this.start(app);
+	}
+
 	/** Stops every session (extension deactivation). */
 	public dispose(): void {
 		for (const appId of [...this.sessions.keys()]) void this.stop(appId);
+	}
+
+	// =========================================================================
+	// INSTALL
+	// =========================================================================
+
+	/**
+	 * Runs `pnpm install` in the app folder, reporting 'installing' to the
+	 * DEV badge while it runs.
+	 *
+	 * @param app - The app whose dependencies should be installed.
+	 * @returns True when the install succeeded (or was a no-op).
+	 */
+	private runInstall(app: ScannedApp): Promise<boolean> {
+		this.notify(app.id, { state: 'installing' });
+		this.logger.output(`[appdev] pnpm install: ${app.id} (${app.folder})`);
+		this.console(app.id, 'log', `$ pnpm install --ignore-workspace  (${app.folder})`);
+		return new Promise<boolean>((resolve) => {
+			// --ignore-workspace: app folders often live INSIDE another pnpm
+			// workspace (the monorepo, a dist tree) — without it pnpm walks up,
+			// installs that workspace's projects, and the app's own
+			// node_modules (with rsbuild) never materializes.
+			const proc = spawn('pnpm', ['install', '--ignore-workspace'], {
+				cwd: app.folder,
+				shell: process.platform === 'win32',
+				env: { ...process.env, NO_COLOR: '1' },
+			});
+			// Mirror installer output into the panel Console + extension log
+			proc.stdout?.on('data', (chunk: Buffer) => this.consoleLines(app.id, 'log', chunk.toString('utf8')));
+			proc.stderr?.on('data', (chunk: Buffer) => this.consoleLines(app.id, 'warn', chunk.toString('utf8')));
+			proc.on('exit', (code) => {
+				if (code === 0) {
+					this.console(app.id, 'log', 'pnpm install: done');
+					resolve(true);
+				} else {
+					this.logger.output(`[appdev] pnpm install failed (${code}): ${app.id}`);
+					this.appScreen.notifyError(app.id, `pnpm install exited with code ${code}`, 'pnpm install');
+					this.notify(app.id, { state: 'error', target: 'pnpm install' });
+					resolve(false);
+				}
+			});
+			proc.on('error', (err) => {
+				this.logger.output(`[appdev] pnpm not found: ${err.message}`);
+				this.appScreen.notifyError(app.id, `pnpm could not be started: ${err.message}`, 'pnpm install');
+				this.notify(app.id, { state: 'error', target: 'pnpm install' });
+				resolve(false);
+			});
+		});
+	}
+
+	/**
+	 * Splits raw process output into rows for the panel Console (blank lines
+	 * dropped), mirroring each line to the extension log.
+	 *
+	 * @param appId - The app the output belongs to.
+	 * @param level - Row severity for the Console pane.
+	 * @param text - Raw chunk (possibly multi-line).
+	 */
+	private consoleLines(appId: string, level: 'log' | 'warn' | 'error', text: string): void {
+		for (const line of text.split(/\r?\n/)) {
+			const trimmed = line.trim();
+			if (trimmed) this.console(appId, level, trimmed);
+		}
+	}
+
+	/** One console row → panel Console pane + extension log. */
+	private console(appId: string, level: 'log' | 'warn' | 'error', text: string): void {
+		this.logger.output(`[appdev] ${text}`);
+		this.appScreen.notifyConsole(appId, level, text);
 	}
 
 	// =========================================================================
@@ -145,12 +255,19 @@ export class WatchManager {
 	 * @param text - Raw process output chunk.
 	 */
 	private handleOutput(session: WatchSession, text: string): void {
+		// Mirror the raw rsbuild output into the panel Console pane
+		this.consoleLines(session.app.id, 'log', text);
+
 		// Dev origin: "  ➜ Local:    http://localhost:3013/" (rsbuild banner)
 		if (!session.devOrigin) {
 			const m = /Local:\s+(http:\/\/[\w.-]+:\d+)/.exec(text);
 			if (m) {
 				session.devOrigin = m[1];
 				this.logger.output(`[appdev] ${session.app.id} dev server at ${session.devOrigin}`);
+				// The panel injects this entry straight into the preview shell
+				// (postMessage — no server dependency); the overlay below only
+				// serves embedder-less shells (F5's external browser).
+				this.notifyDevEntry(session);
 				void this.registerOverlay(session);
 			}
 		}
@@ -160,11 +277,15 @@ export class WatchManager {
 			const durationMs = session.buildStart ? Date.now() - session.buildStart : undefined;
 			session.buildStart = undefined;
 			this.notify(session.app.id, { state: 'ok', durationMs, target: session.devOrigin?.replace(/^https?:\/\//, '') });
-			// Keep the overlay fresh (also renews its idle TTL), then reload
+			// Fresh cache-busted entry FIRST (same-URL re-registration would
+			// resolve to the browser-cached container — the stale-bundle bug),
+			// then the overlay refresh and the debounced re-inject.
+			this.notifyDevEntry(session);
 			void this.registerOverlay(session);
 			this.scheduleReload(session);
 		} else if (/build failed|error {3}/i.test(text)) {
 			session.buildStart = undefined;
+			this.appScreen.notifyError(session.app.id, 'rsbuild build failed — see the Console pane for compiler output', 'rsbuild');
 			this.notify(session.app.id, { state: 'error', target: session.devOrigin?.replace(/^https?:\/\//, '') });
 		} else if (/building|compiling/i.test(text) && session.buildStart === undefined) {
 			session.buildStart = Date.now();
@@ -175,6 +296,20 @@ export class WatchManager {
 	// =========================================================================
 	// OVERLAY + RELOAD
 	// =========================================================================
+
+	/**
+	 * Announces the dev server entry to the panel with a per-build cache
+	 * buster: a CHANGED entry URL is what makes the shell's force
+	 * re-registration actually refetch the container instead of resolving
+	 * the browser-cached script (chunks still resolve relative to the URL's
+	 * directory, so the query hurts nothing).
+	 *
+	 * @param session - The session whose dev server has a fresh build.
+	 */
+	private notifyDevEntry(session: WatchSession): void {
+		if (!session.devOrigin) return;
+		this.appScreen.notifyDevServer(session.app.id, `${session.devOrigin}/remoteEntry.js?t=${Date.now()}`);
+	}
 
 	/** Points the caller's dev overlay at the served remoteEntry.js. */
 	private async registerOverlay(session: WatchSession): Promise<void> {
@@ -210,19 +345,29 @@ export class WatchManager {
 	// BINARY RESOLUTION
 	// =========================================================================
 
-	/**
-	 * Resolves how to invoke rsbuild for an app folder: the app-local bin
-	 * first (deterministic), `pnpm exec` as the fallback for hoisted trees.
-	 *
-	 * @param appRoot - The app's absolute folder path.
-	 */
+	/** See {@link resolveRsbuildInvocation}. */
 	private resolveRsbuild(appRoot: string): { cmd: string; args: string[]; shell: boolean } {
-		try {
-			const binPath = require.resolve('@rsbuild/core/bin/rsbuild.js', { paths: [appRoot] });
-			return { cmd: process.execPath, args: [binPath], shell: false };
-		} catch {
-			return { cmd: 'pnpm', args: ['exec', 'rsbuild'], shell: process.platform === 'win32' };
-		}
+		return resolveRsbuildInvocation(appRoot);
+	}
+}
+
+/**
+ * Resolves how to invoke rsbuild for an app folder: the app-local bin
+ * first (deterministic), `pnpm exec` as the fallback for hoisted trees.
+ * Shared by the watch loop (`rsbuild dev`) and the publish flow's one-shot
+ * `rsbuild build`.
+ *
+ * @param appRoot - The app's absolute folder path.
+ */
+export function resolveRsbuildInvocation(appRoot: string): { cmd: string; args: string[]; shell: boolean } {
+	try {
+		const binPath = require.resolve('@rsbuild/core/bin/rsbuild.js', { paths: [appRoot] });
+		return { cmd: process.execPath, args: [binPath], shell: false };
+	} catch {
+		// --ignore-workspace keeps the exec scoped to the app folder — inside
+		// an enclosing pnpm workspace a bare exec goes recursive across ITS
+		// projects (ERR_PNPM_RECURSIVE_EXEC) instead of running the app's bin.
+		return { cmd: 'pnpm', args: ['--ignore-workspace', 'exec', 'rsbuild'], shell: process.platform === 'win32' };
 	}
 }
 

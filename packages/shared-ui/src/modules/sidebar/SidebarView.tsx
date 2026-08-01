@@ -157,14 +157,15 @@ const PIPELINE_CONFIG: ExplorerConfig = {
  * Maps ISidebarViewProps (pipeline-specific) to IExplorerProps (generic).
  * The Explorer component handles all file tree rendering internally.
  */
-export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath, appBuilder, sidebarMode = 'pipelines', onSidebarModeChange }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath, appBuilder, showModeStrip = false, sidebarMode = 'pipelines', onSidebarModeChange }) => {
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
 
 	const isConnected = connection.state === 'connected';
 	const hasUnknown = (unknownTasks?.length ?? 0) > 0;
-	// The mode strip exists only when the host wires the App Builder; the
-	// apps mode is only honored when it can actually render something.
+	// The App Builder tab exists only when the host wires it; the apps mode
+	// is only honored when it can actually render something. The strip itself
+	// can also be forced visible with a single Pipelines tab (web host).
 	const hasAppBuilder = Boolean(appBuilder);
 	const mode = hasAppBuilder ? sidebarMode : 'pipelines';
 	// --- Static top-nav menu (New pipeline / Monitor) ------------------------
@@ -216,17 +217,20 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 
 	return (
 		<div style={S.container}>
-			{/* ── Mode strip (only when the host wires the App Builder) ── */}
-			{hasAppBuilder && (
+			{/* ── Mode strip: App Builder tab when wired; strip alone when
+			    forced (web host — future modes land here) ─────────────── */}
+			{(hasAppBuilder || showModeStrip) && (
 				<div style={S.modeStrip}>
 					<div
 						style={mode === 'pipelines' ? { ...S.modeTab, ...S.modeTabActive } : S.modeTab}
 						onClick={() => onSidebarModeChange?.('pipelines')}
 					>Pipelines</div>
-					<div
-						style={mode === 'apps' ? { ...S.modeTab, ...S.modeTabActive } : S.modeTab}
-						onClick={() => onSidebarModeChange?.('apps')}
-					>App Builder</div>
+					{hasAppBuilder && (
+						<div
+							style={mode === 'apps' ? { ...S.modeTab, ...S.modeTabActive } : S.modeTab}
+							onClick={() => onSidebarModeChange?.('apps')}
+						>App Builder</div>
+					)}
 				</div>
 			)}
 

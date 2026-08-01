@@ -65,6 +65,9 @@ function packageJson(v: TemplateVars): string {
 			name: v.appId.replace(/\./g, '-'),
 			version: '0.1.0',
 			private: true,
+			// ESM package: rsbuild.config.ts uses import syntax — without this
+			// Node re-parses the config per run (MODULE_TYPELESS_PACKAGE_JSON)
+			type: 'module',
 			description: `${v.appName} — a RocketRide app`,
 			license: 'MIT',
 			appManifest: {
@@ -132,6 +135,11 @@ export default defineConfig(() => ({
 		}),
 	],
 	server: { port: ${v.port} },
+	// The App Builder preview owns refresh: it re-injects the remote into the
+	// shell on every rebuild. The dev client's own reload machinery must stay
+	// OFF — its build-hash check sees the lazy-compiled bundle as stale and
+	// location.reload()s the embedding shell in an infinite loop.
+	dev: { hmr: false, liveReload: false, lazyCompilation: false },
 	source: { entry: { index: './src/index.ts' } },
 	output: { assetPrefix: 'auto' },
 }));
@@ -332,6 +340,11 @@ export function renderTemplate(name: TemplateName, vars: TemplateVars): Template
 		{ path: 'tsconfig.json', content: tsconfigJson() },
 		{ path: '.vscode/launch.json', content: launchJson(vars) },
 		{ path: '.gitignore', content: 'node_modules/\ndist/\n' },
+		// Workspace boundary: app folders often land inside an enclosing pnpm
+		// workspace (a monorepo checkout, a dist tree). This marks the app as
+		// its OWN workspace root so `pnpm install` resolves here instead of
+		// walking up — the app always gets a local node_modules.
+		{ path: 'pnpm-workspace.yaml', content: "packages:\n  - '.'\n" },
 		{ path: 'src/index.ts', content: asyncBoundary() },
 		{ path: 'src/AppDescriptor.ts', content: appDescriptor(vars) },
 		{ path: 'src/App.tsx', content: name === 'Dashboard' ? dashboardApp(vars) : blankApp(vars) },

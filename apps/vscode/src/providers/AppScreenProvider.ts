@@ -21,6 +21,7 @@ import { GenericEvent } from '../shared/types';
 import { scanWorkspaceApps } from '../appdev/appScan';
 import type { ScannedApp } from '../appdev/appScan';
 import { ensureWatch, getWatchManager } from '../appdev/watchManager';
+import { publishApp } from '../appdev/publish';
 
 // =============================================================================
 // TYPES
@@ -28,7 +29,7 @@ import { ensureWatch, getWatchManager } from '../appdev/watchManager';
 
 /** Watch status shape forwarded to the webview DEV badge. */
 export interface AppWatchStatus {
-	state: 'idle' | 'building' | 'ok' | 'error';
+	state: 'idle' | 'installing' | 'building' | 'ok' | 'error';
 	durationMs?: number;
 	target?: string;
 }
@@ -41,6 +42,14 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	private panels = new Map<string, vscode.WebviewPanel>();
 	private disposables: vscode.Disposable[] = [];
 	private connectionManager = ConnectionManager.getInstance();
+	// The webview subscribes at view:ready, which lands AFTER the watch's
+	// install/start notifications — replay state so nothing is lost: the
+	// last watch status, plus a capped console/error backlog per app.
+	private lastWatch = new Map<string, AppWatchStatus>();
+	private consoleBacklog = new Map<string, Array<Record<string, unknown>>>();
+	// The running dev server's remoteEntry.js URL per app — the webview
+	// injects it into the preview shell (replayed at view:ready like status).
+	private devEntries = new Map<string, string>();
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.setupEventListeners();
@@ -136,6 +145,25 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 							capabilities: { hasCodePane: false, hasNativeFiles: true, canDebug: true },
 							stage: this.context.workspaceState.get(`appdev.stage.${appId}`) ?? 'develop',
 						});
+						// Replay what the webview missed while it was booting
+						const last = this.lastWatch.get(appId);
+						if (last) await panel.webview.postMessage({ type: 'appdev:watch', status: last });
+						const devEntry = this.devEntries.get(appId);
+						if (devEntry) await panel.webview.postMessage({ type: 'appdev:devServer', entry: devEntry });
+						for (const msg of this.consoleBacklog.get(appId) ?? []) {
+							await panel.webview.postMessage(msg);
+						}
+						// The resolve-time watch start can lose a race with the
+						// workspace scan — retry here (idempotent when running)
+						if (app && !getWatchManager()?.isRunning(appId)) void ensureWatch(app);
+						// Config sanity: the dev overlay registers on the
+						// CONNECTED server — a preview shell pointing anywhere
+						// else can never see the dev bundle. Warn loudly.
+						const override = vscode.workspace.getConfiguration('rocketride.appdev').get<string>('shellUrl', '');
+						const connected = this.connectionManager.getHttpUrl?.() ?? '';
+						if (override && connected && new URL(override).origin !== new URL(connected).origin) {
+							this.notifyConsole(appId, 'warn', `Preview shell is ${override} but this window is connected to ${connected}. The dev overlay registers on the connected server, so the preview will show "App not found" — clear or fix rocketride.appdev.shellUrl, or switch Development Mode to the matching server.`);
+						}
 						break;
 					}
 
@@ -148,11 +176,52 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						await vscode.commands.executeCommand('rocketride.app.debug', appId);
 						break;
 
+					case 'appdev:restart':
+						// Preview Reload = full inner-loop reset: kill the dev
+						// server, pnpm install (package.json may have changed),
+						// fresh rsbuild dev. The new server's first successful
+						// build triggers the normal preview reload.
+						if (app) await getWatchManager()?.restart(app);
+						break;
+
 					case 'appdev:reveal': {
 						// Reveal the bound folder in the OS file explorer; inside
 						// the workspace the VSCode explorer is a better target.
 						if (app?.folder) {
 							await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(app.folder));
+						}
+						break;
+					}
+
+					case 'appdev:call': {
+						// The BRIDGE's request/response lane: the shared views'
+						// data accessors ride here (decision D7 — the webview
+						// holds no client; this host answers).
+						const { id, method, args: callArgs } = message as { id: number; method: string; args?: unknown[] };
+						try {
+							const client = this.connectionManager.getClient();
+							let value: unknown;
+							switch (method) {
+								case 'listVersions':
+									value = client ? await client.appVersions(appId) : [];
+									break;
+								case 'where':
+									value = client ? await client.appWhere(appId) : [];
+									break;
+								case 'deploy': {
+									if (!client) throw new Error('Not connected');
+									value = await client.appDeploy(appId, Number(callArgs?.[0]), String(callArgs?.[1] ?? ''));
+									break;
+								}
+								case 'publish':
+									value = await publishApp(appId, String(callArgs?.[0] ?? ''));
+									break;
+								default:
+									throw new Error(`Unknown appdev method: ${method}`);
+							}
+							await panel.webview.postMessage({ type: 'appdev:result', id, ok: true, value });
+						} catch (err) {
+							await panel.webview.postMessage({ type: 'appdev:result', id, ok: false, error: err instanceof Error ? err.message : String(err) });
 						}
 						break;
 					}
@@ -164,13 +233,23 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 
 		panel.onDidDispose(() => {
 			this.panels.delete(appId);
+			this.lastWatch.delete(appId);
+			this.consoleBacklog.delete(appId);
+			this.devEntries.delete(appId);
 			// The App Screen owns the watch lifecycle: closing it ends the
 			// session and drops the dev overlay (shell returns to published).
 			void getWatchManager()?.stop(appId);
 		});
 
 		// Start the inner loop (setting-gated by rocketride.appdev.autoWatch)
-		if (app) void ensureWatch(app);
+		if (app) {
+			void ensureWatch(app);
+		} else {
+			// No workspace binding = no dev server, ever — say so loudly
+			// instead of a silent dead preview.
+			this.notifyWatch(appId, { state: 'error', target: 'no workspace binding' });
+			this.notifyConsole(appId, 'error', `No workspace folder is bound to "${appId}" — the .rrapp marker's folder has no package.json with appManifest.id "${appId}", so the dev server cannot start.`);
+		}
 	}
 
 	/**
@@ -180,6 +259,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 * @param status - The new watch status.
 	 */
 	public notifyWatch(appId: string, status: AppWatchStatus): void {
+		this.lastWatch.set(appId, status);
 		this.panels.get(appId)?.webview.postMessage({ type: 'appdev:watch', status });
 	}
 
@@ -190,6 +270,53 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 */
 	public notifyReload(appId: string): void {
 		this.panels.get(appId)?.webview.postMessage({ type: 'appdev:reload' });
+	}
+
+	/**
+	 * Announce the running dev server's remoteEntry.js URL to an app's panel.
+	 * The webview injects it into the preview shell over postMessage — the
+	 * preview needs NO server-side overlay, so it works against any shell.
+	 *
+	 * @param appId - The app whose dev server came up (or repointed).
+	 * @param entry - The dev server's remoteEntry.js URL.
+	 */
+	public notifyDevServer(appId: string, entry: string): void {
+		this.devEntries.set(appId, entry);
+		this.panels.get(appId)?.webview.postMessage({ type: 'appdev:devServer', entry });
+	}
+
+	/**
+	 * Push one console row into an app's panel (Console pane) — the feed for
+	 * pnpm install and rsbuild output. Buffered (capped) so rows emitted
+	 * before the webview's view:ready are replayed, not lost.
+	 *
+	 * @param appId - The app whose console the row belongs to.
+	 * @param level - Row severity.
+	 * @param text - Row text (one line).
+	 */
+	public notifyConsole(appId: string, level: 'log' | 'warn' | 'error', text: string): void {
+		const msg = { type: 'appdev:console', row: { time: AppScreenProvider.feedTime(), level, text } };
+		const backlog = this.consoleBacklog.get(appId) ?? [];
+		backlog.push(msg);
+		if (backlog.length > 300) backlog.splice(0, backlog.length - 300);
+		this.consoleBacklog.set(appId, backlog);
+		this.panels.get(appId)?.webview.postMessage(msg);
+	}
+
+	/**
+	 * Push one error row into an app's panel (Errors pane).
+	 *
+	 * @param appId - The app the error belongs to.
+	 * @param message - The error text.
+	 * @param source - Optional origin tag ("rsbuild", "pnpm install").
+	 */
+	public notifyError(appId: string, message: string, source?: string): void {
+		const msg = { type: 'appdev:error', row: { time: AppScreenProvider.feedTime(), message, source } };
+		const backlog = this.consoleBacklog.get(appId) ?? [];
+		backlog.push(msg);
+		if (backlog.length > 300) backlog.splice(0, backlog.length - 300);
+		this.consoleBacklog.set(appId, backlog);
+		this.panels.get(appId)?.webview.postMessage(msg);
 	}
 
 	// =========================================================================

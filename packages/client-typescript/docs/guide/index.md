@@ -284,6 +284,21 @@ const streamUrl = await client.fsGetUrl('uploads/video.mp4', 600);
 const downloadUrl = await client.fsGetUrl('uploads/video.mp4', undefined, 'my video.mp4');
 ```
 
+
+### App publish ladder
+
+Typed wrappers over `rrext_app_deploy` — the publish ladder for RocketRide apps.
+**Publish** snapshots an immutable version (never activates anything); **Deploy**
+pins a rung (`@user`, `@team/<name>`, `@org`) to a version — first publish,
+update, promote, and rollback are all this one verb.
+
+| Method | Signature | Description |
+| ------ | --------- | ----------- |
+| `appPublish` | `appPublish({appId, version, bundle, message?, moduleId?, name?}): Promise<RailEntry>` | Publish an immutable version to the org registry (single-file `remoteEntry.js` bundle; commit-style `message` shows on the version card). |
+| `appVersions` | `appVersions(appId): Promise<RailEntry[]>` | The version rail, newest first; each entry carries `rungs` naming the rungs currently pinned to it. |
+| `appDeploy` | `appDeploy(appId, registryVersion, target): Promise<{deployment, rung}>` | Pin a rung to a version. Personal deploys resolve into your own manifest immediately. |
+| `appWhere` | `appWhere(appId): Promise<Pin[]>` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per rung. |
+
 ### Events
 
 | Method      | Signature                                                       | Returns | Description                                                                                                                                                                                                                      |
