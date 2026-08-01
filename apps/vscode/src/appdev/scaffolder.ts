@@ -19,8 +19,8 @@
 
 import * as vscode from 'vscode';
 import { ConnectionManager } from '../connection/connection';
-import { renderTemplate, TEMPLATE_NAMES } from './templates';
-import type { TemplateName } from './templates';
+import { renderTemplate, TEMPLATE_NAMES } from 'shared/modules/appdev/templates';
+import type { TemplateName } from 'shared/modules/appdev/templates';
 
 // =============================================================================
 // VALIDATION
@@ -70,13 +70,16 @@ export async function createApp(): Promise<string | undefined> {
 		vscode.window.showErrorMessage('Open a workspace folder first — the app is scaffolded into it.');
 		return undefined;
 	}
+	// Apps live under ./apps by convention — symmetric with ./pipelines
+	// (pipeline files) and the node designer's coming ./nodes, and it makes
+	// an existing RocketRide repo's apps editable in place.
 	const folderName = `${appId.split('.')[1]}-ui`;
-	const target = vscode.Uri.joinPath(root.uri, folderName);
+	const target = vscode.Uri.joinPath(root.uri, 'apps', folderName);
 
 	// Refuse to scaffold over an existing folder — never overwrite work
 	try {
 		await vscode.workspace.fs.stat(target);
-		vscode.window.showErrorMessage(`Folder "${folderName}" already exists in the workspace root.`);
+		vscode.window.showErrorMessage(`Folder "apps/${folderName}" already exists in the workspace.`);
 		return undefined;
 	} catch { /* good — folder is free */ }
 

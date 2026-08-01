@@ -139,9 +139,23 @@ function makeStageFilesAction() {
 	return {
 		run: async (ctx, task) => {
 			const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
-			const buildHasManifest = await exists(path.join(BUILD_DIR, 'package.json'));
+			const stagedPkgPath = path.join(BUILD_DIR, 'package.json');
+			const buildHasManifest = await exists(stagedPkgPath);
 
-			if (!changed && buildHasManifest) {
+			// Build the transformed manifest FIRST: the extension manifest
+			// (contributes, settings, custom editors) lives OUTSIDE the hashed
+			// src/ trees, so a package.json-only edit must still restage — the
+			// dev host loads build/vscode and would otherwise run a stale
+			// manifest with the old contributions.
+			const pkgPath = path.join(APP_ROOT, 'package.json');
+			const pkg = JSON.parse(await readFile(pkgPath));
+			pkg.main = './rocketride.js';
+			pkg.icon = 'rocketride-dark-icon.png';
+			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
+			const stagedPkg = JSON.stringify(pkg, null, 2);
+			const manifestChanged = !buildHasManifest || String(await readFile(stagedPkgPath)) !== stagedPkg;
+
+			if (!changed && !manifestChanged) {
 				task.output = 'No changes detected';
 				return;
 			}
@@ -151,12 +165,7 @@ function makeStageFilesAction() {
 
 			// Copy manifest and assets so build/vscode is a complete extension
 			task.output = 'Staging manifest and assets to build/vscode...';
-			const pkgPath = path.join(APP_ROOT, 'package.json');
-			const pkg = JSON.parse(await readFile(pkgPath));
-			pkg.main = './rocketride.js';
-			pkg.icon = 'rocketride-dark-icon.png';
-			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
-			await writeFile(path.join(BUILD_DIR, 'package.json'), JSON.stringify(pkg, null, 2));
+			await writeFile(stagedPkgPath, stagedPkg);
 			const iconDark = path.join(APP_ROOT, 'rocketride-dark-icon.png');
 			const iconLight = path.join(APP_ROOT, 'rocketride-light-icon.png');
 			if (await exists(iconDark)) {

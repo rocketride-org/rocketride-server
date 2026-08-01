@@ -81,6 +81,7 @@ function packageJson(v: TemplateVars): string {
 				build: 'rsbuild build',
 			},
 			dependencies: {
+				rocketride: '^1.0.0',
 				react: '^18.2.0',
 				'react-dom': '^18.2.0',
 			},
@@ -98,38 +99,50 @@ function packageJson(v: TemplateVars): string {
 	)}\n`;
 }
 
-/** rsbuild.config.ts — the MF remote shape (mirrors hello-ui). */
+/**
+ * rsbuild.config.ts — the standalone MF remote shape from
+ * docs/README-apps.md: moduleId derived from appManifest.id in-config, the
+ * src/index.ts async boundary as the entry, rocketride/app-sdk shared.
+ */
 function rsbuildConfig(v: TemplateVars): string {
 	return `${TS_HEADER}
+import fs from 'node:fs';
+import path from 'node:path';
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 
 // Module Federation remote: the shell loads ./AppDescriptor at runtime.
-// react/react-dom are eager singletons; shell-ui/shared/rocketride are
-// import:false — the HOST provides the live instances (never bundle them).
-export default defineConfig({
+const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
+const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
+
+export default defineConfig(() => ({
 	plugins: [
 		pluginReact(),
 		pluginModuleFederation({
-			name: '${v.moduleId}',
+			name: moduleId,
 			filename: 'remoteEntry.js',
 			exposes: { './AppDescriptor': './src/AppDescriptor.ts' },
 			dts: false,
-			runtime: false,
-			shareStrategy: 'loaded-first',
 			shared: {
 				react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 				'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
-				'shell-ui': { singleton: true, requiredVersion: false, import: false },
-				shared: { singleton: true, requiredVersion: false, import: false },
-				rocketride: { singleton: true, requiredVersion: false, import: false },
+				'rocketride/app-sdk': { singleton: true, requiredVersion: false },
 			},
 		}),
 	],
 	server: { port: ${v.port} },
+	source: { entry: { index: './src/index.ts' } },
 	output: { assetPrefix: 'auto' },
-});
+}));
+`;
+}
+
+/** src/index.ts — the Module Federation async boundary (required). */
+function asyncBoundary(): string {
+	return `${TS_HEADER}
+// Module Federation async boundary — see docs/README-apps.md.
+import('./AppDescriptor');
 `;
 }
 
@@ -186,11 +199,13 @@ function appDescriptor(v: TemplateVars): string {
  * The shell lazy-loads it on activation and renders components.App.
  */
 
+import type { AppDescriptor } from 'rocketride/app-sdk';
 import App from './App';
 
-const descriptor = {
+const descriptor: AppDescriptor = {
 	id: '${v.appId}',
 	name: '${v.appName}',
+	branding: { appName: '${v.appName}' },
 	components: { App },
 };
 
@@ -210,6 +225,7 @@ function blankApp(v: TemplateVars): string {
  */
 
 import React from 'react';
+import type { ShellAppProps } from 'rocketride/app-sdk';
 
 // =============================================================================
 // STYLES
@@ -226,10 +242,11 @@ const styles: Record<string, React.CSSProperties> = {
 // =============================================================================
 
 /** Root view — replace with your app. */
-const App: React.FC = () => (
+const App: React.FC<ShellAppProps> = ({ isConnected, identity }) => (
 	<div style={styles.wrap}>
 		<h1 style={styles.title}>${v.appName}</h1>
 		<p style={styles.sub}>Edit src/App.tsx and save — the preview reloads automatically.</p>
+		<p style={styles.sub}>Connected: {isConnected ? 'yes' : 'no'} · User: {identity?.displayName ?? 'not signed in'}</p>
 	</div>
 );
 
@@ -308,10 +325,14 @@ export default App;
 export function renderTemplate(name: TemplateName, vars: TemplateVars): TemplateFile[] {
 	const files: TemplateFile[] = [
 		{ path: 'package.json', content: packageJson(vars) },
+		// The app DOCUMENT (.pipe-style): opening this file is opening the
+		// app in the App Builder; it carries the binding id as JSON.
+		{ path: `${vars.appId.split('.').pop()}.rrapp`, content: `${JSON.stringify({ id: vars.appId }, null, 2)}\n` },
 		{ path: 'rsbuild.config.ts', content: rsbuildConfig(vars) },
 		{ path: 'tsconfig.json', content: tsconfigJson() },
 		{ path: '.vscode/launch.json', content: launchJson(vars) },
 		{ path: '.gitignore', content: 'node_modules/\ndist/\n' },
+		{ path: 'src/index.ts', content: asyncBoundary() },
 		{ path: 'src/AppDescriptor.ts', content: appDescriptor(vars) },
 		{ path: 'src/App.tsx', content: name === 'Dashboard' ? dashboardApp(vars) : blankApp(vars) },
 	];

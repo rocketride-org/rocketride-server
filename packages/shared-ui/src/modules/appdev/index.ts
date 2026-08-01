@@ -41,6 +41,8 @@ export { StoreView } from './StoreView';
 export type { IStoreViewProps } from './StoreView';
 export { LogList, LOG_LIST_CAP } from './LogList';
 export type { ILogListProps, LogListRow } from './LogList';
+export { renderTemplate, TEMPLATE_NAMES } from './templates';
+export type { TemplateFile, TemplateName, TemplateVars } from './templates';
 export type {
 	AppBuilderCapabilities,
 	AppBuilderStage,

@@ -29,7 +29,7 @@ open/close internally.
 """
 
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from ..core import DAPClient
 
 
@@ -237,6 +237,62 @@ class StoreMixin(DAPClient):
             download_name=download_name,
         )
         return result['url']
+
+    async def fs_read_many(self, paths: List[str]) -> List[Dict[str, Any]]:
+        """
+        Batch-read many small files in one round trip.
+
+        Designed for many-small-file access patterns (the App Builder's
+        lockfile-resolved node_modules view, type manifests) where per-file
+        open/read/close is too chatty. Missing/unreadable files are
+        per-entry results (``ok: False``), never a call failure.
+
+        Args:
+            paths: Store paths to read (max 256 per call; 32 MiB total).
+
+        Returns:
+            One dict per requested path IN ORDER:
+            ``{'path': str, 'ok': bool, 'data': bytes | None, 'error': str | None}``.
+        """
+        # Client-side cap with a clear error before any wire traffic
+        if not paths:
+            return []
+        if len(paths) > 256:
+            raise ValueError(f'fs_read_many caps at 256 paths per call (got {len(paths)})')
+        for p in paths:
+            self._validate_relative_path(p, 'path')
+
+        # The blobs ride response.arguments.data as one binary frame (4-byte
+        # big-endian length prefix per blob, in request order); body.entries
+        # carries the per-path metadata — so use a raw request like fs_read.
+        request = self.build_request(
+            command='rrext_store',
+            arguments={'subcommand': 'fs_read_many', 'paths': paths},
+        )
+        response = await self.request(request)
+        if self.did_fail(response):
+            raise RuntimeError(response.get('message', 'fs_read_many failed'))
+
+        entries = response.get('body', {}).get('entries', [])
+        frame = response.get('arguments', {}).get('data', b'') or b''
+
+        # Decode the length-prefixed frame in entry order
+        results: List[Dict[str, Any]] = []
+        offset = 0
+        for entry in entries:
+            data = None
+            if offset + 4 <= len(frame):
+                length = int.from_bytes(frame[offset : offset + 4], 'big')
+                offset += 4
+                data = bytes(frame[offset : offset + length])
+                offset += length
+            if entry.get('ok'):
+                results.append(
+                    {'path': entry.get('path'), 'ok': True, 'data': data if data is not None else b'', 'error': None}
+                )
+            else:
+                results.append({'path': entry.get('path'), 'ok': False, 'data': None, 'error': entry.get('error')})
+        return results
 
     # =========================================================================
     # Convenience Wrappers (text/JSON over binary)

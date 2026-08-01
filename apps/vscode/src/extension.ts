@@ -293,10 +293,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				// deploy removed — register redirect command so sidebar "Deploy" opens Settings
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
-				// App Builder screen + its watch-session manager (inner loop)
+				// App Builder — a first-class DOCUMENT, .pipe-style: a custom
+				// editor over the app's real <name>.rrapp file (VSCode owns tab
+				// identity, dedupe, and restore-on-reload; double-clicking the
+				// file in the Explorer opens the App Builder), plus the
+				// watch-session manager driving the inner loop.
 				appScreen = new AppScreenProvider(context);
 				const watchManager = initWatchManager(appScreen);
-				context.subscriptions.push(appScreen, { dispose: () => watchManager.dispose() });
+				context.subscriptions.push(
+					vscode.window.registerCustomEditorProvider('rocketride.appBuilder', appScreen, {
+						webviewOptions: { retainContextWhenHidden: true },
+						supportsMultipleEditorsPerDocument: false,
+					}),
+					appScreen,
+					{ dispose: () => watchManager.dispose() },
+				);
 				// File-less per-team deployment tabs (teams-as-environments)
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				const account = new AccountProvider(context);

@@ -37,7 +37,7 @@ export interface AppWatchStatus {
 // PROVIDER
 // =============================================================================
 
-export class AppScreenProvider {
+export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	private panels = new Map<string, vscode.WebviewPanel>();
 	private disposables: vscode.Disposable[] = [];
 	private connectionManager = ConnectionManager.getInstance();
@@ -51,28 +51,75 @@ export class AppScreenProvider {
 	// =========================================================================
 
 	/**
-	 * Show or create the App Builder panel for an app.
+	 * Open (or reveal) the App Builder DOCUMENT for an app.
+	 *
+	 * Apps are documents the way pipelines are: a REAL `<name>.rrapp` file
+	 * in the app folder is the document (double-clicking it in the Explorer
+	 * opens the App Builder), and this custom editor is its surface. VSCode
+	 * owns tab identity, one-editor-per-file dedupe, Open Editors
+	 * membership, and restore-on-reload. The marker is created on first
+	 * open for apps that predate it (a one-line JSON carrying the app id).
 	 *
 	 * @param appId - The app id (appManifest.id).
 	 */
 	public async show(appId: string): Promise<void> {
-		// Reuse existing panel if already open
-		const existing = this.panels.get(appId);
-		if (existing) {
-			existing.reveal(vscode.ViewColumn.One);
+		// Resolve the app's bound folder
+		const apps = await scanWorkspaceApps();
+		const app = apps.find((a) => a.id === appId);
+		if (!app) {
+			vscode.window.showErrorMessage(`App "${appId}" has no bound folder in this workspace.`);
 			return;
 		}
+
+		// The document: <folder>/<name>.rrapp — created on demand
+		const marker = vscode.Uri.joinPath(vscode.Uri.file(app.folder), `${appId.split('.').pop()}.rrapp`);
+		try {
+			await vscode.workspace.fs.stat(marker);
+		} catch {
+			await vscode.workspace.fs.writeFile(marker, Buffer.from(`${JSON.stringify({ id: appId }, null, 2)}\n`, 'utf8'));
+		}
+		await vscode.commands.executeCommand('vscode.openWith', marker, 'rocketride.appBuilder');
+	}
+
+	// =========================================================================
+	// CUSTOM EDITOR — document lifecycle
+	// =========================================================================
+
+	/** Opens the (stateless) custom document for an .rrapp file. */
+	public openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
+		return { uri, dispose: () => undefined };
+	}
+
+	/** Reads the app id from an .rrapp document (falls back to the folder binding). */
+	private async appIdOf(uri: vscode.Uri): Promise<string> {
+		// The marker carries {"id": "<appId>"}
+		try {
+			const raw = await vscode.workspace.fs.readFile(uri);
+			const parsed = JSON.parse(Buffer.from(raw).toString('utf8')) as { id?: string };
+			if (parsed?.id) return parsed.id;
+		} catch { /* malformed/empty marker — fall through to the binding */ }
+		// Fallback: the appManifest binding of the containing folder
+		const folder = uri.with({ path: uri.path.slice(0, uri.path.lastIndexOf('/')) }).fsPath;
+		const apps = await scanWorkspaceApps();
+		return apps.find((a) => a.folder === folder)?.id ?? '';
+	}
+
+	/**
+	 * Resolves the App Builder editor for an .rrapp document — called by
+	 * VSCode on open AND on window-reload restore.
+	 */
+	public async resolveCustomEditor(document: vscode.CustomDocument, panel: vscode.WebviewPanel): Promise<void> {
+		const appId = await this.appIdOf(document.uri);
 
 		// Resolve the app's facts from the workspace binding
 		const apps = await scanWorkspaceApps();
 		const app = apps.find((a) => a.id === appId);
-		const title = app?.name ?? appId;
 
-		const panel = vscode.window.createWebviewPanel('rocketride.pageApp', title, vscode.ViewColumn.One, {
+		panel.title = app?.name ?? appId;
+		panel.webview.options = {
 			enableScripts: true,
-			retainContextWhenHidden: true,
 			localResourceRoots: [this.context.extensionUri],
-		});
+		};
 		this.panels.set(appId, panel);
 		panel.webview.html = this.getHtmlForWebview(panel.webview);
 

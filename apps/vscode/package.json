@@ -45,11 +45,22 @@
 					}
 				],
 				"priority": "default"
+			},
+			{
+				"viewType": "rocketride.appBuilder",
+				"displayName": "RocketRide App Builder",
+				"selector": [
+					{
+						"filenamePattern": "*.rrapp"
+					}
+				],
+				"priority": "default"
 			}
 		],
 		"configurationDefaults": {
 			"files.associations": {
-				"*.pipe": "json"
+				"*.pipe": "json",
+				"*.rrapp": "json"
 			}
 		},
 		"configuration": {
