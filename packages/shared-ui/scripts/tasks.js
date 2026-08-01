@@ -61,8 +61,29 @@ function makeTestAction() {
 	};
 }
 
+/**
+ * Regenerates the gallery token-usage map (write mode), or verifies the
+ * committed map matches a fresh generation (check mode - fails on drift).
+ *
+ * @param {boolean} check - true = verify only, false = write the file.
+ */
+function makeGenGalleryTokensAction(check) {
+	return {
+		description: check ? 'Verifying gallery token map' : 'Generating gallery token map',
+		run: async (ctx, task) => {
+			const args = ['scripts/generate-gallery-tokens.mjs'];
+			if (check) args.push('--check');
+			await execCommand('node', args, { task, cwd: APP_ROOT });
+		},
+	};
+}
+
 module.exports = {
 	name: 'shared-ui',
 	description: 'RocketRide shared-ui package',
-	actions: [{ name: 'shared-ui:test', action: makeTestAction }],
+	actions: [
+		{ name: 'shared-ui:test', action: makeTestAction },
+		{ name: 'shared-ui:gen-gallery-tokens', action: () => makeGenGalleryTokensAction(false) },
+		{ name: 'shared-ui:check-gallery-tokens', action: () => makeGenGalleryTokensAction(true) },
+	],
 };

@@ -21,6 +21,8 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from '../connection/connection';
 import { renderTemplate, TEMPLATE_NAMES } from 'shared/modules/appdev/templates';
 import type { TemplateName } from 'shared/modules/appdev/templates';
+import { getExtensionContext } from '../extension';
+import { vendorAppTypes } from './appTypes';
 
 // =============================================================================
 // VALIDATION
@@ -99,6 +101,11 @@ export async function createApp(): Promise<string | undefined> {
 		const uri = vscode.Uri.joinPath(target, ...file.path.split('/'));
 		await vscode.workspace.fs.writeFile(uri, Buffer.from(file.content, 'utf8'));
 	}
+
+	// Vendor the platform type surface (types/rocketride-shell/) — the
+	// scaffolded tsconfig's paths point at it; without it the app compiles
+	// but the editor has no shell-ui/shared types.
+	vendorAppTypes(getExtensionContext(), target.fsPath);
 
 	// ── 6. Open the App Builder + surface the install step ───────────────
 	await vscode.commands.executeCommand('revealInExplorer', target);

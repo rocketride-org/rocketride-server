@@ -104,6 +104,18 @@ export default defineConfig({
 				splitChunks: false,
 				runtimeChunk: false,
 			},
+			module: {
+				parser: {
+					javascript: {
+						// splitChunks:false does NOT cover dynamic import() —
+						// rspack still emits an async chunk per import() site
+						// (the component gallery's lazy demos), and the webview
+						// never ships those files. Eager mode inlines every
+						// dynamic import into the single bundle instead.
+						dynamicImportMode: 'eager',
+					},
+				},
+			},
 		},
 	},
 

@@ -121,6 +121,21 @@ function makeBundleAction() {
 			await removeDir(BUILD_DIR);
 			await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT });
 
+			// DEV FLAVOR: the same shell with development React (react-refresh
+			// hooks) for the App Builder's HMR preview, built beside the
+			// production output, then stitched behind index.html's inline
+			// flavor picker — one URL, one OAuth callback, CDN-safe.
+			task.output = 'Building dev flavor (development React)...';
+			await execCommand('npx', ['rsbuild', 'build'], { task, cwd: APP_ROOT, env: { ...process.env, RR_SHELL_FLAVOR: 'dev' } });
+			task.output = 'Stitching flavors...';
+			await execCommand('node', [path.join(APP_ROOT, 'scripts', 'stitch-flavors.mjs')], { task, cwd: APP_ROOT });
+
+			// APP TYPES: the shipped type surface for standalone app repos
+			// (frozen shell-api + shared rollup) — vendored into app folders
+			// by the App Builder.
+			task.output = 'Generating app types bundle...';
+			await execCommand('node', [path.join(APP_ROOT, 'scripts', 'generate-app-types.js')], { task, cwd: APP_ROOT });
+
 			await saveSourceHash(BUILD_HASH_KEY, hash);
 		},
 	};

@@ -36,6 +36,7 @@ import { useMessaging } from '../hooks/useMessaging';
 type OutgoingMessage =
 	| { type: 'view:ready' }
 	| { type: 'appdev:debug' }
+	| { type: 'appdev:login' }
 	| { type: 'appdev:restart' }
 	| { type: 'appdev:reveal' }
 	| { type: 'appdev:stage'; stage: AppBuilderStage }
@@ -54,6 +55,7 @@ type IncomingMessage =
 	| { type: 'appdev:error'; row: AppErrorRow }
 	| { type: 'appdev:watch'; status: WatchStatus }
 	| { type: 'appdev:devServer'; entry: string }
+	| { type: 'appdev:auth'; token: string }
 	| { type: 'appdev:reload' }
 	| { type: 'appdev:result'; id: number; ok: boolean; value?: unknown; error?: string };
 
@@ -114,7 +116,7 @@ const styles: Record<string, React.CSSProperties> = {
  * @param props.app - App facts for the injected registration.
  * @param props.devEntry - The dev server's remoteEntry.js URL, when up.
  */
-const PreviewFrame: React.FC<{ url: string; reloadSeq: number; injectSeq: number; app: AppSummary | null; devEntry: string }> = ({ url, reloadSeq, injectSeq, app, devEntry }) => {
+const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary | null; devEntry: string; authToken: string; inheritAuth: boolean; explicitAuthSeq: number }> = ({ url, reloadSeq, app, devEntry, authToken, inheritAuth, explicitAuthSeq }) => {
 	const [ready, setReady] = useState(false);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
@@ -122,13 +124,20 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; injectSeq: number
 	// re-subscribing: the shell can boot ANY number of times inside one
 	// iframe mount (its auth flow navigates internally), and every boot
 	// must be re-injected.
-	const registrationRef = useRef<{ app: AppSummary | null; devEntry: string }>({ app: null, devEntry: '' });
-	registrationRef.current = { app, devEntry };
+	const registrationRef = useRef<{ app: AppSummary | null; devEntry: string; authToken: string; inheritAuth: boolean }>({ app: null, devEntry: '', authToken: '', inheritAuth: true });
+	registrationRef.current = { app, devEntry, authToken, inheritAuth };
+	// Whether THIS shell page has been injected already. Every injection
+	// spawns a live container instance with its own HMR client — injecting
+	// per rebuild leaves zombie instances whose hot-update hashes are gone
+	// (endless ChunkLoadError "missing" + full reloads). One container per
+	// page; HMR keeps IT current; re-injection only on explicit fallback.
+	const injectedRef = useRef(false);
 
 	/** Posts the dev-remote registration into the (current) preview shell. */
 	const inject = useCallback((): void => {
-		const { app: a, devEntry: entry } = registrationRef.current;
+		const { app: a, devEntry: entry, authToken: token, inheritAuth: inherit } = registrationRef.current;
 		if (!a || !entry) return;
+		injectedRef.current = true;
 		iframeRef.current?.contentWindow?.postMessage({
 			type: 'rrdev:registerRemote',
 			appId: a.id,
@@ -136,7 +145,41 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; injectSeq: number
 			name: a.name,
 			entry,
 		}, '*');
+		// Session handoff (Inherit Auth only) — the shell saves it and
+		// reboots authenticated exactly once (a matching token is a no-op
+		// on subsequent boots).
+		if (token && inherit) {
+			iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token }, '*');
+		}
 	}, []);
+
+	// Inherit Auth toggled live: push the session down, or tell the shell
+	// to DROP its session (it reboots signed out; apps demanding auth then
+	// run the preview's own OAuth cycle).
+	const inheritMountedRef = useRef(false);
+	React.useEffect(() => {
+		if (!inheritMountedRef.current) {
+			inheritMountedRef.current = true;
+			return;
+		}
+		const target = iframeRef.current?.contentWindow;
+		if (!target) return;
+		if (inheritAuth) {
+			if (authToken) target.postMessage({ type: 'rrdev:auth', token: authToken }, '*');
+		} else {
+			target.postMessage({ type: 'rrdev:clearAuth' }, '*');
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- fires on toggle only
+	}, [inheritAuth]);
+
+	// Explicit sign-in result: deliver the credential regardless of the
+	// Inherit Auth gate — the user clicked Sign In.
+	React.useEffect(() => {
+		if (explicitAuthSeq === 0) return;
+		const { authToken: token } = registrationRef.current;
+		if (token) iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token }, '*');
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- fires per explicit sign-in only
+	}, [explicitAuthSeq]);
 
 	// Reveal on the shell's devReady handshake; fall back on iframe load +
 	// grace delay for shells without the hooks (older engine builds).
@@ -146,7 +189,10 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; injectSeq: number
 		setReady(false);
 		const onMsg = (e: MessageEvent): void => {
 			if (e.data && typeof e.data === 'object' && (e.data as { type?: string }).type === 'shell:devReady') {
+				// A devReady is a FRESH page (boot, auth navigation, the HMR
+				// client's own failure reload) — it knows nothing; inject.
 				setReady(true);
+				injectedRef.current = false;
 				inject();
 			}
 		};
@@ -158,16 +204,14 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; injectSeq: number
 		};
 	}, [reloadSeq, url, inject]);
 
-	// Also inject when the dev server address ARRIVES after the shell was
-	// already ready (first boot: rsbuild banner lands seconds after devReady),
-	// and on every rebuild (injectSeq): the force re-registration + descriptor
-	// invalidation remounts JUST the app with the fresh bundle. The shell page
-	// itself is never reloaded for a rebuild — reloading it re-requests the
-	// bundle, which re-triggers a compile-on-demand build, which would reload
-	// it again, forever.
+	// First-arrival inject: the rsbuild banner (and thus the entry URL) can
+	// land seconds after devReady on first boot. LATER entry updates do NOT
+	// inject — the live container's HMR client owns updates; injecting per
+	// rebuild is what bred the zombie-container hash churn.
 	React.useEffect(() => {
-		if (ready && devEntry && app) inject();
-	}, [ready, devEntry, app, injectSeq, inject]);
+		if (ready && devEntry && app && !injectedRef.current) inject();
+	}, [ready, devEntry, app, inject]);
+
 
 	return (
 		<div style={styles.iframeWrap}>
@@ -197,8 +241,21 @@ const AppWebview: React.FC = () => {
 	const [capabilities, setCapabilities] = useState({ hasCodePane: false, hasNativeFiles: true, canDebug: true });
 	const [initialStage, setInitialStage] = useState<AppBuilderStage>('develop');
 	const [reloadSeq, setReloadSeq] = useState(0);
-	const [injectSeq, setInjectSeq] = useState(0);
 	const [devEntry, setDevEntry] = useState('');
+	// The extension's auth credential — handed to the preview shell so apps
+	// that require authentication render with a real signed-in session.
+	const [authToken, setAuthToken] = useState('');
+	// Cache-buster-stripped dev entry — detects dev-server ORIGIN changes
+	// (watch restarts land on new ports; the old container is dead).
+	const prevDevEntryBaseRef = useRef('');
+	// Inherit Auth (toolbar checkbox): hand this window's session to the
+	// preview, or let it run its own OAuth cycle. Ref-mirrored so message
+	// listeners and inject() read the live value.
+	const [inheritAuth, setInheritAuthState] = useState(true);
+	// Explicit Sign In in flight: the next credential is user-requested and
+	// bypasses the Inherit Auth gate; the seq delivers it to the iframe.
+	const pendingExplicitLoginRef = useRef(false);
+	const [explicitAuthSeq, setExplicitAuthSeq] = useState(0);
 
 	// ── Feed registries — stable across renders ─────────────────────────
 	const eventListeners = useRef<Registry<AppEventRow>>(new Set());
@@ -233,16 +290,38 @@ const AppWebview: React.FC = () => {
 			case 'appdev:watch':
 				for (const fn of watchListeners.current) fn(msg.status);
 				break;
-			case 'appdev:devServer':
+			case 'appdev:devServer': {
+				// Same server, new build (?t only): HMR owns it — no action.
+				// DIFFERENT origin (watch restarted on a new port): the
+				// injected container and its HMR socket are DEAD — remount
+				// the iframe so a fresh boot injects the live entry.
+				const base = msg.entry.split('?')[0];
+				if (prevDevEntryBaseRef.current && prevDevEntryBaseRef.current !== base) {
+					setReloadSeq((n) => n + 1);
+				}
+				prevDevEntryBaseRef.current = base;
 				setDevEntry(msg.entry);
 				break;
+			}
+			case 'appdev:auth':
+				setAuthToken(msg.token);
+				// Credential arriving for an EXPLICIT sign-in click gets
+				// delivered to the preview regardless of the Inherit Auth
+				// checkbox — the user just asked for it.
+				if (pendingExplicitLoginRef.current) {
+					pendingExplicitLoginRef.current = false;
+					setExplicitAuthSeq((n) => n + 1);
+				}
+				break;
 			case 'appdev:reload':
-				// Watch rebuild landed — re-inject the dev remote so the app
-				// (and only the app) remounts with the fresh bundle. NEVER
-				// reload the iframe here: dev servers compile on request, so a
-				// page reload triggers a build, whose completion lands right
-				// back here — an infinite reload loop.
-				setInjectSeq((n) => n + 1);
+				// Watch rebuild landed — deliberately a no-op. The container's
+				// HMR client owns updates: it hot-applies in place (state
+				// preserved), and on failure it reloads the page itself, which
+				// re-injects the freshest entry via devReady. A second update
+				// path here bred zombie container instances whose stale hashes
+				// 404'd every hot-update. Non-HMR containers (hmr disabled in
+				// the app config, prod-flavor shell) refresh via the Reload
+				// button's full restart.
 				break;
 			case 'appdev:result': {
 				// Settle the matching RPC promise
@@ -267,7 +346,16 @@ const AppWebview: React.FC = () => {
 		const stamp = (): string => new Date().toLocaleTimeString(undefined, { hour12: false });
 		const onWindowMessage = (e: MessageEvent): void => {
 			const data = e.data as { type?: string; level?: 'log' | 'warn' | 'error'; text?: string; message?: string; source?: string } | undefined;
-			if (data?.type === 'shell:devConsole' && data.text !== undefined) {
+			if (data?.type === 'rrdev:loginRequest') {
+				// The OAuth cycle always runs through the EXTENSION (VSCode
+				// webviews block window.open, so the shell's popup fallback is
+				// dead here — ACK immediately to cancel it). An explicit Sign
+				// In click authenticates the preview even with Inherit Auth
+				// off: the checkbox governs AUTOMATIC inheritance only.
+				(e.source as Window | null)?.postMessage({ type: 'rrdev:loginPending' }, '*');
+				pendingExplicitLoginRef.current = true;
+				sendMessage({ type: 'appdev:login' });
+			} else if (data?.type === 'shell:devConsole' && data.text !== undefined) {
 				const row: ConsoleRow = { time: stamp(), level: data.level ?? 'log', text: `[preview] ${data.text}` };
 				for (const fn of consoleListeners.current) fn(row);
 			} else if (data?.type === 'shell:devError' && data.message) {
@@ -277,7 +365,7 @@ const AppWebview: React.FC = () => {
 		};
 		window.addEventListener('message', onWindowMessage);
 		return () => window.removeEventListener('message', onWindowMessage);
-	}, []);
+	}, [sendMessage]);
 
 	/** One RPC round trip to the extension host over the bridge. */
 	const rpc = useCallback(<T,>(method: string, args?: unknown[]): Promise<T> => {
@@ -303,6 +391,9 @@ const AppWebview: React.FC = () => {
 		// here: remounting now would load against a dead dev server — the
 		// restart's first successful build sends appdev:reload, which does.
 		reloadPreview: () => sendMessage({ type: 'appdev:restart' }),
+		// Inherit Auth toggle — PreviewFrame reacts to the prop change (pushes
+		// the session down, or tells the shell to drop it).
+		setInheritAuth: (inherit: boolean) => setInheritAuthState(inherit),
 		// Host actions — ride the bridge to the extension host
 		debug: capabilities.canDebug ? () => sendMessage({ type: 'appdev:debug' }) : undefined,
 		revealFiles: capabilities.hasNativeFiles ? () => sendMessage({ type: 'appdev:reveal' }) : undefined,
@@ -351,7 +442,7 @@ const AppWebview: React.FC = () => {
 			<AppBuilderScreen
 				host={host}
 				app={app}
-				previewPane={previewUrl ? <PreviewFrame url={previewUrl} reloadSeq={reloadSeq} injectSeq={injectSeq} app={app} devEntry={devEntry} /> : undefined}
+				previewPane={previewUrl ? <PreviewFrame url={previewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} authToken={authToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : undefined}
 				initialStage={initialStage}
 				onStageChange={(stage) => sendMessage({ type: 'appdev:stage', stage })}
 			/>

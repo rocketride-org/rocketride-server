@@ -397,7 +397,9 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			setLoadedApps((prev) => ({ ...prev, [appId]: descriptor }));
 			return true;
 		} catch (e) {
-			console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}":`, e);
+			// message + stack explicitly: Error objects JSON-stringify to {}
+			// through console forwarding, hiding the actual failure.
+			console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}": ${e instanceof Error ? (e.stack || e.message) : String(e)}`);
 			failedSetRef.current.add(appId);
 			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
 			return false;

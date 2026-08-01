@@ -40,6 +40,7 @@ import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { useWorkspace } from '../../workspace/WorkspaceContext';
 import { PrefsProvider } from 'shared';
 import { ConnectionManager } from '../../connection/connection';
+import { isDevPreviewPending } from '../../lib/appLoader';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
 import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
@@ -430,6 +431,13 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 									identity={identity}
 								/>
 							</AppErrorBoundary>
+					) : isDevPreviewPending(activeAppId) ? (
+							// DEV PREVIEW, registration not yet injected: the dev
+							// server may still be starting — showing an error here
+							// is a lie that flashes and self-corrects (the injection
+							// invalidates + retries the load when it lands). Hold
+							// the loading animation instead.
+							<LoadingScreen />
 						) : appLoadErrors[activeAppId] ? (
 							<div style={styles.appLoadError}>
 								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>

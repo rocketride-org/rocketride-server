@@ -239,22 +239,8 @@ export class ConnectionManager extends EventEmitter {
 	private async connectToEngine(uri: string): Promise<void> {
 		this.updateConnectionStatus({ state: ConnectionState.CONNECTING, progressMessage: 'Connecting...' });
 
-		const groupConfig = this.getGroupConfig();
-		const mode = groupConfig.connectionMode ?? 'local';
-
-		// Resolve auth credential — each mode has different auth requirements
-		let auth: string;
-		if (connectionModeUsesOAuth(mode)) {
-			const cloudAuth = CloudAuthProvider.getInstance();
-			const token = await cloudAuth.getToken();
-			if (!token) throw new Error('Please sign in to RocketRide Cloud to connect.');
-			auth = token;
-		} else if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
-			auth = groupConfig.apiKey;
-		} else {
-			// Local, service, docker: use default key
-			auth = groupConfig.apiKey || 'MYAPIKEY';
-		}
+		const mode = this.getGroupConfig().connectionMode ?? 'local';
+		const auth = await this.resolveAuthCredential();
 
 		await this.client.connect(auth, { uri });
 		// onConnected callback in createClient() handles state update
@@ -263,6 +249,34 @@ export class ConnectionManager extends EventEmitter {
 		// RocketRide SDK/CLI can drive the same (self-hosted) engine. Best-effort:
 		// a failure here must never break an otherwise-successful connection.
 		await this.syncEnvFile(mode, auth);
+	}
+
+	/**
+	 * Resolves this connection's auth credential — the OAuth token for cloud
+	 * modes, the configured API key otherwise (default key for self-hosted).
+	 * This is the SAME credential connect() presents to the engine, so it
+	 * also serves as the session handoff for embedded previews: the App
+	 * Builder passes it into the preview shell so apps that require
+	 * authentication render with a real signed-in session + live connection.
+	 *
+	 * @throws If cloud mode and no token is available (user must sign in).
+	 */
+	public async resolveAuthCredential(): Promise<string> {
+		const groupConfig = this.getGroupConfig();
+		const mode = groupConfig.connectionMode ?? 'local';
+
+		// Resolve auth credential — each mode has different auth requirements
+		if (connectionModeUsesOAuth(mode)) {
+			const cloudAuth = CloudAuthProvider.getInstance();
+			const token = await cloudAuth.getToken();
+			if (!token) throw new Error('Please sign in to RocketRide Cloud to connect.');
+			return token;
+		}
+		if (connectionModeRequiresApiKey(mode) && groupConfig.apiKey) {
+			return groupConfig.apiKey;
+		}
+		// Local, service, docker: use default key
+		return groupConfig.apiKey || 'MYAPIKEY';
 	}
 
 	/**

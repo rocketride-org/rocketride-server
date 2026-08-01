@@ -98,6 +98,44 @@ const localOverrides = new Map<string, () => Promise<AppDescriptor>>();
 const localAppMetas = new Map<string, { id: string; moduleId: string; name: string }>();
 let localAppsListener: (() => void) | null = null;
 
+// MF containers currently owned by a DEV registration. Manifest-driven
+// (re)registration must never clobber these: the identity merge and the
+// entry-change reconciliation would repoint the container at the server's
+// (older) published bundle mid-session — the dev preview then loads THAT
+// and dies on platform mismatch (RUNTIME-012).
+//
+// Ownership is PERSISTED per tab (sessionStorage) and loaded at module init:
+// the probe registers manifest remotes at boot, BEFORE any dev injection can
+// arrive — and force-overriding an already-initialized container corrupts
+// its consume-shared getters (MF's "overriding may cause unexpected errors"
+// → "getter for the shared module is not a function"). With persisted
+// ownership, every boot after the first skips the manifest registration
+// entirely and the dev entry is the container's ONLY registration.
+const DEV_OWNED_KEY = 'rr:devOwnedModules';
+const devRemoteModules = new Set<string>(((): string[] => {
+	try {
+		return JSON.parse(sessionStorage.getItem(DEV_OWNED_KEY) ?? '[]') as string[];
+	} catch {
+		return [];
+	}
+})());
+
+/** Persists the current dev-owned module set for this tab. */
+function persistDevOwned(): void {
+	try {
+		sessionStorage.setItem(DEV_OWNED_KEY, JSON.stringify([...devRemoteModules]));
+	} catch { /* storage unavailable — ownership lasts this page only */ }
+}
+
+/**
+ * Whether an MF container is currently dev-owned (see devRemoteModules).
+ *
+ * @param moduleId - The MF container name.
+ */
+export function isDevRemote(moduleId: string): boolean {
+	return devRemoteModules.has(moduleId);
+}
+
 /**
  * Registers (or clears, with null) the local-apps change listener. Shell
  * installs it so synthetic local entries re-render the app list.
@@ -106,6 +144,31 @@ let localAppsListener: (() => void) | null = null;
  */
 export function setLocalAppsListener(fn: (() => void) | null): void {
 	localAppsListener = fn;
+}
+
+/**
+ * Whether an app is an EMBEDDED DEV PREVIEW still waiting for its dev
+ * registration. The injection can only arrive after the dev server has
+ * booted and announced its address — during that window the deep-linked app
+ * either isn't in the manifest (new apps) or fails to load (dead published
+ * entry), and showing an error would be a flash that the injection's
+ * invalidate-and-retry immediately self-corrects. The layout holds the
+ * loading state instead while this is true.
+ *
+ * @param appId - The session-locked app id.
+ */
+export function isDevPreviewPending(appId: string): boolean {
+	// Once locally registered, real load states (success or error) apply.
+	if (localOverrides.has(appId)) return false;
+	try {
+		// Only embedded dev previews qualify: iframe + the rrdev flag (URL or
+		// the per-tab persistence the flavor picker writes).
+		if (window.self === window.top) return false;
+		const urlFlag = new URLSearchParams(window.location.search).get('rrdev') === '1';
+		return urlFlag || sessionStorage.getItem('rr:dev') === '1';
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -167,6 +230,11 @@ export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>,
  */
 export function unregisterLocalApp(id: string): void {
 	const hadOverride = localOverrides.delete(id);
+	const meta = localAppMetas.get(id);
+	if (meta) {
+		devRemoteModules.delete(meta.moduleId);
+		persistDevOwned();
+	}
 	if (localAppMetas.delete(id)) localAppsListener?.();
 	if (hadOverride) {
 		console.log(`[appLoader] Local override removed for "${id}"`);
@@ -187,14 +255,69 @@ export function unregisterLocalApp(id: string): void {
  * @param entry - The dev server's remoteEntry.js URL.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string): void {
+	// First takeover of a module the MANIFEST already registered this boot:
+	// the container may be half-initialized and force-overriding it corrupts
+	// its shared getters. Persist ownership and reboot — the next boot skips
+	// the manifest registration, making the dev entry the FIRST and ONLY
+	// registration this container ever sees.
+	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId)) {
+		devRemoteModules.add(moduleId);
+		persistDevOwned();
+		console.log(`[appLoader] taking dev ownership of manifest-registered "${moduleId}" — rebooting for a clean container`);
+		window.location.reload();
+		return;
+	}
+
+	devRemoteModules.add(moduleId);
+	persistDevOwned();
 	registerRemotes([{ name: moduleId, entry }], { force: true });
 	registeredEntries.set(moduleId, entry);
 	registerLocalApp(
 		appId,
-		() => (loadRemote(`${moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>).then((m) => m.default),
+		() => (loadRemote(`${moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
+			.then((m) => m.default)
+			.catch((err) => {
+				// Full failure forensics: the error itself (message + stack, not
+				// the {} an Error JSON-stringifies to) plus the share scope the
+				// container negotiated against — key, version, loaded state.
+				console.error(`[appLoader] dev remote "${moduleId}" failed to load from ${entry}: ${err instanceof Error ? (err.stack || err.message) : String(err)}`);
+				dumpShareScope();
+				throw err;
+			}),
 		{ name, moduleId },
 	);
 	invalidateAppDescriptor(appId);
+}
+
+/**
+ * Logs the MF share scope's contents — one line per shared module version
+ * with its loaded/eager state. The first thing to read when a dev remote's
+ * share negotiation goes sideways.
+ */
+function dumpShareScope(): void {
+	try {
+		// EVERY runtime instance: a split brain (the plugin's host instance vs
+		// a second one spawned by runtime-API calls) is itself a diagnosis —
+		// containers negotiating on an instance without the host's shared
+		// config see an empty scope and die with RUNTIME-012.
+		const host = (globalThis as unknown as Record<string, unknown>).__FEDERATION__ as { __INSTANCES__?: Array<{ name?: string; shareScopeMap?: Record<string, Record<string, Record<string, { loaded?: boolean; eager?: boolean; from?: string }>>> }> } | undefined;
+		const instances = host?.__INSTANCES__ ?? [];
+		console.warn(`[appLoader] federation instances: ${instances.length} [${instances.map((i) => i.name ?? '?').join(', ')}]`);
+		instances.forEach((instance, index) => {
+			const scope = instance.shareScopeMap?.default;
+			if (!scope) {
+				console.warn(`[appLoader] instance[${index}] ${instance.name ?? '?'}: no default share scope`);
+				return;
+			}
+			for (const [key, versions] of Object.entries(scope)) {
+				for (const [version, meta] of Object.entries(versions)) {
+					console.warn(`[appLoader] instance[${index}] ${instance.name ?? '?'} scope: ${key}@${version} loaded=${meta.loaded ?? false} eager=${meta.eager ?? false} from=${meta.from ?? '?'}`);
+				}
+			}
+		});
+	} catch (err) {
+		console.warn(`[appLoader] share scope dump failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
 }
 
 /**
@@ -268,14 +391,16 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 
 	// Register all MF remotes so loadRemote() can resolve them.
 	// force: true overwrites any previously registered remotes (e.g. from
-	// the pre-auth probe) with the post-auth set.
+	// the pre-auth probe) with the post-auth set. Dev-owned containers are
+	// NEVER (re)registered from the manifest — the dev entry stays live.
+	const registrable = validApps.filter((a) => !devRemoteModules.has(a.moduleId));
 	registerRemotes(
-		validApps.map((a) => ({ name: a.moduleId, entry: a.entry })),
+		registrable.map((a) => ({ name: a.moduleId, entry: a.entry })),
 		{ force: true },
 	);
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
-	for (const a of validApps) registeredEntries.set(a.moduleId, a.entry);
+	for (const a of registrable) registeredEntries.set(a.moduleId, a.entry);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return validApps.map((a) => ({

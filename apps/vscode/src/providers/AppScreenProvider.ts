@@ -22,6 +22,8 @@ import { scanWorkspaceApps } from '../appdev/appScan';
 import type { ScannedApp } from '../appdev/appScan';
 import { ensureWatch, getWatchManager } from '../appdev/watchManager';
 import { publishApp } from '../appdev/publish';
+import { vendorAppTypes } from '../appdev/appTypes';
+import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 
 // =============================================================================
 // TYPES
@@ -42,11 +44,11 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	private panels = new Map<string, vscode.WebviewPanel>();
 	private disposables: vscode.Disposable[] = [];
 	private connectionManager = ConnectionManager.getInstance();
-	// The webview subscribes at view:ready, which lands AFTER the watch's
-	// install/start notifications — replay state so nothing is lost: the
-	// last watch status, plus a capped console/error backlog per app.
+	// The webview subscribes at view:ready — replay the latest STATE there
+	// (watch status, dev entry). Console rows are NOT replayed: VSCode queues
+	// messages posted before view:ready, so rows arrive anyway and a replay
+	// double-prints them.
 	private lastWatch = new Map<string, AppWatchStatus>();
-	private consoleBacklog = new Map<string, Array<Record<string, unknown>>>();
 	// The running dev server's remoteEntry.js URL per app — the webview
 	// injects it into the preview shell (replayed at view:ready like status).
 	private devEntries = new Map<string, string>();
@@ -145,14 +147,21 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 							capabilities: { hasCodePane: false, hasNativeFiles: true, canDebug: true },
 							stage: this.context.workspaceState.get(`appdev.stage.${appId}`) ?? 'develop',
 						});
-						// Replay what the webview missed while it was booting
+						// Replay STATE the webview may have missed (idempotent —
+						// VSCode queues messages sent before view:ready, so
+						// replaying console ROWS here double-printed them; only
+						// latest-state messages are safe to resend).
 						const last = this.lastWatch.get(appId);
 						if (last) await panel.webview.postMessage({ type: 'appdev:watch', status: last });
 						const devEntry = this.devEntries.get(appId);
 						if (devEntry) await panel.webview.postMessage({ type: 'appdev:devServer', entry: devEntry });
-						for (const msg of this.consoleBacklog.get(appId) ?? []) {
-							await panel.webview.postMessage(msg);
-						}
+						// Session handoff: this window is already authenticated —
+						// give the preview shell the same credential so apps
+						// requiring auth render with a real signed-in session.
+						try {
+							const token = await this.connectionManager.resolveAuthCredential();
+							if (token) await panel.webview.postMessage({ type: 'appdev:auth', token });
+						} catch { /* signed out — the preview shows its sign-in prompt */ }
 						// The resolve-time watch start can lose a race with the
 						// workspace scan — retry here (idempotent when running)
 						if (app && !getWatchManager()?.isRunning(appId)) void ensureWatch(app);
@@ -175,6 +184,20 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 					case 'appdev:debug':
 						await vscode.commands.executeCommand('rocketride.app.debug', appId);
 						break;
+
+					case 'appdev:login': {
+						// The preview shell needs a session and this window is
+						// signed out — run the EXTENSION's own sign-in flow
+						// (browser-based, works everywhere), then hand the fresh
+						// credential down the normal rrdev:auth path.
+						const auth = CloudAuthProvider.getInstance();
+						await auth.signIn(process.env.RR_ZITADEL_URL || '', process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '');
+						try {
+							const token = await this.connectionManager.resolveAuthCredential();
+							if (token) await panel.webview.postMessage({ type: 'appdev:auth', token });
+						} catch { /* sign-in abandoned — preview keeps its prompt */ }
+						break;
+					}
 
 					case 'appdev:restart':
 						// Preview Reload = full inner-loop reset: kill the dev
@@ -234,7 +257,6 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		panel.onDidDispose(() => {
 			this.panels.delete(appId);
 			this.lastWatch.delete(appId);
-			this.consoleBacklog.delete(appId);
 			this.devEntries.delete(appId);
 			// The App Screen owns the watch lifecycle: closing it ends the
 			// session and drops the dev overlay (shell returns to published).
@@ -243,6 +265,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 
 		// Start the inner loop (setting-gated by rocketride.appdev.autoWatch)
 		if (app) {
+			// Refresh the vendored platform types first — existing apps track
+			// the type surface this extension ships (types/rocketride-shell/).
+			vendorAppTypes(this.context, app.folder);
 			void ensureWatch(app);
 		} else {
 			// No workspace binding = no dev server, ever — say so loudly
@@ -287,20 +312,15 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 
 	/**
 	 * Push one console row into an app's panel (Console pane) — the feed for
-	 * pnpm install and rsbuild output. Buffered (capped) so rows emitted
-	 * before the webview's view:ready are replayed, not lost.
+	 * pnpm install and rsbuild output. VSCode queues webview messages posted
+	 * before view:ready, so no buffering is needed.
 	 *
 	 * @param appId - The app whose console the row belongs to.
 	 * @param level - Row severity.
 	 * @param text - Row text (one line).
 	 */
 	public notifyConsole(appId: string, level: 'log' | 'warn' | 'error', text: string): void {
-		const msg = { type: 'appdev:console', row: { time: AppScreenProvider.feedTime(), level, text } };
-		const backlog = this.consoleBacklog.get(appId) ?? [];
-		backlog.push(msg);
-		if (backlog.length > 300) backlog.splice(0, backlog.length - 300);
-		this.consoleBacklog.set(appId, backlog);
-		this.panels.get(appId)?.webview.postMessage(msg);
+		this.panels.get(appId)?.webview.postMessage({ type: 'appdev:console', row: { time: AppScreenProvider.feedTime(), level, text } });
 	}
 
 	/**
@@ -311,12 +331,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 * @param source - Optional origin tag ("rsbuild", "pnpm install").
 	 */
 	public notifyError(appId: string, message: string, source?: string): void {
-		const msg = { type: 'appdev:error', row: { time: AppScreenProvider.feedTime(), message, source } };
-		const backlog = this.consoleBacklog.get(appId) ?? [];
-		backlog.push(msg);
-		if (backlog.length > 300) backlog.splice(0, backlog.length - 300);
-		this.consoleBacklog.set(appId, backlog);
-		this.panels.get(appId)?.webview.postMessage(msg);
+		this.panels.get(appId)?.webview.postMessage({ type: 'appdev:error', row: { time: AppScreenProvider.feedTime(), message, source } });
 	}
 
 	// =========================================================================
@@ -345,7 +360,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	private buildPreviewUrl(appId: string): string {
 		const override = vscode.workspace.getConfiguration('rocketride.appdev').get<string>('shellUrl', '');
 		const base = override || this.connectionManager.getHttpUrl?.() || 'http://localhost:5565';
-		return `${base.replace(/\/$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1`;
+		// _ts busts the browser's cached index.html — the flavor picker lives
+		// in the html, and a stale copy silently serves the wrong shell flavor.
+		return `${base.replace(/\/$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&_ts=${Date.now()}`;
 	}
 
 	// =========================================================================

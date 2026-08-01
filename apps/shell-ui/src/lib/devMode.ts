@@ -40,6 +40,7 @@
 
 import React from 'react';
 import * as ReactDom from 'react-dom';
+import { ConnectionManager } from '../connection/connection';
 import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote } from './appLoader';
 
 // =============================================================================
@@ -91,6 +92,11 @@ export function isDevHooksEnabled(): boolean {
 		let urlFlag = false;
 		try {
 			urlFlag = new URLSearchParams(window.location.search).get('rrdev') === '1';
+			// The OAuth redirect URI is the bare origin, so `rrdev=1` does not
+			// survive the round trip — index.html's flavor picker persists the
+			// choice per tab ('rr:dev'), and the gate honors the same flag so
+			// the flavor and the hooks can never disagree.
+			if (!urlFlag) urlFlag = sessionStorage.getItem('rr:dev') === '1';
 		} catch { /* no window/location (tests) — build-mode gate only */ }
 		gateResult = process.env.NODE_ENV !== 'production' || urlFlag;
 	}
@@ -156,15 +162,37 @@ export async function installDevHooks(): Promise<void> {
 	// origin-agnostic, so this is the one channel that works everywhere.
 	installConsoleForwarding();
 
-	// Embedded previews: accept dev-remote registrations from the embedder.
-	// The App Builder panel KNOWS its rsbuild dev server's address — it posts
-	// it here and this shell wires the remote itself. No server overlay, no
-	// environment coupling: whatever shell the preview shows, it previews.
+	// Embedded previews: accept dev-remote registrations and session handoff
+	// from the embedder. The App Builder panel KNOWS its rsbuild dev server's
+	// address — it posts it here and this shell wires the remote itself. The
+	// VSCode host is ALSO already authenticated — its credential arrives as
+	// rrdev:auth so authenticated apps preview with a real signed-in session
+	// and live connection instead of hitting the auth gate.
 	window.addEventListener('message', (e: MessageEvent) => {
-		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string } | undefined;
-		if (data?.type !== 'rrdev:registerRemote') return;
-		if (!data.appId || !data.moduleId || !data.entry) return;
-		registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry);
+		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string } | undefined;
+		if (data?.type === 'rrdev:registerRemote') {
+			if (!data.appId || !data.moduleId || !data.entry) return;
+			registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry);
+		} else if (data?.type === 'rrdev:auth' && typeof data.token === 'string' && data.token) {
+			const cm = ConnectionManager.getInstance();
+			// Reboot into the authenticated flow exactly once per credential —
+			// after the reload the tokens match and this is a no-op.
+			if (cm.loadToken() !== data.token) {
+				cm.saveToken(data.token);
+				console.log('[devMode] embedder session received — rebooting authenticated');
+				window.location.reload();
+			}
+		} else if (data?.type === 'rrdev:clearAuth') {
+			// Inherit Auth switched OFF: drop the inherited session and reboot
+			// signed out — auth-requiring apps then run the preview's own
+			// OAuth cycle (embedded sign-in prompt → popup).
+			const cm = ConnectionManager.getInstance();
+			if (cm.loadToken()) {
+				cm.clearToken();
+				console.log('[devMode] embedder session cleared — rebooting signed out');
+				window.location.reload();
+			}
+		}
 	});
 
 	// Tell a parent embedder the hooks are ready so it doesn't have to poll.
@@ -179,7 +207,9 @@ export async function installDevHooks(): Promise<void> {
 	// unload hook reveals WHEN something navigates the page away — both
 	// mirrored to the embedder's Console pane by the forwarding above.
 	if (window.parent !== window) {
-		console.log(`[devMode] boot href=${window.location.href} referrer=${document.referrer || '(none)'}`);
+		// flavor= identifies WHICH shell build booted (dev = development React
+		// with refresh hooks) — the first thing to check when HMR misbehaves.
+		console.log(`[devMode] boot flavor=${process.env.NODE_ENV} href=${window.location.href} referrer=${document.referrer || '(none)'}`);
 		window.addEventListener('beforeunload', () => {
 			console.warn(`[devMode] page unloading from ${window.location.href}`);
 		});
@@ -203,6 +233,9 @@ function installConsoleForwarding(): void {
 	/** Serializes one console argument (objects JSON-ified, cycles tagged). */
 	const asText = (value: unknown): string => {
 		if (typeof value === 'string') return value;
+		// Errors JSON-stringify to {} — their message/stack are non-enumerable.
+		// Losing them cost a debugging session; never again.
+		if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
 		try {
 			return JSON.stringify(value) ?? String(value);
 		} catch {

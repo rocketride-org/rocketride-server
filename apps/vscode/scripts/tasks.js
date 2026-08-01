@@ -28,7 +28,7 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
@@ -151,9 +151,20 @@ function makeStageFilesAction() {
 			const pkg = JSON.parse(await readFile(pkgPath));
 			pkg.main = './rocketride.js';
 			pkg.icon = 'rocketride-dark-icon.png';
-			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
+			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'app-types/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
 			const stagedPkg = JSON.stringify(pkg, null, 2);
 			const manifestChanged = !buildHasManifest || String(await readFile(stagedPkgPath)) !== stagedPkg;
+
+			// App-types bundle (frozen shell-api + shared rollup, built by
+			// shell-ui:build): shipped WITH the extension so the App Builder
+			// can vendor types/rocketride-shell/ into standalone app repos.
+			// Synced BEFORE the early return — it changes when shell-ui
+			// rebuilds, which the vscode source hash cannot see.
+			const appTypesSrc = path.join(BUILD_ROOT, 'app-types');
+			if (await exists(appTypesSrc)) {
+				await mkdir(BUILD_DIR);
+				await syncDir(appTypesSrc, path.join(BUILD_DIR, 'app-types'));
+			}
 
 			if (!changed && !manifestChanged) {
 				task.output = 'No changes detected';
@@ -288,7 +299,7 @@ module.exports = {
 			name: 'vscode:build',
 			action: () => ({
 				description: 'Build vscode',
-				steps: ['client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['client-typescript:build', 'shared-ui:test', 'shared-ui:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{

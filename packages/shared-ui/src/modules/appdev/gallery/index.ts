@@ -21,55 +21,26 @@
 // SOFTWARE.
 
 // =============================================================================
-// APP BUILDER MODULE — deep-path entry point
+// COMPONENT GALLERY — MODULE BARREL
 // =============================================================================
 
 /**
- * The App Builder view layer. Deliberately NOT exported from the shared-ui
- * main barrel (the deploy-panel precedent — keep the shared singleton's
- * surface lean); hosts import 'shared/modules/appdev' directly, exactly
- * like 'shared/modules/project'.
+ * The component gallery's public surface, re-exported through the appdev
+ * module barrel (`shared/modules/appdev`) - like the rest of appdev it is
+ * deliberately NOT on the shared-ui main barrel, so the gallery costs
+ * nothing on the shell's eager `shared` singleton.
  */
 
-export { AppBuilderScreen } from './AppBuilderScreen';
-export type { IAppBuilderScreenProps } from './AppBuilderScreen';
-export { DevelopView } from './DevelopView';
-export type { IDevelopViewProps } from './DevelopView';
-export { DeployView } from './DeployView';
-export type { IDeployViewProps } from './DeployView';
-export { StoreView } from './StoreView';
-export type { IStoreViewProps } from './StoreView';
-export { LogList, LOG_LIST_CAP } from './LogList';
-export type { ILogListProps, LogListRow } from './LogList';
-export { renderTemplate, TEMPLATE_NAMES } from './templates';
-export type { TemplateFile, TemplateName, TemplateVars } from './templates';
-export { ComponentGallery, KnobsPanel, GALLERY_ENTRIES, GALLERY_GROUPS } from './gallery';
+export { ComponentGallery } from './ComponentGallery';
+export { KnobsPanel } from './KnobsPanel';
+export type { IKnobsPanelProps } from './KnobsPanel';
+export { GALLERY_ENTRIES, GALLERY_GROUPS } from './registry';
 export type {
 	GalleryGroup,
 	IGalleryDemoProps,
 	IGalleryEntry,
 	IGalleryKnob,
 	IGalleryPropRow,
-	IKnobsPanelProps,
 	KnobValue,
 	KnobValues,
-} from './gallery';
-export type {
-	AppBuilderCapabilities,
-	AppBuilderStage,
-	AppErrorRow,
-	AppEventRow,
-	AppStatus,
-	AppSummary,
-	AppVersionInfo,
-	ConsoleRow,
-	DevelopPane,
-	IAppBuilderHost,
-	ListingDraft,
-	PreflightCheck,
-	PricingTier,
-	ReviewTimelineItem,
-	RungKind,
-	RungPin,
-	WatchStatus,
-} from './types';
+} from './galleryTypes';

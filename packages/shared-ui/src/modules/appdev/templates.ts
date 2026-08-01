@@ -89,11 +89,17 @@ function packageJson(v: TemplateVars): string {
 				'react-dom': '^18.2.0',
 			},
 			devDependencies: {
-				'@module-federation/rsbuild-plugin': '^2.5.1',
+				// EXACT pin: the container must run against the shell's MF
+				// runtime generation — a floating range drifts ahead of the
+				// shell's installed plugin and breaks share negotiation.
+				'@module-federation/rsbuild-plugin': '2.5.1',
 				'@rsbuild/core': '~2.0.11',
 				'@rsbuild/plugin-react': '~2.0.1',
 				'@types/react': '^18.2.0',
 				'@types/react-dom': '^18.2.0',
+				// Fallback copy for the shared 'react-refresh/runtime' (HMR);
+				// the dev-flavor preview shell's copy wins at runtime.
+				'react-refresh': '^0.14.2',
 				typescript: '^5.3.0',
 			},
 		},
@@ -131,15 +137,33 @@ export default defineConfig(() => ({
 				react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 				'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 				'rocketride/app-sdk': { singleton: true, requiredVersion: false },
+				// Platform modules are CONSUMED from the shell's share scope at
+				// runtime, never bundled (import: false): the app repo needs no
+				// platform checkout to build — editor types come from the
+				// vendored types/rocketride-shell/ (tsconfig paths).
+				'shell-ui': { singleton: true, requiredVersion: false, import: false },
+				'shared': { singleton: true, requiredVersion: false, import: false },
+				// react-refresh/runtime is deliberately NOT shared: the app's
+				// own copy late-attaches to the devtools hook the dev-flavor
+				// shell created BEFORE react-dom loaded (injectIntoGlobalHook
+				// supports coexisting copies), and MF eager-consume of it
+				// inside a remote hard-fails the container.
 			},
 		}),
 	],
 	server: { port: ${v.port} },
-	// The App Builder preview owns refresh: it re-injects the remote into the
-	// shell on every rebuild. The dev client's own reload machinery must stay
-	// OFF — its build-hash check sees the lazy-compiled bundle as stale and
-	// location.reload()s the embedding shell in an infinite loop.
-	dev: { hmr: false, liveReload: false, lazyCompilation: false },
+	// hmr on, liveReload OFF: hot updates apply in place (the dev-flavor
+	// preview shell carries development React + the refresh runtime), and a
+	// FAILED hot update surfaces as an error instead of location.reload()ing
+	// the embedding shell — the page-reload fallback is what looped forever.
+	// lazyCompilation stays off: compile-on-request made every served bundle
+	// one hash behind, so the dev client always saw itself as stale.
+	// client: the bundle runs INSIDE the preview shell's page (a different
+	// origin) — without an explicit host the client derives its WebSocket URL
+	// from that page's location and never reaches this dev server. '<port>'
+	// is rsbuild's runtime placeholder for the ACTUAL port, so dynamic port
+	// assignment keeps working.
+	dev: { hmr: true, liveReload: false, lazyCompilation: false, client: { protocol: 'ws', host: 'localhost', port: '<port>' } },
 	source: { entry: { index: './src/index.ts' } },
 	output: { assetPrefix: 'auto' },
 }));
@@ -167,8 +191,16 @@ function tsconfigJson(): string {
 				strict: true,
 				skipLibCheck: true,
 				noEmit: true,
+				// Platform types come from the VENDORED bundle the App Builder
+				// maintains (types/rocketride-shell/) — the modules themselves
+				// arrive from the shell's share scope at runtime, so nothing
+				// platform-side is ever installed or checked out.
+				paths: {
+					'shell-ui': ['./types/rocketride-shell/shell-ui/index.d.ts'],
+					shared: ['./types/rocketride-shell/shared/index.d.ts'],
+				},
 			},
-			include: ['src'],
+			include: ['src', 'types'],
 		},
 		null,
 		2,

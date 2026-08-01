@@ -252,6 +252,13 @@ export interface IAppBuilderHost {
 	subscribeWatch?: (listener: (status: WatchStatus) => void) => () => void;
 	/** Reload the preview surface. */
 	reloadPreview?: () => void;
+	/**
+	 * Toggle session inheritance for the preview (the "Inherit Auth"
+	 * checkbox). Inheriting hands the HOST's signed-in session to the
+	 * preview shell; not inheriting clears it so the preview runs its own
+	 * OAuth cycle. Presence renders the checkbox.
+	 */
+	setInheritAuth?: (inherit: boolean) => void;
 	/** Set the preview theme. */
 	setPreviewTheme?: (theme: 'light' | 'dark') => void;
 	/** Launch the external-browser debug session (capabilities.canDebug). */
@@ -292,4 +299,4 @@ export interface IAppBuilderHost {
 export type AppBuilderStage = 'develop' | 'deploy' | 'store';
 
 /** The DEVELOP pill panes (Code is web-only). */
-export type DevelopPane = 'preview' | 'code' | 'events' | 'console' | 'errors';
+export type DevelopPane = 'preview' | 'code' | 'components' | 'events' | 'console' | 'errors';
