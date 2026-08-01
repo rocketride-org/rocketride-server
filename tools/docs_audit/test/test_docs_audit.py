@@ -124,6 +124,26 @@ def test_runtime_path_built_by_code_is_protected(repo: Path) -> None:
     assert 'pkg/real.py' in verdict.evidence
 
 
+def test_tool_installed_workspace_path_is_protected(repo: Path) -> None:
+    """Regression: `.rocketride/` is written into a *user's* workspace by the
+    VS Code installer, so a doc telling a reader to open a file under it is
+    correct precisely because this repo does not contain it. Treating those as
+    orphaned produced 8 false positives on rocketride-workshops alone.
+    """
+    (verdict,) = _classify('Read `.rocketride/docs/ROCKETRIDE_README.md` first.', repo)
+    assert verdict.verdict == RUNTIME
+    assert 'installed into the workspace' in verdict.evidence
+
+
+def test_emitted_artifact_is_not_orphaned(repo: Path) -> None:
+    """Regression: prose describing what a pipeline emits at run time names a
+    file that is absent at rest by definition. "emits" was missing from the
+    create-verb set, so those citations were reported for deletion.
+    """
+    (verdict,) = _classify('Emits `ARCHITECTURE.md` as an inline content block.', repo)
+    assert verdict.is_protected
+
+
 def _node(root: Path, name: str, fields: dict, readme: str | None) -> Path:
     node = root / 'nodes' / 'src' / 'nodes' / name
     node.mkdir(parents=True)

@@ -37,12 +37,21 @@ _EXT = r'\.(?:py|ts|tsx|js|mjs|cjs|json|cpp|cc|h|hpp|cmake|toml|yaml|yml|sh|cmd|
 _PATH_SPAN = re.compile(r'`([A-Za-z0-9_.][A-Za-z0-9_.\-/]*' + _EXT + r')`')
 _DIR_SPAN = re.compile(r'`((?:nodes|packages|apps|tools|docs|scripts|examples|deploy|docker)/[A-Za-z0-9_.\-/]+)`')
 
-# Prose that introduces a file the reader is about to make.
+# Prose that introduces a file the reader -- or the code being described -- is
+# about to make. ``emit``/``produce``/``output`` cover docs that describe what a
+# pipeline or agent writes at run time, which is absent at rest by definition.
 _CREATE_VERB = re.compile(
     r'\b(?:create|creating|add|adding|new|name\s+it|call\s+it|save\s+(?:this|it|that)?\s*as|scaffold|'
-    r'generate|write|make|touch|rename\s+to|copy\s+to|place\s+in|put\s+in)\b',
+    r'generate|generates|generated|emit|emits|emitted|produce|produces|output|outputs|'
+    r'write|writes|make|touch|rename\s+to|copy\s+to|place\s+in|put\s+in)\b',
     re.IGNORECASE,
 )
+
+# Directories that tooling installs into a *user's* workspace, never checked in.
+# `.rocketride/` is written by the VS Code extension's installer
+# (apps/vscode/src/agents/agent-manager.ts), so docs telling a reader to open a
+# file under it are correct precisely because the repo does not contain it.
+_INSTALLED_DIR = re.compile(r'(?:^|/)\.rocketride/')
 # Prose citing a name to ILLUSTRATE a convention rather than to point at a file.
 # Includes counter-examples ("NOT: `.pipeline.json`"), which are the most
 # dangerous thing a cleanup pass can delete: removing them reintroduces exactly
@@ -131,7 +140,9 @@ def classify(citation: Citation, index: CodeIndex, doc_lines: list[str]) -> Verd
     doc_dir = Path(citation.doc).parent
 
     # 1. Resolves relative to the citing doc, or to the repo root.
-    sibling = (doc_dir / token).as_posix().lstrip('./')
+    # No lstrip('./') -- it strips a character SET, not a prefix, so a citation
+    # to `.env` would be looked up as `env`. Same bug as index.py had.
+    sibling = (doc_dir / token).as_posix()
     if index.has_path(sibling):
         return Verdict(citation, VERIFIED, f'path exists: {sibling}')
     if index.has_path(token):
@@ -147,7 +158,24 @@ def classify(citation: Citation, index: CodeIndex, doc_lines: list[str]) -> Verd
     if _HISTORICAL_DOCS.search(citation.doc):
         return Verdict(citation, HISTORICAL, f'{citation.doc} documents past state')
 
-    # 4. Prose tells the reader to create it, or it is a template stand-in.
+    # 4. Installed into the reader's workspace by tooling, not stored here.
+    if _INSTALLED_DIR.search(token):
+        return Verdict(citation, RUNTIME, 'installed into the workspace by tooling, not checked in')
+
+    # 5. No file at rest, but the code constructs the name at runtime.
+    #
+    # This runs before the prose heuristics below deliberately: finding the name
+    # as a literal in source is hard evidence, while a create-verb nearby is a
+    # guess about intent. Both verdicts are protected, so the ordering does not
+    # change what survives a cleanup -- it changes the evidence a human reads,
+    # and "source builds this name at pkg/real.py:3" is worth more than
+    # "create-verb in context". (Prose like "Writes `x.json`" matches both.)
+    literal = index.find_literal(basename)
+    if literal is not None:
+        where, where_line = literal
+        return Verdict(citation, RUNTIME, f'source builds this name: {where}:{where_line}')
+
+    # 6. Prose tells the reader to create it, or it is a template stand-in.
     context = _context(doc_lines, citation.line)
     if _CREATE_VERB.search(context):
         return Verdict(citation, PLACEHOLDER, f'create-verb in context at line {citation.line}')
@@ -157,12 +185,6 @@ def classify(citation: Citation, index: CodeIndex, doc_lines: list[str]) -> Verd
         return Verdict(citation, PLACEHOLDER, f'inside a directory-tree diagram at line {citation.line}')
     if _TEMPLATE_STEM.search(basename):
         return Verdict(citation, PLACEHOLDER, f'template stem: {basename}')
-
-    # 5. No file at rest, but the code constructs the name at runtime.
-    literal = index.find_literal(basename)
-    if literal is not None:
-        where, where_line = literal
-        return Verdict(citation, RUNTIME, f'source builds this name: {where}:{where_line}')
 
     return Verdict(citation, ORPHANED, 'no path, basename, or source literal found')
 
