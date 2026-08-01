@@ -40,7 +40,7 @@ UI until the **Advanced settings** toggle is turned on; the defaults work for mo
 |---|---|---|
 | `api_key` | string | Default empty. xTrace API key (xtk_...). Get it from the <b>Developer Portal</b>: <a href='https://app.xtrace.ai' target='_blank'>app.xtrace.ai</a> → Settings → API Keys (not in mem.xtrace.ai). |
 | `org_id` | string | Default empty. xTrace organization id (org_...). Same place as the API key: <a href='https://app.xtrace.ai' target='_blank'>app.xtrace.ai</a> → Settings → API Keys. |
-| `user_id` | string | Default empty. Who this memory belongs to (used to store and recall). Can be passed by the agent per call. |
+| `user_id` | string | Default empty. Who this memory belongs to (used to store and recall). The agent can pass a user id per call. |
 | `group_ids` | string | Default empty. Optional. Comma-separated group ids (grp_...) to share memory across users/agents. Leave empty for private memory. |
 | `show_advanced` | boolean | Default false. Show advanced options. The defaults work for most cases, leave off for a simple setup. |
 | `base_url` | string | Default "https://api.production.xtrace.ai". xTrace Memory API base URL. Production by default; use https://api.staging.xtrace.ai for staging. |
