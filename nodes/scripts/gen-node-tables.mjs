@@ -67,6 +67,22 @@ function dependenciesBlock(dir) {
 	for (const raw of readFileSync(file, 'utf8').split(/\r?\n/)) {
 		const line = raw.trim();
 		if (!line || line.startsWith('#')) continue;
+
+		// pip options are not packages. Rendering them as one produced entries
+		// like `--only-binary` `docopt`, which reads as a package named
+		// "--only-binary" constrained to "docopt". `--only-binary <pkg>` does name
+		// a real dependency, so surface the package and why it is pinned to a
+		// wheel; every other option (index URLs, resolver flags) is dropped.
+		if (line.startsWith('-')) {
+			const onlyBinary = /^--only-binary[=\s]+(.+)$/.exec(line);
+			if (onlyBinary) {
+				for (const pkg of onlyBinary[1].split(',').map((p) => p.trim()).filter(Boolean)) {
+					rows.push(`- \`${esc(pkg)}\` _(wheel only)_`);
+				}
+			}
+			continue;
+		}
+
 		const m = /^([A-Za-z0-9._-]+(?:\[[^\]]*\])?)(.*)$/.exec(line);
 		const pkg = m ? m[1] : line;
 		const constraint = m ? m[2].trim() : '';

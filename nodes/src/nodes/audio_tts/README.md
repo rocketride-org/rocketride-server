@@ -76,8 +76,8 @@ If misaki/spaCy initialization fails (for example `Exception: 1` or a missing `w
 ## Dependencies
 
 - `numpy`
-- `--only-binary` `docopt`
-- `--only-binary` `num2words`
+- `docopt` _(wheel only)_
+- `num2words` _(wheel only)_
 - `kokoro` `>=0.9.4`
 - `soundfile` `>=0.13.1`
 
