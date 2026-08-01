@@ -33,6 +33,10 @@ def _load_nemotron(monkeypatch, response_content: str):
             self._model = 'nvidia/nemotron-3-super-120b-a12b'
             self._modelOutputTokens = 32768
 
+        def _chat(self, prompt: str) -> str:
+            """Mirror ai.common.chat.ChatBase._chat: invoke the LLM, return its content."""
+            return self._llm.invoke(prompt).content
+
     class Config:
         @staticmethod
         def getNodeConfig(_logical_type, _conn_config):
