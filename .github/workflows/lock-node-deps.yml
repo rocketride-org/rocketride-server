@@ -81,6 +81,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
+          # actions/checkout writes `token` into .git/config by default. The
+          # compile step below runs package build backends (--no-build-isolation),
+          # i.e. third-party code, in this same workspace -- exactly the exposure
+          # the comment above avoids on PR events by not minting the token at all.
+          # On push/schedule the token does exist, so it must not be left on disk
+          # for that code to read. create-pull-request receives it directly.
+          persist-credentials: false
 
       - name: Install uv (pinned for reproducible compiles)
         uses: astral-sh/setup-uv@f94ec6bedd8674c4426838e6b50417d36b6ab231 # v5.4.1
