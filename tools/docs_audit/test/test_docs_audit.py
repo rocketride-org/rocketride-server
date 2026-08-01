@@ -9,6 +9,7 @@ deleted or a clean node to be reported as drifted.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from docs_audit.citations import (  # noqa: E402
     classify,
     extract,
 )
+from docs_audit.citations import UNREADABLE_DOC, audit_doc  # noqa: E402
 from docs_audit.cli import main  # noqa: E402
 from docs_audit.coverage import (  # noqa: E402
     MISSING_DOC,
@@ -284,6 +286,26 @@ def test_dotfile_paths_keep_their_leading_dot(tmp_path: Path) -> None:
     assert index.has_path('.env')
     assert index.has_path('.github/workflows/ci.yml')
     assert not index.has_path('env')
+
+
+def test_unreadable_doc_is_reported_and_fails(tmp_path: Path) -> None:
+    """Regression: audit_doc returned [] on OSError, so a doc that could not be
+    read vanished from the audit and the run still reported success -- the same
+    silent-green shape as a mistyped --root.
+    """
+    (tmp_path / 'docs').mkdir()
+    doc = tmp_path / 'docs' / 'unreadable.md'
+    doc.write_text('See `pkg/real.py`.\n', encoding='utf-8')
+    doc.chmod(0o000)
+    try:
+        if os.access(doc, os.R_OK):  # running as root ignores the mode bits
+            pytest.skip('cannot make a file unreadable as this user')
+        index = CodeIndex.build(tmp_path)
+        (verdict,) = audit_doc(doc, tmp_path, index)
+        assert verdict.verdict == UNREADABLE_DOC
+        assert main(['--root', str(tmp_path)]) == 1
+    finally:
+        doc.chmod(0o644)
 
 
 def test_nonexistent_root_fails_instead_of_passing_green(tmp_path: Path) -> None:

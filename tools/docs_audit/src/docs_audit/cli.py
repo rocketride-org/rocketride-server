@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from .citations import ORPHANED, audit_doc
+from .citations import ORPHANED, UNREADABLE_DOC, audit_doc
 from .coverage import MISSING_DOC, MISSING_PARAMS, STALE_PARAMS, UNREADABLE, audit_nodes
 from .index import EXCLUDED_PARTS, CodeIndex, is_excluded
 
@@ -58,6 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     gaps = audit_nodes(root)
 
     orphaned = [v for v in verdicts if v.verdict == ORPHANED]
+    # A doc that could not be read is a failure to audit, not a clean audit,
+    # so it fails the run unconditionally rather than only under --fail-on-orphaned.
+    unreadable = [v for v in verdicts if v.verdict == UNREADABLE_DOC]
 
     if args.json:
         payload = {
@@ -76,7 +79,13 @@ def main(argv: list[str] | None = None) -> int:
         }
         json.dump(payload, sys.stdout, indent=2)
         sys.stdout.write('\n')
-        return 1 if (args.fail_on_orphaned and orphaned) else 0
+        return 1 if (unreadable or (args.fail_on_orphaned and orphaned)) else 0
+
+    if unreadable:
+        print(f'UNREADABLE docs ({len(unreadable)}) -- these were NOT audited:\n')
+        for v in unreadable:
+            print(f'  {v.citation.doc}: {v.evidence}')
+        print()
 
     print(f'Scanned {len(verdicts)} doc->code citations across the tree.\n')
     print('  verdict          count   meaning')
@@ -108,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
             for gap in matching:
                 print(f'    {gap.node}: {gap.detail}')
 
-    return 1 if (args.fail_on_orphaned and orphaned) else 0
+    return 1 if (unreadable or (args.fail_on_orphaned and orphaned)) else 0
 
 
 if __name__ == '__main__':  # `python -m docs_audit.cli` printed nothing without this

@@ -29,6 +29,9 @@ PLACEHOLDER = 'PLACEHOLDER'
 HISTORICAL = 'HISTORICAL'
 RUNTIME = 'RUNTIME'
 ORPHANED = 'ORPHANED'
+#: The doc itself could not be read. Not a citation verdict -- a failure to
+#: audit. Named apart from coverage.UNREADABLE, which is about a node's schema.
+UNREADABLE_DOC = 'UNREADABLE_DOC'
 
 PROTECTED = frozenset({VERIFIED, PLACEHOLDER, HISTORICAL, RUNTIME})
 
@@ -211,11 +214,19 @@ def classify(citation: Citation, index: CodeIndex, doc_lines: list[str]) -> Verd
 
 
 def audit_doc(path: Path, root: Path, index: CodeIndex) -> list[Verdict]:
-    """Classify every citation in a single doc."""
+    """Classify every citation in a single doc.
+
+    A doc that cannot be read yields a single ``UNREADABLE`` verdict rather than
+    an empty list. Returning nothing made an I/O or permission failure
+    indistinguishable from a doc containing no citations, so the file dropped
+    out of the audit silently and the run still reported success -- the same
+    failure shape as a mistyped ``--root``.
+    """
+    doc = path.relative_to(root).as_posix()
     try:
         text = path.read_text(encoding='utf-8', errors='replace')
-    except OSError:
-        return []
-    doc = path.relative_to(root).as_posix()
+    except OSError as exc:
+        citation = Citation(token=doc, doc=doc, line=0)
+        return [Verdict(citation, UNREADABLE_DOC, f'could not be read ({type(exc).__name__})')]
     lines = text.splitlines()
     return [classify(citation, index, lines) for citation in extract(text, doc)]
