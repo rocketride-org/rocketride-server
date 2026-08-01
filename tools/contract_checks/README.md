@@ -4,7 +4,7 @@ Catches breaking API changes in upstream Python packages **before** they ship to
 
 ## Why this exists
 
-In May 2026, `img2table 2.0` moved `OCRInstance` from `img2table.ocr.base` to `img2table.ocr._types`. Our OCR node started failing in production with `No module named 'img2table.ocr.base'`. The fix landed in [commit c4aa67921](https://github.com/aparavi/rocketride-server/commit/c4aa67921), but only **after** the breakage shipped, we found out from a customer.
+In May 2026, `img2table 2.0` moved `OCRInstance` from `img2table.ocr.base` to `img2table.ocr._types`. Our OCR node started failing in production with `No module named 'img2table.ocr.base'`. The fix landed in [commit c4aa67921](https://github.com/rocketride-org/rocketride-server/commit/c4aa67921), but only **after** the breakage shipped, we found out from a customer.
 
 This tool catches the next one in CI instead.
 
