@@ -127,7 +127,7 @@ Self-hosted Qdrant typically needs no credentials: leave `apikey` empty. For Qdr
 - `pydantic`
 - `urllib3`
 - `httpx`
-- `qdrant_client`
+- `qdrant_client` `==1.17.1`
 - `numpy`
 
 ## Source

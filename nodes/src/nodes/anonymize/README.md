@@ -131,10 +131,14 @@ builder nodes:test-full
 | `anonymize.model` | `string` | **Model name**<br/>Gliner model to use for anonymization |  |
 | `anonymize.profile` | `string` | **Model**<br/>Anonymize model | `"glinerMergedLarge"` |
 | `anonymizeChar` | `string` | **Character to use for anonymization**<br/>Character |  |
+| `entityTypes` | `array` | **Entity types to anonymize**<br/>PII / entity types to detect and mask. Pre-filled with common types; remove any you don't want, or add your own (the model is zero-shot, so any label works). | `["person","name","email","phone number","address","social security number","credit card number","date of birth","organization","company","location","ip address","bank account","passport number","driver license"]` |
+| `redactionStyle` | `string` | **Redaction style**<br/>How detected entities are replaced. 'mask' overwrites each entity with the anonymization character (████). 'token' replaces each entity with a labelled tag like [PERSON] or [EMAIL]. | `"mask"` |
 
 ## Dependencies
 
 - `gliner`
+- `onnxruntime-gpu` `==1.22.0; platform_system != 'Darwin'`
+- `onnxruntime` `==1.22.0; platform_system == 'Darwin'`
 
 ## Source
 

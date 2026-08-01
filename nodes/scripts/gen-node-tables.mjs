@@ -205,17 +205,27 @@ function resolveDocPath(dir) {
 }
 
 function main() {
-	// Only regenerate docs on release-track branches to avoid polluting feature
-	// branch diffs with source-link changes (branch name is baked into URLs).
+	// Default to release-track branches only, so routine builds on a feature
+	// branch don't sweep unrelated doc drift into the diff.
+	//
+	// The original rationale ("branch name is baked into URLs") no longer holds:
+	// sourceBlock() builds links from DEFAULT_BRANCH, which resolveDefaultBranch()
+	// reads from refs/remotes/origin/HEAD. The output is identical on every
+	// branch. Since the guard was total, a contributor could never regenerate a
+	// stale table in the PR that fixes it -- the one place the fix belongs.
+	// --force is the opt-in for exactly that case.
+	const force = process.argv.includes('--force');
 	const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], '');
 	const allowed = new Set(['main', 'stage', 'develop']);
-	if (branch && !allowed.has(branch)) {
-		console.log(`nodes:docs-generate skipped (branch: ${branch}, only runs on ${[...allowed].join('/')})`);
+	if (!force && branch && !allowed.has(branch)) {
+		console.log(
+			`nodes:docs-generate skipped (branch: ${branch}, only runs on ${[...allowed].join('/')}; pass --force to override)`,
+		);
 		return;
 	}
 
 	// Optional CLI args restrict generation to the named node(s); no args = all.
-	const only = new Set(process.argv.slice(2));
+	const only = new Set(process.argv.slice(2).filter((arg) => arg !== '--force'));
 	let updated = 0;
 	let skipped = 0;
 	for (const name of readdirSync(NODES_DIR)) {

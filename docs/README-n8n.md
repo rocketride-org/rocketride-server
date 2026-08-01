@@ -14,9 +14,9 @@ Combining the two gives **round-trips**: RocketRide → n8n → RocketRide.
 > (n8n side, importable).
 >
 > **Runnable test pipes** that exercise every mode (sync / async / sequential / agent / round-trip)
-> live in [`examples/n8n/`](../examples/n8n/) — open them in the IDE. They pair with the local
-> test harness in `.context/n8n-test/` (`run.sh --keep` seeds the `rr-echo` / `rr-slow` / `rr-upper`
-> / `rr-callback` workflows); see that folder's `WALKTHROUGH.md` for the step-by-step.
+> live in [`examples/n8n/`](../examples/n8n/) — open them in the IDE. Import
+> [`n8n-dispatch.workflow.json`](../examples/n8n/n8n-dispatch.workflow.json) on the n8n side to
+> receive them.
 
 ---
 

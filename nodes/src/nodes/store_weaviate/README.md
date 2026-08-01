@@ -123,13 +123,14 @@ HTTP error responses are surfaced with their status code and the server's `messa
 | `vector.local.port` |  |  | `8080` |
 | `weaviate.profile` | `string` | **Type of Weaviate host**<br/>Connect to... | `"local"` |
 | `weaviate.provider` | `string` |  | const: `"weaviate"` |
+| `weaviate.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'weaviate' exposes tools as weaviate.search / weaviate.upsert / weaviate.delete. Change this when running multiple Weaviate nodes in the same pipeline so their tool names do not collide. | `"weaviate"` |
 
 ## Dependencies
 
 - `authlib`
-- `grpcio`
-- `grpcio-health-checking`
-- `grpcio-tools`
+- `grpcio` `<=1.81.1`
+- `grpcio-health-checking` `<=1.81.1`
+- `grpcio-tools` `<=1.81.1`
 - `httpx`
 - `pydantic`
 - `requests`

@@ -91,7 +91,8 @@ Defaults to English (`en`). Change the `language` config value to transcribe oth
 - `tokenizers`
 - `huggingface-hub`
 - `tqdm`
-- `onnxruntime`
+- `onnxruntime-gpu` `==1.22.0; platform_system != 'Darwin'`
+- `onnxruntime` `==1.22.0; platform_system == 'Darwin'`
 
 ## Source
 

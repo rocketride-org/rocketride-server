@@ -182,7 +182,10 @@ pytest nodes/test/tool_filesystem/test_read_size_cap.py -v
 | `filesystem.allowRead` | `boolean` | **Read files** | `true` |
 | `filesystem.allowStat` | `boolean` | **Stat (metadata)** | `true` |
 | `filesystem.allowWrite` | `boolean` | **Write files** | `true` |
-| `filesystem.pathWhitelist` | `array` | **Path Whitelist**<br/>Regex patterns applied to the relative path of every operation using re.search semantics: a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |  |
+| `filesystem.emitUrl` | `boolean` | **Emit download URL**<br/>Also attach a time-limited signed download URL to the emitted document metadata. | `false` |
+| `filesystem.pathWhitelist` | `array` | **Path Whitelist**<br/>Regex patterns applied to the relative path of every operation using re.search semantics: a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor (the owning user's file tree for development runs, the task's team subtree for deployed runs) are allowed. |  |
+| `filesystem.targetDir` | `string` | **Target directory**<br/>Base directory (relative to the account file store root) that lane-written files are placed under. | `"output/"` |
+| `filesystem.urlExpiresIn` | `integer` | **URL expiry (seconds)**<br/>TTL for the signed URL when 'Emit download URL' is on. Max 3600. | `3600` |
 | `filesystem.whitelistPattern` | `string` | **Path Pattern (regex)** | `""` |
 
 ## Source

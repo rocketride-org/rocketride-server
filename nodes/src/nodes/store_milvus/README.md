@@ -136,6 +136,7 @@ the number of entities in the collection.
 |---|---|---|---|
 | `milvus.profile` | `string` | **Type of Milvus host**<br/>Connect to... | `"cloud"` |
 | `milvus.provider` | `string` |  | const: `"milvus"` |
+| `milvus.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'milvus' exposes tools as milvus.search / milvus.upsert / milvus.delete. Change this when running multiple Milvus nodes in the same pipeline so their tool names do not collide. | `"milvus"` |
 | `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-name>.<region>.zillizcloud.com |  |
 | `vector.cloud.port` |  |  | `443` |
 | `vector.local.host` |  |  | `"localhost"` |

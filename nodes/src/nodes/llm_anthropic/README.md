@@ -119,6 +119,7 @@ collapsed to a single line.
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `anthropic.profile` | `string` | **Model**<br/>LLM model | `"claude-sonnet-4-6"` |
+| `extendedThinking` | `boolean` | **Extended thinking**<br/>Enable Anthropic extended thinking (reasoning) for this node. Off by default. Applies to reasoning-capable models on the interactive chat path. | `false` |
 | `model` | `string` | **Model**<br/>Anthropic model |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
