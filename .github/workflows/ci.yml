@@ -195,7 +195,7 @@ jobs:
             --ignore-unfixed
 
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
+        uses: github/codeql-action/upload-sarif@4187e74d05793876e9989daffde9c3e66b4acd07 # v3
         if: always()
         with:
           sarif_file: 'trivy-${{ matrix.dockerfile }}.sarif'

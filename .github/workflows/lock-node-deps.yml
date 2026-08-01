@@ -77,7 +77,7 @@ jobs:
           token: ${{ steps.app-token.outputs.token || github.token }}
 
       - name: Install uv (pinned for reproducible compiles)
-        uses: astral-sh/setup-uv@f94ec6bedd8674c4426838e6b50417d36b6ab231 # v5.4.1
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.1
         with:
           version: "0.5.29"
 
