@@ -217,9 +217,13 @@ function main() {
 	const force = process.argv.includes('--force');
 	const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], '');
 	const allowed = new Set(['main', 'stage', 'develop']);
-	if (!force && branch && !allowed.has(branch)) {
+	// Tested against the allowlist rather than `branch && !allowed.has(branch)`:
+	// git() returns '' when branch resolution fails (detached HEAD, no git on
+	// PATH), and the truthiness check made an unresolvable branch skip the guard
+	// entirely and rewrite every node doc. Unknown provenance now fails closed.
+	if (!force && !allowed.has(branch)) {
 		console.log(
-			`nodes:docs-generate skipped (branch: ${branch}, only runs on ${[...allowed].join('/')}; pass --force to override)`,
+			`nodes:docs-generate skipped (branch: ${branch || 'unresolved'}, only runs on ${[...allowed].join('/')}; pass --force to override)`,
 		);
 		return;
 	}
