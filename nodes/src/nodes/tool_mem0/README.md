@@ -57,10 +57,10 @@ use node config (encrypted) or the env var.
 | `mem0.base_url` | `string` | **Base URL**<br/>Mem0 REST API base URL. Defaults to the hosted endpoint; override for self-hosted / enterprise deployments. | `"https://api.mem0.ai"` |
 | `mem0.infer` | `boolean` | **Infer memories**<br/>When on (default), Mem0 runs LLM extraction to derive salient facts from the turns. When off, the raw messages are stored verbatim. | `true` |
 | `mem0.ingest_timeout` | `integer` | **Store timeout (s)**<br/>Max seconds 'remember' waits/polls for background extraction to finish before returning a 'queued' result. | `30` |
-| `mem0.run_id` | `string` | **Run id**<br/>Optional session/run scope stamped on stored memories and used to narrow recall. Can be passed by the agent per call. | `""` |
+| `mem0.run_id` | `string` | **Run id**<br/>Optional session/run scope stamped on stored memories and used to narrow recall. The agent can pass a run id per call. | `""` |
 | `mem0.search_limit` | `integer` | **Recall limit**<br/>Maximum number of memory rows to retrieve per recall. | `10` |
 | `mem0.show_advanced` | `boolean` | **Advanced settings**<br/>Show advanced options. The defaults work for most cases, leave off for a simple setup. | `false` |
-| `mem0.user_id` | `string` | **User id**<br/>Who this memory belongs to (used to store and recall). Can be passed by the agent per call. At least one scope (user id, or an advanced agent/run/app id) is required. | `""` |
+| `mem0.user_id` | `string` | **User id**<br/>Who this memory belongs to (used to store and recall). The agent can pass a user id per call. At least one scope (user id, or an advanced agent/run/app id) is required. | `""` |
 | `mem0.wait` | `boolean` | **Synchronous store**<br/>When on (default), 'remember' polls Mem0 until background extraction finishes, so a following 'recall' can see the new memory. When off, 'remember' returns immediately and extraction runs in the background. | `true` |
 
 ## Dependencies

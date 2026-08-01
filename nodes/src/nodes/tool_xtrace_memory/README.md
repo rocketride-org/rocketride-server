@@ -147,7 +147,7 @@ use node config (encrypted at rest) or env vars.
 | `xtrace_memory.search_limit` | `integer` | **Recall limit**<br/>Maximum number of memory rows to retrieve per recall. | `10` |
 | `xtrace_memory.search_mode` | `string` | **Recall mode**<br/>'compose' returns a ready-to-inject markdown context block (LLM-selected); 'retrieve' returns ranked rows only. | `"compose"` |
 | `xtrace_memory.show_advanced` | `boolean` | **Advanced settings**<br/>Show advanced options. The defaults work for most cases, leave off for a simple setup. | `false` |
-| `xtrace_memory.user_id` | `string` | **User id**<br/>Who this memory belongs to (used to store and recall). Can be passed by the agent per call. | `""` |
+| `xtrace_memory.user_id` | `string` | **User id**<br/>Who this memory belongs to (used to store and recall). The agent can pass a user id per call. | `""` |
 | `xtrace_memory.wait` | `boolean` | **Synchronous ingest**<br/>When on, ingest waits (up to ~30s) for extraction to finish so the agent gets a terminal result. When off, ingest returns immediately and runs in the background. | `true` |
 
 ## Dependencies

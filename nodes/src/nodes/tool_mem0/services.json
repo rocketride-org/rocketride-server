@@ -107,7 +107,7 @@
 			"type": "string",
 			"optional": true,
 			"title": "User id",
-			"description": "Who this memory belongs to (used to store and recall). Can be passed by the agent per call. At least one scope (user id, or an advanced agent/run/app id) is required.",
+			"description": "Who this memory belongs to (used to store and recall). The agent can pass a user id per call. At least one scope (user id, or an advanced agent/run/app id) is required.",
 			"default": ""
 		},
 		// Toggle: when on, reveals the advanced fields listed in `conditional`.
@@ -147,7 +147,7 @@
 			"type": "string",
 			"optional": true,
 			"title": "Run id",
-			"description": "Optional session/run scope stamped on stored memories and used to narrow recall. Can be passed by the agent per call.",
+			"description": "Optional session/run scope stamped on stored memories and used to narrow recall. The agent can pass a run id per call.",
 			"default": ""
 		},
 		"mem0.app_id": {

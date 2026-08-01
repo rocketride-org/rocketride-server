@@ -127,7 +127,7 @@
 			"type": "string",
 			"optional": true,
 			"title": "Namespace",
-			"description": "Memory scope every call reads and writes, e.g. <code>customer:42</code>. Can be passed by the agent per call; a namespace is required on the call or here.",
+			"description": "Memory scope every call reads and writes, e.g. <code>customer:42</code>. The agent can pass a namespace per call; one is required either on the call or here.",
 			"default": ""
 		},
 		// Toggle: when on, reveals the advanced fields listed in `conditional`.

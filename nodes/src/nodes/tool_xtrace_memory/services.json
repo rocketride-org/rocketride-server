@@ -115,7 +115,7 @@
 			"type": "string",
 			"optional": true,
 			"title": "User id",
-			"description": "Who this memory belongs to (used to store and recall). Can be passed by the agent per call.",
+			"description": "Who this memory belongs to (used to store and recall). The agent can pass a user id per call.",
 			"default": ""
 		},
 		"xtrace_memory.group_ids": {
