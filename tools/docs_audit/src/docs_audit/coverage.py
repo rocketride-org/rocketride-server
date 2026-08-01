@@ -92,13 +92,23 @@ def strip_jsonc(text: str) -> str:
 def _is_user_facing_param(value: object) -> bool:
     """True for a real settable parameter, false for a profile grouping.
 
-    ``fields`` holds two different kinds of entry. A parameter carries a
-    ``type`` (``{"type": "string", "title": ...}``). A profile group carries
-    ``object``/``properties`` and merely bundles other keys under a preset --
-    ``nodes:docs-generate`` does not put those in the schema table, so neither
-    do we, or every profile-based node reports phantom drift.
+    This mirrors ``nodes:docs-generate`` exactly, because that generator decides
+    what the table contains and is therefore the only correct oracle::
+
+        if (field && field.object !== undefined) continue; // Skip profile definitions
+
+    (``nodes/scripts/gen-node-tables.mjs``). A profile group carries ``object``/
+    ``properties`` and merely bundles other keys under a preset, so it is
+    excluded from the table and from this comparison.
+
+    Requiring a ``type`` key here as well -- which this did originally -- is
+    stricter than the generator, and produced phantom STALE_PARAMS on every
+    node with a typeless field: the generator emits such a field with an empty
+    Type cell, the audit refused to count it as declared, and the diff surfaced
+    as "in docs but not in schema". Ten of the repository's findings were this
+    false positive rather than real drift.
     """
-    return isinstance(value, dict) and 'type' in value and 'object' not in value
+    return isinstance(value, dict) and 'object' not in value
 
 
 def schema_params(node_dir: Path) -> set[str]:

@@ -197,6 +197,26 @@ def test_jsonc_services_file_is_parsed(tmp_path: Path) -> None:
     assert schema_params(node) == {'a'}
 
 
+def test_typeless_field_counts_as_declared(tmp_path: Path) -> None:
+    """Regression: the audit required a ``type`` key, but nodes:docs-generate
+    only skips entries carrying ``object``. A typeless field (rendered by the
+    generator with an empty Type cell) was therefore counted as documented but
+    not declared, reporting phantom drift on ten real nodes.
+    """
+    node = _node(
+        tmp_path,
+        'typeless',
+        {
+            'vector.local.host': {'default': 'localhost'},  # no "type" key
+            'vector.profile': {'type': 'string'},
+            'vector.group': {'object': 'grp', 'properties': ['vector.profile']},
+        },
+        _block('vector.local.host', 'vector.profile'),
+    )
+    assert schema_params(node) == {'vector.local.host', 'vector.profile'}
+    assert audit_node(node, tmp_path) == []
+
+
 def test_malformed_schema_is_reported_not_skipped(tmp_path: Path) -> None:
     """Regression: a broken services.json yielded zero declared params, which is
     indistinguishable from a node with nothing to document -- so the audit
