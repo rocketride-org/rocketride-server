@@ -170,7 +170,28 @@ def classify(citation: Citation, index: CodeIndex, doc_lines: list[str]) -> Verd
     # change what survives a cleanup -- it changes the evidence a human reads,
     # and "source builds this name at pkg/real.py:3" is worth more than
     # "create-verb in context". (Prose like "Writes `x.json`" matches both.)
-    literal = index.find_literal(basename)
+    # Prefer the whole citation. Falling straight back to the basename let any
+    # source occurrence of a common final segment protect an unrelated path: a
+    # citation ending in a bare English word was held RUNTIME because that word
+    # appears somewhere in source, which is not evidence of anything.
+    #
+    # The fallback survives only for a basename carrying a file extension, which
+    # is the real case: a build artifact referred to by filename in code while
+    # the doc supplies its directory. Requiring the full token reports those as
+    # dead.
+    #
+    # NB: no real repository path is named in this comment on purpose --
+    # find_literal scans raw source text, so a path written here would index as
+    # its own evidence. That cuts both ways and is a known limit: a path merely
+    # mentioned in a comment anywhere in the tree counts as "source builds this
+    # name". Narrowing that needs comment-stripping per language, which is a
+    # bigger change than this fix.
+    literal = index.find_literal(token)
+    if literal is None and '.' in basename and basename != token:
+        found = index.find_literal(basename)
+        if found is not None:
+            where, where_line = found
+            return Verdict(citation, RUNTIME, f'source builds this filename: {where}:{where_line}')
     if literal is not None:
         where, where_line = literal
         return Verdict(citation, RUNTIME, f'source builds this name: {where}:{where_line}')

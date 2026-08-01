@@ -124,6 +124,25 @@ def test_runtime_path_built_by_code_is_protected(repo: Path) -> None:
     assert 'pkg/real.py' in verdict.evidence
 
 
+def test_extensionless_segment_is_not_runtime_evidence(repo: Path) -> None:
+    """Regression: matching only the basename let a citation ending in a common
+    word be protected by that word appearing anywhere in source. `pkg/real.py`
+    contains "json", which must not make `tools/json` look like a built path.
+    (`tools/` prefix so the extractor picks the token up as a directory span.)
+    """
+    (verdict,) = _classify('Call `tools/json` to fetch it.', repo)
+    assert verdict.verdict == ORPHANED
+
+
+def test_basename_fallback_needs_an_extension(repo: Path) -> None:
+    """The complement: a doc supplying the directory for a file the code refers
+    to by name is still protected, because the basename looks like a filename.
+    """
+    (verdict,) = _classify('State lives in `build/built_at_runtime.json`.', repo)
+    assert verdict.verdict == RUNTIME
+    assert 'pkg/real.py' in verdict.evidence
+
+
 def test_tool_installed_workspace_path_is_protected(repo: Path) -> None:
     """Regression: `.rocketride/` is written into a *user's* workspace by the
     VS Code installer, so a doc telling a reader to open a file under it is
