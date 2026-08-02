@@ -159,17 +159,31 @@ def flatten_content(content: Any) -> str:
     return flatten_content_parts(content)[0]
 
 
-def report_llm_tokens(input_tokens: int = 0, output_tokens: int = 0, *, model: str = '') -> None:
+def report_llm_tokens(
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    *,
+    model: str = '',
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+) -> None:
     """Surface per-run LLM token usage to the metrics singleton.
 
     Reported in the subprocess via ``metrics.counter``; ``task_metrics`` accumulates
     it per ``client_id`` (>MET*) so usage bills per user. A counter becomes billable
     only when its name has a rate in the ``metrics_conversions`` table; it flows as a
-    raw count regardless. Best-effort: never let metrics break a chat turn.
+    raw count regardless.
+
+    ``input_tokens`` is fresh (non-cached) input. Cache-read and cache-creation tokens
+    ride their own counters because providers bill them at rates distinct from fresh
+    input; the four counters are disjoint. Best-effort: never break a chat turn.
     """
     try:
-        it, ot = int(input_tokens or 0), int(output_tokens or 0)
-        if not (it or ot):
+        it = int(input_tokens or 0)
+        ot = int(output_tokens or 0)
+        cr = int(cache_read_tokens or 0)
+        cc = int(cache_creation_tokens or 0)
+        if not (it or ot or cr or cc):
             return
         from ai.web.metrics import metrics
 
@@ -177,17 +191,45 @@ def report_llm_tokens(input_tokens: int = 0, output_tokens: int = 0, *, model: s
             metrics.counter('llm_input_tokens', it)
         if ot:
             metrics.counter('llm_output_tokens', ot)
-        metrics.event({'llm_tokens': {'input': it, 'output': ot, 'model': model}})
-    except Exception:
-        pass
+        if cr:
+            metrics.counter('llm_cache_read_tokens', cr)
+        if cc:
+            metrics.counter('llm_cache_creation_tokens', cc)
+        metrics.event(
+            {'llm_tokens': {'input': it, 'output': ot, 'cache_read': cr, 'cache_creation': cc, 'model': model}}
+        )
+    except Exception as exc:
+        # Best-effort accounting: keep the chat turn alive, but leave an operational trace.
+        try:
+            from rocketlib import debug
+
+            debug(f'LLM token reporting failed: {type(exc).__name__}')
+        except Exception:
+            pass
+
+
+def _split_input_cache(um: dict) -> tuple[int, int, int, int]:
+    """From a LangChain ``usage_metadata`` dict, return
+    ``(fresh_input, output, cache_read, cache_creation)``. LangChain reports
+    ``input_tokens`` as the full prompt (cache included), so the cache detail is
+    subtracted back out to keep the four counters disjoint.
+    """
+    out = int(um.get('output_tokens') or 0)
+    total_in = int(um.get('input_tokens') or 0)
+    det = um.get('input_token_details')
+    det = det if isinstance(det, dict) else {}
+    cr = int(det.get('cache_read') or 0)
+    cc = int(det.get('cache_creation') or 0)
+    return max(0, total_in - cr - cc), out, cr, cc
 
 
 def _report_usage_metadata(usage: Any, llm: Any) -> None:
-    """Extract LangChain ``usage_metadata`` (input/output_tokens) and report it."""
+    """Extract LangChain ``usage_metadata`` and report it (fresh input + cache split)."""
     if not isinstance(usage, dict):
         return
     model = getattr(llm, 'model', None) or getattr(llm, 'model_name', '') or ''
-    report_llm_tokens(usage.get('input_tokens', 0), usage.get('output_tokens', 0), model=str(model))
+    fresh, out, cr, cc = _split_input_cache(usage)
+    report_llm_tokens(fresh, out, model=str(model), cache_read_tokens=cr, cache_creation_tokens=cc)
 
 
 class LangChainAdapter:
@@ -208,14 +250,22 @@ class LangChainAdapter:
         self.history.append({'role': 'user', 'content': user_text})
         parse = _make_stream_content_parser(True)
         parts: list[str] = []
-        in_toks = out_toks = 0
-        for piece in self.llm.stream(self.history, **self.stream_kwargs):
+        # OpenAI-family models only emit streaming usage when asked; others (e.g.
+        # Anthropic) emit it by default, so scope the flag to avoid an unknown kwarg.
+        skw = dict(self.stream_kwargs)
+        if 'OpenAI' in type(self.llm).__name__:
+            skw.setdefault('stream_usage', True)
+        total_in = out_toks = cache_read = cache_creation = 0
+        for piece in self.llm.stream(self.history, **skw):
             um = getattr(piece, 'usage_metadata', None)
             if isinstance(um, dict):
-                # Chunks carry cumulative counts (input on the first, output growing);
-                # max() lands on the final totals without assuming chunk order.
-                in_toks = max(in_toks, int(um.get('input_tokens') or 0))
+                # Chunks carry cumulative counts; max() lands on the final totals.
+                total_in = max(total_in, int(um.get('input_tokens') or 0))
                 out_toks = max(out_toks, int(um.get('output_tokens') or 0))
+                det = um.get('input_token_details')
+                if isinstance(det, dict):
+                    cache_read = max(cache_read, int(det.get('cache_read') or 0))
+                    cache_creation = max(cache_creation, int(det.get('cache_creation') or 0))
             text, thinking = parse(piece.content)
             if thinking:
                 yield Event('thinking', thinking)
@@ -232,7 +282,11 @@ class LangChainAdapter:
             parts.append(tail_text)
             yield Event('text', tail_text)
         report_llm_tokens(
-            in_toks, out_toks, model=str(getattr(self.llm, 'model', None) or getattr(self.llm, 'model_name', '') or '')
+            max(0, total_in - cache_read - cache_creation),
+            out_toks,
+            model=str(getattr(self.llm, 'model', None) or getattr(self.llm, 'model_name', '') or ''),
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
         )
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
@@ -268,7 +322,7 @@ class NativeOpenAIResponsesAdapter:
         self.history.append({'role': 'user', 'content': user_text})
         chat = self.chat
         parts: list[str] = []
-        input_tokens = output_tokens = 0
+        input_tokens = output_tokens = cache_read = 0
         stream = chat._raw_client.responses.create(
             model=chat._model,
             input=user_text,
@@ -298,6 +352,8 @@ class NativeOpenAIResponsesAdapter:
                     if u is not None:
                         input_tokens = int(getattr(u, 'input_tokens', 0) or 0)
                         output_tokens = int(getattr(u, 'output_tokens', 0) or 0)
+                        # cached_tokens are part of input_tokens; split them out.
+                        cache_read = int(getattr(getattr(u, 'input_tokens_details', None), 'cached_tokens', 0) or 0)
                     status = getattr(resp, 'status', None) if resp is not None else None
                     if status == 'incomplete':
                         details = getattr(resp, 'incomplete_details', None)
@@ -313,7 +369,12 @@ class NativeOpenAIResponsesAdapter:
                     closer()
                 except Exception:
                     pass
-        report_llm_tokens(input_tokens, output_tokens, model=str(getattr(self.chat, '_model', '') or ''))
+        report_llm_tokens(
+            max(0, input_tokens - cache_read),
+            output_tokens,
+            model=str(getattr(self.chat, '_model', '') or ''),
+            cache_read_tokens=cache_read,
+        )
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])

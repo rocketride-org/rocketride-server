@@ -197,7 +197,7 @@ class NativeAnthropicAdapter:
             raise RuntimeError('ChatAnthropic has no _client for native streaming')
 
         parts: list[str] = []
-        input_tokens = output_tokens = 0
+        input_tokens = output_tokens = cache_read = cache_creation = 0
         raw_stream = _open_raw_message_stream(client, payload)
         try:
             for event in raw_stream:
@@ -220,7 +220,10 @@ class NativeAnthropicAdapter:
                     # input_tokens arrive once, on the opening event's message.usage.
                     u = getattr(getattr(event, 'message', None), 'usage', None)
                     if u is not None:
+                        # Anthropic input_tokens already excludes cache; cache splits out.
                         input_tokens = int(getattr(u, 'input_tokens', 0) or 0)
+                        cache_creation = int(getattr(u, 'cache_creation_input_tokens', 0) or 0)
+                        cache_read = int(getattr(u, 'cache_read_input_tokens', 0) or 0)
                 elif et == 'message_delta':
                     md = getattr(event, 'delta', None)
                     if md is not None:
@@ -239,7 +242,13 @@ class NativeAnthropicAdapter:
                 except Exception:
                     pass
 
-        report_llm_tokens(input_tokens, output_tokens, model=str(getattr(self.chat, '_model', '') or ''))
+        report_llm_tokens(
+            input_tokens,
+            output_tokens,
+            model=str(getattr(self.chat, '_model', '') or ''),
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_creation,
+        )
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])
