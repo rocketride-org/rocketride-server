@@ -345,23 +345,25 @@ class NativeOpenAIResponsesAdapter:
                     if delta:
                         parts.append(delta)
                         yield Event('text', delta)
-                elif etype == 'response.completed':
+                elif etype in ('response.completed', 'response.failed', 'response.error'):
                     resp = getattr(event, 'response', None)
-                    # Responses API reports token usage on the terminal event.
+                    # Terminal events (success OR failure) can carry usage; a failed
+                    # request may already be chargeable, so read it either way.
                     u = getattr(resp, 'usage', None) if resp is not None else None
                     if u is not None:
                         input_tokens = int(getattr(u, 'input_tokens', 0) or 0)
                         output_tokens = int(getattr(u, 'output_tokens', 0) or 0)
                         # cached_tokens are part of input_tokens; split them out.
                         cache_read = int(getattr(getattr(u, 'input_tokens_details', None), 'cached_tokens', 0) or 0)
-                    status = getattr(resp, 'status', None) if resp is not None else None
-                    if status == 'incomplete':
-                        details = getattr(resp, 'incomplete_details', None)
-                        self.finish_reason = (getattr(details, 'reason', None) if details else None) or 'length'
+                    if etype == 'response.completed':
+                        status = getattr(resp, 'status', None) if resp is not None else None
+                        if status == 'incomplete':
+                            details = getattr(resp, 'incomplete_details', None)
+                            self.finish_reason = (getattr(details, 'reason', None) if details else None) or 'length'
+                        else:
+                            self.finish_reason = 'stop' if status == 'completed' else (status or 'stop')
                     else:
-                        self.finish_reason = 'stop' if status == 'completed' else (status or 'stop')
-                elif etype in ('response.failed', 'response.error'):
-                    self.finish_reason = 'error'
+                        self.finish_reason = 'error'
         finally:
             closer = getattr(stream, 'close', None)
             if callable(closer):

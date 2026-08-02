@@ -6,6 +6,7 @@
 """Pins NativeOpenAIResponsesAdapter: Responses stream → Events + finish mapping."""
 
 from ai.common.llm_adapter import Event, NativeOpenAIResponsesAdapter
+from ai.web.metrics.metrics import metrics
 
 
 class _Ev:
@@ -134,3 +135,34 @@ def test_closes_stream_on_early_break():
     next(gen)  # consume one event, then abandon
     gen.close()  # GeneratorExit → finally closes the stream
     assert stream.closed is True
+
+
+def test_reports_usage_on_failed_terminal_event():
+    """A response.failed event that carries usage must still record tokens."""
+    metrics.reset()
+
+    class _Cached:
+        cached_tokens = 4
+
+    class _Usage:
+        input_tokens = 30
+        output_tokens = 7
+        input_tokens_details = _Cached()
+
+    class _FailedResp:
+        usage = _Usage()
+
+    events = [
+        _Ev('response.output_text.delta', delta='partial'),
+        _Ev('response.failed', response=_FailedResp()),
+    ]
+    adapter = NativeOpenAIResponsesAdapter(_Chat(events))
+    out = list(adapter.stream('q'))
+
+    assert adapter.finish_reason == 'error'
+    assert out[-1].type == 'done'
+    counters = metrics.report()['counters']
+    # input 30 includes 4 cached -> fresh 26 + cache_read 4
+    assert counters.get('llm_input_tokens') == 26
+    assert counters.get('llm_cache_read_tokens') == 4
+    assert counters.get('llm_output_tokens') == 7
