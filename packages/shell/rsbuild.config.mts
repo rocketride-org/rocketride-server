@@ -188,7 +188,7 @@ export default defineConfig(({ command }) => {
 			// devtools global hook BEFORE react-dom evaluates (a hard ordering
 			// requirement of react-refresh), then continues into the same boot.
 			entry: {
-				index: isDevFlavor ? './src/index.dev.tsx' : './src/index.tsx',
+				index: isDevFlavor ? './src/boot.dev.tsx' : './src/boot.tsx',
 			},
 
 			// Compile-time constant substitution.
@@ -232,7 +232,7 @@ export default defineConfig(({ command }) => {
 			// Disable lazy compilation. It's incompatible with this dev setup
 			// (custom assetPrefix '/shell/' + writeToDisk + Module Federation): the
 			// on-demand `*_lazy-compilation-proxy` chunk for the async bootstrap
-			// boundary (index.tsx -> import('./bootstrap')) fails to load after a
+			// boundary (boot.tsx -> import('./bootstrap')) fails to load after a
 			// full-page navigation such as the OAuth redirect round-trip, throwing
 			// ChunkLoadError and triggering an HMR reload loop. Compiling everything
 			// up front keeps the bootstrap chunk always available.
@@ -255,6 +255,10 @@ export default defineConfig(({ command }) => {
 
 		},
 		output: {
+			// RR_SHELL_DEBUG=1: ship UNMINIFIED bundles so runtime errors carry
+			// real symbol names — the boot-order/TDZ class is invisible to the
+			// type checker and unreadable when minified. Debug-only; never CI.
+			...(process.env.RR_SHELL_DEBUG === '1' ? { minify: false } : {}),
 			// Write the production bundle to build/shell/ at the repo root so that
 			// all app bundles live under a single top-level build/ directory.
 			// The dev flavor builds beside it; the stitch step merges its hashed

@@ -152,6 +152,10 @@ export type { IConfirmDialogProps as ConfirmDialogProps } from './components/mod
 // Workspace context interface + provider props
 export type { IWorkspaceContext, IWorkspaceProviderProps } from './components/workspace/WorkspaceContext';
 
+// Polling options — graduated from the known-gaps queue (was reachable
+// only structurally through usePolling).
+export type { IUsePollingOptions } from './hooks/usePolling';
+
 // The shared RocketRide client — an MF shared singleton the shell serves to
 // every app, so its API surface is PART of this contract. Exporting the type
 // by name gives it its own per-version floor (Frozen = Current, covariant):
@@ -296,23 +300,6 @@ import * as stockIcons from './components/BoxIcon';
 // Theme vocabulary: the token map type.
 export type { ThemeTokens } from './themes/tokens';
 
-// The picked stock values as ONE object for the shellApi spread below.
-const stockSurface = {
-	Button, StatusBadge, StatusDot, EmptyState, Banner, InputField,
-	ToggleGroup, Chip, ChipAdd, DropZone, Card, MiniCard, MiniContainer,
-	Section, LabelValue, ContentHeader, RocketRideMark,
-	DetailPanel, PanelTabBody, TabControl, TabPanel, Modal, CLOSE_GLYPH,
-	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
-	useSidebarCollapsed, SidebarFooter,
-	DataGrid, CardDataGrid, FilterStrip, createActionsColumn, autoFormatter,
-	badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch,
-	createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET,
-	GRID_CONFIG_CLEAR,
-	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
-	formatDuration,
-	commonStyles,
-	...stockIcons,
-} as const;
 
 // =============================================================================
 // SHELL API SURFACE
@@ -326,85 +313,127 @@ const stockSurface = {
  * becomes the versioned contract enforced against shell's own compilation.
  */
 export const shellApi = {
-	// The stock library surface (see the star export above) — spread FIRST
-	// so this module's explicit members win the few name collisions, same
-	// resolution the star export applies to the named surface.
-	...stockSurface,
+	// LAZY BY DESIGN — every member is a getter, so building this object
+	// reads NOTHING at module evaluation. The aggregator is the one place
+	// that would otherwise read every surface binding eagerly, and inside
+	// the host bundle that is a boot-order landmine: any shared module the
+	// shell chrome pulls that imports the 'shell' barrel creates a require
+	// cycle back into this file, and an eager read of a still-evaluating
+	// module's binding is a TDZ ReferenceError at boot (this happened:
+	// Shell.tsx -> AccountProvider -> account module -> barrel -> here ->
+	// read of Shell). Getters defer every read to first ACCESS, which is
+	// always post-boot. typeof is unchanged (get-only = readonly member).
 
-	// Hooks
-	useShellConnection,
-	useAuthUser,
-	useLogout,
-	useWorkspace,
-	useClient,
-	useShellEvent,
-	useIframeBridge,
-	useSubscriptions,
-	usePolling,
-	useDashboardData,
-	useConnectionStatus,
-	useShellApiConfig,
-	useAppComponent,
-	useSidebarContent,
-	useClickOutside,
-	useFixedPopupPosition,
-	usePrefs,
-
-	// Client access + connection manager + connection state
-	getClient,
-	ConnectionManager,
-	ConnectionState,
-
-	// Auth providers
-	CloudAuthProvider,
-	ApiKeyAuthProvider,
-
-	// Workspace provider + prefs provider
-	WorkspaceProvider,
-	PrefsProvider,
-
-	// Document component library
-	Documents,
-	NOOP_VFS,
-	Explorer,
-	DocTabs,
-	DocSplitLayout,
-	DocExplorer,
-
-	// Top-level shell frame + zone components
-	Shell,
-	Sidebar,
-	BottomPanel,
-	DebugPanel,
-
-	// Layout building blocks
-	NavButton,
-	ConfirmDialog,
-	PopupRow,
-
-	// Shell-owned overlay pages
-	AccountProvider,
-	SettingsProvider,
-
-	// Icons
-	BxPlus,
-	BxEditAlt,
-	BxTrash,
-	BxDesktop,
-	BxGridAlt,
-	BxCog,
-	BxListUl,
-	BxStop,
-	BxPlay,
-	BxHome,
-	BxNote,
-	BxComponent,
-	BxUser,
-	BxRocket,
-	BxLockOpen,
-	BxPurchaseTag,
-	BxChevronRight,
-	BxFolderOpen,
+	// The stock library surface. The icon namespace spread is the one
+	// eager read allowed here: BoxIcon is a LEAF module (react only), so
+	// it can never participate in a cycle.
+	...stockIcons,
+	get Button() { return Button; },
+	get StatusBadge() { return StatusBadge; },
+	get StatusDot() { return StatusDot; },
+	get EmptyState() { return EmptyState; },
+	get Banner() { return Banner; },
+	get InputField() { return InputField; },
+	get ToggleGroup() { return ToggleGroup; },
+	get Chip() { return Chip; },
+	get ChipAdd() { return ChipAdd; },
+	get DropZone() { return DropZone; },
+	get Card() { return Card; },
+	get MiniCard() { return MiniCard; },
+	get MiniContainer() { return MiniContainer; },
+	get Section() { return Section; },
+	get LabelValue() { return LabelValue; },
+	get ContentHeader() { return ContentHeader; },
+	get RocketRideMark() { return RocketRideMark; },
+	get DetailPanel() { return DetailPanel; },
+	get PanelTabBody() { return PanelTabBody; },
+	get TabControl() { return TabControl; },
+	get TabPanel() { return TabPanel; },
+	get Modal() { return Modal; },
+	get CLOSE_GLYPH() { return CLOSE_GLYPH; },
+	get SidebarMenu() { return SidebarMenu; },
+	get SidebarCollapsedProvider() { return SidebarCollapsedProvider; },
+	get SidebarCollapsedGate() { return SidebarCollapsedGate; },
+	get useSidebarCollapsed() { return useSidebarCollapsed; },
+	get SidebarFooter() { return SidebarFooter; },
+	get DataGrid() { return DataGrid; },
+	get CardDataGrid() { return CardDataGrid; },
+	get FilterStrip() { return FilterStrip; },
+	get createActionsColumn() { return createActionsColumn; },
+	get autoFormatter() { return autoFormatter; },
+	get badgeEl() { return badgeEl; },
+	get buttonEl() { return buttonEl; },
+	get avatarEl() { return avatarEl; },
+	get monoEl() { return monoEl; },
+	get mutedEl() { return mutedEl; },
+	get matchesSearch() { return matchesSearch; },
+	get createMessageGridPersistence() { return createMessageGridPersistence; },
+	get GRID_CONFIG_GET() { return GRID_CONFIG_GET; },
+	get GRID_CONFIG_SET() { return GRID_CONFIG_SET; },
+	get GRID_CONFIG_CLEAR() { return GRID_CONFIG_CLEAR; },
+	get useDebouncedValue() { return useDebouncedValue; },
+	get useAnnouncements() { return useAnnouncements; },
+	get formatBytes() { return formatBytes; },
+	get formatDate() { return formatDate; },
+	get formatDuration() { return formatDuration; },
+	get commonStyles() { return commonStyles; },
+	get useShellConnection() { return useShellConnection; },
+	get useAuthUser() { return useAuthUser; },
+	get useLogout() { return useLogout; },
+	get useWorkspace() { return useWorkspace; },
+	get useClient() { return useClient; },
+	get useShellEvent() { return useShellEvent; },
+	get useIframeBridge() { return useIframeBridge; },
+	get useSubscriptions() { return useSubscriptions; },
+	get usePolling() { return usePolling; },
+	get useDashboardData() { return useDashboardData; },
+	get useConnectionStatus() { return useConnectionStatus; },
+	get useShellApiConfig() { return useShellApiConfig; },
+	get useAppComponent() { return useAppComponent; },
+	get useSidebarContent() { return useSidebarContent; },
+	get useClickOutside() { return useClickOutside; },
+	get useFixedPopupPosition() { return useFixedPopupPosition; },
+	get usePrefs() { return usePrefs; },
+	get getClient() { return getClient; },
+	get ConnectionManager() { return ConnectionManager; },
+	get ConnectionState() { return ConnectionState; },
+	get CloudAuthProvider() { return CloudAuthProvider; },
+	get ApiKeyAuthProvider() { return ApiKeyAuthProvider; },
+	get WorkspaceProvider() { return WorkspaceProvider; },
+	get PrefsProvider() { return PrefsProvider; },
+	get Documents() { return Documents; },
+	get NOOP_VFS() { return NOOP_VFS; },
+	get Explorer() { return Explorer; },
+	get DocTabs() { return DocTabs; },
+	get DocSplitLayout() { return DocSplitLayout; },
+	get DocExplorer() { return DocExplorer; },
+	get Shell() { return Shell; },
+	get Sidebar() { return Sidebar; },
+	get BottomPanel() { return BottomPanel; },
+	get DebugPanel() { return DebugPanel; },
+	get NavButton() { return NavButton; },
+	get ConfirmDialog() { return ConfirmDialog; },
+	get PopupRow() { return PopupRow; },
+	get AccountProvider() { return AccountProvider; },
+	get SettingsProvider() { return SettingsProvider; },
+	get BxPlus() { return BxPlus; },
+	get BxEditAlt() { return BxEditAlt; },
+	get BxTrash() { return BxTrash; },
+	get BxDesktop() { return BxDesktop; },
+	get BxGridAlt() { return BxGridAlt; },
+	get BxCog() { return BxCog; },
+	get BxListUl() { return BxListUl; },
+	get BxStop() { return BxStop; },
+	get BxPlay() { return BxPlay; },
+	get BxHome() { return BxHome; },
+	get BxNote() { return BxNote; },
+	get BxComponent() { return BxComponent; },
+	get BxUser() { return BxUser; },
+	get BxRocket() { return BxRocket; },
+	get BxLockOpen() { return BxLockOpen; },
+	get BxPurchaseTag() { return BxPurchaseTag; },
+	get BxChevronRight() { return BxChevronRight; },
+	get BxFolderOpen() { return BxFolderOpen; },
 } as const;
 
 // =============================================================================
