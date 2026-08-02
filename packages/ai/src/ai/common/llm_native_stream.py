@@ -19,7 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from rocketlib import debug, warning
 
-from ai.common.llm_adapter import Event, drive_adapter
+from ai.common.llm_adapter import Event, drive_adapter, report_llm_tokens
 
 # Per-call carrier for API-level stop sequences (e.g. CrewAI's ReAct "\nObservation:").
 # Set on the ask path in llm_base._question and read at every model sink so the stop
@@ -197,6 +197,7 @@ class NativeAnthropicAdapter:
             raise RuntimeError('ChatAnthropic has no _client for native streaming')
 
         parts: list[str] = []
+        input_tokens = output_tokens = 0
         raw_stream = _open_raw_message_stream(client, payload)
         try:
             for event in raw_stream:
@@ -215,12 +216,21 @@ class NativeAnthropicAdapter:
                         if piece:
                             parts.append(piece)
                             yield Event('text', piece)
+                elif et == 'message_start':
+                    # input_tokens arrive once, on the opening event's message.usage.
+                    u = getattr(getattr(event, 'message', None), 'usage', None)
+                    if u is not None:
+                        input_tokens = int(getattr(u, 'input_tokens', 0) or 0)
                 elif et == 'message_delta':
                     md = getattr(event, 'delta', None)
                     if md is not None:
                         sr = getattr(md, 'stop_reason', None)
                         if sr is not None:
                             self.finish_reason = _map_claude_stop_reason(sr)
+                    # output_tokens accumulate on message_delta.usage (final = last).
+                    u = getattr(event, 'usage', None)
+                    if u is not None:
+                        output_tokens = int(getattr(u, 'output_tokens', 0) or 0) or output_tokens
         finally:
             closer = getattr(raw_stream, 'close', None)
             if callable(closer):
@@ -229,6 +239,7 @@ class NativeAnthropicAdapter:
                 except Exception:
                     pass
 
+        report_llm_tokens(input_tokens, output_tokens, model=str(getattr(self.chat, '_model', '') or ''))
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])

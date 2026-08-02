@@ -159,6 +159,37 @@ def flatten_content(content: Any) -> str:
     return flatten_content_parts(content)[0]
 
 
+def report_llm_tokens(input_tokens: int = 0, output_tokens: int = 0, *, model: str = '') -> None:
+    """Surface per-run LLM token usage to the metrics singleton.
+
+    Reported in the subprocess via ``metrics.counter``; ``task_metrics`` accumulates
+    it per ``client_id`` (>MET*) so usage bills per user. A counter becomes billable
+    only when its name has a rate in the ``metrics_conversions`` table; it flows as a
+    raw count regardless. Best-effort: never let metrics break a chat turn.
+    """
+    try:
+        it, ot = int(input_tokens or 0), int(output_tokens or 0)
+        if not (it or ot):
+            return
+        from ai.web.metrics import metrics
+
+        if it:
+            metrics.counter('llm_input_tokens', it)
+        if ot:
+            metrics.counter('llm_output_tokens', ot)
+        metrics.event({'llm_tokens': {'input': it, 'output': ot, 'model': model}})
+    except Exception:
+        pass
+
+
+def _report_usage_metadata(usage: Any, llm: Any) -> None:
+    """Extract LangChain ``usage_metadata`` (input/output_tokens) and report it."""
+    if not isinstance(usage, dict):
+        return
+    model = getattr(llm, 'model', None) or getattr(llm, 'model_name', '') or ''
+    report_llm_tokens(usage.get('input_tokens', 0), usage.get('output_tokens', 0), model=str(model))
+
+
 class LangChainAdapter:
     """Wraps a LangChain chat model so non-reasoning providers speak the Event contract.
 
@@ -177,7 +208,14 @@ class LangChainAdapter:
         self.history.append({'role': 'user', 'content': user_text})
         parse = _make_stream_content_parser(True)
         parts: list[str] = []
+        in_toks = out_toks = 0
         for piece in self.llm.stream(self.history, **self.stream_kwargs):
+            um = getattr(piece, 'usage_metadata', None)
+            if isinstance(um, dict):
+                # Chunks carry cumulative counts (input on the first, output growing);
+                # max() lands on the final totals without assuming chunk order.
+                in_toks = max(in_toks, int(um.get('input_tokens') or 0))
+                out_toks = max(out_toks, int(um.get('output_tokens') or 0))
             text, thinking = parse(piece.content)
             if thinking:
                 yield Event('thinking', thinking)
@@ -193,6 +231,9 @@ class LangChainAdapter:
         if tail_text:
             parts.append(tail_text)
             yield Event('text', tail_text)
+        report_llm_tokens(
+            in_toks, out_toks, model=str(getattr(self.llm, 'model', None) or getattr(self.llm, 'model_name', '') or '')
+        )
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])
@@ -207,6 +248,7 @@ class LangChainAdapter:
         # prompt string it was given, not a one-element message list.
         payload = self.history if had_history else user_text
         result = self.llm.invoke(payload, **self.stream_kwargs)
+        _report_usage_metadata(getattr(result, 'usage_metadata', None), self.llm)
         text, self.reasoning = flatten_content_parts(getattr(result, 'content', ''))
         assistant = {'role': 'assistant', 'content': text}
         self.history.append(assistant)
@@ -226,6 +268,7 @@ class NativeOpenAIResponsesAdapter:
         self.history.append({'role': 'user', 'content': user_text})
         chat = self.chat
         parts: list[str] = []
+        input_tokens = output_tokens = 0
         stream = chat._raw_client.responses.create(
             model=chat._model,
             input=user_text,
@@ -250,6 +293,11 @@ class NativeOpenAIResponsesAdapter:
                         yield Event('text', delta)
                 elif etype == 'response.completed':
                     resp = getattr(event, 'response', None)
+                    # Responses API reports token usage on the terminal event.
+                    u = getattr(resp, 'usage', None) if resp is not None else None
+                    if u is not None:
+                        input_tokens = int(getattr(u, 'input_tokens', 0) or 0)
+                        output_tokens = int(getattr(u, 'output_tokens', 0) or 0)
                     status = getattr(resp, 'status', None) if resp is not None else None
                     if status == 'incomplete':
                         details = getattr(resp, 'incomplete_details', None)
@@ -265,6 +313,7 @@ class NativeOpenAIResponsesAdapter:
                     closer()
                 except Exception:
                     pass
+        report_llm_tokens(input_tokens, output_tokens, model=str(getattr(self.chat, '_model', '') or ''))
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])
