@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-02T06:53:15.271Z
-// Source commit: c8a41043e416166c7f2cac97ad8a5f61e97a1aca
+// Generated:     2026-08-02T07:32:11.580Z
+// Source commit: 83c5c07e7e9b75875cd0b32780a941e5c5cccb0f
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -5441,7 +5441,36 @@ export declare function useSubscriptions(): {
     /** Quick lookup: what's this app's appStatus? */
     getStatus: (appId: string) => AppStatus | undefined;
 };
-interface IUsePollingOptions {
+/**
+ * Poll a fetcher function at a fixed interval, only while connected.
+ *
+ * Replaces the duplicated polling pattern found in monitor apps:
+ * ```ts
+ * useEffect(() => {
+ *     if (!isConnected) return;
+ *     fetchDashboard();
+ *     const id = setInterval(fetchDashboard, 3000);
+ *     return () => clearInterval(id);
+ * }, [isConnected, fetchDashboard]);
+ * ```
+ *
+ * @param fetcher  - Async function to call on each interval tick.
+ * @param interval - Polling interval in milliseconds.
+ *
+ * @example
+ * ```tsx
+ * const fetchDashboard = useCallback(async () => {
+ *     const client = ConnectionManager.getInstance().getClient();
+ *     if (!client) return;
+ *     const data = await client.getDashboard();
+ *     setDashboard(data);
+ * }, []);
+ *
+ * usePolling(fetchDashboard, 3000);
+ * ```
+ */
+/** Options for {@link usePolling}. */
+export interface IUsePollingOptions {
     /**
      * Connection gate for the interval.
      * - 'shell' (default): poll only while the shell's global connection is up —
@@ -8770,6 +8799,113 @@ export type ThemeTokens = {
  * becomes the versioned contract enforced against shell's own compilation.
  */
 export declare const shellApi: {
+    readonly Button: typeof Button;
+    readonly StatusBadge: typeof StatusBadge;
+    readonly StatusDot: typeof StatusDot;
+    readonly EmptyState: typeof EmptyState;
+    readonly Banner: typeof Banner;
+    readonly InputField: typeof InputField;
+    readonly ToggleGroup: typeof ToggleGroup;
+    readonly Chip: typeof Chip;
+    readonly ChipAdd: typeof ChipAdd;
+    readonly DropZone: typeof DropZone;
+    readonly Card: typeof Card;
+    readonly MiniCard: typeof MiniCard;
+    readonly MiniContainer: typeof MiniContainer;
+    readonly Section: typeof Section;
+    readonly LabelValue: typeof LabelValue;
+    readonly ContentHeader: typeof ContentHeader;
+    readonly RocketRideMark: typeof RocketRideMark;
+    readonly DetailPanel: typeof DetailPanel;
+    readonly PanelTabBody: typeof PanelTabBody;
+    readonly TabControl: typeof TabControl;
+    readonly TabPanel: typeof TabPanel;
+    readonly Modal: typeof Modal;
+    readonly CLOSE_GLYPH: string;
+    readonly SidebarMenu: typeof SidebarMenu;
+    readonly SidebarCollapsedProvider: import("react").FC<ISidebarCollapsedProviderProps>;
+    readonly SidebarCollapsedGate: import("react").FC<ISidebarCollapsedGateProps>;
+    readonly useSidebarCollapsed: typeof useSidebarCollapsed;
+    readonly SidebarFooter: import("react").FC<SidebarFooterProps>;
+    readonly DataGrid: <Row extends Record<string, unknown>>(props: IDataGridProps<Row> & {
+        ref?: import("react").Ref<IDataGridHandle>;
+    }) => import("react").ReactElement;
+    readonly CardDataGrid: <Row extends Record<string, unknown>>(props: ICardDataGridProps<Row> & {
+        ref?: import("react").Ref<IDataGridHandle>;
+    }) => import("react").ReactElement;
+    readonly FilterStrip: import("react").FC<IFilterStripProps>;
+    readonly createActionsColumn: typeof createActionsColumn;
+    readonly autoFormatter: typeof autoFormatter;
+    readonly badgeEl: typeof badgeEl;
+    readonly buttonEl: typeof buttonEl;
+    readonly avatarEl: typeof avatarEl;
+    readonly monoEl: typeof monoEl;
+    readonly mutedEl: typeof mutedEl;
+    readonly matchesSearch: typeof matchesSearch;
+    readonly createMessageGridPersistence: typeof createMessageGridPersistence;
+    readonly GRID_CONFIG_GET: string;
+    readonly GRID_CONFIG_SET: string;
+    readonly GRID_CONFIG_CLEAR: string;
+    readonly useDebouncedValue: typeof useDebouncedValue;
+    readonly useAnnouncements: typeof useAnnouncements;
+    readonly formatBytes: typeof formatBytes;
+    readonly formatDate: typeof formatDate;
+    readonly formatDuration: typeof formatDuration;
+    readonly commonStyles: {
+        card: import("react").CSSProperties;
+        cardHeader: import("react").CSSProperties;
+        cardBody: import("react").CSSProperties;
+        cardFlat: import("react").CSSProperties;
+        section: import("react").CSSProperties;
+        sectionHeader: import("react").CSSProperties;
+        sectionHeaderLabel: import("react").CSSProperties;
+        buttonPrimary: import("react").CSSProperties;
+        buttonDanger: import("react").CSSProperties;
+        buttonDangerOutline: import("react").CSSProperties;
+        buttonSecondary: import("react").CSSProperties;
+        buttonSmall: import("react").CSSProperties;
+        buttonPrimarySmall: import("react").CSSProperties;
+        buttonSecondarySmall: import("react").CSSProperties;
+        buttonDangerSmall: import("react").CSSProperties;
+        buttonDisabled: import("react").CSSProperties;
+        cardHeaderButton: import("react").CSSProperties;
+        cardBodyButton: import("react").CSSProperties;
+        toggleButton: (active: boolean) => import("react").CSSProperties;
+        toggleGroup: import("react").CSSProperties;
+        splitHeader: import("react").CSSProperties;
+        tabContent: import("react").CSSProperties;
+        viewPadding: import("react").CSSProperties;
+        columnFill: import("react").CSSProperties;
+        headerBar: import("react").CSSProperties;
+        divider: import("react").CSSProperties;
+        empty: import("react").CSSProperties;
+        textMuted: import("react").CSSProperties;
+        textEllipsis: import("react").CSSProperties;
+        fontMono: import("react").CSSProperties;
+        labelUppercase: import("react").CSSProperties;
+        overlay: import("react").CSSProperties;
+        modalOverlay: import("react").CSSProperties;
+        dialog: import("react").CSSProperties;
+        modalDialog: import("react").CSSProperties;
+        modalHeader: import("react").CSSProperties;
+        modalBody: import("react").CSSProperties;
+        modalFooter: import("react").CSSProperties;
+        popupMenu: import("react").CSSProperties;
+        menuRow: import("react").CSSProperties;
+        inputField: import("react").CSSProperties;
+        listRow: (active: boolean) => import("react").CSSProperties;
+        emptyState: import("react").CSSProperties;
+        iconBox: import("react").CSSProperties;
+        badge: import("react").CSSProperties;
+        tableHeader: import("react").CSSProperties;
+        tableCell: import("react").CSSProperties;
+        indicatorBase: import("react").CSSProperties;
+        indicatorSuccess: import("react").CSSProperties;
+        indicatorInfo: import("react").CSSProperties;
+        indicatorWarning: import("react").CSSProperties;
+        indicatorError: import("react").CSSProperties;
+        indicatorMuted: import("react").CSSProperties;
+    };
     readonly useShellConnection: typeof useShellConnection;
     readonly useAuthUser: typeof useAuthUser;
     readonly useLogout: typeof useLogout;
@@ -8865,113 +9001,6 @@ export declare const shellApi: {
     readonly BxDownload: IconComponent;
     readonly BxSortAlt: IconComponent;
     readonly BxHand: IconComponent;
-    readonly Button: typeof Button;
-    readonly StatusBadge: typeof StatusBadge;
-    readonly StatusDot: typeof StatusDot;
-    readonly EmptyState: typeof EmptyState;
-    readonly Banner: typeof Banner;
-    readonly InputField: typeof InputField;
-    readonly ToggleGroup: typeof ToggleGroup;
-    readonly Chip: typeof Chip;
-    readonly ChipAdd: typeof ChipAdd;
-    readonly DropZone: typeof DropZone;
-    readonly Card: typeof Card;
-    readonly MiniCard: typeof MiniCard;
-    readonly MiniContainer: typeof MiniContainer;
-    readonly Section: typeof Section;
-    readonly LabelValue: typeof LabelValue;
-    readonly ContentHeader: typeof ContentHeader;
-    readonly RocketRideMark: typeof RocketRideMark;
-    readonly DetailPanel: typeof DetailPanel;
-    readonly PanelTabBody: typeof PanelTabBody;
-    readonly TabControl: typeof TabControl;
-    readonly TabPanel: typeof TabPanel;
-    readonly Modal: typeof Modal;
-    readonly CLOSE_GLYPH: "\u2715";
-    readonly SidebarMenu: typeof SidebarMenu;
-    readonly SidebarCollapsedProvider: import("react").FC<ISidebarCollapsedProviderProps>;
-    readonly SidebarCollapsedGate: import("react").FC<ISidebarCollapsedGateProps>;
-    readonly useSidebarCollapsed: typeof useSidebarCollapsed;
-    readonly SidebarFooter: import("react").FC<SidebarFooterProps>;
-    readonly DataGrid: <Row extends Record<string, unknown>>(props: IDataGridProps<Row> & {
-        ref?: import("react").Ref<IDataGridHandle>;
-    }) => import("react").ReactElement;
-    readonly CardDataGrid: <Row extends Record<string, unknown>>(props: ICardDataGridProps<Row> & {
-        ref?: import("react").Ref<IDataGridHandle>;
-    }) => import("react").ReactElement;
-    readonly FilterStrip: import("react").FC<IFilterStripProps>;
-    readonly createActionsColumn: typeof createActionsColumn;
-    readonly autoFormatter: typeof autoFormatter;
-    readonly badgeEl: typeof badgeEl;
-    readonly buttonEl: typeof buttonEl;
-    readonly avatarEl: typeof avatarEl;
-    readonly monoEl: typeof monoEl;
-    readonly mutedEl: typeof mutedEl;
-    readonly matchesSearch: typeof matchesSearch;
-    readonly createMessageGridPersistence: typeof createMessageGridPersistence;
-    readonly GRID_CONFIG_GET: "rr:grid-config:get";
-    readonly GRID_CONFIG_SET: "rr:grid-config:set";
-    readonly GRID_CONFIG_CLEAR: "rr:grid-config:clear";
-    readonly useDebouncedValue: typeof useDebouncedValue;
-    readonly useAnnouncements: typeof useAnnouncements;
-    readonly formatBytes: typeof formatBytes;
-    readonly formatDate: typeof formatDate;
-    readonly formatDuration: typeof formatDuration;
-    readonly commonStyles: {
-        card: import("react").CSSProperties;
-        cardHeader: import("react").CSSProperties;
-        cardBody: import("react").CSSProperties;
-        cardFlat: import("react").CSSProperties;
-        section: import("react").CSSProperties;
-        sectionHeader: import("react").CSSProperties;
-        sectionHeaderLabel: import("react").CSSProperties;
-        buttonPrimary: import("react").CSSProperties;
-        buttonDanger: import("react").CSSProperties;
-        buttonDangerOutline: import("react").CSSProperties;
-        buttonSecondary: import("react").CSSProperties;
-        buttonSmall: import("react").CSSProperties;
-        buttonPrimarySmall: import("react").CSSProperties;
-        buttonSecondarySmall: import("react").CSSProperties;
-        buttonDangerSmall: import("react").CSSProperties;
-        buttonDisabled: import("react").CSSProperties;
-        cardHeaderButton: import("react").CSSProperties;
-        cardBodyButton: import("react").CSSProperties;
-        toggleButton: (active: boolean) => import("react").CSSProperties;
-        toggleGroup: import("react").CSSProperties;
-        splitHeader: import("react").CSSProperties;
-        tabContent: import("react").CSSProperties;
-        viewPadding: import("react").CSSProperties;
-        columnFill: import("react").CSSProperties;
-        headerBar: import("react").CSSProperties;
-        divider: import("react").CSSProperties;
-        empty: import("react").CSSProperties;
-        textMuted: import("react").CSSProperties;
-        textEllipsis: import("react").CSSProperties;
-        fontMono: import("react").CSSProperties;
-        labelUppercase: import("react").CSSProperties;
-        overlay: import("react").CSSProperties;
-        modalOverlay: import("react").CSSProperties;
-        dialog: import("react").CSSProperties;
-        modalDialog: import("react").CSSProperties;
-        modalHeader: import("react").CSSProperties;
-        modalBody: import("react").CSSProperties;
-        modalFooter: import("react").CSSProperties;
-        popupMenu: import("react").CSSProperties;
-        menuRow: import("react").CSSProperties;
-        inputField: import("react").CSSProperties;
-        listRow: (active: boolean) => import("react").CSSProperties;
-        emptyState: import("react").CSSProperties;
-        iconBox: import("react").CSSProperties;
-        badge: import("react").CSSProperties;
-        tableHeader: import("react").CSSProperties;
-        tableCell: import("react").CSSProperties;
-        indicatorBase: import("react").CSSProperties;
-        indicatorSuccess: import("react").CSSProperties;
-        indicatorInfo: import("react").CSSProperties;
-        indicatorWarning: import("react").CSSProperties;
-        indicatorError: import("react").CSSProperties;
-        indicatorMuted: import("react").CSSProperties;
-    };
 };
 /**
  * The compile-time shape of the shell API surface.

@@ -73,6 +73,8 @@ import type { IWorkspaceContext as Frozen_IWorkspaceContext } from '../contract/
 import type { IWorkspaceContext as Current_IWorkspaceContext } from './api';
 import type { IWorkspaceProviderProps as Frozen_IWorkspaceProviderProps } from '../contract/versions/v0';
 import type { IWorkspaceProviderProps as Current_IWorkspaceProviderProps } from './api';
+import type { IUsePollingOptions as Frozen_IUsePollingOptions } from '../contract/versions/v0';
+import type { IUsePollingOptions as Current_IUsePollingOptions } from './api';
 import type { ActivityEvent as Frozen_ActivityEvent } from '../contract/versions/v0';
 import type { ActivityEvent as Current_ActivityEvent } from './api';
 import type { DashboardData as Frozen_DashboardData } from '../contract/versions/v0';
@@ -347,6 +349,8 @@ const _t_IWorkspaceContext: Frozen_IWorkspaceContext = {} as Current_IWorkspaceC
 void _t_IWorkspaceContext;
 const _t_IWorkspaceProviderProps: Frozen_IWorkspaceProviderProps = {} as Current_IWorkspaceProviderProps;
 void _t_IWorkspaceProviderProps;
+const _t_IUsePollingOptions: Frozen_IUsePollingOptions = {} as Current_IUsePollingOptions;
+void _t_IUsePollingOptions;
 const _t_ActivityEvent: Frozen_ActivityEvent = {} as Current_ActivityEvent;
 void _t_ActivityEvent;
 const _t_DashboardData: Frozen_DashboardData = {} as Current_DashboardData;
