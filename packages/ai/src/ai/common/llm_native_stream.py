@@ -241,14 +241,15 @@ class NativeAnthropicAdapter:
                     closer()
                 except Exception:
                     pass
-
-        report_llm_tokens(
-            input_tokens,
-            output_tokens,
-            model=str(getattr(self.chat, '_model', '') or ''),
-            cache_read_tokens=cache_read,
-            cache_creation_tokens=cache_creation,
-        )
+            # Record usage even if the stream raised mid-way — a partial request
+            # can already have provider-reported input/cache/output tokens.
+            report_llm_tokens(
+                input_tokens,
+                output_tokens,
+                model=str(getattr(self.chat, '_model', '') or ''),
+                cache_read_tokens=cache_read,
+                cache_creation_tokens=cache_creation,
+            )
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])

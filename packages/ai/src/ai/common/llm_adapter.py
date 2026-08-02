@@ -369,12 +369,14 @@ class NativeOpenAIResponsesAdapter:
                     closer()
                 except Exception:
                     pass
-        report_llm_tokens(
-            max(0, input_tokens - cache_read),
-            output_tokens,
-            model=str(getattr(self.chat, '_model', '') or ''),
-            cache_read_tokens=cache_read,
-        )
+            # Record usage even if the stream raised mid-way — a partial request
+            # can already have provider-reported input/cache/output tokens.
+            report_llm_tokens(
+                max(0, input_tokens - cache_read),
+                output_tokens,
+                model=str(getattr(self.chat, '_model', '') or ''),
+                cache_read_tokens=cache_read,
+            )
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])
