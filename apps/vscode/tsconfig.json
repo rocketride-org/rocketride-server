@@ -15,7 +15,12 @@
 		"moduleResolution": "Node16",
 		"allowSyntheticDefaultImports": true,
 		"paths": {
-			"shared/*": ["../../packages/shared-ui/src/*"]
+			"shared/*": [
+				"../../packages/shared-ui/src/*"
+			],
+			"shell/*": [
+				"../../packages/shell/*"
+			]
 		}
 	},
 	"include": [
@@ -29,4 +34,3 @@
 		"src/shared/util/useMessaging.ts"
 	]
 }
-

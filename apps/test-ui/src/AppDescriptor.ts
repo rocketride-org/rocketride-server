@@ -3,10 +3,10 @@
 // =============================================================================
 
 import React from 'react';
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import TestApp from './TestApp';
 import TestSidebar from './TestSidebar';
-import { RocketRideMark } from 'shared';
+import { RocketRideMark } from 'shell';
 
 const TEST_APP: AppDescriptor = {
 	id: 'rocketride.test',

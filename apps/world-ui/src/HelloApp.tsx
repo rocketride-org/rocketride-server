@@ -26,7 +26,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
+import type { ShellAppProps } from 'shell';
 import heroSrc from './hello-world.webp';
 
 // =============================================================================

@@ -22,12 +22,8 @@
 
 import React, { useState } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles } from '../../../themes/styles';
-import { Card } from '../../../components/card/Card';
-import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
-import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
-import { Banner } from '../../../components/banner/Banner';
-import { Button } from '../../../components/button/Button';
+import { commonStyles } from 'shell/src/themes/styles';
+import { Card, DetailPanel, ConfirmDialog, Banner, Button } from 'shell';
 import type { ConnectResult, ProfileUpdate } from '../types';
 import { S, Badge, Avatar, initials, avatarColor } from './shared';
 

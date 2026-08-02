@@ -35,8 +35,8 @@
 // =============================================================================
 
 import React from 'react';
-import { ConnectionManagerView } from 'shared';
-import type { IConnectionFormField } from 'shared';
+import { ConnectionManagerView } from 'shared/modules/connection-manager/ConnectionManagerView';
+import type { IConnectionFormField } from 'shared/modules/connection-manager/ConnectionManagerView';
 import {
 	useSavedConnections, addConnection, updateConnection, deleteConnection,
 	type SavedConnection,

@@ -26,9 +26,11 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, useSidebarContent, BxPlus } from 'shell-ui';
-import { Explorer, SidebarMenu, SidebarCollapsedGate } from 'shared';
-import type { ExplorerEntry, ExplorerConfig, IVirtualFileSystem, ViewMenu } from 'shared';
+import { useShellConnection, useSidebarContent, BxPlus } from 'shell';
+import { Explorer } from 'shared/modules/explorer';
+import { SidebarMenu, SidebarCollapsedGate } from 'shell';
+import type { ExplorerEntry, ExplorerConfig } from 'shared/modules/explorer';
+import type { IVirtualFileSystem, ViewMenu } from 'shell';
 import { getDocs } from './docs';
 import { listChatDir, saveChat, deleteChat, renameChat } from './chatStore';
 

@@ -21,16 +21,16 @@
 
 import React, { useEffect, useMemo, useState, CSSProperties } from 'react';
 
-import { DetailPanel } from '../detail-panel/DetailPanel';
-import { Button } from '../button/Button';
-import { Modal } from '../modal/Modal';
-import { ConfirmDialog } from '../modal/ConfirmDialog';
-import { Card } from '../card/Card';
-import { CardDataGrid } from '../data-grid/CardDataGrid';
-import { commonStyles } from '../../themes/styles';
+import { DetailPanel } from 'shell';
+import { Button } from 'shell';
+import { Modal } from 'shell';
+import { ConfirmDialog } from 'shell/src/components/modal/ConfirmDialog';
+import { Card } from 'shell';
+import { CardDataGrid } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import { formatTime, formatDayTime } from '../../modules/server/util/formatters';
 import { describeCron, describeTtl } from './SchedulePanel';
-import type { GridColumnDefinition } from '../data-grid/defaults';
+import type { GridColumnDefinition } from 'shell';
 import type { TaskTimeline } from '../../modules/project/hooks/useTaskEvents';
 import type { DeploymentInfo } from './DeploymentView';
 import { DEPLOY_STATE_COLOR, createDeployHistoryColumns } from './types';

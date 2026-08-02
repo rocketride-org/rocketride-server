@@ -7,7 +7,7 @@
  * Colour tokens use the --rr-* namespace.
  */
 import React, { useState, CSSProperties } from 'react';
-import { commonStyles } from '../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 
 // =============================================================================
 // TYPES

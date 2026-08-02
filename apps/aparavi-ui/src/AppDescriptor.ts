@@ -24,7 +24,7 @@
 // APP DESCRIPTOR — aparavi-ui MF remote entry point (Aparavi AQL Chat)
 // =============================================================================
 
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import AparaviApp from './AparaviApp';
 
 /**

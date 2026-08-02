@@ -24,7 +24,7 @@
 // APP DESCRIPTOR — hello-ui MF remote entry point (OSS landing page)
 // =============================================================================
 
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import HomeApp from './HomeApp';
 
 /**

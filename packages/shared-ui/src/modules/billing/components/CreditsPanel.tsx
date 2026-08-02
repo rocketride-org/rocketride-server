@@ -20,10 +20,8 @@
 
 import React, { useMemo, useState, type CSSProperties } from 'react';
 import type { CellComponent } from 'tabulator-tables';
-import { Card } from '../../../components/card/Card';
-import { Button } from '../../../components/button/Button';
-import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
+import { Card, Button, CardDataGrid } from 'shell';
+import type { GridColumnDefinition } from 'shell';
 import type { CreditBalance, CreditPack } from '../types';
 
 // =============================================================================

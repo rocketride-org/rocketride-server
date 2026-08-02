@@ -25,9 +25,9 @@
 // =============================================================================
 
 import React, { useState } from 'react';
-import type { ShellAppProps } from 'shell-ui';
-import { ContentHeader, MiniCard, MiniContainer, StatusBadge } from 'shared';
-import type { StatusVariant } from 'shared';
+import type { ShellAppProps } from 'shell';
+import { ContentHeader, MiniCard, MiniContainer, StatusBadge } from 'shell';
+import type { StatusVariant } from 'shell';
 import type { EventRow } from './types';
 import { styles } from './styles';
 import { useEventCapture } from './hooks/useEventCapture';

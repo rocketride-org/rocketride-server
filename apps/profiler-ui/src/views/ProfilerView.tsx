@@ -35,8 +35,8 @@
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, getClient } from 'shell-ui';
-import { commonStyles } from 'shared/themes/styles';
+import { useShellConnection, getClient } from 'shell';
+import { commonStyles } from 'shell';
 import type { ProfileTreeNode, ProfileTreeResponse, VizStyle } from './visualizations/types';
 import ReportText from './visualizations/ReportText';
 import FlameGraph from './visualizations/FlameGraph';

@@ -27,8 +27,8 @@
 /** Gallery entry for the stock EmptyState placeholder. */
 
 import React from 'react';
-import { Button } from '../../../../components/button/Button';
-import { EmptyState } from '../../../../components/empty-state/EmptyState';
+import { Button } from 'shell';
+import { EmptyState } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: an EmptyState driven by the knob values. */

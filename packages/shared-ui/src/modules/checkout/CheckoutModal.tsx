@@ -17,7 +17,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef, type CSSPrope
 import { loadStripe } from '@stripe/stripe-js';
 import type { PaymentWalletsOption } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
-import { commonStyles } from '../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 import { PlanPicker, planAmount } from './PlanPicker';
 import type { CheckoutModalProps, CheckoutPlan, PromoValidation } from './types';
 

@@ -38,7 +38,7 @@ export const overlaySystemEntry: IGalleryEntry = {
 	code: `// Deep-link into a shell overlay from anywhere in an app. The shell's
 // OverlayManager listens for this and opens the same dialog the sidebar
 // footer opens. Unknown ids are ignored (guarded allowlist).
-import { ConnectionManager } from 'shell-ui';
+import { ConnectionManager } from 'shell';
 
 ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'account' });`,
 	props: [

@@ -21,15 +21,15 @@
  */
 
 import React, { CSSProperties, ReactNode, useState } from 'react';
-import { commonStyles } from '../../themes/styles';
-import { Button } from '../../components/button/Button';
-import { InputField } from '../../components/input-field/InputField';
-import { ContentHeader } from '../../components/content-header/ContentHeader';
-import { EmptyState } from '../../components/empty-state/EmptyState';
+import { commonStyles } from 'shell/src/themes/styles';
+import { Button } from 'shell';
+import { InputField } from 'shell';
+import { ContentHeader } from 'shell';
+import { EmptyState } from 'shell';
 import { ConnectionCard, ConnectionCardAdd } from '../../components/connection-card/ConnectionCard';
-import { Modal } from '../../components/modal/Modal';
-import { BxDesktop } from '../../components/BoxIcon';
-import type { StatusVariant } from '../../components/status-badge/StatusBadge';
+import { Modal } from 'shell';
+import { BxDesktop } from 'shell';
+import type { StatusVariant } from 'shell';
 
 // =============================================================================
 // TYPES

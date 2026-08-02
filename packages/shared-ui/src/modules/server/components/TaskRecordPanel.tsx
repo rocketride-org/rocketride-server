@@ -9,12 +9,10 @@
 
 import React, { useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
-import { Section, LabelValue } from '../../../components/section/Section';
-import { StatusBadge } from '../../../components/status-badge/StatusBadge';
-import type { StatusVariant } from '../../../components/status-badge/StatusBadge';
+import { DetailPanel, Section, LabelValue, StatusBadge } from 'shell';
+import type { StatusVariant } from 'shell';
 import type { DashboardTask } from '../types';
-import { commonStyles } from '../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 import { formatNumber, formatTime, formatUptime } from '../util';
 
 // =============================================================================

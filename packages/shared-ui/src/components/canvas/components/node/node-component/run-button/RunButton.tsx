@@ -22,7 +22,7 @@
  */
 
 import React, { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { BxPlay, BxStop, BxRefresh } from '../../../../../../components/BoxIcon';
+import { BxPlay, BxStop, BxRefresh } from 'shell';
 import PadlockIcon from '../../../../../../assets/icons/PadlockIcon';
 import { useFlowProject } from '../../../../context/FlowProjectContext';
 import { useFlowGraph } from '../../../../context/FlowGraphContext';

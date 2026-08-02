@@ -15,10 +15,10 @@
 import React from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import PadlockIcon from '../../assets/icons/PadlockIcon';
-import type { ITaskStatus } from '../../types/project';
-import { ITaskState } from '../../types/project';
-import { commonStyles } from '../../themes/styles';
-import { Button } from '../button/Button';
+import type { ITaskStatus } from 'shell/src/types/project';
+import { ITaskState } from 'shell/src/types/project';
+import { commonStyles } from 'shell/src/themes/styles';
+import { Button } from 'shell';
 
 // =============================================================================
 // STYLES (component-specific only)

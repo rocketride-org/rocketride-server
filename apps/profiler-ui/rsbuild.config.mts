@@ -24,7 +24,7 @@ export default defineConfig(() => {
 					'./AppDescriptor': './src/AppDescriptor.ts',
 				},
 				dts: false,
-				// runtime: false — the host (shell-ui) provides the MF runtime;
+				// runtime: false — the host (the shell) provides the MF runtime;
 				// remotes don't embed their own copy, keeping remoteEntry.js
 				// stable across app-code-only rebuilds.
 				runtime: false,
@@ -39,14 +39,13 @@ export default defineConfig(() => {
 					react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					// import: false — host always provides these, no fallback needed.
-					'shell-ui': { singleton: true, requiredVersion: false, import: false },
-					'shared':   { singleton: true, requiredVersion: false, import: false },
+					'shell': { singleton: true, requiredVersion: false, import: false },
 					'rocketride': { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],
 		resolve: {},
-		server: { port: 3017 },
+		server: { port: 3021 },
 		source: {
 			entry: {
 				index: './src/index.ts',

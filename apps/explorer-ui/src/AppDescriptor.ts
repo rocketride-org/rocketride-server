@@ -24,7 +24,7 @@
 // APP DESCRIPTOR — explorer-ui MF remote entry point (File Explorer)
 // =============================================================================
 
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import ExplorerApp from './ExplorerApp';
 
 /**

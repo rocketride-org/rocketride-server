@@ -104,7 +104,7 @@ export async function createApp(): Promise<string | undefined> {
 
 	// Vendor the platform type surface (types/rocketride-shell/) — the
 	// scaffolded tsconfig's paths point at it; without it the app compiles
-	// but the editor has no shell-ui/shared types. Fire-and-forget: it
+	// but the editor has no shell/shared types. Fire-and-forget: it
 	// prefers the connected server's published bundle (network) and is
 	// non-fatal by design, so scaffolding never waits on it.
 	void vendorAppTypes(getExtensionContext(), target.fsPath);

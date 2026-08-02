@@ -17,7 +17,7 @@
  */
 
 import React, { CSSProperties, useMemo } from 'react';
-import { commonStyles } from '../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 import { CompletionsChart } from './CompletionsChart';
 import { StatusFooter } from './StatusFooter';
 import type { ChartStats, StatusDataPoint, TimeRange } from './types';

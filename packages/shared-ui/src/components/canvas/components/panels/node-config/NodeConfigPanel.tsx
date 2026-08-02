@@ -63,11 +63,11 @@ import { getComponentFromNode } from '../../../util/graph';
 
 import { IAuthTokensRef, persistTokensFromFormData, mergeAuthTokensIntoFormData, persistOAuthTokensAndSave } from './authTokenHelpers';
 import { useOAuthCallbacks } from './useOAuthCallbacks';
-import { DetailPanel } from '../../../../detail-panel/DetailPanel';
-import { Button } from '../../../../button/Button';
-import { Banner } from '../../../../banner/Banner';
-import { ConfirmDialog } from '../../../../modal/ConfirmDialog';
-import { commonStyles } from '../../../../../themes/styles';
+import { DetailPanel } from 'shell';
+import { Button } from 'shell';
+import { Banner } from 'shell';
+import { ConfirmDialog } from 'shell/src/components/modal/ConfirmDialog';
+import { commonStyles } from 'shell/src/themes/styles';
 
 // =============================================================================
 // Constants

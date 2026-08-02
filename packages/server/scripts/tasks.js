@@ -1335,7 +1335,7 @@ module.exports = {
 				description: 'Starting server (dev)',
 				steps: [
 					'server:build',
-					parallel(['server:run-eaas', 'shell-ui:dev'], 'Start dev servers'),
+					parallel(['server:run-eaas', 'shell:dev'], 'Start dev servers'),
 				],
 			}),
 		},
@@ -1360,7 +1360,7 @@ module.exports = {
 		},
 		{
 			// Internal action — starts the EaaS Python server process.
-			// Separated so it can be run in parallel with shell-ui:dev or model_server.
+			// Separated so it can be run in parallel with shell:dev or model_server.
 			name: 'server:run-eaas',
 			action: (options = {}) => ({
 				run: async (_ctx, task) => {

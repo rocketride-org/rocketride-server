@@ -27,7 +27,7 @@
 /** Gallery entry for the stock InputField text/select base. */
 
 import React from 'react';
-import { InputField } from '../../../../components/input-field/InputField';
+import { InputField } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: an uncontrolled InputField driven by the knob values. */

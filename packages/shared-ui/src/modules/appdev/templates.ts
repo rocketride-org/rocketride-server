@@ -14,7 +14,7 @@
  * Every generated file carries the project MIT header. The MF rsbuild shape
  * mirrors apps/hello-ui exactly: exposes ./AppDescriptor, dts:false,
  * runtime:false, shareStrategy 'loaded-first', react/react-dom eager
- * singletons, shell-ui/shared/rocketride import:false, assetPrefix 'auto'.
+ * singletons, shell/rocketride import:false, assetPrefix 'auto'.
  */
 
 // =============================================================================
@@ -144,8 +144,7 @@ export default defineConfig(() => ({
 				// runtime, never bundled (import: false): the app repo needs no
 				// platform checkout to build — editor types come from the
 				// vendored types/rocketride-shell/ (tsconfig paths).
-				'shell-ui': { singleton: true, requiredVersion: false, import: false },
-				'shared': { singleton: true, requiredVersion: false, import: false },
+				'shell': { singleton: true, requiredVersion: false, import: false },
 				// react-refresh/runtime is deliberately NOT shared: the app's
 				// own copy late-attaches to the devtools hook the dev-flavor
 				// shell created BEFORE react-dom loaded (injectIntoGlobalHook
@@ -199,8 +198,7 @@ function tsconfigJson(): string {
 				// arrive from the shell's share scope at runtime, so nothing
 				// platform-side is ever installed or checked out.
 				paths: {
-					'shell-ui': ['./types/rocketride-shell/shell-ui/index.d.ts'],
-					shared: ['./types/rocketride-shell/shared/index.d.ts'],
+					shell: ['./types/rocketride-shell/shell.d.ts'],
 				},
 			},
 			include: ['src', 'types'],

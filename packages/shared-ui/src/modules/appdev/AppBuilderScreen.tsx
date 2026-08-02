@@ -38,8 +38,8 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { TabControl } from '../../components/tab-control/TabControl';
-import type { ViewMenu } from '../../types/viewMenu';
+import { TabControl } from 'shell';
+import type { ViewMenu } from 'shell';
 import { DevelopView } from './DevelopView';
 import { DeployView } from './DeployView';
 import { StoreView } from './StoreView';

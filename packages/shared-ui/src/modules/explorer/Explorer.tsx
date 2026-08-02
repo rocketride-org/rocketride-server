@@ -23,8 +23,8 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef, CSSProperties } from 'react';
 import { Tooltip } from '@mui/material';
-import { commonStyles } from '../../themes/styles';
-import { BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxPlay, BxStop, BxListUl, BxGridAlt, BxCollapseAll, BxFilePlus, BxFolderPlus, BxDotsHorizontal, BxEditAlt, BxTrash } from '../../components/BoxIcon';
+import { commonStyles } from 'shell/src/themes/styles';
+import { BxFile, BxFolderOpen, BxChevronRight, BxChevronDown, BxRefresh, BxPlay, BxStop, BxListUl, BxGridAlt, BxCollapseAll, BxFilePlus, BxFolderPlus, BxDotsHorizontal, BxEditAlt, BxTrash } from 'shell';
 import type { IExplorerProps, ExplorerEntry, ExplorerStatus, DirNode } from './types';
 
 // =============================================================================

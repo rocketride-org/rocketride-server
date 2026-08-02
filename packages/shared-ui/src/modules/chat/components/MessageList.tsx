@@ -16,7 +16,7 @@ import React, { useEffect, useRef, useMemo, useState, type CSSProperties } from 
 import { ChatMessage, CHAT_COLUMN_MAX_WIDTH } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
-import { EmptyState } from '../../../components/empty-state/EmptyState';
+import { EmptyState } from 'shell';
 
 // =============================================================================
 // STYLES
@@ -120,7 +120,7 @@ const ThinkingGroup: React.FC<{ messages: ChatMessage[] }> = ({ messages }) => {
 /** A rendered thread item: a single message or a folded thinking group. */
 type RenderItem = { kind: 'message'; message: ChatMessage } | { kind: 'thinking-group'; id: number; messages: ChatMessage[] };
 
-interface MessageListProps {
+export interface MessageListProps {
 	messages: ChatMessage[];
 	isTyping: boolean;
 	/** Title for the EmptyState shown when there are no messages. */

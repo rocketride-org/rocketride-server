@@ -35,7 +35,7 @@ import { useFlowProject } from '../context/FlowProjectContext';
 import type { ITemplate } from '../templates/types';
 import { IService, IServiceCapabilities } from '../types';
 import { Icon } from '../util/Icon';
-import { commonStyles } from '../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 
 // =============================================================================
 // Styles

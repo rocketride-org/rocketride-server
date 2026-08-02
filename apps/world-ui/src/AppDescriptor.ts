@@ -25,10 +25,10 @@
 // =============================================================================
 
 import React from 'react';
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import HelloApp from './HelloApp';
 import HelloSidebar from './HelloSidebar';
-import { RocketRideMark } from 'shared';
+import { RocketRideMark } from 'shell';
 
 /**
  * AppDescriptor for the Hello World demo app.

@@ -30,10 +30,10 @@
  * `rocketride-vscode.css` (VS Code extension).
  */
 
-import { getMuiTheme } from '../../themes/getMuiTheme';
+import { getMuiTheme } from 'shared/themes-mui/getMuiTheme';
 
 // Re-export for convenience
-export { buildMuiTheme } from '../../themes/buildMuiTheme';
+export { buildMuiTheme } from 'shared/themes-mui/buildMuiTheme';
 
 // =============================================================================
 // Font exports (used by other components)

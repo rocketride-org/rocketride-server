@@ -11,8 +11,8 @@
  */
 import React, { CSSProperties, useMemo, useState } from 'react';
 import type { TraceRow } from '../../modules/project/types';
-import { commonStyles } from '../../themes/styles';
-import { EmptyState } from '../empty-state/EmptyState';
+import { commonStyles } from 'shell/src/themes/styles';
+import { EmptyState } from 'shell';
 
 // =============================================================================
 // TYPES

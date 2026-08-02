@@ -35,13 +35,13 @@
 
 import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
+import type { ShellAppProps } from 'shell';
 import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
-import { commonStyles } from 'shared/themes/styles';
-import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout } from 'shell-ui';
-import type { Documents } from 'shell-ui';
-import { ChatView, useChatMessages } from 'shared';
-import type { ChatMessage } from 'shared';
+import { commonStyles } from 'shell';
+import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout } from 'shell';
+import type { Documents } from 'shell';
+import { ChatView, useChatMessages } from 'shared/modules/chat';
+import type { ChatMessage } from 'shared/modules/chat';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { loadChat, saveChat, listChatDir, renameChat, deleteChat } from './chatStore';
 import pipeline from './aparavi.pipe';

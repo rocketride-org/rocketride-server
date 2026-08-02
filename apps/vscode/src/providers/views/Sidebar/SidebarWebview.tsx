@@ -24,13 +24,15 @@
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/src/themes/rocketride-default.css';
+import 'shell/src/themes/rocketride-vscode.css';
 
-import { SidebarView, BxUser, BxCog, BxExport, BxLock, BxRocket, foldTaskEvent } from 'shared';
-import { SidebarFooter } from 'shared/components/sidebar-footer/SidebarFooter';
-import type { SidebarFooterMenuItem } from 'shared/components/sidebar-footer/SidebarFooter';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem } from 'shared';
+import { SidebarView } from 'shared/modules/sidebar/SidebarView';
+import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell/src/components/BoxIcon';
+import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
+import { SidebarFooter } from 'shell/src/components/sidebar-footer/SidebarFooter';
+import type { SidebarFooterMenuItem } from 'shell/src/components/sidebar-footer/SidebarFooter';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem } from 'shared/modules/sidebar/types';
 import { useMessaging } from '../hooks/useMessaging';
 
 // =============================================================================

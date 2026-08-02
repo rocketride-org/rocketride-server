@@ -14,7 +14,7 @@ import React, { ReactElement, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IEndpointInfo } from './PipelineActions';
 import { appendAuthQueryParam, buildIntegrationExamples, type IntegrationTabId } from './endpointIntegrationExamples';
-import { commonStyles } from '../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 
 // =============================================================================
 // Styles

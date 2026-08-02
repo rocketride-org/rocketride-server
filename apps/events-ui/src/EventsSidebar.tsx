@@ -32,7 +32,7 @@
 // =============================================================================
 
 import type React from 'react';
-import type { ShellSidebarProps } from 'shell-ui';
+import type { ShellSidebarProps } from 'shell';
 
 /**
  * Frame-only sidebar for the Event Monitor.

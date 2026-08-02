@@ -26,9 +26,11 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, useSidebarContent } from 'shell-ui';
-import { Explorer, BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shared';
-import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction, IVirtualFileSystem } from 'shared';
+import { useShellConnection, useSidebarContent } from 'shell';
+import { Explorer } from 'shared/modules/explorer';
+import { BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shell';
+import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction } from 'shared/modules/explorer';
+import type { IVirtualFileSystem } from 'shell';
 import { getDocs } from './docs';
 import { getMediaInfo } from './mediaTypes';
 import { getCompatibleViewers, VIEWER_LABELS } from './viewerRegistry';

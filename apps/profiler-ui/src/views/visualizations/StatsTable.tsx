@@ -33,7 +33,7 @@
 
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles } from 'shared/themes/styles';
+import { commonStyles } from 'shell';
 import type { ProfileTreeNode, ProfileTreeResponse, OnRootChange } from './types';
 
 // =============================================================================

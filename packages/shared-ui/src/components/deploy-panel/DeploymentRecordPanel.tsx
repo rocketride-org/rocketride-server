@@ -24,11 +24,11 @@
 
 import React, { useEffect, useMemo, useRef, useState, CSSProperties } from 'react';
 
-import { Button } from '../button/Button';
-import { Modal } from '../modal/Modal';
-import { ConfirmDialog } from '../modal/ConfirmDialog';
-import { DetailPanel } from '../detail-panel/DetailPanel';
-import { commonStyles } from '../../themes/styles';
+import { Button } from 'shell';
+import { Modal } from 'shell';
+import { ConfirmDialog } from 'shell/src/components/modal/ConfirmDialog';
+import { DetailPanel } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import { formatTime } from '../../modules/server/util/formatters';
 import { DeploymentView } from './DeploymentView';
 import type { IDeploymentViewProps } from './DeploymentView';

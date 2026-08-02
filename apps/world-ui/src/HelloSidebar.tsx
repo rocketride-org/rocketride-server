@@ -25,7 +25,7 @@
 // =============================================================================
 
 import React from 'react';
-import type { ShellSidebarProps } from 'shell-ui';
+import type { ShellSidebarProps } from 'shell';
 
 /**
  * Empty sidebar component for the Hello World app.
