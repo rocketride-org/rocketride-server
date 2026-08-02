@@ -40,6 +40,7 @@ type OutgoingMessage =
 	| { type: 'appdev:restart' }
 	| { type: 'appdev:reveal' }
 	| { type: 'appdev:stage'; stage: AppBuilderStage }
+	| { type: 'appdev:pref'; key: string; value: unknown }
 	| { type: 'appdev:call'; id: number; method: string; args?: unknown[] };
 
 type IncomingMessage =
@@ -49,6 +50,7 @@ type IncomingMessage =
 			previewUrl: string;
 			capabilities: { hasCodePane: boolean; hasNativeFiles: boolean; canDebug: boolean };
 			stage?: AppBuilderStage;
+			prefs?: Record<string, unknown>;
 	  }
 	| { type: 'appdev:event'; row: AppEventRow }
 	| { type: 'appdev:console'; row: ConsoleRow }
@@ -75,15 +77,22 @@ const styles: Record<string, React.CSSProperties> = {
 		flexDirection: 'column',
 		background: 'var(--rr-bg-default)',
 	},
+	// borderRadius:'inherit' down the chain: when the App Builder's device
+	// frame rounds its glass, the iframe must round WITH it — Chromium does
+	// not reliably apply an ancestor's rounded overflow clip to a composited
+	// iframe, so the rounding is carried onto the iframe element itself.
 	iframeWrap: {
 		position: 'absolute',
 		inset: 0,
+		borderRadius: 'inherit',
+		overflow: 'hidden',
 	},
 	iframe: {
 		width: '100%',
 		height: '100%',
 		border: 'none',
 		background: 'var(--rr-bg-default)',
+		borderRadius: 'inherit',
 	},
 	loading: {
 		position: 'absolute',
@@ -133,9 +142,20 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	// page; HMR keeps IT current; re-injection only on explicit fallback.
 	const injectedRef = useRef(false);
 
+	/**
+	 * Answers the shell's session handshake with the DEFINITIVE state: the
+	 * credential when Inherit Auth allows it, empty for "no session". The
+	 * shell reconciles idempotently (adopt/drop + reboot when the state
+	 * differs, no-op when it matches), so re-answering is always safe.
+	 */
+	const postAuthState = useCallback((): void => {
+		const { authToken: token, inheritAuth: inherit } = registrationRef.current;
+		iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token: inherit && token ? token : '' }, '*');
+	}, []);
+
 	/** Posts the dev-remote registration into the (current) preview shell. */
 	const inject = useCallback((): void => {
-		const { app: a, devEntry: entry, authToken: token, inheritAuth: inherit } = registrationRef.current;
+		const { app: a, devEntry: entry } = registrationRef.current;
 		if (!a || !entry) return;
 		injectedRef.current = true;
 		iframeRef.current?.contentWindow?.postMessage({
@@ -145,32 +165,35 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 			name: a.name,
 			entry,
 		}, '*');
-		// Session handoff (Inherit Auth only) — the shell saves it and
-		// reboots authenticated exactly once (a matching token is a no-op
-		// on subsequent boots).
-		if (token && inherit) {
-			iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token }, '*');
-		}
 	}, []);
 
-	// Inherit Auth toggled live: push the session down, or tell the shell
-	// to DROP its session (it reboots signed out; apps demanding auth then
-	// run the preview's own OAuth cycle).
+	// Inherit Auth toggled live: re-answer with the resulting state — the
+	// token (shell reboots authenticated) or empty (shell drops its session
+	// and reboots signed out; apps demanding auth then run the preview's
+	// own OAuth cycle).
 	const inheritMountedRef = useRef(false);
 	React.useEffect(() => {
 		if (!inheritMountedRef.current) {
 			inheritMountedRef.current = true;
 			return;
 		}
-		const target = iframeRef.current?.contentWindow;
-		if (!target) return;
-		if (inheritAuth) {
-			if (authToken) target.postMessage({ type: 'rrdev:auth', token: authToken }, '*');
-		} else {
-			target.postMessage({ type: 'rrdev:clearAuth' }, '*');
-		}
+		postAuthState();
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- fires on toggle only
 	}, [inheritAuth]);
+
+	// Credential arriving AFTER the boot answer (slow resolve in the host,
+	// sign-in completing in another flow): re-answer so the running shell
+	// adopts it — otherwise the session would sit here unused until the
+	// next boot.
+	const authMountedRef = useRef(false);
+	React.useEffect(() => {
+		if (!authMountedRef.current) {
+			authMountedRef.current = true;
+			return;
+		}
+		postAuthState();
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- fires on credential change only
+	}, [authToken]);
 
 	// Explicit sign-in result: deliver the credential regardless of the
 	// Inherit Auth gate — the user clicked Sign In.
@@ -193,6 +216,11 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 				// client's own failure reload) — it knows nothing; inject.
 				setReady(true);
 				injectedRef.current = false;
+				// Answer the session handshake FIRST and unconditionally: the
+				// fresh shell holds its boot behind this answer, and it must
+				// not wait for registration facts that can lag (the dev
+				// server entry can land seconds later).
+				postAuthState();
 				inject();
 			}
 		};
@@ -202,7 +230,7 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 			window.removeEventListener('message', onMsg);
 			clearTimeout(fallback);
 		};
-	}, [reloadSeq, url, inject]);
+	}, [reloadSeq, url, inject, postAuthState]);
 
 	// First-arrival inject: the rsbuild banner (and thus the entry URL) can
 	// land seconds after devReady on first boot. LATER entry updates do NOT
@@ -256,6 +284,10 @@ const AppWebview: React.FC = () => {
 	// bypasses the Inherit Auth gate; the seq delivers it to the iframe.
 	const pendingExplicitLoginRef = useRef(false);
 	const [explicitAuthSeq, setExplicitAuthSeq] = useState(0);
+	// App Builder UI preferences (per-workspace, per-app): seeded from
+	// appdev:init, written back over appdev:pref. A ref, not state — reads
+	// are synchronous via host.getPref and never drive a re-render here.
+	const prefsRef = useRef<Record<string, unknown>>({});
 
 	// ── Feed registries — stable across renders ─────────────────────────
 	const eventListeners = useRef<Registry<AppEventRow>>(new Set());
@@ -273,6 +305,10 @@ const AppWebview: React.FC = () => {
 	const onMessage = useCallback((msg: IncomingMessage) => {
 		switch (msg.type) {
 			case 'appdev:init':
+				// Prefs must land BEFORE the App Builder screen mounts (app
+				// gates the render below), so host.getPref is synchronous by
+				// the time the views initialize their state from it.
+				prefsRef.current = msg.prefs ?? {};
 				setApp(msg.app);
 				setPreviewUrl(msg.previewUrl);
 				setCapabilities(msg.capabilities);
@@ -394,6 +430,13 @@ const AppWebview: React.FC = () => {
 		// Inherit Auth toggle — PreviewFrame reacts to the prop change (pushes
 		// the session down, or tells the shell to drop it).
 		setInheritAuth: (inherit: boolean) => setInheritAuthState(inherit),
+		// Per-workspace UI preferences: reads from the init-delivered bag,
+		// writes echo to the extension host (workspaceState).
+		getPref: (key: string) => prefsRef.current[key],
+		setPref: (key: string, value: unknown) => {
+			prefsRef.current[key] = value;
+			sendMessage({ type: 'appdev:pref', key, value });
+		},
 		// Host actions — ride the bridge to the extension host
 		debug: capabilities.canDebug ? () => sendMessage({ type: 'appdev:debug' }) : undefined,
 		revealFiles: capabilities.hasNativeFiles ? () => sendMessage({ type: 'appdev:reveal' }) : undefined,

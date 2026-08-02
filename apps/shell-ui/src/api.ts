@@ -264,6 +264,44 @@ export const shellApi = {
 	BxFolderOpen,
 } as const;
 
+// =============================================================================
+// NAMED VALUE EXPORTS — the frozen bundle must MIRROR the runtime module
+// =============================================================================
+//
+// The real shell-ui module (index.ts, served over the MF share scope) exports
+// every one of these as a NAMED export, and app code imports them by name
+// (`import { DocTabs, useShellConnection } from 'shell-ui'`). Without this
+// list the frozen .d.ts — which standalone app repos use AS their 'shell-ui'
+// types — exposed the values only through the `shellApi` object, so every
+// named value import failed with TS2459 ("declares locally but not
+// exported") despite working at runtime. Same members as `shellApi` above;
+// additions are append-only, exactly like the object.
+export {
+	// Hooks
+	useShellConnection, useAuthUser, useLogout, useWorkspace, useClient,
+	useShellEvent, useIframeBridge, useSubscriptions, usePolling,
+	useDashboardData, useConnectionStatus, useShellApiConfig, useAppComponent,
+	useSidebarContent, useClickOutside, useFixedPopupPosition, usePrefs,
+	// Client access + connection manager + connection state
+	getClient, ConnectionManager, ConnectionState,
+	// Auth providers
+	CloudAuthProvider, ApiKeyAuthProvider,
+	// Workspace provider + prefs provider
+	WorkspaceProvider, PrefsProvider,
+	// Document component library
+	Documents, DocTabs, DocSplitLayout, DocExplorer,
+	// Top-level shell frame + zone components
+	Shell, Sidebar, BottomPanel, DebugPanel,
+	// Layout building blocks
+	NavButton, ConfirmDialog, PopupRow,
+	// Shell-owned overlay pages
+	AccountProvider, SettingsProvider,
+	// Icons
+	BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl,
+	BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket,
+	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen,
+};
+
 /**
  * The compile-time shape of the shell API surface.
  *
@@ -272,6 +310,21 @@ export const shellApi = {
  * version and fails `tsc --noEmit`.
  */
 export type ShellApiShape = typeof shellApi;
+
+// =============================================================================
+// EXPORT-LIST SYNC GUARD
+// =============================================================================
+//
+// The named export list above duplicates shellApi's member list, and the two
+// MUST stay identical — the frozen bundle mirrors the runtime module only if
+// every shellApi member is also a named export. This assertion makes drift a
+// compile error that NAMES the forgotten symbol(s): `typeof import('./api')`
+// is this module's own value namespace, so any shellApi key missing from it
+// survives the Exclude and poisons the assignment below. The freeze pre-check
+// runs `tsc --noEmit`, so an out-of-sync surface can never freeze.
+type _MissingNamedExports = Exclude<keyof ShellApiShape, keyof typeof import('./api')>;
+const _exportsComplete: [_MissingNamedExports] extends [never] ? true : _MissingNamedExports = true;
+void _exportsComplete;
 
 // SHELL_API_VERSION lives in ./apiver.ts (its own file) so `shell:freeze` can
 // auto-write it and the app registration step can read it — and so it never

@@ -146,6 +146,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 							// VSCode variant: files are native, F5 debugs, no Code pane
 							capabilities: { hasCodePane: false, hasNativeFiles: true, canDebug: true },
 							stage: this.context.workspaceState.get(`appdev.stage.${appId}`) ?? 'develop',
+							// App Builder UI preferences (preview layout, zoom, …)
+							// — per-workspace, per-app; written back via appdev:pref
+							prefs: this.context.workspaceState.get(`appdev.prefs.${appId}`) ?? {},
 						});
 						// Replay STATE the webview may have missed (idempotent —
 						// VSCode queues messages sent before view:ready, so
@@ -180,6 +183,15 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						// Persist the active view per app (survives panel close)
 						await this.context.workspaceState.update(`appdev.stage.${appId}`, message.stage);
 						break;
+
+					case 'appdev:pref': {
+						// Persist one App Builder UI preference into the per-app
+						// bag (merge — concurrent keys must not clobber each other)
+						const bag = { ...(this.context.workspaceState.get<Record<string, unknown>>(`appdev.prefs.${appId}`) ?? {}) };
+						bag[message.key] = message.value;
+						await this.context.workspaceState.update(`appdev.prefs.${appId}`, bag);
+						break;
+					}
 
 					case 'appdev:debug':
 						await vscode.commands.executeCommand('rocketride.app.debug', appId);
@@ -266,8 +278,10 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		// Start the inner loop (setting-gated by rocketride.appdev.autoWatch)
 		if (app) {
 			// Refresh the vendored platform types first — existing apps track
-			// the type surface this extension ships (types/rocketride-shell/).
-			vendorAppTypes(this.context, app.folder);
+			// the CONNECTED server's published type surface (falling back to
+			// the copy this extension ships). Fire-and-forget: non-fatal and
+			// network-bound; the App Builder must not wait on it.
+			void vendorAppTypes(this.context, app.folder);
 			void ensureWatch(app);
 		} else {
 			// No workspace binding = no dev server, ever — say so loudly

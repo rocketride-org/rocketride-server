@@ -267,6 +267,16 @@ export interface IAppBuilderHost {
 	revealFiles?: () => void;
 	/** The preview URL to display in the toolbar (informational). */
 	getPreviewUrl?: () => string;
+	/**
+	 * Read a persisted App Builder UI preference (preview layout, device
+	 * resolutions, zoom, Inherit Auth…) from the host's per-workspace
+	 * storage. Must be synchronous — the host loads its bag before the
+	 * views mount (VSCode: workspaceState delivered with appdev:init).
+	 * undefined = never persisted; the view falls back to its default.
+	 */
+	getPref?: (key: string) => unknown;
+	/** Persist an App Builder UI preference to per-workspace storage. */
+	setPref?: (key: string, value: unknown) => void;
 
 	// ── Deploy ───────────────────────────────────────────────────────────
 	/** List published immutable versions, newest first. */

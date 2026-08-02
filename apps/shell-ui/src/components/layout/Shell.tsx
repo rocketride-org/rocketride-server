@@ -52,6 +52,7 @@ import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
 import { registerAndMapApps, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote } from '../../lib/appLoader';
 import type { ServerAppEntry } from '../../lib/appLoader';
+import { waitForEmbeddedSession } from '../../lib/devMode';
 
 // =============================================================================
 // STYLES
@@ -276,6 +277,20 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				// Fresh popup: head straight to the IdP (top-level — allowed)
 				void cm.startOAuth();
 				return;
+			}
+
+			// Embedded dev preview: the App Builder host answers this shell's
+			// shell:devReady with the definitive session state (rrdev:auth —
+			// a token to adopt, or empty for "no session"). Hold the loading
+			// phase for that answer so the FIRST boot comes up already
+			// authenticated: without the wait the auth gate renders "Sign in
+			// required" for the length of the postMessage round-trip and the
+			// late token then forces a reload. The timeout only guards
+			// embedders that do not speak the protocol; hosts always answer,
+			// so the common paths resolve immediately.
+			if (window.self !== window.top && !cm.loadToken()) {
+				await waitForEmbeddedSession(2000);
+				if (!mountedRef.current) return;
 			}
 
 			// Run the auth bootstrap

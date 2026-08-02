@@ -44,6 +44,10 @@ const README_DEST = path.join(APP_ROOT, 'README.md');
 const SRC_HASH_KEY = 'vscode.srcHash';
 const BUNDLE_HASH_KEY = 'vscode.bundleHash';
 const SHARED_UI_HASH_KEY = 'vscode.sharedUiHash';
+// The extension-host bundle's OWN shared-ui fingerprint — esbuild inlines
+// shared-ui (appdev templates) into rocketride.js, and reusing the webview's
+// SHARED_UI_HASH_KEY would let whichever step ran first mark the other clean.
+const BUNDLE_SHARED_UI_HASH_KEY = 'vscode.bundleSharedUiHash';
 
 // All extension build output goes here (bundle, webview, manifest for vsce and F5)
 const BUILD_DIR = path.join(BUILD_ROOT, 'vscode');
@@ -117,20 +121,26 @@ function makeCompileTypescriptAction() {
 function makeBundleExtensionAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check if source changed (uses its own hash key so compile-typescript
-			// saving SRC_HASH_KEY doesn't cause this step to skip)
-			const { changed, hash } = await hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY);
+			// Check vscode src AND shared-ui (own hash keys so compile-typescript /
+			// build-webview saving theirs doesn't cause this step to skip). esbuild
+			// inlines shared-ui (the appdev templates) into rocketride.js, so a
+			// shared-ui-only change must rebuild the host bundle too.
+			const [vsrc, sharedUi] = await Promise.all([
+				hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY),
+				hasSourceChanged(SHARED_UI_SRC, BUNDLE_SHARED_UI_HASH_KEY),
+			]);
 			const outputExists = await exists(path.join(BUILD_DIR, 'rocketride.js'));
 
-			if (!changed && outputExists) {
+			if (!vsrc.changed && !sharedUi.changed && outputExists) {
 				task.output = 'No changes detected';
 				return;
 			}
 
 			await execCommand('node', ['esbuild.js', '--production'], { task, cwd: APP_ROOT });
 
-			// Save hash after successful build
-			await saveSourceHash(BUNDLE_HASH_KEY, hash);
+			// Save hashes after successful build
+			await saveSourceHash(BUNDLE_HASH_KEY, vsrc.hash);
+			await saveSourceHash(BUNDLE_SHARED_UI_HASH_KEY, sharedUi.hash);
 		},
 	};
 }

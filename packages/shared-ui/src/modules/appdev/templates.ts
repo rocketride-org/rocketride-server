@@ -81,7 +81,10 @@ function packageJson(v: TemplateVars): string {
 			},
 			scripts: {
 				dev: 'rsbuild dev',
-				build: 'rsbuild build',
+				// rsbuild transpiles WITHOUT typechecking, so build runs tsc
+				// first — type errors must fail the build, not sit silent.
+				build: 'tsc --noEmit && rsbuild build',
+				typecheck: 'tsc --noEmit',
 			},
 			dependencies: {
 				rocketride: '^1.0.0',
@@ -371,7 +374,26 @@ export function renderTemplate(name: TemplateName, vars: TemplateVars): Template
 		{ path: 'rsbuild.config.ts', content: rsbuildConfig(vars) },
 		{ path: 'tsconfig.json', content: tsconfigJson() },
 		{ path: '.vscode/launch.json', content: launchJson(vars) },
-		{ path: '.gitignore', content: 'node_modules/\ndist/\n' },
+		{
+			path: '.gitignore',
+			content: [
+				'# Dependencies',
+				'node_modules/',
+				'',
+				'# Build output',
+				'dist/',
+				'',
+				'# Vendored platform types — tooling-owned: the App Builder refreshes',
+				'# them from the connected server on every open (do not commit)',
+				'types/rocketride-shell/',
+				'',
+				'# Logs and OS noise',
+				'*.log',
+				'.DS_Store',
+				'Thumbs.db',
+				'',
+			].join('\n'),
+		},
 		// Workspace boundary: app folders often land inside an enclosing pnpm
 		// workspace (a monorepo checkout, a dist tree). This marks the app as
 		// its OWN workspace root so `pnpm install` resolves here instead of

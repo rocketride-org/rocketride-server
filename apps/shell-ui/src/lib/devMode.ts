@@ -104,6 +104,71 @@ export function isDevHooksEnabled(): boolean {
 }
 
 // =============================================================================
+// EMBEDDED SESSION HANDSHAKE
+// =============================================================================
+
+// The embedder answers this shell's `shell:devReady` with its definitive
+// session state (`rrdev:auth` — a token to adopt, or empty for "no session").
+// The FIRST such answer lands while the shell still shows its loading screen:
+// bootstrap holds behind waitForEmbeddedSession() so the initial boot comes up
+// already authenticated instead of flashing the sign-in gate and rebooting
+// when the token arrives. The promise is created synchronously in
+// installDevHooks() BEFORE anything is posted to the embedder, so an answer
+// can never race the shell's wait.
+
+/** Resolves the boot-window answer; null once the window has closed. */
+let bootAnswerResolve: ((token: string | null) => void) | null = null;
+/** The pending boot-window answer; null until installDevHooks() runs. */
+let bootAnswerPromise: Promise<string | null> | null = null;
+
+/**
+ * Settles the boot-window answer exactly once.
+ *
+ * @param token - The adopted token, or null for "no session".
+ * @returns True when this call closed the boot window; false when it was
+ *          already closed (the caller must reconcile by other means).
+ */
+function settleBootAnswer(token: string | null): boolean {
+	if (!bootAnswerResolve) return false;
+	const resolve = bootAnswerResolve;
+	bootAnswerResolve = null;
+	resolve(token);
+	return true;
+}
+
+/**
+ * Waits for the embedder's session answer before the first boot.
+ *
+ * Resolves with the adopted token, or null when the embedder answered "no
+ * session" — or when the fallback timeout fires (an embedder that does not
+ * speak the App Builder protocol never answers). The timeout CLOSES the boot
+ * window: a late answer must then reload into its state (the boot already
+ * completed without it) rather than being silently swallowed.
+ *
+ * Resolves immediately when this shell is not an embedded dev preview.
+ *
+ * @param timeoutMs - Grace period for protocol-less embedders.
+ * @returns The embedder-supplied token, or null.
+ */
+export function waitForEmbeddedSession(timeoutMs: number): Promise<string | null> {
+	// Not framed, hooks off, or hooks not installed — nothing will answer.
+	if (!isDevHooksEnabled() || window.self === window.top || !bootAnswerPromise) {
+		return Promise.resolve(null);
+	}
+	return new Promise((resolve) => {
+		// Fallback for embedders without the protocol: close the window and
+		// proceed unauthenticated after the grace period.
+		const timer = window.setTimeout(() => {
+			settleBootAnswer(null);
+		}, timeoutMs);
+		void bootAnswerPromise?.then((token) => {
+			window.clearTimeout(timer);
+			resolve(token);
+		});
+	});
+}
+
+// =============================================================================
 // DEV SHARE SCOPE + WINDOW API INSTALL
 // =============================================================================
 
@@ -128,6 +193,13 @@ const DEV_SHARE_SCOPE_KEY = Symbol.for('rocketride.devShareScope');
 export async function installDevHooks(): Promise<void> {
 	// Gate: everything below is dev-only surface.
 	if (!isDevHooksEnabled()) return;
+
+	// Open the boot-window answer BEFORE the first await: bootstrap may call
+	// waitForEmbeddedSession() as soon as React mounts, and the promise must
+	// exist by then (see the handshake section above).
+	if (!bootAnswerPromise) {
+		bootAnswerPromise = new Promise((resolve) => { bootAnswerResolve = resolve; });
+	}
 
 	// Resolve the SAME live modules the MF share scope hands to real apps:
 	// shell-ui's public barrel (src/index.ts — the module rsbuild shares as
@@ -162,34 +234,40 @@ export async function installDevHooks(): Promise<void> {
 	// origin-agnostic, so this is the one channel that works everywhere.
 	installConsoleForwarding();
 
-	// Embedded previews: accept dev-remote registrations and session handoff
+	// Embedded previews: accept dev-remote registrations and session state
 	// from the embedder. The App Builder panel KNOWS its rsbuild dev server's
-	// address — it posts it here and this shell wires the remote itself. The
-	// VSCode host is ALSO already authenticated — its credential arrives as
-	// rrdev:auth so authenticated apps preview with a real signed-in session
-	// and live connection instead of hitting the auth gate.
+	// address — it posts it here and this shell wires the remote itself.
+	// rrdev:auth carries the embedder's DEFINITIVE session state: a token to
+	// adopt (the VSCode host's own credential) or empty for "no session"
+	// (signed out, or Inherit Auth off). One message covers grant and revoke —
+	// there is no separate clear message.
 	window.addEventListener('message', (e: MessageEvent) => {
 		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string } | undefined;
 		if (data?.type === 'rrdev:registerRemote') {
 			if (!data.appId || !data.moduleId || !data.entry) return;
 			registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry);
-		} else if (data?.type === 'rrdev:auth' && typeof data.token === 'string' && data.token) {
+		} else if (data?.type === 'rrdev:auth' && typeof data.token === 'string') {
 			const cm = ConnectionManager.getInstance();
-			// Reboot into the authenticated flow exactly once per credential —
-			// after the reload the tokens match and this is a no-op.
-			if (cm.loadToken() !== data.token) {
-				cm.saveToken(data.token);
-				console.log('[devMode] embedder session received — rebooting authenticated');
-				window.location.reload();
+			// loadToken() yields '' when absent, so '' compares as "no session"
+			// on both sides of the protocol.
+			if (cm.loadToken() === data.token) {
+				// Already in the answered state — just release a pending boot
+				// wait; on later re-answers (re-inject, toggle no-op) this is
+				// a no-op.
+				settleBootAnswer(data.token || null);
+				return;
 			}
-		} else if (data?.type === 'rrdev:clearAuth') {
-			// Inherit Auth switched OFF: drop the inherited session and reboot
-			// signed out — auth-requiring apps then run the preview's own
-			// OAuth cycle (embedded sign-in prompt → popup).
-			const cm = ConnectionManager.getInstance();
-			if (cm.loadToken()) {
-				cm.clearToken();
-				console.log('[devMode] embedder session cleared — rebooting signed out');
+			if (data.token) cm.saveToken(data.token); else cm.clearToken();
+			if (settleBootAnswer(data.token || null)) {
+				// Boot-window answer: bootstrap is still holding behind the
+				// loading screen and proceeds straight into the new state —
+				// no reload, no sign-in flash.
+				console.log(`[devMode] embedder session ${data.token ? 'received' : 'empty'} — continuing boot`);
+			} else {
+				// Post-boot change (Inherit Auth toggled, explicit sign-in,
+				// late credential): reboot into the new state exactly once —
+				// after the reload the states match and this is a no-op.
+				console.log(`[devMode] embedder session ${data.token ? 'received' : 'cleared'} — rebooting`);
 				window.location.reload();
 			}
 		}

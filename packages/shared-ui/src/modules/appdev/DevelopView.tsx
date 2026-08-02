@@ -40,6 +40,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Hand, Monitor, RotateCw, Smartphone, Tablet } from 'lucide-react';
 import { ToggleGroup } from '../../components/toggle-group/ToggleGroup';
 import { ComponentGallery } from './gallery';
 import { LogList, LOG_LIST_CAP } from './LogList';
@@ -61,6 +62,74 @@ export interface IDevelopViewProps {
 }
 
 // =============================================================================
+// SCREEN LAYOUTS
+// =============================================================================
+
+/** Screen-layout presets for the preview viewport. */
+type PreviewLayout = 'desktop' | 'tablet' | 'phone';
+
+/** One selectable display resolution (portrait CSS viewport for devices). */
+interface DevicePreset {
+	/** Short human name shown in the hover menu. */
+	name: string;
+	width: number;
+	height: number;
+}
+
+/**
+ * The three screen layouts work IDENTICALLY: a frame with an exact CSS
+ * viewport floats on the draw canvas, scaled by the zoom and draggable
+ * when it overflows. The preview iframe gets these EXACT dimensions, so
+ * the app's responsive breakpoints fire exactly as on the device. Each
+ * class offers its top-5 common CSS viewports — hover the layout button
+ * to pick one.
+ */
+const DEVICE_PRESETS: Record<PreviewLayout, DevicePreset[]> = {
+	desktop: [
+		{ name: 'HD', width: 1366, height: 768 },
+		{ name: 'WXGA+', width: 1440, height: 900 },
+		{ name: 'HD+', width: 1536, height: 864 },
+		{ name: 'Full HD', width: 1920, height: 1080 },
+		{ name: 'QHD', width: 2560, height: 1440 },
+	],
+	tablet: [
+		{ name: 'iPad Mini 7', width: 744, height: 1133 },
+		{ name: 'Galaxy Tab S10', width: 800, height: 1280 },
+		{ name: 'iPad Air 11', width: 820, height: 1180 },
+		{ name: 'iPad Pro 11', width: 834, height: 1210 },
+		{ name: 'iPad Pro 13', width: 1032, height: 1376 },
+	],
+	phone: [
+		{ name: 'Galaxy S25', width: 360, height: 780 },
+		{ name: 'iPhone 16', width: 393, height: 852 },
+		{ name: 'iPhone 17', width: 402, height: 874 },
+		{ name: 'Pixel 9', width: 412, height: 923 },
+		{ name: 'iPhone 17 Pro Max', width: 440, height: 956 },
+	],
+};
+
+/** Default preset index per layout — the class-typical size. */
+const DEFAULT_PRESET: Record<PreviewLayout, number> = { desktop: 2, tablet: 2, phone: 2 };
+
+/**
+ * Each frame's own footprint (bezel padding + glass borders), included in
+ * the fit math so "fits" means the WHOLE frame.
+ */
+const FRAME_CHROME: Record<PreviewLayout, number> = { desktop: 2, tablet: 26, phone: 26 };
+
+/** host.getPref/setPref key for the persisted preview preferences bag. */
+const PREVIEW_PREFS_KEY = 'preview';
+
+/** The persisted preview preferences — ONE bag, ONE write per change. */
+interface PreviewPrefs {
+	layout: PreviewLayout;
+	orientation: 'portrait' | 'landscape';
+	zoom: number;
+	presetIdx: Record<PreviewLayout, number>;
+	inheritAuth: boolean;
+}
+
+// =============================================================================
 // STYLES
 // =============================================================================
 
@@ -76,8 +145,6 @@ const styles: Record<string, React.CSSProperties> = {
 		borderBottom: '1px solid var(--rr-border)',
 		flexShrink: 0,
 	},
-	// No bottom border: the toolbar and the preview surface below share one
-	// continuous background — the CRT bezel floats on it.
 	toolbar: {
 		height: 39,
 		background: 'var(--rr-bg-widget)',
@@ -87,18 +154,20 @@ const styles: Record<string, React.CSSProperties> = {
 		gap: 8,
 		flexShrink: 0,
 		fontSize: 12,
+		borderBottom: '1px solid var(--rr-border)',
 	},
-	toolbarUrl: {
+	// Dev/watch status, inline on the toolbar's left — the flex:1 slot keeps
+	// the controls right-aligned even when the status is empty. Replaced the
+	// floating DEV badge tile, which covered the preview's own top-right UI.
+	devStatus: {
 		flex: 1,
-		background: 'var(--rr-bg-input)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 3,
-		padding: '4px 10px',
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
 		fontFamily: 'var(--rr-font-mono, Consolas, monospace)',
-		fontSize: 11.5,
+		fontSize: 11,
 		color: 'var(--rr-text-secondary)',
 		overflow: 'hidden',
-		textOverflow: 'ellipsis',
 		whiteSpace: 'nowrap',
 	},
 	toolBtn: {
@@ -130,6 +199,201 @@ const styles: Record<string, React.CSSProperties> = {
 		cursor: 'pointer',
 		margin: 0,
 	},
+	layoutGroup: {
+		display: 'flex',
+		gap: 2,
+	},
+	// Anchor for a layout button's hover resolution menu.
+	layoutBtnWrap: {
+		position: 'relative',
+		display: 'inline-flex',
+	},
+	// The hover resolution menu — floats below its button, above the canvas.
+	resMenu: {
+		position: 'absolute',
+		top: '100%',
+		left: 0,
+		zIndex: 40,
+		minWidth: 170,
+		padding: '4px 0',
+		background: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 4,
+		boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
+	},
+	resMenuItem: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 4,
+		width: '100%',
+		padding: '4px 10px 4px 6px',
+		background: 'transparent',
+		border: 'none',
+		color: 'var(--rr-text-primary)',
+		fontSize: 11.5,
+		textAlign: 'left',
+		whiteSpace: 'nowrap',
+		cursor: 'pointer',
+	},
+	// Fixed-width dot column so labels align whether or not selected.
+	resMenuDot: {
+		width: 12,
+		flexShrink: 0,
+		textAlign: 'center',
+		color: 'var(--rr-brand)',
+	},
+	// Hand-tool pan surface: sits above the app iframe, catches every drag.
+	handOverlay: {
+		position: 'absolute',
+		inset: 0,
+		zIndex: 20,
+		cursor: 'grab',
+		touchAction: 'none',
+	},
+	// Same visual grammar as toolBtn, sized for a 14px icon; the active
+	// layout borrows toolBtnOn's accent.
+	layoutBtn: {
+		padding: '4px 7px',
+		background: 'transparent',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 3,
+		color: 'var(--rr-text-secondary)',
+		cursor: 'pointer',
+		display: 'flex',
+		alignItems: 'center',
+	},
+	// The gray canvas behind a device frame — also the pan surface: drags
+	// on it (or the device bezel) move the frame; pointer capture keeps the
+	// drag alive across the iframe. Overflow (zooming in past fit, panning)
+	// clips via previewScreen's overflow:hidden.
+	deviceCenter: {
+		width: '100%',
+		height: '100%',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		// Same field as the toolbar above — one continuous surface under
+		// the rule, with the frame floating on it.
+		background: 'var(--rr-bg-widget)',
+		cursor: 'grab',
+		touchAction: 'none',
+	},
+	// The device hardware: a dark bezel ring around the glass. Deliberately
+	// theme-independent — hardware doesn't change color with the app theme.
+	// Doubles as the visible drag handle for panning. transform (fit x zoom
+	// scale + pan translate) is computed per layout/zoom in the component.
+	deviceShell: {
+		flexShrink: 0,
+		position: 'relative',
+		padding: 12,
+		background: '#1c1c1e',
+		borderRadius: 26,
+		boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
+	},
+	// Desktop hardware: no bezel ring — just the frame slot the outlined
+	// glass sits in. Same DOM position as deviceShell.
+	desktopShell: {
+		flexShrink: 0,
+		position: 'relative',
+	},
+	// Front-facing camera: a small lens centered in the top bezel ring
+	// (portrait), on tablet and phone alike — both device classes have one.
+	// Lit ring + glint so it reads against the near-black bezel even when
+	// the frame is scaled far below actual size.
+	cameraDot: {
+		position: 'absolute',
+		top: 2,
+		left: '50%',
+		width: 6,
+		height: 6,
+		marginLeft: -4,
+		borderRadius: '50%',
+		background: 'radial-gradient(circle at 35% 35%, #5b7a9d 0%, #101018 65%)',
+		border: '1px solid #4a4a52',
+	},
+	// Landscape: the lens rides the rotation onto the left bezel edge —
+	// where landscape-first tablets put it.
+	cameraDotLandscape: {
+		position: 'absolute',
+		top: '50%',
+		left: 2,
+		width: 6,
+		height: 6,
+		marginTop: -4,
+		borderRadius: '50%',
+		background: 'radial-gradient(circle at 35% 35%, #5b7a9d 0%, #101018 65%)',
+		border: '1px solid #4a4a52',
+	},
+	// Desktop has no camera — but the dot element must STAY in the tree
+	// (see the stable-wrapper note in the render) so the glass never moves.
+	cameraDotHidden: {
+		display: 'none',
+	},
+	// Text-glyph steppers flanking the zoom slider (+/- 5% per click).
+	zoomStepBtn: {
+		padding: '2px 6px',
+		background: 'transparent',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 3,
+		color: 'var(--rr-text-secondary)',
+		fontSize: 12,
+		lineHeight: 1,
+		cursor: 'pointer',
+	},
+	// Desktop "glass": a plain outlined box. Same clipping requirements as
+	// deviceFrame below (position anchor + stacking context + radius).
+	// content-box so the width/height set inline ARE the app's viewport and
+	// the frame chrome math stays exact (borders add outside).
+	desktopFrame: {
+		position: 'relative',
+		boxSizing: 'content-box',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 6,
+		overflow: 'hidden',
+		background: 'var(--rr-bg-default)',
+		isolation: 'isolate',
+		boxShadow: '0 2px 12px rgba(0,0,0,0.18)',
+	},
+	// The device "glass": exact device CSS dimensions (set inline), clipped
+	// so the app's corners round with it. position:relative is load-bearing:
+	// the host's iframe wrapper is absolutely positioned, and without an
+	// anchor here it would resolve against the transformed bezel shell (a
+	// transform creates a containing block) and paint over the bezel ring.
+	// isolation forces a stacking context so the rounded clip applies to
+	// the composited iframe under scale transforms. content-box: the set
+	// width/height ARE the app's viewport; the border adds outside, keeping
+	// the frame chrome math exact.
+	deviceFrame: {
+		position: 'relative',
+		boxSizing: 'content-box',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 14,
+		overflow: 'hidden',
+		background: 'var(--rr-bg-default)',
+		isolation: 'isolate',
+	},
+	zoomControl: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 6,
+		fontSize: 11.5,
+		color: 'var(--rr-text-secondary)',
+		whiteSpace: 'nowrap',
+		userSelect: 'none',
+	},
+	zoomSlider: {
+		width: 90,
+		margin: 0,
+		accentColor: 'var(--rr-brand)',
+		cursor: 'pointer',
+	},
+	// Fixed-width tabular readout so the toolbar doesn't jitter as the
+	// percentage changes length while dragging.
+	zoomValue: {
+		minWidth: 36,
+		textAlign: 'right',
+		fontVariantNumeric: 'tabular-nums',
+	},
 	logToolbar: {
 		display: 'flex',
 		justifyContent: 'flex-end',
@@ -150,47 +414,15 @@ const styles: Record<string, React.CSSProperties> = {
 		position: 'relative',
 		display: 'flex',
 		flexDirection: 'column',
-		// Same surface as the toolbar above — one continuous field around
-		// the CRT bezel instead of a white gutter.
 		background: 'var(--rr-bg-widget)',
 	},
-	// CRT-tube framing: a grayish bezel with generous rounding around the
-	// preview, the "glass" clipped inside it so the app's corners round too.
-	previewBezel: {
-		flex: 1,
-		minHeight: 0,
-		margin: '10px 12px 12px',
-		padding: 10,
-		background: 'var(--rr-bg-surface-alt)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 18,
-		boxShadow: 'inset 0 1px 4px rgba(0,0,0,0.14)',
-		display: 'flex',
-		flexDirection: 'column',
-	},
+	// The draw canvas: clips the floating frame; every layout runs it
+	// edge-to-edge under the toolbar rule.
 	previewScreen: {
 		flex: 1,
 		minHeight: 0,
 		position: 'relative',
-		borderRadius: 10,
 		overflow: 'hidden',
-		border: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-default)',
-	},
-	devBadge: {
-		position: 'absolute',
-		top: 10,
-		right: 12,
-		background: 'var(--rr-bg-paper)',
-		border: '1px solid var(--rr-brand)',
-		borderRadius: 4,
-		padding: '5px 10px',
-		fontFamily: 'var(--rr-font-mono, Consolas, monospace)',
-		fontSize: 10.5,
-		zIndex: 5,
-		lineHeight: 1.5,
-		boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
-		color: 'var(--rr-text-secondary)',
 	},
 	devBadgeBrand: {
 		color: 'var(--rr-brand)',
@@ -219,9 +451,70 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	// ── Pane state — the active lens ─────────────────────────────────────
 	const [pane, setPane] = useState<DevelopPane>('preview');
 	const [previewTheme, setPreviewTheme] = useState<'light' | 'dark'>('light');
+	// Persisted preview preferences: read ONCE at mount from host storage
+	// (synchronous by then — VSCode delivers the bag with appdev:init) and
+	// written back whole by the persist effect below.
+	const storedPrefs = useMemo(
+		() => (host.getPref?.(PREVIEW_PREFS_KEY) ?? null) as Partial<PreviewPrefs> | null,
+		[host],
+	);
+
 	// Inherit Auth: hand the host's session to the preview (default) or make
 	// the preview run its own OAuth cycle.
-	const [inheritAuth, setInheritAuth] = useState(true);
+	const [inheritAuth, setInheritAuth] = useState(() => storedPrefs?.inheritAuth ?? true);
+	// A persisted "off" must reach the host at mount — its own default is ON.
+	useEffect(() => {
+		if (!(storedPrefs?.inheritAuth ?? true)) host.setInheritAuth?.(false);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only sync of the persisted value
+	}, []);
+
+	// Preview zoom: ABSOLUTE scale of the floating frame (1 = actual CSS
+	// pixels), applied as a transform — SCALE, not CSS zoom, because CSS
+	// zoom does not reach into an iframe's document (it would magnify
+	// pixels without reflowing the app). Entering a layout auto-fits this
+	// (see the fit effect below).
+	const [previewZoom, setPreviewZoom] = useState(() => storedPrefs?.zoom ?? 1);
+
+	// Screen layout: which fixed-viewport frame floats on the draw canvas
+	// (see DEVICE_PRESETS) — all three behave identically.
+	const [layout, setLayout] = useState<PreviewLayout>(() =>
+		storedPrefs?.layout && DEVICE_PRESETS[storedPrefs.layout] ? storedPrefs.layout : 'desktop');
+
+	// Selected resolution preset per layout (hover menu on the buttons).
+	const [presetIdx, setPresetIdx] = useState<Record<PreviewLayout, number>>(() => ({
+		...DEFAULT_PRESET,
+		...(storedPrefs?.presetIdx ?? {}),
+	}));
+
+	// Which layout button's resolution menu is open (hover).
+	const [openMenu, setOpenMenu] = useState<PreviewLayout | null>(null);
+
+	// Hand tool: while ON, a transparent overlay covers the whole canvas so
+	// pan drags work ANYWHERE — including over the app, whose iframe
+	// otherwise swallows the pointer. The app is non-interactive until the
+	// tool is toggled off. Plain canvas/bezel drags keep working without it.
+	// Deliberately not persisted — it is a transient mode, and restoring a
+	// session into a non-interactive preview would read as a hang.
+	const [handTool, setHandTool] = useState(false);
+
+	// Live pane dimensions for the device fit math. Guard against 0×0: the
+	// preview pane stays MOUNTED under display:none while other pills are
+	// active, and hidden panels report zero dimensions — adopting those
+	// would collapse the device frame to nothing; keep the last real size.
+	const screenRef = useRef<HTMLDivElement | null>(null);
+	const [screenSize, setScreenSize] = useState<{ width: number; height: number } | null>(null);
+	useEffect(() => {
+		const el = screenRef.current;
+		if (!el || typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver((entries) => {
+			const rect = entries[0]?.contentRect;
+			if (rect && rect.width > 0 && rect.height > 0) {
+				setScreenSize({ width: rect.width, height: rect.height });
+			}
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
 
 	// ── Components pane — mounted on first visit, then kept mounted so the
 	//    selected entry and knob values survive pill switches ──────────────
@@ -290,6 +583,138 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 		host.setPreviewTheme?.(theme);
 	};
 
+	// The active frame geometry — all three layouts share one model: this
+	// frame floats on the canvas at previewZoom (absolute scale, 1 = actual
+	// CSS pixels), draggable when it overflows. Rotation swaps the frame's
+	// axes (landscape); the app viewport rotates with it.
+	const preset = DEVICE_PRESETS[layout][presetIdx[layout]] ?? DEVICE_PRESETS[layout][DEFAULT_PRESET[layout]];
+	const chrome = FRAME_CHROME[layout];
+	const [orientation, setOrientation] = useState<'portrait' | 'landscape'>(() => storedPrefs?.orientation ?? 'portrait');
+	const frameWidth = orientation === 'landscape' ? preset.height : preset.width;
+	const frameHeight = orientation === 'landscape' ? preset.width : preset.height;
+
+	// Pan offset (screen px); recentered on layout switches below — a pan
+	// that made sense for one frame geometry is meaningless for the next.
+	const [pan, setPan] = useState({ x: 0, y: 0 });
+
+	/**
+	 * The zoom at which the whole frame (chrome included) fits the canvas,
+	 * FLOORED to the slider's 5% step — rounding up would clip a bezel
+	 * edge — and capped at 100% so small devices in a big pane come up at
+	 * actual size, not blown up. Null until the canvas has been measured.
+	 */
+	const computeFit = (): number | null => {
+		if (!screenSize) return null;
+		const fit = Math.min(
+			screenSize.width / (frameWidth + chrome),
+			screenSize.height / (frameHeight + chrome),
+			1,
+		);
+		return Math.max(0.25, Math.floor(fit * 20) / 20);
+	};
+
+	/** Fit button / mode entry: whole frame visible, centered. */
+	const applyFit = (): void => {
+		const fit = computeFit();
+		if (fit !== null) {
+			setPreviewZoom(fit);
+			setPan({ x: 0, y: 0 });
+		}
+	};
+
+	// Auto-fit on mode entry, rotation, or resolution change: the zoom is
+	// SET so everything is visible; after that the slider is free —
+	// absolute scale, pan for the overflow. The fit waits on the first
+	// real canvas measurement (needsFitRef), so a boot behind a hidden
+	// pill fits once shown. All three reset effects SKIP their mount run —
+	// on mount these states carry persisted values that must survive (a
+	// stored zoom also suppresses the initial fit). Switching layouts
+	// returns to portrait.
+	const needsFitRef = useRef(storedPrefs?.zoom == null);
+	const layoutMountedRef = useRef(false);
+	useEffect(() => {
+		if (!layoutMountedRef.current) { layoutMountedRef.current = true; return; }
+		needsFitRef.current = true;
+		setPan({ x: 0, y: 0 });
+		setOrientation('portrait');
+	}, [layout]);
+	const orientationMountedRef = useRef(false);
+	useEffect(() => {
+		if (!orientationMountedRef.current) { orientationMountedRef.current = true; return; }
+		needsFitRef.current = true;
+		setPan({ x: 0, y: 0 });
+	}, [orientation]);
+	const presetMountedRef = useRef(false);
+	useEffect(() => {
+		if (!presetMountedRef.current) { presetMountedRef.current = true; return; }
+		needsFitRef.current = true;
+		setPan({ x: 0, y: 0 });
+	}, [presetIdx]);
+	useEffect(() => {
+		if (!needsFitRef.current || !screenSize) return;
+		needsFitRef.current = false;
+		applyFit();
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- applyFit reads the same deps
+	}, [screenSize, layout, orientation, presetIdx]);
+
+	// Persist the whole preferences bag on any change (skip the mount run —
+	// it would just echo the loaded values back).
+	const prefsMountedRef = useRef(false);
+	useEffect(() => {
+		if (!prefsMountedRef.current) { prefsMountedRef.current = true; return; }
+		const bag: PreviewPrefs = { layout, orientation, zoom: previewZoom, presetIdx, inheritAuth };
+		host.setPref?.(PREVIEW_PREFS_KEY, bag);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- host is stable; persist on value changes only
+	}, [layout, orientation, previewZoom, presetIdx, inheritAuth]);
+
+	// In-flight pan drag; pointer capture on the backdrop keeps move events
+	// coming even while the pointer crosses the preview iframe.
+	const panDragRef = useRef<{ pointerId: number; originX: number; originY: number; baseX: number; baseY: number } | null>(null);
+
+	/** Starts a pan drag from the gray backdrop or the device bezel. */
+	const onPanPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+		if (e.button !== 0) return;
+		panDragRef.current = { pointerId: e.pointerId, originX: e.clientX, originY: e.clientY, baseX: pan.x, baseY: pan.y };
+		e.currentTarget.setPointerCapture(e.pointerId);
+	};
+
+	/** Applies the drag delta, clamped so part of the device stays reachable. */
+	const onPanPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+		const drag = panDragRef.current;
+		if (!drag || e.pointerId !== drag.pointerId) return;
+		let x = drag.baseX + (e.clientX - drag.originX);
+		let y = drag.baseY + (e.clientY - drag.originY);
+		// Clamp: never let the whole device leave the pane — always keep a
+		// grabbable sliver (60px) inside the visible area.
+		if (screenSize) {
+			const maxX = (screenSize.width + (frameWidth + chrome) * previewZoom) / 2 - 60;
+			const maxY = (screenSize.height + (frameHeight + chrome) * previewZoom) / 2 - 60;
+			x = Math.max(-maxX, Math.min(maxX, x));
+			y = Math.max(-maxY, Math.min(maxY, y));
+		}
+		setPan({ x, y });
+	};
+
+	/** Ends a pan drag and releases the pointer capture. */
+	const onPanPointerEnd = (e: React.PointerEvent<HTMLDivElement>): void => {
+		const drag = panDragRef.current;
+		if (!drag || e.pointerId !== drag.pointerId) return;
+		panDragRef.current = null;
+		try { e.currentTarget.releasePointerCapture(drag.pointerId); } catch { /* already released */ }
+	};
+
+	// The scaled+panned shell and the exact-viewport glass inside it —
+	// desktop wears the outlined box, tablet/phone the dark hardware bezel.
+	const shellStyle: React.CSSProperties = {
+		...(layout === 'desktop' ? styles.desktopShell : styles.deviceShell),
+		transform: `translate(${pan.x}px, ${pan.y}px) scale(${previewZoom})`,
+	};
+	const glassStyle: React.CSSProperties = {
+		...(layout === 'desktop' ? styles.desktopFrame : styles.deviceFrame),
+		width: frameWidth,
+		height: frameHeight,
+	};
+
 	return (
 		<div style={styles.wrap}>
 			{/* Pill row — the lens switcher */}
@@ -305,7 +730,21 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 			{previewPane && (
 				<div style={{ ...styles.paneHost, display: pane === 'preview' ? 'flex' : 'none' }}>
 					<div style={styles.toolbar}>
-						<div style={styles.toolbarUrl}>{host.getPreviewUrl?.() ?? ''}</div>
+						{/* Dev/watch status (single line). The preview URL that used
+						    to sit here was informational noise — the status is the
+						    fact a developer actually watches. */}
+						<div style={styles.devStatus}>
+							{watch && watch.state !== 'idle' && (
+								<>
+									<span style={styles.devBadgeBrand}>DEV</span>
+									{watch.target ? <span>&rarr; {watch.target}</span> : null}
+									<span style={watch.state === 'error' ? styles.devBadgeErr : styles.devBadgeOk}>
+										watch: {watch.state}
+										{watch.durationMs != null ? ` · ${(watch.durationMs / 1000).toFixed(1)}s` : ''}
+									</span>
+								</>
+							)}
+						</div>
 					{host.setInheritAuth && (
 							<label style={styles.inheritAuth} title="Hand this window's signed-in session to the preview. Unchecked: the preview runs its own OAuth sign-in.">
 								<input
@@ -320,6 +759,87 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 								Inherit Auth
 							</label>
 						)}
+						{/* Screen-layout presets — the iframe gets REAL device CSS
+						    dimensions (breakpoints fire); entering a layout
+						    auto-fits the zoom so the whole frame is visible.
+						    Hovering a button opens its top-5 resolution menu;
+						    the dot marks the selected one. */}
+						<div style={styles.layoutGroup}>
+							{([
+								['desktop', <Monitor key="i" size={14} />, 'Desktop'],
+								['tablet', <Tablet key="i" size={14} />, 'Tablet'],
+								['phone', <Smartphone key="i" size={14} />, 'Phone'],
+							] as Array<[PreviewLayout, React.ReactNode, string]>).map(([l, icon, label]) => {
+								const selected = DEVICE_PRESETS[l][presetIdx[l]] ?? DEVICE_PRESETS[l][DEFAULT_PRESET[l]];
+								return (
+									<span
+										key={l}
+										style={styles.layoutBtnWrap}
+										onMouseEnter={() => setOpenMenu(l)}
+										onMouseLeave={() => setOpenMenu((m) => (m === l ? null : m))}
+									>
+										<button
+											style={layout === l ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
+											title={`${label} layout: ${selected.name} ${selected.width} x ${selected.height} — hover for resolutions`}
+											onClick={() => setLayout(l)}
+										>{icon}</button>
+										{openMenu === l && (
+											<div style={styles.resMenu}>
+												{DEVICE_PRESETS[l].map((p, i) => (
+													<button
+														key={p.name}
+														style={styles.resMenuItem}
+														onClick={() => {
+															setPresetIdx((prev) => ({ ...prev, [l]: i }));
+															setLayout(l);
+															setOpenMenu(null);
+														}}
+													>
+														<span style={styles.resMenuDot}>{presetIdx[l] === i ? '•' : ''}</span>
+														{p.name} · {p.width} x {p.height}
+													</button>
+												))}
+											</div>
+										)}
+									</span>
+								);
+							})}
+							<button
+								style={styles.layoutBtn}
+								title="Rotate 90 degrees (portrait/landscape)"
+								onClick={() => setOrientation((o) => (o === 'portrait' ? 'landscape' : 'portrait'))}
+							><RotateCw size={14} /></button>
+						</div>
+						<label style={styles.zoomControl} title="Preview zoom: absolute scale, 100% = actual size. Switching layouts auto-fits it; drag the gray canvas to pan when zoomed in. Double-click the slider for 100%.">
+							Zoom
+							<button
+								style={styles.zoomStepBtn}
+								title="Zoom out 5%"
+								onClick={() => setPreviewZoom((z) => Math.max(0.25, Math.round((z - 0.05) * 100) / 100))}
+							>-</button>
+							<input
+								type="range"
+								min={25}
+								max={200}
+								step={5}
+								value={Math.round(previewZoom * 100)}
+								onChange={(e) => setPreviewZoom(Number(e.target.value) / 100)}
+								onDoubleClick={() => setPreviewZoom(1)}
+								style={styles.zoomSlider}
+							/>
+							<button
+								style={styles.zoomStepBtn}
+								title="Zoom in 5%"
+								onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.05) * 100) / 100))}
+							>+</button>
+							<span style={styles.zoomValue}>{Math.round(previewZoom * 100)}%</span>
+						</label>
+						<button style={styles.toolBtn} title="Fit the whole frame in the view and recenter" onClick={applyFit}>Fit</button>
+						<button
+							style={handTool ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
+							title="Hand tool: drag anywhere on the preview to pan, even over the app. The app is not interactive while active."
+							onClick={() => setHandTool((h) => !h)}
+						><Hand size={14} /></button>
 						{host.reloadPreview && (
 							<button style={styles.toolBtn} onClick={() => host.reloadPreview?.()}>Reload</button>
 						)}
@@ -340,19 +860,45 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 						)}
 					</div>
 					<div style={styles.previewSurface}>
-						{watch && watch.state !== 'idle' && (
-							<div style={styles.devBadge}>
-								<span style={styles.devBadgeBrand}>DEV</span>
-								{watch.target ? ` → ${watch.target}` : ''}
-								<br />
-								<span style={watch.state === 'error' ? styles.devBadgeErr : styles.devBadgeOk}>
-									watch: {watch.state}
-									{watch.durationMs != null ? ` · ${(watch.durationMs / 1000).toFixed(1)}s` : ''}
-								</span>
+						<div ref={screenRef} style={styles.previewScreen}>
+							{/* ONE stable wrapper structure for every layout — only
+							    the styles switch. Branching to different element
+							    trees here would remount the iframe on a layout
+							    change, rebooting the entire preview session
+							    (shell, dev remote, HMR client). The camera dot is
+							    rendered ALWAYS (hidden on desktop) for the same
+							    reason: conditional children shift the glass's
+							    position and remount it. */}
+							<div
+								style={styles.deviceCenter}
+								onPointerDown={onPanPointerDown}
+								onPointerMove={onPanPointerMove}
+								onPointerUp={onPanPointerEnd}
+								onPointerCancel={onPanPointerEnd}
+								onDoubleClick={() => setPan({ x: 0, y: 0 })}
+								title="Drag the gray canvas or the frame edge to pan. Double-click to recenter."
+							>
+								<div style={shellStyle}>
+									<div style={layout === 'desktop' ? styles.cameraDotHidden : orientation === 'landscape' ? styles.cameraDotLandscape : styles.cameraDot} />
+									<div style={glassStyle}>{previewPane}</div>
+								</div>
 							</div>
-						)}
-						<div style={styles.previewBezel}>
-							<div style={styles.previewScreen}>{previewPane}</div>
+							{/* Hand-tool overlay — ABOVE the iframe so drags work
+							    over the app too. Rendered AFTER the center div:
+							    appending/removing a trailing sibling never shifts
+							    the center's child position, so the iframe is not
+							    remounted by toggling the tool. */}
+							{handTool && (
+								<div
+									style={styles.handOverlay}
+									onPointerDown={onPanPointerDown}
+									onPointerMove={onPanPointerMove}
+									onPointerUp={onPanPointerEnd}
+									onPointerCancel={onPanPointerEnd}
+									onDoubleClick={() => setPan({ x: 0, y: 0 })}
+									title="Hand tool: drag to pan. Double-click to recenter."
+								/>
+							)}
 						</div>
 					</div>
 				</div>

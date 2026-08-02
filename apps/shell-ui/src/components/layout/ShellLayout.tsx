@@ -297,6 +297,17 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Active app descriptor (undefined while loading) ---------------------
 	const activeApp = loadedApps[activeAppId];
 
+	// --- First-content latch --------------------------------------------------
+	// True once the client area has EVER had something real to show (the app,
+	// or a terminal error surface). Until then the whole layout stays on the
+	// full-screen boot rocket: rendering the chrome skeleton around a loading
+	// client area made startup a chrome-pop followed by an app-pop instead of
+	// one cut from "loading" to "ready". A ref, not state — it is a render
+	// latch that must flip in the SAME render that first has content, and it
+	// never flips back (later app SWITCHES keep the chrome and show the
+	// in-pane rocket, as before).
+	const firstContentRef = useRef(false);
+
 	// --- Debug panel state (ALT+D toggle) ------------------------------------
 	const [debugOpen, setDebugOpen] = useState(false);
 
@@ -389,7 +400,23 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	}, [subGateActive, activeAppId, activeManifest]);
 
 	// --- Loading guard -------------------------------------------------------
-	if (!loaded && !seeded) return null;
+	// Workspace still hydrating: hold the SAME phase-anchored rocket as the
+	// boot LoadingScreen — returning null here put a blank frame between two
+	// otherwise-continuous loading screens.
+	if (!loaded && !seeded) return <LoadingScreen />;
+
+	// First boot: stay full-screen on the rocket until the first activation
+	// resolves to real content — the mounted app, or a terminal error surface
+	// (load failure, unknown app id) that the user must see. A pending dev
+	// preview counts as still-loading: its registration self-corrects when
+	// the embedder's injection lands (see the client-area branch below).
+	const devPending = isDevPreviewPending(activeAppId);
+	const hasFirstContent =
+		!!activeApp?.components?.App ||
+		(!devPending && !!appLoadErrors[activeAppId]) ||
+		(!devPending && appManifest.length > 0 && !activeManifest);
+	if (hasFirstContent) firstContentRef.current = true;
+	if (!firstContentRef.current) return <LoadingScreen />;
 
 	// --- Derived layout info -------------------------------------------------
 	// The sidebar is always mounted (inside HostChromeProvider) and self-hides

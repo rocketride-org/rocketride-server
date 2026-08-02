@@ -599,6 +599,29 @@ function regenerateBarrels(maxN) {
 	fs.writeFileSync(INDEX_TS, index);
 }
 
+/**
+ * True when `name` is declared as a TYPE (interface, type alias, or class) in
+ * the bundle body. Used to keep VALUE-only re-exports (consts/functions the
+ * bundler renamed through the final `export { Orig as Alias }` block, e.g. a
+ * component) out of the type floors — a value name in a type position is a
+ * TS2749 in the generated conformance file, and values are already covered
+ * covariantly by the per-version ShellApiShape floors.
+ *
+ * @param {string} body - The bundle text.
+ * @param {string} name - The ORIGINAL (pre-rename) declared name.
+ * @returns {boolean} True for interface/type-alias/class declarations.
+ */
+function hasTypeDeclaration(body, name) {
+	// dts-bundle-generator suffixes collision renames with `$N` — escape for RegExp.
+	const escaped = name.replace(/\$/g, '\\$');
+	const re = new RegExp(
+		`^(?:export\\s+)?(?:declare\\s+)?(?:interface\\s+${escaped}\\b|type\\s+${escaped}\\b)|` +
+		`^(?:export\\s+)?declare\\s+(?:abstract\\s+)?class\\s+${escaped}\\b`,
+		'm',
+	);
+	return re.test(body);
+}
+
 /** Collect the individually-exported named types from the bundle body. */
 function parseExportedTypes(candidateBody) {
 	const names = new Set();
@@ -613,14 +636,19 @@ function parseExportedTypes(candidateBody) {
 	let m;
 	const inlineRe = /^export (?:interface|type|declare (?:abstract )?class) (\w+)/gm;
 	while ((m = inlineRe.exec(candidateBody))) names.add(m[1]);
-	// Re-export blocks: `export { A as B, C }`.
+	// Re-export blocks: `export { A as B, C }`. Since api.ts exports the value
+	// surface by name (mirroring the runtime module), these blocks can carry
+	// VALUE renames too — only names whose original declaration is a type
+	// belong in the type floors (see hasTypeDeclaration).
 	const blockRe = /export \{([^}]*)\}/g;
 	while ((m = blockRe.exec(candidateBody))) {
 		for (const part of m[1].split(',')) {
 			const token = part.trim();
 			if (!token) continue;
-			const asMatch = /\w+\s+as\s+(\w+)/.exec(token);
-			names.add(asMatch ? asMatch[1] : token);
+			const asMatch = /([\w$]+)\s+as\s+(\w+)/.exec(token);
+			const original = asMatch ? asMatch[1] : token;
+			const exported = asMatch ? asMatch[2] : token;
+			if (hasTypeDeclaration(candidateBody, original)) names.add(exported);
 		}
 	}
 	// Exclude the contract machinery — it is checked via the ShellApiShape gate.

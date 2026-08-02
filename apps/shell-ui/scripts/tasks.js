@@ -53,6 +53,13 @@ const {
 const APP_ROOT = path.join(__dirname, '..');
 const BUILD_DIR = path.join(BUILD_ROOT, 'shell-ui');
 const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell');
+// The app-types bundle (generate-app-types, run by shell-ui:bundle) and its
+// served location: the engine serves static/shell at its HTTP root, so the
+// bundle is addressable at /dev/types/ on every server — localhost and cloud
+// alike. The VSCode client vendors from there first (falling back to its
+// packaged copy), so vendored types track the CONNECTED platform.
+const APP_TYPES_DIR = path.join(BUILD_ROOT, 'app-types');
+const SERVER_TYPES_DIR = path.join(SERVER_STATIC_DIR, 'dev', 'types');
 
 // Source directories and files that affect the shell build output.
 // Shell bundles shared-ui with eager: true, so shared-ui changes require a rebuild.
@@ -149,10 +156,13 @@ function makeBundleAction() {
 function makeCopyAction() {
 	return {
 		run: async (ctx, task) => {
-			// Exclude apps/ from mirror — app bundles are copied by their own tasks
-			// and must not be deleted when shell-ui syncs its build output.
-			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { ignore: ['**/__pycache__/**', 'apps/**'], package: true });
-			task.output = formatSyncStats(stats);
+			// Exclude apps/ and dev/types/ from mirror — app bundles are copied by
+			// their own tasks and the type bundle by the sync below; neither must
+			// be deleted when shell-ui syncs its build output.
+			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { ignore: ['**/__pycache__/**', 'apps/**', 'dev/types/**'], package: true });
+			// Publish the app-types bundle at /dev/types/ (see SERVER_TYPES_DIR).
+			const typeStats = await syncDir(APP_TYPES_DIR, SERVER_TYPES_DIR, { package: true });
+			task.output = `${formatSyncStats(stats)}; types: ${formatSyncStats(typeStats)}`;
 		},
 	};
 }
