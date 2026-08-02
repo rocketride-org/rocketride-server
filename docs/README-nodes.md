@@ -257,7 +257,7 @@ The `core` module (`nodes/src/nodes/core/`) is not a single node, it registers a
 family of built-in services through several `services.common.*.json` files:
 
 - **Sources / connectors:** local filesystem, S3, Azure Blob, Google Drive,
-  OneDrive, SharePoint, Outlook, Gmail, Confluence, Slack, SMB.
+  OneDrive, SharePoint, Outlook, Gmail, Slack, SMB.
 - **Processing:** document parsing, content hashing/fingerprinting, ZIP creation,
   word indexing, and vectorization helpers.
 

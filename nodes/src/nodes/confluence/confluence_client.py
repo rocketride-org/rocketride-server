@@ -76,7 +76,7 @@ def _get_with_retry(session: 'requests.Session', url: str, params: Dict[str, Any
             return response
 
         try:
-            delay = min(float(response.headers.get('Retry-After', 1)), MAX_RETRY_AFTER_SECONDS)
+            delay = max(0.0, min(float(response.headers.get('Retry-After', 1)), MAX_RETRY_AFTER_SECONDS))
         except (TypeError, ValueError):
             delay = 1.0
         time.sleep(delay)

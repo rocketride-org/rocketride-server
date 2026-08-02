@@ -111,6 +111,22 @@ def test_get_with_retry_caps_backoff_at_max_retry_after(monkeypatch):
     assert sleeps == [client.MAX_RETRY_AFTER_SECONDS]
 
 
+def test_get_with_retry_floors_a_negative_retry_after(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(client.time, 'sleep', lambda seconds: sleeps.append(seconds))
+
+    responses = [
+        _FakeResponse({}, status_code=429, headers={'Retry-After': '-5'}),
+        _FakeResponse({'ok': True}, status_code=200),
+    ]
+    fake_session = MagicMock()
+    fake_session.get.side_effect = lambda *a, **kw: responses.pop(0)
+
+    client._get_with_retry(fake_session, 'https://x/pages', {})
+
+    assert sleeps == [0.0]
+
+
 def test_get_with_retry_gives_up_after_max_attempts(monkeypatch):
     monkeypatch.setattr(client.time, 'sleep', lambda seconds: None)
 
