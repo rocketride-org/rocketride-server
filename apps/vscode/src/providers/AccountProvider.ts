@@ -49,6 +49,7 @@ interface AccountWebviewMessage {
 	subscriptionId?: string;
 	promotionCode?: string;
 	code?: string;
+	url?: string;
 }
 
 // =============================================================================
@@ -266,6 +267,11 @@ export class AccountProvider {
 
 			case 'checkout:redeemPromo':
 				await this.handleCheckoutRedeemPromo(panel, message);
+				break;
+
+			// -- Plan action CTA (a webview cannot open links itself) --------------
+			case 'checkout:openAction':
+				await this.handleOpenPlanAction(message.url as string);
 				break;
 
 			// Environment variables removed — now handled by EnvironmentProvider.
@@ -1078,6 +1084,28 @@ export class AccountProvider {
 			const msg = err instanceof Error ? err.message : String(err);
 			await panel.webview.postMessage({ type: 'checkout:confirmResult', error: msg });
 		}
+	}
+
+	/**
+	 * Opens a plan card's action CTA (e.g. the "Contact us" tier).
+	 *
+	 * PlanPicker's default handler calls window.open, which a webview has no
+	 * browser chrome to satisfy — it navigates the panel to a blank target with
+	 * no way back (#1303). The host opens it instead.
+	 *
+	 * The scheme is allowlisted because this value arrives from the webview and
+	 * ends at the OS handler; the other openExternal calls here go host -> OS.
+	 *
+	 * @param url - Target URL, or a mailto: URI for `mailto` actions.
+	 */
+	private async handleOpenPlanAction(url: string): Promise<void> {
+		if (!url) return;
+		const target = vscode.Uri.parse(url);
+		if (!['http', 'https', 'mailto'].includes(target.scheme)) {
+			console.error(`[AccountProvider] Refusing to open unsupported scheme: ${target.scheme}`);
+			return;
+		}
+		await vscode.env.openExternal(target);
 	}
 
 	/**

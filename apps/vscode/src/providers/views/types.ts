@@ -121,7 +121,9 @@ export type AccountWebviewToHost =
 	| { type: 'account:removeTeamMember'; params: { teamId: string; userId: string } }
 	| { type: 'account:sectionChange'; section: string }
 	| { type: 'checkout:validatePromo'; code: string; priceId?: string }
-	| { type: 'checkout:redeemPromo'; code: string };
+	| { type: 'checkout:redeemPromo'; code: string }
+	/** Plan action CTA; the host opens it, since window.open blanks a webview. */
+	| { type: 'checkout:openAction'; url: string };
 
 // =============================================================================
 // ENVIRONMENT PAGE PROTOCOL
