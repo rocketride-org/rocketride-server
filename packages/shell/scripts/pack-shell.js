@@ -30,12 +30,13 @@
  * emitted or served anymore.
  *
  * Dependencies: real npm deps are copied through. 'shared' is dropped
- * (no longer imported by shell). 'rocketride' — the published SDK the
- * shell's connection code wraps — ships as a real dependency pinned to
- * the in-repo SDK version, so standalone consumers that bundle the
- * compiled shell resolve it from npm; apps never import it directly
- * (the shell barrel is the only door; its types are inlined in the
- * frozen bundle).
+ * (no longer imported by shell). 'rocketride' — the SDK the shell's
+ * connection code wraps — is a BUNDLED dependency: the tgz carries the
+ * in-repo build at node_modules/rocketride (npm's bundleDependencies),
+ * so 'shell/client' always resolves to the SDK this server was built
+ * with — the registry is never consulted. The SDK's own deps stay
+ * ordinary registry deps. An app that wants a private SDK instance
+ * declares its own 'rocketride' dependency and owns the divergence.
  */
 const fs = require('fs');
 const path = require('path');
@@ -136,9 +137,23 @@ async function main() {
 	fs.copyFileSync(path.join(SRC_DIR, 'themes', 'rocketride-default.css'), path.join(STAGE_DIR, 'tokens.css'));
 
 	// step: the shell/client subpath types — the SDK surface rides the
-	// rocketride dependency's own bundled types, so the declaration is a
-	// bare star re-export resolved against the installed package
+	// bundled rocketride package's own types, so the declaration is a
+	// bare star re-export resolved against the copy vendored below
 	fs.writeFileSync(path.join(STAGE_DIR, 'client.d.ts'), "export * from 'rocketride';\n");
+
+	// step: vendor the in-repo SDK at node_modules/rocketride — its publish
+	// file set (manifest + dist), exactly what `npm pack` would ship. The
+	// bundleDependencies entry in the manifest below makes npm pack carry
+	// this directory inside the tgz.
+	const sdkRoot = path.join(REPO_ROOT, 'packages', 'client-typescript');
+	if (!fs.existsSync(path.join(sdkRoot, 'dist', 'types', 'index.d.ts'))) throw new Error('pack-shell: packages/client-typescript/dist is missing — run ./builder client-typescript:build first');
+	const sdkPkg = JSON.parse(fs.readFileSync(path.join(sdkRoot, 'package.json'), 'utf8'));
+	const vendorDir = path.join(STAGE_DIR, 'node_modules', 'rocketride');
+	fs.mkdirSync(vendorDir, { recursive: true });
+	for (const f of ['package.json', 'README.md', 'LICENSE']) {
+		if (fs.existsSync(path.join(sdkRoot, f))) fs.copyFileSync(path.join(sdkRoot, f), path.join(vendorDir, f));
+	}
+	fs.cpSync(path.join(sdkRoot, 'dist'), path.join(vendorDir, 'dist'), { recursive: true });
 
 	// step: craft the published manifest from the workspace one — same name
 	// and version, real deps only, exports locked to the barrel + sanctioned
@@ -150,13 +165,12 @@ async function main() {
 		dependencies[name] = spec;
 	}
 	// The rocketride SDK is an implementation detail of the shell (the
-	// connection code wraps it), published on npm. Standalone consumers
-	// that bundle the compiled shell need it installed beside the package,
-	// so it ships as a REAL dependency pinned to the in-repo SDK version —
+	// connection code wraps it). It ships BUNDLED — the exact in-repo
+	// build vendored above rides inside the tgz, so the guaranteed
+	// shell/client surface can never drift from the serving server —
 	// apps themselves never import 'rocketride'; the shell barrel is the
 	// only door.
-	const sdkVersion = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'packages', 'client-typescript', 'package.json'), 'utf8')).version;
-	dependencies['rocketride'] = `^${sdkVersion}`;
+	dependencies['rocketride'] = sdkPkg.version;
 	const manifest = {
 		name: 'shell',
 		version: workspacePkg.version,
@@ -176,6 +190,7 @@ async function main() {
 			'./package.json': './package.json',
 		},
 		dependencies,
+		bundleDependencies: ['rocketride'],
 		rocketride: {
 			shellApiVersion: frozen.version,
 			generated: new Date().toISOString(),
@@ -184,11 +199,13 @@ async function main() {
 	fs.writeFileSync(path.join(STAGE_DIR, 'package.json'), `${JSON.stringify(manifest, null, '\t')}\n`);
 
 	// step: pack under the STABLE name into the server's static clients
-	// tree (served at /client/shell by the clients module)
+	// tree (served at /client/shell by the clients module). npm (not pnpm)
+	// does the packing — its packlist is the reference implementation of
+	// bundleDependencies, which carries node_modules/rocketride into the tgz.
 	fs.mkdirSync(TGZ_DIR, { recursive: true });
-	execFileSync('pnpm', ['pack', '--pack-destination', TGZ_DIR], { cwd: STAGE_DIR, stdio: 'pipe', shell: process.platform === 'win32' });
+	execFileSync('npm', ['pack', '--pack-destination', TGZ_DIR], { cwd: STAGE_DIR, stdio: 'pipe', shell: process.platform === 'win32' });
 	const packed = fs.readdirSync(TGZ_DIR).find((f) => /^shell-.*\.tgz$/.test(f));
-	if (!packed) throw new Error('pack-shell: pnpm pack produced no shell tarball');
+	if (!packed) throw new Error('pack-shell: npm pack produced no shell tarball');
 	fs.rmSync(path.join(TGZ_DIR, 'shell.tgz'), { force: true });
 	fs.renameSync(path.join(TGZ_DIR, packed), path.join(TGZ_DIR, 'shell.tgz'));
 
