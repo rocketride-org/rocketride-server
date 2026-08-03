@@ -41,9 +41,11 @@ the FalkorDB Browser offers between *Manual Configuration* and *FalkorDB URL*:
 - **FalkorDB URL (connection string)** — profile `url`. Paste the connection string from the
   FalkorDB Cloud console, e.g.
   `falkor://falkordb@r-6jissuruar.instance-ytljliglb.us-east-1.aws.cloud:53939`. Schemes
-  accepted: `falkor://`, `falkors://` (TLS), `redis://`, `rediss://`, `unix://`. Credentials
-  travel in the URL itself (`falkor://user:password@host:port`); this profile has no separate
-  password field, so there is nothing that can disagree with what the URL already carries.
+  accepted: `falkor://`, `falkors://` (TLS), `redis://`, `rediss://`, `unix://`. The password may
+  be embedded (`falkor://user:password@host:port`) or left out of the URL and typed into
+  `password`, which keeps the secret in the node's encrypted field instead of in the URL. When
+  `password` is filled in it is the one used: any password the URL embeds is stripped before the
+  connection is opened, so the two can never silently disagree.
 
 Every other setting below is available in both profiles. Pipelines saved before the URL profile
 existed keep working unchanged: they already use the `default` profile.
@@ -55,9 +57,9 @@ existed keep working unchanged: they already use the `default` profile.
 | `host` | manual | string | Default `localhost`. FalkorDB host, e.g. `localhost` or `your-instance.falkordb.cloud`. |
 | `port` | manual | integer | Default 6379 (1–65535). FalkorDB port (Redis protocol). |
 | `username` | manual | string | Default empty. Username, e.g. `default` for FalkorDB Cloud. Leave empty for no auth. |
-| `password` | manual | string | Default empty. Password for the FalkorDB instance. Leave empty for no auth. |
 | `tls` | manual | boolean | Default false. Connect with TLS (for FalkorDB Cloud TLS endpoints). |
-| `url` | url | string | Connection string, e.g. `falkor://user:password@host:6379`. Required in this profile; it carries the credentials too. |
+| `url` | url | string | Connection string, e.g. `falkor://user@host:6379`. Required in this profile. |
+| `password` | both | string | Default empty. Stored encrypted. When set it replaces any password embedded in the URL. Leave empty for no auth, or to use the one the URL carries. |
 
 ### Shared fields
 

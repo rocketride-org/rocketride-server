@@ -689,9 +689,40 @@ def test_url_profile_connects_from_url(recording_client):
     url = 'falkor://falkordb:s3cret@r-6jissuruar.instance-ytljliglb.us-east-1.aws.cloud:53939'
     _glb_mod.IGlobal._connect({'mode': 'url', 'url': f'  {url}  '})
 
-    # The URL carries every credential; nothing else may be passed alongside it.
+    # No password field set -> the URL is passed through untouched.
     assert recording_client.last_url == url
     assert recording_client.last_kwargs == {}
+
+
+def test_password_field_replaces_the_one_embedded_in_the_url(recording_client):
+    """The field is the single source of truth: redis-py must not prefer the URL."""
+    _glb_mod.IGlobal._connect({'mode': 'url', 'url': 'falkor://falkordb:stale@host:53939', 'password': 'current'})
+
+    assert recording_client.last_url == 'falkor://falkordb@host:53939'
+    assert recording_client.last_kwargs == {'password': 'current'}
+
+
+def test_password_field_fills_in_a_url_without_credentials(recording_client):
+    _glb_mod.IGlobal._connect({'mode': 'url', 'url': 'falkor://falkordb@host:53939', 'password': 'secret'})
+
+    assert recording_client.last_url == 'falkor://falkordb@host:53939'
+    assert recording_client.last_kwargs == {'password': 'secret'}
+
+
+@pytest.mark.parametrize(
+    ('url', 'expected'),
+    [
+        # The username survives, percent-escapes and all; only the password goes.
+        ('falkor://us%3Aer:p%40ss@host:6379', 'falkor://us%3Aer@host:6379'),
+        # No username either — an authority that is only a password.
+        ('falkor://:pw@host:6379', 'falkor://host:6379'),
+        # unix:// carries its password in the query string instead.
+        ('unix:///tmp/f.sock?db=0&password=pw', 'unix:///tmp/f.sock?db=0'),
+        ('falkor://host:6379', 'falkor://host:6379'),
+    ],
+)
+def test_url_without_password_strips_only_the_password(url, expected):
+    assert _glb_mod._url_without_password(url) == expected
 
 
 @pytest.mark.parametrize('url', ['http://host:6379', 'host:6379', 'bolt://host:7687'])

@@ -34,6 +34,7 @@ from the base class.
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from redis.exceptions import RedisError
 
@@ -244,11 +245,17 @@ class IGlobal(GraphGlobalBase):
     def _connect(cls, config: Dict[str, Any]) -> FalkorDB:
         """Open a client from whichever profile is configured: URL or host/port."""
         url = _connection_url(config)
-        # In the URL profile every credential travels in the URL itself; a separate
-        # password field would only conflict with one already embedded there.
-        if url:
+        if not url:
+            return FalkorDB(**cls._client_kwargs(config))
+
+        # Do NOT strip the password — whitespace is valid in passwords.
+        password = str(config.get('password') or '')
+        if not password:
             return FalkorDB.from_url(url)
-        return FalkorDB(**cls._client_kwargs(config))
+
+        # A filled-in password field is the one that counts, so drop whatever the
+        # URL embeds: redis-py would otherwise prefer the URL and ignore the field.
+        return FalkorDB.from_url(_url_without_password(url), password=password)
 
     @staticmethod
     def _client_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -300,6 +307,34 @@ def _connection_url(config: Dict[str, Any]) -> str:
             f'Unsupported FalkorDB URL scheme in "{_redact(url)}": expected one of {", ".join(URL_SCHEMES)}'
         )
     return url
+
+
+def _url_without_password(url: str) -> str:
+    """Return the URL with any embedded password removed, username kept.
+
+    Covers both places a URL can carry one: the authority (``user:pass@host``)
+    and the ``password=`` query parameter that ``unix://`` URLs use.
+    """
+    parts = urlsplit(url)
+
+    # Split the authority by hand rather than through parts.username, which
+    # unquotes percent-escapes that must survive into the rebuilt URL.
+    netloc = parts.netloc
+    if '@' in netloc:
+        credentials, _, host = netloc.rpartition('@')
+        user = credentials.split(':', 1)[0]
+        netloc = f'{user}@{host}' if user else host
+
+    query = parts.query
+    if query:
+        query = urlencode([(k, v) for k, v in parse_qsl(query, keep_blank_values=True) if k != 'password'])
+
+    rebuilt = urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
+    # urlunsplit drops the '//' when the authority is empty, turning a unix:///path
+    # socket URL into unix:/path. Put it back so the scheme still parses.
+    if not netloc and url.startswith(f'{parts.scheme}://'):
+        rebuilt = f'{parts.scheme}://{rebuilt[len(parts.scheme) + 1 :]}'
+    return rebuilt
 
 
 def _redact(target: str) -> str:
