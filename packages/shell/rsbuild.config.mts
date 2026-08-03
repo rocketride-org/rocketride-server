@@ -148,9 +148,17 @@ export default defineConfig(({ command }) => {
 					// MF shared resolution bypasses rsbuild aliases — explicit import
 					// paths are required so MF can find the modules at build time.
 					'shell':   { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
+					// The SDK surface, mediated by the shell — remotes import
+					// runtime values from 'shell/client' and consume this
+					// host-provided singleton, so protocol classes keep ONE
+					// identity across the host boundary. Share keys match
+					// exactly: sharing 'shell' does NOT cover the subpath.
+					'shell/client': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/client.ts') },
 					// NOTE: no 'shared' share key — the shared library is STATIC
 					// (each consumer bundles its own copy via deep specs); only
 					// the shell surface and the SDK are runtime-bound.
+					// 'rocketride' stays host-provided for already-deployed
+					// remotes that predate shell/client; new apps never use it.
 					'rocketride': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
 
 				},

@@ -53,13 +53,12 @@ const {
 const APP_ROOT = path.join(__dirname, '..');
 const BUILD_DIR = path.join(BUILD_ROOT, 'shell');
 const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell');
-// The app-types bundle (generate-app-types, run by shell:bundle) and its
-// served location: the engine serves static/shell at its HTTP root, so the
-// bundle is addressable at /dev/types/ on every server — localhost and cloud
-// alike. The VSCode client vendors from there first (falling back to its
-// packaged copy), so vendored types track the CONNECTED platform.
-const APP_TYPES_DIR = path.join(BUILD_ROOT, 'app-types');
-const SERVER_TYPES_DIR = path.join(SERVER_STATIC_DIR, 'dev', 'types');
+// The installable shell package (pack-shell, run by shell:bundle) lands in
+// static/clients/shell/shell.tgz — beside the python/typescript SDK
+// packages — and the clients module serves it at /client/shell. Standalone
+// consumers install from there, so the platform package tracks the
+// CONNECTED server.
+const SERVER_CLIENTS_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'shell');
 
 // Source directories and files that affect the shell build output.
 // Shell bundles shared-ui with eager: true, so shared-ui changes require a rebuild.
@@ -140,8 +139,15 @@ function makeBundleAction() {
 			// APP TYPES: the shipped type surface for standalone app repos
 			// (frozen shell-api + shared rollup) — vendored into app folders
 			// by the App Builder.
-			task.output = 'Generating app types bundle...';
-			await execCommand('node', [path.join(APP_ROOT, 'scripts', 'generate-app-types.js')], { task, cwd: APP_ROOT });
+			// SHELL PACKAGE: the installable shell.tgz (compiled lib + frozen
+			// contract types + token CSS), packed straight into
+			// static/clients/shell/ and served at /client/shell by the
+			// clients module. pack-shell also emits the loose transition
+			// files (shell.d.ts / tokens.css / app-types.json) the current
+			// per-app type vendoring still reads — it replaced the old
+			// generate-app-types script outright.
+			task.output = 'Packing shell.tgz...';
+			await execCommand('node', [path.join(APP_ROOT, 'scripts', 'pack-shell.js')], { task, cwd: APP_ROOT });
 
 			await saveSourceHash(BUILD_HASH_KEY, hash);
 		},
@@ -156,13 +162,14 @@ function makeBundleAction() {
 function makeCopyAction() {
 	return {
 		run: async (ctx, task) => {
-			// Exclude apps/ and dev/types/ from mirror — app bundles are copied by
-			// their own tasks and the type bundle by the sync below; neither must
-			// be deleted when the shell syncs its build output.
-			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { ignore: ['**/__pycache__/**', 'apps/**', 'dev/types/**'], package: true });
-			// Publish the app-types bundle at /dev/types/ (see SERVER_TYPES_DIR).
-			const typeStats = await syncDir(APP_TYPES_DIR, SERVER_TYPES_DIR, { package: true });
-			task.output = `${formatSyncStats(stats)}; types: ${formatSyncStats(typeStats)}`;
+			// Exclude apps/ from mirror — app bundles are copied by their own
+			// tasks and must not be deleted when the shell syncs its build
+			// output. shell.tgz lives in static/clients/shell (packed there
+			// by shell:bundle), not in the bundle output, so this mirror also
+			// removes the retired dev/shell.tgz and dev/types loose files
+			// from older deployments.
+			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, { ignore: ['**/__pycache__/**', 'apps/**'], package: true });
+			task.output = formatSyncStats(stats);
 		},
 	};
 }
@@ -216,6 +223,7 @@ const shellModule = {
 				run: async (_ctx, task) => {
 					await removeDir(BUILD_DIR);
 					await removeDir(SERVER_STATIC_DIR);
+					await removeDir(SERVER_CLIENTS_DIR);
 					await removeDir(path.join(APP_ROOT, 'dist'));
 					await setState(BUILD_HASH_KEY, null);
 					task.output = 'Cleaned shell';

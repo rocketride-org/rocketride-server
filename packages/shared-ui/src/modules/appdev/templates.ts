@@ -90,6 +90,11 @@ function packageJson(v: TemplateVars): string {
 				rocketride: '^1.0.0',
 				react: '^18.2.0',
 				'react-dom': '^18.2.0',
+				// The platform package: the App Builder downloads the server's
+				// shell.tgz and extracts it to <workspace>/.rocketride/shell —
+				// a DIRECTORY dependency (linked, no lockfile hash churn), and
+				// the spec never changes across platform versions.
+				shell: 'file:../../.rocketride/shell',
 			},
 			devDependencies: {
 				// EXACT pin: the container must run against the shell's MF
@@ -143,7 +148,8 @@ export default defineConfig(() => ({
 				// Platform modules are CONSUMED from the shell's share scope at
 				// runtime, never bundled (import: false): the app repo needs no
 				// platform checkout to build — editor types come from the
-				// vendored types/rocketride-shell/ (tsconfig paths).
+				// installed shell package (.rocketride/shell, the server's
+				// shell.tgz) via its package.json types entry.
 				'shell': { singleton: true, requiredVersion: false, import: false },
 				// react-refresh/runtime is deliberately NOT shared: the app's
 				// own copy late-attaches to the devtools hook the dev-flavor
@@ -193,15 +199,12 @@ function tsconfigJson(): string {
 				strict: true,
 				skipLibCheck: true,
 				noEmit: true,
-				// Platform types come from the VENDORED bundle the App Builder
-				// maintains (types/rocketride-shell/) — the modules themselves
-				// arrive from the shell's share scope at runtime, so nothing
-				// platform-side is ever installed or checked out.
-				paths: {
-					shell: ['./types/rocketride-shell/shell.d.ts'],
-				},
+				// No 'shell' paths mapping: the specifier resolves through the
+				// installed platform package (.rocketride/shell) whose manifest
+				// declares the frozen contract as its types entry — standard
+				// node_modules resolution, nothing hand-mapped.
 			},
-			include: ['src', 'types'],
+			include: ['src'],
 		},
 		null,
 		2,
@@ -393,10 +396,6 @@ export function renderTemplate(name: TemplateName, vars: TemplateVars): Template
 				'',
 				'# Build output',
 				'dist/',
-				'',
-				'# Vendored platform types — tooling-owned: the App Builder refreshes',
-				'# them from the connected server on every open (do not commit)',
-				'types/rocketride-shell/',
 				'',
 				'# Logs and OS noise',
 				'*.log',
