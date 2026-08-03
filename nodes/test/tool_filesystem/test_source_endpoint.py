@@ -260,3 +260,49 @@ def test_validate_config_requires_path(monkeypatch):
     ep = _endpoint(mod, {}, path='', monkeypatch=monkeypatch)
     with pytest.raises(ValueError, match='path'):
         ep.validateConfig(False)
+
+
+# ---------------------------------------------------------------------------
+# pydevd foreign-thread registration (designer/debugpy dev-mode wedge)
+# ---------------------------------------------------------------------------
+
+
+def _render_ready_instance():
+    from test_sink_naming import _fs, _sink_instance
+
+    inst = _sink_instance(_fs())
+    inst.IEndpoint = types.SimpleNamespace(renderStoreObject=lambda e, i: None)
+    return inst, sys.modules['tool_filesystem.IInstance']
+
+
+def test_render_registers_thread_with_pydevd_once(monkeypatch):
+    inst, mod = _render_ready_instance()
+    fake_pydevd = MagicMock()
+    monkeypatch.setitem(sys.modules, 'pydevd', fake_pydevd)
+    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+
+    inst.renderObject(types.SimpleNamespace(name='a.txt'))
+    fake_pydevd.settrace.assert_called_once_with(suspend=False)
+    inst.renderObject(types.SimpleNamespace(name='b.txt'))
+    fake_pydevd.settrace.assert_called_once()  # same thread: not re-registered
+
+
+def test_render_without_pydevd_is_a_noop(monkeypatch):
+    inst, mod = _render_ready_instance()
+    monkeypatch.delitem(sys.modules, 'pydevd', raising=False)
+    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+    assert inst.renderObject(types.SimpleNamespace(name='a.txt')) == 'PREVENT_DEFAULT'
+
+
+def test_render_survives_pydevd_settrace_failure(monkeypatch):
+    # A broken debugger must not fail the render; and the thread must not be
+    # retried on every object (one warning, not a warning per file).
+    inst, mod = _render_ready_instance()
+    fake_pydevd = MagicMock()
+    fake_pydevd.settrace.side_effect = RuntimeError('adapter gone')
+    monkeypatch.setitem(sys.modules, 'pydevd', fake_pydevd)
+    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+
+    assert inst.renderObject(types.SimpleNamespace(name='a.txt')) == 'PREVENT_DEFAULT'
+    inst.renderObject(types.SimpleNamespace(name='b.txt'))
+    fake_pydevd.settrace.assert_called_once()
