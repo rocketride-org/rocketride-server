@@ -76,7 +76,7 @@ async function copyScripts(targetRoot, opts = {}) {
 		throw new Error(`target path '${targetRoot}' does not exist`);
 	}
 	if (path.resolve(targetRoot) === path.resolve(SOURCE_SCRIPTS, '..')) {
-		throw new Error('target is this repository — builder:scripts copies the local scripts/ to ANOTHER repo (--path=<repo root>)');
+		throw new Error('target is this repository — builder:inject copies the local scripts/ to ANOTHER repo (--path=<repo root>)');
 	}
 
 	const scriptsDir = path.join(targetRoot, 'scripts');

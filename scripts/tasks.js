@@ -34,14 +34,14 @@
  *     /client/shell. When the package is missing, build.js fetches it
  *     automatically BEFORE the dependency bootstrap (lib/vendor-shell.js)
  *     — the workspace cannot even pnpm install without it. This file
- *     registers shell:update for the explicit case: refreshing the
+ *     registers client:update for the explicit case: refreshing the
  *     package when it is ALREADY installed.
  *
  * Actions:
  *   ui:clean        — clean all UI app build artifacts
  *   ui:register     — register all UI apps into apps.json (no bundling)
  *   ui:build        — build all UI apps (shell first when it is in-tree)
- *   shell:update    — [standalone repos only] refresh .rocketride/shell
+ *   client:update   — [standalone repos only] refresh .rocketride/shell
  *                     from a server (--shell=<url>, default ROCKETRIDE_URI)
  *                     and relink the workspace
  *   builder:inject  — copy this builder's scripts/ tree into another repo
@@ -142,13 +142,15 @@ const uiModule = {
 };
 
 // =============================================================================
-// SHELL MODULE (standalone repos) — vendored platform package
+// CLIENT MODULE (standalone repos) — vendored platform package
 // =============================================================================
 
-// Only registered when the shell is NOT in-tree: in the platform repo the
-// 'shell' module name belongs to packages/shell/scripts/tasks.js.
-const shellVendorModule = {
-	name: 'shell',
+// Only registered when the shell is NOT in-tree. Named 'client' (not
+// 'shell') so a copy of this file inside a nested standalone repo (e.g.
+// the apps/stock submodule) can never clobber the platform repo's real
+// shell module in the shared registry namespace.
+const clientVendorModule = {
+	name: 'client',
 	description: 'Vendored platform package (.rocketride/shell)',
 
 	actions: [
@@ -157,7 +159,7 @@ const shellVendorModule = {
 			// not — the automatic injection before pnpm install only fetches
 			// when the package is MISSING, so picking up a newer platform
 			// build is always this explicit step.
-			name: 'shell:update',
+			name: 'client:update',
 			action: () => ({
 				description: 'Refresh .rocketride/shell from a server (--shell=<url>)',
 				run: async (ctx, task) => {
@@ -226,4 +228,4 @@ const builderModule = {
 	],
 };
 
-module.exports = IS_PLATFORM_REPO ? [uiModule, builderModule] : [uiModule, shellVendorModule, builderModule];
+module.exports = IS_PLATFORM_REPO ? [uiModule, builderModule] : [uiModule, clientVendorModule, builderModule];

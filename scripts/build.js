@@ -119,7 +119,7 @@ function parseArgs(args) {
 			options.branch = arg.substring('--branch='.length);
 		} else if (arg.startsWith('--shell=')) {
 			// Server to vendor the platform package from (auto-injection and
-			// shell:update); beats ROCKETRIDE_URI from .config/.env.
+			// client:update); beats ROCKETRIDE_URI from .config/.env.
 			options.shell = arg.substring('--shell='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
 			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
@@ -248,7 +248,7 @@ Options:
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message
-  --host=URL          Server to vendor the platform from (shell:update)
+  --shell=URL         Server to vendor the platform from (auto-injection, client:update)
   --jest="args"       Pass arguments to Jest (can be repeated)
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
@@ -303,7 +303,7 @@ async function main() {
 	// (file:../../.rocketride/shell) cannot even pnpm install until the
 	// package exists, so when it is needed and MISSING it is fetched here
 	// automatically (--shell=<url> beats ROCKETRIDE_URI beats localhost).
-	// Refreshing an EXISTING install is explicit: builder shell:update.
+	// Refreshing an EXISTING install is explicit: builder client:update.
 	if (isStandalone) {
 		const { ensureVendoredShell } = require('./lib/vendor-shell');
 		try {
