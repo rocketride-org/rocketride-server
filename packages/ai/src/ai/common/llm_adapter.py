@@ -250,44 +250,50 @@ class LangChainAdapter:
         self.history.append({'role': 'user', 'content': user_text})
         parse = _make_stream_content_parser(True)
         parts: list[str] = []
-        # OpenAI-family models only emit streaming usage when asked; others (e.g.
-        # Anthropic) emit it by default, so scope the flag to avoid an unknown kwarg.
+        # OpenAI-family models only emit streaming usage when asked. Ask whichever
+        # model declares the flag rather than matching on the class name: ChatXAI
+        # inherits it from BaseChatOpenAI without carrying 'OpenAI' in its name, and
+        # a model that lacks it (ChatBedrock) would reject it as an unknown kwarg.
         skw = dict(self.stream_kwargs)
-        if 'OpenAI' in type(self.llm).__name__:
+        if hasattr(self.llm, 'stream_usage'):
             skw.setdefault('stream_usage', True)
         total_in = out_toks = cache_read = cache_creation = 0
-        for piece in self.llm.stream(self.history, **skw):
-            um = getattr(piece, 'usage_metadata', None)
-            if isinstance(um, dict):
-                # Chunks carry cumulative counts; max() lands on the final totals.
-                total_in = max(total_in, int(um.get('input_tokens') or 0))
-                out_toks = max(out_toks, int(um.get('output_tokens') or 0))
-                det = um.get('input_token_details')
-                if isinstance(det, dict):
-                    cache_read = max(cache_read, int(det.get('cache_read') or 0))
-                    cache_creation = max(cache_creation, int(det.get('cache_creation') or 0))
-            text, thinking = parse(piece.content)
-            if thinking:
-                yield Event('thinking', thinking)
-            if text:
-                parts.append(text)
-                yield Event('text', text)
-            reason = (getattr(piece, 'response_metadata', None) or {}).get('finish_reason')
-            if reason:
-                self.finish_reason = reason
-        tail_text, tail_thinking = parse.flush()
-        if tail_thinking:
-            yield Event('thinking', tail_thinking)
-        if tail_text:
-            parts.append(tail_text)
-            yield Event('text', tail_text)
-        report_llm_tokens(
-            max(0, total_in - cache_read - cache_creation),
-            out_toks,
-            model=str(getattr(self.llm, 'model', None) or getattr(self.llm, 'model_name', '') or ''),
-            cache_read_tokens=cache_read,
-            cache_creation_tokens=cache_creation,
-        )
+        # try/finally so a mid-stream raise still records the cumulative usage the
+        # chunks already carried, matching the two native adapters.
+        try:
+            for piece in self.llm.stream(self.history, **skw):
+                um = getattr(piece, 'usage_metadata', None)
+                if isinstance(um, dict):
+                    # Chunks carry cumulative counts; max() lands on the final totals.
+                    total_in = max(total_in, int(um.get('input_tokens') or 0))
+                    out_toks = max(out_toks, int(um.get('output_tokens') or 0))
+                    det = um.get('input_token_details')
+                    if isinstance(det, dict):
+                        cache_read = max(cache_read, int(det.get('cache_read') or 0))
+                        cache_creation = max(cache_creation, int(det.get('cache_creation') or 0))
+                text, thinking = parse(piece.content)
+                if thinking:
+                    yield Event('thinking', thinking)
+                if text:
+                    parts.append(text)
+                    yield Event('text', text)
+                reason = (getattr(piece, 'response_metadata', None) or {}).get('finish_reason')
+                if reason:
+                    self.finish_reason = reason
+            tail_text, tail_thinking = parse.flush()
+            if tail_thinking:
+                yield Event('thinking', tail_thinking)
+            if tail_text:
+                parts.append(tail_text)
+                yield Event('text', tail_text)
+        finally:
+            report_llm_tokens(
+                max(0, total_in - cache_read - cache_creation),
+                out_toks,
+                model=str(getattr(self.llm, 'model', None) or getattr(self.llm, 'model_name', '') or ''),
+                cache_read_tokens=cache_read,
+                cache_creation_tokens=cache_creation,
+            )
         assistant = {'role': 'assistant', 'content': ''.join(parts)}
         self.history.append(assistant)
         yield Event('done', items=[assistant])
