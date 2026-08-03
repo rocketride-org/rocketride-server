@@ -44,6 +44,7 @@
 		"@types/react": "~18.3.31",
 		"@types/react-dom": "~18.3.7",
 		"dts-bundle-generator": "^9.5.1",
+		"esbuild": "^0.28.1",
 		"@types/tabulator-tables": "~6.2.0"
 	},
 	"exports": {
