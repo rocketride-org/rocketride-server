@@ -34,6 +34,16 @@ class ModuleRegistry {
 			nodir: true,
 		});
 
+		// Shallowest first: the root's own scripts/tasks.js loads before any
+		// nested repo's copy of it (e.g. the apps/stock submodule), so with
+		// first-wins registration below, shared module names (ui, builder)
+		// always resolve to THIS root's copy — the one whose lib/registry is
+		// the instance actually running the build.
+		taskFiles.sort((a, b) => {
+			const depth = (f) => path.relative(rootDir, f).split(path.sep).length;
+			return depth(a) - depth(b) || a.localeCompare(b);
+		});
+
 		for (const taskFile of taskFiles) {
 			await this._loadModule(taskFile);
 		}
@@ -60,6 +70,11 @@ class ModuleRegistry {
 					console.warn(`  Warning: ${filePath} entry missing 'name' property, skipping`);
 					continue;
 				}
+
+				// First registration wins — never re-register a module name.
+				// Combined with the shallowest-first load order, a nested
+				// repo's copy of a shared module can't shadow the root's.
+				if (this.modules.has(mod.name)) continue;
 
 				// Store the module's directory for context
 				mod._path = path.dirname(filePath);
