@@ -51,7 +51,9 @@ class ServicesMixin(DAPClient):
 
     This mixin adds get_services() and get_service() to fetch connector
     definitions from the server via the DAP rrext_services command.
-    Definitions include schemas, UI schemas, and metadata.
+    get_services() returns lightweight summaries (display fields + inline
+    icon SVG); get_service() returns one full definition with the
+    configuration schema sections.
 
     This is automatically included when you use RocketRideClient.
     """
@@ -62,14 +64,17 @@ class ServicesMixin(DAPClient):
 
     async def get_services(self) -> SERVICES_RESPONSE:
         """
-        Retrieve all available service definitions from the server.
+        Retrieve all service summaries from the server.
 
-        Returns the full services structure from the engine, including a
-        'services' dict (logical type -> definition) and 'version'.
+        Returns the server's cached catalog: a 'services' dict (logical
+        type -> summary), an 'icons' table (icon id -> raw SVG text,
+        deduplicated — each summary's 'icon' field is an id into it), and
+        'version'. The configuration schema is served by get_service()
+        on demand.
 
         Returns:
-            Dict containing 'services' (dict of service definitions) and
-            'version'. Returns {} if the response has no body.
+            Dict containing 'services', 'icons', and 'version'. Returns
+            {} if the response has no body.
 
         Raises:
             RuntimeError: If the server returns an error.
@@ -78,7 +83,11 @@ class ServicesMixin(DAPClient):
 
     async def get_service(self, service: str) -> Optional[SERVICE_DEFINITION]:
         """
-        Retrieve a specific service definition by name.
+        Retrieve a specific service's FULL definition by name.
+
+        The full definition extends the summary with the dynamic
+        configuration sections (schema + UI schema per section) used by
+        the configure panel.
 
         Args:
             service: Logical name of the service (e.g. 'ocr', 'embed', 'chat').
