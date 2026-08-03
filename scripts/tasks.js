@@ -44,9 +44,11 @@
  *   shell:update    — [standalone repos only] refresh .rocketride/shell
  *                     from a server (--shell=<url>, default ROCKETRIDE_URI)
  *                     and relink the workspace
- *   builder:scripts — replace scripts/ with the upstream copy
- *                     ([--branch=<branch>, default: upstream default branch]
- *                     [--path=<repo root>])
+ *   builder:inject  — copy this builder's scripts/ tree into another repo
+ *                     (--path=<repo root>)
+ *   builder:update  — replace scripts/ with the upstream copy
+ *                     (--branch=<branch>, default develop;
+ *                     --path=<repo root>, default this repository)
  */
 const fs = require('fs');
 const path = require('path');
@@ -187,23 +189,37 @@ const builderModule = {
 
 	actions: [
 		{
-			// Replace ./scripts with the upstream rocketride-server copy at
-			// a given branch — how standalone repos pick up builder changes
-			// (and the platform repo can restore a known-good tree). Run it
-			// as the ONLY action of the invocation: the swap replaces code
-			// this process has not require()d yet, so nothing further may
-			// lazy-load afterwards.
-			name: 'builder:scripts',
+			// Push THIS builder's scripts/ tree (the local working copy,
+			// uncommitted changes included) into another repo that carries a
+			// copy of the builder — how standalone repos pick up builder
+			// changes during development: what you test here is exactly what
+			// they get.
+			name: 'builder:inject',
 			action: () => ({
-				description: 'Replace scripts/ with the upstream copy ([--branch=<branch>] [--path=<repo root>])',
+				description: "Copy this builder's scripts/ into another repo (--path=<repo root>)",
+				run: async (ctx, task) => {
+					if (!ctx.options.path) throw new Error('builder:inject requires --path=<repo root> (the repository to receive the scripts/ tree)');
+					const { copyScripts } = require('./lib/copy-scripts');
+					await copyScripts(path.resolve(ctx.options.path), { log: (msg) => { task.output = msg; } });
+					task.output = `scripts/ copied to ${path.resolve(ctx.options.path)}`;
+				},
+			}),
+		},
+		{
+			// Replace scripts/ with the upstream rocketride-server copy at a
+			// branch (default develop) — how any repo syncs to the published
+			// builder. Run it as the invocation's ONLY action when targeting
+			// this repository: the swap replaces code this process has not
+			// require()d yet, so nothing further may lazy-load afterwards.
+			name: 'builder:update',
+			action: () => ({
+				description: 'Replace scripts/ with the upstream copy (--branch=<branch>, default develop)',
 				run: async (ctx, task) => {
 					const { selfUpdate } = require('./lib/self-update');
-					// step: --path retargets the swap at another repository
-					// that carries a copy of the builder; default is our own.
-					// No --branch follows the upstream default branch.
+					// step: --path retargets another repo; default is our own
 					const target = ctx.options.path ? path.resolve(ctx.options.path) : PROJECT_ROOT;
 					await selfUpdate(target, ctx.options.branch, { log: (msg) => { task.output = msg; } });
-					task.output = 'scripts/ updated from upstream';
+					task.output = `${target} scripts/ updated from upstream`;
 				},
 			}),
 		},

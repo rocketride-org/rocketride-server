@@ -110,11 +110,12 @@ function parseArgs(args) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
 		} else if (arg.startsWith('--path=')) {
-			// builder:scripts: root of the repository whose scripts/ is
-			// replaced (defaults to this builder's own repository).
+			// builder:inject / builder:update: root of the target repository
+			// (inject requires it; update defaults to this repository).
 			options.path = arg.substring('--path='.length);
 		} else if (arg.startsWith('--branch=')) {
-			// builder:scripts: upstream branch to fetch the scripts/ tree from.
+			// builder:update: upstream branch to fetch the scripts/ tree
+			// from (default: develop).
 			options.branch = arg.substring('--branch='.length);
 		} else if (arg.startsWith('--shell=')) {
 			// Server to vendor the platform package from (auto-injection and
