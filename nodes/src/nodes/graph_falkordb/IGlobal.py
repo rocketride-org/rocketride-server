@@ -46,6 +46,8 @@ from falkordb import FalkorDB
 
 DEFAULT_PORT = 6379
 DEFAULT_GRAPH = 'agent'
+# Schemes falkordb-py accepts: falkor(s):// are its own aliases for redis(s)://.
+URL_SCHEMES = ('falkor://', 'falkors://', 'redis://', 'rediss://', 'unix://')
 DEFAULT_TIMEOUT_MS = 30000
 DEFAULT_ROW_CAP = 250
 
@@ -87,7 +89,7 @@ class IGlobal(GraphGlobalBase):
             config, 'query_timeout_ms', DEFAULT_TIMEOUT_MS, min_value=100, max_value=600000
         )
 
-        self.client = FalkorDB(**self._client_kwargs(config))
+        self.client = self._connect(config)
         # Round-trip now so a wrong host or password fails at pipeline start
         # rather than on the first tool call.
         self.client.list_graphs()
@@ -101,17 +103,24 @@ class IGlobal(GraphGlobalBase):
 
     def _probe_connection(self, config: Dict[str, Any]) -> None:
         """Save-time probe: connect and list graphs, reporting failures as warnings."""
-        host = str(config.get('host') or '').strip()
-        if not host:
-            warning('host is required')
+        try:
+            target = _connection_url(config)
+        except ValueError as e:
+            warning(str(e))
             return
+
+        if not target:
+            target = str(config.get('host') or '').strip()
+            if not target:
+                warning('host is required')
+                return
 
         client = None
         try:
-            client = FalkorDB(**self._client_kwargs(config))
+            client = self._connect(config)
             client.list_graphs()
         except RedisError as e:
-            warning(f'Could not connect to FalkorDB at {host}: {e}')
+            warning(f'Could not connect to FalkorDB at {_redact(target)}: {e}')
         except Exception as e:
             warning(str(e))
         finally:
@@ -231,6 +240,21 @@ class IGlobal(GraphGlobalBase):
         result = graph.ro_query(cypher, timeout=self.query_timeout_ms)
         return [str(row[0]) for row in (result.result_set or []) if row]
 
+    @classmethod
+    def _connect(cls, config: Dict[str, Any]) -> FalkorDB:
+        """Open a client from whichever profile is configured: URL or host/port."""
+        url = _connection_url(config)
+        if not url:
+            return FalkorDB(**cls._client_kwargs(config))
+
+        kwargs: Dict[str, Any] = {}
+        # redis-py lets the URL's own credentials win over keyword arguments, so
+        # the password field only fills in a URL that carries none.
+        password = str(config.get('password') or '')
+        if password:
+            kwargs['password'] = password
+        return FalkorDB.from_url(url, **kwargs)
+
     @staticmethod
     def _client_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
         """Build the FalkorDB() kwargs from node config."""
@@ -263,6 +287,33 @@ class IGlobal(GraphGlobalBase):
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+
+def _connection_url(config: Dict[str, Any]) -> str:
+    """Return the validated connection URL, or '' when the node uses host/port.
+
+    The URL profile sets ``mode`` to ``url``; an empty URL there is a
+    misconfiguration rather than a fallback to localhost.
+    """
+    url = str(config.get('url') or '').strip()
+    if not url:
+        if str(config.get('mode') or '').strip().lower() == 'url':
+            raise ValueError('FalkorDB URL is required, e.g. falkor://user:password@host:6379')
+        return ''
+    if not url.startswith(URL_SCHEMES):
+        raise ValueError(
+            f'Unsupported FalkorDB URL scheme in "{_redact(url)}": expected one of {", ".join(URL_SCHEMES)}'
+        )
+    return url
+
+
+def _redact(target: str) -> str:
+    """Strip credentials from a URL before it reaches a log line."""
+    scheme, sep, rest = target.partition('://')
+    if not sep:
+        return target
+    credentials, at, host = rest.rpartition('@')
+    return f'{scheme}://***@{host}' if at and credentials else target
 
 
 def _type_name(value: Any) -> str:
