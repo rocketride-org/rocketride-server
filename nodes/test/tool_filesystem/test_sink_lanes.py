@@ -253,3 +253,45 @@ def test_no_url_key_when_emit_url_off():
     inst.writeText('# heading')
     (payload,), _ = inst.instance.writeJson.call_args
     assert 'url' not in payload
+
+
+def test_media_stream_ops_share_one_live_event_loop():
+    # aiofiles write handles bind to the loop that opened them: open_write,
+    # every write_chunk, and close_write MUST run on the same still-running
+    # loop, or the real store raises 'Event loop is closed' mid-stream and
+    # leaves a 0-byte file (live bug: image drop via parse -> filestore).
+    import asyncio
+
+    fs = _fs()
+    seen = []
+
+    async def _open_write(path, connection_id):
+        seen.append(('open', asyncio.get_running_loop()))
+        fs.streams['h1'] = {'path': path, 'chunks': []}
+        return 'h1'
+
+    async def _write_chunk(handle, data, connection_id=0):
+        seen.append(('chunk', asyncio.get_running_loop()))
+        fs.streams[handle]['chunks'].append(bytes(data))
+        return len(data)
+
+    async def _close_write(handle, connection_id=0):
+        seen.append(('close', asyncio.get_running_loop()))
+        return None
+
+    fs.open_write.side_effect = _open_write
+    fs.write_chunk.side_effect = _write_chunk
+    fs.close_write.side_effect = _close_write
+
+    inst = _sink_instance(fs, has_name=False, object_id='loop1')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'\x89PNG')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'\xde\xad')
+    inst.writeImage(AVI_ACTION.END, 'image/png', b'')
+
+    loops = {loop for _op, loop in seen}
+    assert len(seen) == 4  # open, chunk, chunk, close
+    assert len(loops) == 1, f'handle ops crossed {len(loops)} loops: {[op for op, _ in seen]}'
+    assert all(not loop.is_closed() for loop in loops)

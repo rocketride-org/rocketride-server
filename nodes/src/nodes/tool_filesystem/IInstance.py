@@ -45,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
+import threading
 from typing import TYPE_CHECKING, Any
 
 from rocketlib import IInstanceBase, tool_function
@@ -537,8 +538,8 @@ class IInstance(IInstanceBase):
         st = streams.pop(kind, None)
         if st and st.get('handle') is not None:
             try:
-                _run_async(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
-                _run_async(self.IGlobal.file_store.delete(st['path']))
+                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+                _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
             except Exception:
                 pass
 
@@ -567,14 +568,14 @@ class IInstance(IInstanceBase):
                 if not self.IGlobal.allow_write:
                     raise ValueError('write access is not enabled for this filesystem tool')
                 path = self._sink_target_path(f'{self._sink_base_name()}{self._media_ext(st["mime"])}')
-                st['handle'] = _run_async(self.IGlobal.file_store.open_write(path, _SINK_CONNECTION_ID))
+                st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(path, _SINK_CONNECTION_ID))
                 st['path'] = path
-            _run_async(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data), _SINK_CONNECTION_ID))
+            _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data), _SINK_CONNECTION_ID))
         elif aviAction == AVI_ACTION.END:
             st = streams.pop(kind, None)
             if st is None or st['handle'] is None:
                 return
-            _run_async(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+            _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
             self._sink_emit([self._sink_ref(st['path'], st['mime'])])
 
     def writeImage(self, aviAction, mimeType: str, buffer: bytes):
@@ -631,6 +632,30 @@ def _ext_from_mime(mime: str | None) -> str:
     if not subtype or subtype.startswith('vnd.'):
         return ''
     return f'.{subtype}'
+
+
+_STREAM_LOOP: asyncio.AbstractEventLoop | None = None
+_STREAM_LOOP_LOCK = threading.Lock()
+
+
+def _run_on_stream_loop(coro):
+    """Run a store-handle coroutine on one persistent event loop.
+
+    aiofiles handles bind to the loop that opened them, so ``open_write``,
+    every ``write_chunk``, and ``close_write`` of a media stream must all run
+    on the same still-running loop. ``_run_async`` spins up a fresh loop per
+    call (fine for one-shot ops), which left the handle bound to a closed
+    loop and aborted streams with 'Event loop is closed' after the first
+    chunk. All handle-based ops therefore go through this dedicated
+    long-lived loop thread instead.
+    """
+    global _STREAM_LOOP
+    with _STREAM_LOOP_LOCK:
+        if _STREAM_LOOP is None or _STREAM_LOOP.is_closed():
+            loop = asyncio.new_event_loop()
+            threading.Thread(target=loop.run_forever, name='tool_filesystem-stream-io', daemon=True).start()
+            _STREAM_LOOP = loop
+    return asyncio.run_coroutine_threadsafe(coro, _STREAM_LOOP).result()
 
 
 def _run_async(coro):
