@@ -21,7 +21,7 @@ import React, { ReactElement } from 'react';
 
 import { ITaskStatus, ITaskState } from '../../../../types';
 import { PipelineActions } from '../../../../../../components/pipeline-actions';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 
 // =============================================================================
 // Helpers

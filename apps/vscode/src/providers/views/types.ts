@@ -11,8 +11,8 @@
  */
 
 import type { ViewState, TaskStatus } from 'shared/modules/project';
-import type { DashboardResponse } from 'shared/modules/server';
-import type { PromoRedemption, PromoValidation } from 'shared/modules/checkout';
+import type { DashboardResponse } from 'shell';
+import type { PromoRedemption, PromoValidation } from 'shell';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from 'rocketride';
 import type { DeployLifecycleHostToWebview, DeployLifecycleWebviewToHost, DeploymentHostToWebview, DeploymentWebviewToHost } from './deployTypes';
 import type { LogSessionHostToWebview, LogSessionWebviewToHost } from './logTypes';

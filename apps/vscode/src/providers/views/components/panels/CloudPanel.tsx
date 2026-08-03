@@ -17,8 +17,8 @@ import cloudLogoDark from '../../../../../rocketride-dark-icon.png';
 import cloudLogoLight from '../../../../../rocketride-light-icon.png';
 import { settingsStyles as S } from '../../Settings/SettingsWebview';
 import { useTheme } from '../../hooks/useTheme';
-import { CheckoutModal } from 'shared/modules/checkout';
-import type { CheckoutPlan } from 'shared/modules/checkout';
+import { CheckoutModal } from 'shell';
+import type { CheckoutPlan } from 'shell';
 
 // =============================================================================
 // TYPES

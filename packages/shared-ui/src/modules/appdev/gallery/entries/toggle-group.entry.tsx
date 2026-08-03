@@ -27,7 +27,7 @@
 /** Gallery entry for the stock ToggleGroup segmented control. */
 
 import React, { useState } from 'react';
-import { ToggleGroup } from '../../../../components/toggle-group/ToggleGroup';
+import { ToggleGroup } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** The demo's fixed option set - a typical time-range switch. */

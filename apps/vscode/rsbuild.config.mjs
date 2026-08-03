@@ -64,11 +64,15 @@ export default defineConfig({
 
 	resolve: {
 		alias: {
-			// Deep-spec roots: the webviews consume shared and the shell's stock
-			// tree as STATIC libraries (no shell runtime here) — directory
-			// aliases so 'shared/<group>' and 'shell/src/stock/<group>' resolve.
+			// shared is a STATIC library the webviews compile from source, so
+			// its whole tree stays reachable via 'shared/<group>' deep specs.
 			shared: path.resolve(__dirname, '../../packages/shared-ui/src'),
-			shell: path.resolve(__dirname, '../../packages/shell'),
+			// shell is the CONTRACT: only the barrel and the one sanctioned CSS
+			// entry resolve (exact-match aliases). Deep shell/src paths have no
+			// alias and no node_modules fallback, so they fail the build — the
+			// same enforcement out-of-repo consumers get from shell.d.ts.
+			'shell/themes/rocketride-default.css$': path.resolve(__dirname, '../../packages/shell/src/themes/rocketride-default.css'),
+			shell$: path.resolve(__dirname, '../../packages/shell/src/index.ts'),
 			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
 		},

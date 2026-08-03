@@ -13,9 +13,9 @@
 // RE-EXPORTS
 // =============================================================================
 
-export type { ITaskStatus as TaskStatus } from 'shell/src/types/project';
-export type { IFlowData as FlowData } from 'shell/src/types/project';
-export { ITaskState as TASK_STATE } from 'shell/src/types/project';
+export type { ITaskStatus as TaskStatus } from 'shell';
+export type { IFlowData as FlowData } from 'shell';
+export { ITaskState as TASK_STATE } from 'shell';
 
 // =============================================================================
 // TRACE TYPES

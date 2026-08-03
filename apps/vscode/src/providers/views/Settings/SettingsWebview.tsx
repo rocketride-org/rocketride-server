@@ -29,15 +29,15 @@ import { PipelineSettings } from './PipelineSettings';
 import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
-import { commonStyles } from 'shell/src/themes/styles';
-import type { CheckoutPlan } from 'shared/modules/checkout';
-import type { ViewMenu } from 'shell/src/types/viewMenu';
-import { TabPanel } from 'shell/src/components/tab-panel/TabPanel';
-import type { ITabPanelPanel } from 'shell/src/components/tab-panel/TabPanel';
+import { commonStyles } from 'shell';
+import type { CheckoutPlan } from 'shell';
+import type { ViewMenu } from 'shell';
+import { TabPanel } from 'shell';
+import type { ITabPanelPanel } from 'shell';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
-import 'shell/src/themes/rocketride-default.css';
-import 'shell/src/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
 // ============================================================================

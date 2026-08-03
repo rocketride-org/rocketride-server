@@ -27,9 +27,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useShellConnection, BxPlus } from 'shell';
-import { Explorer } from 'shared/modules/explorer';
+import { Explorer } from 'shell';
 import { SidebarMenu, SidebarCollapsedGate } from 'shell';
-import type { ExplorerEntry, ExplorerConfig } from 'shared/modules/explorer';
+import type { ExplorerEntry, ExplorerConfig } from 'shell';
 import type { IVirtualFileSystem, ViewMenu } from 'shell';
 import { getDocs } from './docs';
 import { listChatDir, saveChat, deleteChat, renameChat } from './chatStore';

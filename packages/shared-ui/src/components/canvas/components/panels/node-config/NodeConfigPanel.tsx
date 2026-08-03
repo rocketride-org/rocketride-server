@@ -66,8 +66,8 @@ import { useOAuthCallbacks } from './useOAuthCallbacks';
 import { DetailPanel } from 'shell';
 import { Button } from 'shell';
 import { Banner } from 'shell';
-import { ConfirmDialog } from 'shell/src/components/modal/ConfirmDialog';
-import { commonStyles } from 'shell/src/themes/styles';
+import { ConfirmDialog } from 'shell';
+import { commonStyles } from 'shell';
 
 // =============================================================================
 // Constants

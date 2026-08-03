@@ -16,8 +16,8 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { EnvironmentView } from 'shared/modules/environment';
-import type { EnvironmentSlotConfig, EnvironmentScope } from 'shared/modules/environment';
+import { EnvironmentView } from 'shell';
+import type { EnvironmentSlotConfig, EnvironmentScope } from 'shell';
 import { useMessaging } from '../hooks/useMessaging';
 import type { EnvironmentHostToWebview, EnvironmentWebviewToHost, EnvironmentSlotState } from '../types';
 

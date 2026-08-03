@@ -14,7 +14,7 @@
 
 import React, { useMemo } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import { EmptyState } from 'shell';
 
 // =============================================================================

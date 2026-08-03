@@ -36,7 +36,7 @@ import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
 import { useShellConnection, useDashboardData, usePolling, AppLayout } from 'shell';
 import { commonStyles } from 'shell';
-import MonitorView from 'shared/modules/server';
+import { MonitorView } from 'shell';
 import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse } from 'shell';
 
 // =============================================================================

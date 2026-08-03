@@ -28,7 +28,7 @@
 
 import React from 'react';
 import { formatBytes, formatDate, formatDuration } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Row layout: input expression on the left, formatted output on the right. */

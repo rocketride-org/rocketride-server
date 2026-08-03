@@ -16,8 +16,8 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { applyTheme } from 'shell/src/themes';
-import type { ThemeTokens } from 'shell/src/themes/tokens';
+import { applyTheme } from 'shell';
+import type { ThemeTokens } from 'shell';
 // Project module is imported via subpath (not the 'shared' barrel): the
 // barrel is the shell's MF share and must stay canvas-free; this webview
 // bundles the project module directly.
@@ -25,8 +25,8 @@ import { ProjectView, parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from '
 import { foldProjectDeployRuns } from 'shared/modules/sidebar/taskFold';
 import type { TaskLifecycleEvent } from 'shared/modules/sidebar/taskFold';
 import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, ViewState } from 'shared/modules/project';
-import { CheckoutModal } from 'shared/modules/checkout';
-import type { CheckoutPlan, PlanAction } from 'shared/modules/checkout';
+import { CheckoutModal } from 'shell';
+import type { CheckoutPlan, PlanAction } from 'shell';
 import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from 'shared/components/deploy-panel';
 import type { DeploySnapshot } from 'shared/components/deploy-panel';
 import { useMessaging } from '../hooks/useMessaging';

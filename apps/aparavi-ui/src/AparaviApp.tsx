@@ -36,7 +36,7 @@
 import React, { useCallback, useMemo, useRef, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
-import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+import type { IVirtualFileSystem } from 'shell';
 import { commonStyles } from 'shell';
 import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout, AppLayout } from 'shell';
 import type { Documents } from 'shell';

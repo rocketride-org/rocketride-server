@@ -28,7 +28,7 @@
 // =============================================================================
 
 import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
-import AccountView from 'shared/modules/account/AccountView';
+import AccountView from '../modules/account/AccountView';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
 import { useShellConnection } from '../connection/ConnectionContext';

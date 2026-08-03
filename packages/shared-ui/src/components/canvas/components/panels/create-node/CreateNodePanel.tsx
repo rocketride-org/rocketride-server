@@ -28,7 +28,7 @@ import { usePrefs } from 'shell';
 import { IService, IServiceCapabilities } from '../../../types';
 import { Icon } from '../../../util/Icon';
 import { DetailPanel } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import { CATEGORY_TITLES } from './categoryTitles';
 
 // =============================================================================

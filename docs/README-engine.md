@@ -228,7 +228,7 @@ Set with `--monitor TYPE`.
 ## Directory Structure
 
 ```text
-apps/engine/
+packages/engine/
 ├── src/
 │   ├── main.cpp                    # Entry point
 │   ├── CMakeLists.txt              # Build config

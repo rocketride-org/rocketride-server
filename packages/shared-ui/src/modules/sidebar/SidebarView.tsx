@@ -20,15 +20,15 @@
  */
 
 import React, { useState, useCallback, CSSProperties } from 'react';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop, BxGridAlt } from 'shell';
 import { SidebarMenu, TabControl, TabPanel } from 'shell';
 import { StatusBadge } from 'shell';
 import type { StatusVariant } from 'shell';
-import { Explorer, NOOP_VFS } from '../explorer';
+import { Explorer, NOOP_VFS } from 'shell';
 import type { AppListItem, ISidebarViewProps } from './types';
 import type { ViewMenu } from 'shell';
-import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from '../explorer';
+import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from 'shell';
 
 // =============================================================================
 // STYLES

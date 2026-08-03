@@ -28,7 +28,7 @@
 // without directly depending on shared-ui's module paths.
 // =============================================================================
 
-export { Explorer as DocExplorer } from 'shared/modules/explorer';
+export { Explorer as DocExplorer } from '../../modules/explorer';
 export type {
 	IExplorerProps as DocExplorerProps,
 	ExplorerConfig as DocExplorerConfig,
@@ -36,4 +36,4 @@ export type {
 	ExplorerChild as DocEntryChild,
 	ExplorerStatus as DocEntryStatus,
 	IVirtualFileSystem,
-} from 'shared/modules/explorer';
+} from '../../modules/explorer';

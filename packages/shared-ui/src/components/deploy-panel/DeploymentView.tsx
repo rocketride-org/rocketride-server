@@ -28,10 +28,10 @@
 
 import React, { useEffect, useMemo, useState, CSSProperties, ComponentProps } from 'react';
 
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import { Button } from 'shell';
 import { Modal } from 'shell';
-import { ConfirmDialog } from 'shell/src/components/modal/ConfirmDialog';
+import { ConfirmDialog } from 'shell';
 import { Card } from 'shell';
 import { CardDataGrid } from 'shell';
 import { ContentHeader } from 'shell';
@@ -40,8 +40,8 @@ import { TabPanel } from 'shell';
 import CanvasPanel from '../canvas';
 import { SourcePanel } from '../../modules/project/components/SourcePanel';
 import { describeCron } from './SchedulePanel';
-import { OAUTH_ROOT_URL } from 'shell/src/auth/oauth';
-import { formatDayTime, formatTime } from '../../modules/server/util/formatters';
+import { OAUTH_ROOT_URL } from 'shell';
+import { formatDayTime, formatTime } from 'shell';
 import type { GridColumnDefinition } from 'shell';
 import type { ViewMenu } from 'shell';
 import type { TaskEventMessage, TaskEventSession, TaskTimeline } from '../../modules/project/hooks/useTaskEvents';

@@ -28,8 +28,8 @@
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { commonStyles } from 'shell/src/themes/styles';
-import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
+import { commonStyles } from 'shell';
+import { ToggleGroup } from 'shell';
 import { PlayBar } from '../../../components/play-bar/PlayBar';
 import type { ITimeSelection } from '../../../components/play-bar/PlayBar';
 import Utilization from '../../../components/utilization/Utilization';

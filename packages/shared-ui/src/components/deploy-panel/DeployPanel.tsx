@@ -31,12 +31,12 @@
 
 import React, { useCallback, useEffect, useMemo, useState, CSSProperties } from 'react';
 
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import { Button } from 'shell';
 import { Modal } from 'shell';
-import { ConfirmDialog } from 'shell/src/components/modal/ConfirmDialog';
+import { ConfirmDialog } from 'shell';
 import { Card } from 'shell';
-import { formatTime, formatDayTime } from '../../modules/server/util/formatters';
+import { formatTime, formatDayTime } from 'shell';
 import { buttonize } from '../../utils/buttonize';
 import { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
 import { VersionRecordPanel } from './VersionRecordPanel';

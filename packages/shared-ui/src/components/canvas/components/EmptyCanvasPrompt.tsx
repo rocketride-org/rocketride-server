@@ -40,7 +40,7 @@ import { useFlowProject } from '../context/FlowProjectContext';
 import { useFlowGraph } from '../context/FlowGraphContext';
 import { IService, IServiceCapabilities } from '../types';
 import { templates as templateCatalog } from '../templates';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import type { ITemplate } from '../templates/types';
 import { Icon } from '../util/Icon';
 import { resolveDefaultFormData } from '../util/helpers';

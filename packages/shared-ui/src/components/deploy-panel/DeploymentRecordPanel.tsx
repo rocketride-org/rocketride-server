@@ -26,10 +26,10 @@ import React, { useEffect, useMemo, useRef, useState, CSSProperties } from 'reac
 
 import { Button } from 'shell';
 import { Modal } from 'shell';
-import { ConfirmDialog } from 'shell/src/components/modal/ConfirmDialog';
+import { ConfirmDialog } from 'shell';
 import { DetailPanel } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
-import { formatTime } from '../../modules/server/util/formatters';
+import { commonStyles } from 'shell';
+import { formatTime } from 'shell';
 import { DeploymentView } from './DeploymentView';
 import type { IDeploymentViewProps } from './DeploymentView';
 

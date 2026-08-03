@@ -10,8 +10,8 @@
  * the extension host to the pure AccountView component.
  */
 
-import 'shell/src/themes/rocketride-default.css';
-import 'shell/src/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
 export { default as Account } from './AccountWebview';
