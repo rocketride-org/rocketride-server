@@ -43,7 +43,7 @@ Before writing ANY RocketRide code, you MUST:
 - [ ] Read ROCKETRIDE_PIPELINE_RULES.md, ROCKETRIDE_COMPONENT_REFERENCE.md and ROCKETRIDE_COMMON_MISTAKES.md
 - [ ] If you are creating a python project, create a virtual environment
 - [ ] Create the pipeline file(s) using `.pipe` extension (e.g., `chat.pipe`, `ingestion.pipe`)
-- [ ] Create the `.env` file yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` (the extension no longer writes this file; server-managed env is configured on the **Environment** page, separately from the local `.env` file)
+- [ ] Create the `.env` file yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` for the Python and TypeScript clients (`ROCKETRIDE_AUTH` for MCP) (the extension no longer writes this file; server-managed env is configured on the **Environment** page, separately from the local `.env` file)
 - [ ] Create an `env.example` file documenting any custom variables used in your pipeline files
 - [ ] Open the `.env` file in the workspace editor (as a tab) so the user can verify settings and add custom variables (e.g., `ROCKETRIDE_INPUT_PATH`, `ROCKETRIDE_OUTPUT_PATH`, etc.)
 - [ ] Always install the appropriate RocketRide client:

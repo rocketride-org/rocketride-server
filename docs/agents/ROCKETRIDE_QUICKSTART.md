@@ -4,7 +4,7 @@
 
 ### Step 1: Set Up the `.env` File
 
-The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. Server-managed env (org/team/user secrets) is configured on the **Environment** page, separately from the local `.env` file.
+The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` for the Python and TypeScript clients. MCP uses `ROCKETRIDE_AUTH` instead. Server-managed env (org/team/user secrets) is configured on the **Environment** page, separately from the local `.env` file.
 
 ```env
 # live engine address
@@ -111,7 +111,7 @@ python main.py
 
 ### Step 1: Set Up the `.env` File
 
-The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`. Server-managed env (org/team/user secrets) is configured on the **Environment** page, separately from the local `.env` file.
+The extension does not write `.env` for you — create it yourself with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` for the Python and TypeScript clients. MCP uses `ROCKETRIDE_AUTH` instead. Server-managed env (org/team/user secrets) is configured on the **Environment** page, separately from the local `.env` file.
 
 ```env
 # live engine address
