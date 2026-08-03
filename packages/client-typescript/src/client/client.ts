@@ -2708,28 +2708,32 @@ export class RocketRideClient extends DAPClient {
 	// ============================================================================
 
 	/**
-	 * Retrieve all available service definitions from the server.
+	 * Retrieve all service summaries from the server.
 	 *
-	 * Returns a dictionary containing all service definitions available on
-	 * the connected RocketRide server. Each service definition includes schemas,
-	 * UI schemas, and configuration metadata.
+	 * Returns the server's cached service catalog: one SUMMARY per service
+	 * with the display fields (title, classType, lanes, ...) plus a
+	 * deduplicated icon table (`icons`) that each summary's `icon` id
+	 * points into. Configuration schema is not included — call
+	 * {@link getService} when the user opens the configure panel.
 	 *
-	 * @returns Promise resolving to object mapping service names to their definitions
+	 * @returns Promise resolving to `{ services, icons, version }` where
+	 *          services maps service names to their summaries
 	 * @throws Error if the request fails or server returns an error
 	 *
 	 * @example
 	 * ```typescript
 	 * // Get all available services
-	 * const services = await client.getServices();
+	 * const { services, icons } = await client.getServices();
 	 *
 	 * // List available service names
 	 * for (const name of Object.keys(services)) {
 	 *   console.log(`Available service: ${name}`);
 	 * }
 	 *
-	 * // Access a specific service's schema
-	 * if (services['ocr']) {
-	 *   console.log('OCR schema:', services['ocr'].schema);
+	 * // Render a node's icon
+	 * const iconId = services['ocr']?.icon;
+	 * if (iconId && icons?.[iconId]) {
+	 *   renderSvg(icons[iconId]);
 	 * }
 	 * ```
 	 */
@@ -2738,10 +2742,11 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Retrieve a specific service definition from the server.
+	 * Retrieve a specific service's FULL definition from the server.
 	 *
-	 * Returns the definition for a specific service (connector) by name.
-	 * The definition includes schemas, UI schemas, and configuration metadata.
+	 * Returns the complete definition for one service (connector) by name:
+	 * the summary fields plus the dynamic configuration sections (schema +
+	 * UI schema per section) the configure panel needs.
 	 *
 	 * @param service - Name of the service to retrieve (e.g., 'ocr', 'embed', 'chat')
 	 * @returns Promise resolving to service definition or undefined if not found
@@ -2749,11 +2754,10 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @example
 	 * ```typescript
-	 * // Get OCR service definition
+	 * // Get OCR service definition (config sections included)
 	 * const ocr = await client.getService('ocr');
 	 * if (ocr) {
-	 *   console.log('OCR schema:', ocr.schema);
-	 *   console.log('OCR UI schema:', ocr.uiSchema);
+	 *   console.log('OCR sections:', Object.keys(ocr));
 	 * } else {
 	 *   console.log('OCR service not available');
 	 * }
