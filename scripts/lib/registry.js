@@ -20,11 +20,16 @@ class ModuleRegistry {
 		const parse = require('gitignore-globs');
 
 		const gitignorePath = path.join(rootDir, '.gitignore');
-		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath) : [];
+		// gitignore-globs keeps the \r of CRLF checkouts in its patterns,
+		// which makes every produced glob match nothing — strip it.
+		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath).map((g) => g.replace(/\r/g, '')) : [];
 
 		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools,shared}/**/scripts/tasks.{js,cjs}', 'scripts/tasks.{js,cjs}'], {
 			cwd: rootDir,
-			ignore: gitignore,
+			// A tasks.js inside any node_modules is never a build module
+			// (installed/materialized packages ship their dev files), so it
+			// is excluded regardless of what the gitignore contributes.
+			ignore: ['**/node_modules/**', ...gitignore],
 			absolute: true,
 			nodir: true,
 		});
