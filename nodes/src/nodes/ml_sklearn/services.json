@@ -1,0 +1,72 @@
+{
+	"title": "ML Sklearn Predict",
+	"protocol": "preprocessor_ml_sklearn://",
+	"classType": ["preprocessor"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.ml_sklearn",
+	"prefix": "Preprocessor",
+	"description": ["Applies a trained scikit-learn model to input text. ",
+		"Loads a pickled model from a configurable path and runs inference, ",
+		"returning the prediction as output. Falls back to original input ",
+		"if no model is found or inference fails."],
+	"icon": "preprocessor-code.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": [],
+	"lanes": {
+		"answers": ["answers"]
+	},
+	"input": [
+		{
+			"lane": "answers",
+			"min": 0,
+			"output": [
+				{
+					"lane": "answers"
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"model_path": ""
+			}
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"cases": [
+			{
+				"answers": {
+					"answers": [{"text": "hello world"}]
+				},
+				"expect": {
+					"answers": {
+						"notEmpty": true
+					}
+				}
+			}
+		]
+	},
+	"fields": {
+		"ml_sklearn.model_path": {
+			"type": "string",
+			"title": "Model file path (.pkl)",
+			"default": ""
+		},
+		"ml_sklearn.default": {
+			"object": "default",
+			"properties": ["ml_sklearn.model_path"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "ML Sklearn",
+			"properties": ["ml_sklearn.model_path"]
+		}
+	]
+}
