@@ -764,6 +764,21 @@ def test_probe_does_not_leak_url_credentials(monkeypatch, recording_client):
     assert 'falkor://***@host:53939' in messages[0]
 
 
+def test_probe_does_not_leak_unix_socket_password(monkeypatch, recording_client):
+    """A unix:// URL carries its password in the query string, not the authority."""
+    messages = []
+    monkeypatch.setattr(_glb_mod, 'warning', messages.append)
+    monkeypatch.setattr(
+        recording_client, 'from_url', classmethod(lambda cls, url, **kw: (_ for _ in ()).throw(_StubRedisError('nope')))
+    )
+
+    glb = _FakeGlobal(_FakeGraph())
+    glb._probe_connection({'mode': 'url', 'url': 'unix:///tmp/f.sock?db=0&password=s3cret'})
+
+    assert messages and 's3cret' not in messages[0]
+    assert 'unix:///tmp/f.sock?db=0&password=***' in messages[0]
+
+
 def test_probe_reports_missing_host_on_manual_profile(monkeypatch):
     messages = []
     monkeypatch.setattr(_glb_mod, 'warning', messages.append)

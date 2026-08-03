@@ -338,12 +338,27 @@ def _url_without_password(url: str) -> str:
 
 
 def _redact(target: str) -> str:
-    """Strip credentials from a URL before it reaches a log line."""
+    """Strip credentials from a URL before it reaches a log line.
+
+    Masks both places a URL carries a password: the ``user:password@host``
+    authority and the ``password=`` query that ``unix://`` URLs use.
+    """
     scheme, sep, rest = target.partition('://')
     if not sep:
         return target
-    credentials, at, host = rest.rpartition('@')
-    return f'{scheme}://***@{host}' if at and credentials else target
+
+    authority, question, query = rest.partition('?')
+    credentials, at, host = authority.rpartition('@')
+    if at and credentials:
+        authority = f'***@{host}'
+
+    if query:
+        params = parse_qsl(query, keep_blank_values=True)
+        if any(k == 'password' for k, _ in params):
+            # safe='*' keeps the mask readable instead of percent-escaping it.
+            query = urlencode([(k, '***' if k == 'password' else v) for k, v in params], safe='*')
+
+    return f'{scheme}://{authority}{question}{query}'
 
 
 def _type_name(value: Any) -> str:
