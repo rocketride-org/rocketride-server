@@ -82,7 +82,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// Cached workspace scan (re-run on package.json events) and the current
 	// sidebar mode (session-scoped; the webview restores it from updates).
 	private scannedApps: ScannedApp[] = [];
-	private sidebarMode: 'pipelines' | 'apps' = 'pipelines';
+	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'pipelines';
 
 	private logger = getLogger();
 

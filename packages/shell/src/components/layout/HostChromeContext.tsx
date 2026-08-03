@@ -21,11 +21,13 @@
 // SOFTWARE.
 
 // =============================================================================
-// HOST CHROME CONTEXT — opt-in sidebar-content registration
+// HOST CHROME CONTEXT — sidebar/status-bar slot registration (shell-internal)
 // =============================================================================
 //
-// The shell frame owns one slot that apps may fill at runtime, WITHOUT the app
-// having to render into the shell's DOM directly:
+// INTERNAL plumbing for <AppLayout> — not part of the app-facing surface.
+// Apps declare their layout via AppLayout props; AppLayout registers the
+// declared nodes here. The shell frame owns two slots filled this way,
+// WITHOUT the app having to render into the shell's DOM directly:
 //
 //   Sidebar content — a ReactNode declared via useSidebarContent(), mounted
 //   inside the sidebar's scrolling slot (below the fixed header, above the
@@ -33,14 +35,18 @@
 //   its icon rail; components inside the node read the collapsed flag via
 //   shared-ui's useSidebarCollapsed() and decide their own collapsed form.
 //
-// The mechanism is OPT-IN. An app that never calls it behaves exactly as
-// before: its legacy `components.Sidebar` (if any) still renders in the slot.
-// The mechanism the app's `<App />` uses to register lives in a DIFFERENT
-// context than the resolved state the shell reads, so that updating the
-// rendered content does NOT re-render the registering app (which would
-// otherwise recreate an inline node and loop). The app consumes only the
-// STABLE registration API; the shell chrome (Sidebar) consumes the resolved
-// STATE.
+//   Status-bar content — a ReactNode declared via useStatusBarContent(),
+//   mounted inside the shell StatusBar's app slot (between the connection
+//   identity on the left and the shell status message on the right). The
+//   bar's PRESENCE is content-driven: a non-null registration shows it
+//   (AppLayout registers an empty fragment for a bare `showStatus`),
+//   nothing registered means no bar.
+//
+// The registration API lives in a DIFFERENT context than the resolved state
+// the shell reads, so that updating the rendered content does NOT re-render
+// the registering component (which would otherwise recreate an inline node
+// and loop). AppLayout consumes only the STABLE registration API; the shell
+// chrome (Sidebar, StatusBar) consumes the resolved STATE.
 //
 // Registration model — "the currently mounted active view wins":
 //   Each hook instance owns a stable token. It registers on mount, syncs on
@@ -63,6 +69,8 @@ import type { ReactNode } from 'react';
 export interface HostChromeState {
 	/** App-declared sidebar content, or null when none is registered. */
 	sidebarContent: ReactNode | null;
+	/** App-declared status-bar content, or null when none is registered. */
+	statusBarContent: ReactNode | null;
 }
 
 /** The stable registration API apps call. Identity never changes across renders. */
@@ -71,6 +79,10 @@ interface HostChromeApi {
 	registerSidebarContent: (token: object, content: ReactNode | null) => void;
 	/** Clear the sidebar content if `token` still owns it. */
 	unregisterSidebarContent: (token: object) => void;
+	/** Register/replace the status-bar content owned by `token`. */
+	registerStatusBarContent: (token: object, content: ReactNode | null) => void;
+	/** Clear the status-bar content if `token` still owns it. */
+	unregisterStatusBarContent: (token: object) => void;
 }
 
 // =============================================================================
@@ -86,10 +98,12 @@ interface HostChromeApi {
 const NOOP_API: HostChromeApi = {
 	registerSidebarContent: () => {},
 	unregisterSidebarContent: () => {},
+	registerStatusBarContent: () => {},
+	unregisterStatusBarContent: () => {},
 };
 
 /** Empty state used when the reader is mounted outside a provider. */
-const EMPTY_STATE: HostChromeState = { sidebarContent: null };
+const EMPTY_STATE: HostChromeState = { sidebarContent: null, statusBarContent: null };
 
 const HostChromeApiContext = createContext<HostChromeApi>(NOOP_API);
 const HostChromeStateContext = createContext<HostChromeState>(EMPTY_STATE);
@@ -98,8 +112,8 @@ const HostChromeStateContext = createContext<HostChromeState>(EMPTY_STATE);
 // PROVIDER
 // =============================================================================
 
-/** Internal owner-tagged sidebar registration. */
-interface SidebarSlot {
+/** Internal owner-tagged slot registration (shared by both chrome slots). */
+interface ContentSlot {
 	token: object;
 	content: ReactNode | null;
 }
@@ -113,7 +127,8 @@ interface SidebarSlot {
  */
 export const HostChromeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 	// --- Owner-tagged slot state -------------------------------------------
-	const [sidebarSlot, setSidebarSlot] = useState<SidebarSlot | null>(null);
+	const [sidebarSlot, setSidebarSlot] = useState<ContentSlot | null>(null);
+	const [statusBarSlot, setStatusBarSlot] = useState<ContentSlot | null>(null);
 
 	// --- Stable registration API (identity fixed for the provider's life) ---
 	const api = useMemo<HostChromeApi>(() => ({
@@ -126,12 +141,21 @@ export const HostChromeProvider: React.FC<{ children: ReactNode }> = ({ children
 			// Clear only if this token still owns the slot (last-writer-wins).
 			setSidebarSlot((cur) => (cur && cur.token === token ? null : cur));
 		},
+		registerStatusBarContent: (token, content) => {
+			// Same dedupe rule as the sidebar slot.
+			setStatusBarSlot((cur) => (cur && cur.token === token && cur.content === content ? cur : { token, content }));
+		},
+		unregisterStatusBarContent: (token) => {
+			// Same last-writer-wins clearing rule as the sidebar slot.
+			setStatusBarSlot((cur) => (cur && cur.token === token ? null : cur));
+		},
 	}), []);
 
 	// --- Resolved state the shell chrome consumes --------------------------
 	const state = useMemo<HostChromeState>(() => ({
 		sidebarContent: sidebarSlot ? sidebarSlot.content : null,
-	}), [sidebarSlot]);
+		statusBarContent: statusBarSlot ? statusBarSlot.content : null,
+	}), [sidebarSlot, statusBarSlot]);
 
 	return (
 		<HostChromeApiContext.Provider value={api}>
@@ -161,13 +185,11 @@ export function useHostChromeState(): HostChromeState {
 // =============================================================================
 
 /**
- * Declare the shell sidebar content for the calling view.
+ * Register the shell sidebar content (shell-internal — AppLayout's plumbing).
  *
- * Opt-in: an app that never calls this keeps its legacy `components.Sidebar`
- * behavior. Passing a node mounts it inside the sidebar's scrolling slot; passing
- * `null` (or unmounting) withdraws it. When no app supplies sidebar content and
- * the app has no legacy sidebar, the shell renders no sidebar and the client area
- * spans full width.
+ * Passing a node mounts it inside the sidebar's scrolling slot; passing
+ * `null` (or unmounting) withdraws it. When nothing is registered the shell
+ * renders no sidebar and the client area spans full width.
  *
  * Collapse contract: the node stays mounted while the sidebar is collapsed to
  * its icon rail. Components inside it read shared-ui's `useSidebarCollapsed()`
@@ -192,5 +214,38 @@ export function useSidebarContent(content: ReactNode | null): void {
 	// dedupes by node identity, so a stable node registers once.
 	useLayoutEffect(() => {
 		api.registerSidebarContent(tokenRef.current, content ?? null);
+	}, [api, content]);
+}
+
+/**
+ * Register the shell status-bar content (shell-internal — AppLayout's
+ * plumbing).
+ *
+ * Mirrors {@link useSidebarContent}: passing a node mounts it in the
+ * StatusBar's app slot (between the connection identity and the shell status
+ * message); passing `null` (or unmounting) withdraws it. The bar's presence
+ * is content-driven: a non-null node (even an empty fragment) shows the bar,
+ * nothing registered means no bar.
+ *
+ * Same ownership model as the sidebar slot: the mounted active view wins.
+ *
+ * @param content - The status-bar node to mount, or null to declare nothing.
+ */
+export function useStatusBarContent(content: ReactNode | null): void {
+	const api = useContext(HostChromeApiContext);
+	// Stable per-instance ownership token for last-writer-wins arbitration.
+	const tokenRef = useRef<object>({});
+
+	// Clear this instance's registration on unmount only (not on every change),
+	// so switching content never flashes an empty slot.
+	useLayoutEffect(() => {
+		const token = tokenRef.current;
+		return () => api.unregisterStatusBarContent(token);
+	}, [api]);
+
+	// Sync the current content into the slot whenever it changes. The provider
+	// dedupes by node identity, so a stable node registers once.
+	useLayoutEffect(() => {
+		api.registerStatusBarContent(tokenRef.current, content ?? null);
 	}, [api, content]);
 }

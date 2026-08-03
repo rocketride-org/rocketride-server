@@ -24,24 +24,34 @@
 // OVERLAY SYSTEM — GALLERY ENTRY (DOC-ONLY, HOST CHROME)
 // =============================================================================
 
-/** Doc-only gallery entry for the shell-owned overlay dialogs. */
+/** Gallery entry for the shell-owned overlay dialogs. */
 
-import type { IGalleryEntry } from '../galleryTypes';
+import React from 'react';
+import type { IGalleryDemoProps, IGalleryEntry } from '../galleryTypes';
+import { FrameSchematic } from './demos/FrameSchematic';
+
+/** Schematic demo: an overlay dialog above the dimmed client area. */
+const OverlaySystemDemo: React.FC<IGalleryDemoProps> = () => <FrameSchematic highlight="overlay" />;
 
 /** The Overlay system gallery entry. */
 export const overlaySystemEntry: IGalleryEntry = {
 	id: 'overlay-system',
 	name: 'Overlay system',
 	group: 'chrome',
-	blurb: 'The shell-owned modal dialogs - Account, Settings, Environment, and the Checkout flow - rendered above the client area on a dimmed backdrop. The pages inside are ordinary views (their sub-pages use the ordinary TabControl).',
-	docNote: 'Apps do not create overlays; they may only ask the shell to open one by emitting shell:openOverlay. For the app\'s OWN records - inspect, edit, and create - use a DetailPanel record panel; modals are only for confirmations (ConfirmDialog) and multi-step flows (Modal). Note overlay dialogs render outside the client area\'s providers, so components inside them cannot rely on app-side context.',
+	blurb: 'The shell-owned modal dialogs - Account, Settings, Environment, and the Checkout flow - rendered above the client area on a dimmed backdrop.',
+	doc: `The pages inside the overlays are ordinary views (their sub-pages use the ordinary \`TabControl\`), but the dialogs themselves belong to the shell: apps never create overlays, they may only **ask** the shell to open one by emitting \`shell:openOverlay\` on the \`ConnectionManager\`. Unknown ids are ignored (guarded allowlist), and opening one overlay closes any other.
+
+For the app's OWN records — inspect, edit, create — use a \`DetailPanel\` record panel instead; app-side modals are only for confirmations (\`ConfirmDialog\`) and multi-step flows (\`Modal\`).`,
+	docNote: 'Overlay dialogs render OUTSIDE the client area\'s providers - components inside them cannot rely on app-side context.',
+	demo: OverlaySystemDemo,
 	code: `// Deep-link into a shell overlay from anywhere in an app. The shell's
 // OverlayManager listens for this and opens the same dialog the sidebar
 // footer opens. Unknown ids are ignored (guarded allowlist).
 import { ConnectionManager } from 'shell';
 
 ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'account' });`,
+	propsLabel: 'Events',
 	props: [
-		{ name: 'shell:openOverlay', type: "{ id: 'account' | 'settings' | 'environment' }", dir: 'in', note: 'Emit on the ConnectionManager to request an overlay; part of ShellConnectionEventMap. Opening one overlay closes any other.' },
+		{ name: 'shell:openOverlay', type: "{ id: 'account' | 'settings' | 'environment' }", dir: 'in', note: 'Emit on the ConnectionManager to request an overlay; part of ShellEventMap. Opening one overlay closes any other.' },
 	],
 };

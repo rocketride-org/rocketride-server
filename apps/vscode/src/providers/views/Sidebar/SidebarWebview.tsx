@@ -32,7 +32,7 @@ import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell/src/components/
 import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
 import { SidebarFooter } from 'shell/src/components/sidebar-footer/SidebarFooter';
 import type { SidebarFooterMenuItem } from 'shell/src/components/sidebar-footer/SidebarFooter';
-import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem } from 'shared/modules/sidebar/types';
+import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, SidebarMode } from 'shared/modules/sidebar/types';
 import { useMessaging } from '../hooks/useMessaging';
 
 // =============================================================================
@@ -56,7 +56,7 @@ interface TaskEventBody {
 	tasks?: { id: string; name: string; projectId: string; source: string; runKind?: string }[];
 }
 
-type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' } | { type: 'openApp'; appId: string } | { type: 'setSidebarMode'; mode: 'pipelines' | 'apps' };
+type OutgoingMessage = { type: 'view:ready' } | { type: 'connect' } | { type: 'disconnect' } | { type: 'command'; command: string; args?: unknown[] } | { type: 'openFile'; fsPath: string } | { type: 'runPipeline'; fsPath: string; sourceId?: string } | { type: 'stopPipeline'; projectId: string; sourceId: string } | { type: 'refresh' } | { type: 'openUnknownTask'; projectId: string; sourceId: string; displayName: string } | { type: 'setDevelopmentMode'; mode: string } | { type: 'setDeployTargetMode'; mode: string | null } | { type: 'cloudSignIn' } | { type: 'openApp'; appId: string } | { type: 'setSidebarMode'; mode: SidebarMode };
 
 interface DashboardTaskDTO {
 	id: string;
@@ -93,7 +93,7 @@ type IncomingMessage =
 				// App Builder (MY APPS) — merged workspace ∪ server list
 				apps?: AppListItem[];
 				/** Host-persisted sidebar mode (workspaceState). */
-				sidebarMode?: 'pipelines' | 'apps';
+				sidebarMode?: SidebarMode;
 			};
 	  }
 	| { type: 'entriesUpdate'; entries: HostProjectEntry[] }
@@ -127,7 +127,7 @@ const SidebarViewWebview: React.FC = () => {
 
 	// ── App Builder (MY APPS) ───────────────────────────────────────────────
 	const [apps, setApps] = useState<AppListItem[]>([]);
-	const [sidebarMode, setSidebarMode] = useState<'pipelines' | 'apps'>('pipelines');
+	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('pipelines');
 
 	// Synchronously-updated mirrors: the shared foldTaskEvent needs BOTH
 	// collections atomically, and relayed events can burst faster than a
@@ -354,7 +354,7 @@ const SidebarViewWebview: React.FC = () => {
 
 	/** Mode strip selection — local state now, host persists via message. */
 	const onSidebarModeChange = useCallback(
-		(mode: 'pipelines' | 'apps') => {
+		(mode: SidebarMode) => {
 			setSidebarMode(mode);
 			sendMessage({ type: 'setSidebarMode', mode });
 		},

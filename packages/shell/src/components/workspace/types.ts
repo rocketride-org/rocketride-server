@@ -39,17 +39,6 @@ export interface ShellAppProps {
 	identity: ConnectResult | null;
 }
 
-/**
- * Props injected by the shell into the app's `<Sidebar />` component.
- *
- * The sidebar zone is collapsible; apps should hide or simplify their
- * sidebar content when `collapsed` is true.
- */
-export interface ShellSidebarProps {
-	/** True when the sidebar is in collapsed (icon-only) mode. */
-	collapsed: boolean;
-}
-
 // =============================================================================
 // WORKSPACE PREFERENCES (per-app)
 // =============================================================================
@@ -241,16 +230,6 @@ export interface AppManifestEntry {
 	 * Defaults to true — most apps require the user to be logged in.
 	 */
 	authenticated?: boolean;
-	/**
-	 * When false, the shell header (app name/icon bar in the sidebar) is hidden,
-	 * allowing the app to render its own header. Defaults to true.
-	 */
-	showHeader?: boolean;
-	/**
-	 * When false, the status bar is hidden for this app.
-	 * Defaults to true — most apps show the status bar.
-	 */
-	showStatusBar?: boolean;
 	/** App lifecycle status: auth | free | unsubscribed | subscribed | trialing | past_due | canceled. */
 	appStatus?: string;
 	/** Whether this app is on the user's desktop. */
@@ -275,10 +254,6 @@ export interface AppManifestEntry {
  *
  * The shell stores one of these per app in `WorkspaceContext.loadedApps` once
  * the dynamic import triggered by `AppManifestEntry.load()` resolves.
- *
- * The `components` object provides the React components the shell mounts in
- * its screen zones.  The `exports` bag holds additional components that other
- * apps can load via Module Federation for cross-app composition.
  */
 export interface AppDescriptor {
 	/** Unique stable identifier — used as the workspace file key. */
@@ -290,19 +265,16 @@ export interface AppDescriptor {
 	/** Branding tokens (logo, welcome text) for the app. */
 	branding: ShellBrandingConfig;
 	/**
-	 * Component catalog.  The shell mounts well-known components in its
-	 * screen zones:
-	 *
-	 * - `App`     — required, mounted in the client area.
-	 * - `Sidebar` — optional, mounted in the sidebar zone.  If absent the
-	 *               sidebar zone is hidden for this app.
-	 *
-	 * Any additional components (e.g. `Canvas`, `Toolbar`) are ignored by
-	 * the shell but available for cross-app loading via `useAppComponent()`.
+	 * The app's ONE mount point, rendered raw in the client area. The app
+	 * composes its own layout inside with `<AppLayout>` (one column, sidebar,
+	 * status bar — declared as props from the app's single tree).
 	 */
-	components: {
-		App: React.ComponentType<ShellAppProps>;
-		Sidebar?: React.ComponentType<ShellSidebarProps>;
+	app: React.ComponentType<ShellAppProps>;
+	/**
+	 * Optional cross-app component catalog. Never mounted by the shell —
+	 * entries are loadable by other apps via `useAppComponent()`.
+	 */
+	components?: {
 		[key: string]: React.ComponentType<any> | undefined;
 	};
 }

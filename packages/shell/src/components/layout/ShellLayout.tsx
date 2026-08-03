@@ -44,7 +44,8 @@ import { isDevPreviewPending } from '../../util/appLoader';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
 import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
-import { HostChromeProvider } from './HostChromeContext';
+import { HostChromeProvider, useHostChromeState } from './HostChromeContext';
+import { AppFrame } from './AppFrame';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
@@ -297,6 +298,13 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Active app descriptor (undefined while loading) ---------------------
 	const activeApp = loadedApps[activeAppId];
 
+	// --- Active app mount contract -------------------------------------------
+	// Mounting is AppFrame's job: the descriptor's ONE `app` component is
+	// rendered raw, and the app declares its layout via <AppLayout> props
+	// (sidebar presence, status bar). The layout only needs to know whether
+	// there is an app UI at all.
+	const hasAppUi = !!activeApp?.app;
+
 	// --- First-content latch --------------------------------------------------
 	// True once the client area has EVER had something real to show (the app,
 	// or a terminal error surface). Until then the whole layout stays on the
@@ -412,7 +420,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// the embedder's injection lands (see the client-area branch below).
 	const devPending = isDevPreviewPending(activeAppId);
 	const hasFirstContent =
-		!!activeApp?.components?.App ||
+		hasAppUi ||
 		(!devPending && !!appLoadErrors[activeAppId]) ||
 		(!devPending && appManifest.length > 0 && !activeManifest);
 	if (hasFirstContent) firstContentRef.current = true;
@@ -420,16 +428,16 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 
 	// --- Derived layout info -------------------------------------------------
 	// The sidebar is always mounted (inside HostChromeProvider) and self-hides
-	// when it has no content: a legacy `components.Sidebar` or app-registered
-	// sidebar content. Apps with neither render no sidebar and the client area
-	// spans full width — exactly as before, when the sidebar was gated on
-	// `components.Sidebar` here.
+	// when it has no content — i.e. when the app's AppLayout declares no
+	// sidebar, the client area spans full width.
 	const appName = activeApp?.branding?.appName ?? config.apps[0]?.name ?? 'RocketRide';
-	// Only show the status bar once the app has actually loaded. During the app-load gap the
-	// client area shows the boot rocket (LoadingScreen); rendering the StatusBar there made it
-	// blink in and then get covered by home-ui's AuthTransitionPage overlay — a one-frame
-	// "flash" between the otherwise-identical loading/transition screens.
-	const showStatusBar = activeManifest?.showStatusBar !== false && !!activeApp?.components?.App;
+	// Only consider the status bar once the app has actually loaded. During the app-load gap
+	// the client area shows the boot rocket (LoadingScreen); rendering the StatusBar there made
+	// it blink in and then get covered by home-ui's AuthTransitionPage overlay — a one-frame
+	// "flash" between the otherwise-identical loading/transition screens. Whether the bar
+	// actually renders is the app's declaration (AppLayout showStatus/status), read by
+	// StatusBarWithChrome from the chrome slot.
+	const considerStatusBar = hasAppUi;
 
 	// --- Render --------------------------------------------------------------
 	return (
@@ -451,9 +459,12 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				{/* Client area */}
 				<div style={styles.overlayContainer}>
 					<div style={styles.clientArea}>
-						{activeApp?.components?.App ? (
+						{hasAppUi && activeApp ? (
+							// The framing control mounts the descriptor's `app`
+							// component raw; the app declares its layout inside.
 							<AppErrorBoundary key={activeAppId} appName={appName}>
-								<activeApp.components.App
+								<AppFrame
+									app={activeApp}
 									isConnected={isConnected}
 									identity={identity}
 								/>
@@ -556,9 +567,9 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				)}
 			</div>
 
-			{/* Status bar */}
-			{showStatusBar && (
-				<StatusBar
+			{/* Status bar — presence is the app's AppLayout declaration */}
+			{considerStatusBar && (
+				<StatusBarWithChrome
 					appName={appName}
 					isConnected={isConnected}
 					isAuthenticated={identity !== null}
@@ -599,4 +610,28 @@ const SidebarWithOverlay: React.FC<{
 			onOverlay={onOverlay}
 		/>
 	);
+};
+
+// =============================================================================
+// STATUS BAR WRAPPER — connects StatusBar to the host-chrome app slot
+// =============================================================================
+
+/**
+ * Thin wrapper that reads the app-declared status-bar content from the
+ * host-chrome state (it must render INSIDE HostChromeProvider, which
+ * ShellLayout itself mounts) and decides the bar's presence: the bar exists
+ * exactly when the app declared it (AppLayout `showStatus`/`status`, which
+ * registers a non-null node in the slot).
+ */
+const StatusBarWithChrome: React.FC<{
+	appName: string;
+	isConnected: boolean;
+	isAuthenticated: boolean;
+	statusMessage: string | null;
+	onToggleBottomPanel: () => void;
+}> = (props) => {
+	const { statusBarContent } = useHostChromeState();
+	// Presence rule: the app declared a status bar, or there is no bar.
+	if (statusBarContent == null) return null;
+	return <StatusBar {...props} appContent={statusBarContent} />;
 };

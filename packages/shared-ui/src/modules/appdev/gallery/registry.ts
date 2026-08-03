@@ -25,23 +25,36 @@
 // =============================================================================
 
 /**
- * The ordered gallery registry: group declarations plus every entry, in the
- * style guide's stock-table order (host chrome, sidebar content, then content
- * components alphabetically). Adding a component to the gallery = writing its
- * entry file under `entries/` and appending it here.
+ * The ordered gallery registry: group declarations plus every entry. The
+ * gallery documents the ENTIRE public shell API surface (shell/src/api.ts):
+ * host chrome, sidebar content, the document system, content components
+ * (alphabetical), platform hooks/context, and the utility layer. Adding a
+ * surface symbol to the gallery = writing its entry file under `entries/`
+ * and appending it here (plus an ENTRY_SOURCES line in
+ * scripts/generate-gallery-tokens.mjs for live-demo entries).
  */
 
 import type { GalleryGroup, IGalleryEntry } from './galleryTypes';
 
-// --- Host chrome (doc-only) --------------------------------------------------
-import { docTabsEntry } from './entries/doc-tabs.entry';
-import { overlaySystemEntry } from './entries/overlay-system.entry';
+// --- Host chrome -------------------------------------------------------------
+import { shellFrameEntry } from './entries/shell-frame.entry';
 import { sidebarFrameEntry } from './entries/sidebar-frame.entry';
+import { overlaySystemEntry } from './entries/overlay-system.entry';
 import { statusBarEntry } from './entries/status-bar.entry';
+import { bottomPanelEntry } from './entries/bottom-panel.entry';
+import { debugPanelEntry } from './entries/debug-panel.entry';
 
 // --- Sidebar content ---------------------------------------------------------
 import { explorerEntry } from './entries/explorer.entry';
 import { sidebarMenuEntry } from './entries/sidebar-menu.entry';
+import { navButtonEntry } from './entries/nav-button.entry';
+import { sidebarFooterEntry } from './entries/sidebar-footer.entry';
+
+// --- Document system ---------------------------------------------------------
+import { documentsModelEntry } from './entries/documents-model.entry';
+import { docTabsEntry } from './entries/doc-tabs.entry';
+import { docSplitLayoutEntry } from './entries/doc-split-layout.entry';
+import { docExplorerEntry } from './entries/doc-explorer.entry';
 
 // --- Content components ------------------------------------------------------
 import { bannerEntry } from './entries/banner.entry';
@@ -49,60 +62,110 @@ import { buttonEntry } from './entries/button.entry';
 import { cardEntry } from './entries/card.entry';
 import { chatViewEntry } from './entries/chat-view.entry';
 import { chipEntry } from './entries/chip.entry';
+import { confirmDialogEntry } from './entries/confirm-dialog.entry';
 import { connectionCardEntry } from './entries/connection-card.entry';
 import { contentHeaderEntry } from './entries/content-header.entry';
 import { dataGridEntry } from './entries/data-grid.entry';
+import { gridHelpersEntry } from './entries/grid-helpers.entry';
 import { detailPanelEntry } from './entries/detail-panel.entry';
 import { dropZoneEntry } from './entries/drop-zone.entry';
 import { emptyStateEntry } from './entries/empty-state.entry';
+import { filterStripEntry } from './entries/filter-strip.entry';
 import { inputFieldEntry } from './entries/input-field.entry';
 import { miniCardEntry } from './entries/mini-card.entry';
+import { modalEntry } from './entries/modal.entry';
+import { popupRowEntry } from './entries/popup-row.entry';
+import { rocketRideMarkEntry } from './entries/rocketride-mark.entry';
 import { sectionEntry } from './entries/section.entry';
 import { statusBadgeEntry } from './entries/status-badge.entry';
 import { tabControlEntry } from './entries/tab-control.entry';
 import { toggleGroupEntry } from './entries/toggle-group.entry';
 
+// --- Hooks & context ---------------------------------------------------------
+import { connectionClientEntry } from './entries/connection-client.entry';
+import { shellEventsEntry } from './entries/shell-events.entry';
+import { authIdentityEntry } from './entries/auth-identity.entry';
+import { workspacePrefsEntry } from './entries/workspace-prefs.entry';
+import { dataPollingEntry } from './entries/data-polling.entry';
+import { uiHooksEntry } from './entries/ui-hooks.entry';
+import { iframeBridgeEntry } from './entries/iframe-bridge.entry';
+
+// --- Utilities ---------------------------------------------------------------
+import { formattersEntry } from './entries/formatters.entry';
+import { iconsEntry } from './entries/icons.entry';
+import { themeStylesEntry } from './entries/theme-styles.entry';
+
 // =============================================================================
 // GROUPS
 // =============================================================================
 
-/** The gallery's list groups, in display order (matches the style guide). */
+/** The gallery's list groups, in display order. */
 export const GALLERY_GROUPS: Array<{ id: GalleryGroup; label: string }> = [
 	{ id: 'chrome', label: 'Host chrome' },
 	{ id: 'sidebar', label: 'Sidebar content' },
+	{ id: 'documents', label: 'Document system' },
 	{ id: 'content', label: 'Content components' },
+	{ id: 'hooks', label: 'Hooks & context' },
+	{ id: 'utils', label: 'Utilities' },
 ];
 
 // =============================================================================
 // ENTRIES
 // =============================================================================
 
-/** Every gallery entry, in stock-table order within its group. */
+/** Every gallery entry, ordered within its group. */
 export const GALLERY_ENTRIES: IGalleryEntry[] = [
-	// Host chrome - always present, never drawn by apps
-	docTabsEntry,
-	overlaySystemEntry,
+	// Host chrome - the frame overview first, then its zones
+	shellFrameEntry,
 	sidebarFrameEntry,
+	overlaySystemEntry,
 	statusBarEntry,
+	bottomPanelEntry,
+	debugPanelEntry,
 	// Sidebar content - app mounts these inside the frame's scrolling slot
 	explorerEntry,
 	sidebarMenuEntry,
-	// Content components - app composes freely between DocTabs and StatusBar
+	navButtonEntry,
+	sidebarFooterEntry,
+	// Document system - the model first, then its renderers
+	documentsModelEntry,
+	docTabsEntry,
+	docSplitLayoutEntry,
+	docExplorerEntry,
+	// Content components - alphabetical
 	bannerEntry,
 	buttonEntry,
 	cardEntry,
 	chatViewEntry,
 	chipEntry,
+	confirmDialogEntry,
 	connectionCardEntry,
 	contentHeaderEntry,
 	dataGridEntry,
+	gridHelpersEntry,
 	detailPanelEntry,
 	dropZoneEntry,
 	emptyStateEntry,
+	filterStripEntry,
 	inputFieldEntry,
 	miniCardEntry,
+	modalEntry,
+	popupRowEntry,
+	rocketRideMarkEntry,
 	sectionEntry,
 	statusBadgeEntry,
 	tabControlEntry,
 	toggleGroupEntry,
+	// Hooks & context - the platform API
+	connectionClientEntry,
+	shellEventsEntry,
+	authIdentityEntry,
+	workspacePrefsEntry,
+	dataPollingEntry,
+	uiHooksEntry,
+	iframeBridgeEntry,
+	// Utilities - formatters, icons, theme vocabulary
+	formattersEntry,
+	iconsEntry,
+	themeStylesEntry,
 ];

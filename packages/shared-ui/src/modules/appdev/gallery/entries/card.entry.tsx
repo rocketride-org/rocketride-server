@@ -48,7 +48,7 @@ const CardDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 const buildCode = (knobs: KnobValues): string => {
 	const actionAttr = knobs.actions ? '\n\theaderActions={<Button variant="secondary" small onClick={refresh}>Refresh</Button>}' : '';
 	const clickAttr = knobs.clickable ? '\n\tonClick={openRecord}' : '';
-	return `import { Card } from 'shared';
+	return `import { Card } from 'shell';
 
 <Card header="${String(knobs.header)}"${actionAttr}${clickAttr}>
 	Ingest finished for 1,284 documents.

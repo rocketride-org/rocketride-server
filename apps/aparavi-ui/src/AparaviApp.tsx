@@ -38,7 +38,7 @@ import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
 import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
 import { commonStyles } from 'shell';
-import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout } from 'shell';
+import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout, AppLayout } from 'shell';
 import type { Documents } from 'shell';
 import { ChatView, useChatMessages } from 'shared/modules/chat';
 import type { ChatMessage } from 'shared/modules/chat';
@@ -185,8 +185,18 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 			});
 	}, [isConnected, client, identity]);
 
-	if (!ready) return <div style={styles.welcome}>Initialising...</div>;
-	return <AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />;
+	// Sidebar node memoized once: AparaviSidebar takes no props and reads all
+	// its state from the shared singletons, so the slot registration is stable.
+	const sidebar = useMemo(() => <AparaviSidebar />, []);
+
+	// Two-column app: the chat-file Explorer sidebar mounts once Documents is
+	// ready (it shares the singleton with the editor surface).
+	if (!ready) return <AppLayout showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	return (
+		<AppLayout sidebar={sidebar} showStatus>
+			<AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />
+		</AppLayout>
+	);
 };
 
 // =============================================================================
@@ -227,10 +237,6 @@ const AparaviAppReady: React.FC<{
 
 	return (
 		<div style={styles.container}>
-			{/* Register the chat-file Explorer into the shell sidebar frame.
-			    Renders null; mounted here so it shares the ready Documents
-			    singleton (active-file highlight, file actions). */}
-			<AparaviSidebar />
 			<DocSplitLayout
 				docs={docs}
 				renderPane={(groupId: string) => {

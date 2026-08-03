@@ -47,7 +47,7 @@ const InputFieldDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 const buildCode = (knobs: KnobValues): string => {
 	const typeAttr = knobs.type !== 'text' ? ` type="${String(knobs.type)}"` : '';
 	const disabledAttr = knobs.disabled ? ' disabled' : '';
-	return `import { InputField } from 'shared';
+	return `import { InputField } from 'shell';
 
 <InputField${typeAttr} placeholder="${String(knobs.placeholder)}"${disabledAttr}
 	value={name} onChange={(e) => setName(e.target.value)} />`;

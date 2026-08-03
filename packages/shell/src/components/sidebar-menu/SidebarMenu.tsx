@@ -9,8 +9,10 @@
  * Renders a declared {@link ViewMenu} as a vertical list. Not shell-routed:
  * an app composes zero, one, or several SidebarMenus inside the sidebar
  * content it registers via `useSidebarContent`, alongside any other content
- * it likes. The active entry is drawn as a selection-tinted pill; count
- * badges are right-aligned via the shared {@link ViewMenuBadge}.
+ * it likes. Row geometry matches the Explorer's compact rows (22px line
+ * height, 5px radius) so the two read as one family when stacked in a
+ * sidebar; the active entry takes the theme's standard list highlight and
+ * count badges right-align via the shared {@link ViewMenuBadge}.
  *
  * Multi-level (2026-07-18): an entry that declares `children` renders as an
  * expandable SECTION — a bolder row with a right-aligned chevron that
@@ -62,30 +64,33 @@ export interface ISidebarMenuProps {
 // =============================================================================
 
 const styles = {
-	// Outer container padding around the item list.
+	// Outer container padding around the item list (Explorer tree-list padding).
 	container: {
-		padding: '2px 8px',
+		padding: '2px 6px',
 	} as CSSProperties,
 
-	// Optional uppercase section header naming the owning document.
+	// Optional uppercase section header naming the owning document — the
+	// Explorer's section-header label treatment.
 	sectionLabel: {
-		padding: '16px 16px 6px',
-		fontSize: 10.5,
-		fontWeight: 700,
+		padding: '6px 12px 4px',
+		fontSize: 11,
+		fontWeight: 600,
 		textTransform: 'uppercase',
-		letterSpacing: '0.14em',
+		letterSpacing: '0.5px',
 		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
 
-	// Base row — active and hover treatments are layered on top.
+	// Base row — active and hover treatments are layered on top. Geometry
+	// mirrors the Explorer's compact file rows so stacked SidebarMenu +
+	// Explorer sections read as one list family.
 	item: (active: boolean, hovered: boolean, disabled: boolean): CSSProperties => ({
 		display: 'flex',
 		alignItems: 'center',
-		gap: 10,
-		margin: '1px 0',
-		padding: '7px 10px',
-		borderRadius: 7,
+		gap: 6,
+		padding: '1px 8px',
+		borderRadius: 5,
 		fontSize: 13,
+		lineHeight: '22px',
 		// Disabled rows render muted with a default cursor and receive no hover
 		// or active treatment (both are skipped below); otherwise the standard
 		// primary tone with a pointer cursor.
@@ -100,13 +105,13 @@ const styles = {
 		borderStyle: 'solid',
 		borderColor: 'transparent',
 		// Active: the theme's standard list highlight (--rr-bg-list-active /
-		// --rr-fg-list-active) + bolder label. Border stays transparent. Never
-		// applied to a disabled row.
+		// --rr-fg-list-active) — no weight change, matching the Explorer's
+		// selected row. Border stays transparent. Never applied to a disabled
+		// row.
 		...(!disabled && active
 			? {
 					background: 'var(--rr-bg-list-active)',
 					color: 'var(--rr-fg-list-active)',
-					fontWeight: 600,
 			  }
 			: null),
 		// Hover (non-active, non-disabled only): quiet list-hover fill.
@@ -144,7 +149,7 @@ const styles = {
 		width: 36,
 		height: 36,
 		margin: '2px auto',
-		borderRadius: 7,
+		borderRadius: 5,
 		// Disabled rows render muted with a default cursor and no hover/active
 		// treatment (both skipped below); otherwise the standard primary tone.
 		color: disabled ? 'var(--rr-text-disabled)' : 'var(--rr-text-primary)',
@@ -166,15 +171,16 @@ const styles = {
 
 	// Section header row — an expandable group, not a navigation target: the
 	// item geometry with a bolder label and a right-aligned chevron. Never
-	// takes the active pill (sections do not navigate), only the hover fill.
+	// takes the active highlight (sections do not navigate), only the hover
+	// fill.
 	sectionRow: (hovered: boolean): CSSProperties => ({
 		display: 'flex',
 		alignItems: 'center',
-		gap: 10,
-		margin: '1px 0',
-		padding: '7px 10px',
-		borderRadius: 7,
+		gap: 6,
+		padding: '1px 8px',
+		borderRadius: 5,
 		fontSize: 13,
+		lineHeight: '22px',
 		fontWeight: 600,
 		color: 'var(--rr-text-primary)',
 		cursor: 'pointer',
@@ -195,10 +201,10 @@ const styles = {
 	} as CSSProperties,
 
 	// Child rows indent under their section: the extra left padding equals
-	// the parent's icon column (17px) + gap (10px), so a child's icon lines
-	// up with its section's label.
+	// the parent's icon column (17px) + gap (6px) + the row's own base
+	// padding (8px), so a child's icon lines up with its section's label.
 	childIndent: {
-		paddingLeft: 37,
+		paddingLeft: 31,
 	} as CSSProperties,
 
 	// First-letter fallback glyph for entries that declare no icon.

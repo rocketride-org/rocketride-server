@@ -43,7 +43,7 @@ const ChipDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	const removeAttr = knobs.removable ? ' onRemove={() => removeTag(tag)}' : '';
-	return `import { Chip, ChipAdd } from 'shared';
+	return `import { Chip, ChipAdd } from 'shell';
 
 <Chip label="${String(knobs.label)}"${removeAttr} />
 <ChipAdd label="Add permission" onClick={openPicker} />`;

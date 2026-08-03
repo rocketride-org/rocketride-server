@@ -37,7 +37,7 @@ const BannerDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 );
 
 /** Snippet builder mirroring the current knob state. */
-const buildCode = (knobs: KnobValues): string => `import { Banner } from 'shared';
+const buildCode = (knobs: KnobValues): string => `import { Banner } from 'shell';
 
 <Banner variant="${String(knobs.variant)}">${String(knobs.text)}</Banner>`;
 

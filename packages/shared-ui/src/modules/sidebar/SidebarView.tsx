@@ -9,6 +9,11 @@
  * Composes the generic Explorer component (file tree) with pipeline-specific
  * UI: navigation buttons, unknown tasks section, and a footer slot.
  *
+ * Column order: shared nav (host slot + Monitor), then the stock TabControl
+ * mode tabs (Pipelines | Apps | Nodes — Apps when the host wires the app
+ * builder, Nodes as the node-builder placeholder), then a stock TabPanel
+ * holding the mode bodies, then the shared footer slot.
+ *
  * The Explorer component handles all file tree rendering, inline rename/create,
  * context menus, status indicators, and child item actions.  SidebarView
  * just wraps it with app-specific chrome.
@@ -16,8 +21,8 @@
 
 import React, { useState, useCallback, CSSProperties } from 'react';
 import { commonStyles } from 'shell/src/themes/styles';
-import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from 'shell';
-import { SidebarMenu } from 'shell';
+import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop, BxGridAlt } from 'shell';
+import { SidebarMenu, TabControl, TabPanel } from 'shell';
 import { StatusBadge } from 'shell';
 import type { StatusVariant } from 'shell';
 import { Explorer, NOOP_VFS } from '../explorer';
@@ -39,8 +44,11 @@ const S = {
 		color: 'var(--rr-text-primary)',
 		overflow: 'hidden',
 	} as CSSProperties,
+	// No horizontal padding: the SidebarMenu inside carries its own tree-list
+	// padding (2px 6px), so adding more here would indent nav rows past the
+	// Explorer rows and break the sidebar's shared left rhythm.
 	navSection: {
-		padding: '8px 6px 12px',
+		padding: '8px 0 12px',
 		flexShrink: 0,
 	} as CSSProperties,
 	row: {
@@ -79,43 +87,44 @@ const S = {
 		display: 'flex',
 		alignItems: 'center',
 	}),
-	// Mode strip — the TabControl idiom applied to the sidebar top:
-	// uppercase labels, active = text-primary + 2px brand underline.
-	modeStrip: {
+	// Wrapper giving the TabPanel stack the remaining column height (the
+	// stock TabPanel sizes itself to 100% of its parent).
+	panelStack: {
+		flex: 1,
+		minHeight: 0,
+	} as CSSProperties,
+	// One mode body inside the TabPanel stack — its own full-height column
+	// so the Explorer / apps list keep their internal flex scrolling.
+	panelColumn: {
 		display: 'flex',
-		gap: 2,
-		padding: '0 10px',
-		borderBottom: '1px solid var(--rr-border)',
+		flexDirection: 'column' as const,
+		height: '100%',
+	} as CSSProperties,
+	// MY APPS header — the Explorer's section-header treatment (same label
+	// style and left offset). The 24px line height reproduces the row height
+	// the Explorer's header gets from its 16px+4px-padding action buttons, so
+	// the two labels sit at the same vertical position across the mode tabs.
+	appsLabel: {
+		...commonStyles.labelUppercase,
+		padding: '6px 12px 4px',
+		lineHeight: '24px',
 		flexShrink: 0,
 	} as CSSProperties,
-	modeTab: {
-		padding: '9px 12px 7px',
-		fontSize: 11,
-		fontWeight: 700,
-		letterSpacing: '0.06em',
-		textTransform: 'uppercase' as const,
-		color: 'var(--rr-text-secondary)',
-		borderBottom: '2px solid transparent',
-		cursor: 'pointer',
-		userSelect: 'none' as const,
-	} as CSSProperties,
-	modeTabActive: {
-		color: 'var(--rr-text-primary)',
-		borderBottomColor: 'var(--rr-brand)',
-	} as CSSProperties,
-	appsSection: {
-		padding: '6px 6px 2px',
+	// MY APPS list — the Explorer's tree-list padding, so app rows align
+	// with pipeline rows across the mode tabs.
+	appsList: {
+		padding: '2px 6px',
 		flex: 1,
 		minHeight: 0,
 		overflowY: 'auto' as const,
 	} as CSSProperties,
-	appsLabel: {
-		padding: '8px 10px 4px',
-		fontSize: 11,
-		fontWeight: 700,
-		letterSpacing: '0.08em',
-		textTransform: 'uppercase' as const,
-		color: 'var(--rr-text-secondary)',
+	// Placeholder body for not-yet-built modes (the Explorer empty-state
+	// treatment: centered muted text).
+	comingSoon: {
+		...commonStyles.textMuted,
+		padding: 16,
+		fontSize: 12,
+		textAlign: 'center' as const,
 	} as CSSProperties,
 };
 
@@ -163,20 +172,34 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 
 	const isConnected = connection.state === 'connected';
 	const hasUnknown = (unknownTasks?.length ?? 0) > 0;
-	// The App Builder tab exists only when the host wires it; the apps mode
-	// is only honored when it can actually render something. The strip itself
-	// can also be forced visible with a single Pipelines tab (web host).
+	// The Apps tab exists only when the host wires it; the Nodes tab exists
+	// whenever the mode tabs render at all. A requested mode is only honored
+	// when its tab actually exists — anything else falls back to Pipelines.
 	const hasAppBuilder = Boolean(appBuilder);
-	const mode = hasAppBuilder ? sidebarMode : 'pipelines';
-	// --- Static top-nav menu (New pipeline / Monitor) ------------------------
+	const tabsVisible = hasAppBuilder || showModeStrip;
+	const mode = (sidebarMode === 'apps' && hasAppBuilder) || (sidebarMode === 'nodes' && tabsVisible) ? sidebarMode : 'pipelines';
+	// --- Static nav menus ----------------------------------------------------
 
-	// The fixed nav actions rendered above the Explorer as a stock SidebarMenu.
-	// Monitor is disabled while disconnected; there is no persistent selection,
-	// so activeId is empty. Icons match the shell nav sizing (16px).
-	const navMenu: ViewMenu = {
+	// Monitor sits ABOVE the mode tabs — it is mode-independent chrome shared
+	// by both tabs. Disabled while disconnected; there is no persistent
+	// selection, so activeId is empty. Icons match the shell nav sizing (16px).
+	const monitorMenu: ViewMenu = {
+		entries: [{ id: 'monitor', label: 'Monitor', icon: <BxDesktop size={16} />, disabled: !isConnected }],
+	};
+
+	// "+ New pipeline" belongs to the Pipelines tab body only.
+	const pipelinesNavMenu: ViewMenu = {
+		entries: [{ id: 'new', label: 'New pipeline', icon: <BxPlus size={16} /> }],
+	};
+
+	// The mode tabs — the stock TabControl menu. The Apps entry only exists
+	// when the host wires the app-builder sidebar content; Nodes (the
+	// node-builder placeholder) rides along whenever the tabs render.
+	const modeMenu: ViewMenu = {
 		entries: [
-			{ id: 'new', label: 'New pipeline', icon: <BxPlus size={16} /> },
-			{ id: 'monitor', label: 'Monitor', icon: <BxDesktop size={16} />, disabled: !isConnected },
+			{ id: 'pipelines', label: 'Pipelines' },
+			...(hasAppBuilder ? [{ id: 'apps', label: 'Apps' }] : []),
+			{ id: 'nodes', label: 'Nodes' },
 		],
 	};
 
@@ -215,85 +238,23 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 		entries: [{ id: 'newApp', label: 'New app', icon: <BxPlus size={16} /> }],
 	};
 
-	return (
-		<div style={S.container}>
-			{/* ── Mode strip: App Builder tab when wired; strip alone when
-			    forced (web host — future modes land here) ─────────────── */}
-			{(hasAppBuilder || showModeStrip) && (
-				<div style={S.modeStrip}>
-					<div
-						style={mode === 'pipelines' ? { ...S.modeTab, ...S.modeTabActive } : S.modeTab}
-						onClick={() => onSidebarModeChange?.('pipelines')}
-					>Pipelines</div>
-					{hasAppBuilder && (
-						<div
-							style={mode === 'apps' ? { ...S.modeTab, ...S.modeTabActive } : S.modeTab}
-							onClick={() => onSidebarModeChange?.('apps')}
-						>App Builder</div>
-					)}
-				</div>
-			)}
+	// --- Mode bodies ---------------------------------------------------------
 
-			{/* ── APP BUILDER MODE — + New app / MY APPS list ─────────── */}
-			{mode === 'apps' && appBuilder && (
-				<>
-					<div style={S.navSection}>
-						<SidebarMenu
-							menu={appsNavMenu}
-							activeId=""
-							onSelect={(id) => {
-								if (id === 'newApp') appBuilder.onNewApp();
-							}}
-						/>
-					</div>
-					<div style={S.appsSection}>
-						<div style={S.appsLabel}>My Apps</div>
-						{appBuilder.apps.length === 0 && (
-							<div style={{ padding: '4px 10px', fontSize: 12, color: 'var(--rr-text-secondary)' }}>
-								No apps yet — create one with New app.
-							</div>
-						)}
-						{appBuilder.apps.map((app) => {
-							const rowKey = `app:${app.id}`;
-							const active = app.id === appBuilder.activeAppId;
-							const badge = APP_BADGE[app.status] ?? APP_BADGE.local;
-							return (
-								<div
-									key={app.id}
-									style={{ ...S.row, ...(active ? { background: HOVER_BG } : hoverBg(rowKey)) }}
-									onMouseEnter={() => setHoveredRow(rowKey)}
-									onMouseLeave={() => setHoveredRow(null)}
-									onClick={() => appBuilder.onOpenApp(app.id)}
-									title={app.folder ? `${app.id}\n${app.folder}` : app.id}
-								>
-									<span style={S.rowName}>{app.name}</span>
-									<span style={S.spacer} />
-									<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>
-								</div>
-							);
-						})}
-					</div>
-					{footerSlot}
-				</>
-			)}
-
-			{/* ── PIPELINES MODE — the existing layout, untouched ─────── */}
-			{mode === 'pipelines' && (
-				<>
+	// Pipelines tab body: + New pipeline nav, the Explorer tree, and the
+	// ad-hoc (unknown-task) section.
+	const pipelinesPanel = (
+		<div style={S.panelColumn}>
 			{/* ── Navigation ──────────────────────────────────────────── */}
 			<div style={S.navSection}>
-				{/* Host-injected nav (e.g. rocket-ui's Home button). Bare render so an
-				    omitted slot adds zero DOM/spacing — VS Code passes nothing. */}
-				{headerSlot}
-				{/* Fixed nav actions as a stock SidebarMenu. No persistent selection
+				{/* "+ New pipeline" as a stock SidebarMenu. No persistent selection
 				    (activeId=''); the id-narrowing guard keeps onNavigate's union
 				    contract without a cast. SidebarMenu reads the collapsed flag
 				    from context, so no explicit collapsed prop is wired here. */}
 				<SidebarMenu
-					menu={navMenu}
+					menu={pipelinesNavMenu}
 					activeId=""
 					onSelect={(id) => {
-						if (id === 'new' || id === 'monitor') onNavigate(id);
+						if (id === 'new') onNavigate(id);
 					}}
 				/>
 			</div>
@@ -338,11 +299,100 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 						})}
 				</div>
 			)}
+		</div>
+	);
 
-			{/* ── Footer slot ─────────────────────────────────────────── */}
-			{footerSlot}
-				</>
+	// Apps tab body: + New app nav and the MY APPS list.
+	const appsPanel = appBuilder ? (
+		<div style={S.panelColumn}>
+			<div style={S.navSection}>
+				<SidebarMenu
+					menu={appsNavMenu}
+					activeId=""
+					onSelect={(id) => {
+						if (id === 'newApp') appBuilder.onNewApp();
+					}}
+				/>
+			</div>
+			<div style={S.appsLabel}>My Apps</div>
+			<div style={S.appsList}>
+				{appBuilder.apps.length === 0 && (
+					<div style={{ padding: '4px 10px', fontSize: 12, color: 'var(--rr-text-secondary)' }}>
+						No apps yet — create one with New app.
+					</div>
+				)}
+				{appBuilder.apps.map((app) => {
+					const rowKey = `app:${app.id}`;
+					const active = app.id === appBuilder.activeAppId;
+					const badge = APP_BADGE[app.status] ?? APP_BADGE.local;
+					return (
+						<div
+							key={app.id}
+							style={{ ...S.row, ...(active ? { background: HOVER_BG } : hoverBg(rowKey)) }}
+							onMouseEnter={() => setHoveredRow(rowKey)}
+							onMouseLeave={() => setHoveredRow(null)}
+							onClick={() => appBuilder.onOpenApp(app.id)}
+							title={app.folder ? `${app.id}\n${app.folder}` : app.id}
+						>
+							{/* Mirror the Explorer file-row anatomy — 14px chevron slot
+							    (apps don't expand) + 16px leading icon — so app icons and
+							    names align column-for-column with the pipeline rows. */}
+							<span style={{ width: 14, flexShrink: 0 }} />
+							<BxGridAlt size={16} color="var(--rr-text-secondary)" />
+							<span style={S.rowName}>{app.name}</span>
+							<span style={S.spacer} />
+							<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>
+						</div>
+					);
+				})}
+			</div>
+		</div>
+	) : null;
+
+	// Nodes tab body: node-builder placeholder until the real surface lands.
+	const nodesPanel = (
+		<div style={S.panelColumn}>
+			<div style={S.comingSoon}>Coming soon...</div>
+		</div>
+	);
+
+	return (
+		<div style={S.container}>
+			{/* ── Shared nav above the mode tabs: host slot + Monitor ─── */}
+			<div style={S.navSection}>
+				{/* Host-injected nav (e.g. rocket-ui's Home button). Bare render so an
+				    omitted slot adds zero DOM/spacing — VS Code passes nothing. */}
+				{headerSlot}
+				<SidebarMenu
+					menu={monitorMenu}
+					activeId=""
+					onSelect={(id) => {
+						if (id === 'monitor') onNavigate(id);
+					}}
+				/>
+			</div>
+
+			{/* ── Mode tabs — the stock TabControl strip: Apps tab when
+			    wired, Nodes placeholder always; strip alone forced by the
+			    web host (future modes land here) ──────────────────────── */}
+			{tabsVisible && (
+				<TabControl
+					menu={modeMenu}
+					activeId={mode}
+					onSelect={(id) => {
+						if (id === 'pipelines' || id === 'apps' || id === 'nodes') onSidebarModeChange?.(id);
+					}}
+				/>
 			)}
+
+			{/* ── Mode bodies — the stock TabPanel stack keeps all modes
+			    mounted, so Explorer scroll/expand state survives switches */}
+			<div style={S.panelStack}>
+				<TabPanel activeId={mode} panels={{ pipelines: { content: pipelinesPanel }, ...(appsPanel ? { apps: { content: appsPanel } } : {}), nodes: { content: nodesPanel } }} />
+			</div>
+
+			{/* ── Footer slot (shared by both modes) ──────────────────── */}
+			{footerSlot}
 		</div>
 	);
 };

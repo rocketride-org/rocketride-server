@@ -387,11 +387,12 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 				),
 			]);
 
-			// Validate the descriptor has the minimum required shape
-			if (!descriptor || !descriptor.components?.App) {
-				console.error(`[WorkspaceContext] Invalid AppDescriptor for "${appId}": missing components.App`);
+			// Validate the descriptor has the minimum required shape: the ONE
+			// `app` mount point.
+			if (!descriptor || !descriptor.app) {
+				console.error(`[WorkspaceContext] Invalid AppDescriptor for "${appId}": missing app`);
 				failedSetRef.current.add(appId);
-				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (components.App) — the bundle may be stale or only partially deployed.` }));
+				setAppLoadErrors((prev) => ({ ...prev, [appId]: `App "${appId}" loaded but is missing its UI (app entry point) — the bundle may be stale or only partially deployed.` }));
 				return false;
 			}
 

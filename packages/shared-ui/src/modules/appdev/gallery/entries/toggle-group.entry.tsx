@@ -68,7 +68,7 @@ const ToggleGroupDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 const buildCode = (knobs: KnobValues): string => {
 	const disabledAttr = knobs.disabled ? '\n\tdisabled' : '';
 	if (knobs.multi) {
-		return `import { ToggleGroup } from 'shared';
+		return `import { ToggleGroup } from 'shell';
 
 <ToggleGroup
 	multi
@@ -77,7 +77,7 @@ const buildCode = (knobs: KnobValues): string => {
 	onToggle={toggleRange}${disabledAttr}
 />`;
 	}
-	return `import { ToggleGroup } from 'shared';
+	return `import { ToggleGroup } from 'shell';
 
 <ToggleGroup
 	options={[{ id: 'hour', label: 'Hour' }, { id: 'day', label: 'Day' }, { id: 'week', label: 'Week' }]}

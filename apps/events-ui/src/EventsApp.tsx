@@ -26,7 +26,7 @@
 
 import React, { useState } from 'react';
 import type { ShellAppProps } from 'shell';
-import { ContentHeader, MiniCard, MiniContainer, StatusBadge } from 'shell';
+import { ContentHeader, MiniCard, MiniContainer, StatusBadge, AppLayout } from 'shell';
 import type { StatusVariant } from 'shell';
 import type { EventRow } from './types';
 import { styles } from './styles';
@@ -34,6 +34,10 @@ import { useEventCapture } from './hooks/useEventCapture';
 import { CaptureCard } from './components/CaptureCard';
 import { EventsGrid } from './components/EventsGrid';
 import { EventDetailPanel } from './components/EventDetailPanel';
+
+// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
+// (header + account footer) present with an empty middle slot.
+const SIDEBAR_FRAME_ONLY = <></>;
 
 // =============================================================================
 // HELPERS
@@ -92,6 +96,7 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 	const canStart = config.types.length > 0;
 
 	return (
+		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
 		<div style={styles.root}>
 			<ContentHeader
 				title="Event Monitor"
@@ -138,6 +143,7 @@ const EventsApp: React.FC<ShellAppProps> = (_props) => {
 			{/* Record slide-over for the selected event's body. */}
 			<EventDetailPanel event={selected} onClose={() => setSelected(null)} />
 		</div>
+		</AppLayout>
 	);
 };
 

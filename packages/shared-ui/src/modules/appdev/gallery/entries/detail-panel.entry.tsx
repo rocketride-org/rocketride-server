@@ -74,7 +74,7 @@ const DetailPanelDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 const buildCode = (knobs: KnobValues): string => {
 	const sideAttr = knobs.side !== 'right' ? `\n\tside="${String(knobs.side)}"` : '';
 	const footerAttr = knobs.footer ? '\n\tfooter={<><Button variant="secondary" onClick={close}>Cancel</Button><Button onClick={save}>Save</Button></>}' : '';
-	return `import { DetailPanel, Section, LabelValue } from 'shared';
+	return `import { DetailPanel, Section, LabelValue } from 'shell';
 
 <DetailPanel
 	open={open}
@@ -91,9 +91,10 @@ const buildCode = (knobs: KnobValues): string => {
 /** The DetailPanel gallery entry. */
 export const detailPanelEntry: IGalleryEntry = {
 	id: 'detail-panel',
-	name: 'DetailPanel',
+	name: 'DetailPanel / PanelTabBody',
 	group: 'content',
 	blurb: 'THE record panel: one slide-over surface for inspect / edit / create - EntityHeader + optional tabs + sectioned body + footer verb row. Stacks, resizes, and can anchor contained to the record-owning surface (as this demo does).',
+	doc: `With \`tabs\`, the panel's outer body does not scroll — each tab owns its own overflow. Wrap every tab's content in \`PanelTabBody\` (the one-line stock scroll wrapper) to get that right.`,
 	knobs: [
 		{ id: 'side', label: 'Side', kind: 'select', options: ['right', 'bottom'], defaultValue: 'right' },
 		{ id: 'footer', label: 'Footer verbs', kind: 'boolean', defaultValue: true },
@@ -116,5 +117,13 @@ export const detailPanelEntry: IGalleryEntry = {
 		{ name: 'flushBody', type: 'boolean', dir: 'in', note: 'Body hosts a full View that owns its own scrolling - the body becomes a definite, non-scrolling flex box with no padding.' },
 		{ name: 'onClose', type: '() => void', dir: 'out', required: true, note: 'Fired when the user dismisses the drawer (close glyph or Escape).' },
 		{ name: 'onTabSelect', type: '(id: string) => void', dir: 'out', note: 'Fired with a tab id when the user selects a tab.' },
+	],
+	sections: [
+		{
+			label: 'PanelTabBody',
+			rows: [
+				{ name: 'children', type: 'ReactNode', dir: 'in', required: true, note: 'One tab\'s content - typically a Section / LabelValue stack. The wrapper owns the tab\'s scrolling.' },
+			],
+		},
 	],
 };

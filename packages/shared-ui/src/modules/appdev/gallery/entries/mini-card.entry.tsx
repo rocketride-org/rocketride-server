@@ -50,7 +50,7 @@ const MiniCardDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	const colorAttr = knobs.color !== 'default' ? ` color="var(--rr-color-${String(knobs.color)})"` : '';
-	return `import { MiniCard, MiniContainer } from 'shared';
+	return `import { MiniCard, MiniContainer } from 'shell';
 
 <MiniContainer>
 	<MiniCard value="${String(knobs.value)}" label="${String(knobs.label)}"${colorAttr} />

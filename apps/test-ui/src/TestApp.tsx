@@ -24,13 +24,17 @@
 // TEST APP — Workspace-aware tab manager with connection store
 // =============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
-import { useWorkspace, DocSplitLayout, DocTabs } from 'shell';
+import { useWorkspace, DocSplitLayout, DocTabs, AppLayout } from 'shell';
 import type { Documents } from 'shell';
 import { commonStyles } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
+// Import cycle note: TestSidebar imports openConnection from this module.
+// Both references are runtime-only (render / click handler), so the cycle
+// never resolves during module initialisation.
+import TestSidebar from './TestSidebar';
 import {
 	initConnectionStore, destroyConnectionStore,
 	type SavedConnection, type TestConnectionContent,
@@ -115,8 +119,19 @@ const TestApp: React.FC<ShellAppProps> = (_props) => {
 		};
 	}, [seeded]);
 
-	if (!ready) return <div style={s.center}>Initialising...</div>;
-	return <TestAppReady docs={getDocs()!} />;
+	// Sidebar node memoized once (created at render time, not module init —
+	// TestSidebar's module imports back from this one, so a module-level
+	// element could hit the cycle before TestSidebar is initialised).
+	const sidebar = useMemo(() => <TestSidebar />, []);
+
+	// Two-column app: the connections/views sidebar mounts once Documents is
+	// ready (it reads the same singletons as the editor surface).
+	if (!ready) return <AppLayout showStatus><div style={s.center}>Initialising...</div></AppLayout>;
+	return (
+		<AppLayout sidebar={sidebar} showStatus>
+			<TestAppReady docs={getDocs()!} />
+		</AppLayout>
+	);
 };
 
 // =============================================================================
