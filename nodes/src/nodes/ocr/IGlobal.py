@@ -130,9 +130,11 @@ class ModelServerOCR(OCRInstance):
                 # Call model server OCR (or local fallback)
                 _diag(f'[DIAG] Calling self.ocr.read() with engine={self.engine}')
                 result = self.ocr.read(image_bytes)
-                # summary only: the full result carries a record per recognised word
-                n_boxes = len(result.get('boxes', ())) if isinstance(result, dict) else 0
-                _diag(f'[DIAG] OCR result: {n_boxes} boxes')
+                # count when boxes are present (one record per recognised word); the
+                # full result only when there are none, which is the case worth seeing
+                boxes = result.get('boxes') if isinstance(result, dict) else None
+                n_boxes = len(boxes) if isinstance(boxes, list) else 0
+                _diag(f'[DIAG] OCR result: {n_boxes} boxes' if n_boxes else f'[DIAG] OCR result: {result}')
 
                 # Convert to EasyOCR-compatible format
                 page_results = self._format_to_easyocr(result, image.shape)

@@ -397,19 +397,34 @@ def test_content_returns_easyocr_format(adapter) -> None:
 # ---------------------------------------------------------------------------
 
 
-class _ExplodingDocument:
-    """Document whose page is not an array, so ``image.shape`` raises inside the try."""
+class _RaisingOcr:
+    """OCR engine that fails the way a real backend would."""
 
-    images = ['not-an-array']
+    def read(self, image_bytes: bytes) -> dict:
+        raise RuntimeError('boom')
 
 
 def test_content_swallows_but_reports(adapter, monkeypatch) -> None:
     """A page failure must not propagate, and must not vanish either."""
     captured: list[str] = []
     monkeypatch.setattr(_iglobal_mod, 'warning', lambda msg: captured.append(msg))
+    adapter._ocr = _RaisingOcr()
 
-    assert adapter.content(_ExplodingDocument()) == []
+    assert adapter.content(_StubDocument()) == []
 
     assert len(captured) == 1, 'swallowed exception was not reported'
-    assert "'str' object has no attribute 'shape'" in captured[0]
+    assert 'boom' in captured[0]
     assert 'Traceback' in captured[0]
+
+
+def test_text_only_result_is_not_broken_by_the_diagnostic(adapter, monkeypatch) -> None:
+    """boxes=None is a valid text-only result; the box-count diagnostic must not raise."""
+    captured: list[str] = []
+    monkeypatch.setattr(_iglobal_mod, 'warning', lambda msg: captured.append(msg))
+    adapter._ocr = _StubOcr({'text': 'hello', 'boxes': None})
+
+    pages = adapter.content(_StubDocument())
+
+    assert captured == [], 'diagnostic raised and discarded a usable result'
+    assert len(pages) == 1
+    assert pages[0][0][1] == 'hello'
