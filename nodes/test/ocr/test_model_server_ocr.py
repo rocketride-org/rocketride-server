@@ -85,6 +85,7 @@ def _install_min_stubs() -> None:
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IGlobalBase = _IGlobalBase
     rocketlib.debug = _noop
+    rocketlib.warning = _noop
     sys.modules['rocketlib'] = rocketlib
 
     ai = types.ModuleType('ai')
@@ -389,3 +390,26 @@ def test_content_returns_easyocr_format(adapter) -> None:
     assert text == 'hi'
     assert conf == 0.9
     assert bbox_points == [[0, 0], [5, 0], [5, 5], [0, 5]]
+
+
+# ---------------------------------------------------------------------------
+# Swallowed failures must stay visible
+# ---------------------------------------------------------------------------
+
+
+class _ExplodingDocument:
+    """Document whose page is not an array, so ``image.shape`` raises inside the try."""
+
+    images = ['not-an-array']
+
+
+def test_content_swallows_but_reports(adapter, monkeypatch) -> None:
+    """A page failure must not propagate, and must not vanish either."""
+    captured: list[str] = []
+    monkeypatch.setattr(_iglobal_mod, 'warning', lambda msg: captured.append(msg))
+
+    assert adapter.content(_ExplodingDocument()) == []
+
+    assert len(captured) == 1, 'swallowed exception was not reported'
+    assert "'str' object has no attribute 'shape'" in captured[0]
+    assert 'Traceback' in captured[0]

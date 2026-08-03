@@ -25,7 +25,7 @@ import os
 import io
 import threading
 from typing import List, Tuple, Any
-from rocketlib import IGlobalBase, debug
+from rocketlib import IGlobalBase, debug, warning
 from ai.common.config import Config
 
 from depends import depends
@@ -112,7 +112,7 @@ class ModelServerOCR(OCRInstance):
         """
 
         def _diag(msg):
-            pass
+            debug(msg)
 
         _diag(f'[DIAG] ModelServerOCR.content() called, document type: {type(document)}')
         _diag(f'[DIAG] document.images count: {len(document.images) if hasattr(document, "images") else "N/A"}')
@@ -130,7 +130,9 @@ class ModelServerOCR(OCRInstance):
                 # Call model server OCR (or local fallback)
                 _diag(f'[DIAG] Calling self.ocr.read() with engine={self.engine}')
                 result = self.ocr.read(image_bytes)
-                _diag(f'[DIAG] OCR result: {result}')
+                # summary only: the full result carries a record per recognised word
+                n_boxes = len(result.get('boxes', ())) if isinstance(result, dict) else 0
+                _diag(f'[DIAG] OCR result: {n_boxes} boxes')
 
                 # Convert to EasyOCR-compatible format
                 page_results = self._format_to_easyocr(result, image.shape)
@@ -140,8 +142,8 @@ class ModelServerOCR(OCRInstance):
         except Exception as e:
             import traceback
 
-            _diag(f'[DIAG] ModelServerOCR.content() EXCEPTION: {e}')
-            _diag(f'[DIAG] Traceback: {traceback.format_exc()}')
+            # swallowed so a page failure cannot kill the whole document, but must stay visible
+            warning(f'OCR content() failed: {e}\n{traceback.format_exc()}')
 
         return all_results
 
@@ -265,7 +267,7 @@ class ModelServerOCR(OCRInstance):
         import polars as pl
 
         def _diag(msg):
-            pass
+            debug(msg)
 
         _diag(f'[DIAG] to_ocr_dataframe called, content pages: {len(content)}')
 
