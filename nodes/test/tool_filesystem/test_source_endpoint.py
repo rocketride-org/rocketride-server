@@ -193,6 +193,11 @@ def test_render_sends_tag_stream_sequence(monkeypatch):
         'sendTagData',
         'sendTagEndStream',
         'sendTagEndObject',
+        # Explicit per-object close: the dev-mode runner (unlike task-mode
+        # processItem) never closes the object for the source, leaving it
+        # PROCESSING forever in the trace. Close is idempotent engine-side,
+        # so task mode is unaffected. Same contract as telegram/webhook.
+        'sendClose',
     ]
     assert dict(inst.calls)['sendTagData'] == (b'PDFDATA',)
 

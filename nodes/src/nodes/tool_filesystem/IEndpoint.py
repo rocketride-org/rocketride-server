@@ -130,6 +130,13 @@ class IEndpoint(IEndpointBase):
         Called by ``IInstance.renderObject`` with the engine ``instance`` whose
         ``sendTag*`` functions write into the already-open target pipe. Errors
         propagate so the engine marks the entry failed and counts it.
+
+        Ends with an explicit ``sendClose``: task-mode ``processItem`` closes
+        the object pipe itself, but the dev-mode runner leaves closure to the
+        source — without it the ``close`` lifecycle lane never dispatches and
+        every object shows PROCESSING forever in the run trace. The engine's
+        own close is a no-op on an already-closed pipe, so both modes are
+        safe. Same contract the telegram/webhook push sources follow.
         """
         file_path = str(entry.name).strip('/')
         data = asyncio.run(self._store().read(file_path))
@@ -138,3 +145,4 @@ class IEndpoint(IEndpointBase):
         instance.sendTagData(data)
         instance.sendTagEndStream()
         instance.sendTagEndObject()
+        instance.sendClose()
