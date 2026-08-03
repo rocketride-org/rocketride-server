@@ -41,7 +41,7 @@
 // =============================================================================
 
 import { useSyncExternalStore } from 'react';
-import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+import type { IVirtualFileSystem } from '../../modules/explorer/types';
 
 // =============================================================================
 // TYPES
@@ -168,7 +168,7 @@ export interface DocumentsState {
 	activeGroupId: string;
 }
 
-export type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+export type { IVirtualFileSystem } from '../../modules/explorer/types';
 
 // =============================================================================
 // WORKSPACE BINDING

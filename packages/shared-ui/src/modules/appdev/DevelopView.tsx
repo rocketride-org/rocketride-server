@@ -41,7 +41,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Hand, Monitor, RotateCw, Smartphone, Tablet } from 'lucide-react';
-import { ToggleGroup } from '../../components/toggle-group/ToggleGroup';
+import { ToggleGroup } from 'shell';
 import { ComponentGallery } from './gallery';
 import { LogList, LOG_LIST_CAP } from './LogList';
 import type { LogListRow } from './LogList';

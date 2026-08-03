@@ -27,9 +27,9 @@
 /** Gallery entry browsing the full Bx* icon set with click-to-copy names. */
 
 import React, { useState } from 'react';
-import * as BoxIcon from 'shell/src/components/BoxIcon';
-import type { IconComponent } from 'shell/src/components/BoxIcon';
-import { commonStyles } from 'shell/src/themes/styles';
+import * as BoxIcon from 'shell';
+import type { IconComponent } from 'shell';
+import { commonStyles } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Every exported Bx* glyph, enumerated from the module itself so the

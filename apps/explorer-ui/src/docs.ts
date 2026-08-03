@@ -29,7 +29,7 @@
 // =============================================================================
 
 import { Documents } from 'shell';
-import type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+import type { IVirtualFileSystem } from 'shell';
 
 /** The app's Documents instance. Set by ExplorerApp on mount. */
 let _docs: Documents | null = null;

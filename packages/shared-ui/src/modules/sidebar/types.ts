@@ -12,7 +12,7 @@
  */
 
 import type { ReactNode } from 'react';
-import type { ExplorerFileAction } from '../explorer/types';
+import type { ExplorerFileAction } from 'shell';
 
 // =============================================================================
 // DATA TYPES

@@ -16,7 +16,7 @@
 import type { CellComponent } from 'tabulator-tables';
 
 import type { GridColumnDefinition } from 'shell';
-import { formatTime } from '../../modules/server/util/formatters';
+import { formatTime } from 'shell';
 
 // =============================================================================
 // DATA TYPES

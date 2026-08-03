@@ -46,7 +46,7 @@ import React, { Suspense, useMemo, useState } from 'react';
 import { Banner } from 'shell';
 import { Button } from 'shell';
 import { StatusBadge } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import { KnobsPanel } from './KnobsPanel';
 import { GALLERY_ENTRIES, GALLERY_GROUPS } from './registry';
 import { GALLERY_TOKEN_USAGE } from './tokenUsage.generated';

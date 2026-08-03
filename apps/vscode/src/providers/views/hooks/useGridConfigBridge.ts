@@ -27,9 +27,9 @@
  */
 
 import { useEffect } from 'react';
-import { GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from 'shell/src/components/data-grid/gridConfigChannel';
-import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail } from 'shell/src/components/data-grid/gridConfigChannel';
-import type { DataGridLayout } from 'shell/src/components/data-grid/persistence';
+import { GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from 'shell';
+import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail } from 'shell';
+import type { DataGridLayout } from 'shell';
 import { getVsCodeApi } from './useMessaging';
 
 // =============================================================================

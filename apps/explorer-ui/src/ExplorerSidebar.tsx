@@ -27,9 +27,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useShellConnection } from 'shell';
-import { Explorer } from 'shared/modules/explorer';
+import { Explorer } from 'shell';
 import { BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shell';
-import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction } from 'shared/modules/explorer';
+import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction } from 'shell';
 import type { IVirtualFileSystem } from 'shell';
 import { getDocs } from './docs';
 import { getMediaInfo } from './mediaTypes';

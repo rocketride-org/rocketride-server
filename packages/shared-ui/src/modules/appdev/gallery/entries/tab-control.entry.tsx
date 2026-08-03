@@ -33,7 +33,7 @@
 import React, { useState } from 'react';
 import { TabControl } from 'shell';
 import { TabPanel } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import type { ViewMenu } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 

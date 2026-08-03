@@ -70,7 +70,7 @@ import TidyIcon from '../../../assets/icons/TidyIcon';
 import { INodeType } from '../types';
 import { useFlowProject } from '../context/FlowProjectContext';
 import { usePrefs } from 'shell';
-import { isInVSCode } from 'shell/src/themes/vscode';
+import { isInVSCode } from 'shell';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
 

@@ -56,7 +56,11 @@ function makeTestAction() {
 				return;
 			}
 
-			await execCommand('node', ['--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
+				// stub-css: no-op loader for stylesheet imports the shell barrel
+				// side-effect-pulls (Tabulator CSS) — node cannot execute CSS.
+				// './' prefix required: a bare relative path in --require is
+				// resolved as a package name, not a file.
+				await execCommand('node', ['--require', './scripts/stub-css.cjs', '--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
 		},
 	};
 }

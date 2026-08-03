@@ -24,14 +24,14 @@
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 
-import 'shell/src/themes/rocketride-default.css';
-import 'shell/src/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 
 import { SidebarView } from 'shared/modules/sidebar/SidebarView';
-import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell/src/components/BoxIcon';
+import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell';
 import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
-import { SidebarFooter } from 'shell/src/components/sidebar-footer/SidebarFooter';
-import type { SidebarFooterMenuItem } from 'shell/src/components/sidebar-footer/SidebarFooter';
+import { SidebarFooter } from 'shell';
+import type { SidebarFooterMenuItem } from 'shell';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, SidebarMode } from 'shared/modules/sidebar/types';
 import { useMessaging } from '../hooks/useMessaging';
 

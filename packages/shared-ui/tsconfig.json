@@ -21,9 +21,7 @@
 			"shell": [
 				"../shell/src/index.ts"
 			],
-			"shell/*": [
-				"../shell/*"
-			],
+
 			"shared/*": [
 				"./src/*"
 			]

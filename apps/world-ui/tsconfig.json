@@ -12,8 +12,7 @@
     "noEmit": true,
     "paths": {
       "shared/*": ["../../packages/shared-ui/src/*"],
-      "shell": ["../../packages/shell/src/index.ts"],
-      "shell/*": ["../../packages/shell/*"]
+      "shell": ["../../packages/shell/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

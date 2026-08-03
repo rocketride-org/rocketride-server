@@ -18,8 +18,8 @@
 			"shared/*": [
 				"../../packages/shared-ui/src/*"
 			],
-			"shell/*": [
-				"../../packages/shell/*"
+			"shell": [
+				"../../packages/shell/src/index.ts"
 			]
 		}
 	},

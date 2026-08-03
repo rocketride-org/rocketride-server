@@ -869,10 +869,10 @@ function makeCompileEngineAction(options = {}) {
 			// Copy engine to dist
 			await mkdir(DIST_DIR);
 			const exeExt = isWindows() ? '.exe' : '';
-			await syncFile(path.join(BUILD_ROOT, 'apps', 'engine', 'engine' + exeExt), path.join(DIST_DIR, 'engine' + exeExt), { package: true });
+			await syncFile(path.join(BUILD_ROOT, 'packages', 'engine', 'engine' + exeExt), path.join(DIST_DIR, 'engine' + exeExt), { package: true });
 
 			if (isWindows()) {
-				await syncFile(path.join(BUILD_ROOT, 'apps', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
+				await syncFile(path.join(BUILD_ROOT, 'packages', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
 			} else {
 				// crashpad_handler must ship next to the engine (runtime finds it via
 				// execDir()). Windows keeps its native MiniDumpWriteDump path.
@@ -885,7 +885,7 @@ function makeCompileEngineAction(options = {}) {
 				}
 
 				// Retain generated symbols (if dump_syms ran) for later symbolication.
-				const symbolsSrc = path.join(BUILD_ROOT, 'apps', 'engine', 'symbols');
+				const symbolsSrc = path.join(BUILD_ROOT, 'packages', 'engine', 'symbols');
 				if (await exists(symbolsSrc)) {
 					await syncDir(symbolsSrc, path.join(DIST_DIR, 'symbols'), { mirror: false, package: true });
 				}

@@ -37,14 +37,14 @@
 import React, { useState, CSSProperties } from 'react';
 import { useMessaging } from '../hooks/useMessaging';
 import { useTheme } from '../hooks/useTheme';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import { ConnectionConfig } from '../components/ConnectionConfig';
 import { MessageDisplay } from '../Settings/MessageDisplay';
 import type { SettingsData, ConnectionMode, EngineVersionItem, MessageData } from '../Settings/SettingsWebview';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
-import 'shell/src/themes/rocketride-default.css';
-import 'shell/src/themes/rocketride-vscode.css';
+import 'shell/themes/rocketride-default.css';
+import '../../../themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
 // =============================================================================

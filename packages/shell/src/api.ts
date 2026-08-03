@@ -49,6 +49,13 @@
 // VALUE IMPORTS — hooks, client access, classes, components, icons
 // =============================================================================
 
+// Theme styles FIRST — a leaf module (no imports back into this graph) that
+// MUST initialize before any shared-ui module below re-enters this barrel:
+// shared modules spread commonStyles into top-level style consts at module
+// init, so in the shell⇄shared import cycle this binding has to be live
+// before the first 'shared/*' import statement evaluates.
+import { commonStyles } from './themes/styles';
+
 // Hooks
 import { useShellConnection } from './connection/ConnectionContext';
 import { useAuthUser, useLogout } from './hooks/useAuthUser';
@@ -92,12 +99,12 @@ import { Documents } from './components/docs/Documents';
 // The no-op virtual filesystem — Documents' companion for apps that mount
 // document workspaces without a backing store (demonstrated third-party
 // need; entered the surface via the graduation pipeline).
-import { NOOP_VFS, Explorer } from 'shared/modules/explorer';
+import { NOOP_VFS, Explorer } from './modules/explorer';
 // Explorer's contract types under their NATIVE names (the Doc* aliases the
 // document system exports remain; both names refer to the same types —
 // append-only). Standalone apps cannot bundle the library, so a
 // demonstrated third-party file-tree need graduates the component itself.
-export type { IExplorerProps, ExplorerEntry, ExplorerChild, ExplorerConfig, ExplorerStatus, ExplorerFileAction } from 'shared/modules/explorer';
+export type { IExplorerProps, ExplorerEntry, ExplorerChild, ExplorerConfig, ExplorerStatus, ExplorerFileAction } from './modules/explorer';
 import DocTabs from './components/docs/DocTabs';
 import DocSplitLayout from './components/docs/DocSplitLayout';
 import { DocExplorer } from './components/docs/DocExplorer';
@@ -169,6 +176,12 @@ export type { IUsePollingOptions } from './hooks/usePolling';
 // input position on this surface — see contract-hold.ts.
 export type { RocketRideClient } from 'rocketride';
 
+// The ENTIRE SDK type surface rides the contract (type-only): out-of-repo
+// apps have no 'rocketride' workspace package, so every payload/result/config
+// type they touch must be importable from 'shell'. Values are deliberately
+// excluded — the runtime client only ever arrives via useShellConnection().
+export type * from 'rocketride';
+
 // Connection manager standalone types
 export type { InitOptions, DebugLogEntry } from './connection/connection';
 
@@ -189,7 +202,7 @@ export type { Editor, WorkspaceBinding, Document, EditorGroup, SplitOrientation,
 export type { DocTabsProps } from './components/docs/DocTabs';
 export type { DocSplitLayoutProps } from './components/docs/DocSplitLayout';
 export type { DocExplorerProps, DocExplorerConfig, DocEntry, DocEntryChild, DocEntryStatus } from './components/docs/DocExplorer';
-export type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+export type { IVirtualFileSystem } from './modules/explorer/types';
 
 // ViewMenu declaration types (consumed by shared-ui's TabControl/SidebarMenu)
 export type { DashboardData } from './hooks/useDashboardData';
@@ -220,7 +233,7 @@ import { StatusBadge, StatusDot } from './components/status-badge/StatusBadge';
 import { EmptyState } from './components/empty-state/EmptyState';
 import { Banner } from './components/banner/Banner';
 import { InputField } from './components/input-field/InputField';
-import { ToggleGroup } from '../../shared-ui/src/components/toggle-group/ToggleGroup';
+import { ToggleGroup } from './components/toggle-group/ToggleGroup';
 import { Chip, ChipAdd } from './components/chip/Chip';
 import { DropZone } from './components/drop-zone/DropZone';
 import { Card } from './components/card/Card';
@@ -239,12 +252,21 @@ import { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
 import { DataGrid } from './components/data-grid/DataGrid';
 import { CardDataGrid } from './components/data-grid/CardDataGrid';
 import { FilterStrip } from './components/data-grid/FilterStrip';
-import { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch } from './components/data-grid/defaults';
+import { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch, formatDateValue } from './components/data-grid/defaults';
 import { createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from './components/data-grid/gridConfigChannel';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import { formatBytes, formatDate, formatDuration } from './util/format';
-import { commonStyles } from './themes/styles';
+// (commonStyles is imported at the very top of this file — cycle-order
+// constraint — and re-exported from the export block below.)
+// Values graduated from deep shell/src imports when the package exports map
+// closed those paths: theme application (vscode webviews apply tokens at
+// mount), the vscode-host probe, the OAuth root, and the pipeline-schema
+// runtime values shared-ui's project module re-exports.
+import { applyTheme } from './themes';
+import { isInVSCode } from './themes/vscode';
+import { OAUTH_ROOT_URL } from './auth/oauth';
+import { ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE } from './types/project';
 
 export {
 	Button, StatusBadge, StatusDot, EmptyState, Banner, InputField,
@@ -258,8 +280,10 @@ export {
 	createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET,
 	GRID_CONFIG_CLEAR,
 	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
-	formatDuration,
+	formatDuration, formatDateValue,
 	commonStyles,
+	applyTheme, isInVSCode, OAUTH_ROOT_URL,
+	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
 };
 
 // Prop/config types for the kept components, plus platform data types —
@@ -269,7 +293,7 @@ export type { IStatusBadgeProps, IStatusDotProps, StatusVariant } from './compon
 export type { IEmptyStateProps } from './components/empty-state/EmptyState';
 export type { IBannerProps, BannerVariant } from './components/banner/Banner';
 export type { IInputFieldProps } from './components/input-field/InputField';
-export type { IToggleGroupProps, IToggleGroupOption } from '../../shared-ui/src/components/toggle-group/ToggleGroup';
+export type { IToggleGroupProps, IToggleGroupOption } from './components/toggle-group/ToggleGroup';
 export type { IChipProps, IChipAddProps } from './components/chip/Chip';
 export type { IDropZoneProps } from './components/drop-zone/DropZone';
 export type { ICardProps } from './components/card/Card';
@@ -293,8 +317,40 @@ export type { IGridFilterDef, IGridFilterOption, IFilterStripProps } from './com
 export type { IDataGridPersistence, DataGridLayout } from './components/data-grid/persistence';
 export type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail } from './components/data-grid/gridConfigChannel';
 export type { Announcement } from './hooks/useAnnouncements';
-export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from '../../shared-ui/src/modules/server';
-export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
+export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from './modules/server';
+// =============================================================================
+// PLATFORM VIEW MODULES — the shared partition's shell half, now in-package
+// =============================================================================
+//
+// These view modules were shared-ui residents that shell's own surface always
+// re-exported pieces of (Explorer, the dashboard types). With the partition
+// they live in packages/shell, so their host-facing components graduate to
+// the contract: the vscode webviews and first-party apps consume them from
+// 'shell' like any other surface member.
+
+import MonitorView, { parseActivityEvent } from './modules/server';
+import { ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay } from './modules/server/components';
+import { formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime } from './modules/server/util';
+import AccountView from './modules/account';
+import { EnvironmentView } from './modules/environment';
+import { CheckoutModal, PlanPicker } from './modules/checkout';
+import { UpgradeModal } from './modules/billing';
+
+export {
+	MonitorView, parseActivityEvent,
+	ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay,
+	formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime,
+	AccountView, EnvironmentView,
+	CheckoutModal, PlanPicker, UpgradeModal,
+};
+
+export type { EventTone } from './modules/server/components';
+export type { CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './modules/checkout/types';
+export type { EnvironmentSlotConfig, EnvironmentScope } from './modules/environment';
+
+// The FULL pipeline-schema type family — shared-ui's project module and the
+// vscode Project webview consume all of it, so the whole set is surface.
+export type { IProject, IValidateResponse, IServiceCatalog, IProjectComponent, IComponentUI, IControlConnection, IInputConnection, IPosition, IDimensions, IService, IServiceSchema, IServiceLaneEntry, INodeConfig, IComponentValidatePayload, IValidatePipelinePayload, IToolchainExport, IToolchainState, IForm, IFormData, ITaskStatus, IFlowData } from './types/project';
 
 // The FULL icon set (the explicit Bx* subset below stays for chrome and
 // wins its names per TS star-export rules; every other glyph flows through).

@@ -31,8 +31,8 @@
  */
 
 import React, { useState } from 'react';
-import { Explorer, NOOP_VFS } from '../../../../../modules/explorer';
-import type { ExplorerEntry } from '../../../../../modules/explorer';
+import { Explorer, NOOP_VFS } from 'shell';
+import type { ExplorerEntry } from 'shell';
 import type { IGalleryDemoProps } from '../../galleryTypes';
 
 /** The demo's in-memory document tree - S3-style flat paths. */

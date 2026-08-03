@@ -15,9 +15,9 @@
 import React from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import PadlockIcon from '../../assets/icons/PadlockIcon';
-import type { ITaskStatus } from 'shell/src/types/project';
-import { ITaskState } from 'shell/src/types/project';
-import { commonStyles } from 'shell/src/themes/styles';
+import type { ITaskStatus } from 'shell';
+import { ITaskState } from 'shell';
+import { commonStyles } from 'shell';
 import { Button } from 'shell';
 
 // =============================================================================

@@ -33,8 +33,8 @@
 
 import React from 'react';
 import { InputField } from 'shell';
-import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
-import { commonStyles } from 'shell/src/themes/styles';
+import { ToggleGroup } from 'shell';
+import { commonStyles } from 'shell';
 import type { IGalleryKnob, KnobValue, KnobValues } from './galleryTypes';
 
 // =============================================================================

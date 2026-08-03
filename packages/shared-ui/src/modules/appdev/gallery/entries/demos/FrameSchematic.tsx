@@ -33,7 +33,7 @@
  */
 
 import React from 'react';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 
 // =============================================================================
 // TYPES
