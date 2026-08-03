@@ -13,7 +13,7 @@ class ModuleRegistry {
 
 	/**
 	 * Discover all tasks.js files in the project
-	 * Searches for scripts/tasks.js in packages/, apps/, and nodes/
+	 * Searches for scripts/tasks.js in packages/, apps/, nodes/, shared/, ...
 	 */
 	async discover(rootDir) {
 		const { glob } = require('glob');
@@ -22,7 +22,7 @@ class ModuleRegistry {
 		const gitignorePath = path.join(rootDir, '.gitignore');
 		const gitignore = (await exists(gitignorePath)) ? parse(gitignorePath) : [];
 
-		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools}/**/scripts/tasks.{js,cjs}', 'scripts/tasks.{js,cjs}'], {
+		const taskFiles = await glob(['{packages,apps,nodes,examples,extension,tools,shared}/**/scripts/tasks.{js,cjs}', 'scripts/tasks.{js,cjs}'], {
 			cwd: rootDir,
 			ignore: gitignore,
 			absolute: true,

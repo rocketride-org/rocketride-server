@@ -113,6 +113,10 @@ function parseArgs(args) {
 			// builder update: root of the repository whose scripts/ is
 			// replaced (defaults to this builder's own repository).
 			options.path = arg.substring('--path='.length);
+		} else if (arg.startsWith('--host=')) {
+			// shell:update: the server to vendor the platform package from
+			// (defaults to ROCKETRIDE_URI from .config/.env).
+			options.host = arg.substring('--host='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
 			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
 			const paths = require('./lib/paths');
@@ -241,6 +245,7 @@ Options:
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message
+  --host=URL          Server to vendor the platform from (shell:update)
   --jest="args"       Pass arguments to Jest (can be repeated)
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
