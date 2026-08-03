@@ -35,8 +35,6 @@ import type { RocketRideClient as Frozen_RocketRideClient } from '../contract/ve
 import type { RocketRideClient as Current_RocketRideClient } from './api';
 import type { ShellAppProps as Frozen_ShellAppProps } from '../contract/versions/v0';
 import type { ShellAppProps as Current_ShellAppProps } from './api';
-import type { ShellSidebarProps as Frozen_ShellSidebarProps } from '../contract/versions/v0';
-import type { ShellSidebarProps as Current_ShellSidebarProps } from './api';
 import type { WorkspacePrefs as Frozen_WorkspacePrefs } from '../contract/versions/v0';
 import type { WorkspacePrefs as Current_WorkspacePrefs } from './api';
 import type { AppWorkspaceState as Frozen_AppWorkspaceState } from '../contract/versions/v0';
@@ -137,6 +135,8 @@ import type { SidebarProps as Frozen_SidebarProps } from '../contract/versions/v
 import type { SidebarProps as Current_SidebarProps } from './api';
 import type { NavButtonProps as Frozen_NavButtonProps } from '../contract/versions/v0';
 import type { NavButtonProps as Current_NavButtonProps } from './api';
+import type { AppLayoutProps as Frozen_AppLayoutProps } from '../contract/versions/v0';
+import type { AppLayoutProps as Current_AppLayoutProps } from './api';
 import type { IConfirmDialogProps as Frozen_IConfirmDialogProps } from '../contract/versions/v0';
 import type { IConfirmDialogProps as Current_IConfirmDialogProps } from './api';
 import type { ShellInitMsg as Frozen_ShellInitMsg } from '../contract/versions/v0';
@@ -311,8 +311,6 @@ const _t_RocketRideClient: Frozen_RocketRideClient = {} as Current_RocketRideCli
 void _t_RocketRideClient;
 const _t_ShellAppProps: Frozen_ShellAppProps = {} as Current_ShellAppProps;
 void _t_ShellAppProps;
-const _t_ShellSidebarProps: Frozen_ShellSidebarProps = {} as Current_ShellSidebarProps;
-void _t_ShellSidebarProps;
 const _t_WorkspacePrefs: Frozen_WorkspacePrefs = {} as Current_WorkspacePrefs;
 void _t_WorkspacePrefs;
 const _t_AppWorkspaceState: Frozen_AppWorkspaceState = {} as Current_AppWorkspaceState;
@@ -413,6 +411,8 @@ const _t_SidebarProps: Frozen_SidebarProps = {} as Current_SidebarProps;
 void _t_SidebarProps;
 const _t_NavButtonProps: Frozen_NavButtonProps = {} as Current_NavButtonProps;
 void _t_NavButtonProps;
+const _t_AppLayoutProps: Frozen_AppLayoutProps = {} as Current_AppLayoutProps;
+void _t_AppLayoutProps;
 const _t_IConfirmDialogProps: Frozen_IConfirmDialogProps = {} as Current_IConfirmDialogProps;
 void _t_IConfirmDialogProps;
 const _t_ShellInitMsg: Frozen_ShellInitMsg = {} as Current_ShellInitMsg;

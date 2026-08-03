@@ -35,7 +35,7 @@
 import React, { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
-import { useWorkspace, DocSplitLayout, DocTabs } from 'shell';
+import { useWorkspace, DocSplitLayout, DocTabs, AppLayout } from 'shell';
 import type { Documents } from 'shell';
 import { commonStyles } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
@@ -43,6 +43,10 @@ import { initConnectionStore, destroyConnectionStore } from './connections';
 import type { ConnectionContent } from './connections';
 import ProfilerView from './views/ProfilerView';
 import ConnectionManagerView from './views/ConnectionManagerView';
+
+// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
+// (header + account footer) present with an empty middle slot.
+const SIDEBAR_FRAME_ONLY = <></>;
 
 // =============================================================================
 // STYLES
@@ -130,8 +134,12 @@ const ProfilerApp: React.FC<ShellAppProps> = (_props) => {
 	// RENDER
 	// =========================================================================
 
-	if (!ready) return <div style={styles.center}>Initialising...</div>;
-	return <ProfilerAppReady docs={getDocs()!} />;
+	if (!ready) return <AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus><div style={styles.center}>Initialising...</div></AppLayout>;
+	return (
+		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
+			<ProfilerAppReady docs={getDocs()!} />
+		</AppLayout>
+	);
 };
 
 // =============================================================================

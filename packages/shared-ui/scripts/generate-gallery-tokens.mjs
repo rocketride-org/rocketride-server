@@ -69,9 +69,11 @@ const OUTPUT_FILE = path.join(SRC_DIR, 'modules', 'appdev', 'gallery', 'tokenUsa
 
 /**
  * Gallery entry id -> the component source directories (relative to src/)
- * that constitute the component. Doc-only chrome entries (doc-tabs,
- * overlay-system, sidebar-frame, status-bar) are deliberately absent: their
- * surfaces are shell-owned and their tokens are not the app's to theme.
+ * that constitute the component. Entries are deliberately absent when their
+ * tokens are not the app's to theme or cannot be isolated: shell-owned
+ * chrome (the schematic entries), doc-only hook/utility entries, and
+ * components that share a directory with unrelated chrome (nav-button,
+ * popup-row, rocketride-mark live in multi-purpose locations).
  */
 const ENTRY_SOURCES = {
 	'banner': ['components/banner'],
@@ -79,6 +81,7 @@ const ENTRY_SOURCES = {
 	'card': ['components/card'],
 	'chat-view': ['modules/chat'],
 	'chip': ['components/chip'],
+	'confirm-dialog': ['components/modal'],
 	'connection-card': ['components/connection-card'],
 	'content-header': ['components/content-header'],
 	'data-grid': ['components/data-grid'],
@@ -86,9 +89,13 @@ const ENTRY_SOURCES = {
 	'drop-zone': ['components/drop-zone'],
 	'empty-state': ['components/empty-state'],
 	'explorer': ['modules/explorer'],
+	'filter-strip': ['components/data-grid'],
+	'grid-helpers': ['components/data-grid'],
 	'input-field': ['components/input-field'],
 	'mini-card': ['components/mini-card'],
+	'modal': ['components/modal'],
 	'section': ['components/section'],
+	'sidebar-footer': ['components/sidebar-footer'],
 	'sidebar-menu': ['components/sidebar-menu'],
 	'status-badge': ['components/status-badge'],
 	'tab-control': ['components/tab-control', 'components/tab-panel'],

@@ -69,6 +69,17 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		direct: ['--rr-border', '--rr-color-info', '--rr-text-primary'],
 		commonStyles: {},
 	},
+	'confirm-dialog': {
+		direct: ['--rr-font-family', '--rr-text-secondary'],
+		commonStyles: {
+			buttonDanger: ['--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-font-size-widget'],
+			buttonPrimary: ['--rr-brand', '--rr-fg-button', '--rr-font-size-widget'],
+			buttonSecondary: ['--rr-bg-paper', '--rr-border', '--rr-font-size-widget', '--rr-text-secondary'],
+			modalDialog: ['--rr-bg-widget', '--rr-border', '--rr-shadow-widget'],
+			modalFooter: ['--rr-border'],
+			modalHeader: ['--rr-bg-title', '--rr-text-primary'],
+		},
+	},
 	'connection-card': {
 		direct: ['--rr-bg-paper', '--rr-border', '--rr-border-hover', '--rr-brand', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {},
@@ -108,6 +119,26 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			textMuted: ['--rr-text-secondary'],
 		},
 	},
+	'filter-strip': {
+		direct: ['--rr-bg-default', '--rr-bg-input', '--rr-bg-list-hover', '--rr-bg-paper', '--rr-bg-surface-alt', '--rr-border', '--rr-border-hover', '--rr-border-input', '--rr-brand', '--rr-chart-', '--rr-color-error', '--rr-color-info', '--rr-color-success', '--rr-color-warning', '--rr-fg-button', '--rr-font-family', '--rr-font-mono', '--rr-palette-mode', '--rr-shadow-widget', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],
+		commonStyles: {
+			cardHeader: ['--rr-bg-title', '--rr-text-primary'],
+			fontMono: ['--rr-font-mono'],
+			inputField: ['--rr-bg-input', '--rr-border-input', '--rr-text-primary'],
+			popupMenu: ['--rr-bg-paper', '--rr-border', '--rr-shadow-widget'],
+			tableCell: ['--rr-border'],
+		},
+	},
+	'grid-helpers': {
+		direct: ['--rr-bg-default', '--rr-bg-input', '--rr-bg-list-hover', '--rr-bg-paper', '--rr-bg-surface-alt', '--rr-border', '--rr-border-hover', '--rr-border-input', '--rr-brand', '--rr-chart-', '--rr-color-error', '--rr-color-info', '--rr-color-success', '--rr-color-warning', '--rr-fg-button', '--rr-font-family', '--rr-font-mono', '--rr-palette-mode', '--rr-shadow-widget', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],
+		commonStyles: {
+			cardHeader: ['--rr-bg-title', '--rr-text-primary'],
+			fontMono: ['--rr-font-mono'],
+			inputField: ['--rr-bg-input', '--rr-border-input', '--rr-text-primary'],
+			popupMenu: ['--rr-bg-paper', '--rr-border', '--rr-shadow-widget'],
+			tableCell: ['--rr-border'],
+		},
+	},
 	'input-field': {
 		direct: ['--rr-bg-default', '--rr-text-disabled'],
 		commonStyles: {
@@ -118,9 +149,27 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		direct: ['--rr-bg-paper', '--rr-border', '--rr-color-success', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {},
 	},
+	'modal': {
+		direct: ['--rr-font-family', '--rr-text-secondary'],
+		commonStyles: {
+			buttonDanger: ['--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-font-size-widget'],
+			buttonPrimary: ['--rr-brand', '--rr-fg-button', '--rr-font-size-widget'],
+			buttonSecondary: ['--rr-bg-paper', '--rr-border', '--rr-font-size-widget', '--rr-text-secondary'],
+			modalDialog: ['--rr-bg-widget', '--rr-border', '--rr-shadow-widget'],
+			modalFooter: ['--rr-border'],
+			modalHeader: ['--rr-bg-title', '--rr-text-primary'],
+		},
+	},
 	'section': {
 		direct: ['--rr-border', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {},
+	},
+	'sidebar-footer': {
+		direct: ['--rr-bg-scrollbar-thumb', '--rr-bg-surface-alt', '--rr-brand', '--rr-color-success', '--rr-text-primary', '--rr-text-secondary'],
+		commonStyles: {
+			divider: ['--rr-border'],
+			popupMenu: ['--rr-bg-paper', '--rr-border', '--rr-shadow-widget'],
+		},
 	},
 	'sidebar-menu': {
 		direct: ['--rr-bg-list-active', '--rr-bg-list-hover', '--rr-fg-list-active', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],

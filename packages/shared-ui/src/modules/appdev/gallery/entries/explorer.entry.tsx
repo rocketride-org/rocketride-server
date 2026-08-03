@@ -35,7 +35,7 @@ export const explorerEntry: IGalleryEntry = {
 	group: 'sidebar',
 	blurb: 'VFS-backed tree/list for pipelines, chats, connections, and files: S3-style flat paths, per-entry children (source components), inline create/rename, and status dots. The host supplies a flat entries array and handles every action via callbacks.',
 	lazyDemo: () => import('./demos/ExplorerDemo'),
-	code: `import { Explorer, NOOP_VFS } from 'shared';
+	code: `import { Explorer, NOOP_VFS } from 'shell';
 
 <Explorer
 	vfs={NOOP_VFS}

@@ -56,10 +56,6 @@ export interface ServerAppEntry {
 	entry: string;
 	/** Whether the app UI requires auth to render. */
 	authenticated?: boolean;
-	/** Whether to show the header bar. */
-	showHeader?: boolean;
-	/** Whether to show the status bar. */
-	showStatusBar?: boolean;
 	/** Whether the app is visible to unauthenticated users. */
 	public?: boolean;
 }
@@ -415,8 +411,6 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		// simply ignored rather than crashing the shell.
 		configuration: a.configuration as AppConfiguration | undefined,
 		authenticated: a.authenticated,
-		showHeader:    a.showHeader,
-		showStatusBar: a.showStatusBar,
 		public:        a.public,
 		load: () => {
 			// Local override wins over the MF remote — checked per CALL so a

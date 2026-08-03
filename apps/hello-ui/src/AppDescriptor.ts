@@ -32,7 +32,6 @@ import HomeApp from './HomeApp';
  *
  * Shows installed apps as a simple grid. No app store, no subscriptions.
  * Runs without authentication (authenticated: false in manifest).
- * No Sidebar — the shell hides the sidebar zone for full-screen rendering.
  */
 const HOME_APP: AppDescriptor = {
 	id: 'rocketride.hello',
@@ -40,10 +39,9 @@ const HOME_APP: AppDescriptor = {
 	branding: {
 		appName: 'RocketRide',
 	},
-	components: {
-		App: HomeApp,
-		// No Sidebar — full-screen app
-	},
+	// One-column app (no sidebar) with the status bar on — declared by
+	// HomeApp's root AppLayout.
+	app: HomeApp,
 };
 
 export default HOME_APP;

@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-02T07:32:11.580Z
-// Source commit: 83c5c07e7e9b75875cd0b32780a941e5c5cccb0f
+// Generated:     2026-08-02T22:18:42.207Z
+// Source commit: e21e8b718260730ebe8482bbc3be53284da1f7b8
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -3998,16 +3998,6 @@ export interface ShellAppProps {
     identity: ConnectResult | null;
 }
 /**
- * Props injected by the shell into the app's `<Sidebar />` component.
- *
- * The sidebar zone is collapsible; apps should hide or simplify their
- * sidebar content when `collapsed` is true.
- */
-export interface ShellSidebarProps {
-    /** True when the sidebar is in collapsed (icon-only) mode. */
-    collapsed: boolean;
-}
-/**
  * Persisted preferences for a single app instance.
  *
  * Some fields (`theme`, `sidePanelOpen`) are also written to `global.json` so
@@ -4172,16 +4162,6 @@ interface AppManifestEntry$1 {
      * Defaults to true — most apps require the user to be logged in.
      */
     authenticated?: boolean;
-    /**
-     * When false, the shell header (app name/icon bar in the sidebar) is hidden,
-     * allowing the app to render its own header. Defaults to true.
-     */
-    showHeader?: boolean;
-    /**
-     * When false, the status bar is hidden for this app.
-     * Defaults to true — most apps show the status bar.
-     */
-    showStatusBar?: boolean;
     /** App lifecycle status: auth | free | unsubscribed | subscribed | trialing | past_due | canceled. */
     appStatus?: string;
     /** Whether this app is on the user's desktop. */
@@ -4201,10 +4181,6 @@ interface AppManifestEntry$1 {
  *
  * The shell stores one of these per app in `WorkspaceContext.loadedApps` once
  * the dynamic import triggered by `AppManifestEntry.load()` resolves.
- *
- * The `components` object provides the React components the shell mounts in
- * its screen zones.  The `exports` bag holds additional components that other
- * apps can load via Module Federation for cross-app composition.
  */
 export interface AppDescriptor {
     /** Unique stable identifier — used as the workspace file key. */
@@ -4216,19 +4192,16 @@ export interface AppDescriptor {
     /** Branding tokens (logo, welcome text) for the app. */
     branding: ShellBrandingConfig;
     /**
-     * Component catalog.  The shell mounts well-known components in its
-     * screen zones:
-     *
-     * - `App`     — required, mounted in the client area.
-     * - `Sidebar` — optional, mounted in the sidebar zone.  If absent the
-     *               sidebar zone is hidden for this app.
-     *
-     * Any additional components (e.g. `Canvas`, `Toolbar`) are ignored by
-     * the shell but available for cross-app loading via `useAppComponent()`.
+     * The app's ONE mount point, rendered raw in the client area. The app
+     * composes its own layout inside with `<AppLayout>` (one column, sidebar,
+     * status bar — declared as props from the app's single tree).
      */
-    components: {
-        App: React$1.ComponentType<ShellAppProps>;
-        Sidebar?: React$1.ComponentType<ShellSidebarProps>;
+    app: React$1.ComponentType<ShellAppProps>;
+    /**
+     * Optional cross-app component catalog. Never mounted by the shell —
+     * entries are loadable by other apps via `useAppComponent()`.
+     */
+    components?: {
         [key: string]: React$1.ComponentType<any> | undefined;
     };
 }
@@ -5574,23 +5547,6 @@ export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameE
  * ```
  */
 export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
-/**
- * Declare the shell sidebar content for the calling view.
- *
- * Opt-in: an app that never calls this keeps its legacy `components.Sidebar`
- * behavior. Passing a node mounts it inside the sidebar's scrolling slot; passing
- * `null` (or unmounting) withdraws it. When no app supplies sidebar content and
- * the app has no legacy sidebar, the shell renders no sidebar and the client area
- * spans full width.
- *
- * Collapse contract: the node stays mounted while the sidebar is collapsed to
- * its icon rail. Components inside it read shared-ui's `useSidebarCollapsed()`
- * and choose their collapsed form (SidebarMenu iconifies; free-form content
- * typically returns null).
- *
- * @param content - The sidebar node to mount, or null to declare nothing.
- */
-export declare function useSidebarContent(content: React$1.ReactNode | null): void;
 export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
 export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
     top: number;
@@ -7059,6 +7015,28 @@ export declare const BottomPanel: React$1.FC<BottomPanelProps>;
 export declare const DebugPanel: React$1.FC<{
     onClose: () => void;
 }>;
+/** Props for {@link AppLayout}. */
+export interface AppLayoutProps {
+    /** The scrolling portion of the sidebar column. Present = two-column app;
+        absent = one-column app spanning the full client area. Components
+        inside read `useSidebarCollapsed()` to choose their collapsed
+        (icon-rail) form. */
+    sidebar?: React$1.ReactNode;
+    /** Show the status bar (stock connection identity). Defaults to false. */
+    showStatus?: boolean;
+    /** App content for the status bar's middle slot. Providing it implies
+        `showStatus`. */
+    status?: React$1.ReactNode;
+    /** The app's client-area content. */
+    children: React$1.ReactNode;
+}
+/**
+ * The app-root layout. See the file header for the three layouts and the
+ * sidebar/status contracts.
+ *
+ * @param props - See {@link AppLayoutProps}.
+ */
+export declare const AppLayout: React$1.FC<AppLayoutProps>;
 /** Props for the {@link ConfirmDialog} component. */
 export interface IConfirmDialogProps {
     /** Dialog title. */
@@ -8919,7 +8897,6 @@ export declare const shellApi: {
     readonly useConnectionStatus: typeof useConnectionStatus;
     readonly useShellApiConfig: typeof useShellApiConfig;
     readonly useAppComponent: typeof useAppComponent;
-    readonly useSidebarContent: typeof useSidebarContent;
     readonly useClickOutside: typeof useClickOutside;
     readonly useFixedPopupPosition: typeof useFixedPopupPosition;
     readonly usePrefs: typeof usePrefs;
@@ -8968,6 +8945,7 @@ export declare const shellApi: {
     readonly BxPurchaseTag: IconComponent;
     readonly BxChevronRight: IconComponent;
     readonly BxFolderOpen: IconComponent;
+    readonly AppLayout: import("react").FC<AppLayoutProps>;
     readonly BxPlusSquare: IconComponent;
     readonly BxPlusSquareSolid: IconComponent;
     readonly BxLock: IconComponent;

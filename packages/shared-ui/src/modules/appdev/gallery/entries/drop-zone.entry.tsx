@@ -53,7 +53,7 @@ const DropZoneDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	const hintAttr = knobs.hint ? `\n\thint="${String(knobs.hint)}"` : '';
-	return `import { DropZone } from 'shared';
+	return `import { DropZone } from 'shell';
 
 <DropZone
 	title="${String(knobs.title)}"${hintAttr}

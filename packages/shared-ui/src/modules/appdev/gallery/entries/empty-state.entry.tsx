@@ -44,7 +44,7 @@ const EmptyStateDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 const buildCode = (knobs: KnobValues): string => {
 	const descriptionAttr = knobs.description ? `\n\tdescription="${String(knobs.description)}"` : '';
 	const actionAttr = knobs.action ? '\n\taction={<Button onClick={createPipeline}>New pipeline</Button>}' : '';
-	return `import { EmptyState } from 'shared';
+	return `import { EmptyState } from 'shell';
 
 <EmptyState
 	title="${String(knobs.title)}"${descriptionAttr}${actionAttr}

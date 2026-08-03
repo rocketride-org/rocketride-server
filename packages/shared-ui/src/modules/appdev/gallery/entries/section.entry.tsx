@@ -45,7 +45,7 @@ const SectionDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	const monoAttr = knobs.mono ? ' mono' : '';
-	return `import { Section, LabelValue, StatusBadge } from 'shared';
+	return `import { Section, LabelValue, StatusBadge } from 'shell';
 
 <Section label="${String(knobs.label)}">
 	<LabelValue label="Name">chat.pipe</LabelValue>

@@ -25,7 +25,7 @@
 //
 // Layout (top to bottom):
 //   Header (AppSwitcherButton + dock toggle)
-//   App Sidebar Content slot (from active app's components.Sidebar)
+//   App Sidebar Content slot (the app's AppLayout `sidebar` declaration)
 //   Footer (SidebarFooter — shared component with popup menu)
 // =============================================================================
 
@@ -180,7 +180,6 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 	const isHome = activeAppId === 'rocketride.home';
 	const activeManifest = appManifest.find((a) => a.id === activeAppId) ?? null;
 	const branding = loadedApps[activeAppId]?.branding;
-	const showHeader = activeManifest?.showHeader !== false;
 
 	// Resolve icon: branding theme-aware → branding generic → manifest URL → RocketRide mark
 	const resolveIcon = (size: number): React.ReactNode => {
@@ -209,9 +208,6 @@ const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
 			</div>
 		);
 	}
-
-	// Expanded but showHeader is false: app owns its own header, render nothing
-	if (!showHeader) return null;
 
 	// App name for display
 	const appLabel = isHome ? 'ROCKETRIDE CLOUD' : (activeManifest?.name.toUpperCase() ?? '');
@@ -289,7 +285,7 @@ const AppIcon: React.FC<{ name: string; iconUrl?: string; size?: number }> = ({ 
  */
 const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, hideAppSwitcher, onOverlay, isSaas }) => {
 	const identity = useContext(ShellIdentityContext);
-	const { prefs, updatePrefs: _updatePrefs, setTheme, themeOptions, activeAppId, loadedApps, appManifest } = useWorkspace();
+	const { prefs, updatePrefs: _updatePrefs, setTheme, themeOptions, activeAppId, appManifest } = useWorkspace();
 	const { isOnDesktop } = useSubscriptions();
 
 	// --- Collapse / resize state ---------------------------------------------
@@ -304,20 +300,15 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	const startXRef = useRef(0);
 	const startWidthRef = useRef(EXPANDED_WIDTH);
 
-	// --- App's Sidebar component from loaded descriptor ----------------------
-
-	const AppSidebar = loadedApps[activeAppId]?.components?.Sidebar;
-
-	// --- Opt-in host-chrome registration (new mechanism) ---------------------
-	// `sidebarContent` is an app-declared node for the scrolling slot. Empty for
-	// every app that has not adopted the new API.
+	// --- Host-chrome slot content ---------------------------------------------
+	// `sidebarContent` is the app-declared node for the scrolling slot — the
+	// AppLayout `sidebar` prop, registered through the host-chrome context.
 	const { sidebarContent } = useHostChromeState();
 
 	// Whether the scrolling slot has anything to show. Drives self-hiding so the
-	// shell renders NO sidebar (and the client area spans full width) when an app
-	// provides neither a legacy sidebar component nor registered content —
-	// exactly today's behavior for such apps.
-	const hasSlotContent = !!AppSidebar || sidebarContent != null;
+	// shell renders NO sidebar (and the client area spans full width) when an
+	// app declares no sidebar (a one-column AppLayout).
+	const hasSlotContent = sidebarContent != null;
 
 	// --- Collapse toggle -----------------------------------------------------
 
@@ -453,9 +444,8 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	if (!identity) return null;
 
 	// --- Don't render sidebar when the frame has no content to hold ----------
-	// Reproduces the prior gate (which mounted the sidebar only for apps with a
-	// `components.Sidebar`): with no slot content the shell shows no sidebar and
-	// the client area spans full width.
+	// A one-column app (no AppLayout sidebar) gets no sidebar chrome and the
+	// client area spans full width.
 	if (!hasSlotContent) return null;
 
 	const sidebarWidth = collapsed ? COLLAPSED_WIDTH : width;
@@ -524,12 +514,11 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			    APP SIDEBAR CONTENT SLOT — scrolls between fixed header/footer
 			    ================================================================ */}
 			<div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', minHeight: 0 }}>
-				{/* Legacy per-app sidebar component (unchanged mechanism). */}
-				{AppSidebar && <AppSidebar collapsed={collapsed} />}
-				{/* Opt-in app-declared sidebar content — rendered ALWAYS, including
+				{/* App-declared sidebar content — rendered ALWAYS, including
 				    while collapsed to the icon rail. The provider exposes the
 				    collapsed flag; each component inside decides its collapsed form
-				    (SidebarMenu iconifies, free-form content returns null). */}
+				    (SidebarMenu iconifies, free-form content returns null; the
+				    legacy bridge reads it back into the `collapsed` prop). */}
 				<SidebarCollapsedProvider value={collapsed}>
 					{sidebarContent}
 				</SidebarCollapsedProvider>

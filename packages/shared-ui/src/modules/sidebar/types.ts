@@ -94,8 +94,8 @@ export interface AppListItem {
 
 /**
  * App Builder sidebar content. PRESENCE of this prop enables the
- * `Pipelines | App Builder` mode strip at the top of the sidebar; hosts
- * that omit it (or pre-App-Builder hosts) render exactly as before.
+ * `Pipelines | Apps` mode tabs in the sidebar; hosts that omit it (or
+ * pre-App-Builder hosts) render exactly as before.
  */
 export interface AppBuilderSidebar {
 	/** Merged MY APPS list (workspace scan ∪ server list_mine, by id). */
@@ -107,6 +107,17 @@ export interface AppBuilderSidebar {
 	/** Open an app's App Builder screen. */
 	onOpenApp: (appId: string) => void;
 }
+
+// =============================================================================
+// SIDEBAR MODE
+// =============================================================================
+
+/**
+ * The sidebar's mode tabs. 'apps' exists only when the host wires the app
+ * builder; 'nodes' is the node-builder placeholder shown whenever the mode
+ * tabs render.
+ */
+export type SidebarMode = 'pipelines' | 'apps' | 'nodes';
 
 // =============================================================================
 // CONNECTION STATE
@@ -140,8 +151,9 @@ export interface ISidebarViewProps {
 
 	// ── Capabilities ────────────────────────────────────────────────────────
 	/**
-	 * Host-injected content rendered at the TOP of the nav section (above
-	 * "New pipeline"). Renders nothing — and adds no spacing — when omitted.
+	 * Host-injected content rendered at the TOP of the shared nav section
+	 * (above "Monitor" and the mode tabs). Renders nothing — and adds no
+	 * spacing — when omitted.
 	 * Hosts use this for host-specific nav (e.g. rocket-ui's "Home" button which
 	 * switches to the home app). The shared component intentionally knows nothing
 	 * about home/dashboard routing, keeping SaaS-shell concepts out of the
@@ -181,17 +193,17 @@ export interface ISidebarViewProps {
 
 	// ── App Builder mode ────────────────────────────────────────────────────
 	/**
-	 * App Builder sidebar content — presence adds the App Builder tab to the
-	 * mode strip and enables the MY APPS mode. Omitted → Pipelines only.
+	 * App Builder sidebar content — presence adds the Apps tab to the mode
+	 * tabs and enables the MY APPS mode. Omitted → Pipelines only.
 	 */
 	appBuilder?: AppBuilderSidebar;
 	/**
-	 * Force the mode strip visible even with only the Pipelines tab (the web
+	 * Force the mode tabs visible even with only the Pipelines tab (the web
 	 * host: more modes — the node builder — will land on that strip).
 	 */
 	showModeStrip?: boolean;
-	/** Active sidebar mode when the strip is shown. Defaults to 'pipelines'. */
-	sidebarMode?: 'pipelines' | 'apps';
-	/** Mode strip selection callback (hosts persist the choice). */
-	onSidebarModeChange?: (mode: 'pipelines' | 'apps') => void;
+	/** Active sidebar mode when the tabs are shown. Defaults to 'pipelines'. */
+	sidebarMode?: SidebarMode;
+	/** Mode tab selection callback (hosts persist the choice). */
+	onSidebarModeChange?: (mode: SidebarMode) => void;
 }

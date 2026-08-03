@@ -33,7 +33,7 @@
 // =============================================================================
 
 import React, { useMemo, type CSSProperties } from 'react';
-import { getShellApi } from 'shell';
+import { getShellApi, AppLayout } from 'shell';
 import type { ShellAppProps, AppManifestEntry } from 'shell';
 import GitHubStars from './GitHubStars';
 
@@ -638,6 +638,8 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const quote = identity ? QUOTES[quoteIndex] : null;
 
 	return (
+		// One-column app (no sidebar) with the status bar on.
+		<AppLayout showStatus>
 		<div style={styles.container}>
 			{/* Top bar */}
 			<div style={styles.topBar}>
@@ -715,6 +717,7 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 				)}
 			</div>
 		</div>
+		</AppLayout>
 	);
 };
 

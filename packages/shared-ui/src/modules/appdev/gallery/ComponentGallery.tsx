@@ -25,18 +25,19 @@
 // =============================================================================
 
 /**
- * The in-product explorer for the stock shared-ui component library: a
- * grouped component list on the left, and a detail pane on the right showing
- * the selected entry's blurb, a LIVE demo of the real component, its knob
- * controls, a copyable usage snippet (rebuilt from the knob values when the
- * entry provides a builder), and the prop contract.
+ * The documentation browser for the public shell API surface: a grouped
+ * entry list on the left, and a detail pane on the right showing the
+ * selected entry's blurb, markdown documentation, a LIVE demo of the real
+ * component (or a frame schematic for host chrome), its knob controls, a
+ * copyable usage snippet (rebuilt from the knob values when the entry
+ * provides a builder), and the API contract tables.
  *
  * Demos render in the current shell theme — the token variables are declared
  * on `:root`, so a per-demo theme flip is not possible without a theme-file
  * change (plan decision D-H).
  *
  * The gallery's own chrome is dogfooded from the library it documents:
- * StatusBadge for the group chip, Banner for doc-only notes, Button for the
+ * StatusBadge for the group chip, Banner for doc notes, Button for the
  * copy action, ToggleGroup / InputField inside the KnobsPanel, and
  * commonStyles for lists, tables, and text treatments.
  */
@@ -49,7 +50,14 @@ import { commonStyles } from 'shell/src/themes/styles';
 import { KnobsPanel } from './KnobsPanel';
 import { GALLERY_ENTRIES, GALLERY_GROUPS } from './registry';
 import { GALLERY_TOKEN_USAGE } from './tokenUsage.generated';
-import type { IGalleryDemoProps, IGalleryEntry, KnobValue, KnobValues } from './galleryTypes';
+import type { IGalleryDemoProps, IGalleryEntry, IGalleryPropRow, KnobValue, KnobValues } from './galleryTypes';
+
+// Markdown doc renderer — the chat module's MarkdownRenderer, loaded lazily
+// so the gallery pulls the markdown/syntax-highlighter bundle only when an
+// entry with a `doc` body is first shown.
+const MarkdownDoc = React.lazy(() =>
+	import('../../chat/components/MarkdownRenderer').then((mod) => ({ default: mod.MarkdownRenderer })),
+);
 
 // =============================================================================
 // STYLES
@@ -99,6 +107,12 @@ const styles: Record<string, React.CSSProperties> = {
 		margin: '8px 0 0',
 		maxWidth: 720,
 		lineHeight: 1.5,
+	},
+	// Markdown doc body under the blurb
+	docBody: {
+		maxWidth: 860,
+		marginTop: 4,
+		fontSize: 13,
 	},
 	sectionLabel: {
 		...commonStyles.labelUppercase,
@@ -234,7 +248,10 @@ function defaultKnobValues(entry: IGalleryEntry): KnobValues {
 const GROUP_CHIP: Record<IGalleryEntry['group'], string> = {
 	chrome: 'Host chrome',
 	sidebar: 'Sidebar content',
+	documents: 'Document system',
 	content: 'Content component',
+	hooks: 'Hooks & context',
+	utils: 'Utilities',
 };
 
 /** Tokens that are not colors (no swatch): fonts, sizes, radii, shadows. */
@@ -275,6 +292,49 @@ const TokenChip: React.FC<ITokenChipProps> = ({ token }) => {
 		</span>
 	);
 };
+
+// =============================================================================
+// API TABLE
+// =============================================================================
+
+/** Props for the {@link ApiTable} component. */
+interface IApiTableProps {
+	/** The table rows (same shape for props, hooks, events, helpers). */
+	rows: IGalleryPropRow[];
+}
+
+/**
+ * One API contract table: name / type / direction / description rows. Used
+ * for the entry's main table and for every additional labeled section, so
+ * hooks and events render with the same treatment as component props.
+ */
+const ApiTable: React.FC<IApiTableProps> = ({ rows }) => (
+	<table style={styles.propTable}>
+		<thead>
+			<tr>
+				<th style={commonStyles.tableHeader}>Name</th>
+				<th style={commonStyles.tableHeader}>Type</th>
+				<th style={commonStyles.tableHeader}>Dir</th>
+				<th style={commonStyles.tableHeader}>Description</th>
+			</tr>
+		</thead>
+		<tbody>
+			{rows.map((row) => (
+				<tr key={row.name}>
+					<td style={{ ...commonStyles.tableCell, ...styles.propName }}>
+						{row.name}
+						{row.required && <span style={styles.required} title="Required">*</span>}
+					</td>
+					<td style={{ ...commonStyles.tableCell, ...styles.propType }}>{row.type}</td>
+					<td style={commonStyles.tableCell}>
+						<StatusBadge variant={row.dir === 'out' ? 'info' : 'muted'}>{row.dir.toUpperCase()}</StatusBadge>
+					</td>
+					<td style={{ ...commonStyles.tableCell, ...styles.propNote }}>{row.note}</td>
+				</tr>
+			))}
+		</tbody>
+	</table>
+);
 
 // =============================================================================
 // COMPONENT
@@ -377,8 +437,17 @@ export const ComponentGallery: React.FC = () => {
 				</div>
 				<p style={styles.blurb}>{entry.blurb}</p>
 
-				{/* DEMO — live component on a default-background stage */}
-				{Demo ? (
+				{/* DOC — markdown documentation body (ownership, rules, gotchas) */}
+				{entry.doc && (
+					<div style={styles.docBody}>
+						<Suspense fallback={<div style={styles.demoLoading}>Loading documentation...</div>}>
+							<MarkdownDoc content={entry.doc} />
+						</Suspense>
+					</div>
+				)}
+
+				{/* DEMO — live component (or frame schematic) on a stage */}
+				{Demo && (
 					<>
 						<span style={styles.sectionLabel}>Live demo</span>
 						<div style={styles.demoBezel}>
@@ -389,12 +458,14 @@ export const ComponentGallery: React.FC = () => {
 							</div>
 						</div>
 					</>
-				) : (
-					entry.docNote && (
-						<div style={{ marginTop: 16, maxWidth: 860 }}>
-							<Banner variant="info">{entry.docNote}</Banner>
-						</div>
-					)
+				)}
+
+				{/* NOTE — the one rule the reader must not get wrong; renders
+				    with or without a demo */}
+				{entry.docNote && (
+					<div style={{ marginTop: 16, maxWidth: 860 }}>
+						<Banner variant="info">{entry.docNote}</Banner>
+					</div>
 				)}
 
 				{/* KNOBS — only when the entry declares them */}
@@ -414,37 +485,19 @@ export const ComponentGallery: React.FC = () => {
 					</div>
 				</div>
 
-				{/* PROPS — the component's contract */}
+				{/* API TABLES — the main contract table plus labeled sections */}
 				{entry.props && entry.props.length > 0 && (
 					<>
-						<span style={styles.sectionLabel}>Props</span>
-						<table style={styles.propTable}>
-							<thead>
-								<tr>
-									<th style={commonStyles.tableHeader}>Prop</th>
-									<th style={commonStyles.tableHeader}>Type</th>
-									<th style={commonStyles.tableHeader}>Dir</th>
-									<th style={commonStyles.tableHeader}>Description</th>
-								</tr>
-							</thead>
-							<tbody>
-								{entry.props.map((prop) => (
-									<tr key={prop.name}>
-										<td style={{ ...commonStyles.tableCell, ...styles.propName }}>
-											{prop.name}
-											{prop.required && <span style={styles.required} title="Required">*</span>}
-										</td>
-										<td style={{ ...commonStyles.tableCell, ...styles.propType }}>{prop.type}</td>
-										<td style={commonStyles.tableCell}>
-											<StatusBadge variant={prop.dir === 'out' ? 'info' : 'muted'}>{prop.dir.toUpperCase()}</StatusBadge>
-										</td>
-										<td style={{ ...commonStyles.tableCell, ...styles.propNote }}>{prop.note}</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
+						<span style={styles.sectionLabel}>{entry.propsLabel ?? 'Props'}</span>
+						<ApiTable rows={entry.props} />
 					</>
 				)}
+				{(entry.sections ?? []).map((section) => (
+					<React.Fragment key={section.label}>
+						<span style={styles.sectionLabel}>{section.label}</span>
+						<ApiTable rows={section.rows} />
+					</React.Fragment>
+				))}
 
 				{/* COMMON STYLES — the commonStyles members the component uses,
 				    each with the tokens it contributes (generated map) */}

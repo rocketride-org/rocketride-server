@@ -62,7 +62,6 @@ import { useConnectionStatus } from './hooks/useConnectionStatus';
 import { useShellApiConfig } from './connection/ShellApiConfigContext';
 import { useIframeBridge } from './hooks/useIframeBridge';
 import { useAppComponent } from './hooks/useAppComponent';
-import { useSidebarContent } from './components/layout/HostChromeContext';
 
 // Shared hooks re-exported through shell for app convenience
 import { useClickOutside } from './hooks/useClickOutside';
@@ -109,6 +108,11 @@ import Sidebar from './components/layout/Sidebar';
 import BottomPanel from './components/layout/BottomPanel';
 import DebugPanel from './components/layout/DebugPanel';
 
+// The one app-root layout — apps render it as the root of their `app` mount
+// and declare their layout with props (sidebar, showStatus, status).
+import { AppLayout } from './components/layout/AppLayout';
+export type { AppLayoutProps } from './components/layout/AppLayout';
+
 // Layout building blocks
 import { NavButton } from './components/layout/Sidebar';
 // The SURFACE ConfirmDialog is the stock modal one (richer: ReactNode
@@ -142,7 +146,7 @@ import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxSt
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types
-export type { ShellAppProps, ShellSidebarProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+export type { ShellAppProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
 
 // Top-level shell + sidebar component prop types
 export type { ShellProps } from './components/layout/Shell';
@@ -390,7 +394,6 @@ export const shellApi = {
 	get useConnectionStatus() { return useConnectionStatus; },
 	get useShellApiConfig() { return useShellApiConfig; },
 	get useAppComponent() { return useAppComponent; },
-	get useSidebarContent() { return useSidebarContent; },
 	get useClickOutside() { return useClickOutside; },
 	get useFixedPopupPosition() { return useFixedPopupPosition; },
 	get usePrefs() { return usePrefs; },
@@ -434,6 +437,7 @@ export const shellApi = {
 	get BxPurchaseTag() { return BxPurchaseTag; },
 	get BxChevronRight() { return BxChevronRight; },
 	get BxFolderOpen() { return BxFolderOpen; },
+	get AppLayout() { return AppLayout; },
 } as const;
 
 // =============================================================================
@@ -453,7 +457,7 @@ export {
 	useShellConnection, useAuthUser, useLogout, useWorkspace, useClient,
 	useShellEvent, useIframeBridge, useSubscriptions, usePolling,
 	useDashboardData, useConnectionStatus, useShellApiConfig, useAppComponent,
-	useSidebarContent, useClickOutside, useFixedPopupPosition, usePrefs,
+	useClickOutside, useFixedPopupPosition, usePrefs,
 	// Client access + connection manager + connection state
 	getClient, ConnectionManager, ConnectionState,
 	// Auth providers
@@ -472,6 +476,8 @@ export {
 	BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl,
 	BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket,
 	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen,
+	// The one app-root layout
+	AppLayout,
 };
 
 /**
