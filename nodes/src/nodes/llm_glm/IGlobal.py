@@ -36,7 +36,7 @@ GLM_BASE_URL = 'https://api.z.ai/api/paas/v4'
 class IGlobal(IGlobalBase):
     """Global handler for the GLM (Z.ai / Zhipu AI) LLM node."""
 
-    chat: Optional[ChatBase] = None
+    _chat: Optional[ChatBase] = None
 
     def validateConfig(self):
         """Validate only cloud GLM models (Z.ai / Zhipu API) at save time.
@@ -55,7 +55,7 @@ class IGlobal(IGlobalBase):
             from openai import OpenAI
 
             # Prefer provider-driven exception types over string parsing
-            from openai import APIStatusError, OpenAIError, AuthenticationError, RateLimitError, APIConnectionError
+            from openai import APIStatusError, OpenAIError, APIConnectionError
 
             # Get config
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
@@ -100,8 +100,9 @@ class IGlobal(IGlobalBase):
                     message = self._format_error(status, None, None, str(e))
                 warning(message)
                 return
-            except (AuthenticationError, RateLimitError, APIConnectionError, OpenAIError) as e:
-                # Other OpenAI exceptions; format consistently
+            except (APIConnectionError, OpenAIError) as e:
+                # Non-HTTP OpenAI exceptions (HTTP-status errors, including auth and
+                # rate-limit, are APIStatusError subclasses handled above)
                 message = self._format_error(None, None, None, str(e))
                 warning(message)
                 return
