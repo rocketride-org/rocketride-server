@@ -31,7 +31,7 @@ Key dependencies and their licenses:
     - libffi (MIT)
     - pybind11 (BSD-3-Clause)
     - Catch2 (BSL-1.0)
-    - breakpad (BSD-3-Clause)
+    - crashpad (Apache-2.0)
     - AWS SDK for C++ (Apache-2.0)
     - Azure SDK for C++ (MIT)
 

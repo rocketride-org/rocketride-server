@@ -82,7 +82,8 @@
 		"profiles": {
 			"default": {
 				"agent_description": "",
-				"instructions": []
+				"instructions": [],
+				"require_tool_call": false
 			}
 		}
 	},
@@ -110,7 +111,13 @@
 				"format": "textarea"
 			}
 		},
-		"agent_llamaindex.default": { "object": "default", "properties": ["agent_description", "instructions"] },
+		"require_tool_call": {
+			"type": "boolean",
+			"title": "Require tool call",
+			"default": false,
+			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
+		},
+		"agent_llamaindex.default": { "object": "default", "properties": ["agent_description", "instructions", "require_tool_call"] },
 		"agent_llamaindex.profile": {
 			"title": "Profile",
 			"type": "string",
@@ -127,7 +134,7 @@
 		{
 			"section": "Pipe",
 			"title": "LlamaIndex",
-			"properties": ["agent_description", "instructions"]
+			"properties": ["agent_description", "instructions", "require_tool_call"]
 		}
 	]
 }

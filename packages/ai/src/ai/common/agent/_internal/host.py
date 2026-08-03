@@ -13,7 +13,7 @@ plan in plans/elegant-cooking-finch.md for the architectural rationale.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from rocketlib import ToolDescriptor
@@ -270,6 +270,17 @@ class AgentContext:
             ``'langchain'``, ``'wave'``).  Stamped from ``self.FRAMEWORK``
             at construction time.
         started_at: ISO-8601 timestamp of when the run started.
+        invoked_tools: Names of every host tool invoked through
+            ``AgentBase.call_tool`` during this run.  The list is the ONE
+            mutable field on this otherwise-frozen context (frozen forbids
+            reassigning the attribute, but the list contents may change);
+            ``call_tool`` appends to it and ``run_agent`` reads its length to
+            enforce the optional ``require_tool_call`` guard.  Appending is
+            thread-safe under the GIL, which matters because some drivers
+            (e.g. the wave executor) invoke tools from parallel threads.
+            Sub-agent drivers that build their own ``AgentContext`` (crewai
+            manager, deepagent) pass the parent's list here so delegated tool
+            calls count toward the parent run's guard.
     """
 
     invoker: Any
@@ -284,3 +295,9 @@ class AgentContext:
     pipe_id: int
     framework: str
     started_at: str
+
+    # Mutable run-scoped tally of tool invocations (see docstring).  Trailing
+    # defaulted field so all existing keyword constructions stay valid;
+    # compare=False keeps it out of the generated __eq__/__hash__ so the frozen
+    # context stays hashable (a mutable list would otherwise make __hash__ raise).
+    invoked_tools: List[str] = field(default_factory=list, compare=False)

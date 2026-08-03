@@ -31,8 +31,8 @@ import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shared/themes/styles';
 import type { CheckoutPlan, ViewMenu } from 'shared';
-import { TabPanelContent } from 'shared';
-import type { ITabPanelPanel } from 'shared/components/tab-panel/TabPanelContent';
+import { TabPanel } from 'shared';
+import type { ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
 import 'shared/themes/rocketride-default.css';
@@ -59,8 +59,6 @@ export interface ConnectionGroupSettings {
 	hasApiKey: boolean;
 	/** User-entered API key (cleared after save to secret storage). */
 	apiKey: string;
-	/** Selected team ID for cloud mode multi-tenant deployments. */
-	teamId: string;
 	/** Local engine settings (applies to local mode only). */
 	local: {
 		engineVersion: string;
@@ -153,9 +151,6 @@ export type SettingsOutgoingMessage =
 	  }
 	| {
 			type: 'fetchVersions';
-	  }
-	| {
-			type: 'fetchTeams';
 	  }
 	| {
 			type: 'openSubscribe';
@@ -304,7 +299,7 @@ const subscribeBannerStyles = {
 // ============================================================================
 
 /**
- * Fills the space to the right of the left settings nav; TabPanelContent's
+ * Fills the space to the right of the left settings nav; TabPanel's
  * 100%-height wrapper resolves against this definite flex box.
  */
 const pageBodyStyle: CSSProperties = {
@@ -321,7 +316,7 @@ const pageBodyStyle: CSSProperties = {
 
 /**
  * Left-hand settings navigation, matching the browser settings page
- * (shell-ui SettingsPage): a fixed-width rail of `listRow` pills, one per
+ * (shell-ui SettingsProvider): a fixed-width rail of `listRow` pills, one per
  * section, with the page bodies rendered to its right. The pages themselves
  * are unchanged — only the section selector moved from a top strip to here.
  */
@@ -462,7 +457,6 @@ export const Settings: React.FC = () => {
 			hostUrl: 'http://localhost:5565',
 			hasApiKey: false,
 			apiKey: '',
-			teamId: '',
 			local: { engineVersion: 'latest' },
 		},
 		deployment: {
@@ -470,13 +464,13 @@ export const Settings: React.FC = () => {
 			hostUrl: '',
 			hasApiKey: false,
 			apiKey: '',
-			teamId: '',
 			local: { engineVersion: 'latest' },
 		},
 		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
 		pipelineTtl: 900,
-		pipelineTraceLevel: 'summary',
+		// Must match package.json's rocketride.pipelineTraceLevel default.
+		pipelineTraceLevel: 'full',
 		taskArguments: '',
 		pipelineDebugOutput: false,
 		envVars: {},
@@ -502,7 +496,6 @@ export const Settings: React.FC = () => {
 	// Subscription state — defaults to false so the subscribe button shows until the host confirms
 	const [subscribed, setSubscribed] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
-	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
 
 	// Checkout modal state
 	const checkoutResolvers = useRef<{
@@ -606,10 +599,6 @@ export const Settings: React.FC = () => {
 					}
 					break;
 				}
-
-				case 'teamsLoaded' as any:
-					setTeams((message as any).teams || []);
-					break;
 
 				case 'setFocus' as any:
 					if ((message as any).focus) setActiveTab((message as any).focus);
@@ -757,10 +746,6 @@ export const Settings: React.FC = () => {
 		sendMessage({ type: 'probeServerInfo', hostUrl: cloudUrl } as any);
 	};
 
-	const handleFetchTeams = (cloudUrl: string): void => {
-		sendMessage({ type: 'fetchTeams', hostUrl: cloudUrl } as any);
-	};
-
 	/**
 	 * Clear stored credentials
 	 */
@@ -820,8 +805,6 @@ export const Settings: React.FC = () => {
 			if ((devMode && needsVersions.includes(devMode)) || (depMode && needsVersions.includes(depMode))) {
 				sendMessage({ type: 'fetchVersions' });
 			}
-
-			// Teams are fetched by CloudPanel after it confirms the server is SaaS
 
 			return next;
 		});
@@ -947,9 +930,7 @@ export const Settings: React.FC = () => {
 							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)}
 							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)}
 							onProbeCloudServer={handleProbeCloudServer}
-							onFetchTeams={handleFetchTeams}
 							isSaas={isSaasProbed}
-							teams={teams}
 							dockerStatus={dockerStatus}
 							dockerProgress={dockerProgress}
 							dockerError={dockerError}
@@ -997,7 +978,6 @@ export const Settings: React.FC = () => {
 							settings={settings}
 							onSettingsChange={handleSettingsChange}
 							serverCapabilities={serverCapabilities}
-							teams={teams}
 							engineVersions={engineVersions}
 							engineVersionsLoading={engineVersionsLoading}
 							onClearCredentials={handleClearCredentials}
@@ -1008,7 +988,6 @@ export const Settings: React.FC = () => {
 							onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' } as any)}
 							onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' } as any)}
 							onProbeCloudServer={handleProbeCloudServer}
-							onFetchTeams={handleFetchTeams}
 							isSaas={isSaasProbed}
 							dockerStatus={dockerStatus}
 							dockerProgress={dockerProgress}
@@ -1066,7 +1045,7 @@ export const Settings: React.FC = () => {
 				),
 			},
 		}),
-		[settings, message, testMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, teams, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
+		[settings, message, testMessage, engineVersions, engineVersionsLoading, serverCapabilities, cloudSignedIn, cloudUserName, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerVersionOptions, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceVersionOptions, serviceSelectedVersion, sudoPromptVisible, sudoPasswordInput]
 	);
 
 	return (
@@ -1094,7 +1073,7 @@ export const Settings: React.FC = () => {
 				{/* Left nav — one pill per settings section, driving the same activeTab. */}
 				<nav style={settingsNavStyles.sidebar} role="tablist" aria-orientation="vertical">
 					{settingsMenu.entries.map((entry) => {
-						// The selected section is highlighted and rendered by TabPanelContent.
+						// The selected section is highlighted and rendered by TabPanel.
 						const isActive = entry.id === activeTab;
 						return (
 							<button key={entry.id} role="tab" aria-selected={isActive} style={settingsNavStyles.navItem(isActive)} onClick={() => setActiveTab(entry.id)}>
@@ -1106,7 +1085,7 @@ export const Settings: React.FC = () => {
 
 				{/* Page bodies fill the space to the right of the nav. */}
 				<div style={pageBodyStyle}>
-					<TabPanelContent panels={panels} activeId={activeTab} />
+					<TabPanel panels={panels} activeId={activeTab} />
 				</div>
 			</div>
 

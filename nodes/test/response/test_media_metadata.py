@@ -19,8 +19,11 @@ from rocketlib import AVI_ACTION
 from ai.common.avi.descriptor import build_stream_descriptor, descriptor_to_payload
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
-if str(NODES_SRC) not in sys.path:
-    sys.path.insert(0, str(NODES_SRC))
+# Move to the front rather than "insert only if absent": another test dir already on
+# sys.path can hold a package with the same name as the node (see #1687).
+while str(NODES_SRC) in sys.path:
+    sys.path.remove(str(NODES_SRC))
+sys.path.insert(0, str(NODES_SRC))
 
 from response.IInstance import IInstance  # noqa: E402
 

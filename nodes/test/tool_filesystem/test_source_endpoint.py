@@ -79,12 +79,10 @@ class _FakeInstance:
         return record
 
 
-def _endpoint(mod, files, *, path='inbox', recursive=False, client_id='c1', monkeypatch=None):
-    if monkeypatch is not None:
-        monkeypatch.setenv('ROCKETRIDE_CLIENT_ID', client_id)
+def _endpoint(mod, files, *, path='inbox', recursive=False, monkeypatch=None):
     store = _FakeStore(files)
     mod.Store = MagicMock()
-    mod.Store.create.return_value.get_file_store.return_value = store
+    mod.Store.engine_file_store.return_value = store
     ep = mod.IEndpoint()
     ep.endpoint = types.SimpleNamespace(
         serviceConfig={'parameters': {'path': path, 'recursive': recursive}},
@@ -169,11 +167,13 @@ def test_blank_path_raises(monkeypatch):
         ep.scanObjects('', lambda e: 0)
 
 
-def test_missing_client_id_raises(monkeypatch):
+def test_no_task_identity_raises(monkeypatch):
+    # Store.engine_file_store() returns None when no task is running or the
+    # task carries no identity — the scan must fail loudly, not silently no-op.
     mod = _load_endpoint_module()
     ep = _endpoint(mod, {'inbox/a.txt': b'A'}, path='inbox', monkeypatch=monkeypatch)
-    monkeypatch.delenv('ROCKETRIDE_CLIENT_ID', raising=False)
-    with pytest.raises(ValueError, match='ROCKETRIDE_CLIENT_ID'):
+    mod.Store.engine_file_store.return_value = None
+    with pytest.raises(ValueError, match='task'):
         ep.scanObjects('', lambda e: 0)
 
 

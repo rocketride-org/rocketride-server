@@ -129,10 +129,6 @@ export class ConnectionMessageHandler {
 				await this.sendCloudStatus(webview);
 				return true;
 
-			case 'fetchTeams':
-				await this.fetchCloudTeams(webview, message.hostUrl as string);
-				return true;
-
 			case 'fetchVersions':
 				// Fetch GitHub releases + Docker GHCR tags in parallel.
 				// Both are cached, max 2 retries, broadcast to all active webviews.
@@ -303,41 +299,6 @@ export class ConnectionMessageHandler {
 		const signedIn = await cloudAuth.isSignedIn();
 		const userName = await cloudAuth.getUserName();
 		webview.postMessage({ type: 'cloud:status', signedIn, userName });
-	}
-
-	/**
-	 * Fetch cloud teams by connecting to the given cloud URL with the
-	 * stored cloud auth token. The URL comes from the webview (build-time
-	 * ROCKETRIDE_URI injected into the CloudPanel).
-	 */
-	public async fetchCloudTeams(webview: vscode.Webview, hostUrl: string): Promise<void> {
-		const cloudAuth = CloudAuthProvider.getInstance();
-		const token = await cloudAuth.getToken();
-		if (!token) return;
-
-		const uri = hostUrl;
-		if (!uri) return;
-
-		console.log(`[ConnectionMessageHandler] fetchCloudTeams: uri=${uri}`);
-
-		let client: RocketRideClient | undefined;
-		try {
-			client = new RocketRideClient({ module: 'CONN-CFG', requestTimeout: 8000 });
-			await client.connect(token, { uri, timeout: 10000 });
-
-			const teams = this.extractTeams(client.getAccountInfo());
-			console.log(`[ConnectionMessageHandler] fetchCloudTeams: ${teams.length} teams found`);
-			webview.postMessage({ type: 'teamsLoaded', teams });
-		} catch (error) {
-			console.log('[ConnectionMessageHandler] Could not fetch cloud teams:', error);
-		} finally {
-			if (client) client.disconnect().catch(() => {});
-		}
-	}
-
-	private extractTeams(account: ReturnType<RocketRideClient['getAccountInfo']>): Array<{ id: string; name: string }> {
-		if (!account?.organization) return [];
-		return (account.organization.teams ?? []).map((t) => ({ id: t.id, name: t.name }));
 	}
 
 	// =========================================================================

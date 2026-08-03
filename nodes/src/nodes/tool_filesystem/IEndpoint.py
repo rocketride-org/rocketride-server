@@ -25,7 +25,7 @@
 File Store source endpoint.
 
 Streams files from the account-scoped RocketRide file store into the pipeline
-as raw objects. The configured ``path`` (relative to ``users/<client_id>/files/``)
+as raw objects. The configured ``path`` (relative to the task's storage anchor)
 may be a single file or a folder; with ``recursive`` on, subfolders are
 descended as well.
 
@@ -45,7 +45,6 @@ finite source, not a long-running server.
 from __future__ import annotations
 
 import asyncio
-import os
 from typing import Any, Callable, Dict
 
 from ai.account.store import Store
@@ -90,13 +89,19 @@ class IEndpoint(IEndpointBase):
 
     @staticmethod
     def _store():
-        """Build the account-scoped FileStore for the engine-injected client id."""
-        client_id = os.environ.get('ROCKETRIDE_CLIENT_ID', '').strip()
-        if not client_id:
+        """Build the FileStore anchored at the current engine task's storage root.
+
+        Identity and the storage anchor come from the task file the engine
+        published (``rocketlib.getTask()``) — never from the environment —
+        so paths behave identically in development and deployed runs (same
+        contract as the tool/sink variants' ``IGlobal``).
+        """
+        store = Store.engine_file_store()
+        if store is None:
             raise ValueError(
-                'File Store Source: ROCKETRIDE_CLIENT_ID env var is missing; this source must run inside the task engine'
+                'File Store Source: no running task with an identity (rocketlib.getTask); this source must run inside the task engine'
             )
-        return Store.create().get_file_store(client_id)
+        return store
 
     def validateConfig(self, syntaxOnly: bool) -> None:
         if not str(self._params().get('path') or '').strip():

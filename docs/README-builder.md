@@ -1270,6 +1270,72 @@ builder my-package:test --list-deps
 
 ---
 
+## Compiler toolchain (C++ engine)
+
+The engine builds with **clang 16–18 + libc++** (it doesn't compile with clang ≥ 19).
+`server:setup-tools` (run by `scripts/compiler-unix.sh`) provisions it on **Fedora,
+Ubuntu, and macOS**:
+
+- **macOS** — uses the system **Apple Clang** (Xcode Command Line Tools) as-is.
+- **Linux**:
+  1. if bare `clang` is 16–18 with a working libc++ **and** `ld.lld` (Crashpad links
+     with `-fuse-ld=lld`) → used as-is;
+  2. otherwise, by default, a **self-contained LLVM 18 toolchain** (latest 18.x
+     `clang+llvm` release, bundles its own libc++) is unpacked into
+     **`~/toolchains/llvm-18`** — **user-local, no root, system compiler untouched**.
+     The builder points the build at it via `PATH`/`CC`/`CXX`/`LD_LIBRARY_PATH`.
+- **`dump_syms`** (crash-symbol generator) is fetched into `~/toolchains/bin`
+  (root-free) and added to the build `PATH`.
+
+### `--autoinstall` vs `--autoinstall --system-compiler`
+
+Both install the non-compiler build dependencies via `apt`/`dnf` (needs root). They
+differ only in **where the C++ compiler goes**:
+
+- **`--autoinstall`** (default) — keeps clang **local**: uses the system clang if it's
+  already 16–18, else the `~/toolchains/llvm-18` toolchain. **Never touches the system
+  compiler.**
+- **`--autoinstall --system-compiler`** — installs a compatible clang **system-wide**
+  via the package manager and repoints the default `clang++`:
+  - **apt** — the distro's default `clang` if it's 16–18 (e.g. Ubuntu 24.04), else
+    clang-18 from the distro archive or **apt.llvm.org** (e.g. Ubuntu 22.04) +
+    `update-alternatives`.
+  - **dnf** — only if the default `clang` is 16–18; Fedora's clang-22 has no matching
+    libc++, so it **falls back to the `~/toolchains` toolchain**.
+  - Needs root. If root isn't available (or `sudo` can't authenticate non-interactively)
+    it errors and asks you to run with `sudo` or drop `--system-compiler` — it does
+    **not** silently fall back to the tarball.
+
+### Install policy & ownership
+
+Root-free `~/toolchains` downloads (the LLVM toolchain, `dump_syms`) install
+**automatically**, with or without `--autoinstall`. Distro **packages** install only
+under `--autoinstall`. Anything placed in a user home (`~/toolchains`) is installed
+**as the invoking user** — never as root — even when the script runs under `sudo`.
+
+### Compatibility (glibc) — why CI builds on the oldest LTS
+
+A binary's **glibc floor is set by the build host, not the compiler**. Building on
+Ubuntu 22.04 (glibc 2.35) with either the tarball or apt.llvm.org clang-18 produces a
+binary that runs on 22.04 **and newer**; building on 24.04 (glibc 2.39) would **not**
+run on 22.04. So release/CI builds run on the **oldest supported LTS** (currently
+`ubuntu-22.04`), and `--system-compiler` there installs clang-18 via apt.llvm.org
+(faster than the tarball, same glibc floor). The clang version never changes the floor.
+
+### Building manually with clang
+
+To compile outside the builder (e.g. a raw `cmake`/`ninja` invocation), source the
+env helper to point `CC`/`CXX`/`PATH`/`LD_LIBRARY_PATH` at the same toolchain:
+
+```bash
+. scripts/setenvs.sh
+```
+
+It uses `~/toolchains/llvm-18` if present, otherwise the system clang, and always
+adds `~/toolchains/bin` (for `dump_syms`) to `PATH`.
+
+---
+
 ## Design Patterns
 
 This section covers common patterns and **when** to use them based on the problem you're solving.

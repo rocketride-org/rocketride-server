@@ -9,7 +9,7 @@
 	"prefix": "fs",
 	"icon": "file-system.svg",
 	"documentation": "https://docs.rocketride.org",
-	"description": ["File Store source. Streams files from the account-scoped RocketRide file store (users/<client_id>/files/) into the pipeline as raw objects for downstream processing.", "Point it at a file to process just that file, or at a folder to process every file in it; enable 'Recursive' to also descend into subfolders.", "The client id is resolved from the ROCKETRIDE_CLIENT_ID env var injected by the task engine."],
+	"description": ["File Store source. Streams files from the account-scoped RocketRide file store into the pipeline as raw objects for downstream processing.", "Point it at a file to process just that file, or at a folder to process every file in it; enable 'Recursive' to also descend into subfolders.", "Paths are relative to the task's storage anchor, resolved automatically from the running task."],
 	"tile": ["Path: ${parameters.filesystem.path}"],
 	"lanes": {
 		"_source": ["tags"]

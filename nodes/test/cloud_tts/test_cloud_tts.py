@@ -21,9 +21,10 @@ import pytest
 
 _DIR = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'cloud_tts'
 
-# Reuse the contract-test JSONC parser (handles // comments and :// URLs).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from test_contracts import parse_service_json  # noqa: E402
+# Reuse the contract-test JSONC parser (handles // comments and :// URLs). Imported
+# package-relative: putting nodes/test on sys.path would let its node-named subpackages
+# shadow the real node packages under src/nodes (see #1687).
+from ..test_contracts import parse_service_json
 
 _SERVICES = ['services.tts_openai.json', 'services.tts_elevenlabs.json']
 

@@ -51,10 +51,11 @@ except ImportError:
 
 
 # The sys.modules isolation guard (see #1640) lives in _sys_modules_guard so it is
-# unit-testable in isolation. conftest is imported before pytest puts its own dir
-# on sys.path, so add it here; importing the hooks registers them with pytest.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _sys_modules_guard import (  # noqa: E402,F401
+# unit-testable in isolation; importing the hooks registers them with pytest.
+# Imported package-relative on purpose: putting this directory on sys.path would let
+# its node-named subpackages (text_output/, response/, telegram/, ...) shadow the real
+# node packages under src/nodes (see #1687).
+from ._sys_modules_guard import (  # noqa: E402,F401
     pytest_collectreport,
     pytest_collectstart,
     pytest_sessionfinish,

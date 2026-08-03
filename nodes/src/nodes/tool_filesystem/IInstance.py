@@ -283,7 +283,7 @@ class IInstance(IInstanceBase):
         return {name: m for name, m in methods.items() if self._is_method_allowed(name)}
 
     def _is_method_allowed(self, name: str) -> bool:
-        # When FileStore couldn't be initialised (e.g. ROCKETRIDE_CLIENT_ID
+        # When FileStore couldn't be initialised (e.g. no running task identity
         # missing), hide every tool method so the LLM never sees something it
         # can't successfully invoke. ``beginGlobal()`` already logged a warning
         # with the reason.
@@ -356,7 +356,7 @@ class IInstance(IInstanceBase):
         """Verify the FileStore was successfully initialised in beginGlobal()."""
         if self.IGlobal.file_store is None:
             raise ValueError(
-                'filesystem tool is not available: ROCKETRIDE_CLIENT_ID is missing or the account store failed to initialise (check pipeline logs)'
+                'filesystem tool is not available: no running task identity (rocketlib.getTask) or the account store failed to initialise (check pipeline logs)'
             )
 
     def _check_path(self, path: str) -> None:

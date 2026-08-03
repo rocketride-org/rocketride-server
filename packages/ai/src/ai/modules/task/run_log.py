@@ -142,9 +142,46 @@ def segment_store_path(project_id: str, source: str, run_kind: str, segment_id: 
 _SPOOL_FILE_RE = re.compile(r'^[A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+)*\.(?:dev|deploy)\.\d{6}\.jsonl$')
 
 
-def spool_path(spool_root: str, client_id: str, stream: str, segment_id: int) -> str:
-    """Flat local spool file for one segment: '{userId}.{stream}.{id}.jsonl'."""
-    return os.path.join(spool_root, f'{_sanitize(client_id)}.{stream}.{segment_id:06d}.jsonl')
+def spool_path(spool_root: str, scope_id: str, stream: str, segment_id: int) -> str:
+    """Flat local spool file for one segment: '{scopeId}.{stream}.{id}.jsonl'.
+
+    The scope id (owner user id for dev, team id for deploy — see
+    scope_paths) qualifies the flat name so equal streams in different
+    scopes never collide on one host.
+    """
+    return os.path.join(spool_root, f'{_sanitize(scope_id)}.{stream}.{segment_id:06d}.jsonl')
+
+
+def scope_paths(run_kind: str, client_id: str, team_id: str) -> 'tuple[str, str]':
+    """The continuum's scope: (store path prefix, scope id) — ONE helper.
+
+    Dev runs live in the OWNER's user tree ('' prefix: the FileStore's
+    client anchor). Deploy runs live in the TEAM tree so teammates can
+    watch/replay — the prefix is the internal-identity scope grammar
+    ('@/Team/=<id>/'), resolved by the store to teams/<id>/files/.
+
+    The scope id qualifies SPOOL filenames and the writer registry so the
+    same stream name in two scopes (Staging vs Production deploying one
+    project) can never collide on one host.
+
+    Both RunLogWriter and RunLogReader derive their paths from this single
+    function — writer and reader cannot disagree about where a stream lives.
+
+    Raises:
+        ValueError: A deploy run without a team has no valid scope, or the
+            team id is not usable as a path segment.
+    """
+    if run_kind == 'deploy':
+        if not team_id:
+            raise ValueError('deploy continua are team-scoped: team_id is required')
+        # team_id is embedded into the store's id-reference grammar below —
+        # reject anything that could escape the '=<id>' segment (same rule
+        # the deployment backend applies to path-segment ids). Upstream
+        # callers validate membership, so this is defense in depth.
+        if '/' in team_id or '\\' in team_id or team_id in ('.', '..') or team_id.startswith(('@', '=', '.')):
+            raise ValueError(f'team_id contains invalid characters: {team_id!r}')
+        return (f'@/Team/={team_id}/', team_id)
+    return ('', client_id)
 
 
 def history_seconds(run_kind: str) -> int:
@@ -209,15 +246,15 @@ def _try_remove(path: str) -> None:
 # Module-wide lease table — shared by the writer's janitor and (L3+) readers.
 LEASES = SegmentLeases()
 
-# Registry of ACTIVE writers by (client_id, stream) — lets rrext_log's delete
+# Registry of ACTIVE writers by (scope_id, stream) — lets rrext_log's delete
 # coordinate with a live stream (route the mutation through the writer's lock)
 # and lets L5 compose reads with a live in-memory tail.
 WRITERS: Dict[str, 'RunLogWriter'] = {}
 
 
-def writer_key(client_id: str, stream: str) -> str:
-    """Registry key for an active writer."""
-    return f'{client_id}/{stream}'
+def writer_key(scope_id: str, stream: str) -> str:
+    """Registry key for an active writer (scope-qualified — see scope_paths)."""
+    return f'{scope_id}/{stream}'
 
 
 # =============================================================================
@@ -358,6 +395,7 @@ class RunLogWriter:
         stamp: Any,
         raise_seq_floor: Any,
         *,
+        team_id: str = '',
         spool_root: Optional[str] = None,
         debug: Any = None,
     ) -> None:
@@ -373,6 +411,8 @@ class RunLogWriter:
             project_id: Pipeline project id.
             source: Source component id.
             run_kind: 'dev' or 'deploy' — separate continua per kind.
+            team_id: REQUIRED for deploy runs — the continuum then lives in
+                the team's tree (teammates watch/replay); ignored for dev.
             stamp: Callable(message, *, event_time=None) -> message; the
                 task's stamp_log_event (synthetic events go through it too).
             raise_seq_floor: Callable(int); the task's raise_log_seq_floor —
@@ -389,7 +429,9 @@ class RunLogWriter:
         self._raise_seq_floor = raise_seq_floor
         self._debug = debug or (lambda _msg: None)
 
-        # Identity-derived names/paths.
+        # Identity-derived names/paths. Deploy continua live in the TEAM
+        # tree (scope prefix); the scope id qualifies spool + registry.
+        self._scope_prefix, self._scope_id = scope_paths(run_kind, client_id, team_id)
         self._stream = stream_name(project_id, source, run_kind)
         self._spool_root = spool_root or default_spool_root()
 
@@ -441,16 +483,16 @@ class RunLogWriter:
     # -------------------------------------------------------------------------
 
     def _spool_path(self, seg_id: int) -> str:
-        """Flat spool file for one of this stream's segments."""
-        return spool_path(self._spool_root, self._client_id, self._stream, seg_id)
+        """Flat spool file for one of this stream's segments (scope-qualified)."""
+        return spool_path(self._spool_root, self._scope_id, self._stream, seg_id)
 
     def _control_path(self) -> str:
-        """FileStore-relative control-file path for this stream."""
-        return control_store_path(self._project_id, self._source, self._run_kind)
+        """Store path of this stream's control file (scope prefix applied)."""
+        return self._scope_prefix + control_store_path(self._project_id, self._source, self._run_kind)
 
     def _segment_path(self, seg_id: int) -> str:
-        """FileStore-relative store path for one sealed segment."""
-        return segment_store_path(self._project_id, self._source, self._run_kind, seg_id)
+        """Store path of one sealed segment (scope prefix applied)."""
+        return self._scope_prefix + segment_store_path(self._project_id, self._source, self._run_kind, seg_id)
 
     # =========================================================================
     # OPEN / RECOVERY
@@ -539,6 +581,9 @@ class RunLogWriter:
                     'beginSeq': begin['body']['logSeq'],
                     'endTime': None,
                     'outcome': None,
+                    # Whether THIS run recorded traces — None/'none' lets the
+                    # UI say "tracing was off" instead of "no data yet".
+                    'traceLevel': trace_level,
                 }
             )
             del chapters[:-CONST_LOG_CHAPTERS]
@@ -549,7 +594,7 @@ class RunLogWriter:
 
             # Register as the stream's live writer (delete coordination + L5
             # live-tail composition).
-            WRITERS[writer_key(self._client_id, self._stream)] = self
+            WRITERS[writer_key(self._scope_id, self._stream)] = self
 
             # Background worker: backstop seal + upload drain + retention.
             self._worker = asyncio.create_task(self._worker_loop())
@@ -1083,7 +1128,7 @@ class RunLogWriter:
     # RUN END / CLOSE
     # =========================================================================
 
-    async def end_run(self, outcome: str, exit_message: str = '') -> None:
+    async def end_run(self, outcome: str, exit_message: str = '', reason: 'str | None' = None) -> None:
         """
         Complete the current run: end marker, chapter completion, SEAL, upload.
 
@@ -1098,12 +1143,19 @@ class RunLogWriter:
         Args:
             outcome: 'ok' | 'error' | 'cancelled'.
             exit_message: Optional human detail for the end marker.
+            reason: WHY a requested stop happened ('user' | 'ttl'); kept on
+                the end marker and the chapter so the audit stays honest —
+                a ttl expiry arrives here as outcome 'ok', reason 'ttl'.
         """
         async with self._lock:
             if not self._open:
                 return
 
-            end = self._stamp(_lifecycle_event('run-end', outcome=outcome, detail=exit_message))
+            end = self._stamp(
+                _lifecycle_event(
+                    'run-end', outcome=outcome, detail=exit_message, **({'reason': reason} if reason else {})
+                )
+            )
             self._append_event(end)
 
             # Complete the newest open chapter.
@@ -1111,6 +1163,8 @@ class RunLogWriter:
                 if chapter.get('endTime') is None:
                     chapter['endTime'] = end['body']['eventTime']
                     chapter['outcome'] = outcome
+                    if reason:
+                        chapter['reason'] = reason
                     break
 
             self._control['completed'] = True
@@ -1132,7 +1186,7 @@ class RunLogWriter:
             self._worker = None
 
         # Deregister as the stream's live writer.
-        WRITERS.pop(writer_key(self._client_id, self._stream), None)
+        WRITERS.pop(writer_key(self._scope_id, self._stream), None)
 
     def note_restart(self) -> None:
         """
@@ -1202,6 +1256,7 @@ class RunLogReader:
         source: str,
         run_kind: str,
         *,
+        team_id: str = '',
         spool_root: Optional[str] = None,
     ) -> None:
         """
@@ -1215,6 +1270,8 @@ class RunLogReader:
             project_id: Pipeline project id.
             source: Source component id.
             run_kind: 'dev' or 'deploy'.
+            team_id: REQUIRED for deploy streams — reads the TEAM continuum
+                (the command layer verifies team permissions first).
             spool_root: Override spool root (tests).
         """
         self._store = store
@@ -1222,20 +1279,22 @@ class RunLogReader:
         self._project_id = project_id
         self._source = source
         self._run_kind = run_kind
+        # Same single scope helper as the writer — they cannot diverge.
+        self._scope_prefix, self._scope_id = scope_paths(run_kind, client_id, team_id)
         self._stream = stream_name(project_id, source, run_kind)
         self._spool_root = spool_root or default_spool_root()
 
     def _spool_path(self, seg_id: int) -> str:
-        """Flat spool file for one of this stream's segments."""
-        return spool_path(self._spool_root, self._client_id, self._stream, seg_id)
+        """Flat spool file for one of this stream's segments (scope-qualified)."""
+        return spool_path(self._spool_root, self._scope_id, self._stream, seg_id)
 
     def _control_path(self) -> str:
-        """FileStore-relative control-file path for this stream."""
-        return control_store_path(self._project_id, self._source, self._run_kind)
+        """Store path of this stream's control file (scope prefix applied)."""
+        return self._scope_prefix + control_store_path(self._project_id, self._source, self._run_kind)
 
     def _segment_path(self, seg_id: int) -> str:
-        """FileStore-relative store path for one sealed segment."""
-        return segment_store_path(self._project_id, self._source, self._run_kind, seg_id)
+        """Store path of one sealed segment (scope prefix applied)."""
+        return self._scope_prefix + segment_store_path(self._project_id, self._source, self._run_kind, seg_id)
 
     # -------------------------------------------------------------------------
     # CONTROL ACCESS
@@ -1252,7 +1311,7 @@ class RunLogReader:
         Raises:
             FileNotFoundError: If the stream has no control (never logged).
         """
-        writer = WRITERS.get(writer_key(self._client_id, self._stream))
+        writer = WRITERS.get(writer_key(self._scope_id, self._stream))
         if writer is not None:
             return writer._control
         try:
@@ -1618,7 +1677,7 @@ class RunLogReader:
         Returns:
             Dict with 'deletedSegments' count.
         """
-        writer = WRITERS.get(writer_key(self._client_id, self._stream))
+        writer = WRITERS.get(writer_key(self._scope_id, self._stream))
         if writer is not None:
             async with writer._lock:
                 return await self._delete_locked(writer._control, before_time, delete_all, writer)

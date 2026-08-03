@@ -5,15 +5,16 @@
 
 export { StatCard } from './StatCard';
 export { StatusPill } from './StatusPill';
-export { OverviewTab } from './OverviewTab';
+export { OverviewPanel } from './OverviewPanel';
+export type { IOverviewPanelProps } from './OverviewPanel';
 export { OverviewGrid } from './OverviewGrid';
 export type { IOverviewGridProps } from './OverviewGrid';
-export { ConnectionsGrid } from './ConnectionsGrid';
-export type { IConnectionsGridProps } from './ConnectionsGrid';
-export { TasksGrid } from './TasksGrid';
-export type { ITasksGridProps } from './TasksGrid';
-export { ActivityGrid, getEventDisplay } from './ActivityGrid';
-export type { IActivityGridProps, IEventDisplay, EventTone } from './ActivityGrid';
+export { ConnectionsPanel } from './ConnectionsPanel';
+export type { IConnectionsPanelProps } from './ConnectionsPanel';
+export { TasksPanel } from './TasksPanel';
+export type { ITasksPanelProps } from './TasksPanel';
+export { ActivityPanel, getEventDisplay } from './ActivityPanel';
+export type { IActivityPanelProps, IEventDisplay, EventTone } from './ActivityPanel';
 export { ConnectionRecordPanel } from './ConnectionRecordPanel';
 export type { IConnectionRecordPanelProps } from './ConnectionRecordPanel';
 export { TaskRecordPanel, taskStatusText, taskStatusVariant } from './TaskRecordPanel';

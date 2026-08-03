@@ -29,7 +29,7 @@
 
 import React, { CSSProperties, useEffect, useState } from 'react';
 import { ViewMenu, ViewMenuEntry } from '../../types/viewMenu';
-import { ViewMenuBadge } from '../page-view-control/ViewMenuBadge';
+import { ViewMenuBadge } from '../tab-control/ViewMenuBadge';
 import { BxChevronDown, BxChevronRight } from '../BoxIcon';
 import { useSidebarCollapsed } from './SidebarCollapsedContext';
 
