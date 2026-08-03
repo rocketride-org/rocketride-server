@@ -686,18 +686,12 @@ def test_manual_profile_connects_with_host_and_port(recording_client):
 
 
 def test_url_profile_connects_from_url(recording_client):
-    url = 'falkor://falkordb@r-6jissuruar.instance-ytljliglb.us-east-1.aws.cloud:53939'
+    url = 'falkor://falkordb:s3cret@r-6jissuruar.instance-ytljliglb.us-east-1.aws.cloud:53939'
     _glb_mod.IGlobal._connect({'mode': 'url', 'url': f'  {url}  '})
 
+    # The URL carries every credential; nothing else may be passed alongside it.
     assert recording_client.last_url == url
-    # No password field set -> nothing may override the URL's own credentials.
     assert recording_client.last_kwargs == {}
-
-
-def test_url_profile_password_field_fills_in_a_url_without_one(recording_client):
-    _glb_mod.IGlobal._connect({'mode': 'url', 'url': 'falkors://falkordb@host:53939', 'password': 'secret'})
-
-    assert recording_client.last_kwargs == {'password': 'secret'}
 
 
 @pytest.mark.parametrize('url', ['http://host:6379', 'host:6379', 'bolt://host:7687'])

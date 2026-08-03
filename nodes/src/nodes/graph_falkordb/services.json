@@ -134,7 +134,7 @@
 			"default": "",
 			"secure": true,
 			"optional": true,
-			"description": "Password for the FalkorDB instance. Leave empty for no auth, or when the FalkorDB URL already carries it.",
+			"description": "Password for the FalkorDB instance. Leave empty for no auth.",
 			"ui": {
 				"ui:widget": "password"
 			}
@@ -143,7 +143,7 @@
 			"type": "string",
 			"title": "FalkorDB URL",
 			"default": "",
-			"description": "Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. Credentials may be embedded as falkor://user:password@host:port, or left out and typed in the Password field below."
+			"description": "Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. Credentials travel in the URL itself: falkor://user:password@host:port."
 		},
 		"graph_falkordb.tls": {
 			"type": "boolean",
@@ -222,7 +222,7 @@
 		},
 		"graph_falkordb.urlProfile": {
 			"object": "url",
-			"properties": ["graph_falkordb.url", "graph_falkordb.password", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
+			"properties": ["graph_falkordb.url", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
 		},
 		"graph_falkordb.profile": {
 			"type": "string",

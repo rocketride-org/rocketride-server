@@ -244,16 +244,11 @@ class IGlobal(GraphGlobalBase):
     def _connect(cls, config: Dict[str, Any]) -> FalkorDB:
         """Open a client from whichever profile is configured: URL or host/port."""
         url = _connection_url(config)
-        if not url:
-            return FalkorDB(**cls._client_kwargs(config))
-
-        kwargs: Dict[str, Any] = {}
-        # redis-py lets the URL's own credentials win over keyword arguments, so
-        # the password field only fills in a URL that carries none.
-        password = str(config.get('password') or '')
-        if password:
-            kwargs['password'] = password
-        return FalkorDB.from_url(url, **kwargs)
+        # In the URL profile every credential travels in the URL itself; a separate
+        # password field would only conflict with one already embedded there.
+        if url:
+            return FalkorDB.from_url(url)
+        return FalkorDB(**cls._client_kwargs(config))
 
     @staticmethod
     def _client_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
