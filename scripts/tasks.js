@@ -21,8 +21,7 @@
 // SOFTWARE.
 
 /**
- * UI Build Module — aggregate tasks for all UI applications, plus the
- * vendored-platform module for standalone app repos.
+ * UI Build Module — aggregate tasks for all UI applications.
  *
  * This file is CANONICAL for every repo the builder ships to (`builder
  * update` replaces standalone repos' scripts/ with this tree), so it must
@@ -31,22 +30,27 @@
  *   platform repo (rocketride-server) — the shell is an in-tree module
  *     (packages/shell); ui:build builds it first, then the remotes.
  *   standalone app repo — there is no shell source; the platform arrives
- *     prebuilt in .rocketride/shell (vendored from a server's
- *     /client/shell), and this file registers `shell:update` to refresh
- *     it.
+ *     prebuilt in .rocketride/shell, vendored from a server's
+ *     /client/shell. When the package is missing, build.js fetches it
+ *     automatically BEFORE the dependency bootstrap (lib/vendor-shell.js)
+ *     — the workspace cannot even pnpm install without it. This file
+ *     registers shell:update for the explicit case: refreshing the
+ *     package when it is ALREADY installed.
  *
  * Actions:
- *   ui:clean     — clean all UI app build artifacts
- *   ui:register  — register all UI apps into apps.json (no bundling)
- *   ui:build     — build all UI apps (shell first when it is in-tree)
- *   shell:update — [standalone repos only] refresh .rocketride/shell from
- *                  a server (--host=<url>, default ROCKETRIDE_URI) and
- *                  relink the workspace
+ *   ui:clean        — clean all UI app build artifacts
+ *   ui:register     — register all UI apps into apps.json (no bundling)
+ *   ui:build        — build all UI apps (shell first when it is in-tree)
+ *   shell:update    — [standalone repos only] refresh .rocketride/shell
+ *                     from a server (--shell=<url>, default ROCKETRIDE_URI)
+ *                     and relink the workspace
+ *   builder:scripts — replace scripts/ with the upstream copy
+ *                     ([--branch=<branch>, default: upstream default branch]
+ *                     [--path=<repo root>])
  */
 const fs = require('fs');
 const path = require('path');
-const zlib = require('zlib');
-const { parallel, execCommand, removeDir } = require('./lib');
+const { parallel, execCommand } = require('./lib');
 const { PROJECT_ROOT } = require('./lib/paths');
 const registry = require('./lib/registry');
 
@@ -78,58 +82,6 @@ function getRemoteUiModules() {
  */
 function optionalStep(actionName) {
 	return registry.getAction(actionName) ? [actionName] : [];
-}
-
-/**
- * Extracts a gzipped ustar tarball (the shell package as `pnpm pack`
- * emits it) into a directory, stripping the leading 'package/' segment.
- *
- * Pure JS on purpose — the same approach the vscode extension's vendoring
- * uses: shelling out to `tar` varies by platform (MSYS tar misreads C:\
- * paths), while pnpm-pack tarballs are plain ustar with pax extended
- * headers only for over-long paths.
- *
- * @param {Buffer} tgz - The gzipped tarball bytes.
- * @param {string} destDir - Directory to extract into (must exist).
- */
-function extractShellTgz(tgz, destDir) {
-	const tarBuf = zlib.gunzipSync(tgz);
-	// Path override supplied by an immediately-preceding pax header.
-	let paxPath = null;
-	let off = 0;
-	while (off + 512 <= tarBuf.length) {
-		const block = tarBuf.subarray(off, off + 512);
-		// step: two consecutive zero blocks terminate the archive
-		if (block.every((b) => b === 0)) break;
-		// step: decode the ustar header fields we need
-		const readStr = (start, len) => block.subarray(start, start + len).toString('utf8').replace(/\0.*$/, '');
-		const name = readStr(0, 100);
-		const size = parseInt(readStr(124, 12).trim() || '0', 8);
-		const type = readStr(156, 1) || '0';
-		const prefix = readStr(345, 155);
-		const dataStart = off + 512;
-		const data = tarBuf.subarray(dataStart, dataStart + size);
-		// step: advance to the next 512-aligned header
-		off = dataStart + Math.ceil(size / 512) * 512;
-		// step: pax extended header — records a long path for the NEXT entry
-		if (type === 'x' || type === 'g') {
-			const m = /(?:^|\n)\d+ path=([^\n]+)\n/.exec(data.toString('utf8'));
-			if (type === 'x' && m) paxPath = m[1];
-			continue;
-		}
-		const full = paxPath ?? (prefix ? `${prefix}/${name}` : name);
-		paxPath = null;
-		// step: write files/dirs, stripping 'package/' and refusing escapes
-		const rel = full.replace(/^package\//, '');
-		if (!rel || rel.includes('..')) continue;
-		const target = path.join(destDir, rel);
-		if (type === '5') {
-			fs.mkdirSync(target, { recursive: true });
-		} else if (type === '0') {
-			fs.mkdirSync(path.dirname(target), { recursive: true });
-			fs.writeFileSync(target, data);
-		}
-	}
 }
 
 // =============================================================================
@@ -199,56 +151,63 @@ const shellVendorModule = {
 
 	actions: [
 		{
-			// Refresh the vendored shell from a server. Same artifact and
-			// layout the App Builder vendors on open:
-			// <server>/client/shell (the stable-named shell.tgz) extracted
-			// (swap-based) to .rocketride/shell. Finishes with pnpm install
-			// so every app's linked copy in the pnpm store picks up the new
-			// content.
+			// Force-refresh the vendored shell from a server, installed or
+			// not — the automatic injection before pnpm install only fetches
+			// when the package is MISSING, so picking up a newer platform
+			// build is always this explicit step.
 			name: 'shell:update',
 			action: () => ({
-				description: 'Update .rocketride/shell from a server (--host=<url>)',
+				description: 'Refresh .rocketride/shell from a server (--shell=<url>)',
 				run: async (ctx, task) => {
-					const { getenv } = require('./lib/getenv');
-					const base = (ctx.options.host || getenv().ROCKETRIDE_URI || 'http://localhost:5565').replace(/\/$/, '');
-					const url = `${base}/client/shell`;
-
-					// step: fetch the stable-named tarball from the server
-					task.output = `Fetching ${url}...`;
-					let res;
-					try {
-						res = await fetch(url);
-					} catch (err) {
-						throw new Error(`Cannot reach ${base} — is the server running? (${err.message})`);
-					}
-					if (!res.ok) throw new Error(`${url} -> HTTP ${res.status} — the server does not serve shell.tgz`);
-					const tgz = Buffer.from(await res.arrayBuffer());
-
-					// step: keep the raw tarball beside the extraction (provenance)
-					const rrDir = path.join(PROJECT_ROOT, '.rocketride');
-					await fs.promises.mkdir(rrDir, { recursive: true });
-					await fs.promises.writeFile(path.join(rrDir, 'shell.tgz'), tgz);
-
-					// step: swap-extract so a torn update never leaves a
-					// half-written package installed
-					const staging = path.join(rrDir, 'shell.extracting');
-					await removeDir(staging);
-					await fs.promises.mkdir(staging, { recursive: true });
-					extractShellTgz(tgz, staging);
-					const dest = path.join(rrDir, 'shell');
-					await removeDir(dest);
-					await fs.promises.rename(staging, dest);
-					const version = JSON.parse(await fs.promises.readFile(path.join(dest, 'package.json'), 'utf8')).version;
-
-					// step: relink — apps consume the pnpm-store copy of the
-					// file: dependency, which only refreshes on install
+					const { vendorShell } = require('./lib/vendor-shell');
+					// step: fetch + swap-extract, routing progress into the
+					// task display; skip the lib's own install...
+					const version = await vendorShell(PROJECT_ROOT, ctx.options.shell, {
+						install: false,
+						log: (msg) => { task.output = msg; },
+					});
+					// step: ...and relink through execCommand instead, so
+					// pnpm's output stays inside the task UI
 					task.output = `shell v${version} vendored — relinking workspace (pnpm install)...`;
 					await execCommand('pnpm', ['install'], { task, cwd: PROJECT_ROOT });
-					task.output = `shell v${version} vendored from ${base} and workspace relinked`;
+					task.output = `shell v${version} vendored and workspace relinked`;
 				},
 			}),
 		},
 	],
 };
 
-module.exports = IS_PLATFORM_REPO ? [uiModule] : [uiModule, shellVendorModule];
+// =============================================================================
+// BUILDER MODULE — maintenance of the build system itself
+// =============================================================================
+
+const builderModule = {
+	name: 'builder',
+	description: 'Build system maintenance',
+
+	actions: [
+		{
+			// Replace ./scripts with the upstream rocketride-server copy at
+			// a given branch — how standalone repos pick up builder changes
+			// (and the platform repo can restore a known-good tree). Run it
+			// as the ONLY action of the invocation: the swap replaces code
+			// this process has not require()d yet, so nothing further may
+			// lazy-load afterwards.
+			name: 'builder:scripts',
+			action: () => ({
+				description: 'Replace scripts/ with the upstream copy ([--branch=<branch>] [--path=<repo root>])',
+				run: async (ctx, task) => {
+					const { selfUpdate } = require('./lib/self-update');
+					// step: --path retargets the swap at another repository
+					// that carries a copy of the builder; default is our own.
+					// No --branch follows the upstream default branch.
+					const target = ctx.options.path ? path.resolve(ctx.options.path) : PROJECT_ROOT;
+					await selfUpdate(target, ctx.options.branch, { log: (msg) => { task.output = msg; } });
+					task.output = 'scripts/ updated from upstream';
+				},
+			}),
+		},
+	],
+};
+
+module.exports = IS_PLATFORM_REPO ? [uiModule, builderModule] : [uiModule, shellVendorModule, builderModule];

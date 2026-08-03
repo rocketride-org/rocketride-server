@@ -24,7 +24,8 @@
  * Builder Self-Update
  *
  * Replaces the local `scripts/` directory with the copy from the upstream
- * rocketride-server repository at a given branch (`builder update <branch>`).
+ * rocketride-server repository at a given branch
+ * (`builder builder:scripts --branch=<branch>`).
  *
  * Intentionally depends only on Node built-ins (fs, path, child_process):
  * the whole point of the command is to repair a scripts/ tree that may be
@@ -51,13 +52,32 @@ const UPSTREAM_URL = 'https://github.com/rocketride-org/rocketride-server.git';
 // =============================================================================
 
 /**
- * Runs a git command, streaming its output to the console.
+ * Runs a git command quietly, surfacing git's own last stderr line on
+ * failure (e.g. "Remote branch X not found") instead of a bare exit code.
  *
  * @param {string[]} args - Arguments passed to git.
  * @param {string} [cwd] - Working directory for the command.
  */
 function runGit(args, cwd) {
-	execFileSync('git', args, { cwd, stdio: 'inherit' });
+	try {
+		execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+	} catch (err) {
+		const detail = err.stderr ? err.stderr.toString().trim().split('\n').pop() : err.message;
+		throw new Error(`git ${args[0]} failed: ${detail}`);
+	}
+}
+
+/**
+ * Resolves the upstream repository's default branch (its HEAD symref) —
+ * what `builder:scripts` uses when no --branch is given.
+ *
+ * @returns {string} The default branch name.
+ */
+function defaultBranch() {
+	const out = execFileSync('git', ['ls-remote', '--symref', UPSTREAM_URL, 'HEAD'], { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+	const m = /^ref: refs\/heads\/(\S+)\s+HEAD/m.exec(out);
+	if (!m) throw new Error(`cannot determine the default branch of ${UPSTREAM_URL} — pass --branch=<branch>`);
+	return m[1];
 }
 
 // =============================================================================
@@ -73,19 +93,30 @@ function runGit(args, cwd) {
  * the new one is in place, so a failed fetch or swap leaves the builder
  * usable.
  *
- * When root is the running builder's own repository, the caller must exit
- * the process immediately after this returns: the builder's un-required
- * modules live in the directory that was just replaced, so any further
- * lazy require() would load mismatched code.
+ * When root is the running builder's own repository, the swap replaces
+ * code this process may not have require()d yet — the caller must not
+ * load further modules afterwards (the builder:scripts task is designed
+ * to be the run's final work for exactly that reason).
  *
  * A root without an existing scripts/ directory is allowed — the fetched
  * copy is simply moved into place, so the command can also bootstrap a
  * repository that carries a copy of the builder.
  *
  * @param {string} root - Repository root (the directory containing scripts/).
- * @param {string} branch - Upstream branch to fetch scripts/ from.
+ * @param {string} [branch] - Upstream branch to fetch scripts/ from;
+ *   defaults to the upstream repository's default branch.
+ * @param {object} [opts]
+ * @param {(msg: string) => void} [opts.log=console.log] - Progress sink
+ *   (the builder:scripts task routes this into its listr output).
  */
-async function selfUpdate(root, branch) {
+async function selfUpdate(root, branch, opts = {}) {
+	const { log = console.log } = opts;
+
+	// step: no branch given — follow the upstream repo's default branch
+	if (!branch) {
+		log(`Resolving the default branch of ${UPSTREAM_URL} ...`);
+		branch = defaultBranch();
+	}
 	// Fail before cloning if the target root itself is missing (a typoed
 	// --path would otherwise surface as a confusing rename error).
 	if (!fs.existsSync(root)) {
@@ -104,7 +135,7 @@ async function selfUpdate(root, branch) {
 	try {
 		// Fetch only the scripts/ tree: depth-1 avoids history, blobless +
 		// sparse avoids downloading the rest of the working tree.
-		console.log(`Fetching scripts/ from ${UPSTREAM_URL} @ ${branch}\n`);
+		log(`Fetching scripts/ from ${UPSTREAM_URL} @ ${branch} ...`);
 		runGit([
 			'clone',
 			'--depth', '1',
@@ -143,7 +174,7 @@ async function selfUpdate(root, branch) {
 		}
 		fs.rmSync(backupDir, { recursive: true, force: true });
 
-		console.log(`\n${scriptsDir} updated from ${branch}`);
+		log(`${scriptsDir} updated from ${branch}`);
 	} finally {
 		// The clone directory is transient in every outcome.
 		fs.rmSync(tmpDir, { recursive: true, force: true });
