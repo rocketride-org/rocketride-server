@@ -190,14 +190,18 @@ class IInstance(IInstanceBase):
             image_data = base64.b64decode(doc.page_content)
 
             # Read the text by OCR model
-            text = self.IGlobal.reader(image_data)
+            with self.IGlobal.readerLock:
+                text = self.IGlobal.reader.read(image_data)
+
+            if isinstance(text, list):
+                text = ' '.join(text)
 
             # Read the tables by OCR model , invoke writeTable
             self.extract_tables_from_image(image_data, self.instance.writeTable)
 
             # If we have a listener on our text lane, write the text to it
             if self.instance.hasListener('text'):
-                self.writeText(text)
+                self.instance.writeText(text)
 
             # If we have a listener on our documents lane, create a new
             # text document and add it to the list
