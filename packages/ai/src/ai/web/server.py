@@ -49,6 +49,7 @@ Usage::
 """
 
 import os
+import secrets
 import signal
 import sys
 import threading
@@ -96,6 +97,20 @@ from ai.logo import LOGO as logo
 def _is_restorable_signal_handler(handler: Any) -> bool:
     """Return True when Python's signal.signal() accepts the saved handler."""
     return handler in (signal.SIG_IGN, signal.SIG_DFL) or callable(handler)
+
+
+def _ensure_signing_key() -> None:
+    """Provision an ephemeral ``RR_SIGNING_KEY`` if the operator set none.
+
+    The key signs FileStore fetch URLs (``FileStore.get_url`` -> ``/task/fetch``)
+    on the local filesystem backend; cloud backends presign natively and never
+    read it. An operator-provided value always wins. The generated key lives
+    only in this process environment (inherited by task subprocesses), so
+    signed URLs stop verifying after a server restart — acceptable at the
+    1-hour URL TTL cap, and it means zero configuration for local use.
+    """
+    if not os.environ.get('RR_SIGNING_KEY'):
+        os.environ['RR_SIGNING_KEY'] = secrets.token_hex(32)
 
 
 def _build_signal_safe_capture(server: uvicorn.Server):
@@ -452,6 +467,14 @@ class WebServer:
                 os.environ['RR_BASE_URL'] = f'{self._base_url_scheme}://{self._base_url_host}:{port}'
             # When port is 0 the OS assigns the real port at bind time;
             # RR_BASE_URL will be set lazily by get_port() once resolved.
+
+        # Self-provision the FileStore URL-signing secret alongside RR_BASE_URL,
+        # so local (filesystem-backend) deployments work with zero configuration.
+        # Task subprocesses inherit it from this environment, the same channel
+        # RR_BASE_URL already relies on. Ephemeral by design: signed URLs die on
+        # restart, which is acceptable at the 1-hour TTL cap. Cloud backends
+        # (S3/Azure) presign natively and never read this.
+        _ensure_signing_key()
 
         # Setup the Uvicorn configuration
         config = uvicorn.Config(
