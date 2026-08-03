@@ -105,8 +105,7 @@ class ServicesMixin(DAPClient):
         Validate a pipeline configuration.
 
         Sends the pipeline to the server for structural validation, checking
-        component compatibility, connection integrity, and the resolved
-        execution chain.
+        required fields and component references.
 
         Source resolution follows the same logic as :meth:`use`:
         1. Explicit ``source`` parameter (if provided)

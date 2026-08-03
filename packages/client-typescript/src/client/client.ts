@@ -986,8 +986,7 @@ export class RocketRideClient extends DAPClient {
 	 * Validate a pipeline configuration.
 	 *
 	 * Sends the pipeline to the server for structural validation, checking
-	 * component compatibility, connection integrity, and the resolved
-	 * execution chain.
+	 * required fields and component references.
 	 *
 	 * Source resolution follows the same logic as {@link use}:
 	 * 1. Explicit `source` option (if provided)
@@ -997,7 +996,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.pipeline - Pipeline configuration to validate
 	 * @param options.source - Optional override for the source component ID
 	 * @returns Promise resolving to validation result with errors, warnings,
-	 *          resolved component, and execution chain
+	 *          and resolved component
 	 * @throws Error if the server returns a validation error
 	 *
 	 * @example
