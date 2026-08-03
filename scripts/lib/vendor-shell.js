@@ -34,7 +34,7 @@
  *     .rocketride/shell) and the package is MISSING, fetches it so the
  *     following pnpm install succeeds. Never refreshes an existing
  *     install.
- *   vendorShell — explicit: the shell:update task uses it to refresh the
+ *   vendorShell — explicit: the client:update task uses it to refresh the
  *     package whether or not it is already installed.
  *
  * Host precedence: --shell=<url> (explicit) beats ROCKETRIDE_URI from
@@ -213,7 +213,7 @@ async function renameWithRetry(from, to) {
  * @param {boolean} [opts.install=true] - Run pnpm install after the swap.
  *   Pass false when the caller runs its own install right after.
  * @param {(msg: string) => void} [opts.log=console.log] - Progress sink
- *   (the shell:update task routes this into its listr output).
+ *   (the client:update task routes this into its listr output).
  * @returns {Promise<string>} The vendored package version.
  */
 async function vendorShell(root, host, opts = {}) {
@@ -262,7 +262,7 @@ async function vendorShell(root, host, opts = {}) {
  * Automatic injection: fetches the vendored shell before the caller's
  * pnpm install, but ONLY when a workspace member actually depends on it
  * and .rocketride/shell is missing. An existing install is never touched
- * — refreshing is explicit (builder shell:update).
+ * — refreshing is explicit (builder client:update).
  *
  * @param {string} root - Repository root.
  * @param {object} [options] - Parsed builder options (reads options.shell).
