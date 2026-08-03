@@ -25,7 +25,7 @@
  *
  * Replaces the local `scripts/` directory with the copy from the upstream
  * rocketride-server repository at a given branch
- * (`builder builder:scripts --branch=<branch>`).
+ * (`builder builder:update [branch]`, default develop).
  *
  * Intentionally depends only on Node built-ins (fs, path, child_process):
  * the whole point of the command is to repair a scripts/ tree that may be
@@ -67,19 +67,6 @@ function runGit(args, cwd) {
 	}
 }
 
-/**
- * Resolves the upstream repository's default branch (its HEAD symref) —
- * what `builder:scripts` uses when no --branch is given.
- *
- * @returns {string} The default branch name.
- */
-function defaultBranch() {
-	const out = execFileSync('git', ['ls-remote', '--symref', UPSTREAM_URL, 'HEAD'], { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
-	const m = /^ref: refs\/heads\/(\S+)\s+HEAD/m.exec(out);
-	if (!m) throw new Error(`cannot determine the default branch of ${UPSTREAM_URL} — pass --branch=<branch>`);
-	return m[1];
-}
-
 // =============================================================================
 // SELF-UPDATE
 // =============================================================================
@@ -95,7 +82,7 @@ function defaultBranch() {
  *
  * When root is the running builder's own repository, the swap replaces
  * code this process may not have require()d yet — the caller must not
- * load further modules afterwards (the builder:scripts task is designed
+ * load further modules afterwards (the builder:update task is designed
  * to be the run's final work for exactly that reason).
  *
  * A root without an existing scripts/ directory is allowed — the fetched
@@ -103,20 +90,17 @@ function defaultBranch() {
  * repository that carries a copy of the builder.
  *
  * @param {string} root - Repository root (the directory containing scripts/).
- * @param {string} [branch] - Upstream branch to fetch scripts/ from;
- *   defaults to the upstream repository's default branch.
+ * @param {string} [branch='develop'] - Upstream branch to fetch scripts/
+ *   from; develop is the integration branch.
  * @param {object} [opts]
  * @param {(msg: string) => void} [opts.log=console.log] - Progress sink
- *   (the builder:scripts task routes this into its listr output).
+ *   (the builder:update task routes this into its listr output).
  */
 async function selfUpdate(root, branch, opts = {}) {
 	const { log = console.log } = opts;
 
-	// step: no branch given — follow the upstream repo's default branch
-	if (!branch) {
-		log(`Resolving the default branch of ${UPSTREAM_URL} ...`);
-		branch = defaultBranch();
-	}
+	// step: no branch given — the integration branch is the default
+	if (!branch) branch = 'develop';
 	// Fail before cloning if the target root itself is missing (a typoed
 	// --path would otherwise surface as a confusing rename error).
 	if (!fs.existsSync(root)) {

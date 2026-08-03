@@ -44,8 +44,7 @@
  * built-ins-only): in a standalone repo the workspace cannot even
  * `pnpm install` until .rocketride/shell exists — every app depends on
  * it as file:../../.rocketride/shell — so the automatic path must run
- * BEFORE the builder's dependency bootstrap, exactly like
- * `builder inject:scripts`.
+ * BEFORE the builder's dependency bootstrap.
  */
 const fs = require('fs');
 const path = require('path');
@@ -281,4 +280,5 @@ async function ensureVendoredShell(root, options = {}) {
 	return true;
 }
 
-module.exports = { vendorShell, ensureVendoredShell };
+// renameWithRetry is shared with copy-scripts.js — same Windows swap dance.
+module.exports = { vendorShell, ensureVendoredShell, renameWithRetry };
