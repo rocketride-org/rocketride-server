@@ -345,25 +345,29 @@ class NativeOpenAIResponsesAdapter:
                     if delta:
                         parts.append(delta)
                         yield Event('text', delta)
-                elif etype in ('response.completed', 'response.failed', 'response.error'):
+                elif etype in ('response.completed', 'response.incomplete', 'response.failed', 'response.error'):
                     resp = getattr(event, 'response', None)
-                    # Terminal events (success OR failure) can carry usage; a failed
-                    # request may already be chargeable, so read it either way.
+                    # Terminal events (success, incomplete, OR failure) can carry usage;
+                    # a truncated or failed request may already be chargeable, so read it.
                     u = getattr(resp, 'usage', None) if resp is not None else None
                     if u is not None:
                         input_tokens = int(getattr(u, 'input_tokens', 0) or 0)
                         output_tokens = int(getattr(u, 'output_tokens', 0) or 0)
                         # cached_tokens are part of input_tokens; split them out.
                         cache_read = int(getattr(getattr(u, 'input_tokens_details', None), 'cached_tokens', 0) or 0)
-                    if etype == 'response.completed':
+                    if etype in ('response.failed', 'response.error'):
+                        self.finish_reason = 'error'
+                    elif etype == 'response.incomplete':
+                        # Separate terminal event (e.g. max_output_tokens); map its reason.
+                        details = getattr(resp, 'incomplete_details', None)
+                        self.finish_reason = (getattr(details, 'reason', None) if details else None) or 'length'
+                    else:  # response.completed
                         status = getattr(resp, 'status', None) if resp is not None else None
                         if status == 'incomplete':
                             details = getattr(resp, 'incomplete_details', None)
                             self.finish_reason = (getattr(details, 'reason', None) if details else None) or 'length'
                         else:
                             self.finish_reason = 'stop' if status == 'completed' else (status or 'stop')
-                    else:
-                        self.finish_reason = 'error'
         finally:
             closer = getattr(stream, 'close', None)
             if callable(closer):

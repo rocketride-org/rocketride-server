@@ -166,3 +166,35 @@ def test_reports_usage_on_failed_terminal_event():
     assert counters.get('llm_input_tokens') == 26
     assert counters.get('llm_cache_read_tokens') == 4
     assert counters.get('llm_output_tokens') == 7
+
+
+def test_reports_usage_on_incomplete_terminal_event():
+    """response.incomplete is a distinct terminal event: map its reason and record usage."""
+    metrics.reset()
+
+    class _Cached:
+        cached_tokens = 2
+
+    class _Usage:
+        input_tokens = 20
+        output_tokens = 100
+        input_tokens_details = _Cached()
+
+    class _IncompleteResp:
+        usage = _Usage()
+        incomplete_details = _Details('max_output_tokens')
+
+    events = [
+        _Ev('response.output_text.delta', delta='partial'),
+        _Ev('response.incomplete', response=_IncompleteResp()),
+    ]
+    adapter = NativeOpenAIResponsesAdapter(_Chat(events))
+    out = list(adapter.stream('q'))
+
+    assert adapter.finish_reason == 'max_output_tokens'
+    assert out[-1].type == 'done'
+    counters = metrics.report()['counters']
+    # input 20 includes 2 cached -> fresh 18 + cache_read 2
+    assert counters.get('llm_input_tokens') == 18
+    assert counters.get('llm_cache_read_tokens') == 2
+    assert counters.get('llm_output_tokens') == 100
