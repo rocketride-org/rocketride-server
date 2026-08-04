@@ -17,6 +17,9 @@ feeds ``image/png``, which ``_determine_lane`` routes to the ``image`` lane:
 ``IInstance.py`` is loaded by file path under a synthetic parent package so its
 ``from .IGlobal import IGlobal`` resolves without the engine venv.
 
+Only ``numpy``/``PIL`` (unused by the code path under test) and ``IGlobal``
+(whose import bootstraps the OCR node's own heavy dependencies) stay stubbed.
+
 Usage:
     ./builder.cmd nodes:test --pytest-pattern=ocr --verbose
 """
@@ -32,55 +35,17 @@ from typing import Iterator
 
 import pytest
 
+from ai.common.schema import Doc
+
 _PKG = '_ocr_pkg_under_test'
 
 _STUB_NAMES = (
-    'rocketlib',
-    'ai',
-    'ai.common',
-    'ai.common.schema',
-    'ai.common.avi',
-    'ai.common.avi.descriptor',
     'numpy',
     'PIL',
     'PIL.Image',
     _PKG,
     f'{_PKG}.IGlobal',
 )
-
-
-class _AVI_ACTION:
-    BEGIN, WRITE, END = 0, 1, 2
-
-
-class _Entry:
-    pass
-
-
-class _Doc:
-    """Stand-in for ``ai.common.schema.Doc``."""
-
-    def __init__(self, type: str, page_content: str, metadata: dict | None = None) -> None:
-        self.type = type
-        self.page_content = page_content
-        self.metadata = metadata or {}
-
-    def model_copy(self) -> '_Doc':
-        return _Doc(self.type, self.page_content, dict(self.metadata))
-
-
-class _IInstanceBase:
-    """Stand-in for ``rocketlib.IInstanceBase``.
-
-    ``writeText`` mirrors the real inbound handler, which is a ``pass`` body —
-    here it records instead, so a test can prove it is not used as an emitter.
-    """
-
-    def writeText(self, text) -> None:
-        self.inbound_writeText.append(text)
-
-    def preventDefault(self) -> str:
-        return 'prevented'
 
 
 def _install_min_stubs() -> None:
@@ -90,18 +55,6 @@ def _install_min_stubs() -> None:
             setattr(m, k, v)
         sys.modules[name] = m
 
-    _mk('rocketlib', IInstanceBase=_IInstanceBase, AVI_ACTION=_AVI_ACTION, Entry=_Entry)
-
-    ai = types.ModuleType('ai')
-    ai.__path__ = []
-    sys.modules['ai'] = ai
-    for name in ('ai.common', 'ai.common.avi'):
-        m = types.ModuleType(name)
-        m.__path__ = []
-        sys.modules[name] = m
-
-    _mk('ai.common.schema', Doc=_Doc)
-    _mk('ai.common.avi.descriptor', rename_ext=lambda metadata, ext: metadata)
     _mk('numpy', array=lambda *a, **kw: None)
 
     pil = types.ModuleType('PIL')
@@ -192,13 +145,16 @@ PNG_BYTES = b'\x89PNG\r\n\x1a\n-not-a-real-png-but-opaque-to-the-node'
 def _make(lanes: tuple[str, ...] = ('text',), result='hello world'):
     node = IInstance.__new__(IInstance)
     node.inbound_writeText = []
+    # IInstanceBase.writeText/preventDefault: overridden, engine dispatch is out of scope here.
+    node.writeText = node.inbound_writeText.append
+    node.preventDefault = lambda: 'prevented'
     node.IGlobal = _StubIGlobal(_StubReader(result))
     node.instance = _StubInstance(lanes)
     return node
 
 
-def _doc() -> _Doc:
-    return _Doc(type='Image', page_content=base64.b64encode(PNG_BYTES).decode())
+def _doc() -> Doc:
+    return Doc(type='Image', page_content=base64.b64encode(PNG_BYTES).decode())
 
 
 class TestReaderIsInvokedCorrectly:
@@ -256,4 +212,4 @@ class TestDocumentsLane:
     def test_rejects_non_image_documents(self) -> None:
         node = _make()
         with pytest.raises(ValueError, match='must be "image"'):
-            node.writeDocuments([_Doc(type='Document', page_content='')])
+            node.writeDocuments([Doc(type='Document', page_content='')])
