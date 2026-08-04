@@ -1,4 +1,0 @@
-[submodule "apps/stock"]
-	path = apps/stock
-	url = https://github.com/rocketride-org/rocketride-apps.git
-	branch = develop
