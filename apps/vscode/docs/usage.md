@@ -89,3 +89,29 @@ When enabled, the Copilot and Cursor integrations provide:
 - Pipeline optimization tips.
 
 Enable these in settings under `rocketride.integrations.copilot` and `rocketride.integrations.cursor`.
+
+### Auto-Detected Integrations And The Consent Prompt
+
+With `rocketride.integrations.autoAgentIntegration` on (the default), RocketRide checks
+whether a coding agent is actually present — the `GitHub.copilot` or `GitHub.copilot-chat`
+extension installed, the editor being Cursor or Windsurf, or Claude Code (its
+`anthropic.claude-code` extension, or a `~/.claude` config directory). Merely running VS
+Code no longer counts as having Copilot.
+
+When one is detected, RocketRide asks before writing anything into the workspace, because
+having an agent tool installed is not on its own permission to modify every project you
+open. The prompt offers three choices:
+
+- **Install** — create `.rocketride/docs/`, add the entries the extension manages
+  (`.rocketride/` and `.env`) to `.gitignore`, and write the agent stub files now.
+- **Not now** — write nothing this time; you will be asked again on the next activation.
+- **Don't ask again** — write nothing, and never auto-install again.
+
+The answer is stored globally, so you are asked at most once across all workspaces rather
+than once per project. To change your mind later, turn `autoAgentIntegration` off, or use
+one of the manual paths below.
+
+Manual opt-in is unaffected by the prompt and installs immediately, since checking a box or
+running a command is already explicit consent: tick an integration under
+`rocketride.integrations.*` in Settings, or run **RocketRide: Install Agent Docs** from the
+Command Palette.
