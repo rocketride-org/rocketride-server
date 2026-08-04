@@ -62,7 +62,7 @@ const APP_ROOT = path.resolve(SCRIPTS_DIR, '..'); // packages/shell
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const REPO_ROOT = path.resolve(APP_ROOT, '..', '..'); // rocketride-server
 const CONTRACT_TSCONFIG = path.join(APP_ROOT, 'tsconfig.contract.json');
-const SHARED_UI_TSCONFIG = path.join(REPO_ROOT, 'packages', 'shared-ui', 'tsconfig.json');
+const SHARED_UI_TSCONFIG = path.join(REPO_ROOT, 'apps', 'shared', 'tsconfig.json');
 // The contract store lives INSIDE the shell package (folded from the
 // former packages/shell-api — one owner, one consumer, zero external edges).
 const SHELL_API_DIR = path.join(APP_ROOT, 'contract');
@@ -372,9 +372,9 @@ function cleanup() {
  *   (regen mode passes one because its destructive reset has already run).
  */
 function preCheck(failureNote) {
-	log('Pre-check: tsc --noEmit (shared-ui + shell contract)...');
+	log('Pre-check: tsc --noEmit (apps/shared + shell contract)...');
 	for (const [label, tsconfig] of [
-		['shared-ui', SHARED_UI_TSCONFIG],
+		['apps/shared', SHARED_UI_TSCONFIG],
 		['shell (contract)', CONTRACT_TSCONFIG],
 	]) {
 		const r = runNodeBin(TSC.binPath, ['--noEmit', '-p', tsconfig], REPO_ROOT);

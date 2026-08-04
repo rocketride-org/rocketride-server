@@ -52,11 +52,12 @@ import { GALLERY_ENTRIES, GALLERY_GROUPS } from './registry';
 import { GALLERY_TOKEN_USAGE } from './tokenUsage.generated';
 import type { IGalleryDemoProps, IGalleryEntry, IGalleryPropRow, KnobValue, KnobValues } from './galleryTypes';
 
-// Markdown doc renderer — the chat module's MarkdownRenderer, loaded lazily
-// so the gallery pulls the markdown/syntax-highlighter bundle only when an
-// entry with a `doc` body is first shown.
+// Markdown doc renderer — the shell surface's MarkdownRenderer, loaded
+// lazily. In MF remotes the dynamic import resolves through the share
+// scope (the host's already-loaded shell instance), so this defers only
+// the gallery's own use, not a second copy of the bundle.
 const MarkdownDoc = React.lazy(() =>
-	import('../../chat/components/MarkdownRenderer').then((mod) => ({ default: mod.MarkdownRenderer })),
+	import('shell').then((mod) => ({ default: mod.MarkdownRenderer })),
 );
 
 // =============================================================================

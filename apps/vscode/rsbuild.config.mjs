@@ -24,7 +24,7 @@
 /* global process */
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
-import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
+import { pluginRocketrideIcons } from '../shared/scripts/rsbuild-plugin-icons.mjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -69,18 +69,31 @@ export default defineConfig({
 	},
 
 	resolve: {
+		// prefer-alias: rsbuild's default lets tsconfig 'paths' beat
+		// resolve.alias — which routed the bundler into the package's
+		// .d.ts (types-only targets) and panicked rspack. The aliases
+		// below are the RUNTIME resolutions and must win.
+		aliasStrategy: 'prefer-alias',
 		alias: {
 			// shared is a STATIC library the webviews compile from source, so
 			// its whole tree stays reachable via 'shared/<group>' deep specs.
-			shared: path.resolve(__dirname, '../../shared/src'),
-			// shell is the CONTRACT, satisfied by the vendored shell package
-			// ("shell": "file:../../.rocketride/shell" in package.json,
-			// extracted from the server's shell.tgz — per pack-shell,
-			// static hosts bundle its compiled code). No alias: ordinary
-			// node_modules resolution applies the package's exports map,
-			// which only exposes the barrel and the sanctioned CSS/token
-			// entries — deep shell paths fail the build, the same
-			// enforcement out-of-repo consumers get from shell.d.ts.
+			shared: path.resolve(__dirname, '../shared/src'),
+			// shell is the CONTRACT, satisfied by the vendored/materialized
+			// shell package ("shell": "link:../../.rocketride/shell") whose
+			// compiled dist the webviews bundle. The barrel and the client
+			// subpath are aliased EXACTLY ($) to the package's runtime dist:
+			// tsconfig 'paths' point the same specifiers at the package's
+			// .d.ts for TYPES, and without these aliases the bundler follows
+			// those paths too and tries to bundle a declaration file (rspack
+			// panics). Deep shell paths carry no alias and still fall through
+			// to the package's exports map, keeping barrel-only enforcement.
+			// The SDK's TransportWebSocket has a Node-only dynamic import('ws')
+			// fallback (browsers use the native WebSocket; the branch never
+			// executes in a webview). Stub it so rspack doesn't try to
+			// resolve a Node dependency into a browser bundle.
+			ws: false,
+			'shell/client$': path.resolve(__dirname, '../../.rocketride/shell/dist/client.js'),
+			'shell$': path.resolve(__dirname, '../../.rocketride/shell/dist/index.js'),
 			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
 		},

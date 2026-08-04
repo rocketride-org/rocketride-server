@@ -22,12 +22,11 @@
 // =============================================================================
 
 /**
- * Ambient module declarations for third-party libraries and asset imports.
- * These declarations allow TypeScript to understand non-TS imports (images, SVGs, etc.)
- * and untyped npm packages used throughout the shared-ui package.
+ * Ambient module declarations for third-party libraries and asset imports
+ * used by the shell package. These declarations allow TypeScript to
+ * understand non-TS imports (images, SVGs, CSS) and build-time seams that
+ * the bundler resolves.
  */
-
-/** Ambient declaration for the `d3` data visualization library. */
 
 /**
  * Ambient declarations for Fontsource self-hosted font packages. These are
@@ -43,14 +42,14 @@ declare module '*.css' {}
 
 /**
  * SVG imports default to React components via SVGR (see
- * `packages/shared-ui/build/rsbuild-plugin-icons.mjs`). The
- * `auto-currentcolor` svgo plugin auto-rewrites monochrome SVGs to use
- * `currentColor` so they inherit the theme color when rendered inline.
+ * `apps/shared/scripts/rsbuild-plugin-icons.mjs`). The `auto-currentcolor`
+ * svgo plugin auto-rewrites monochrome SVGs to use `currentColor` so they
+ * inherit the theme color when rendered inline.
  */
 declare module '*.svg' {
 	import type * as React from 'react';
-	// SVGR is configured with `ref: true` (see scripts/rsbuild-plugin-icons.mjs),
-	// so the generated components forward a ref to the underlying <svg>.
+	// SVGR is configured with `ref: true` (see the icons plugin), so the
+	// generated components forward a ref to the underlying <svg>.
 	const Component: React.ForwardRefExoticComponent<
 		React.SVGProps<SVGSVGElement> & React.RefAttributes<SVGSVGElement>
 	>;
@@ -84,12 +83,6 @@ declare module '*.jpeg' {
 /** Allows importing `.gif` files as string URLs (handled by the bundler). */
 declare module '*.gif' {
 	const content: string;
-	export default content;
-}
-
-/** Allows importing assets from the shared assets directory as unknown values. */
-declare module 'shared/assets/*' {
-	const content: unknown;
 	export default content;
 }
 

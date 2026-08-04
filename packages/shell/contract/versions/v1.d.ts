@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 // =============================================================================
-// FROZEN shell-api contract — ShellApiV0 — never edit by hand
+// FROZEN shell-api contract — ShellApiV1 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-04T05:58:37.003Z
+// Generated:     2026-08-04T06:46:14.779Z
 // Source commit: f8bdd8f9e534c45486ba80cdcd7f74ec8af47794
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
@@ -10173,6 +10173,137 @@ export interface IGridConfigClearDetail {
  * @returns A persistence adapter for one or more DataGrids.
  */
 export declare function createMessageGridPersistence(): IDataGridPersistence;
+/** A single message in the conversation. */
+export interface ChatMessage {
+    /** Unique monotonic ID — never collides even within the same millisecond. */
+    id: number;
+    /** Raw text content (may contain markdown). */
+    text: string;
+    /** Who produced the message. */
+    sender: "user" | "bot" | "system" | "status";
+    /** Formatted time string, e.g. "14:32". */
+    timestamp: string;
+    /** Pipeline result key — shown as a small label below bot messages. */
+    resultKey?: string;
+    /** SSE event type — used to identify thinking-group status messages. */
+    sseType?: string;
+    /** Optional metadata line (e.g. "2,340 tokens · 1.8s") shown under the bubble content. */
+    meta?: string;
+    /** When true, the message renders as an in-thread error Banner instead of a bubble. */
+    isError?: boolean;
+}
+/** Props for the top-level ChatView component. */
+export interface IChatViewProps {
+    /** Current message list managed by the host via useChatMessages. */
+    messages: ChatMessage[];
+    /** Whether the assistant is currently composing a response. */
+    isTyping: boolean;
+    /** Whether the underlying WebSocket client is connected. */
+    isConnected: boolean;
+    /** Called when the user submits a message. */
+    onSend: (text: string) => void;
+    /** Placeholder shown in the input when idle. Defaults to "Ask anything…". */
+    placeholder?: string;
+    /** Title for the EmptyState shown when the conversation has no messages. */
+    emptyTitle?: string;
+    /** Description for the EmptyState shown when the conversation has no messages. */
+    emptyDescription?: string;
+    /** Optional node rendered before the input field (reserved for future attachments). */
+    leadingInputSlot?: React$1.ReactNode;
+}
+/** Options for useChatMessages. */
+export interface UseChatMessagesOptions {
+    /** System message shown after clearMessages(). */
+    welcomeMessage?: string;
+    /** Seed messages to restore a previous conversation (preserves sender, timestamp, etc.). */
+    initialMessages?: ChatMessage[];
+}
+/**
+ * Renders the chat surface (message thread + composer).
+ *
+ * @param props - {@link IChatViewProps}. The composer is disabled whenever
+ *   `isConnected` is false; `emptyTitle` / `emptyDescription` configure the
+ *   EmptyState for new conversations; `leadingInputSlot` is rendered before the
+ *   input (reserved for future attachments).
+ * @returns The chat view element.
+ */
+export declare const ChatView: React$1.FC<IChatViewProps>;
+interface MessageListProps {
+    messages: ChatMessage[];
+    isTyping: boolean;
+    /** Title for the EmptyState shown when there are no messages. */
+    emptyTitle?: string;
+    /** Description for the EmptyState shown when there are no messages. */
+    emptyDescription?: string;
+}
+/**
+ * Renders the scrollable message thread with scroll-locked autoscroll.
+ *
+ * @param props - {@link MessageListProps}.
+ * @returns The thread element (or an EmptyState when empty).
+ */
+export declare const MessageList: React$1.FC<MessageListProps>;
+interface MarkdownRendererProps {
+    content: string;
+}
+export declare const MarkdownRenderer: React$1.FC<MarkdownRendererProps>;
+interface UseChatMessagesReturn {
+    messages: ChatMessage[];
+    isTyping: boolean;
+    sendMessage: (text: string, client: any, authToken: string) => Promise<void>;
+    clearMessages: () => void;
+    addSystemMessage: (text: string) => void;
+}
+/**
+ * Manages chat message state and RocketRide API communication.
+ *
+ * IMPORTANT: always use the internal updateMessages helper — never call
+ * setMessages directly. Direct setMessages calls bypass the messagesRef
+ * sync and will cause sendMessage to build history from a stale snapshot.
+ */
+export declare function useChatMessages({ welcomeMessage, initialMessages }?: UseChatMessagesOptions): UseChatMessagesReturn;
+/** Props for the {@link ConnectionCard} component. */
+export interface IConnectionCardProps {
+    /** Optional source icon (rendered at 30px, inherits the card's icon colour). */
+    icon?: React$1.ReactNode;
+    /** Source name. */
+    name: string;
+    /** Source address / endpoint. */
+    address: string;
+    /** StatusBadge variant for the source's state. */
+    status: Extract<StatusVariant, "success" | "muted" | "error">;
+    /** StatusBadge label, e.g. "Connected" / "Disconnected". */
+    statusLabel: string;
+    /** When true, the card carries the brand border and brand icon colour. */
+    connected?: boolean;
+    /** Edit action — reveals the pencil icon on hover. */
+    onEdit?: () => void;
+    /** Delete action — reveals the trash icon on hover. */
+    onDelete?: () => void;
+    /** Select action for the whole card. */
+    onClick?: () => void;
+}
+/** Props for the {@link ConnectionCardAdd} component. */
+export interface IConnectionCardAddProps {
+    /** Label beneath the plus glyph, e.g. "New Connection". */
+    label: string;
+    /** Fired when the add tile is activated. */
+    onClick: () => void;
+}
+/**
+ * Renders a connection / source card.
+ *
+ * @param props - {@link IConnectionCardProps}.
+ * @returns The card element.
+ */
+export declare function ConnectionCard({ icon, name, address, status, statusLabel, connected, onEdit, onDelete, onClick, }: IConnectionCardProps): React$1.ReactElement;
+/**
+ * Renders the dashed "add a source" tile.
+ *
+ * @param props - {@link IConnectionCardAddProps}.
+ * @returns The add-tile element.
+ */
+export declare function ConnectionCardAdd({ label, onClick }: IConnectionCardAddProps): React$1.ReactElement;
 /**
  * Debounce a value: the returned value updates only after `delayMs` of
  * silence following the last change.
@@ -11251,4 +11382,4 @@ export declare function getShellApi(): ShellApiShape;
 export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData, };
 export {};
 // ===== END FROZEN BUNDLE =====
-export type ShellApiV0 = ShellApiShape;
+export type ShellApiV1 = ShellApiShape;

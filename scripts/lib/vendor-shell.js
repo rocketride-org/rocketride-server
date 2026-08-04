@@ -294,5 +294,37 @@ async function ensureVendoredShell(root, options = {}) {
 	return true;
 }
 
+/**
+ * Platform-repo stub: writes a minimal placeholder package at
+ * .rocketride/shell so the workspace's link: dependencies resolve on a
+ * fresh clone — BEFORE shell:build has ever produced the real package.
+ *
+ * pnpm only needs the link target to exist with a parseable manifest;
+ * nothing compiles against the stub (ui:build orders shell:build before
+ * every app, and the first shell:build replaces it via pack-shell's
+ * materialize step — the junction sees the swap instantly, no reinstall).
+ *
+ * @param {string} root - Repository root (the platform repo).
+ * @returns {boolean} True when a stub was written.
+ */
+function ensureShellStub(root) {
+	// step: cheap exits — real package (or a previous stub) already
+	// present, or nobody links to it
+	const dir = path.join(root, '.rocketride', 'shell');
+	if (fs.existsSync(path.join(dir, 'package.json'))) return false;
+	if (!workspaceNeedsShell(root)) return false;
+
+	// step: the minimal manifest pnpm needs to create the link
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(path.join(dir, 'package.json'), `${JSON.stringify({
+		name: 'shell',
+		version: '0.0.0-stub',
+		private: true,
+	}, null, '	')}
+`);
+	console.log('Vendored shell missing — wrote the placeholder package (the first shell:build materializes the real one)');
+	return true;
+}
+
 // renameWithRetry is shared with copy-scripts.js — same Windows swap dance.
-module.exports = { vendorShell, ensureVendoredShell, renameWithRetry };
+module.exports = { vendorShell, ensureVendoredShell, ensureShellStub, renameWithRetry };

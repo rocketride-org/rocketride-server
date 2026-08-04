@@ -17,7 +17,7 @@ import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 // so it must run SVGR itself (the shell host's copy doesn't process rocket-ui's
 // modules). Without this the SVGs bundle as asset URLs, not React components, and
 // no node icons render. Same plugin apps/vscode and packages/shell use.
-import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
+import { pluginRocketrideIcons } from '../shared/scripts/rsbuild-plugin-icons.mjs';
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf-8'));
 const moduleId = (pkg.appManifest?.id ?? 'unknown').replace(/[^a-zA-Z0-9_$]/g, '_');
@@ -61,13 +61,16 @@ export default defineConfig(() => {
 		],
 		resolve: {
 			alias: {
-				shared: path.resolve(__dirname, '../../shared/src'),
+				shared: path.resolve(__dirname, '../shared/src'),
 				// The vendored shell package (compiled): only a fallback — at
 				// runtime the host's MF share scope provides 'shell'.
 				'shell$': path.resolve(__dirname, '../../.rocketride/shell/dist/index.js'),
 			},
 		},
-		server: { port: 3010 },
+		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
+		// allowlist is possible; declaring it also stops the MF plugin injecting
+		// its own wildcard defaults (and warning about it).
+		server: { port: 3010, cors: { origin: '*' } },
 		source: {
 			entry: {
 				index: './src/index.ts',

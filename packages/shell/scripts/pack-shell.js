@@ -40,7 +40,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execSync } = require('child_process');
 
 // =============================================================================
 // PATHS + TOOLING
@@ -74,6 +74,23 @@ function newestFrozenContract() {
 		.sort((a, b) => b - a);
 	if (versions.length === 0) throw new Error(`pack-shell: no frozen shell-api versions in ${VERSIONS_DIR} — run ./builder shell:freeze first`);
 	return { file: path.join(VERSIONS_DIR, `v${versions[0]}.d.ts`), version: versions[0] };
+}
+
+/**
+ * Copies the in-repo SDK's publish file set (manifest + dist) into a
+ * node_modules/rocketride directory — used once when staging the package
+ * and again to RE-SEED the materialized copy after its scoped install
+ * (which rebuilds node_modules and would otherwise drop the bundled SDK).
+ *
+ * @param {string} sdkRoot - packages/client-typescript.
+ * @param {string} vendorDir - Target node_modules/rocketride directory.
+ */
+function vendorSdkInto(sdkRoot, vendorDir) {
+	fs.mkdirSync(vendorDir, { recursive: true });
+	for (const f of ['package.json', 'README.md', 'LICENSE']) {
+		if (fs.existsSync(path.join(sdkRoot, f))) fs.copyFileSync(path.join(sdkRoot, f), path.join(vendorDir, f));
+	}
+	fs.cpSync(path.join(sdkRoot, 'dist'), path.join(vendorDir, 'dist'), { recursive: true, force: true });
 }
 
 /**
@@ -148,12 +165,7 @@ async function main() {
 	const sdkRoot = path.join(REPO_ROOT, 'packages', 'client-typescript');
 	if (!fs.existsSync(path.join(sdkRoot, 'dist', 'types', 'index.d.ts'))) throw new Error('pack-shell: packages/client-typescript/dist is missing — run ./builder client-typescript:build first');
 	const sdkPkg = JSON.parse(fs.readFileSync(path.join(sdkRoot, 'package.json'), 'utf8'));
-	const vendorDir = path.join(STAGE_DIR, 'node_modules', 'rocketride');
-	fs.mkdirSync(vendorDir, { recursive: true });
-	for (const f of ['package.json', 'README.md', 'LICENSE']) {
-		if (fs.existsSync(path.join(sdkRoot, f))) fs.copyFileSync(path.join(sdkRoot, f), path.join(vendorDir, f));
-	}
-	fs.cpSync(path.join(sdkRoot, 'dist'), path.join(vendorDir, 'dist'), { recursive: true });
+	vendorSdkInto(sdkRoot, path.join(STAGE_DIR, 'node_modules', 'rocketride'));
 
 	// step: craft the published manifest from the workspace one — same name
 	// and version, real deps only, exports locked to the barrel + sanctioned
@@ -203,7 +215,7 @@ async function main() {
 	// does the packing — its packlist is the reference implementation of
 	// bundleDependencies, which carries node_modules/rocketride into the tgz.
 	fs.mkdirSync(TGZ_DIR, { recursive: true });
-	execFileSync('npm', ['pack', '--pack-destination', TGZ_DIR], { cwd: STAGE_DIR, stdio: 'pipe', shell: process.platform === 'win32' });
+	execSync(`npm pack --pack-destination "${TGZ_DIR}"`, { cwd: STAGE_DIR, stdio: 'pipe' });
 	const packed = fs.readdirSync(TGZ_DIR).find((f) => /^shell-.*\.tgz$/.test(f));
 	if (!packed) throw new Error('pack-shell: npm pack produced no shell tarball');
 	fs.rmSync(path.join(TGZ_DIR, 'shell.tgz'), { force: true });
@@ -211,6 +223,90 @@ async function main() {
 
 	const size = (fs.statSync(path.join(TGZ_DIR, 'shell.tgz')).size / 1024).toFixed(0);
 	console.log(`pack-shell: shell.tgz (v${manifest.version}, contract v${frozen.version}, ${size} KB) -> ${TGZ_DIR}`);
+
+	// =========================================================================
+	// MATERIALIZE — the repo's own .rocketride/shell (the link: target)
+	// =========================================================================
+
+	// step: the LOCAL copy's manifest drops the rocketride entries — its SDK
+	// is the PHYSICAL vendored directory, and listing the dependency would
+	// send the scoped install below to the registry for a version that may
+	// not be published yet. The tgz (already packed above) keeps the full
+	// manifest; only the materialized copy is adjusted.
+	delete manifest.dependencies['rocketride'];
+	delete manifest.bundleDependencies;
+	fs.writeFileSync(path.join(STAGE_DIR, 'package.json'), `${JSON.stringify(manifest, null, '\t')}\n`);
+
+	// step: swap the staged package into .rocketride/shell, old package (or
+	// the fresh-clone stub) held as backup until the new one is in place.
+	// Apps reach it through a link: junction that targets the PATH, so the
+	// swap is visible to every consumer instantly — no pnpm relink.
+	//
+	// FALLBACK: every app tsconfig points 'shell' into this directory, so an
+	// open editor's TypeScript server holds a directory watch on it — and a
+	// watched directory cannot be RENAMED on Windows (persistent EPERM). Its
+	// CHILDREN can still be deleted and written, so when the atomic swap is
+	// refused, the contents are synced in place instead. shell:bundle runs
+	// before every consumer in the build graph, so nothing reads mid-sync.
+	const { renameWithRetry } = require(path.join(REPO_ROOT, 'scripts', 'lib', 'vendor-shell.js'));
+	const rrDir = path.join(REPO_ROOT, '.rocketride');
+	const localDir = path.join(rrDir, 'shell');
+	const backupDir = path.join(rrDir, 'shell.backup');
+	fs.mkdirSync(rrDir, { recursive: true });
+	fs.rmSync(backupDir, { recursive: true, force: true });
+	const hadLocal = fs.existsSync(localDir);
+	try {
+		if (hadLocal) await renameWithRetry(localDir, backupDir);
+		try {
+			await renameWithRetry(STAGE_DIR, localDir);
+		} catch (err) {
+			if (hadLocal) await renameWithRetry(backupDir, localDir);
+			throw err;
+		}
+		fs.rmSync(backupDir, { recursive: true, force: true });
+	} catch (err) {
+		if (err.code !== 'EPERM' && err.code !== 'EBUSY') throw err;
+		console.log('pack-shell: .rocketride/shell is held open (editor watch) — syncing contents in place');
+		for (const entry of fs.readdirSync(localDir)) {
+			fs.rmSync(path.join(localDir, entry), { recursive: true, force: true });
+		}
+		for (const entry of fs.readdirSync(STAGE_DIR)) {
+			fs.cpSync(path.join(STAGE_DIR, entry), path.join(localDir, entry), { recursive: true });
+		}
+	}
+
+	// step: the package provides its own dependency tree — a scoped install
+	// against ITS manifest (no workspace: specs survive the crafting above),
+	// so d.ts type imports and the compiled dist resolve beside the package.
+	// --prefer-offline: resolution uses cached registry metadata when the
+	// store can satisfy the range — a single slow registry response must
+	// not stall every shell build (observed: one metadata GET taking 142s).
+	execSync('pnpm install --ignore-workspace --ignore-scripts --prefer-offline', { cwd: localDir, stdio: 'inherit' });
+
+	// step: re-seed the bundled SDK LAST — the install rebuilt node_modules
+	// and knows nothing of the physical rocketride copy
+	vendorSdkInto(sdkRoot, path.join(localDir, 'node_modules', 'rocketride'));
+
+	console.log(`pack-shell: materialized v${manifest.version} -> ${localDir} (scoped install + bundled SDK)`);
+
+	// step: OVERLAY materialization — the wrapping repo's apps carry the
+	// same canonical link:../../.rocketride/shell dependency, but they are
+	// MF remotes (import:false) that only ever read the package's TYPES:
+	// a lean real directory (manifest + declaration bundles + tokens, no
+	// dist, no scoped install) satisfies the link and the tsconfig paths
+	// without copying the 160MB scoped install per build. The bundled SDK
+	// IS vendored (a few MB): client.d.ts re-exports 'rocketride', which
+	// must resolve beside the package for the overlay apps' type-checkers.
+	const overlayRoot = path.dirname(DIST_ROOT);
+	if (path.resolve(overlayRoot) !== path.resolve(REPO_ROOT)) {
+		const overlayShell = path.join(overlayRoot, '.rocketride', 'shell');
+		fs.mkdirSync(overlayShell, { recursive: true });
+		for (const f of ['package.json', 'shell.d.ts', 'client.d.ts', 'tokens.css']) {
+			fs.copyFileSync(path.join(localDir, f), path.join(overlayShell, f));
+		}
+		vendorSdkInto(sdkRoot, path.join(overlayShell, 'node_modules', 'rocketride'));
+		console.log(`pack-shell: overlay types -> ${overlayShell}`);
+	}
 }
 
 main().catch((err) => {

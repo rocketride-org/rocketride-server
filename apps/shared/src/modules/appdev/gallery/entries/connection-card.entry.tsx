@@ -27,8 +27,8 @@
 /** Gallery entry for the ConnectionCard source card (Archetype C vocabulary). */
 
 import React from 'react';
-import { ConnectionCard, ConnectionCardAdd } from '../../../../components/connection-card/ConnectionCard';
-import type { IConnectionCardProps } from '../../../../components/connection-card/ConnectionCard';
+import { ConnectionCard, ConnectionCardAdd } from 'shell';
+import type { IConnectionCardProps } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Status label per status variant - what real callers render. */
@@ -65,7 +65,7 @@ const ConnectionCardDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	const connectedAttr = knobs.connected ? '\n\tconnected' : '';
-	return `import { ConnectionCard, ConnectionCardAdd } from 'shared/components/connection-card/ConnectionCard';
+	return `import { ConnectionCard, ConnectionCardAdd } from 'shell';
 
 <ConnectionCard
 	name="Production"
@@ -85,7 +85,7 @@ export const connectionCardEntry: IGalleryEntry = {
 	name: 'ConnectionCard',
 	group: 'content',
 	blurb: 'Source card: icon, name, address, StatusBadge, and hover-revealed edit/delete actions - plus the matching ConnectionCardAdd tile. The Archetype C source vocabulary.',
-	doc: `ConnectionCard is a STATIC library component, not part of the frozen shell surface: each app bundles its own copy via the \`shared/components/connection-card/ConnectionCard\` deep spec.`,
+	doc: `ConnectionCard is part of the shell surface: apps import it (with \`ConnectionCardAdd\`) from \`shell\`.`,
 	knobs: [
 		{ id: 'status', label: 'Status', kind: 'select', options: ['success', 'muted', 'error'], defaultValue: 'success' },
 		{ id: 'connected', label: 'Connected', kind: 'boolean', defaultValue: true },

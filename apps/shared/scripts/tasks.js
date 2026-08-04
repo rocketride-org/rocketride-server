@@ -35,7 +35,7 @@
  */
 const path = require('path');
 const { readdir } = require('node:fs/promises');
-const { execCommand } = require('../../scripts/lib');
+const { execCommand } = require('../../../scripts/lib');
 
 // packages/shared-ui (one level up from this file)
 const APP_ROOT = path.join(__dirname, '..');

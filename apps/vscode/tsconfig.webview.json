@@ -1,7 +1,11 @@
 {
 	"compilerOptions": {
 		"target": "ES2022",
-		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"lib": [
+			"ES2022",
+			"DOM",
+			"DOM.Iterable"
+		],
 		"module": "ESNext",
 		"moduleResolution": "bundler",
 		"jsx": "react-jsx",
@@ -14,11 +18,29 @@
 		"isolatedModules": true,
 		"noEmit": true,
 		"paths": {
-			"shared": ["../../shared/src/index.ts"],
-			"shared/*": ["../../shared/src/*"],
-			"shell": ["../../packages/shell/src/index.ts"],
-			"shell/themes/rocketride-default.css": ["../../packages/shell/src/themes/rocketride-default.css"]
+			"shared": [
+				"../shared/src/index.ts"
+			],
+			"shared/*": [
+				"../shared/src/*"
+			],
+			"shell": [
+				"../../.rocketride/shell/shell.d.ts"
+			],
+			"shell/client": [
+				"../../.rocketride/shell/client.d.ts"
+			],
+			"shell/themes/rocketride-default.css": [
+				"../../.rocketride/shell/dist/themes/rocketride-default.css"
+			]
 		}
 	},
-	"include": ["src/providers/views/**/*.ts", "src/providers/views/**/*.tsx", "src/providers/components/**/*.ts", "src/providers/components/**/*.tsx", "src/shared/**/*.ts", "src/assets/**/*.d.ts"]
+	"include": [
+		"src/providers/views/**/*.ts",
+		"src/providers/views/**/*.tsx",
+		"src/providers/components/**/*.ts",
+		"src/providers/components/**/*.tsx",
+		"src/shared/**/*.ts",
+		"src/assets/**/*.d.ts"
+	]
 }

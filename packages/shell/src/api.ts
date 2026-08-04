@@ -20,13 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/// <reference path="../../../packages/shared-ui/src/types/global.d.ts" />
+/// <reference path="./types/global.d.ts" />
 //
-// The reference above pulls shared-ui's ambient module declarations (d3, the
+// The reference above pulls the shell's ambient module declarations (the
 // `import.meta.webpackContext` typing, asset imports) into the program when
 // `./builder shell:freeze` bundles this entry with dts-bundle-generator, which
 // builds its program from this file's import graph and does NOT read the
-// tsconfig `files` array. Without it, transitively-reached shared-ui modules
+// tsconfig `files` array. Without it, transitively-reached shell modules
 // fail to compile during generation.
 
 // =============================================================================
@@ -254,6 +254,11 @@ import { CardDataGrid } from './components/data-grid/CardDataGrid';
 import { FilterStrip } from './components/data-grid/FilterStrip';
 import { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch, formatDateValue } from './components/data-grid/defaults';
 import { createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from './components/data-grid/gridConfigChannel';
+import { ChatView } from './components/chat/ChatView';
+import { MessageList } from './components/chat/components/MessageList';
+import { MarkdownRenderer } from './components/chat/components/MarkdownRenderer';
+import { useChatMessages } from './components/chat/hooks/useChatMessages';
+import { ConnectionCard, ConnectionCardAdd } from './components/connection-card/ConnectionCard';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import { formatBytes, formatDate, formatDuration } from './util/format';
@@ -281,6 +286,8 @@ export {
 	GRID_CONFIG_CLEAR,
 	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
 	formatDuration, formatDateValue,
+	ChatView, MessageList, MarkdownRenderer, useChatMessages,
+	ConnectionCard, ConnectionCardAdd,
 	commonStyles,
 	applyTheme, isInVSCode, OAUTH_ROOT_URL,
 	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
@@ -290,6 +297,8 @@ export {
 // concrete module paths (generated from the retired barrel's map).
 export type { IButtonProps, ButtonVariant } from './components/button/Button';
 export type { IStatusBadgeProps, IStatusDotProps, StatusVariant } from './components/status-badge/StatusBadge';
+export type { IChatViewProps, ChatMessage, UseChatMessagesOptions } from './components/chat/types';
+export type { IConnectionCardProps, IConnectionCardAddProps } from './components/connection-card/ConnectionCard';
 export type { IEmptyStateProps } from './components/empty-state/EmptyState';
 export type { IBannerProps, BannerVariant } from './components/banner/Banner';
 export type { IInputFieldProps } from './components/input-field/InputField';
