@@ -594,11 +594,15 @@ export class TransportWebSocket extends TransportBase {
 					binaryData = new TextEncoder().encode(JSON.stringify(args.data));
 				}
 
-				const debugMessage = { ...message };
-				if (debugMessage.arguments) {
-					debugMessage.arguments = { ...debugMessage.arguments, data: `<${binaryData.length} bytes>` };
+				// Build and redact only when a protocol-debug callback is bound, mirroring
+				// the receive path — otherwise every send pays for a walk it throws away.
+				if (this._onCallerDebugProtocol) {
+					const debugMessage = { ...message };
+					if (debugMessage.arguments) {
+						debugMessage.arguments = { ...debugMessage.arguments, data: `<${binaryData.length} bytes>` };
+					}
+					this._debugProtocol(`SEND: ${JSON.stringify(this._redactProtocolMessage(debugMessage))}`);
 				}
-				this._debugProtocol(`SEND: ${JSON.stringify(this._redactProtocolMessage(debugMessage))}`);
 
 				const headerMessage = { ...message };
 				if (headerMessage.arguments) {
@@ -613,7 +617,9 @@ export class TransportWebSocket extends TransportBase {
 				combinedMessage.set(binaryData, jsonHeader.length + 1);
 				socket.send(combinedMessage);
 			} else {
-				this._debugProtocol(`SEND: ${JSON.stringify(this._redactProtocolMessage(message))}`);
+				if (this._onCallerDebugProtocol) {
+					this._debugProtocol(`SEND: ${JSON.stringify(this._redactProtocolMessage(message))}`);
+				}
 				socket.send(JSON.stringify(message));
 			}
 		} catch (error) {

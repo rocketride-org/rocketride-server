@@ -510,6 +510,52 @@ describe.each(['node ws', 'browser WebSocket'] as const)('TransportWebSocket lif
 		expect(disconnected).toHaveBeenCalledTimes(1);
 	});
 
+	test('sent protocol traces are lazy and redact only when a debug callback is bound', async () => {
+		const transport = new TransportWebSocket(harness.uri('send-trace'));
+		const traces: string[] = [];
+		transport.bind({});
+
+		const connected = transport.connect(250);
+		await harness.waitForAttempts('send-trace');
+		const socket = harness.currentSocket(transport);
+		await harness.open('send-trace', socket);
+		await connected;
+
+		const redactSpy = jest.spyOn(
+			transport as unknown as { _redactProtocolMessage: (value: unknown) => unknown },
+			'_redactProtocolMessage',
+		);
+
+		// Untraced: neither the JSON nor the binary branch may pay for a redaction walk.
+		await transport.send({ type: 'request', seq: 1, command: 'noTrace' });
+		await transport.send({
+			type: 'request',
+			seq: 2,
+			command: 'noTraceBinary',
+			arguments: { data: new Uint8Array([1, 2, 3]), userToken: 'rr_do-not-log' },
+		});
+		expect(redactSpy).not.toHaveBeenCalled();
+
+		// Traced: both branches redact, and the binary payload is summarized, not logged.
+		transport.bind({ onDebugProtocol: (message) => traces.push(message) });
+		await transport.send({ type: 'request', seq: 3, command: 'traced', arguments: { userToken: 'rr_do-not-log' } });
+		await transport.send({
+			type: 'request',
+			seq: 4,
+			command: 'tracedBinary',
+			arguments: { data: new Uint8Array([1, 2, 3]), userToken: 'rr_do-not-log' },
+		});
+
+		expect(redactSpy).toHaveBeenCalledTimes(2);
+		expect(traces).toEqual([
+			'SEND: {"type":"request","seq":3,"command":"traced","arguments":{"userToken":"<redacted>"}}',
+			'SEND: {"type":"request","seq":4,"command":"tracedBinary","arguments":{"data":"<3 bytes>","userToken":"<redacted>"}}',
+		]);
+
+		redactSpy.mockRestore();
+		await transport.disconnect();
+	});
+
 	test('a synchronous socket close clears its fallback timer before disconnect resolves', async () => {
 		const transport = new TransportWebSocket(harness.uri('synchronous-close'));
 		const connected = transport.connect(250);
