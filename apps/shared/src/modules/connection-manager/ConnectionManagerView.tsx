@@ -26,7 +26,7 @@ import { Button } from 'shell';
 import { InputField } from 'shell';
 import { ContentHeader } from 'shell';
 import { EmptyState } from 'shell';
-import { ConnectionCard, ConnectionCardAdd } from '../../components/connection-card/ConnectionCard';
+import { ConnectionCard, ConnectionCardAdd } from 'shell';
 import { Modal } from 'shell';
 import { BxDesktop } from 'shell';
 import type { StatusVariant } from 'shell';

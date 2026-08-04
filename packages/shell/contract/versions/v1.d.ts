@@ -21,10 +21,10 @@
 // SOFTWARE.
 
 // =============================================================================
-// FROZEN shell-api contract — ShellApiV0 — never edit by hand
+// FROZEN shell-api contract — ShellApiV1 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-02T22:18:42.207Z
-// Source commit: e21e8b718260730ebe8482bbc3be53284da1f7b8
+// Generated:     2026-08-04T06:46:14.779Z
+// Source commit: f8bdd8f9e534c45486ba80cdcd7f74ec8af47794
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -34,17 +34,178 @@ import React$1 from 'react';
 import { CSSProperties, InputHTMLAttributes, ReactElement, ReactNode, Ref, RefObject } from 'react';
 import { Options, Sequelize } from 'sequelize';
 import { CellComponent, ColumnDefinition, Options as Options$1, Tabulator } from 'tabulator-tables';
-declare class DAPException extends Error {
+export declare const commonStyles: {
+    card: React$1.CSSProperties;
+    cardHeader: React$1.CSSProperties;
+    cardBody: React$1.CSSProperties;
+    cardFlat: React$1.CSSProperties;
+    section: React$1.CSSProperties;
+    sectionHeader: React$1.CSSProperties;
+    sectionHeaderLabel: React$1.CSSProperties;
+    buttonPrimary: React$1.CSSProperties;
+    buttonDanger: React$1.CSSProperties;
+    buttonDangerOutline: React$1.CSSProperties;
+    buttonSecondary: React$1.CSSProperties;
+    buttonSmall: React$1.CSSProperties;
+    buttonPrimarySmall: React$1.CSSProperties;
+    buttonSecondarySmall: React$1.CSSProperties;
+    buttonDangerSmall: React$1.CSSProperties;
+    buttonDisabled: React$1.CSSProperties;
+    cardHeaderButton: React$1.CSSProperties;
+    cardBodyButton: React$1.CSSProperties;
+    toggleButton: (active: boolean) => React$1.CSSProperties;
+    toggleGroup: React$1.CSSProperties;
+    splitHeader: React$1.CSSProperties;
+    tabContent: React$1.CSSProperties;
+    viewPadding: React$1.CSSProperties;
+    columnFill: React$1.CSSProperties;
+    headerBar: React$1.CSSProperties;
+    divider: React$1.CSSProperties;
+    empty: React$1.CSSProperties;
+    textMuted: React$1.CSSProperties;
+    textEllipsis: React$1.CSSProperties;
+    fontMono: React$1.CSSProperties;
+    labelUppercase: React$1.CSSProperties;
+    overlay: React$1.CSSProperties;
+    modalOverlay: React$1.CSSProperties;
+    dialog: React$1.CSSProperties;
+    modalDialog: React$1.CSSProperties;
+    modalHeader: React$1.CSSProperties;
+    modalBody: React$1.CSSProperties;
+    modalFooter: React$1.CSSProperties;
+    popupMenu: React$1.CSSProperties;
+    menuRow: React$1.CSSProperties;
+    inputField: React$1.CSSProperties;
+    listRow: (active: boolean) => React$1.CSSProperties;
+    emptyState: React$1.CSSProperties;
+    iconBox: React$1.CSSProperties;
+    badge: React$1.CSSProperties;
+    tableHeader: React$1.CSSProperties;
+    tableCell: React$1.CSSProperties;
+    indicatorBase: React$1.CSSProperties;
+    indicatorSuccess: React$1.CSSProperties;
+    indicatorInfo: React$1.CSSProperties;
+    indicatorWarning: React$1.CSSProperties;
+    indicatorError: React$1.CSSProperties;
+    indicatorMuted: React$1.CSSProperties;
+};
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Base exception class for Debug Adapter Protocol (DAP) errors.
+ *
+ * This exception wraps DAP error responses to provide structured access to
+ * error information including file locations, line numbers, and other
+ * contextual data returned by RocketRide servers.
+ */
+export declare class DAPException extends Error {
     readonly dapResult: Record<string, unknown>;
     constructor(dapResult: Record<string, unknown>);
 }
-declare class RocketRideException extends DAPException {
+/**
+ * Base exception for all RocketRide operations.
+ *
+ * This is the root exception class for all RocketRide-specific errors.
+ * Catch this exception type to handle any error that originates from
+ * RocketRide operations while still having access to detailed error context.
+ */
+export declare class RocketRideException extends DAPException {
     constructor(dapResult: Record<string, unknown>);
 }
-declare class ConnectionException extends RocketRideException {
+/**
+ * Exception raised for connection-related issues.
+ *
+ * Raised when there are problems connecting to RocketRide servers,
+ * maintaining connections, or when connections are lost unexpectedly.
+ */
+export declare class ConnectionException extends RocketRideException {
     constructor(dapResult: Record<string, unknown>);
 }
-interface DocMetadata {
+/**
+ * Exception raised when authentication fails (bad API key or credentials).
+ */
+export declare class AuthenticationException extends ConnectionException {
+    constructor(dapResult: Record<string, unknown>);
+}
+/**
+ * Exception raised for data pipe operations.
+ *
+ * Raised when there are problems with data pipes used for sending
+ * data to pipelines, uploading files, or streaming operations.
+ */
+export declare class PipeException extends RocketRideException {
+    constructor(dapResult: Record<string, unknown>);
+}
+/**
+ * Exception raised for pipeline execution issues.
+ *
+ * Raised when there are problems starting, running, or managing
+ * RocketRide pipelines and processing tasks.
+ */
+export declare class ExecutionException extends RocketRideException {
+    constructor(dapResult: Record<string, unknown>);
+}
+/**
+ * Exception raised for input validation failures.
+ *
+ * Raised when input data, configurations, or parameters don't meet
+ * the requirements for RocketRide operations.
+ */
+export declare class ValidationException extends RocketRideException {
+    constructor(dapResult: Record<string, unknown>);
+}
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Contains information about where a document chunk came from and its properties.
+ *
+ * Every document returned from RocketRide operations includes metadata that tells you
+ * about the source file, the chunk's position within that file, permissions,
+ * and whether it's table data or regular text.
+ */
+export interface DocMetadata {
     /** Unique identifier for the source document in the RocketRide system. */
     objectId: string;
     /** Position of this chunk within the document (0, 1, 2, etc.). */
@@ -66,7 +227,37 @@ interface DocMetadata {
     /** Allow additional fields for extensibility */
     [key: string]: unknown;
 }
-interface Doc {
+export declare class DocMetadataHelper {
+    /**
+     * Convert metadata to a dictionary for serialization or storage.
+     */
+    static toDict(metadata: DocMetadata): Record<string, unknown>;
+    /**
+     * Create default metadata for a document processing instance.
+     */
+    static defaultMetadata(pInstance: {
+        instance: {
+            currentObject: {
+                objectId: string;
+                path: string;
+                permissionId: number;
+                componentId: string;
+            };
+        };
+        IEndpoint: {
+            endpoint: {
+                jobConfig: Record<string, unknown>;
+            };
+        };
+    }): DocMetadata;
+}
+/**
+ * Represents a document returned from RocketRide operations like search, AI chat, or data processing.
+ *
+ * Documents contain the actual content text, relevance scoring, embeddings for semantic search,
+ * and metadata about the source file and location.
+ */
+export interface Doc {
     /** Type identifier of the document. */
     type?: string;
     /** The main text content of this document chunk. */
@@ -86,7 +277,55 @@ interface Doc {
     /** Information about the source file, location, permissions, and chunk details. */
     metadata?: DocMetadata;
 }
-interface DocFilter {
+export declare class DocHelper {
+    /**
+     * Create a readable string representation showing the key identifiers and relevance score.
+     */
+    static toString(doc: Doc): string;
+    /**
+     * Convert this document to a dictionary for serialization or storage.
+     */
+    static toDict(doc: Doc): Record<string, unknown>;
+    /**
+     * Create a Document from a dictionary (reverse of toDict).
+     */
+    static fromDict(data: Record<string, unknown>): Doc;
+    /**
+     * Create a new document with default values.
+     */
+    static create(content: string, metadata?: Partial<DocMetadata>): Doc;
+}
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Controls how RocketRide searches, processes, and returns documents in your queries.
+ *
+ * Use DocFilter to customize search behavior, pagination, content grouping,
+ * and AI processing options. This gives you fine-grained control over what
+ * documents are returned and how they're processed.
+ */
+export interface DocFilter {
     /** Combine all chunks from the same table into one result. Useful when you need complete table data rather than individual rows. */
     fullTables?: boolean;
     /** Combine all chunks from the same document into one result. Use this when you need complete document content rather than fragments. */
@@ -126,32 +365,165 @@ interface DocFilter {
     /** Include additional context information with search results. Useful for understanding document relationships. */
     context?: boolean;
 }
-declare enum QuestionType {
+export declare class DocFilterHelper {
+    /**
+     * Create a default DocFilter with sensible defaults.
+     */
+    static createDefault(): DocFilter;
+    /**
+     * Create a DocFilter for paginated table results.
+     */
+    static forTables(limit?: number, offset?: number): DocFilter;
+    /**
+     * Create a DocFilter for complete documents.
+     */
+    static forFullDocuments(limit?: number): DocFilter;
+    /**
+     * Create a DocFilter with AI enhancements enabled.
+     */
+    static withAIEnhancements(): DocFilter;
+    /**
+     * Validate that a DocFilter has reasonable values.
+     */
+    static validate(filter: DocFilter): string[];
+    /**
+     * Convert DocFilter to dictionary for serialization.
+     */
+    static toDict(filter: DocFilter): Record<string, unknown>;
+    /**
+     * Create DocFilter from dictionary.
+     */
+    static fromDict(data: Record<string, unknown>): DocFilter;
+}
+/**
+ * Groups related document chunks that come from the same source file.
+ *
+ * When you search RocketRide and multiple chunks are found from the same document,
+ * they can be organized into DocGroups for easier processing. This helps you
+ * understand which content comes from which files and work with complete documents
+ * rather than scattered fragments.
+ */
+export interface DocGroup {
+    /** Overall relevance score for this entire document/file. Higher scores indicate the file is more relevant to your query. */
+    score: number;
+    /** Unique identifier for this document object in the RocketRide system. */
+    objectId: string;
+    /** File path or name of the source document. This is typically the filename you would recognize. */
+    parent: string;
+    /** List of all document chunks from this file that matched your query. */
+    documents: Doc[];
+}
+export declare class DocGroupHelper {
+    /**
+     * Create a readable string representation showing the filename and relevance score.
+     */
+    static toString(group: DocGroup): string;
+    /**
+     * Create a new DocGroup.
+     */
+    static create(objectId: string, parent: string, documents?: Doc[], score?: number): DocGroup;
+    /**
+     * Add a document to the group and update the score.
+     */
+    static addDocument(group: DocGroup, doc: Doc): DocGroup;
+    /**
+     * Get the total content from all documents in the group.
+     */
+    static getFullContent(group: DocGroup): string;
+    /**
+     * Get the highest scoring document in the group.
+     */
+    static getBestDocument(group: DocGroup): Doc | undefined;
+    /**
+     * Sort documents in the group by score (highest first) or chunk ID.
+     */
+    static sortDocuments(group: DocGroup, sortBy?: "score" | "chunkId"): DocGroup;
+    /**
+     * Filter documents in the group by score threshold.
+     */
+    static filterByScore(group: DocGroup, minScore: number): DocGroup;
+    /**
+     * Get document count in the group.
+     */
+    static getDocumentCount(group: DocGroup): number;
+    /**
+     * Get total tokens count for all documents in the group.
+     */
+    static getTotalTokens(group: DocGroup): number;
+    /**
+     * Get average score of documents in the group.
+     */
+    static getAverageScore(group: DocGroup): number;
+    /**
+     * Check if group contains table data.
+     */
+    static hasTableData(group: DocGroup): boolean;
+    /**
+     * Get only table documents from the group.
+     */
+    static getTableDocuments(group: DocGroup): Doc[];
+    /**
+     * Get only text documents from the group.
+     */
+    static getTextDocuments(group: DocGroup): Doc[];
+    /**
+     * Convert DocGroup to dictionary for serialization.
+     */
+    static toDict(group: DocGroup): Record<string, unknown>;
+    /**
+     * Create DocGroup from dictionary.
+     */
+    static fromDict(data: Record<string, unknown>): DocGroup;
+    /**
+     * Merge multiple DocGroups from the same source document.
+     */
+    static merge(groups: DocGroup[]): DocGroup | undefined;
+    /**
+     * Split a DocGroup into smaller groups by chunk ranges.
+     */
+    static splitByChunkRange(group: DocGroup, chunkSize: number): DocGroup[];
+}
+/**
+ * Defines different types of questions and queries you can ask.
+ */
+export declare enum QuestionType {
     QUESTION = "question",
     SEMANTIC = "semantic",
     KEYWORD = "keyword",
     GET = "get",
     PROMPT = "prompt"
 }
-interface QuestionHistory {
+/**
+ * Represents a single message in a chat conversation history.
+ */
+export interface QuestionHistory {
     /** Who sent this message ('user', 'system', or 'assistant') */
     role: string;
     /** The actual message content */
     content: string;
 }
-interface QuestionInstruction {
+/**
+ * Provides specific instructions to guide the AI's response.
+ */
+export interface QuestionInstruction {
     /** Brief description of what this instruction is about */
     subtitle: string;
     /** Detailed guidance for the AI */
     instructions: string;
 }
-interface QuestionExample {
+/**
+ * Shows the AI an example of the kind of response you want.
+ */
+export interface QuestionExample {
     /** Example question or input */
     given: string;
     /** Example response you want for that input */
     result: string;
 }
-interface QuestionText {
+/**
+ * Represents a single question with optional AI embeddings.
+ */
+export interface QuestionText {
     /** The actual question text */
     text: string;
     /** AI model used for creating embeddings (if any) */
@@ -159,7 +531,36 @@ interface QuestionText {
     /** Vector representation of the question (if any) */
     embedding?: number[];
 }
-declare class Question {
+/**
+ * Handles AI responses from RocketRide chat operations.
+ */
+export declare class Answer {
+    constructor(expectJson?: boolean);
+    /**
+     * Extract Python code from AI response.
+     */
+    static parsePython(value: string): string;
+    /**
+     * Set the AI response value (used internally by the system).
+     */
+    setAnswer(value: string | object | unknown[]): void;
+    /**
+     * Get the response as plain text.
+     */
+    getText(): string;
+    /**
+     * Get the response as structured JSON data.
+     */
+    getJson(): unknown;
+    /**
+     * Check if this answer contains JSON data.
+     */
+    isJson(): boolean;
+}
+/**
+ * Main class for asking questions to RocketRide's AI system.
+ */
+export declare class Question {
     type: QuestionType;
     filter: DocFilter;
     expectJson: boolean;
@@ -218,7 +619,38 @@ declare class Question {
      */
     static fromDict(data: Record<string, unknown>): Question;
 }
-interface ApiKeyRecord {
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Account type definitions for the RocketRide TypeScript SDK.
+ *
+ * Data shapes for user profiles, API keys, organizations, teams, and members.
+ * These mirror the server's DAP response shapes without importing any
+ * platform-specific modules.
+ */
+/** A single API key record returned from the server. */
+export interface ApiKeyRecord {
     /** Unique identifier for the key. */
     id: string;
     /** Human-readable label given to the key at creation time. */
@@ -242,7 +674,8 @@ interface ApiKeyRecord {
     /** Whether this is an auto-managed session key for reconnect persistence. */
     isSession: boolean;
 }
-interface OrgDetail {
+/** Summary information about the current user's organization. */
+export interface OrgDetail {
     /** Unique identifier for the organization. */
     id: string;
     /** Display name of the organization. */
@@ -254,7 +687,8 @@ interface OrgDetail {
     /** Total number of teams within the organization. */
     teamCount: number;
 }
-interface MemberRecord {
+/** A single organization member record returned from the server. */
+export interface MemberRecord {
     /** Unique identifier of the user. */
     userId: string;
     /** The user's display name. */
@@ -273,7 +707,8 @@ interface MemberRecord {
         name: string;
     }>;
 }
-interface TeamRecord {
+/** Summary of a team, used in the teams list view. */
+export interface TeamRecord {
     /** Unique identifier for the team. */
     id: string;
     /** Display name of the team. */
@@ -283,7 +718,8 @@ interface TeamRecord {
     /** Number of members currently in the team. */
     memberCount: number;
 }
-interface TeamDetail {
+/** Full detail for a single team including its member list. */
+export interface TeamDetail {
     /** Unique identifier for the team. */
     id: string;
     /** Display name of the team. */
@@ -293,7 +729,8 @@ interface TeamDetail {
     /** Full list of members belonging to this team. */
     members: TeamMemberRecord[];
 }
-interface TeamMemberRecord {
+/** A member record scoped to a specific team, including that team's permissions. */
+export interface TeamMemberRecord {
     /** Unique identifier of the user. */
     userId: string;
     /** The user's display name. */
@@ -305,7 +742,16 @@ interface TeamMemberRecord {
     /** ISO timestamp of when the user joined the team, or null. */
     createdAt?: string | null;
 }
-interface ProfileUpdate {
+/**
+ * Union type for the five navigable sections within AccountView.
+ * Controls which tab panel is active and which data is fetched.
+ */
+export type AccountSection = "profile" | "billing" | "api-keys" | "organization" | "teams" | "members";
+/**
+ * The set of mutable profile fields submitted when saving profile edits.
+ * All fields are strings; an empty string means no change.
+ */
+export interface ProfileUpdate {
     /** Display name (nickname). */
     displayName: string;
     /** Preferred login / username. */
@@ -321,7 +767,8 @@ interface ProfileUpdate {
     /** Locale / language preference. */
     locale: string;
 }
-interface CreateKeyParams {
+/** Parameters for creating a new API key. */
+export interface CreateKeyParams {
     /** Human-readable label for the key. */
     name: string;
     /** Array of permission strings to grant to this key. Empty for full PAT. */
@@ -331,7 +778,8 @@ interface CreateKeyParams {
     /** Optional team UUID to scope this key to. Omit for all teams. */
     teamId?: string;
 }
-interface InviteMemberParams {
+/** Parameters for inviting a new member to an organization. */
+export interface InviteMemberParams {
     /** Email address of the person to invite. */
     email: string;
     /** First / given name of the invitee. */
@@ -349,7 +797,8 @@ interface InviteMemberParams {
         permissions: string[];
     }>;
 }
-interface TeamMemberParams {
+/** Parameters for adding or updating a team member. */
+export interface TeamMemberParams {
     /** The team to add the member to or update within. */
     teamId: string;
     /** The user ID of the member. */
@@ -357,7 +806,41 @@ interface TeamMemberParams {
     /** Permissions to grant within the team. */
     permissions: string[];
 }
-interface BillingDetail {
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Billing type definitions for the RocketRide TypeScript SDK.
+ *
+ * Data shapes for subscription management, compute credits, and Stripe
+ * integration. These mirror the server's DAP response shapes without
+ * importing any platform-specific modules.
+ */
+/**
+ * Per-app subscription detail row returned by the `rrext_account_billing`
+ * `list` subcommand. One row per subscribed app.
+ */
+export interface BillingDetail {
     /** App identifier matching AppManifestEntry.id (e.g. "brandi"). */
     appId: string;
     /** Resolved app display name (e.g. "Pipe Builder"). */
@@ -388,7 +871,11 @@ interface BillingDetail {
     /** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
     labels: Record<string, string> | null;
 }
-interface AppPrice {
+/**
+ * App pricing tier row from the ``app_prices`` table.
+ * Returned by the ``prices`` subcommand. Used in the checkout plan picker.
+ */
+export interface AppPrice {
     /** Internal price UUID. */
     id: string;
     /** App identifier. */
@@ -410,7 +897,16 @@ interface AppPrice {
     /** ISO 8601 creation timestamp. */
     createdAt: string | null;
 }
-interface CreditBalance {
+/** @deprecated Use {@link AppPrice} instead. */
+export type StripePlan = AppPrice;
+/**
+ * Net credit balance for an organisation, grouped by resource.
+ * Returned by the `credits_balance` subcommand.
+ *
+ * Balance is computed from ``SUM(amount) GROUP BY resource`` on the credit
+ * ledger.  Positive = net credit remaining, negative = overspent.
+ */
+export interface CreditBalance {
     /** Net balance per resource type (positive = remaining, negative = overspent). */
     balances: Record<string, number>;
     /** Total credits granted (purchased/credited) per resource. */
@@ -424,7 +920,10 @@ interface CreditBalance {
      */
     labels: Record<string, string>;
 }
-interface LedgerTransaction {
+/**
+ * A single ledger transaction row returned by the `transactions` subcommand.
+ */
+export interface LedgerTransaction {
     /** Auto-increment row ID. */
     id: number;
     /** Transaction type: purchase, usage, credit, refund, etc. */
@@ -450,7 +949,10 @@ interface LedgerTransaction {
     /** ISO 8601 creation timestamp. */
     createdAt: string | null;
 }
-interface TransactionsResult {
+/**
+ * Paginated result from the `transactions` subcommand.
+ */
+export interface TransactionsResult {
     /** Transaction rows for the current page. */
     transactions: LedgerTransaction[];
     /** Total matching rows (for pagination). */
@@ -460,7 +962,10 @@ interface TransactionsResult {
     /** Rows per page. */
     pageSize: number;
 }
-interface UsageRollup {
+/**
+ * Per-user or per-team consumption rollup row returned by usage_by_user / usage_by_team.
+ */
+export interface UsageRollup {
     /** User or team ID (or '__none__' for unattributed). */
     id: string;
     /** Resolved display name of the user or team, or null when unresolvable. */
@@ -510,7 +1015,12 @@ interface PromoRedemption {
     /** Credits granted ({resource: amount}). */
     credits: Record<string, number>;
 }
-interface CreditPack {
+/**
+ * Per-pack pricing row for the credit top-up modal.
+ * Mirrors the output of the Terraform `credit_packs` map so operators
+ * can add/edit packs without a frontend deploy.
+ */
+export interface CreditPack {
     /** Terraform key ("small", "medium", "large"). */
     packId: string;
     /** Stripe price_* identifier for the one-off pack. */
@@ -522,19 +1032,55 @@ interface CreditPack {
     /** Human-readable label, e.g. "55k credits (10% bonus)". */
     nickname: string;
 }
-interface PipelineInputConnection {
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Data flow connection between pipeline components.
+ */
+export interface PipelineInputConnection {
     /** Data lane/channel name (e.g., 'text', 'data', 'image') */
     lane: string;
     /** Source component ID providing the data */
     from: string;
 }
-interface PipelineControlConnection {
+/**
+ * Invoke (control-flow) connection from one component to another.
+ */
+export interface PipelineControlConnection {
     /** Class type of the invoke channel (e.g., 'llm', 'tool', 'memory') */
     classType: string;
     /** Source component ID providing the invocation */
     from: string;
 }
-interface PipelineComponent {
+/**
+ * Pipeline component that processes data.
+ *
+ * Each component has a unique ID, a provider type that determines its behavior,
+ * and provider-specific configuration. Components receive data through input
+ * connections from other components.
+ */
+export interface PipelineComponent {
     /** Unique identifier for this component within the pipeline */
     id: string;
     /** Component type/provider (e.g., 'webhook', 'response', 'ai_chat') */
@@ -552,7 +1098,14 @@ interface PipelineComponent {
     /** Invoke (control-flow) connections from other components */
     control?: PipelineControlConnection[];
 }
-interface PipelineConfig {
+/**
+ * Pipeline configuration for RocketRide data processing workflows.
+ *
+ * Defines a complete pipeline with components, data flow connections,
+ * and execution parameters. Pipelines process data through a series
+ * of connected components that transform, analyze, or route information.
+ */
+export interface PipelineConfig {
     /** Human-readable pipeline name — the registry's pipelineName renders it
         on every deploy surface, and publish requires it. */
     name?: string;
@@ -586,12 +1139,14 @@ interface PipelineConfig {
     /** Active editor mode (e.g. 'design', 'status', 'flow') */
     editorMode?: string;
 }
-interface DeployActor {
+/** Denormalized audit identity — survives account deletion. */
+export interface DeployActor {
     userId?: string;
     display?: string;
     email?: string;
 }
-interface DeployArtifact {
+/** One immutable registry version of a project's pipeline. */
+export interface DeployArtifact {
     version?: number;
     /** sha256 over the exact stored artifact bytes; verified on every load. */
     sha256?: string;
@@ -603,7 +1158,8 @@ interface DeployArtifact {
     /** Optional "what changed" note supplied at publish time. */
     comment?: string;
 }
-interface DeploymentSchedule {
+/** Per-source schedule on a team deployment. */
+export interface DeploymentSchedule {
     /** 5-field cron expression. */
     cron?: string;
     /** Paused schedules stay configured (cron/ttl kept) but never fire. */
@@ -618,7 +1174,8 @@ interface DeploymentSchedule {
     /** Unix timestamp (seconds) of the last scheduler dispatch, or null. */
     lastRunAt?: number | null;
 }
-interface Deployment {
+/** One team's deployment of a project, joined with registry info. */
+export interface Deployment {
     teamId?: string;
     projectId?: string;
     /** The registry version this team currently points at. */
@@ -641,7 +1198,8 @@ interface Deployment {
     publishedAt?: number;
     publishedBy?: DeployActor;
 }
-interface DeployHistoryEntry {
+/** One immutable audit-trail row (who did what, where, when). */
+export interface DeployHistoryEntry {
     /**
      * Stable append-order key: newest first, never ties. Use as the row
      * identity when rendering.
@@ -657,12 +1215,14 @@ interface DeployHistoryEntry {
     version?: number;
     actor?: DeployActor;
 }
-interface PublishResult {
+/** Body of `deploy.publish()`. */
+export interface PublishResult {
     artifact?: DeployArtifact;
     /** Present only when `deployTo` was given (one-step publish+deploy). */
     deployment?: Deployment;
 }
-interface DeployListParams {
+/** The standard list-API request arguments (page/search/filter/sort). */
+export interface DeployListParams {
     /** 1-based page number. */
     page?: number;
     /** Rows per page (server-clamped). */
@@ -677,20 +1237,62 @@ interface DeployListParams {
         dir: "asc" | "desc";
     }>;
 }
-interface DeployListEnvelope<T> {
+/** The standard list envelope. */
+export interface DeployListEnvelope<T> {
     rows: T[];
     total: number;
     page: number;
     pageSize: number;
 }
-interface SchedulePreview {
+/** Body of `deploy.preview()` — THE single cron evaluator. */
+export interface SchedulePreview {
     valid?: boolean;
     /** Human-readable reason when invalid. */
     error?: string;
     /** Unix timestamps (seconds) of the next occurrences. */
     next?: number[];
 }
-interface LogStreamRef {
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Run-log type definitions for the RocketRide TypeScript SDK.
+ *
+ * A task's run log is ONE continuous JSONL event stream per identity;
+ * individual runs are chapters (tracks) inside it. Streams are addressed by
+ * the plain identity pair (`projectId` + `source`) plus the SCOPE — never by
+ * token. THE SCOPE IS THE KIND: `teamId` present addresses that team's
+ * DEPLOY continuum (deploy runs execute as the team and log into its tree —
+ * teammates with monitor rights can watch/replay); absent addresses the
+ * caller's own DEV stream. There is no run-kind wire argument.
+ */
+/**
+ * The two run kinds. Not part of stream addressing (the scope decides) —
+ * still stamped on event bodies for client-side filtering.
+ */
+export type LogRunKind = "dev" | "deploy";
+/** Identity addressing one run-log stream. */
+export interface LogStreamRef {
     projectId: string;
     source: string;
     /**
@@ -699,7 +1301,8 @@ interface LogStreamRef {
      */
     teamId?: string;
 }
-interface LogChapter {
+/** One chapter (track) — a run inside the continuum. */
+export interface LogChapter {
     /** Run start (epoch seconds). */
     beginTime: number;
     /** First continuum seq of the run. */
@@ -712,7 +1315,8 @@ interface LogChapter {
         chapters recorded before the stamp existed). */
     traceLevel?: string | null;
 }
-interface LogActivitySpan {
+/** One activity span (segment time range) for the activity bar. */
+export interface LogActivitySpan {
     /** Segment id — the raw segment fetch / DVR cache key. */
     id?: number;
     /** First continuum seq recorded in this segment. */
@@ -722,7 +1326,8 @@ interface LogActivitySpan {
     /** A run begins within this span. */
     chapterStart: boolean;
 }
-interface LogChaptersResult {
+/** Response of `client.log.chapters()` — the whole timeline in one read. */
+export interface LogChaptersResult {
     chapters: LogChapter[];
     segments: LogActivitySpan[];
     /** Retained-window start (the horizon), epoch seconds. */
@@ -734,7 +1339,8 @@ interface LogChaptersResult {
     /** True when no run is currently writing the stream. */
     completed: boolean;
 }
-interface LogReadParams {
+/** Range/paging options for `client.log.read()`. */
+export interface LogReadParams {
     /** Inclusive seq lower bound. */
     fromSeq?: number;
     /** Inclusive seq upper bound. */
@@ -754,31 +1360,51 @@ interface LogReadParams {
     /** Server-side event-type filter (e.g. ['output'] for the Log page). */
     types?: string[];
 }
-interface LogEventBody {
+/**
+ * The body of a stamped task event — the COMPLETE task-scoped record.
+ *
+ * The continuum stamps live here, beside the project_id/source identity the
+ * server stamps at its forward choke point. The DAP envelope around this
+ * body is pure protocol (its `seq` is per-connection bookkeeping,
+ * meaningless to the continuum) and carries nothing of ours.
+ */
+export interface LogEventBody {
     /** Continuum emission time (epoch seconds, float), stamped at engine ingress. */
     eventTime: number;
     /** Continuum sequence — catalog-seeded, strictly monotonic per stream. */
     logSeq: number;
     [key: string]: unknown;
 }
-interface LogEvent {
+/**
+ * One logged event — a stamped DAP event message line.
+ *
+ * There is ONE representation of the stamps: the body. Legacy v2 segments
+ * (which carried the stamps at the header) are canonicalized into the body
+ * at decode (see log-codec normalizeStamps), so consumers never read a
+ * top-level stamp.
+ */
+export interface LogEvent {
     type: "event";
     event: string;
     body: LogEventBody;
     [key: string]: unknown;
 }
-interface LogReadResult {
+/** Response of `client.log.read()`. */
+export interface LogReadResult {
     events: LogEvent[];
     /** Present when paged: pass as `cursor` to continue. */
     nextSeq?: number;
     /** Present when the request reached below the retention horizon. */
     truncatedAtSeq?: number;
 }
-interface LogDeleteResult {
+/** Response of `client.log.delete()`. */
+export interface LogDeleteResult {
     deletedSegments: number;
 }
-type LogPosition = number | "live";
-interface LogTraceSummary {
+/** A position on the continuum: epoch seconds, or 'live' (pinned to now). */
+export type LogPosition = number | "live";
+/** One trace (document) summary at the session position. */
+export interface LogTraceSummary {
     /**
      * Display id. For fold summaries this is the pipe SLOT (reused across
      * requests); for getTrace results it is the begin seq. Always pass
@@ -801,29 +1427,38 @@ interface LogTraceSummary {
     /** Segment ids containing this trace's events (sparse expand list). */
     touched?: number[];
 }
-interface LogTracesResult {
+/** Response of `LogEventStream.getTraces()` — state at the position. */
+export interface LogTracesResult {
     /** ALL in-flight traces at the position (bounded by real concurrency). */
     open: LogTraceSummary[];
     /** The most recently completed traces before the position (≤ n). */
     closed: LogTraceSummary[];
 }
-interface LogTraceDetail {
+/** Response of `LogEventStream.getTrace()` — one trace's full event set. */
+export interface LogTraceDetail {
     summary: LogTraceSummary;
     /** Every event belonging to this trace, seq-ordered, fully reconstructed. */
     events: LogEvent[];
 }
-interface LogPlayItem {
+/** Items delivered to the `play()` callback. */
+export interface LogPlayItem {
     /** One reconstructed event, delivered in seq order. */
     event: LogEvent;
 }
-type LogPlayCallback = (item: LogPlayItem) => void;
-interface LogSegmentParams {
+/** The `play()` callback. */
+export type LogPlayCallback = (item: LogPlayItem) => void;
+/** Options for `client.log.segment()`. */
+export interface LogSegmentParams {
     /** Byte offset to continue from (0 = segment start). */
     offset?: number;
     /** Chunk ceiling in bytes (clamped by the server; 0/omitted = server default). */
     maxBytes?: number;
 }
-interface LogSegmentResult {
+/**
+ * Response of `client.log.segment()` — one whole-line-aligned chunk of a
+ * segment's raw JSONL. Repeat with `nextOffset` until `final`.
+ */
+export interface LogSegmentResult {
     /** Segment id within the stream. */
     segment: number;
     /** Byte offset this chunk starts at. */
@@ -837,13 +1472,30 @@ interface LogSegmentResult {
     /** True when this chunk reached the end of the segment. */
     final: boolean;
 }
-interface TraceInfo {
+/**
+ * Stack trace information for errors.
+ *
+ * Carries source-location metadata returned by the server when a server-side
+ * error includes a traceback, enabling developers to pinpoint the failure
+ * inside pipeline node code.
+ */
+export interface TraceInfo {
     /** File path where the error occurred */
     file: string;
     /** Line number where the error occurred */
     lineno: number;
 }
-interface DAPMessage {
+/**
+ * A single DAP (Debug Adapter Protocol) message exchanged between the client
+ * and the RocketRide server.
+ *
+ * All communication on the WebSocket uses this envelope. The `type` field
+ * discriminates between the three roles a message can play:
+ * - `request`  — client → server command invocation
+ * - `response` — server → client result for a prior request
+ * - `event`    — server → client unsolicited notification
+ */
+export interface DAPMessage {
     /** Message type: request from client, response from server, or event notification */
     type: "request" | "response" | "event";
     /** Unique sequence number for message correlation and ordering */
@@ -869,7 +1521,13 @@ interface DAPMessage {
     /** Stack trace information for errors */
     trace?: TraceInfo;
 }
-interface TransportCallbacks {
+/**
+ * Callback functions for transport layer events and debugging.
+ *
+ * These callbacks provide hooks for monitoring transport activity,
+ * debugging protocol messages, and handling connection lifecycle events.
+ */
+export interface TransportCallbacks {
     /** Called when debug messages are generated */
     onDebugMessage?: (message: string) => void;
     /** Called when protocol messages are sent/received for debugging */
@@ -881,11 +1539,54 @@ interface TransportCallbacks {
     /** Called when connection is lost or closed */
     onDisconnected?: (reason?: string, hasError?: boolean) => Promise<void>;
 }
-type EventCallback = (event: DAPMessage) => Promise<void>;
-type ConnectCallback = (connectionInfo?: string) => Promise<void>;
-type DisconnectCallback = (reason?: string, hasError?: boolean) => Promise<void>;
-type ConnectErrorCallback = (error: ConnectionException) => void | Promise<void>;
-interface RocketRideClientConfig {
+/**
+ * Connection configuration for establishing server connections.
+ */
+export interface ConnectionInfo {
+    /** Server URI (WebSocket endpoint) */
+    uri: string;
+    /** Authentication token or API key */
+    auth?: string;
+}
+/**
+ * Callback function for handling real-time events from the server.
+ *
+ * Events include pipeline status updates, processing progress,
+ * error notifications, and system alerts.
+ */
+export type EventCallback = (event: DAPMessage) => Promise<void>;
+/**
+ * Callback function for connection establishment events.
+ *
+ * Invoked once the WebSocket is open AND the server has confirmed the
+ * authentication handshake. `connectionInfo` is an optional human-readable
+ * string describing the remote endpoint.
+ */
+export type ConnectCallback = (connectionInfo?: string) => Promise<void>;
+/**
+ * Callback function for disconnection events.
+ *
+ * Invoked whenever the connection closes, whether gracefully or due to an
+ * error. `reason` is a human-readable description and `hasError` is true
+ * when the closure was caused by an error rather than a clean shutdown.
+ */
+export type DisconnectCallback = (reason?: string, hasError?: boolean) => Promise<void>;
+/**
+ * Callback when a connection attempt fails (e.g. auth or pipeline not ready).
+ * Used in persist mode to inform the UI while the client keeps retrying.
+ *
+ * The callback receives a `ConnectionException` (rather than a generic Error)
+ * so the caller can inspect structured error details such as status codes
+ * returned by the server.
+ */
+export type ConnectErrorCallback = (error: ConnectionException) => void | Promise<void>;
+/**
+ * Configuration options for creating an RocketRideClient instance.
+ *
+ * Provides connection settings, authentication, and event handling
+ * configuration for establishing and managing server connections.
+ */
+export interface RocketRideClientConfig {
     /** API authentication key or token */
     auth?: string;
     /** Server URI (will be converted to WebSocket URI automatically) */
@@ -936,7 +1637,8 @@ interface RocketRideClientConfig {
      */
     onTrace?: (traceType: TraceType, message: DAPMessage) => void;
 }
-declare enum TraceType {
+/** Discriminator for the three trace event types. */
+export declare enum TraceType {
     /** Emitted before the DAP request is sent. */
     Request = 0,
     /** Emitted when the DAP request succeeds. */
@@ -944,7 +1646,14 @@ declare enum TraceType {
     /** Emitted when the DAP request fails. */
     Error = 2
 }
-interface TeamInfo {
+/**
+ * Describes a team within an organisation that the authenticated user belongs to.
+ *
+ * Teams are the finest-grained unit of access control. Each team carries a set
+ * of permission strings that govern which server operations are available to
+ * members of that team.
+ */
+export interface TeamInfo {
     /** Unique identifier of the team (UUID or short slug) */
     id: string;
     /** Display name of the team shown in dashboards and logs */
@@ -955,7 +1664,14 @@ interface TeamInfo {
      */
     permissions: string[];
 }
-interface OrgInfo {
+/**
+ * Describes the organisation the authenticated user belongs to.
+ *
+ * Organisations group users and teams for billing and access management.
+ * Each user belongs to exactly one organisation, which carries its own
+ * permission set at the organisation level plus a list of contained teams.
+ */
+export interface OrgInfo {
     /** Unique identifier of the organisation (UUID or short slug) */
     id: string;
     /** Display name of the organisation */
@@ -979,7 +1695,7 @@ interface OrgInfo {
  * an `apaext_account` event (e.g. after a plan change). The `userToken`
  * field is used for subsequent reconnects in persist mode.
  */
-interface ConnectResult {
+export interface ConnectResult {
     /**
      * Short-lived RocketRide session token (`rr_…`) that can be replayed on
      * reconnect without requiring the original API key or PKCE exchange again.
@@ -1100,7 +1816,10 @@ interface AppManifestEntry {
     /** Feature flags enabled by the subscribed plan (only for subscribed paid apps). */
     features?: string[];
 }
-interface StripePriceEntry {
+/**
+ * A Stripe pricing tier for a paid app.
+ */
+export interface StripePriceEntry {
     /** Stripe price ID (price_*). */
     priceId: string;
     /** Human-readable label (e.g. "Monthly"). */
@@ -1112,7 +1831,14 @@ interface StripePriceEntry {
     /** Billing interval: "month", "year", or "one_time". */
     interval: string;
 }
-interface ServerInfoResult {
+/**
+ * Server metadata returned by the pre-auth info probe.
+ *
+ * Obtained via {@link RocketRideClient.getServerInfo} which sends an
+ * `auth` request with `infoOnly: true`. The server responds without
+ * requiring credentials.
+ */
+export interface ServerInfoResult {
     /** Server engine version string. */
     version: string;
     /** Capability tags: `['oss']` for open-source, `['saas']` for cloud. */
@@ -1127,7 +1853,37 @@ interface ServerInfoResult {
      */
     apps?: AppManifestEntry[];
 }
-interface CProfileStatusResponse {
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Type definitions for cProfile process profiling DAP commands.
+ *
+ * These types correspond to the responses from rrext_cprofile_* commands
+ * returned by CProfileManager on the server.
+ */
+/** Response from rrext_cprofile_status and rrext_cprofile_start. */
+export interface CProfileStatusResponse {
     /** Whether profiling is currently active. */
     active?: boolean;
     /** 'started' or 'error' (from start command). */
@@ -1145,7 +1901,8 @@ interface CProfileStatusResponse {
     /** Error message (if status is 'error'). */
     message?: string;
 }
-interface CProfileStopResponse {
+/** Response from rrext_cprofile_stop. */
+export interface CProfileStopResponse {
     /** 'completed' or 'error'. */
     status: string;
     /** Session name that was stopped. */
@@ -1157,11 +1914,13 @@ interface CProfileStopResponse {
     /** Owner info (on ownership mismatch error). */
     owner?: string;
 }
-interface CProfileReportResponse {
+/** Response from rrext_cprofile_report. */
+export interface CProfileReportResponse {
     /** Full pstats-formatted text report. */
     report: string;
 }
-interface CProfileTreeNode {
+/** A single node in the hierarchical call tree returned by rrext_cprofile_report_tree. */
+export interface CProfileTreeNode {
     /** Function name. */
     name: string;
     /** Source filename. */
@@ -1177,7 +1936,8 @@ interface CProfileTreeNode {
     /** Child function calls. */
     children: CProfileTreeNode[];
 }
-interface CProfileReportTreeResponse {
+/** Response from rrext_cprofile_report_tree. */
+export interface CProfileReportTreeResponse {
     /** Root node of the call tree (synthetic '<root>' wrapper). */
     tree: CProfileTreeNode | null;
     /** Total cumulative time across all profiled functions. */
@@ -1312,7 +2072,8 @@ export interface DashboardResponse {
     connections: DashboardConnection[];
     tasks: DashboardTask[];
 }
-interface ListSortSpec {
+/** One sort instruction for a list command: a row key and a direction. */
+export interface ListSortSpec {
     /** The row key to sort by (e.g. 'startTime', 'connectedAt'). */
     field: string;
     /** Sort direction. */
@@ -1352,8 +2113,10 @@ export interface ListPageResponse<TRow> {
     /** The (clamped) page size that was applied. */
     pageSize: number;
 }
-type ListConnectionsResponse = ListPageResponse<DashboardConnection>;
-type ListTasksResponse = ListPageResponse<DashboardTask>;
+/** Response from the rrext_list_connections command. */
+export type ListConnectionsResponse = ListPageResponse<DashboardConnection>;
+/** Response from the rrext_list_tasks command. */
+export type ListTasksResponse = ListPageResponse<DashboardTask>;
 interface DashboardEventBase {
     /** Unix timestamp when the event occurred. */
     timestamp: number;
@@ -1424,7 +2187,44 @@ interface DashboardMonitorChanged extends DashboardEventBase {
 }
 /** Discriminated union of all dashboard activity events. */
 export type DashboardEvent = DashboardConnectionAdded | DashboardConnectionRemoved | DashboardTaskStarted | DashboardTaskStopped | DashboardTaskRemoved | DashboardTaskError | DashboardAuthFailed | DashboardMonitorChanged;
-interface PIPELINE_RESULT {
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Response structures from RocketRide pipeline data processing operations.
+ *
+ * These interfaces represent the different types of responses returned when data
+ * is sent through pipelines, depending on the processing method and MIME type handling.
+ */
+/**
+ * Pipeline response structure with optional processing information.
+ *
+ * This is returned from all pipeline operations. When data is sent without
+ * MIME type specification, only basic fields are present. When MIME type
+ * is specified and processing occurs, additional result_types and dynamic
+ * fields are included.
+ */
+export interface PIPELINE_RESULT {
     /** Unique identifier for this processing result (UUID format) */
     name: string;
     /** File path context (typically empty for direct data sends) */
@@ -1455,7 +2255,13 @@ interface PIPELINE_RESULT {
      */
     [key: string]: any;
 }
-interface UPLOAD_RESULT {
+/**
+ * File upload result structure with processing outcome and metadata.
+ *
+ * This represents the complete result of a file upload operation, including
+ * upload statistics, processing results, and any error information.
+ */
+export interface UPLOAD_RESULT {
     /** Upload completion status - 'complete' indicates successful upload and processing */
     action: "open" | "write" | "close" | "complete" | "error";
     /** Original filename as provided during upload */
@@ -1474,6 +2280,105 @@ interface UPLOAD_RESULT {
     result?: PIPELINE_RESULT;
     /** Error message if upload or processing failed (when action is 'error') */
     error?: string;
+}
+/**
+ * Event type enumeration for sophisticated client subscription and event routing.
+ *
+ * This enumeration defines event categories used for intelligent event filtering
+ * and routing in multi-client environments. It enables clients to subscribe
+ * to specific types of events based on their needs and capabilities, reducing
+ * network traffic and improving system performance.
+ *
+ * Event Categories:
+ * ----------------
+ * NONE: Unsubscribe from all events (cleanup and disconnection)
+ * ALL: Subscribe to all events regardless of category (comprehensive monitoring)
+ * DEBUGGER: Debug-specific events for debugging protocol communication
+ * DETAIL: Real-time processing events requiring immediate client attention
+ * SUMMARY: Periodic status summaries suitable for dashboard monitoring
+ * OUTPUT: Standard output and logging messages
+ * FLOW: Pipeline flow events - component execution tracking
+ * TASK: Task lifecycle events - start, stop, state changes
+ *
+ * Subscription Strategies:
+ * -----------------------
+ * NONE: Used during client disconnection to stop all event delivery
+ *       and perform cleanup of monitoring subscriptions.
+ *
+ * ALL: Comprehensive monitoring for administrative clients that need
+ *      complete visibility into task execution and debugging activities.
+ *
+ * DEBUGGER: Debug protocol events including breakpoint hits, variable
+ *           changes, stack traces, and debugging session management.
+ *
+ * DETAIL: Real-time processing events including object processing updates,
+ *         error/warning messages, metrics updates, and immediate status
+ *         changes requiring client response or display updates.
+ *
+ * SUMMARY: Periodic status summaries sent at CONST_STATUS_UPDATE_FREQ
+ *          intervals containing complete task status, suitable for
+ *          monitoring dashboards and periodic client updates.
+ *
+ * OUTPUT: Standard output and logging messages from task execution.
+ *
+ * FLOW: Pipeline flow events tracking component execution, data flow
+ *       between pipeline stages, and processing pipeline status.
+ *
+ * TASK: Task lifecycle events including task start, stop, pause, resume,
+ *       and state changes for task management interfaces.
+ *
+ * Network Optimization:
+ * --------------------
+ * Event filtering reduces network traffic by sending only relevant events
+ * to interested clients. SUMMARY subscriptions receive consolidated status
+ * updates rather than individual processing events, significantly reducing
+ * bandwidth usage for monitoring applications.
+ *
+ * Multi-Client Support:
+ * --------------------
+ * Different clients can subscribe to different event types simultaneously:
+ * - Debugging clients: DEBUGGER + DETAIL for comprehensive debugging
+ * - Monitoring dashboards: SUMMARY for efficient status tracking
+ * - Administrative tools: ALL for complete system visibility
+ * - Log viewers: OUTPUT for message monitoring
+ * - Pipeline managers: FLOW + TASK for execution tracking
+ *
+ * @example
+ * ```typescript
+ * // Subscribe to debugging and detail events
+ * const subscription = EVENT_TYPE.DEBUGGER | EVENT_TYPE.DETAIL;
+ *
+ * // Check if client wants specific events
+ * if (clientSubscription & EVENT_TYPE.SUMMARY) {
+ *     sendSummaryUpdate(client, taskStatus);
+ * }
+ * ```
+ */
+export declare enum EVENT_TYPE {
+    /** No events - unsubscribe from all event types */
+    NONE = 0,
+    /** Debug protocol events - DAP and debugging-specific events like breakpoints, stack traces */
+    DEBUGGER = 1,// Binary: 000001
+    /** Real-time processing events - immediate updates for live monitoring */
+    DETAIL = 2,// Binary: 000010
+    /** Periodic status summaries - dashboard monitoring with reduced frequency */
+    SUMMARY = 4,// Binary: 000100
+    /** Standard output and logging messages from task execution */
+    OUTPUT = 8,// Binary: 001000
+    /** Pipeline flow events - component execution tracking and data flow visualization */
+    FLOW = 16,// Binary: 010000
+    /** Task lifecycle events - start, stop, state changes, and task management */
+    TASK = 32,
+    /** Real-time node-to-UI messages emitted via monitorSSE() during pipeline execution */
+    SSE = 64,
+    /** Server-level events - connection added/removed, for admin dashboards */
+    DASHBOARD = 128,
+    /** Billing ledger events - credit/debit updates, scoped by org */
+    BILLING = 256,
+    /** Deployment change events - pointer/state/schedule/run mutations, scoped by org */
+    DEPLOY = 512,
+    /** Convenience combination - ALL events except NONE for comprehensive monitoring */
+    ALL = 1023
 }
 interface TaskRunningEntry {
     /** Unique task identifier. */
@@ -1518,7 +2423,79 @@ interface TaskEventRestart {
 }
 /** Discriminated union of all apaevt_task event body shapes. */
 export type TaskEvent = TaskEventRunning | TaskEventBegin | TaskEventEnd | TaskEventRestart;
-interface ServiceInvokeSlot {
+/**
+ * DAP event for pipeline flow tracking — component execution and data flow visualization.
+ *
+ * Sent during pipeline execution to track data flowing through components.
+ * Each event represents a pipeline operation (begin, enter, leave, end) on
+ * a specific pipe within the pipeline.
+ *
+ * Client Subscriptions:
+ * - FLOW: Pipeline execution tracking
+ * - ALL: Comprehensive monitoring
+ */
+export interface TaskEventFlow {
+    /** Pipe index within the pipeline. */
+    id: number;
+    /** Operation type. */
+    op: "begin" | "enter" | "leave" | "end";
+    /** Component names in the current pipe's execution path. */
+    pipes: string[];
+    /** Trace data — lane, input/output data, result, error. */
+    trace: {
+        lane?: string;
+        data?: Record<string, unknown>;
+        result?: string;
+        error?: string;
+    };
+    /**
+     * Final pipeline result — populated on op === 'end' when trace level >= summary.
+     * Contains result_types mapping plus dynamic fields (text, answers, documents, etc.).
+     */
+    result?: PIPELINE_RESULT;
+    /** Project identifier. */
+    project_id: string;
+    /** Source component identifier (e.g. "chat_1"). */
+    source: string;
+}
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * JSON Schema / UI schema pair for a single configuration section of a
+ * service driver (e.g. "Pipe", "Source", "Global").
+ */
+export interface ServiceSection {
+    /** JSON Schema describing the section's configurable properties. */
+    schema: Record<string, unknown>;
+    /** UI schema hints for rendering the section in the pipeline editor. */
+    ui: Record<string, unknown>;
+}
+/**
+ * Invoke slot descriptor for a service that supports control-plane invoke.
+ * Each key in the invoke map names a slot (e.g. 'llm', 'tool', 'memory').
+ */
+export interface ServiceInvokeSlot {
     /** Human-readable description of what this slot expects. */
     description: string;
     /** Minimum number of connections required (0 = optional). */
@@ -1526,7 +2503,10 @@ interface ServiceInvokeSlot {
     /** Maximum number of connections allowed (omitted = unlimited). */
     max?: number;
 }
-interface ServiceInputLane {
+/**
+ * Describes one input lane and its possible output lanes.
+ */
+export interface ServiceInputLane {
     /** The input lane name. */
     lane: string;
     /** Output lanes this input can produce. */
@@ -1534,7 +2514,22 @@ interface ServiceInputLane {
         lane: string;
     }>;
 }
-interface ServiceDefinition {
+/**
+ * A service SUMMARY as returned per-entry by the bulk `rrext_services`
+ * call: the display fields a client needs to render the canvas / node
+ * palette. The node's icon is referenced by id into the response's
+ * deduplicated {@link ServicesResponse.icons} table. Configuration
+ * schema is NOT included — fetch the full {@link ServiceDefinition} via
+ * `getService()` when the user opens the configure panel.
+ *
+ * @example
+ * ```typescript
+ * const { services } = await client.getServices();
+ * const ocr = services['ocr'];
+ * console.log(ocr.title, ocr.classType);
+ * ```
+ */
+export interface ServiceSummary {
     /** Human-readable display name. */
     title: string;
     /** Protocol URI scheme (e.g. "filesys://", "agent_rocketride://"). */
@@ -1559,24 +2554,59 @@ interface ServiceDefinition {
     invoke?: Record<string, ServiceInvokeSlot>;
     /** Tile/card rendering hint for the pipeline editor. */
     tile?: Record<string, unknown>;
-    /** Icon filename or identifier. */
+    /**
+     * Opaque id into the response's deduplicated {@link ServicesResponse.icons}
+     * table. Absent when the node ships no icon (or the file is unreadable)
+     * — clients render their built-in unknown icon. Ids are stable only
+     * within one response; never persist them across reloads.
+     */
     icon?: string;
     /** External documentation URL. */
     documentation?: string;
+}
+/**
+ * A FULL service definition, returned by the single-service
+ * `rrext_services` call (`getService()`). Extends the summary with the
+ * dynamic configuration section keys (e.g. "Pipe", "Source", "Global")
+ * that each hold a {@link ServiceSection} with `schema` and `ui`.
+ */
+export interface ServiceDefinition extends ServiceSummary {
     /** Dynamic configuration sections (e.g. "Pipe", "Source", "Global"). */
     [section: string]: unknown;
 }
-interface ServicesResponse {
-    /** Map of logical type name (e.g. "ocr", "filesys") to its definition. */
-    services: Record<string, ServiceDefinition>;
+/**
+ * Response from `getServices()`: a map of logical type names to their
+ * service summaries, the deduplicated icon table, and a version field.
+ */
+export interface ServicesResponse {
+    /** Map of logical type name (e.g. "ocr", "filesys") to its summary. */
+    services: Record<string, ServiceSummary>;
+    /**
+     * Deduplicated icon table: icon id -> raw SVG text. Many nodes share
+     * byte-identical icons, so each distinct SVG appears once and services
+     * reference it via their `icon` id. Sanitize before injecting into the
+     * DOM.
+     */
+    icons?: Record<string, string>;
+    /** Engine services version. */
+    version?: number;
 }
-interface ValidationError {
+/**
+ * A single validation error or warning from pipeline validation.
+ */
+export interface ValidationError {
     /** Human-readable error/warning message. */
     message: string;
     /** Component ID that caused the issue (if applicable). */
     id?: string;
 }
-interface ValidationResult {
+/**
+ * Result of a pipeline validation via `validate()`.
+ *
+ * The engine validates structure, component compatibility, and connection
+ * integrity. The result contains any errors and warnings found.
+ */
+export interface ValidationResult {
     /** Validation errors — pipeline will not execute with these. */
     errors: ValidationError[];
     /** Validation warnings — pipeline may still execute. */
@@ -1584,13 +2614,267 @@ interface ValidationResult {
     /** Additional fields from the engine response. */
     [key: string]: unknown;
 }
-interface TASK_STATUS_FLOW {
+/**
+ * Protocol capability flags for service drivers.
+ *
+ * Each flag is a single bit in a uint32 bitmask describing what a service
+ * driver supports. Values are returned by the engine in the `capabilities`
+ * field of a service definition and can be tested with bitwise AND.
+ *
+ * @example
+ * ```typescript
+ * const services = await client.getServices();
+ * const svc = services.services['my_driver'];
+ * if (svc.capabilities & PROTOCOL_CAPS.GPU) {
+ *   console.log('Driver requires a GPU');
+ * }
+ * ```
+ */
+export declare enum PROTOCOL_CAPS {
+    /** No capabilities */
+    NONE = 0,
+    /** Supports the file permissions interface */
+    SECURITY = 1,
+    /** Is a filesystem interface */
+    FILESYSTEM = 2,
+    /** Supports the substream interface */
+    SUBSTREAM = 4,
+    /** Uses a network interface */
+    NETWORK = 8,
+    /** Uses datanet or streamnet interfaces */
+    DATANET = 16,
+    /** Uses delta queries to track changes */
+    SYNC = 32,
+    /** Internal — will not be returned in services.json */
+    INTERNAL = 64,
+    /** Supports data catalog operations */
+    CATALOG = 128,
+    /** Do not monitor for excessive failures */
+    NOMONITOR = 256,
+    /** Source endpoint does not use include */
+    NOINCLUDE = 512,
+    /** Driver supports the invoke function */
+    INVOKE = 1024,
+    /** Driver supports remoting execution */
+    REMOTING = 2048,
+    /** Driver requires a GPU */
+    GPU = 4096,
+    /** Driver is not SaaS compatible */
+    NOSAAS = 8192,
+    /** Focus on this driver */
+    FOCUS = 16384,
+    /** Driver is deprecated */
+    DEPRECATED = 32768,
+    /** Driver is experimental */
+    EXPERIMENTAL = 65536
+}
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * Task Management Types: Comprehensive Status Tracking and Event Management System.
+ *
+ * This module defines the complete type system for sophisticated task lifecycle management,
+ * real-time status monitoring, and event-driven communication in distributed computational
+ * pipeline systems. It provides structured data models for tracking complex task execution
+ * states, processing statistics, error management, and pipeline flow visualization.
+ */
+/**
+ * Task lifecycle state enumeration for comprehensive state management.
+ *
+ * This enumeration defines all possible states in the task execution lifecycle,
+ * providing clear state transitions and enabling proper resource management,
+ * error handling, and client notification. Each state represents a distinct
+ * phase with specific characteristics and available operations.
+ *
+ * Lifecycle Phases:
+ * ----------------
+ * NONE: Initial state before any resources are allocated or configuration
+ *       is processed. Tasks in this state can be safely discarded without
+ *       cleanup operations.
+ *
+ * STARTING: Resource allocation and initial setup phase. Ports are allocated,
+ *           temporary files created, and subprocess preparation occurs.
+ *
+ * INITIALIZING: Subprocess has been created and is performing pipeline
+ *               initialization. Service interfaces are being established.
+ *
+ * RUNNING: Task is operational and processing requests. All interfaces
+ *          are available and the pipeline is actively executing.
+ *
+ * STOPPING: Graceful shutdown initiated. Subprocess is being terminated
+ *           and resources are being cleaned up.
+ *
+ * COMPLETED: Task finished successfully. All resources cleaned up and
+ *            final status available for client queries.
+ *
+ * CANCELLED: Task was terminated before completion. Resources cleaned up
+ *            and termination reason available in status.
+ *
+ * State Transitions:
+ * -----------------
+ * Normal execution flow:
+ * NONE → STARTING → INITIALIZING → RUNNING → STOPPING → COMPLETED
+ *
+ * Cancellation flow:
+ * Any state → STOPPING → CANCELLED
+ *
+ * Error handling:
+ * Any state → STOPPING → COMPLETED (with error exit code)
+ *
+ * Resource Management:
+ * -------------------
+ * - NONE/COMPLETED/CANCELLED: No active resources requiring cleanup
+ * - STARTING/INITIALIZING/RUNNING: Active resources requiring cleanup
+ * - STOPPING: Cleanup in progress, resources being deallocated
+ *
+ * Client Operations:
+ * -----------------
+ * - NONE: Configuration and launch operations available
+ * - STARTING/INITIALIZING: Status monitoring available
+ * - RUNNING: Full debugging and data processing operations available
+ * - STOPPING: Limited status monitoring, operations being rejected
+ * - COMPLETED/CANCELLED: Status queries only, task cleanup may be initiated
+ *
+ * Wait Operations:
+ * ---------------
+ * Clients can wait for specific state transitions using wait_for_running()
+ * and similar methods. State transitions trigger event notifications to
+ * all subscribed monitoring clients.
+ */
+export declare enum TASK_STATE {
+    /** Initial state - no resources allocated */
+    NONE = 0,
+    /** Resource allocation and subprocess preparation */
+    STARTING = 1,
+    /** Subprocess initialization and service startup */
+    INITIALIZING = 2,
+    /** Operational state - processing requests */
+    RUNNING = 3,
+    /** Graceful shutdown and resource cleanup in progress */
+    STOPPING = 4,
+    /** Successful completion - resources cleaned up */
+    COMPLETED = 5,
+    /** Terminated before completion - resources cleaned up */
+    CANCELLED = 6
+}
+/**
+ * Pipeline component execution flow tracking and visualization model.
+ *
+ * This model provides detailed tracking of pipeline component execution flow,
+ * enabling real-time visualization of which components are currently executing
+ * in each pipeline instance. It supports complex pipeline architectures with
+ * multiple concurrent execution paths and nested component hierarchies.
+ *
+ * Flow Tracking Features:
+ * ----------------------
+ * - Multi-pipeline execution tracking with per-instance component stacks
+ * - Real-time component entry/exit monitoring for performance analysis
+ * - Visual pipeline flow representation for debugging and monitoring
+ * - Component execution depth tracking for nested pipeline architectures
+ * - Concurrent execution visibility across multiple pipeline instances
+ *
+ * Data Structure:
+ * --------------
+ * totalPipes: Total number of concurrent pipeline execution instances
+ * byPipe: Dictionary mapping pipeline instance IDs to component execution stacks
+ *
+ * Component Stack Behavior:
+ * ------------------------
+ * Each pipeline instance maintains a stack of currently executing components:
+ * - Component entry pushes component name onto the stack
+ * - Component exit pops component name from the stack
+ * - Stack depth indicates nesting level of component execution
+ * - Empty stack indicates pipeline instance is idle or completed
+ *
+ * Visualization Applications:
+ * --------------------------
+ * - Real-time pipeline execution diagrams showing active components
+ * - Performance analysis identifying bottlenecks and execution patterns
+ * - Debugging support for component-level execution tracing
+ * - Monitoring dashboards displaying pipeline health and activity
+ *
+ * Concurrent Execution Support:
+ * ----------------------------
+ * Multiple pipeline instances can execute simultaneously, each maintaining
+ * independent component execution stacks. This enables complex parallel
+ * processing scenarios with full visibility into each execution path.
+ *
+ * Example Flow Tracking:
+ * ---------------------
+ * Pipeline 0: ['source', 'transform', 'filter'] - Currently in filter component
+ * Pipeline 1: ['source', 'transform']           - Currently in transform component
+ * Pipeline 2: []                                - Idle or completed
+ */
+export interface TASK_STATUS_FLOW {
     /** Total number of concurrent pipeline execution instances */
     totalPipes: number;
     /** Component execution stacks by pipeline instance ID */
     byPipe: Record<number, string[]>;
 }
-interface TASK_STATUS {
+/**
+ * Comprehensive task status model with real-time processing statistics and metrics.
+ *
+ * This model provides complete task execution status including processing statistics,
+ * error tracking, performance metrics, resource usage, and operational state.
+ * It serves as the central status repository for task monitoring, client updates,
+ * and administrative dashboards.
+ *
+ * Status Categories:
+ * -----------------
+ * - Job Information: Basic task identification and lifecycle status
+ * - Processing Statistics: Counts, sizes, rates, and completion metrics
+ * - Error Management: Error and warning tracking with message history
+ * - Resource Monitoring: Service health and operational state
+ * - Performance Metrics: Processing rates and resource utilization
+ * - Pipeline Tracking: Component execution flow and pipeline visualization
+ *
+ * Real-Time Updates:
+ * -----------------
+ * Status is updated in real-time as the task processes data and progresses
+ * through its lifecycle. Updates are broadcast to subscribed clients based
+ * on their EVENT_TYPE subscriptions, enabling responsive monitoring and
+ * debugging interfaces.
+ *
+ * Buffer Management:
+ * -----------------
+ * Error and warning lists maintain recent message history with automatic
+ * buffer limits to prevent memory growth in long-running tasks. Trace
+ * buffers preserve debugging information while controlling resource usage.
+ *
+ * Metrics Integration:
+ * -------------------
+ * Processing statistics and performance metrics are continuously updated
+ * to provide real-time visibility into task performance, throughput,
+ * and resource utilization patterns.
+ *
+ * Client Integration:
+ * ------------------
+ * Status information is serialized and broadcast to monitoring clients,
+ * debugging interfaces, and administrative dashboards. Different client
+ * types receive filtered status updates based on their subscription preferences.
+ */
+export interface TASK_STATUS {
     /** Human-readable task name derived from pipeline source component */
     name: string;
     /** Unique identifier for the project associated with the task */
@@ -1664,7 +2948,14 @@ interface TASK_STATUS {
     /** Epoch when the longest unused stretch began (0 while none is recorded). */
     idleLongestAt?: number;
 }
-interface TASK_STATUS_COMPONENT_STAT {
+/**
+ * Per-component timing accumulated by the supervisor for one run.
+ *
+ * Correlation happens by PIPE (concurrent completions run the same component
+ * on different pipes); aggregation rolls up by component. Seconds are rounded
+ * to 2 decimals at accumulation.
+ */
+export interface TASK_STATUS_COMPONENT_STAT {
     /** Completed enter/leave pairs this run. */
     calls: number;
     /** Sum of enter-to-leave seconds. */
@@ -1672,7 +2963,14 @@ interface TASK_STATUS_COMPONENT_STAT {
     /** Longest single call in seconds. */
     maxSeconds: number;
 }
-interface TASK_STATUS_SLOWEST_DOC {
+/**
+ * One of the run's slowest completions (server-tracked top list).
+ *
+ * beginSeq is the completion's begin flow event's continuum seq — the
+ * permanent trace identity getTrace resolves. beginTime is carried
+ * explicitly: catalog-seeded seqs do not encode time.
+ */
+export interface TASK_STATUS_SLOWEST_DOC {
     /** Object name from the begin event (capped at 200 chars). */
     name: string;
     /** Begin-to-end seconds, rounded to 2 decimals. */
@@ -1682,7 +2980,16 @@ interface TASK_STATUS_SLOWEST_DOC {
     /** Begin flow event continuum seq (trace identity). */
     beginSeq?: number | null;
 }
-interface TASK_TOKENS {
+/**
+ * Task token usage tracking (user-facing billing).
+ *
+ * Behavior:
+ *   - Values are CUMULATIVE from when monitoring starts
+ *   - Updated in real-time every 250ms as metrics are sampled
+ *   - Preserved when monitoring stops (frozen at final values)
+ *   - RESET to 0.0 when start_monitoring() is called for a new session
+ */
+export interface TASK_TOKENS {
     /** Cumulative CPU utilization tokens charged since monitoring started */
     cpu_utilization: number;
     /** Cumulative CPU memory tokens charged since monitoring started */
@@ -1696,7 +3003,13 @@ interface TASK_TOKENS {
     /** Total cumulative tokens charged (all dimensions) since monitoring started */
     total: number;
 }
-interface TASK_METRICS {
+/**
+ * Task resource utilization metrics.
+ *
+ * User-facing metrics for monitoring CPU, memory, and GPU usage.
+ * CPU percentages are normalized to 0-100% range across all platforms.
+ */
+export interface TASK_METRICS {
     /** Current CPU utilization percentage (normalized 0-100%, per-process) */
     cpu_percent: number;
     /** Current CPU memory (RAM) usage in megabytes (per-process) */
@@ -1716,6 +3029,80 @@ interface TASK_METRICS {
     /** Average GPU memory usage in megabytes over task lifetime */
     avg_gpu_memory_mb: number;
 }
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
+ * SDK version — automatically synced from package.json during build.
+ */
+export declare const SDK_VERSION = "1.3.0";
+/**
+ * Default protocol for connections when none is specified.
+ */
+export declare const CONST_DEFAULT_WEB_PROTOCOL = "http://";
+/**
+ * Default hostname for local RocketRide instances.
+ */
+export declare const CONST_DEFAULT_WEB_HOST = "localhost";
+/**
+ * Default server port for self-hosted / local RocketRide instances.
+ * Applied when no port is specified in the URI.
+ */
+export declare const CONST_DEFAULT_WEB_PORT = "5565";
+/**
+ * Default local RocketRide service endpoint URL.
+ */
+export declare const CONST_DEFAULT_WEB_LOCAL = "http://localhost:5565";
+/**
+ * Default cloud RocketRide service endpoint URL.
+ * Used when no custom URI is provided in the client configuration.
+ */
+export declare const CONST_DEFAULT_WEB_CLOUD = "https://api.rocketride.ai";
+/**
+ * @deprecated Use CONST_DEFAULT_WEB_CLOUD instead.
+ */
+export declare const CONST_DEFAULT_SERVICE = "https://api.rocketride.ai";
+/**
+ * WebSocket connection timeout in seconds.
+ * If no communication occurs within this period, the connection may be considered stale.
+ */
+export declare const CONST_SOCKET_TIMEOUT = 180;
+/**
+ * WebSocket ping interval in seconds.
+ * Ping frames are sent at this interval to detect dead connections.
+ */
+export declare const CONST_WS_PING_INTERVAL = 15;
+/**
+ * WebSocket ping timeout in seconds.
+ * If no pong response is received within this period after a ping,
+ * the connection is considered dead and will be closed.
+ */
+export declare const CONST_WS_PING_TIMEOUT = 60;
+/**
+ * Default store directory for project pipeline files.
+ * Use this constant instead of hardcoding '.projects'.
+ */
+export declare const PROJECT_DIR = ".projects";
 declare abstract class TransportBase {
     /**
      * Connection info for the "connected" callback (e.g. URI). Default none.
@@ -2319,13 +3706,109 @@ declare class BillingApi {
         url: string;
     }>;
 }
-type SequelizeConstructor = new (options?: Options) => Sequelize;
-declare enum DatabaseDialect {
+/**
+ * Constructor shape of the `Sequelize` class, injected by the caller so the
+ * RocketRide client never statically (runtime) imports the `sequelize`
+ * package. `sequelize` transitively pulls in Node built-ins (`util`, `debug`)
+ * that cannot be bundled for browser targets (dropper-ui, chat-ui, etc.).
+ * Callers pass their own `import { Sequelize } from 'sequelize'` through.
+ */
+export type SequelizeConstructor = new (options?: Options) => Sequelize;
+/** Options for {@link createSequelize}. */
+export interface CreateSequelizeOptions {
+    /** The `Sequelize` class, injected by the caller (`import { Sequelize } from 'sequelize'`). */
+    Sequelize: SequelizeConstructor;
+    /** A `DatabaseLike` instance (e.g. `client.database`) to forward SQL through. */
+    db: DatabaseLike;
+    /** Pipeline token for authentication and resource access. */
+    token: string;
+    /** Optional target database node ID; pins connections to a specific node. */
+    nodeId?: string;
+    /** Extra Sequelize options merged over the defaults. */
+    sequelizeOptions?: Options;
+}
+/**
+ * Build a Sequelize v6 instance whose Postgres dialect transports SQL over
+ * a RocketRide `DatabaseLike` (e.g. `client.database`) instead of a TCP socket.
+ *
+ * Internally wires `makePgShim` as `dialectModule` so Sequelize never opens a
+ * real pg connection — all queries, transactions, and parameter binding are
+ * forwarded through the RocketRide pipeline protocol.
+ *
+ * @param opts - See {@link CreateSequelizeOptions}.
+ * @returns A fully configured `Sequelize` instance ready for model definition and queries.
+ *
+ * @example
+ * ```ts
+ * import { Sequelize } from 'sequelize';
+ * const sq = createSequelize({ Sequelize, db: client.database, token: myToken, nodeId: 'myDb' });
+ * const User = sq.define('User', { name: DataTypes.STRING }, { tableName: 'users', timestamps: false });
+ * const users = await User.findAll();
+ * ```
+ */
+export declare function createSequelize(opts: CreateSequelizeOptions): Sequelize;
+/**
+ * Structural interface satisfied by `DatabaseApi` (and test doubles) for the
+ * Sequelize pg-compatible shim.  Only the four methods the shim needs are
+ * required, so the interface remains stable across future `DatabaseApi`
+ * additions without forcing shim changes.
+ */
+export interface DatabaseLike {
+    /** Execute a raw SQL statement. */
+    query(options: {
+        token: string;
+        sql: string;
+        nodeId?: string;
+        sessionId?: string;
+        params?: unknown[];
+    }): Promise<{
+        rows: Record<string, unknown>[];
+        affected_rows: number;
+    }>;
+    /** Begin a database transaction. */
+    beginTransaction(options: {
+        token: string;
+        nodeId?: string;
+    }): Promise<{
+        session_id: string;
+    }>;
+    /** Commit an open transaction. */
+    commit(options: {
+        token: string;
+        sessionId: string;
+        nodeId?: string;
+    }): Promise<{
+        ok: boolean;
+    }>;
+    /** Roll back an open transaction. */
+    rollback(options: {
+        token: string;
+        sessionId: string;
+        nodeId?: string;
+    }): Promise<{
+        ok: boolean;
+    }>;
+}
+/**
+ * Underlying database engine a pipeline is connected to.
+ *
+ * Returned by `client.database.dialect(...)` so applications can branch on
+ * dialect-specific behavior (e.g. SQL syntax differences, type coercion) and
+ * detect when they're talking to a graph DB instead of a relational one.
+ */
+export declare enum DatabaseDialect {
     POSTGRES = "postgres",
     MYSQL = "mysql",
     NEO4J = "neo4j"
 }
-declare class DatabaseApi {
+/**
+ * Direct database-query namespace on RocketRideClient.
+ *
+ * Accessed via `client.database` — not instantiated directly. Statements
+ * submitted through this namespace bypass the LLM translation layer and
+ * safety checks, so the caller is responsible for the SQL/Cypher they pass.
+ */
+export declare class DatabaseApi {
     constructor(client: RocketRideClient);
     /**
      * Execute a raw SQL or Cypher statement against a database pipeline node.
@@ -2656,7 +4139,13 @@ declare class DeployApi {
      */
     preview(schedule: string, count?: number): Promise<SchedulePreview>;
 }
-declare class LogEventStream {
+/**
+ * A stateful DVR session over one source continuum.
+ *
+ * Create via {@link LogApi.openEventStream}; dispose with
+ * {@link closeEventStream}.
+ */
+export declare class LogEventStream {
     /** @param client - Owning client. @param stream - Identity tuple. */
     constructor(client: RocketRideClient, stream: LogStreamRef);
     /**
@@ -2810,7 +4299,28 @@ declare class LogApi {
         all?: boolean;
     }): Promise<LogDeleteResult>;
 }
-declare class DataPipe {
+/**
+ * Streaming data pipe for sending large datasets to RocketRide pipelines.
+ *
+ * DataPipe provides a stream-like interface for uploading data to an RocketRide
+ * pipeline. It handles the low-level protocol details of opening, writing to,
+ * and closing data pipes on the server.
+ *
+ * Usage pattern:
+ * 1. Create pipe using client.pipe()
+ * 2. Call open() to establish the pipe
+ * 3. Call write() multiple times with data chunks
+ * 4. Call close() to finalize and get results
+ *
+ * @example
+ * ```typescript
+ * const pipe = await client.pipe(token, { filename: 'data.json' }, 'application/json');
+ * await pipe.open();
+ * await pipe.write(new TextEncoder().encode('{"data": "value"}'));
+ * const result = await pipe.close();
+ * ```
+ */
+export declare class DataPipe {
     /**
      * Creates a new DataPipe instance.
      *
@@ -2887,7 +4397,36 @@ declare class DataPipe {
      */
     tool<T = any>(tool: string, nodeId?: string, input?: Record<string, unknown>): Promise<T>;
 }
-type MonitorKey = {
+/**
+ * Main RocketRide client for connecting to RocketRide servers and services.
+ *
+ * This client provides a comprehensive API for interacting with RocketRide services,
+ * including connection management, pipeline execution, data operations, AI chat,
+ * event handling, and server connectivity testing.
+ *
+ * Key features:
+ * - Single shared WebSocket connection for all operations
+ * - Connection management (connect/disconnect) with optional persistence
+ * - Automatic reconnection when persist mode is enabled
+ * - Pipeline execution (use, terminate, getTaskStatus)
+ * - Data operations (send, sendFiles, pipe)
+ * - AI chat functionality (chat)
+ * - Event handling (setEvents, event callbacks)
+ * - Server connectivity testing (ping)
+ * - Full TypeScript type safety
+ */
+/**
+ * Identifies a monitor subscription key.
+ *
+ * - `{ token }` — monitors a specific running task by its session token.
+ * - `{ projectId, source }` — monitors the CALLER's own dev run of the
+ *   project/source (the server binds the connection's user identity).
+ * - `{ teamId, projectId, source }` — monitors the team's DEPLOYED run.
+ *
+ * The scope IS the kind: teamId present addresses the deploy continuum,
+ * absent addresses your dev run — there is no run-kind argument.
+ */
+export type MonitorKey = {
     token: string;
 } | {
     teamId?: string;
@@ -3770,37 +5309,42 @@ export declare class RocketRideClient extends DAPClient {
      */
     static withConnection<T>(config: RocketRideClientConfig, callback: (client: RocketRideClient) => Promise<T>): Promise<T>;
     /**
-     * Retrieve all available service definitions from the server.
+     * Retrieve all service summaries from the server.
      *
-     * Returns a dictionary containing all service definitions available on
-     * the connected RocketRide server. Each service definition includes schemas,
-     * UI schemas, and configuration metadata.
+     * Returns the server's cached service catalog: one SUMMARY per service
+     * with the display fields (title, classType, lanes, ...) plus a
+     * deduplicated icon table (`icons`) that each summary's `icon` id
+     * points into. Configuration schema is not included — call
+     * {@link getService} when the user opens the configure panel.
      *
-     * @returns Promise resolving to object mapping service names to their definitions
+     * @returns Promise resolving to `{ services, icons, version }` where
+     *          services maps service names to their summaries
      * @throws Error if the request fails or server returns an error
      *
      * @example
      * ```typescript
      * // Get all available services
-     * const services = await client.getServices();
+     * const { services, icons } = await client.getServices();
      *
      * // List available service names
      * for (const name of Object.keys(services)) {
      *   console.log(`Available service: ${name}`);
      * }
      *
-     * // Access a specific service's schema
-     * if (services['ocr']) {
-     *   console.log('OCR schema:', services['ocr'].schema);
+     * // Render a node's icon
+     * const iconId = services['ocr']?.icon;
+     * if (iconId && icons?.[iconId]) {
+     *   renderSvg(icons[iconId]);
      * }
      * ```
      */
     getServices(): Promise<ServicesResponse>;
     /**
-     * Retrieve a specific service definition from the server.
+     * Retrieve a specific service's FULL definition from the server.
      *
-     * Returns the definition for a specific service (connector) by name.
-     * The definition includes schemas, UI schemas, and configuration metadata.
+     * Returns the complete definition for one service (connector) by name:
+     * the summary fields plus the dynamic configuration sections (schema +
+     * UI schema per section) the configure panel needs.
      *
      * @param service - Name of the service to retrieve (e.g., 'ocr', 'embed', 'chat')
      * @returns Promise resolving to service definition or undefined if not found
@@ -3808,11 +5352,10 @@ export declare class RocketRideClient extends DAPClient {
      *
      * @example
      * ```typescript
-     * // Get OCR service definition
+     * // Get OCR service definition (config sections included)
      * const ocr = await client.getService('ocr');
      * if (ocr) {
-     *   console.log('OCR schema:', ocr.schema);
-     *   console.log('OCR UI schema:', ocr.uiSchema);
+     *   console.log('OCR sections:', Object.keys(ocr));
      * } else {
      *   console.log('OCR service not available');
      * }
@@ -4416,7 +5959,36 @@ export interface IAuthProvider {
     /** Returns true if a valid token is stored. */
     isSignedIn(): Promise<boolean>;
 }
-interface CheckoutPlan {
+/**
+ * Checkout module type definitions.
+ *
+ * Shapes for the plan picker and checkout flow. These mirror the server's
+ * DAP response shapes from the `rrext_account_billing` `prices` subcommand.
+ */
+/**
+ * Defines an alternative click action for a plan card.
+ *
+ * Plans without an action proceed to Stripe checkout as normal.
+ * Plans with an action navigate the user elsewhere instead (e.g. a
+ * GitHub repo for a free/OSS tier, or a mailto for enterprise sales).
+ */
+export interface PlanAction {
+    /** Action type: ``link`` opens a URL, ``mailto`` opens an email compose. */
+    type: "link" | "mailto";
+    /** Target URL (for ``link``) or email address (for ``mailto``). */
+    url: string;
+    /** Optional email subject line (only used when type is ``mailto``). */
+    subject?: string;
+    /** Button label shown on the card (e.g. "Get started", "Contact us"). */
+    label: string;
+}
+/**
+ * A single plan card shown in the CheckoutModal plan picker.
+ *
+ * Mirrors the ``app_prices`` DB row shape returned by ``_price_to_dict``.
+ * The UI reads display fields from ``metadata`` (description, action, order, etc.).
+ */
+export interface CheckoutPlan {
     /** Internal price UUID. */
     id: string;
     /** App identifier. */
@@ -4438,6 +6010,13 @@ interface CheckoutPlan {
     /** ISO 8601 creation timestamp. */
     createdAt: string | null;
 }
+/**
+ * UI-local result of validating a promo code via the host callback.
+ *
+ * Mirrors the SDK's `PromoValidation` response shape. A grant/hackathon
+ * code is recognisable by `appId` + `creditsGranted`; a discount-only code
+ * has neither and applies to whichever plan is selected.
+ */
 interface PromoValidation$1 {
     /** Whether the code resolved to an active Stripe promotion code. */
     valid: boolean;
@@ -4466,6 +6045,91 @@ interface PromoValidation$1 {
     /** First-invoice price in cents after the discount (if priceId given). */
     discountedAmountCents?: number;
 }
+/**
+ * UI-local result of redeeming a credit-grant code via the host callback.
+ * Mirrors the SDK's `PromoRedemption` response shape.
+ */
+interface PromoRedemption$1 {
+    /** True when the redemption succeeded. */
+    redeemed: boolean;
+    /** 'subscribed' = new $0 subscription; 'credits_only' = already subscribed. */
+    mode: "subscribed" | "credits_only";
+    /** App the code targets. */
+    appId: string;
+    /** Subscription status after redemption (e.g. 'active'). */
+    status?: string;
+    /** Credits granted ({resource: amount}). */
+    credits: Record<string, number>;
+}
+type CheckoutModalPromoProps = {
+    /**
+     * Resolves a promo code without side effects. Providing the pair
+     * renders a Promo Code box under the plan cards.
+     */
+    onValidatePromoCode: (code: string, priceId?: string) => Promise<PromoValidation$1>;
+    /**
+     * Redeems a credit-grant (hackathon) code — $0 subscription plus
+     * immediate credits, no plan selection or payment step.
+     */
+    onRedeemPromoCode: (code: string) => Promise<PromoRedemption$1>;
+} | {
+    onValidatePromoCode?: undefined;
+    onRedeemPromoCode?: undefined;
+};
+interface CheckoutModalBaseProps {
+    /** Display name of the app being subscribed to (e.g. "RocketRide"). */
+    appName: string;
+    /** Short description shown below the app name. */
+    appDescription?: string;
+    /** Stripe publishable key (pk_test_* or pk_live_*). */
+    stripePublishableKey: string;
+    /**
+     * When set, the modal skips the plan-picker step and goes straight to the
+     * payment step for this plan (creating the subscription immediately). Omit
+     * (the default) to show the picker first. Only the web pricing page sets
+     * this; the in-app and VS Code extension flows leave it undefined and keep
+     * the pick-a-plan → Continue UX.
+     */
+    preselectedPlan?: CheckoutPlan;
+    /**
+     * Discount code (already validated on the pricing page) to apply to a
+     * preselected-plan checkout. Seeds the applied promo so the auto-advanced
+     * payment step shows and charges the discounted amount.
+     */
+    preselectedPromo?: PromoValidation$1 | null;
+    /** Fetches available subscription plans from the server. */
+    onFetchPlans: () => Promise<CheckoutPlan[]>;
+    /**
+     * Creates a Stripe subscription on the server and returns the
+     * client secret needed by Stripe Elements to confirm the payment.
+     *
+     * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
+     * promotion code) — the subscription is already active and the payment
+     * step is skipped entirely.
+     */
+    onCreateCheckout: (priceId: string, promotionCode?: string) => Promise<{
+        clientSecret: string | null;
+        subscriptionId: string;
+        status?: string;
+    }>;
+    /**
+     * Notifies the server that payment was confirmed client-side.
+     * The server writes 'incomplete' status; the webhook later flips to 'active'.
+     */
+    onConfirmPending: (subscriptionId: string, priceId: string) => Promise<void>;
+    /** Called after a successful payment — host should close the modal. */
+    onSuccess: () => void;
+    /** Called when the user dismisses the modal without completing checkout. */
+    onClose: () => void;
+    /**
+     * Overrides how a plan's action CTA (Free → link, Enterprise → mailto) is
+     * opened. The browser default (window.open / mailto) works in the SaaS web
+     * app; the VS Code extension passes a handler that routes through the host,
+     * since webview navigation is sandboxed.
+     */
+    onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
+}
+type CheckoutModalProps = CheckoutModalBaseProps & CheckoutModalPromoProps;
 interface ShellAppEntry {
     /** Unique app identifier (e.g. 'rocketride.home'). */
     id: string;
@@ -5465,6 +7129,47 @@ export type ActivityEvent = {
     body: DashboardEvent;
     receivedAt: number;
 };
+interface IMonitorViewProps {
+    /**
+     * Document display name for the page header. When provided, the view
+     * renders a stock {@link ContentHeader} titled with this name (matching
+     * the host's tab title), pinned between the page strip and the scrolling
+     * page bodies. No header renders without it.
+     */
+    documentTitle?: string;
+    /** Full dashboard snapshot from rrext_dashboard response, or null if not yet loaded. */
+    data: DashboardResponse | null;
+    /** Activity events pushed from the server (newest first). */
+    events: ActivityEvent[];
+    /** Whether the client is connected to the server. */
+    isConnected: boolean;
+    /** Callback to request a manual data refresh from the host. */
+    onRefresh?: () => void;
+    /**
+     * Optional server-paginated connections fetcher — presence switches the
+     * Connections grid to REMOTE mode (host binds it to `listConnections`).
+     */
+    listConnections?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardConnection>>;
+    /**
+     * Optional server-paginated tasks fetcher — presence switches the Tasks
+     * grid to REMOTE mode (host binds it to `listTasks`).
+     */
+    listTasks?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardTask>>;
+    /**
+     * Receives ONE combined refetch that silently re-requests the current
+     * page of every remote grid — the host polls it (usePolling, 3s) the way
+     * the admin views poll their own grids.
+     */
+    onRefetchReady?: (refetch: () => void) => void;
+}
+export declare const MonitorView: React$1.FC<IMonitorViewProps>;
+/**
+ * Parse a raw server event into a monitor ActivityEvent.
+ *
+ * @param raw - Raw event object from the server WebSocket.
+ * @returns ActivityEvent if the event is dashboard or task related, null otherwise.
+ */
+export declare function parseActivityEvent(raw: unknown): ActivityEvent | null;
 /** Data returned by the useDashboardData hook. */
 export interface DashboardData {
     /** Latest dashboard snapshot, or null if not yet loaded. */
@@ -8062,6 +9767,49 @@ export declare function createActionsColumn<Row>(config: IActionsColumnConfig<Ro
  * @returns The formatted cell content.
  */
 export declare function autoFormatter(cell: CellComponent): HTMLElement | string;
+/**
+ * Render a 'date' column value per its {@link IColumnFormat} date/time pick.
+ * The date and time parts are independent: either alone renders just that
+ * part; both render "date time". The 12-hour clock is the default; `clock24`
+ * switches the time part to 24-hour. Values render in the viewer's LOCAL
+ * time by default (the wire carries UTC); the `utc` pick renders the UTC
+ * parts instead — including the date part, since a UTC instant near midnight
+ * falls on a different local date.
+ *
+ * The modifiers ([24HR] / [UTC]) act even WITHOUT a pattern pick: toggled
+ * alone, the override takes over the full default datetime
+ * (MM/DD/YY HH:MM:SS) — otherwise the toggle would sit dead on a column
+ * still rendered by its own formatter.
+ *
+ * @param value - The raw cell value (ISO string / epoch / Date).
+ * @param fmt - The column's format override.
+ * @returns The formatted text, or null when no date/time/modifier pick is
+ *     set or the value does not parse as a date (callers fall back to the
+ *     base render).
+ */
+export declare function formatDateValue(value: unknown, fmt: IColumnFormat): string | null;
+interface IColumnFormat {
+    /** Cell text alignment; unset = the column's declared hozAlign. */
+    align?: "left" | "center" | "right";
+    /** Date part of a 'date' column's rendering (exclusive pair). */
+    dateFormat?: "MM/YY" | "MM/DD/YY";
+    /** Time part of a 'date' column's rendering (exclusive pair). */
+    timeFormat?: "HH:MM" | "HH:MM:SS";
+    /** 24-hour clock for the time part (default 12-hour AM/PM). */
+    clock24?: boolean;
+    /**
+     * Render the picked date/time parts in UTC. Default (unset) converts to
+     * the viewer's LOCAL time — the platform wire contract is that server
+     * datetimes are UTC.
+     */
+    utc?: boolean;
+    /** Fixed decimal places of a 'number' column (exclusive 0-3). */
+    decimals?: 0 | 1 | 2 | 3;
+    /** Thousands separators on a 'number' column. */
+    thousands?: boolean;
+    /** '$' currency prefix on a 'number' column. */
+    currency?: boolean;
+}
 /** One option of a select or typeahead filter control. */
 export interface IGridFilterOption {
     /** Value stored (and sent to fetchPage) when chosen. */
@@ -8425,6 +10173,137 @@ export interface IGridConfigClearDetail {
  * @returns A persistence adapter for one or more DataGrids.
  */
 export declare function createMessageGridPersistence(): IDataGridPersistence;
+/** A single message in the conversation. */
+export interface ChatMessage {
+    /** Unique monotonic ID — never collides even within the same millisecond. */
+    id: number;
+    /** Raw text content (may contain markdown). */
+    text: string;
+    /** Who produced the message. */
+    sender: "user" | "bot" | "system" | "status";
+    /** Formatted time string, e.g. "14:32". */
+    timestamp: string;
+    /** Pipeline result key — shown as a small label below bot messages. */
+    resultKey?: string;
+    /** SSE event type — used to identify thinking-group status messages. */
+    sseType?: string;
+    /** Optional metadata line (e.g. "2,340 tokens · 1.8s") shown under the bubble content. */
+    meta?: string;
+    /** When true, the message renders as an in-thread error Banner instead of a bubble. */
+    isError?: boolean;
+}
+/** Props for the top-level ChatView component. */
+export interface IChatViewProps {
+    /** Current message list managed by the host via useChatMessages. */
+    messages: ChatMessage[];
+    /** Whether the assistant is currently composing a response. */
+    isTyping: boolean;
+    /** Whether the underlying WebSocket client is connected. */
+    isConnected: boolean;
+    /** Called when the user submits a message. */
+    onSend: (text: string) => void;
+    /** Placeholder shown in the input when idle. Defaults to "Ask anything…". */
+    placeholder?: string;
+    /** Title for the EmptyState shown when the conversation has no messages. */
+    emptyTitle?: string;
+    /** Description for the EmptyState shown when the conversation has no messages. */
+    emptyDescription?: string;
+    /** Optional node rendered before the input field (reserved for future attachments). */
+    leadingInputSlot?: React$1.ReactNode;
+}
+/** Options for useChatMessages. */
+export interface UseChatMessagesOptions {
+    /** System message shown after clearMessages(). */
+    welcomeMessage?: string;
+    /** Seed messages to restore a previous conversation (preserves sender, timestamp, etc.). */
+    initialMessages?: ChatMessage[];
+}
+/**
+ * Renders the chat surface (message thread + composer).
+ *
+ * @param props - {@link IChatViewProps}. The composer is disabled whenever
+ *   `isConnected` is false; `emptyTitle` / `emptyDescription` configure the
+ *   EmptyState for new conversations; `leadingInputSlot` is rendered before the
+ *   input (reserved for future attachments).
+ * @returns The chat view element.
+ */
+export declare const ChatView: React$1.FC<IChatViewProps>;
+interface MessageListProps {
+    messages: ChatMessage[];
+    isTyping: boolean;
+    /** Title for the EmptyState shown when there are no messages. */
+    emptyTitle?: string;
+    /** Description for the EmptyState shown when there are no messages. */
+    emptyDescription?: string;
+}
+/**
+ * Renders the scrollable message thread with scroll-locked autoscroll.
+ *
+ * @param props - {@link MessageListProps}.
+ * @returns The thread element (or an EmptyState when empty).
+ */
+export declare const MessageList: React$1.FC<MessageListProps>;
+interface MarkdownRendererProps {
+    content: string;
+}
+export declare const MarkdownRenderer: React$1.FC<MarkdownRendererProps>;
+interface UseChatMessagesReturn {
+    messages: ChatMessage[];
+    isTyping: boolean;
+    sendMessage: (text: string, client: any, authToken: string) => Promise<void>;
+    clearMessages: () => void;
+    addSystemMessage: (text: string) => void;
+}
+/**
+ * Manages chat message state and RocketRide API communication.
+ *
+ * IMPORTANT: always use the internal updateMessages helper — never call
+ * setMessages directly. Direct setMessages calls bypass the messagesRef
+ * sync and will cause sendMessage to build history from a stale snapshot.
+ */
+export declare function useChatMessages({ welcomeMessage, initialMessages }?: UseChatMessagesOptions): UseChatMessagesReturn;
+/** Props for the {@link ConnectionCard} component. */
+export interface IConnectionCardProps {
+    /** Optional source icon (rendered at 30px, inherits the card's icon colour). */
+    icon?: React$1.ReactNode;
+    /** Source name. */
+    name: string;
+    /** Source address / endpoint. */
+    address: string;
+    /** StatusBadge variant for the source's state. */
+    status: Extract<StatusVariant, "success" | "muted" | "error">;
+    /** StatusBadge label, e.g. "Connected" / "Disconnected". */
+    statusLabel: string;
+    /** When true, the card carries the brand border and brand icon colour. */
+    connected?: boolean;
+    /** Edit action — reveals the pencil icon on hover. */
+    onEdit?: () => void;
+    /** Delete action — reveals the trash icon on hover. */
+    onDelete?: () => void;
+    /** Select action for the whole card. */
+    onClick?: () => void;
+}
+/** Props for the {@link ConnectionCardAdd} component. */
+export interface IConnectionCardAddProps {
+    /** Label beneath the plus glyph, e.g. "New Connection". */
+    label: string;
+    /** Fired when the add tile is activated. */
+    onClick: () => void;
+}
+/**
+ * Renders a connection / source card.
+ *
+ * @param props - {@link IConnectionCardProps}.
+ * @returns The card element.
+ */
+export declare function ConnectionCard({ icon, name, address, status, statusLabel, connected, onEdit, onDelete, onClick, }: IConnectionCardProps): React$1.ReactElement;
+/**
+ * Renders the dashed "add a source" tile.
+ *
+ * @param props - {@link IConnectionCardAddProps}.
+ * @returns The add-tile element.
+ */
+export declare function ConnectionCardAdd({ label, onClick }: IConnectionCardAddProps): React$1.ReactElement;
 /**
  * Debounce a value: the returned value updates only after `delayMs` of
  * silence following the last change.
@@ -8489,202 +10368,6 @@ export declare function formatDate(iso: string): string;
  *   `formatDuration(1500)` → `"1.5s"`, `formatDuration(90000)` → `"1m 30s"`.
  */
 export declare function formatDuration(ms: number): string;
-export declare const commonStyles: {
-    card: React$1.CSSProperties;
-    cardHeader: React$1.CSSProperties;
-    cardBody: React$1.CSSProperties;
-    cardFlat: React$1.CSSProperties;
-    section: React$1.CSSProperties;
-    sectionHeader: React$1.CSSProperties;
-    sectionHeaderLabel: React$1.CSSProperties;
-    buttonPrimary: React$1.CSSProperties;
-    buttonDanger: React$1.CSSProperties;
-    buttonDangerOutline: React$1.CSSProperties;
-    buttonSecondary: React$1.CSSProperties;
-    buttonSmall: React$1.CSSProperties;
-    buttonPrimarySmall: React$1.CSSProperties;
-    buttonSecondarySmall: React$1.CSSProperties;
-    buttonDangerSmall: React$1.CSSProperties;
-    buttonDisabled: React$1.CSSProperties;
-    cardHeaderButton: React$1.CSSProperties;
-    cardBodyButton: React$1.CSSProperties;
-    toggleButton: (active: boolean) => React$1.CSSProperties;
-    toggleGroup: React$1.CSSProperties;
-    splitHeader: React$1.CSSProperties;
-    tabContent: React$1.CSSProperties;
-    viewPadding: React$1.CSSProperties;
-    columnFill: React$1.CSSProperties;
-    headerBar: React$1.CSSProperties;
-    divider: React$1.CSSProperties;
-    empty: React$1.CSSProperties;
-    textMuted: React$1.CSSProperties;
-    textEllipsis: React$1.CSSProperties;
-    fontMono: React$1.CSSProperties;
-    labelUppercase: React$1.CSSProperties;
-    overlay: React$1.CSSProperties;
-    modalOverlay: React$1.CSSProperties;
-    dialog: React$1.CSSProperties;
-    modalDialog: React$1.CSSProperties;
-    modalHeader: React$1.CSSProperties;
-    modalBody: React$1.CSSProperties;
-    modalFooter: React$1.CSSProperties;
-    popupMenu: React$1.CSSProperties;
-    menuRow: React$1.CSSProperties;
-    inputField: React$1.CSSProperties;
-    listRow: (active: boolean) => React$1.CSSProperties;
-    emptyState: React$1.CSSProperties;
-    iconBox: React$1.CSSProperties;
-    badge: React$1.CSSProperties;
-    tableHeader: React$1.CSSProperties;
-    tableCell: React$1.CSSProperties;
-    indicatorBase: React$1.CSSProperties;
-    indicatorSuccess: React$1.CSSProperties;
-    indicatorInfo: React$1.CSSProperties;
-    indicatorWarning: React$1.CSSProperties;
-    indicatorError: React$1.CSSProperties;
-    indicatorMuted: React$1.CSSProperties;
-};
-interface IPosition {
-    x: number;
-    y: number;
-}
-interface IDimensions {
-    width: number;
-    height: number;
-}
-declare enum IServiceCapabilities {
-    Security = 1,
-    Filesystem = 2,
-    Substream = 4,
-    Network = 8,
-    Datanet = 16,
-    Sync = 32,
-    Internal = 64,
-    Catalog = 128,
-    NoMonitor = 256,
-    NoInclude = 512,
-    Invoke = 1024,
-    Remoting = 2048,
-    Gpu = 4096,
-    NoSaas = 8192,
-    Focus = 16384,
-    Deprecated = 32768,
-    Experimental = 65536
-}
-interface IServiceSchema {
-    /** JSON Schema defining the data shape and validation rules. */
-    schema: Record<string, any>;
-    /** RJSF UI schema controlling widget rendering and layout. */
-    ui: Record<string, any>;
-}
-interface IInvokeChannel {
-    /** Human-readable description of what this channel provides. */
-    description?: string;
-    /** Minimum number of connections required (0 = optional). */
-    min?: number;
-    /** Maximum number of connections allowed (undefined = unlimited). */
-    max?: number;
-}
-type IServiceLaneEntry = string | {
-    type: string;
-    description?: string;
-    min?: number;
-    max?: number;
-};
-interface IService {
-    /** Human-readable display title (e.g. "OpenAI", "PostgreSQL"). */
-    title?: string;
-    /** Tile display template strings shown on the node body (e.g. "Model: ${parameters.llm_openai.profile}"). */
-    tile?: string[];
-    /** Icon filename or URL for the node header (e.g. "openai.svg"). */
-    icon?: string;
-    /** Bitmask of actions this service supports. */
-    actions?: number;
-    /** Bitmask of capabilities (see {@link IServiceCapabilities}). */
-    capabilities?: IServiceCapabilities;
-    /** Class type tags determining which invoke channels accept this node (e.g. ["llm"], ["database", "tool"]). */
-    classType?: string[];
-    /**
-     * Lane definitions: maps input lane keys to arrays of output lane entries.
-     * Keys prefixed with `_` are hidden internal lanes.
-     *
-     * @example
-     * ```json
-     * { "questions": ["answers"], "_source": ["questions"] }
-     * ```
-     */
-    lanes?: Record<string, IServiceLaneEntry[]>;
-    /** Execution plan identifiers. */
-    plans?: string[];
-    /** Pipe configuration schema (compiled from fields/shape/preconfig by the engine). */
-    Pipe?: IServiceSchema;
-    /** Source configuration schema. */
-    Source?: IServiceSchema;
-    /**
-     * Invoke configuration: maps channel names to their connection requirements.
-     *
-     * @example
-     * ```json
-     * { "llm": { "min": 1, "max": 1 }, "tool": { "min": 0 } }
-     * ```
-     */
-    invoke?: Record<string, IInvokeChannel>;
-    /** Control-flow configuration. */
-    control?: Record<string, unknown>;
-    /** HTML description for tooltips. */
-    description?: string;
-    /** URL to external documentation. */
-    documentation?: string;
-    /** Service type identifier. */
-    type?: string;
-    /** Display content string. */
-    content?: string;
-    /** Whether this service should receive focus in the catalog. */
-    focus?: boolean;
-}
-/** Dictionary of service definitions keyed by provider name. */
-export interface IServiceCatalog {
-    [key: string]: IService;
-}
-interface IComponentUI {
-    [key: string]: unknown;
-    position: IPosition;
-    measured: IDimensions;
-    nodeType: string;
-    formDataValid?: boolean;
-    parentId?: string;
-}
-interface IProjectComponent extends Omit<PipelineComponent, "ui"> {
-    ui: IComponentUI;
-}
-/**
- * Top-level project entity persisted to the .pipe file.
- * Extends the SDK's PipelineConfig.
- */
-export interface IProject extends PipelineConfig {
-}
-/**
- * Response from the backend pipeline validation endpoint.
- */
-export interface IValidateResponse {
-    status: string;
-    error?: {
-        code?: number;
-        message?: string;
-    };
-    data: {
-        errors?: {
-            code: number;
-            message: string;
-        }[];
-        warnings?: {
-            code: number;
-            message: string;
-        }[];
-        component: IProjectComponent;
-        pipeline: IProject;
-    };
-}
 /**
  * Complete set of --rr-* CSS custom property keys used across all
  * RocketRide components. Every theme JSON file must define all of these.
@@ -8769,6 +10452,704 @@ export type ThemeTokens = {
     "--rr-chart-red": string;
     [key: string]: string;
 };
+/**
+ * Apply a theme by setting all --rr-* CSS custom properties on :root.
+ * Works in any document context (main app, iframe, webview).
+ */
+export declare function applyTheme(tokens: ThemeTokens): void;
+/**
+ * VSCode integration utilities
+ */
+/**
+ * Checks if the code is running within a VSCode webview environment.
+ * This is detected by checking for VSCode-specific CSS variables.
+ *
+ * @returns {boolean} True if running in VSCode, false otherwise
+ */
+export declare const isInVSCode: () => boolean;
+/**
+ * OAuth configuration for the shared-ui social-login buttons.
+ *
+ * User-OAuth (Google/Microsoft/Slack) is brokered by a RocketRide-hosted
+ * function — NOT by the local engine. Self-hosters never register their own
+ * Google OAuth app or client secret; a single hosted broker owns the verified
+ * consent screen, the client secret, and the token-refresh proxy. See the
+ * social-button widgets and `useOAuthCallbacks` for the consuming flow.
+ *
+ * The value is inlined at build time from `REACT_APP_OAUTH_ROOT_URL`: every
+ * bundler that consumes shared-ui `define`s it to a string literal (see
+ * `rslib.config.ts` and `apps/vscode/rsbuild.config.mjs`), so no `process`
+ * reference survives into the webview bundle. An empty/unset value falls back
+ * to the production broker URL.
+ */
+export declare const OAUTH_ROOT_URL: string;
+/**
+ * Generic form data record type for dynamic form submissions.
+ * Intentionally uses `any` to accommodate the wide variety of field types
+ * produced by RJSF forms.
+ */
+export type IFormData = Record<string, any>;
+/**
+ * A dictionary of dynamic form definitions keyed by service/connector name.
+ * This is the shape returned by the services API and consumed by the canvas
+ * to build the node inventory.
+ */
+export interface IForm {
+    [key: string]: IService;
+}
+/** Position on the canvas in pixel coordinates. */
+export interface IPosition {
+    x: number;
+    y: number;
+}
+/** Measured dimensions of a rendered element. */
+export interface IDimensions {
+    width: number;
+    height: number;
+}
+/**
+ * User-configured form data for a pipeline component.
+ * Contains key/value pairs from the RJSF configuration form.
+ */
+export type INodeConfig = Record<string, any>;
+/**
+ * Bitmask capabilities supported by a service driver.
+ * Each flag indicates a specific feature the driver supports.
+ */
+export declare enum IServiceCapabilities {
+    Security = 1,
+    Filesystem = 2,
+    Substream = 4,
+    Network = 8,
+    Datanet = 16,
+    Sync = 32,
+    Internal = 64,
+    Catalog = 128,
+    NoMonitor = 256,
+    NoInclude = 512,
+    Invoke = 1024,
+    Remoting = 2048,
+    Gpu = 4096,
+    NoSaas = 8192,
+    Focus = 16384,
+    Deprecated = 32768,
+    Experimental = 65536
+}
+/**
+ * Pairs a JSON Schema with its corresponding RJSF UI schema for a single
+ * form section (e.g. Pipe, Source, Target).
+ *
+ * The schema defines the data shape and validation rules. The ui schema
+ * controls which widgets render each field and how they are laid out.
+ */
+export interface IServiceSchema {
+    /** JSON Schema defining the data shape and validation rules. */
+    schema: Record<string, any>;
+    /** RJSF UI schema controlling widget rendering and layout. */
+    ui: Record<string, any>;
+}
+interface IInvokeChannel {
+    /** Human-readable description of what this channel provides. */
+    description?: string;
+    /** Minimum number of connections required (0 = optional). */
+    min?: number;
+    /** Maximum number of connections allowed (undefined = unlimited). */
+    max?: number;
+}
+/**
+ * A lane entry in the service definition — either a plain string
+ * (lane name) or a structured object with metadata.
+ */
+export type IServiceLaneEntry = string | {
+    type: string;
+    description?: string;
+    min?: number;
+    max?: number;
+};
+/**
+ * Service definition from the driver catalog (services.json).
+ *
+ * Describes a single pipeline service driver's metadata, configuration
+ * schemas, capabilities, lane definitions, and invoke configuration.
+ * This is the compiled form received by the UI — the engine resolves
+ * `fields`, `shape`, and `preconfig` into `Pipe`/`Source`/`Target` schemas.
+ */
+export interface IService {
+    /** Human-readable display title (e.g. "OpenAI", "PostgreSQL"). */
+    title?: string;
+    /** Tile display template strings shown on the node body (e.g. "Model: ${parameters.llm_openai.profile}"). */
+    tile?: string[];
+    /** Icon filename or URL for the node header (e.g. "openai.svg"). */
+    icon?: string;
+    /** Bitmask of actions this service supports. */
+    actions?: number;
+    /** Bitmask of capabilities (see {@link IServiceCapabilities}). */
+    capabilities?: IServiceCapabilities;
+    /** Class type tags determining which invoke channels accept this node (e.g. ["llm"], ["database", "tool"]). */
+    classType?: string[];
+    /**
+     * Lane definitions: maps input lane keys to arrays of output lane entries.
+     * Keys prefixed with `_` are hidden internal lanes.
+     *
+     * @example
+     * ```json
+     * { "questions": ["answers"], "_source": ["questions"] }
+     * ```
+     */
+    lanes?: Record<string, IServiceLaneEntry[]>;
+    /** Execution plan identifiers. */
+    plans?: string[];
+    /** Pipe configuration schema (compiled from fields/shape/preconfig by the engine). */
+    Pipe?: IServiceSchema;
+    /** Source configuration schema. */
+    Source?: IServiceSchema;
+    /**
+     * Invoke configuration: maps channel names to their connection requirements.
+     *
+     * @example
+     * ```json
+     * { "llm": { "min": 1, "max": 1 }, "tool": { "min": 0 } }
+     * ```
+     */
+    invoke?: Record<string, IInvokeChannel>;
+    /** Control-flow configuration. */
+    control?: Record<string, unknown>;
+    /** HTML description for tooltips. */
+    description?: string;
+    /** URL to external documentation. */
+    documentation?: string;
+    /** Service type identifier. */
+    type?: string;
+    /** Display content string. */
+    content?: string;
+    /** Whether this service should receive focus in the catalog. */
+    focus?: boolean;
+}
+/** Dictionary of service definitions keyed by provider name. */
+export interface IServiceCatalog {
+    [key: string]: IService;
+}
+/**
+ * Visual and layout properties for a component on the canvas.
+ * Stored under `component.ui` in the serialised project file.
+ */
+export interface IComponentUI {
+    [key: string]: unknown;
+    position: IPosition;
+    measured: IDimensions;
+    nodeType: string;
+    formDataValid?: boolean;
+    parentId?: string;
+}
+/**
+ * Serialised representation of a single pipeline component (node).
+ * Extends the SDK's PipelineComponent with a strongly-typed `ui` object
+ * and invoke (control-flow) connections.
+ */
+export interface IProjectComponent extends Omit<PipelineComponent, "ui"> {
+    ui: IComponentUI;
+}
+/**
+ * Top-level project entity persisted to the .pipe file.
+ * Extends the SDK's PipelineConfig.
+ */
+export interface IProject extends PipelineConfig {
+}
+/**
+ * Response from the backend pipeline validation endpoint.
+ */
+export interface IValidateResponse {
+    status: string;
+    error?: {
+        code?: number;
+        message?: string;
+    };
+    data: {
+        errors?: {
+            code: number;
+            message: string;
+        }[];
+        warnings?: {
+            code: number;
+            message: string;
+        }[];
+        component: IProjectComponent;
+        pipeline: IProject;
+    };
+}
+/**
+ * Single-component validation payload. The node config panel validates one
+ * component at a time on save; the validation endpoint accepts this shape
+ * alongside a full pipeline.
+ */
+export interface IComponentValidatePayload {
+    /** Pipeline schema version (PIPELINE_SCHEMA_VERSION). */
+    version: number;
+    /** The single component to validate. */
+    component: IProjectComponent;
+}
+/**
+ * Payload union accepted by the host's validate callback
+ * (`handleValidatePipeline`): a full pipeline or a single component.
+ */
+export type IValidatePipelinePayload = IProject | IComponentValidatePayload;
+/**
+ * Shape of the JSON file produced by the export-toolchain feature.
+ */
+export interface IToolchainExport {
+    components: IProjectComponent[];
+    id: string;
+    servicesVersion?: number;
+    appVersion?: string;
+    engineVersion?: string;
+}
+/**
+ * Transient UI state flags for the pipeline editor.
+ */
+export interface IToolchainState {
+    isSaving: boolean;
+    isSaved: boolean;
+    isPending: boolean;
+    isRunning: boolean;
+    isUpdated: boolean;
+    isDevMode: boolean;
+    isDragging: boolean;
+}
+export declare const DEFAULT_TOOLCHAIN_STATE: IToolchainState;
+interface IOverviewGridProps {
+    /** Full dashboard snapshot, or null while it has not loaded yet. */
+    data: DashboardResponse | null;
+    /** Optional manual refresh callback — renders the header's Refresh action. */
+    onRefresh?: () => void;
+}
+/**
+ * Overview grid — the unified Connections & Tasks CardDataGrid: connections
+ * first, then running tasks, then the five most recent completed ones, with
+ * CPU/Memory gauges and status badges. Clicking a client row opens the
+ * connection record panel; clicking a task row opens the task record panel.
+ *
+ * @param props - {@link IOverviewGridProps}.
+ * @returns The card-hosted grid plus both record panels.
+ */
+export declare const OverviewGrid: React$1.FC<IOverviewGridProps>;
+interface IConnectionsPanelProps {
+    /**
+     * Snapshot connection rows (the dashboard snapshot). LOCAL mode renders
+     * exactly these; with `listConnections` present the fetched pages take
+     * over and this prop is unused.
+     */
+    connections?: DashboardConnection[];
+    /**
+     * Optional server-paginated fetcher — presence switches the grid to
+     * REMOTE mode. Hosts bind it to their client's `listConnections`.
+     */
+    listConnections?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardConnection>>;
+    /**
+     * Receives the grid's silent current-page refetch trigger (REMOTE mode
+     * only) so the HOST owns the polling cadence.
+     */
+    onRefetchReady?: (refetch: () => void) => void;
+}
+/**
+ * Connections grid — every active client connection as a CardDataGrid with
+ * identity, client label, traffic counters, subscription counts, and auth
+ * status; clicking a row opens the connection record panel.
+ *
+ * @param props - {@link IConnectionsPanelProps}.
+ * @returns The card-hosted grid plus its record panel.
+ */
+export declare const ConnectionsPanel: React$1.FC<IConnectionsPanelProps>;
+interface ITasksPanelProps {
+    /**
+     * Snapshot task rows (the dashboard snapshot): feeds the header's
+     * running/completed counts in both modes, and the grid rows plus record
+     * panel in LOCAL mode. Null while the snapshot has not loaded yet (the
+     * header counts stay hidden).
+     */
+    tasks?: DashboardTask[] | null;
+    /**
+     * Optional server-paginated fetcher — presence switches the grid to
+     * REMOTE mode. Hosts bind it to their client's `listTasks`.
+     */
+    listTasks?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardTask>>;
+    /**
+     * Receives the grid's silent current-page refetch trigger (REMOTE mode
+     * only) so the HOST owns the polling cadence.
+     */
+    onRefetchReady?: (refetch: () => void) => void;
+}
+/**
+ * Tasks grid — all pipeline tasks as a CardDataGrid with CPU/Memory gauges,
+ * elapsed time, completion counts, TTL/idle time, and status badges;
+ * clicking a row opens the task record panel.
+ *
+ * @param props - {@link ITasksPanelProps}.
+ * @returns The card-hosted grid plus its record panel.
+ */
+export declare const TasksPanel: React$1.FC<ITasksPanelProps>;
+/** Semantic tone of an event, keyed off what happened (not who reported it). */
+export type EventTone = "connection" | "task" | "warning" | "system";
+interface IEventDisplay {
+    /** Semantic tone (drives the badge / feed color). */
+    tone: EventTone;
+    /** Short category label (connect, disconnect, task, security, system). */
+    label: string;
+    /** Human-readable one-line summary. */
+    message: string;
+    /** Epoch-milliseconds arrival time of the event at this client. */
+    timestamp: number;
+}
+interface IActivityPanelProps {
+    /** Accumulated activity events (newest first, as delivered by the host). */
+    events: ActivityEvent[];
+}
+/**
+ * Describe one activity event from either channel (task / dashboard) as its
+ * display fields. Exported for the Overview surfaces' Recent Activity feeds,
+ * which render the same events in card form.
+ *
+ * @param event - The wrapped activity event.
+ * @returns Tone, label, message, and the arrival timestamp (epoch ms).
+ */
+export declare function getEventDisplay(event: ActivityEvent): IEventDisplay;
+/**
+ * Activity grid — live stream of server events (connections, task lifecycle,
+ * errors) as a CardDataGrid fed by the host's event feed (LOCAL mode: each
+ * poll / push hands down a new events array, applied silently).
+ *
+ * @param props - {@link IActivityPanelProps}.
+ * @returns The card-hosted grid.
+ */
+export declare const ActivityPanel: React$1.FC<IActivityPanelProps>;
+/**
+ * Formatting utilities for the Server Monitor module.
+ */
+/** Format seconds into a human-readable duration string (e.g. "4d 7h 23m"). */
+export declare function formatUptime(seconds: number): string;
+/** Format a Unix timestamp into a short time string (HH:MM:SS). */
+export declare function formatTime(timestamp: number): string;
+/**
+ * Format a Unix timestamp as a short day-aware stamp: "Today at 4:55 PM"
+ * for the current local day, "6/28/2026 at 1:30 PM" otherwise (browser
+ * locale, like every other time in the product).
+ *
+ * @param timestamp - Unix seconds.
+ * @returns The day-aware stamp.
+ */
+export declare function formatDayTime(timestamp: number): string;
+/** Format a Unix timestamp as a relative "X ago" string. */
+export declare function formatTimeAgo(timestamp: number): string;
+/** Format a number with locale-appropriate thousands separators. */
+export declare function formatNumber(n: number): string;
+interface ActiveTask {
+    /** Task identifier. */
+    taskId: string;
+    /** Pipeline or source name. */
+    name: string;
+    /** Current cumulative token total. */
+    tokensTotal: number;
+    /** Task state string. */
+    state: string;
+    /** Duration in seconds. */
+    durationSeconds: number;
+}
+interface IAccountViewProps {
+    /** Whether the shell client is connected to the server. */
+    isConnected: boolean;
+    /** Error message from the last failed data load for the active section, or null. */
+    sectionError?: string | null;
+    /** The live/editable profile data from the server, or null while loading. */
+    profile: ConnectResult | null;
+    /** Cached identity from the auth provider, used as display fallback. */
+    authUser: ConnectResult | null;
+    /** List of API key records owned by the current user. */
+    keys: ApiKeyRecord[];
+    /** Organization detail for the current user's org, or null while loading. */
+    org: OrgDetail | null;
+    /** Flat list of all organization members. */
+    members: MemberRecord[];
+    /** Flat list of all teams in the organization. */
+    teams: TeamRecord[];
+    /** Full detail for the currently selected team, or null. */
+    teamDetail: TeamDetail | null;
+    /** Per-app subscription rows for the billing panel. */
+    subscriptions: BillingDetail[];
+    /** True while billing data is being fetched. */
+    billingLoading: boolean;
+    /** Error message from the last billing operation, or null. */
+    billingError: string | null;
+    /** Current org credit balance, or null while loading. */
+    creditBalance: CreditBalance | null;
+    /** App manifest entries for resolving display names, icons, etc. from appId. */
+    apps?: Array<{
+        id: string;
+        name: string;
+        icon?: string;
+        description?: string;
+    }>;
+    /** Cancel a subscription. Host re-fetches and updates subscriptions prop. */
+    onCancelSubscription: (appId: string) => Promise<void>;
+    /** Open the Stripe customer portal for payment management. */
+    onOpenPortal: () => Promise<void>;
+    /** Called when the user clicks the Subscribe CTA. Opens the checkout flow. */
+    onSubscribe?: () => void;
+    /** Paginated transaction result for the transaction log. */
+    transactions?: TransactionsResult | null;
+    /** Per-user usage rollup. */
+    usageByUser?: UsageRollup[];
+    /** Per-team usage rollup. */
+    usageByTeam?: UsageRollup[];
+    /** Currently running tasks with live token data. */
+    activeTasks?: ActiveTask[];
+    /** Whether dashboard data is still loading. */
+    dashboardLoading?: boolean;
+    /** Callback to change the transaction page. */
+    onTransactionPage?: (page: number) => void;
+    /** Direct ledger query for the transaction log (preferred; see BillingDashboardProps). */
+    fetchTransactions?: (req: IDataGridPageRequest) => Promise<TransactionsResult | null>;
+    /** Org-scoped distinct ledger values for the enum checklist filters. */
+    fetchTransactionDistinct?: (field: string) => Promise<(string | number | boolean)[]>;
+    /** Available top-up packs (filtered from plans by kind='topup'). */
+    topupPlans?: any[];
+    /** Callback when user clicks a top-up pack. */
+    onBuyTopup?: (plan: any) => void;
+    /** All plans from app_prices (for the TopUpModal). */
+    allPlans?: any[];
+    /** Called to purchase a top-up pack (charges card on file). */
+    onPurchaseTopup?: (plan: any) => Promise<{
+        status: string;
+        clientSecret?: string;
+    }>;
+    /** Called when the user confirms a plan upgrade/downgrade from the billing panel. */
+    onUpgradeSubscription?: (appId: string, newPriceId: string) => Promise<void>;
+    /** The currently active section / tab. */
+    section: AccountSection;
+    /** Called when the user switches tabs. */
+    onSectionChange: (section: AccountSection) => void;
+    /** ID of the team currently being drilled into, or null for list view. */
+    activeTeamId: string | null;
+    /** Called when the user drills into / backs out of a team. */
+    onActiveTeamIdChange: (id: string | null) => void;
+    /** Persists updated profile fields. */
+    onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
+    /** Sets the user's preferred default team. */
+    onSetDefaultTeam: (teamId: string) => Promise<void>;
+    /** Switches the user's active organization. */
+    onSetDefaultOrg: (orgId: string) => Promise<void>;
+    /**
+     * @deprecated Unused — the shell owns the logout flow (`shell:logoutRequest`);
+     * no panel in this view renders a sign-out control. Kept optional so existing
+     * hosts still compile; will be removed once every caller stops passing it.
+     */
+    onLogout?: () => void;
+    /**
+     * @deprecated Unused — account deletion has no entry point in this view.
+     * Kept optional so existing hosts still compile; will be removed once every
+     * caller stops passing it.
+     */
+    onDeleteAccount?: () => Promise<void>;
+    /** Persists an updated organization name. */
+    onSaveOrgName: (name: string) => Promise<void>;
+    /** Creates a new API key and returns the raw key string. */
+    onCreateKey: (params: {
+        name: string;
+        permissions: string[];
+        expiresAt?: string;
+        teamId?: string;
+    }) => Promise<{
+        key: string;
+    }>;
+    /** Revokes an API key by its ID. */
+    onRevokeKey: (keyId: string) => Promise<void>;
+    /** Sends an invitation to a new organization member. */
+    onInviteMember: (params: {
+        email: string;
+        givenName: string;
+        familyName: string;
+        role: string;
+        teamAssignments?: Array<{
+            teamId: string;
+            permissions: string[];
+        }>;
+    }) => Promise<void>;
+    /** Updates an organization member's role. */
+    onUpdateMemberRole: (userId: string, role: string) => Promise<void>;
+    /** Removes an organization member. */
+    onRemoveMember: (userId: string) => Promise<void>;
+    /** Resends the initialization email for a pending member. */
+    onResendInvite: (userId: string) => Promise<void>;
+    /** Creates a new team. */
+    onCreateTeam: (name: string) => Promise<void>;
+    /** Deletes a team. */
+    onDeleteTeam: (teamId: string) => Promise<void>;
+    /** Adds a member to a team with specified permissions. */
+    onAddTeamMember: (params: {
+        teamId: string;
+        userId: string;
+        permissions: string[];
+    }) => Promise<void>;
+    /** Updates a team member's permissions. */
+    onEditTeamMemberPerms: (params: {
+        teamId: string;
+        userId: string;
+        permissions: string[];
+    }) => Promise<void>;
+    /** Removes a member from a team. */
+    onRemoveTeamMember: (params: {
+        teamId: string;
+        userId: string;
+    }) => Promise<void>;
+    /** Requests the host to load full detail for a specific team. */
+    onLoadTeamDetail: (teamId: string) => void;
+}
+/**
+ * AccountView is the pure, host-agnostic root component for account management.
+ *
+ * It renders five tab panels (Profile, API Keys, Organization, Teams, Members)
+ * and owns all modal/form UI state internally. Server operations are delegated
+ * to the host via async callback props defined in IAccountViewProps.
+ */
+export declare const AccountView: React$1.FC<IAccountViewProps>;
+/** Possible environment scope levels. */
+export type EnvironmentScope = "org" | "team" | "user";
+/** Connection state and permissions for a single connection slot. */
+export interface EnvironmentSlotConfig {
+    /** Slot identifier (e.g. 'development', 'deployment', 'default'). */
+    id: string;
+    /** Display label for the tab (e.g. "Development", "Deployment"). */
+    label: string;
+    /** Whether this slot's server is connected. */
+    isConnected: boolean;
+    /** Whether the server is SaaS (true) or OSS (false). */
+    isSaas: boolean;
+    /** Whether the current user is an org admin on this slot. */
+    isOrgAdmin: boolean;
+    /** Whether the current user is a team admin on this slot. */
+    isTeamAdmin: boolean;
+    /** Organization ID (SaaS only). */
+    orgId?: string;
+    /** Team ID (SaaS only). */
+    teamId?: string;
+}
+interface EnvironmentViewProps {
+    /** Connection slots to display. Single slot = no tabs, multiple = tab panel. */
+    slots: EnvironmentSlotConfig[];
+    /**
+     * Loaded env dicts keyed by `slotId:scope:scopeId`.
+     * A key with `undefined` means loading; missing key means not yet requested.
+     */
+    envs: Record<string, Record<string, string> | undefined>;
+    /** Requests the host to load env data for a scope. */
+    onLoadEnv: (slotId: string, scope: EnvironmentScope, scopeId?: string) => void;
+    /** Saves env data for a scope. */
+    onSaveEnv: (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => Promise<void>;
+    /** Keys that must have non-empty values before save is allowed (user scope only). */
+    requiredKeys?: string[];
+    /** Page-level error message. */
+    error?: string | null;
+}
+/**
+ * EnvironmentView — host-agnostic environment variable management page.
+ *
+ * Renders env scope cards for one or more connection slots. When there
+ * is a single slot, cards render directly. When there are multiple
+ * slots, a TabControl strip switches between them.
+ *
+ * @param props - Environment view configuration and callbacks.
+ */
+export declare const EnvironmentView: React$1.FC<EnvironmentViewProps>;
+/**
+ * Two-step checkout modal: PlanPicker (step 1) then Stripe Elements (step 2).
+ *
+ * All server communication is via callback props — no SDK imports.
+ */
+export declare const CheckoutModal: React$1.FC<CheckoutModalProps>;
+interface PlanPickerProps {
+    /** Plans to display. Plans with ``metadata.action`` render as non-selectable CTA cards. */
+    plans: CheckoutPlan[];
+    /** True while plans are loading -- shows a placeholder. */
+    loading?: boolean;
+    /** Currently selected checkout-able plan (controlled). */
+    selectedPlan?: CheckoutPlan | null;
+    /** Called when the user selects a billable plan. Not called for action plans. */
+    onSelectPlan?: (plan: CheckoutPlan) => void;
+    /** Called when the user clicks an action plan's CTA. Defaults to opening the link/mailto natively. */
+    onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
+    /**
+     * When provided, each billable plan card renders a primary CTA button
+     * (labelled by ``ctaLabel``) that calls this with the plan. The caller
+     * owns what the click does (e.g. start checkout, or prompt sign-up first).
+     * When omitted, billable cards have no CTA button — selection is via the
+     * card click / ``onSelectPlan`` (the CheckoutModal flow).
+     */
+    onPlanCta?: (plan: CheckoutPlan) => void;
+    /** Label for the per-card billable CTA. Default: ``'Get started'``. Only used with ``onPlanCta``. */
+    ctaLabel?: string;
+    /**
+     * Optional per-plan CTA overrides, keyed by ``stripePriceId``. Lets a host
+     * app render context-aware labels (e.g. "Selected", "Upgrade", "Switch
+     * plan") and disable a card's CTA — without baking any subscription logic
+     * into shared-ui (this component ships in the VS Code extension too). A plan
+     * with no entry falls back to ``ctaLabel``. Only used with ``onPlanCta``.
+     */
+    ctaConfig?: Record<string, {
+        label?: string;
+        disabled?: boolean;
+    }>;
+    /**
+     * Stripe price ID of the user's current plan, in card-selection mode
+     * (``onSelectPlan``). The matching card shows a "Current" badge and is made
+     * non-selectable. The host owns what "current" means — no subscription logic
+     * lives here. Used by the upgrade flow.
+     */
+    currentPriceId?: string;
+    /** Content rendered below the plan cards (e.g. a "Continue" button). */
+    footer?: React$1.ReactNode;
+    /** Default interval on first render. Default: ``'month'``. */
+    defaultInterval?: "month" | "year";
+    /**
+     * When true, ensures a billable plan is always selected: on mount (and
+     * whenever the visible plans change) the lowest-order billable plan at the
+     * current interval is selected if the current selection is absent or not
+     * visible. Requires ``onSelectPlan``. Default: ``false`` (caller-controlled
+     * selection, e.g. the upgrade/top-up modals).
+     */
+    autoSelectDefault?: boolean;
+}
+/**
+ * Shared plan card grid with interval toggle.
+ *
+ * Renders plans as side-by-side cards. Manages the Monthly/Annual toggle
+ * internally. Action plans (Free, Enterprise) always show; billable plans
+ * are filtered by the selected interval.
+ */
+export declare const PlanPicker: React$1.FC<PlanPickerProps>;
+interface UpgradeModalProps {
+    /** All plans from app_prices for the subscribed app. */
+    plans: CheckoutPlan[];
+    /** Stripe price_* ID of the user's current subscription plan. */
+    currentPriceId: string;
+    /** Human-readable name of the current plan (e.g. "Pro Monthly"). */
+    currentPlanName: string | null;
+    /**
+     * Optional Stripe price_* to preselect on open (e.g. the plan a user clicked
+     * on the pricing page), so they land on the proration summary ready to
+     * confirm. Ignored if it equals the current plan. Defaults to no selection.
+     */
+    preselectedPriceId?: string;
+    /** Called when the user confirms the plan change. */
+    onUpgrade: (newPriceId: string) => Promise<void>;
+    /** Called when the modal is dismissed. */
+    onClose: () => void;
+}
+/**
+ * Modal dialog for upgrading or downgrading a subscription plan.
+ *
+ * Displays the PlanPicker grid with the current plan disabled. The user
+ * selects a new plan and clicks Confirm to trigger the server-side
+ * Stripe subscription modification with proration.
+ */
+export declare const UpgradeModal: React$1.FC<UpgradeModalProps>;
 /**
  * The curated set of value symbols shell exposes to remote apps.
  *
@@ -8998,7 +11379,7 @@ export type ShellApiShape = typeof shellApi;
  * @returns The frozen `shellApi` object.
  */
 export declare function getShellApi(): ShellApiShape;
-export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, ShellConnectionEventMap as ShellEventMap, };
+export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData, };
 export {};
 // ===== END FROZEN BUNDLE =====
-export type ShellApiV0 = ShellApiShape;
+export type ShellApiV1 = ShellApiShape;

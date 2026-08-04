@@ -38,9 +38,9 @@ export const chatViewEntry: IGalleryEntry = {
 		{ id: 'connected', label: 'Connected', kind: 'boolean', defaultValue: true },
 		{ id: 'typing', label: 'Force typing', kind: 'boolean', defaultValue: false },
 	],
-	doc: `ChatView is a STATIC library component, not part of the frozen shell surface: each app bundles its own copy via the \`shared/modules/chat\` deep spec. The host owns the message state (\`useChatMessages\`) and the transport; ChatView only renders and collects input.`,
+	doc: `ChatView is part of the shell surface: apps import it (with \`useChatMessages\`) from \`shell\`. The host owns the message state and the transport; ChatView only renders and collects input.`,
 	lazyDemo: () => import('./demos/ChatViewDemo'),
-	code: `import { ChatView, useChatMessages } from 'shared/modules/chat';
+	code: `import { ChatView, useChatMessages } from 'shell';
 
 const { messages, isTyping, sendMessage } = useChatMessages({ welcomeMessage: 'Hi - ask me anything.' });
 

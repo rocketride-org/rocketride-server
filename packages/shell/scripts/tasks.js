@@ -61,9 +61,7 @@ const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell');
 const SERVER_CLIENTS_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'shell');
 
 // Source directories and files that affect the shell build output.
-// Shell bundles shared-ui with eager: true, so shared-ui changes require a rebuild.
 const SRC_DIR       = path.join(APP_ROOT, 'src');
-const SHARED_UI_SRC = path.join(APP_ROOT, '..', '..', 'packages', 'shared-ui', 'src');
 const PKG_JSON      = path.join(APP_ROOT, 'package.json');
 const BUILD_HASH_KEY = 'shell.buildHash';
 
@@ -117,8 +115,21 @@ function makeBundleAction() {
 		run: async (ctx, task) => {
 			// Fingerprint inputs before building so concurrent edits are detected on the next run.
 			const { changed, hash } = await hasBuildInputChanged(
-				BUILD_HASH_KEY, [SRC_DIR, SHARED_UI_SRC], [PKG_JSON]);
-			if (!ctx.options.force && !changed && (await exists(BUILD_DIR))) {
+				BUILD_HASH_KEY, [SRC_DIR], [PKG_JSON]);
+			// The cache skip must also verify the MATERIALIZED package: on a
+			// fresh clone .rocketride/shell is the pre-install stub (or a
+			// carried-over build state with no local package at all), and
+			// only pack-shell replaces it with the real one — an unchanged
+			// source hash must not strand the workspace on the stub.
+			const localShellReal = (() => {
+				try {
+					const pkg = JSON.parse(require('fs').readFileSync(path.join(APP_ROOT, '..', '..', '.rocketride', 'shell', 'package.json'), 'utf8'));
+					return pkg.version !== '0.0.0-stub';
+				} catch {
+					return false;
+				}
+			})();
+			if (!ctx.options.force && !changed && (await exists(BUILD_DIR)) && localShellReal) {
 				task.output = 'No changes detected';
 				return;
 			}
@@ -240,9 +251,9 @@ const shellModule = {
 const contractActions = [
 		// Internal leaf actions (no description — not shown in builder --help).
 		// Both public composites below chain `client-typescript:build` ahead of
-		// these: the freeze script's tsc pre-check type-checks shared-ui, whose
-		// `rocketride` imports resolve to the SDK's dist/types — a build artifact
-		// that fresh clones and CI runners do not have yet.
+		// these: the freeze script's tsc pre-check type-checks apps/shared,
+		// whose SDK-adjacent imports resolve to the SDK's dist/types — a build
+		// artifact that fresh clones and CI runners do not have yet.
 		{
 			name: 'shell:freeze-run',
 			action: () => ({

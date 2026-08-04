@@ -36,7 +36,7 @@
     "react-dom": "^18.2.0",
     "shared": "file:../shared",
     "xlsx": "^0.18.5",
-    "shell": "file:../../.rocketride/shell"
+    "shell": "link:../../.rocketride/shell"
   },
   "devDependencies": {
     "@rsbuild/core": "~2.0.11",

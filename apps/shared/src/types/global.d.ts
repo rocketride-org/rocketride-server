@@ -28,7 +28,6 @@
  */
 
 /** Ambient declaration for the `d3` data visualization library. */
-declare module 'd3';
 
 /**
  * Ambient declarations for Fontsource self-hosted font packages. These are

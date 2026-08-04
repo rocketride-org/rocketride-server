@@ -47,7 +47,10 @@ export default defineConfig(() => {
 		// No resolve aliases — all shared modules resolve through node_modules
 		// and MF provides the host's singleton at runtime.
 		resolve: {},
-		server: { port: 3014 },
+		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
+		// allowlist is possible; declaring it also stops the MF plugin injecting
+		// its own wildcard defaults (and warning about it).
+		server: { port: 3014, cors: { origin: '*' } },
 		source: {
 			entry: {
 				index: './src/index.ts',

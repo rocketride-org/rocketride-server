@@ -45,7 +45,10 @@ export default defineConfig(() => {
 			}),
 		],
 		resolve: {},
-		server: { port: 3021 },
+		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
+		// allowlist is possible; declaring it also stops the MF plugin injecting
+		// its own wildcard defaults (and warning about it).
+		server: { port: 3021, cors: { origin: '*' } },
 		source: {
 			entry: {
 				index: './src/index.ts',

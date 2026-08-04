@@ -476,7 +476,7 @@
 		"rehype-raw": "^7.0.0",
 		"remark-gfm": "^4.0.1",
 		"shared": "file:../shared",
-		"shell": "file:../../.rocketride/shell"
+		"shell": "link:../../.rocketride/shell"
 	},
 	"engines": {
 		"node": ">=20.11.0",

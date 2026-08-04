@@ -16,7 +16,7 @@ import React, { useEffect, useRef, useMemo, useState, type CSSProperties } from 
 import { ChatMessage, CHAT_COLUMN_MAX_WIDTH } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
-import { EmptyState } from 'shell';
+import { EmptyState } from '../../empty-state/EmptyState';
 
 // =============================================================================
 // STYLES

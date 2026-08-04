@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-03T17:58:29.608Z
-// Source commit: ecbdb4d4b1b4e608949726911d0fdc90269b676c
+// Generated:     2026-08-04T05:58:37.003Z
+// Source commit: f8bdd8f9e534c45486ba80cdcd7f74ec8af47794
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
