@@ -98,6 +98,42 @@ def test_parse_scale_suffix_then_footnote():
     assert value == 1234
 
 
+def test_parse_negative_with_footnote():
+    # Regression: a parenthesised (accounting-negative) figure carrying a
+    # footnote used to be dropped (value None while is_negative stayed True),
+    # because the footnote was stripped after the sign step. It must keep its
+    # value now, across footnote and bracket forms.
+    for raw in ('(1,234)(a)', '(1,234) (a)', '(1,234)[1]'):
+        value, neg, source = parse_number(raw)
+        assert value == -1234, raw
+        assert neg is True, raw
+        assert source == 'parentheses', raw
+
+
+def test_parse_trailing_minus_with_footnote():
+    value, neg, source = parse_number('1,234-(a)')
+    assert value == -1234
+    assert neg is True
+    assert source == 'trailing_minus'
+
+
+def test_parse_negative_currency_scale_with_footnote():
+    # Currency + scale + accounting-negative + footnote all at once.
+    value, neg, source = parse_number('(£456.789m)(a)')
+    assert float(value) == -456.789
+    assert neg is True
+    assert source == 'parentheses'
+
+
+def test_parse_plain_parenthesised_number_still_negative():
+    # A footnote-free (123) must remain an accounting negative, not be eaten by
+    # the early footnote strip.
+    value, neg, source = parse_number('(123)')
+    assert value == -123
+    assert neg is True
+    assert source == 'parentheses'
+
+
 def test_parse_currency_symbol_and_scale_suffix():
     value, neg, source = parse_number('(£456.789m)')
     assert float(value) == -456.789

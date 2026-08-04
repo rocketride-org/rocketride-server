@@ -117,6 +117,14 @@ _DASHES = ('−', '‐', '‑', '–', '—', '―')
 _NUM_SUFFIX_RE = re.compile(r'(billions?|millions?|thousands?|bn|mn|mm|[kmb])\s*$', re.IGNORECASE)
 #: A trailing footnote marker such as ``(a)`` or ``[1]``.
 _FOOTNOTE_RE = re.compile(r'\s*(\([a-z0-9]{1,3}\)|\[[0-9]{1,3}\])\s*$', re.IGNORECASE)
+#: An *unambiguous* trailing footnote, safe to strip before sign handling: a
+#: ``[n]`` bracket, or a parenthesised token that contains a letter (``(a)``,
+#: ``(iv)``). Deliberately does NOT match a plain parenthesised number like
+#: ``(123)`` — that is an accounting-negative, handled by the sign step.
+_FOOTNOTE_EARLY_RE = re.compile(
+    r'\s*(?:\[[0-9]{1,3}\]|\((?=[a-z0-9]{1,3}\))[a-z0-9]*[a-z][a-z0-9]*\))\s*$',
+    re.IGNORECASE,
+)
 
 
 def _to_decimal(value: Any) -> Optional[Decimal]:
@@ -192,6 +200,12 @@ def parse_number(raw: Any, decimal_format: str = 'auto') -> Tuple[Optional[Decim
     for ch in _DASHES:
         s = s.replace(ch, '-')
     s = s.strip()
+
+    # Strip an unambiguous trailing footnote (e.g. ``(a)``, ``(iv)``, ``[1]``)
+    # BEFORE sign handling, so a negative figure carrying a footnote keeps its
+    # value (``(1,234)(a)`` -> ``(1,234)`` -> -1234). A plain parenthesised
+    # number like ``(123)`` is left for the accounting-negative branch below.
+    s = _FOOTNOTE_EARLY_RE.sub('', s).strip()
 
     negative = False
     sign_source = 'none'
