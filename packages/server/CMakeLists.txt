@@ -137,10 +137,6 @@ option(BUILD_TESTS "Build test suites" ON)
 option(BUILD_DOCS "Build documentation" OFF)
 option(ENABLE_PYTHON "Enable Python node support" ON)
 
-# Breakpad symbols are only needed to symbolicate crash dumps, so a dump_syms
-# failure warns instead of failing the build. Release/CI can force it on.
-option(ROCKETRIDE_REQUIRE_BREAKPAD_SYMBOLS "Fail the build if Breakpad symbol generation fails" OFF)
-
 message(STATUS "Build tests : ${BUILD_TESTS}")
 message(STATUS "Build docs  : ${BUILD_DOCS}")
 message(STATUS "Python support: ${ENABLE_PYTHON}")

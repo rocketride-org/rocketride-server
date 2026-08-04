@@ -58,33 +58,13 @@
  *            failures keep the prior rows and show a transient error overlay.
  */
 
-import {
-	forwardRef,
-	useEffect,
-	useImperativeHandle,
-	useLayoutEffect,
-	useRef,
-	useState,
-	type CSSProperties,
-	type ForwardedRef,
-	type ReactElement,
-	type ReactNode,
-	type Ref,
-} from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type ForwardedRef, type ReactElement, type ReactNode, type Ref } from 'react';
 import type { Options } from 'tabulator-tables';
 import { Tabulator } from './modules';
 import { createPortal } from 'react-dom';
 import { applyDefaultLayout, buildAutoColumns, closeHeaderPopup, defaultGroupFields, defaultSorters, exportRowsAsCsv, exportRowsAsJson, matchesSearch, normalizeColumns, rowMatchesFilters, toggleColumnWithFit } from './defaults';
 import { BxCog, BxSearch } from '../BoxIcon';
-import type {
-	GridColumnDefinition,
-	HeaderFilterMode,
-	IColumnFormat,
-	IExportColumn,
-	IGridInstanceState,
-	IHeaderFilterBridge,
-	IHeaderFormatBridge,
-} from './defaults';
+import type { GridColumnDefinition, HeaderFilterMode, IColumnFormat, IExportColumn, IGridInstanceState, IHeaderFilterBridge, IHeaderFormatBridge } from './defaults';
 import { FilterStrip } from './FilterStrip';
 import type { IGridFilterDef } from './FilterStrip';
 import type { IDataGridPersistence } from './persistence';
@@ -563,10 +543,7 @@ function isActionTarget(e: UIEvent): boolean {
 function exportTimestamp(): string {
 	const now = new Date();
 	const pad = (value: number): string => String(value).padStart(2, '0');
-	return (
-		`${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
-		`-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-	);
+	return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
 // =============================================================================
@@ -581,34 +558,8 @@ function exportTimestamp(): string {
  * @param ref - Imperative {@link IDataGridHandle}.
  * @returns The grid container element.
  */
-function DataGridInner<Row extends Record<string, unknown>>(
-	props: IDataGridProps<Row>,
-	ref: ForwardedRef<IDataGridHandle>,
-): ReactElement {
-	const {
-		tableId,
-		title,
-		actions,
-		noSearch,
-		noExport,
-		columns,
-		data,
-		fetchPage,
-		remoteSort = false,
-		pageSizes = DEFAULT_PAGE_SIZES,
-		paginate = true,
-		height,
-		emptyTitle,
-		emptyDescription,
-		onRowClick,
-		onLoadError,
-		persistence,
-		autoColumns = false,
-		filters,
-		onFiltersChange,
-		fetchDistinct,
-		options,
-	} = props;
+function DataGridInner<Row extends Record<string, unknown>>(props: IDataGridProps<Row>, ref: ForwardedRef<IDataGridHandle>): ReactElement {
+	const { tableId, title, actions, noSearch, noExport, columns, data, fetchPage, remoteSort = false, pageSizes = DEFAULT_PAGE_SIZES, paginate = true, height, emptyTitle, emptyDescription, onRowClick, onLoadError, persistence, autoColumns = false, filters, onFiltersChange, fetchDistinct, options } = props;
 
 	// ── Instance state ──────────────────────────────────────────────────────
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -863,9 +814,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	const [gearAnchor, setGearAnchor] = useState<{ top: number; left: number } | null>(null);
 	// Snapshot of toggleable columns for the panel's checklist, refreshed on
 	// open and after every toggle (the table is the source of truth).
-	const [gearColumns, setGearColumns] = useState<
-		{ field: string; title: string; visible: boolean; tooltip?: string }[]
-	>([]);
+	const [gearColumns, setGearColumns] = useState<{ field: string; title: string; visible: boolean; tooltip?: string }[]>([]);
 	// Per-grid display settings; persisted per user under the 'display' blob
 	// (Reset layout deletes the table's entry, restoring these defaults).
 	// The ref mirror lets the build effect read the CURRENT value while
@@ -951,18 +900,12 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			// LOCAL: the grid-internal predicate narrows the full data prop
 			// the same way the visible grid does (an empty term / record
 			// admits everything, so the filter is unconditional).
-			rows = ((dataRef.current ?? []) as Record<string, unknown>[]).filter(
-				(row) =>
-					matchesSearch(row, committedSearchRef.current) &&
-					rowMatchesFilters(row, committedFiltersRef.current, columnsRef.current),
-			);
+			rows = ((dataRef.current ?? []) as Record<string, unknown>[]).filter((row) => matchesSearch(row, committedSearchRef.current) && rowMatchesFilters(row, committedFiltersRef.current, columnsRef.current));
 		} else {
 			// REMOTE: mirror what the grid itself sends — committed filters and
 			// search always; the current sorters only when the grid sorts
 			// remotely.
-			const sort = remoteSort && tableRef.current && builtRef.current
-				? tableRef.current.getSorters().map((sorter) => ({ field: sorter.field, dir: sorter.dir }))
-				: [];
+			const sort = remoteSort && tableRef.current && builtRef.current ? tableRef.current.getSorters().map((sorter) => ({ field: sorter.field, dir: sorter.dir })) : [];
 			rows = [];
 			let total = Number.POSITIVE_INFINITY;
 			let page = 1;
@@ -1168,8 +1111,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	 * stripped before definitions reach Tabulator); auto-derived columns are
 	 * never declared, so they are never exempt.
 	 */
-	const isPopupExempt = (field: string): boolean =>
-		columnsRef.current.find((c) => c.field === field)?.rrNoPopup === true;
+	const isPopupExempt = (field: string): boolean => columnsRef.current.find((c) => c.field === field)?.rrNoPopup === true;
 
 	/**
 	 * Resolve the filter control of a field from its declared column type
@@ -1236,9 +1178,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	const getDeclaredOptions = (field: string): { value: string; label: string }[] | null => {
 		const options = columnsRef.current.find((c) => c.field === field)?.rrOptions;
 		if (!options || options.length === 0) return null;
-		return options.map((option) =>
-			typeof option === 'string' ? { value: option, label: option } : { value: option.value, label: option.label },
-		);
+		return options.map((option) => (typeof option === 'string' ? { value: option, label: option } : { value: option.value, label: option.label }));
 	};
 
 	/**
@@ -1299,14 +1239,8 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			}
 		}
 		// Step 2: build defs for the uncovered keys of the sample row.
-		const persisted = tableId && persistenceRef.current
-			? persistenceRef.current.read(tableId, 'columns')
-			: undefined;
-		const extras = buildAutoColumns(
-			rows[0],
-			autoKeysRef.current,
-			Array.isArray(persisted) ? persisted : undefined,
-		);
+		const persisted = tableId && persistenceRef.current ? persistenceRef.current.read(tableId, 'columns') : undefined;
+		const extras = buildAutoColumns(rows[0], autoKeysRef.current, Array.isArray(persisted) ? persisted : undefined);
 		if (extras.length === 0) return;
 		for (const def of extras) {
 			if (def.field) autoKeysRef.current.add(def.field);
@@ -1386,11 +1320,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		// Step 1: install / clear the combined predicate over the loaded rows.
 		const hasFilters = Object.keys(committedFiltersRef.current).length > 0;
 		if (committedSearchRef.current !== '' || hasFilters) {
-			table.setFilter(
-				(row: Record<string, unknown>) =>
-					matchesSearch(row, committedSearchRef.current) &&
-					rowMatchesFilters(row, committedFiltersRef.current, columnsRef.current),
-			);
+			table.setFilter((row: Record<string, unknown>) => matchesSearch(row, committedSearchRef.current) && rowMatchesFilters(row, committedFiltersRef.current, columnsRef.current));
 		} else {
 			table.clearFilter(false);
 		}
@@ -1500,10 +1430,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		// write left it alone -> the user's formats survive the rebuild).
 		if (persist) {
 			const storedFormats = persistenceRef.current!.read(tableId!, 'format');
-			formatsRef.current =
-				storedFormats && typeof storedFormats === 'object'
-					? { ...(storedFormats as Record<string, IColumnFormat>) }
-					: {};
+			formatsRef.current = storedFormats && typeof storedFormats === 'object' ? { ...(storedFormats as Record<string, IColumnFormat>) } : {};
 		}
 
 		// Gear display settings: the persisted blob (merged over the defaults
@@ -1514,10 +1441,8 @@ function DataGridInner<Row extends Record<string, unknown>>(
 		const seededDisplay = persist
 			? (() => {
 					const storedDisplay = persistenceRef.current!.read(tableId!, 'display');
-					return storedDisplay && typeof storedDisplay === 'object'
-						? { ...DEFAULT_DISPLAY_SETTINGS, ...(storedDisplay as Partial<IGridDisplaySettings>) }
-						: DEFAULT_DISPLAY_SETTINGS;
-			  })()
+					return storedDisplay && typeof storedDisplay === 'object' ? { ...DEFAULT_DISPLAY_SETTINGS, ...(storedDisplay as Partial<IGridDisplaySettings>) } : DEFAULT_DISPLAY_SETTINGS;
+				})()
 			: displaySettingsRef.current;
 		if (persist) setDisplaySettings(seededDisplay);
 
@@ -1574,7 +1499,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 						paginationSize: pageSizes[0],
 						paginationSizeSelector: pageSizes.length > 1 ? pageSizes : false,
 						paginationCounter: 'rows',
-				  }
+					}
 				: {}),
 			...(remote
 				? {
@@ -1612,7 +1537,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 								};
 							});
 						},
-				  }
+					}
 				: { data: (dataRef.current ?? []) as Record<string, unknown>[] }),
 			...(persist
 				? {
@@ -1628,18 +1553,14 @@ function DataGridInner<Row extends Record<string, unknown>>(
 						// targeted the raw tableId — so Clear could never empty the
 						// sort Tabulator then restored. Ignore Tabulator's id and
 						// key EVERYTHING by the raw tableId.
-						persistenceReaderFunc: (_id: string, type: string) =>
-							persistenceRef.current?.read(tableId!, type) ?? false,
-						persistenceWriterFunc: (_id: string, type: string, blob: unknown) =>
-							persistenceRef.current?.write(tableId!, type, blob),
-				  }
+						persistenceReaderFunc: (_id: string, type: string) => persistenceRef.current?.read(tableId!, type) ?? false,
+						persistenceWriterFunc: (_id: string, type: string, blob: unknown) => persistenceRef.current?.write(tableId!, type, blob),
+					}
 				: {}),
 			...options,
 			// columnDefaults from `options` was already folded in above; make
 			// sure a plain `...options` spread doesn't clobber the merge.
-			...(options?.columnDefaults
-				? { columnDefaults: { ...columnDefaultsBase, ...options.columnDefaults } }
-				: {}),
+			...(options?.columnDefaults ? { columnDefaults: { ...columnDefaultsBase, ...options.columnDefaults } } : {}),
 		} as Options;
 
 		// Step 2: create the instance and wire events.
@@ -1694,9 +1615,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 				if (range.end !== undefined) merged[`${field}__lte`] = range.end;
 				const start = merged[`${field}__gte`];
 				const end = merged[`${field}__lte`];
-				const active =
-					(typeof start === 'string' && start !== '') ||
-					(typeof end === 'string' && end !== '');
+				const active = (typeof start === 'string' && start !== '') || (typeof end === 'string' && end !== '');
 				const col = table.getColumns().find((c) => c.getField() === field);
 				col?.getElement().classList.toggle('rr-col-filtered', active);
 			},
@@ -1796,17 +1715,39 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			popupScrollCloser = null;
 		});
 
-		// Hidden-panel reveal: a grid built inside a display:none tab panel
-		// measures 0 wide and Tabulator crushes its column layout (the known
-		// hidden-panel-dimensions gotcha). Watch the container; when it first
-		// gains real width, force a full re-layout.
+		// Container-size healing. Two failure modes, one observer:
+		//  - Hidden-panel reveal: a grid built inside a display:none panel
+		//    measures 0 wide and Tabulator crushes the column layout (the
+		//    known hidden-panel-dimensions gotcha) — re-lay out IMMEDIATELY
+		//    on the first real width.
+		//  - Wrong-width build: a grid built mid tab/document transition
+		//    measures a real but WRONG width (e.g. ~500px in a 1500px card)
+		//    and Tabulator's own autoResize does not reliably re-fit
+		//    fitColumns afterwards — re-lay out after the size SETTLES
+		//    (trailing debounce, so panel drag-resizes don't pay a full
+		//    redraw per frame).
 		let lastWidth = containerRef.current.clientWidth;
+		let settleTimer: number | null = null;
 		const revealObserver = new ResizeObserver(() => {
 			const width = containerRef.current?.clientWidth ?? 0;
-			if (lastWidth === 0 && width > 0 && builtRef.current) {
-				table.redraw(true);
-			}
+			if (width === lastWidth || !builtRef.current) return;
+			const revealed = lastWidth === 0 && width > 0;
 			lastWidth = width;
+			if (settleTimer != null) {
+				window.clearTimeout(settleTimer);
+				settleTimer = null;
+			}
+			if (revealed) {
+				table.redraw(true);
+				return;
+			}
+			// Collapsing to 0 needs no redraw — the reveal path handles the
+			// way back.
+			if (width === 0) return;
+			settleTimer = window.setTimeout(() => {
+				settleTimer = null;
+				if (builtRef.current) table.redraw(true);
+			}, 120);
 		});
 		revealObserver.observe(containerRef.current);
 
@@ -1815,6 +1756,10 @@ function DataGridInner<Row extends Record<string, unknown>>(
 			builtRef.current = false;
 			tableRef.current = null;
 			revealObserver.disconnect();
+			if (settleTimer != null) {
+				window.clearTimeout(settleTimer);
+				settleTimer = null;
+			}
 			if (popupScrollCloser) {
 				document.removeEventListener('scroll', popupScrollCloser, true);
 				popupScrollCloser = null;
@@ -1989,15 +1934,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	// like the gear (design owner): quiet secondary tone at rest, primary
 	// while hovered or with the field expanded.
 	const searchToggle = showSearch && (
-		<button
-			type="button"
-			style={styles.gearButton(searchHover || displaySettings.searchOpen)}
-			onMouseEnter={() => setSearchHover(true)}
-			onMouseLeave={() => setSearchHover(false)}
-			onClick={toggleSearchOpen}
-			aria-label="Toggle search"
-			aria-expanded={displaySettings.searchOpen}
-		>
+		<button type="button" style={styles.gearButton(searchHover || displaySettings.searchOpen)} onMouseEnter={() => setSearchHover(true)} onMouseLeave={() => setSearchHover(false)} onClick={toggleSearchOpen} aria-label="Toggle search" aria-expanded={displaySettings.searchOpen}>
 			<BxSearch size={15} />
 		</button>
 	);
@@ -2033,33 +1970,20 @@ function DataGridInner<Row extends Record<string, unknown>>(
 	// single-row bar keeps it at the row's right end (the corner there).
 	const gearControl = showGridButtons && (
 		<div ref={gearWrapRef} style={styles.exportWrap}>
-				{/* BARE gear glyph — never a Button (design owner): quiet
+			{/* BARE gear glyph — never a Button (design owner): quiet
 				    secondary tone, primary on hover / while open. */}
-				<button
-					type="button"
-					style={styles.gearButton(gearHover || gearOpen)}
-					onMouseEnter={() => setGearHover(true)}
-					onMouseLeave={() => setGearHover(false)}
-					onClick={handleGearClick}
-					aria-label="Grid settings"
-					aria-expanded={gearOpen}
-				>
-					<BxCog size={15} />
-				</button>
-				{gearOpen &&
-					gearAnchor &&
-					createPortal(
-						/* The FULL header-popup class stack: .tabulator-popup +
+			<button type="button" style={styles.gearButton(gearHover || gearOpen)} onMouseEnter={() => setGearHover(true)} onMouseLeave={() => setGearHover(false)} onClick={handleGearClick} aria-label="Grid settings" aria-expanded={gearOpen}>
+				<BxCog size={15} />
+			</button>
+			{gearOpen &&
+				gearAnchor &&
+				createPortal(
+					/* The FULL header-popup class stack: .tabulator-popup +
 						   container paint the popup surface, .rr-grid-hp shapes
 						   the box (248px, vertical padding), .rr-grid-gear adds
 						   the font reset — the gear panel and the column popups
 						   are the same surface by construction. */
-						<div
-							ref={gearPanelRef}
-							style={styles.gearMenu(gearAnchor)}
-							className="tabulator-popup tabulator-popup-container rr-grid-hp rr-grid-gear"
-							role="menu"
-						>
+					<div ref={gearPanelRef} style={styles.gearMenu(gearAnchor)} className="tabulator-popup tabulator-popup-container rr-grid-hp rr-grid-gear" role="menu">
 						{/* DISPLAY: per-grid presentation toggles (persisted per
 						    user). */}
 						<div className="rr-grid-hp-section">
@@ -2075,14 +1999,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 							<div className="rr-grid-hp-section">
 								<div className="rr-grid-hp-label">Export</div>
 								{(['csv', 'json'] as const).map((format) => (
-									<div
-										key={format}
-										className="rr-grid-hp-item"
-										role="menuitem"
-										aria-disabled={exporting}
-										style={exporting ? { opacity: 0.5, cursor: 'default' } : undefined}
-										onClick={() => handleExportSelect(format)}
-									>
+									<div key={format} className="rr-grid-hp-item" role="menuitem" aria-disabled={exporting} style={exporting ? { opacity: 0.5, cursor: 'default' } : undefined} onClick={() => handleExportSelect(format)}>
 										<span style={styles.gearCheckSpacer} />
 										<span className="rr-grid-hp-item-label">{format === 'csv' ? 'CSV' : 'Json'}</span>
 									</div>
@@ -2099,14 +2016,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 								<div className="rr-grid-hp-label">Columns</div>
 								<div className="rr-grid-hp-list">
 									{gearColumns.map((col) => (
-										<div
-											key={col.field}
-											className="rr-grid-hp-item"
-											role="menuitemcheckbox"
-											aria-checked={col.visible}
-											title={col.tooltip}
-											onClick={() => handleGearColumnToggle(col.field)}
-										>
+										<div key={col.field} className="rr-grid-hp-item" role="menuitemcheckbox" aria-checked={col.visible} title={col.tooltip} onClick={() => handleGearColumnToggle(col.field)}>
 											<span className={col.visible ? 'rr-menu-check rr-menu-check--on' : 'rr-menu-check'} />
 											<span className="rr-grid-hp-item-label">{col.title}</span>
 										</div>
@@ -2134,9 +2044,9 @@ function DataGridInner<Row extends Record<string, unknown>>(
 								</button>
 							</div>
 						</div>
-						</div>,
-						document.body,
-					)}
+					</div>,
+					document.body
+				)}
 		</div>
 	);
 
@@ -2191,14 +2101,7 @@ function DataGridInner<Row extends Record<string, unknown>>(
 					)}
 				</div>
 			)}
-			{hasStrip && filters && (
-				<FilterStrip
-					defs={filters}
-					values={filterValues}
-					labels={filterLabels}
-					onChange={handleFilterChange}
-				/>
-			)}
+			{hasStrip && filters && <FilterStrip defs={filters} values={filterValues} labels={filterLabels} onChange={handleFilterChange} />}
 			{gridEl}
 		</div>
 	);
@@ -2208,6 +2111,4 @@ function DataGridInner<Row extends Record<string, unknown>>(
  * The platform's stock table. See the module doc above for behavior; see
  * {@link IDataGridProps} for the API.
  */
-export const DataGrid = forwardRef(DataGridInner) as <Row extends Record<string, unknown>>(
-	props: IDataGridProps<Row> & { ref?: Ref<IDataGridHandle> },
-) => ReactElement;
+export const DataGrid = forwardRef(DataGridInner) as <Row extends Record<string, unknown>>(props: IDataGridProps<Row> & { ref?: Ref<IDataGridHandle> }) => ReactElement;

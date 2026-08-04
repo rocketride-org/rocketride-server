@@ -338,9 +338,7 @@ function collapseEmptyGroup(state: DocumentsState, groupId: string): DocumentsSt
 
 	// Pick a new active group if the collapsed one was active
 	const allGroupIds = collectGroupIds(newRoot);
-	const newActiveGroup = allGroupIds.includes(state.activeGroupId)
-		? state.activeGroupId
-		: allGroupIds[allGroupIds.length - 1]!;
+	const newActiveGroup = allGroupIds.includes(state.activeGroupId) ? state.activeGroupId : allGroupIds[allGroupIds.length - 1]!;
 
 	return { ...state, groups: remainingGroups, rootNode: newRoot, activeGroupId: newActiveGroup };
 }
@@ -537,7 +535,7 @@ export class Documents {
 				this._listeners.add(listener);
 				return () => this._listeners.delete(listener);
 			},
-			() => this._state,
+			() => this._state
 		);
 	}
 
@@ -580,16 +578,25 @@ export class Documents {
 			if (this._vfs) {
 				try {
 					const raw = await this._vfs.read(uri);
-					if (raw !== null && raw !== undefined) { content = raw; loadedOk = true; }
-				} catch { /* read failed */ }
+					if (raw !== null && raw !== undefined) {
+						content = raw;
+						loadedOk = true;
+					}
+				} catch {
+					/* read failed */
+				}
 			}
 			doc = { uri, content, dirty: false, version: 1, editorCount: 0, isNew: !loadedOk };
 		}
 
 		const editorId = this._nextEditorId();
 		const editor: Editor = {
-			id: editorId, documentUri: uri,
-			scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1,
+			id: editorId,
+			documentUri: uri,
+			scrollTop: 0,
+			scrollLeft: 0,
+			cursorLine: 1,
+			cursorColumn: 1,
 			label: labelFromUri(uri),
 		};
 
@@ -648,8 +655,12 @@ export class Documents {
 		const doc: Document = { uri, content: content ?? null, dirty: false, version: 1, editorCount: 1, isNew: false, static: true };
 		const editorId = this._nextEditorId();
 		const editor: Editor = {
-			id: editorId, documentUri: uri,
-			scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1,
+			id: editorId,
+			documentUri: uri,
+			scrollTop: 0,
+			scrollLeft: 0,
+			cursorLine: 1,
+			cursorColumn: 1,
 			label,
 		};
 
@@ -684,8 +695,12 @@ export class Documents {
 		const doc: Document = { uri, content: initialContent ?? '', dirty: false, version: 1, editorCount: 1, isNew: true };
 		const editorId = this._nextEditorId();
 		const editor: Editor = {
-			id: editorId, documentUri: uri,
-			scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1,
+			id: editorId,
+			documentUri: uri,
+			scrollTop: 0,
+			scrollLeft: 0,
+			cursorLine: 1,
+			cursorColumn: 1,
 			label: uri,
 		};
 
@@ -857,7 +872,11 @@ export class Documents {
 		if (existingDoc?.static) return;
 		let newContent: unknown = null;
 		if (this._vfs) {
-			try { newContent = await this._vfs.read(uri); } catch { /* read failed */ }
+			try {
+				newContent = await this._vfs.read(uri);
+			} catch {
+				/* read failed */
+			}
 		}
 		if (newContent === null || newContent === undefined) return;
 		this._update((prev) => {
@@ -898,7 +917,9 @@ export class Documents {
 
 			// Replace the original leaf with a split containing both
 			const splitNode: LayoutSplit = {
-				type: 'split', id: splitNodeId, orientation,
+				type: 'split',
+				id: splitNodeId,
+				orientation,
 				children: [leaf, newLeaf],
 			};
 
@@ -947,8 +968,12 @@ export class Documents {
 			if (activeDocUri && prev.documents[activeDocUri]) {
 				// Open the same document in the new group
 				const newEditor: Editor = {
-					id: editorId, documentUri: activeDocUri,
-					scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1,
+					id: editorId,
+					documentUri: activeDocUri,
+					scrollTop: 0,
+					scrollLeft: 0,
+					cursorLine: 1,
+					cursorColumn: 1,
 					label: activeEditor!.label,
 				};
 				newGroup = { id: newGroupId, editorIds: [editorId], activeEditorIndex: 0 };
@@ -962,7 +987,9 @@ export class Documents {
 
 			const newLeaf: LayoutLeaf = { type: 'leaf', id: newGroupId, groupId: newGroupId };
 			const splitNode: LayoutSplit = {
-				type: 'split', id: splitNodeId, orientation,
+				type: 'split',
+				id: splitNodeId,
+				orientation,
 				children: [leaf, newLeaf],
 			};
 

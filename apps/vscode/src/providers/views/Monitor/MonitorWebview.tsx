@@ -86,7 +86,7 @@ const MonitorWebview: React.FC = () => {
 
 	// --- Render --------------------------------------------------------------
 
-	return <MonitorView data={data} events={events} isConnected={isConnected} onRefresh={handleRefresh} />;
+	return <MonitorView documentTitle="Server Monitor" data={data} events={events} isConnected={isConnected} onRefresh={handleRefresh} />;
 };
 
 export default MonitorWebview;

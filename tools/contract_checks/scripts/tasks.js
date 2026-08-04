@@ -91,8 +91,12 @@ function makeRunChecksAction(options = {}) {
 
             await execCommand(ENGINE, cliArgs, {
                 task,
+                // NLTK 3.9.4's import guard (nltk/inisec.py) blocks any NLTK-triggered import
+                // that resolves under the CWD. Here cwd=dist/server holds the engine's frozen
+                // stdlib, so NLTK importing optparse trips it as a false positive. Its
+                // off-switch disables the guard so the stdlib import resolves normally.
                 cwd: path.join(DIST_ROOT, 'server'),
-                env: { ...process.env },
+                env: { ...process.env, NLTK_DISABLE_IMPORT_SECURITY: '1' },
             });
         },
     };

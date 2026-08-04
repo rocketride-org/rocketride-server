@@ -181,12 +181,13 @@ def _load_node():
     scaffold.append('db_arango')
 
     def _load(sub: str):
-        spec = importlib.util.spec_from_file_location(
-            f'db_arango.{sub}', _NODE_DIR / f'{sub}.py', submodule_search_locations=[str(_NODE_DIR)]
-        )
+        # Plain MODULE spec: passing submodule_search_locations would make
+        # this a package spec whose parent is itself, tripping Python 3.12's
+        # "__package__ != __spec__.parent" deprecation on relative imports.
+        # module_from_spec derives __package__ = 'db_arango' from the parent.
+        spec = importlib.util.spec_from_file_location(f'db_arango.{sub}', _NODE_DIR / f'{sub}.py')
         assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)
-        mod.__package__ = 'db_arango'
         sys.modules[f'db_arango.{sub}'] = mod
         scaffold.append(f'db_arango.{sub}')
         spec.loader.exec_module(mod)

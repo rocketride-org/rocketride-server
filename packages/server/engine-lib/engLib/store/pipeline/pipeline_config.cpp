@@ -346,10 +346,17 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
             return false;
         };
 
-        // Mark the source component as visited
+        // Mark the source component as visited, INCLUDING its
+        // control-attached components — a control edge is wiring exactly
+        // like a lane (lane targets get the same treatment in the DFS
+        // above), and an invoke-capable source (the 'tools' endpoint) has
+        // members with no data lanes at all. Keeps the reported chain in
+        // agreement with what generatePipelineStack actually instantiates.
         for (auto &[_, comp] : comps) {
             if (comp.id == sourceId) {
                 comp.visited = true;
+                for (auto *controlComp : comp.controls)
+                    controlComp->visited = true;
                 break;
             }
         }

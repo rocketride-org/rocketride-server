@@ -332,6 +332,12 @@
 			"title": "Tokens",
 			"description": "Total Tokens"
 		},
+		"extendedThinking": {
+			"type": "boolean",
+			"title": "Extended thinking",
+			"default": false,
+			"description": "Enable Anthropic extended thinking (reasoning) for this node. Off by default. Applies to reasoning-capable models on the interactive chat path."
+		},
 		"anthropic.custom": {
 			"object": "custom",
 			"properties": [
@@ -345,6 +351,7 @@
 			"object": "claude-sonnet-4-6",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -352,6 +359,7 @@
 			"object": "claude-opus-4-6",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -359,6 +367,7 @@
 			"object": "claude-haiku-4-5",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -366,6 +375,7 @@
 			"object": "claude-sonnet-4-5",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -373,6 +383,7 @@
 			"object": "claude-opus-4-5",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -523,6 +534,7 @@
 			"object": "claude-opus-4-7",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -537,6 +549,7 @@
 			"object": "claude-fable-5",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -544,6 +557,7 @@
 			"object": "claude-fable-latest",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -551,6 +565,7 @@
 			"object": "claude-haiku-latest",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -558,6 +573,7 @@
 			"object": "claude-opus-4",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -565,6 +581,7 @@
 			"object": "claude-opus-4-1",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -572,6 +589,7 @@
 			"object": "claude-opus-4-7-fast",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -579,6 +597,7 @@
 			"object": "claude-opus-4-8",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -586,6 +605,7 @@
 			"object": "claude-opus-4-8-fast",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -593,6 +613,7 @@
 			"object": "claude-opus-latest",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -600,6 +621,7 @@
 			"object": "claude-sonnet-4",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -607,6 +629,7 @@
 			"object": "claude-sonnet-5",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -614,6 +637,7 @@
 			"object": "claude-sonnet-latest",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -621,6 +645,7 @@
 			"object": "claude-opus-5",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		},
@@ -628,6 +653,7 @@
 			"object": "claude-opus-5-fast",
 			"properties": [
 				"llm.cloud.apikey",
+				"extendedThinking",
 				"llm.cloud.modelSource"
 			]
 		}

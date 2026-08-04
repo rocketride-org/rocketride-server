@@ -41,12 +41,19 @@ export { default as MonitorView } from './modules/server';
 export type { IMonitorViewProps } from './modules/server';
 export { parseActivityEvent } from './modules/server';
 export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from './modules/server';
-export { OverviewTab, OverviewGrid, ConnectionsGrid, TasksGrid, ActivityGrid, ConnectionRecordPanel, TaskRecordPanel, taskStatusText, taskStatusVariant, getEventDisplay } from './modules/server/components';
-export type { IOverviewGridProps, IConnectionsGridProps, ITasksGridProps, IActivityGridProps, IConnectionRecordPanelProps, ITaskRecordPanelProps, IEventDisplay, EventTone } from './modules/server/components';
+export { OverviewPanel, OverviewGrid, ConnectionsPanel, TasksPanel, ActivityPanel, ConnectionRecordPanel, TaskRecordPanel, taskStatusText, taskStatusVariant, getEventDisplay } from './modules/server/components';
+export type { IOverviewPanelProps, IOverviewGridProps, IConnectionsPanelProps, ITasksPanelProps, IActivityPanelProps, IConnectionRecordPanelProps, ITaskRecordPanelProps, IEventDisplay, EventTone } from './modules/server/components';
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
 export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
+export { foldTaskEvent, foldDeployRunState, foldProjectDeployRuns } from './modules/sidebar/taskFold';
+export type { TaskLifecycleEvent, TaskFoldResult } from './modules/sidebar/taskFold';
+
+// --- Deploy panel family (teams-as-environments deployment surfaces) ---------
+// Deliberately NOT exported from this barrel: DeploymentView drags the canvas
+// (same weight problem as the project module). Consumers import
+// 'shared/components/deploy-panel' directly, like 'shared/modules/project'.
 
 // --- Explorer module (generic file tree panel) -------------------------------
 export { Explorer } from './modules/explorer';
@@ -63,8 +70,8 @@ export type { IntegrationTabId } from './components/pipeline-actions/endpointInt
 
 export * from './components/BoxIcon';
 
-export { TabPanelContent } from './components/tab-panel/TabPanelContent';
-export type { ITabPanelContentProps, ITabPanelPanel } from './components/tab-panel/TabPanelContent';
+export { TabPanel } from './components/tab-panel/TabPanel';
+export type { ITabPanelProps, ITabPanelPanel } from './components/tab-panel/TabPanel';
 
 // --- Sidebar footer ----------------------------------------------------------
 export { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
@@ -152,11 +159,7 @@ export type { IMiniCardProps, IMiniContainerProps } from './components/mini-card
 export { ConnectionCard, ConnectionCardAdd } from './components/connection-card/ConnectionCard';
 export type { IConnectionCardProps, IConnectionCardAddProps } from './components/connection-card/ConnectionCard';
 export { ConnectionManagerView } from './modules/connection-manager/ConnectionManagerView';
-export type {
-	IConnectionManagerViewProps,
-	IConnectionCardDisplay,
-	IConnectionFormField,
-} from './modules/connection-manager/ConnectionManagerView';
+export type { IConnectionManagerViewProps, IConnectionCardDisplay, IConnectionFormField } from './modules/connection-manager/ConnectionManagerView';
 export { Section, LabelValue } from './components/section/Section';
 export type { ISectionProps, ILabelValueProps } from './components/section/Section';
 export { DetailPanel } from './components/detail-panel/DetailPanel';
@@ -165,8 +168,8 @@ export { PrefsProvider, usePrefs } from './contexts/PrefsContext';
 export type { IPrefsApi } from './contexts/PrefsContext';
 export { PanelTabBody } from './components/detail-panel/PanelTabBody';
 export type { IPanelTabBodyProps } from './components/detail-panel/PanelTabBody';
-export { PageViewControl } from './components/page-view-control/PageViewControl';
-export type { IPageViewControlProps } from './components/page-view-control/PageViewControl';
+export { TabControl } from './components/tab-control/TabControl';
+export type { ITabControlProps } from './components/tab-control/TabControl';
 export { PlayBar } from './components/play-bar/PlayBar';
 export type { IPlayBarProps, ITimeSelection } from './components/play-bar/PlayBar';
 export { Modal, CLOSE_GLYPH } from './components/modal/Modal';

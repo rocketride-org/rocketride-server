@@ -21,7 +21,7 @@
  * Anatomy (matches the style-guide 6.2 / mockup):
  * - a fixed EntityHeader (42px avatar/icon slot + title + secondary line + close),
  * - an optional underline tab strip taking the same {@link ViewMenuEntry} shape as
- *   PageViewControl/SidebarMenu (count badges reuse the shared {@link ViewMenuBadge}),
+ *   TabControl/SidebarMenu (count badges reuse the shared {@link ViewMenuBadge}),
  * - a scrollable body composed from Section / LabelValue / Chip / StatusBadge /
  *   MiniContainer / Button.
  *
@@ -32,7 +32,7 @@
 
 import React, { CSSProperties, ReactNode, useEffect, useRef, useState } from 'react';
 import { ViewMenuEntry } from '../../types/viewMenu';
-import { ViewMenuBadge } from '../page-view-control/ViewMenuBadge';
+import { ViewMenuBadge } from '../tab-control/ViewMenuBadge';
 import { CLOSE_GLYPH, trapFocus, acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from '../modal/Modal';
 import { ConfirmDialog } from '../modal/ConfirmDialog';
 import { BxChevronLeft } from '../BoxIcon';
@@ -156,6 +156,15 @@ export interface IDetailPanelProps {
 	 */
 	footer?: ReactNode;
 	/**
+	 * Body hosts a full VIEW (its own TabControl strip, gutters, and inner
+	 * scroll regions): the body becomes a definite, non-scrolling flex box
+	 * with no padding — the hosted View owns all scrolling. Without this, a
+	 * height-100% View collapses inside the default scrolling body and
+	 * scrollbars double up. Ignored when `tabs` are used (bodyTabs already
+	 * stops outer scrolling).
+	 */
+	flushBody?: boolean;
+	/**
 	 * Anchor the drawer to the nearest POSITIONED ANCESTOR instead of the
 	 * viewport. A slide-out anchors to the surface that OWNS the record:
 	 * grids on app pages open viewport drawers;
@@ -266,13 +275,9 @@ const styles = {
 	// entering along Y. Shadow always falls toward the dimmed host content.
 	panel: (size: number, entered: boolean, bottom: boolean): CSSProperties => ({
 		position: 'absolute',
-		...(bottom
-			? { left: 0, right: 0, bottom: 0, height: size }
-			: { top: 0, right: 0, bottom: 0, width: size }),
+		...(bottom ? { left: 0, right: 0, bottom: 0, height: size } : { top: 0, right: 0, bottom: 0, width: size }),
 		background: 'var(--rr-bg-default)',
-		boxShadow: bottom
-			? '0 -10px 30px color-mix(in srgb, var(--rr-text-primary) 20%, transparent)'
-			: '-10px 0 30px color-mix(in srgb, var(--rr-text-primary) 20%, transparent)',
+		boxShadow: bottom ? '0 -10px 30px color-mix(in srgb, var(--rr-text-primary) 20%, transparent)' : '-10px 0 30px color-mix(in srgb, var(--rr-text-primary) 20%, transparent)',
 		// The drawer box always captures pointer events, so a MODELESS overlay
 		// (pointerEvents:none) still lets the drawer itself be interactive while
 		// the surface behind it stays live.
@@ -391,6 +396,19 @@ const styles = {
 		padding: '6px 20px 20px',
 	} as CSSProperties,
 
+	// Flush body (View-hosting drawers): a full *View* mounted as the body —
+	// with its own TabControl strip, gutters, and inner scroll regions —
+	// needs a definite flex box and NO padding or outer scrolling, or its
+	// height-100% chain breaks and scrollbars double up.
+	bodyFlush: {
+		flex: 1,
+		minHeight: 0,
+		display: 'flex',
+		flexDirection: 'column',
+		overflow: 'hidden',
+		padding: 0,
+	} as CSSProperties,
+
 	// Covered-layer catcher: sits over a panel that is NOT the stack top —
 	// an extra dim that makes depth readable, swallows every interaction
 	// (the covered panel is inert), and turns the exposed sliver into the
@@ -409,9 +427,7 @@ const styles = {
 	// the affordance matches the rest of the platform).
 	resizeHandle: (active: boolean, bottom: boolean): CSSProperties => ({
 		position: 'absolute',
-		...(bottom
-			? { top: 0, left: 0, right: 0, height: 6, cursor: 'row-resize' }
-			: { left: 0, top: 0, bottom: 0, width: 6, cursor: 'col-resize' }),
+		...(bottom ? { top: 0, left: 0, right: 0, height: 6, cursor: 'row-resize' } : { left: 0, top: 0, bottom: 0, width: 6, cursor: 'col-resize' }),
 		zIndex: 1,
 		background: active ? 'var(--rr-sash-hover)' : 'transparent',
 		touchAction: 'none',
@@ -441,30 +457,7 @@ const styles = {
  * @param props - {@link IDetailPanelProps}.
  * @returns The drawer element, or `null` when closed.
  */
-export function DetailPanel({
-	open,
-	onClose,
-	avatar,
-	title,
-	subtitle,
-	tabs,
-	activeTab,
-	onTabSelect,
-	children,
-	side = 'right',
-	width = DEFAULT_WIDTH,
-	height = DEFAULT_HEIGHT,
-	footer,
-	contained,
-	resizable = true,
-	dirty,
-	editing,
-	onExitMode,
-	busy,
-	modeless,
-	minWidth,
-	persistKey,
-}: IDetailPanelProps): React.ReactElement | null {
+export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, activeTab, onTabSelect, children, side = 'right', width = DEFAULT_WIDTH, height = DEFAULT_HEIGHT, footer, flushBody, contained, resizable = true, dirty, editing, onExitMode, busy, modeless, minWidth, persistKey }: IDetailPanelProps): React.ReactElement | null {
 	// The ambient workspace-prefs accessor (no-op when no PrefsProvider is
 	// mounted) — the single store DetailPanel persists its width through.
 	const prefs = usePrefs();
@@ -515,9 +508,7 @@ export function DetailPanel({
 	};
 
 	const clampSize = (candidate: number): number => {
-		const host = bottom
-			? (overlayRef.current?.clientHeight ?? window.innerHeight)
-			: (overlayRef.current?.clientWidth ?? window.innerWidth);
+		const host = bottom ? (overlayRef.current?.clientHeight ?? window.innerHeight) : (overlayRef.current?.clientWidth ?? window.innerWidth);
 		// In a stack the clamp binds the ROOT (deepest, widest) panel: the top
 		// may grow only until root = top + 40/level still fits the host band.
 		const { entries, stackedTop } = stackStateNow();
@@ -581,10 +572,7 @@ export function DetailPanel({
 	const resetSize = (): void => {
 		const { entries, stackedTop } = stackStateNow();
 		if (stackedTop) {
-			stackSharedSize[contained ? 'contained' : 'viewport'] = Math.max(
-				minSize,
-				defaultSize - STACK_OFFSET * (entries.length - 1),
-			);
+			stackSharedSize[contained ? 'contained' : 'viewport'] = Math.max(minSize, defaultSize - STACK_OFFSET * (entries.length - 1));
 			notifyStack();
 		} else {
 			setDragSize(null);
@@ -841,9 +829,7 @@ export function DetailPanel({
 	const isTop = !stacked || depthFromTop === 0;
 	const hasBelow = stackIndex > 0;
 	const parentTitle = hasBelow ? entries[stackIndex - 1].getTitle() : null;
-	const renderSize = stacked
-		? (stackSharedSize[stackScope] ?? Math.max(minSize, defaultSize - STACK_OFFSET)) + STACK_OFFSET * depthFromTop
-		: (dragSize ?? defaultSize);
+	const renderSize = stacked ? (stackSharedSize[stackScope] ?? Math.max(minSize, defaultSize - STACK_OFFSET)) + STACK_OFFSET * depthFromTop : (dragSize ?? defaultSize);
 	// Mirror for the registry (push seeding) and the resize handlers.
 	sizeRef.current = renderSize;
 
@@ -883,13 +869,7 @@ export function DetailPanel({
 				    back peels one level, X exits the whole stack. */}
 				<div style={styles.header}>
 					{hasBelow && (
-						<button
-							type="button"
-							style={styles.back}
-							onClick={requestPeel}
-							aria-label={`Back to ${parentTitle}`}
-							title={`Back to ${parentTitle}`}
-						>
+						<button type="button" style={styles.back} onClick={requestPeel} aria-label={`Back to ${parentTitle}`} title={`Back to ${parentTitle}`}>
 							<BxChevronLeft size={20} />
 						</button>
 					)}
@@ -898,13 +878,7 @@ export function DetailPanel({
 						<div style={styles.title}>{title}</div>
 						{subtitle != null && <div style={styles.subtitle}>{subtitle}</div>}
 					</div>
-					<button
-						ref={closeButtonRef}
-						type="button"
-						style={styles.close}
-						onClick={requestCloseAll}
-						aria-label="Close"
-					>
+					<button ref={closeButtonRef} type="button" style={styles.close} onClick={requestCloseAll} aria-label="Close">
 						{CLOSE_GLYPH}
 					</button>
 				</div>
@@ -943,7 +917,7 @@ export function DetailPanel({
 				{/* Body: independently scrolling for plain panels; with TABS the
 				    outer region stops scrolling and each tab panel owns its own
 				    overflow (PanelTabBody / grids), per the 2026-07-18 standard. */}
-				<div style={tabs != null && tabs.length > 0 ? styles.bodyTabs : styles.body}>{children}</div>
+				<div style={tabs != null && tabs.length > 0 ? styles.bodyTabs : flushBody ? styles.bodyFlush : styles.body}>{children}</div>
 
 				{/* Fixed footer — RECORD machinery only (record-level verbs left,
 				    mode machinery right); navigation lives in the header. */}

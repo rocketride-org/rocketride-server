@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * AccountView — account management tabs behind a stock PageViewControl strip.
+ * AccountView — account management tabs behind a stock TabControl strip.
  *
  * This is the pure, host-agnostic root component for the Account module.
  * All data is received as props and all server mutations are delegated to
@@ -19,11 +19,11 @@
 
 import React, { useMemo, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { TabPanelContent } from '../../components/tab-panel/TabPanelContent';
-import { PageViewControl } from '../../components/page-view-control/PageViewControl';
+import { TabPanel } from '../../components/tab-panel/TabPanel';
+import { TabControl } from '../../components/tab-control/TabControl';
 import { ContentHeader } from '../../components/content-header/ContentHeader';
 import { commonStyles } from '../../themes/styles';
-import type { ITabPanelPanel } from '../../components/tab-panel/TabPanelContent';
+import type { ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ViewMenu } from '../../types/viewMenu';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from './types';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
@@ -82,7 +82,7 @@ const styles = {
 		letterSpacing: '0.05em',
 	} as CSSProperties,
 	/**
-	 * Fills the space below the top PageViewControl strip; TabPanelContent's
+	 * Fills the space below the top TabControl strip; TabPanel's
 	 * 100%-height wrapper resolves against this definite flex box.
 	 */
 	pageBody: {
@@ -295,7 +295,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	// =========================================================================
 
 	/**
-	 * ViewMenu declaration — rendered by this view's own PageViewControl strip.
+	 * ViewMenu declaration — rendered by this view's own TabControl strip.
 	 * Counts on Billing, API Keys, Teams, and Members show when non-zero.
 	 */
 	const activeKeyCount = keys.filter((k) => k.active).length;
@@ -338,8 +338,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						{/* Page heading — below the strip, per the style guide (tabs first, title inside each page). */}
 						<ContentHeader title="Profile" subtitle="Your identity, sign-in, and defaults for this account." />
 						<div style={commonStyles.tabContent}>
-						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-						<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onSetDefaultOrg={onSetDefaultOrg} />
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDefaultTeam={onSetDefaultTeam} onSetDefaultOrg={onSetDefaultOrg} />
 						</div>
 					</>
 				),
@@ -349,7 +349,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<>
 						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
 						<div style={commonStyles.tabContent}>
-						<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} />
+							<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} />
 						</div>
 					</>
 				),
@@ -359,8 +359,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<>
 						<ContentHeader title="API Keys" subtitle="Create and revoke keys for programmatic access." />
 						<div style={commonStyles.tabContent}>
-						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-						<ApiKeysPanel keys={keys} teams={teams} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
 						</div>
 					</>
 				),
@@ -370,8 +370,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<>
 						<ContentHeader title="Organization" subtitle="Your organization's name and settings." />
 						<div style={commonStyles.tabContent}>
-						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-						<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} />
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} />
 						</div>
 					</>
 				),
@@ -381,23 +381,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<>
 						<ContentHeader title="Teams" subtitle="Group members and scope their permissions." />
 						<div style={commonStyles.tabContent}>
-						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-						<TeamsPanel
-							teams={teams}
-							teamDetail={teamDetail}
-							activeTeamId={activeTeamId}
-							onActiveTeamIdChange={onActiveTeamIdChange}
-							onLoadTeamDetail={onLoadTeamDetail}
-							members={members}
-							profile={profile}
-							onCreateTeam={onCreateTeam}
-							onDeleteTeam={onDeleteTeam}
-							onAddTeamMember={onAddTeamMember}
-							onEditTeamMemberPerms={onEditTeamMemberPerms}
-							onRemoveTeamMember={onRemoveTeamMember}
-							isOrgAdmin={isOrgAdmin}
-							isActiveTeamAdmin={isActiveTeamAdmin}
-						/>
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<TeamsPanel teams={teams} teamDetail={teamDetail} activeTeamId={activeTeamId} onActiveTeamIdChange={onActiveTeamIdChange} onLoadTeamDetail={onLoadTeamDetail} members={members} profile={profile} onCreateTeam={onCreateTeam} onDeleteTeam={onDeleteTeam} onAddTeamMember={onAddTeamMember} onEditTeamMemberPerms={onEditTeamMemberPerms} onRemoveTeamMember={onRemoveTeamMember} isOrgAdmin={isOrgAdmin} isActiveTeamAdmin={isActiveTeamAdmin} />
 						</div>
 					</>
 				),
@@ -407,8 +392,8 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					<>
 						<ContentHeader title="Members" subtitle="Everyone in this organization and their roles." />
 						<div style={commonStyles.tabContent}>
-						{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-						<MembersPanel members={members} teams={teams} profile={profile} isOrgAdmin={isOrgAdmin} onInviteMember={onInviteMember} onUpdateMemberRole={onUpdateMemberRole} onRemoveMember={onRemoveMember} onResendInvite={onResendInvite} />
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<MembersPanel members={members} teams={teams} profile={profile} isOrgAdmin={isOrgAdmin} onInviteMember={onInviteMember} onUpdateMemberRole={onUpdateMemberRole} onRemoveMember={onRemoveMember} onResendInvite={onResendInvite} />
 						</div>
 					</>
 				),
@@ -424,10 +409,10 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	return (
 		<div style={styles.root}>
 			{/* Page strip — the view renders its own tabs at the very top. */}
-			<PageViewControl menu={viewMenu} activeId={section} onSelect={handleSelectSection} />
+			<TabControl menu={viewMenu} activeId={section} onSelect={handleSelectSection} />
 			{/* Page bodies fill the space below the strip. */}
 			<div style={styles.pageBody}>
-				<TabPanelContent panels={panels} activeId={section} />
+				<TabPanel panels={panels} activeId={section} />
 			</div>
 
 			{/* Frosted-glass overlay with a disabled status button when disconnected. */}
@@ -438,7 +423,6 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 					</button>
 				</div>
 			)}
-
 		</div>
 	);
 };

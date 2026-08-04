@@ -148,14 +148,13 @@ def _load_iinstance():
     pkg_stub.IGlobal = iglobal_mod
 
     try:
-        spec = importlib.util.spec_from_file_location(
-            f'{pkg_name}.IInstance',
-            _IINSTANCE_PATH,
-            submodule_search_locations=[],
-        )
+        # Plain MODULE spec: submodule_search_locations (even []) would make
+        # this a package spec whose parent is itself, tripping Python 3.12's
+        # "__package__ != __spec__.parent" deprecation on relative imports.
+        # module_from_spec derives __package__ from the spec parent instead.
+        spec = importlib.util.spec_from_file_location(f'{pkg_name}.IInstance', _IINSTANCE_PATH)
         assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)
-        mod.__package__ = pkg_name
         sys.modules[f'{pkg_name}.IInstance'] = mod
         scaffold.append(f'{pkg_name}.IInstance')
         spec.loader.exec_module(mod)

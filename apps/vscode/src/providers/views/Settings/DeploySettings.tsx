@@ -35,8 +35,6 @@ interface DeploySettingsProps {
 	onClearCredentials: () => void;
 	onTestConnection: (mode: string, params?: Record<string, unknown>) => void;
 	testMessage: MessageData | null;
-	/** Available teams for cloud mode (fetched after OAuth sign-in). */
-	teams: Array<{ id: string; name: string }>;
 	engineVersions: EngineVersionItem[];
 	engineVersionsLoading: boolean;
 	serverCapabilities: string[];
@@ -45,7 +43,6 @@ interface DeploySettingsProps {
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
 	onProbeCloudServer?: () => void;
-	onFetchTeams?: () => void;
 	isSaas?: boolean;
 	/** Whether the user has an active subscription. */
 	isSubscribed?: boolean;
@@ -120,7 +117,7 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 			const defaultMode: ConnectionMode = canUseCloud ? 'cloud' : 'local';
 			onSettingsChange({ deployment: { connectionMode: defaultMode } } as Partial<SettingsData>);
 		} else {
-			onSettingsChange({ deployment: { connectionMode: null, teamId: '' } } as Partial<SettingsData>);
+			onSettingsChange({ deployment: { connectionMode: null } } as Partial<SettingsData>);
 		}
 	};
 
@@ -162,9 +159,7 @@ export const DeploySettings: React.FC<DeploySettingsProps> = (props) => {
 						onCloudSignIn={props.onCloudSignIn ?? (() => {})}
 						onCloudSignOut={props.onCloudSignOut ?? (() => {})}
 						onProbeCloudServer={props.onProbeCloudServer}
-						onFetchTeams={props.onFetchTeams}
 						isSaas={props.isSaas}
-						teams={props.teams ?? []}
 						onClearCredentials={props.onClearCredentials}
 						onTestConnection={props.onTestConnection}
 						testMessage={props.testMessage}

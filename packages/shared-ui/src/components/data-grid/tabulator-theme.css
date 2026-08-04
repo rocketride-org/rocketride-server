@@ -103,7 +103,8 @@
 	background: var(--rr-bg-list-hover); /* row hover (listRow) */
 }
 .rr-grid.tabulator .tabulator-row .tabulator-cell {
-	padding: 10px 12px;
+	/* Tightened from 10px vertical (then 6px): dense rows across every grid. */
+	padding: 4px 12px;
 	border-right: none;
 	font-size: 13px;
 	vertical-align: middle;

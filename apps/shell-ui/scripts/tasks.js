@@ -266,14 +266,15 @@ const shellContractModule = {
 			}),
 		},
 		{
-			// Integrity check: regenerate the barrels + per-version conformance
-			// floors from the immutable versions/*.d.ts WITHOUT freezing a new
-			// version. CI runs this and then `git diff --exit-code` on the generated
-			// files — a nonzero diff means a floor was hand-edited/dropped to launder
-			// a removed export past the tsc floors. Nothing is written otherwise.
+			// RESET to a fresh v0: drops every frozen version and re-mints v0
+			// from the CURRENT live surface (pre-1.0 policy — intentional
+			// breaking changes collapse the contract history). CI pairs this
+			// with `git diff --exit-code` on the generated files: a committed
+			// contract that disagrees with the live surface — including a
+			// hand-edited floor or version file — fails the diff.
 			name: 'shell:regen',
 			action: () => ({
-				description: 'Regenerate shell-api barrels + floors from frozen versions (no new version)',
+				description: 'Recreate the v0 shell-api freeze from the live surface (contract reset)',
 				steps: ['client-typescript:build', 'shell:regen-run'],
 			}),
 		},

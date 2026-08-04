@@ -178,3 +178,41 @@ jobs:
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Publish the engine container too, under the run's own suffix.
+  #
+  # WHY THIS EXISTS. Until now the only workflows that produced an engine
+  # container were prerelease.yaml (auto, develop) and release.yaml (full
+  # release, publishes to npm/PyPI/Marketplace). So there was NO way to get a
+  # branch build into the cloud: the first overwrites the shared
+  # `<version>-prerelease` tag that every other build resolves to, and the
+  # second publishes to the public registries. Both are wrong for a workshop
+  # or hotfix branch, which left "put this branch in front of users" with no
+  # safe route at all.
+  #
+  # With tag_suffix the image lands on `<version>-<suffix>` and nothing else —
+  # `latest` is skipped by _docker.yaml. Nothing shared is touched, so this
+  # cannot disturb develop's pipeline.
+  #
+  # Only when the run actually includes the server; a vscode-only workshop
+  # build has no engine to publish.
+  docker:
+    name: Docker
+    if: ${{ contains(inputs.products, 'server') }}
+    needs: [init, build]
+    uses: ./.github/workflows/_docker.yaml
+    permissions:
+      contents: read
+      packages: write
+      # id-token: write is REQUIRED even though nothing here signs directly —
+      # _docker.yaml's job declares it for cosign keyless signing, and GitHub
+      # validates at workflow start that the caller covers every permission the
+      # reusable job declares. Omitting it fails the whole run before any step
+      # executes (that is what broke every nightly after #929).
+      id-token: write
+    with:
+      ref: ${{ inputs.ref }}
+      server_version: ${{ needs.init.outputs.server_version }}
+      tag_suffix: ${{ inputs.tag_suffix }}
+    secrets: inherit
+

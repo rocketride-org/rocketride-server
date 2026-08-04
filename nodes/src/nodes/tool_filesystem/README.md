@@ -5,12 +5,16 @@ A RocketRide tool node that gives an AI agent read/write access to the account-s
 ## What it does
 
 Exposes the account file store, the same storage area the client SDK reaches via its
-`fs_*` methods, to an agent as a set of callable tools. All paths are relative to
-`users/<client_id>/files/`, so files written by the agent are visible to the client SDK
-and vice versa. The account is resolved automatically from the `ROCKETRIDE_CLIENT_ID`
-env var injected by the task engine, no account configuration is needed on the node.
-If that env var is missing or the account store fails to initialise, a warning is logged
-and **all** tool methods are hidden from the agent.
+`fs_*` methods, to an agent as a set of callable tools. All paths are plain and
+relative to the task's **storage anchor**, which the task file provides: the owning
+user's file tree (`users/<client_id>/files/`) for development runs, or a task-specific
+subtree of the deployment team's storage (`teams/<teamId>/files/tasks/<projectId>/`)
+for deployed runs — so files written by the agent are visible in the file browser and
+vice versa, and node behavior is identical in both modes. Identity and the anchor are
+resolved automatically from the running task (`rocketlib.getTask()`), never from the
+environment; no account configuration is needed on the node. If no task identity is
+available or the account store fails to initialise, a warning is logged and **all**
+tool methods are hidden from the agent.
 
 The node plays two roles. As a **tool** it is connected to agents via the `tool` invoke
 channel (see *Available tools*). As a **pipeline sink** it also accepts data lanes and
@@ -39,7 +43,7 @@ may touch.
 | `emitUrl` | boolean | Default false. Also attach a time-limited signed download URL to the emitted document metadata. |
 | `urlExpiresIn` | integer | Default 3600 (max 3600). TTL in seconds for the signed URL when `emitUrl` is on. |
 | `whitelistPattern` | string | Default empty.  |
-| `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under users/<client_id>/files/ are allowed. |
+| `pathWhitelist` | array | Regex patterns applied to the relative path of every operation using re.search semantics, a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor are allowed. |
 
 
 ### Path whitelist
@@ -143,15 +147,17 @@ subprocess long before the LLM ever sees the result.
 
 ## Storage location
 
-Files land under the configured storage backend (defaults to `~/.rocketlib/store/`). For
-the default filesystem backend the absolute path is:
+Files land under the configured storage backend (defaults to `~/.rocketlib/store/`).
+For the default filesystem backend the absolute path is the task's storage anchor
+plus the relative path:
 
 ```text
-<store>/users/<client_id>/files/<path>
+<store>/users/<client_id>/files/<path>                    # development runs
+<store>/teams/<teamId>/files/tasks/<projectId>/<path>     # deployed runs
 ```
 
-Each account gets its own isolated `files/` directory, the node picks up the current
-account automatically, no configuration needed.
+The anchor comes from the task file the engine wrote at spawn; the node picks up
+the current task automatically, no configuration needed.
 
 ---
 

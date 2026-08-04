@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-23T18:39:00.513Z
-// Source commit: 6fc82b1bfc6c4b38c0e03658281f9ca491aa3b4e
+// Generated:     2026-07-28T19:11:58.922Z
+// Source commit: 7d708f3711c106a2d6a7007260c83c73d61dd92c
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -551,6 +551,9 @@ interface PipelineComponent {
     control?: PipelineControlConnection[];
 }
 interface PipelineConfig {
+    /** Human-readable pipeline name — the registry's pipelineName renders it
+        on every deploy surface, and publish requires it. */
+    name?: string;
     /** Pipeline description */
     description?: string;
     /** Pipeline version number */
@@ -581,23 +584,109 @@ interface PipelineConfig {
     /** Active editor mode (e.g. 'design', 'status', 'flow') */
     editorMode?: string;
 }
-interface DeploymentRecord {
-    pipeline?: PipelineConfig;
-    /** Cron expression or `"manual"`. */
-    schedule?: string;
-    state?: "active" | "paused" | "errored";
-    /** ID of the user who created the deployment. */
+interface DeployActor {
     userId?: string;
-    /** Unix timestamp (seconds). */
-    createdAt?: number;
-    /** Unix timestamp (seconds). */
-    updatedAt?: number;
+    display?: string;
+    email?: string;
 }
-type LogRunKind = "dev" | "deploy";
+interface DeployArtifact {
+    version?: number;
+    /** sha256 over the exact stored artifact bytes; verified on every load. */
+    sha256?: string;
+    bytes?: number;
+    pipelineName?: string;
+    publishedBy?: DeployActor;
+    /** Unix timestamp (seconds). */
+    publishedAt?: number;
+    /** Optional "what changed" note supplied at publish time. */
+    comment?: string;
+}
+interface DeploymentSchedule {
+    /** 5-field cron expression. */
+    cron?: string;
+    /** Paused schedules stay configured (cron/ttl kept) but never fire. */
+    paused?: boolean;
+    /** Run window in seconds ('fixed window'); null/absent = until finished. */
+    ttl?: number | null;
+    /** Unix timestamp (seconds) of the last scheduler dispatch, or null. */
+    lastRunAt?: number | null;
+}
+interface Deployment {
+    teamId?: string;
+    projectId?: string;
+    /** The registry version this team currently points at. */
+    version?: number;
+    /** `disabled` is the whole-deployment kill switch — nothing runs. */
+    state?: "enabled" | "disabled" | "errored" | "removed";
+    pipelineName?: string;
+    /** Per-source schedules, keyed by source id. */
+    schedules?: Record<string, DeploymentSchedule>;
+    createdAt?: number;
+    createdBy?: DeployActor;
+    updatedAt?: number;
+    updatedBy?: DeployActor;
+    /** Registry-joined fields of the pointed-at version. */
+    sha256?: string;
+    publishedAt?: number;
+    publishedBy?: DeployActor;
+}
+interface DeployHistoryEntry {
+    /**
+     * Stable append-order key: newest first, never ties. Use as the row
+     * identity when rendering.
+     */
+    seq?: number;
+    /** Unix timestamp (seconds). */
+    at?: number;
+    /** `pause`/`resume` appear only on rows written before the
+        enable/disable vocabulary (the trail is immutable). */
+    action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
+    /** `''` on org-wide rows (publish); the team id on pointer changes. */
+    teamId?: string;
+    version?: number;
+    actor?: DeployActor;
+}
+interface PublishResult {
+    artifact?: DeployArtifact;
+    /** Present only when `deployTo` was given (one-step publish+deploy). */
+    deployment?: Deployment;
+}
+interface DeployListParams {
+    /** 1-based page number. */
+    page?: number;
+    /** Rows per page (server-clamped). */
+    pageSize?: number;
+    /** Free-text search over the surface's searchable columns. */
+    search?: string;
+    /** Column filters; `__gte`/`__lte` suffixes express range bounds. */
+    filters?: Record<string, unknown>;
+    /** Sorters, most-significant first. */
+    sort?: Array<{
+        field: string;
+        dir: "asc" | "desc";
+    }>;
+}
+interface DeployListEnvelope<T> {
+    rows: T[];
+    total: number;
+    page: number;
+    pageSize: number;
+}
+interface SchedulePreview {
+    valid?: boolean;
+    /** Human-readable reason when invalid. */
+    error?: string;
+    /** Unix timestamps (seconds) of the next occurrences. */
+    next?: number[];
+}
 interface LogStreamRef {
     projectId: string;
     source: string;
-    runKind: LogRunKind;
+    /**
+     * A team id addresses that team's deploy continuum; omitted = the
+     * caller's own dev stream.
+     */
+    teamId?: string;
 }
 interface LogChapter {
     /** Run start (epoch seconds). */
@@ -1506,6 +1595,36 @@ interface TASK_STATUS {
     metrics: TASK_METRICS;
     /** Cumulative token usage for CPU, memory, GPU (100 tokens = $1.00) */
     tokens: TASK_TOKENS;
+    /** Per-component timing accumulated this run (requires tracing). */
+    componentStats?: Record<string, TASK_STATUS_COMPONENT_STAT>;
+    /** The 10 slowest completions this run, slowest first (requires tracing). */
+    slowestDocs?: TASK_STATUS_SLOWEST_DOC[];
+    /** Total begin-to-end seconds across all completions this run (requires tracing). */
+    completionSeconds?: number;
+    /** Total seconds the pipe sat unused between completions this run (requires tracing). */
+    idleSeconds?: number;
+    /** Longest single unused stretch between completions this run (requires tracing). */
+    idleLongestSeconds?: number;
+    /** Epoch when the longest unused stretch began (0 while none is recorded). */
+    idleLongestAt?: number;
+}
+interface TASK_STATUS_COMPONENT_STAT {
+    /** Completed enter/leave pairs this run. */
+    calls: number;
+    /** Sum of enter-to-leave seconds. */
+    totalSeconds: number;
+    /** Longest single call in seconds. */
+    maxSeconds: number;
+}
+interface TASK_STATUS_SLOWEST_DOC {
+    /** Object name from the begin event (capped at 200 chars). */
+    name: string;
+    /** Begin-to-end seconds, rounded to 2 decimals. */
+    elapsed: number;
+    /** Begin emission time (epoch seconds). */
+    beginTime: number;
+    /** Begin flow event continuum seq (trace identity). */
+    beginSeq?: number | null;
 }
 interface TASK_TOKENS {
     /** Cumulative CPU utilization tokens charged since monitoring started */
@@ -2191,49 +2310,192 @@ declare class DeployApi {
     /** @param client - The parent RocketRideClient that owns this namespace. */
     constructor(client: RocketRideClient);
     /**
-     * Deploys a pipeline to the server and activates it.
+     * Publishes a pipeline as the next immutable registry version.
      *
-     * @param pipeline - The pipeline definition to deploy.
-     * @param options - Optional deploy options.
-     * @param options.schedule - Cron expression or `"manual"`. Defaults to `"manual"` if omitted.
-     * @returns The created deployment record.
+     * The artifact is sha256-locked: what was published is provably what
+     * runs. Publishing alone puts nothing live — point a team at the version
+     * with {@link deploy} (or pass `deployTo` to do both in one step, the
+     * small-team convenience).
+     *
+     * @param pipeline - The full pipeline definition to snapshot.
+     * @param options - Optional publish options.
+     * @param options.comment - "What changed" note kept in the registry.
+     * @param options.deployTo - Team id to deploy the new version to
+     *   immediately (one-step publish+deploy).
+     * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
-    add(pipeline: PipelineConfig, options?: {
-        schedule?: string;
-    }): Promise<DeploymentRecord>;
+    publish(pipeline: PipelineConfig, options?: {
+        comment?: string;
+        deployTo?: string;
+    }): Promise<PublishResult>;
     /**
-     * Undeploys and removes a pipeline from the server.
+     * Points a team at a published version.
      *
-     * @param projectId - Project ID of the deployment to remove.
+     * Promotion (Staging → Production) and rollback (v3 → v2) are both this
+     * call — the team's pointer moves, nothing else changes. The team is
+     * always explicit; requires `task.control` on it.
+     *
+     * @param projectId - The project whose artifact to deploy.
+     * @param version - The registry version to point the team at.
+     * @param teamId - The target team (the environment).
+     * @returns The updated deployment record, registry-joined.
      */
-    remove(projectId: string): Promise<void>;
+    deploy(projectId: string, version: number, teamId: string): Promise<Deployment>;
     /**
-     * Returns the authenticated user's deployments with their status and schedule config.
+     * Deployments visible to the caller, as the standard list envelope.
      *
-     * @returns Array of deployment summary records.
+     * @param params - Optional team scope + list-API params.
+     * @param params.teamId - Restrict to one team; omitted = every team the
+     *   caller can monitor.
+     * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
      */
-    list(): Promise<DeploymentRecord[]>;
+    list(params?: DeployListParams & {
+        teamId?: string;
+    }): Promise<DeployListEnvelope<Deployment>>;
     /**
-     * Gets detailed status of a specific deployment.
+     * One team's deployment of a project, registry-joined.
      *
-     * @param projectId - Project ID of the deployment to query.
-     * @returns The deployment record including state, schedule, and timestamps.
+     * @param projectId - The project.
+     * @param teamId - The team whose deployment to fetch.
+     * @returns The deployment record (version, state, schedules, actors).
      */
-    status(projectId: string): Promise<DeploymentRecord>;
+    get(projectId: string, teamId: string): Promise<Deployment>;
     /**
-     * Modifies the schedule or pipeline config for an existing deployment.
+     * The org-registry versions of a project (the version strip), newest
+     * first, as the standard list envelope.
      *
-     * Both `pipeline` and `schedule` are optional — omit a parameter to leave it unchanged.
-     *
-     * @param projectId - Project ID of the deployment to update.
-     * @param options - Optional update options.
-     * @param options.pipeline - Replacement pipeline definition, or omit to leave unchanged.
-     * @param options.schedule - Replacement cron expression or `"manual"`, or omit to leave unchanged.
+     * @param projectId - The project whose registry to read.
+     * @param params - Optional list-API params.
+     * @returns `{rows, total, page, pageSize}` of {@link DeployArtifact} rows.
      */
-    update(projectId: string, options?: {
-        pipeline?: PipelineConfig;
-        schedule?: string;
-    }): Promise<void>;
+    versions(projectId: string, params?: DeployListParams): Promise<DeployListEnvelope<DeployArtifact>>;
+    /**
+     * Starts one deployed source NOW (manual trigger).
+     *
+     * The same trusted team dispatch the scheduler uses — the run executes
+     * as the team, with the caller as the billing-attribution actor. The
+     * deployment must be enabled.
+     *
+     * @param projectId - The deployed project.
+     * @param sourceId - The pipeline source to fire.
+     * @param teamId - The team whose deployment to run.
+     * @returns The started run's token and the version that ran.
+     */
+    run(projectId: string, sourceId: string, teamId: string): Promise<{
+        token?: string;
+        version?: number;
+    }>;
+    /**
+     * Fetches one immutable artifact's pipeline JSON from the registry.
+     *
+     * sha256-verified server-side on load: what you get is provably what was
+     * published. This is the source of truth for read-only rendering of a
+     * deployed version — never a local file, never a running task.
+     *
+     * @param projectId - The project.
+     * @param version - The registry version to fetch.
+     * @returns The pipeline definition exactly as published.
+     */
+    artifact(projectId: string, version: number): Promise<PipelineConfig>;
+    /**
+     * The immutable audit trail of a project, newest first, as the standard
+     * list envelope.
+     *
+     * The trail is unbounded by design (who published what when, who put
+     * which version live where) — the server pages it; rows carry `seq`, the
+     * stable append-order key, as their identity.
+     *
+     * @param projectId - The project whose trail to read.
+     * @param params - Optional team scope + list-API params (`filters.at__gte`
+     *   / `at__lte` take epoch seconds).
+     * @param params.teamId - Restrict to one team's pointer changes
+     *   (org-wide publish rows always ride along).
+     * @returns `{rows, total, page, pageSize}` of {@link DeployHistoryEntry} rows.
+     */
+    history(projectId: string, params?: DeployListParams & {
+        teamId?: string;
+    }): Promise<DeployListEnvelope<DeployHistoryEntry>>;
+    /**
+     * Disables one team's deployment — the kill switch: NOTHING runs
+     * (schedules stop firing and manual runs are refused) until it is
+     * enabled again.
+     *
+     * @param projectId - The project.
+     * @param teamId - The team whose deployment to disable.
+     * @returns The updated deployment record.
+     */
+    disable(projectId: string, teamId: string): Promise<Deployment>;
+    /**
+     * Enables one team's disabled deployment.
+     *
+     * @param projectId - The project.
+     * @param teamId - The team whose deployment to enable.
+     * @returns The updated deployment record.
+     */
+    enable(projectId: string, teamId: string): Promise<Deployment>;
+    /**
+     * Soft-removes one team's deployment.
+     *
+     * Listings hide it; the audit history and every registry artifact
+     * survive forever (the enterprise requirement). Re-deploying any version
+     * revives it.
+     *
+     * @param projectId - The project.
+     * @param teamId - The team whose deployment to remove.
+     * @returns The final deployment record (state `removed`).
+     */
+    remove(projectId: string, teamId: string): Promise<Deployment>;
+    /**
+     * Sets (or clears) one source's schedule on a team deployment.
+     *
+     * The paused flag is untouched — editing cron/ttl preserves it (a new
+     * schedule starts unpaused); {@link pauseSchedule}/{@link resumeSchedule}
+     * own it.
+     *
+     * @param projectId - The project.
+     * @param sourceId - The pipeline source the schedule fires.
+     * @param schedule - 5-field cron expression; `null` or `'manual'` clears
+     *   the schedule.
+     * @param teamId - The team whose deployment to schedule.
+     * @param options - Optional schedule options.
+     * @param options.ttl - Run window in seconds ('fixed window'); omitted
+     *   runs each task until the pipeline finishes.
+     * @returns The updated deployment record.
+     */
+    setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options?: {
+        ttl?: number;
+    }): Promise<Deployment>;
+    /**
+     * Pauses ONE source's schedule — the cron/ttl stay configured, it just
+     * stops firing until resumed.
+     *
+     * @param projectId - The project.
+     * @param sourceId - The source whose schedule to pause.
+     * @param teamId - The team whose deployment carries the schedule.
+     * @returns The updated deployment record.
+     */
+    pauseSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment>;
+    /**
+     * Resumes a paused source schedule.
+     *
+     * @param projectId - The project.
+     * @param sourceId - The source whose schedule to resume.
+     * @param teamId - The team whose deployment carries the schedule.
+     * @returns The updated deployment record.
+     */
+    resumeSchedule(projectId: string, sourceId: string, teamId: string): Promise<Deployment>;
+    /**
+     * Validates a schedule and returns its next occurrences.
+     *
+     * THE single cron evaluator: panel validation, "next:" lines, and DVR
+     * ghost tracks all render from this — nothing client-side parses cron,
+     * so a preview can never disagree with what the scheduler fires.
+     *
+     * @param schedule - 5-field cron expression (or `'manual'`).
+     * @param count - How many upcoming occurrences to return (server-capped).
+     * @returns Validity plus the next occurrence timestamps.
+     */
+    preview(schedule: string, count?: number): Promise<SchedulePreview>;
 }
 declare class LogEventStream {
     /** @param client - Owning client. @param stream - Identity tuple. */
@@ -2327,7 +2589,7 @@ declare class LogApi {
      * (segments, keyframes, deltas) is invisible. Dispose with
      * {@link LogEventStream.closeEventStream} when done.
      *
-     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
      * @returns A new, unpositioned session (call `seek()` first).
      */
     openEventStream(stream: LogStreamRef): LogEventStream;
@@ -2338,7 +2600,7 @@ declare class LogApi {
      * times + starting seq + outcome, segment activity spans, the stream's
      * retained window, and the retention horizon.
      *
-     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
      * @returns Chapters, activity spans, and stream timeline metadata.
      */
     chapters(stream: LogStreamRef): Promise<LogChaptersResult>;
@@ -2351,7 +2613,7 @@ declare class LogApi {
      * `truncatedAtSeq` flag means the request reached below the retention
      * horizon.
      *
-     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
      * @param params - Range, paging, and filter options.
      * @returns The page of events plus paging/truncation metadata.
      */
@@ -2367,7 +2629,7 @@ declare class LogApi {
      * live subscription covers growth past that. The segment table (ids +
      * time extents) comes from {@link chapters}.
      *
-     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
      * @param segment - Segment id within the stream.
      * @param params - Byte offset to continue from + optional chunk ceiling.
      * @returns One raw chunk plus paging metadata.
@@ -2380,7 +2642,7 @@ declare class LogApi {
      * (chapters trimmed, horizon advanced), or `all: true` to remove the
      * entire stream including its control file.
      *
-     * @param stream - Identity tuple (projectId + source + runKind).
+     * @param stream - Stream identity (projectId + source; teamId = a team deploy continuum).
      * @param options - Cutoff time and/or the delete-all flag.
      * @returns The number of segments deleted.
      */
@@ -2479,15 +2741,19 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Creates a new RocketRideClient instance.
      *
-     * Configuration priority (highest to lowest):
-     * 1. Values passed in config parameter (auth, uri)
-     * 2. Values from env parameter (if provided)
-     * 3. Values from .env file (Node.js only)
-     * 4. Default values
+     * `config.env` is copied as the configured environment map when provided;
+     * otherwise Node.js values are copied from `process.env`. The two maps are not merged.
+     * `config.uri` overrides `ROCKETRIDE_URI`; `config.auth` supplies the fallback
+     * credential used when `login()` receives no credential and the configured environment
+     * has no `ROCKETRIDE_APIKEY`.
+     *
+     * The client does not load `.env` files; load them into `process.env` before construction
+     * (for example, start Node with `--env-file=.env`).
      *
      * @param config - Configuration options for the client
-     * @param config.auth - API key for authentication (required)
-     * @param config.uri - Server URI (default: CONST_DEFAULT_SERVICE)
+     * @param config.auth - Optional initial API key; `login()` can also use
+     *   `ROCKETRIDE_APIKEY` from the configured environment
+     * @param config.uri - Server URI (default: CONST_DEFAULT_WEB_CLOUD)
      * @param config.env - Environment variables dictionary for configuration and substitution
      * @param config.onEvent - Callback for server events
      * @param config.onConnected - Callback when connection is established
@@ -2496,8 +2762,6 @@ export declare class RocketRideClient extends DAPClient {
      * @param config.requestTimeout - Default timeout in ms for individual requests
      * @param config.maxRetryTime - Max total time in ms to keep retrying connections
      * @param config.module - Optional module name for client identification
-     *
-     * @throws Error if auth is not provided via config, env, or .env file
      *
      * @example
      * ```typescript
@@ -2587,7 +2851,9 @@ export declare class RocketRideClient extends DAPClient {
      * @param credential - API key, rr_ token, or PKCE code object.
      * @param options - Optional URI override and/or timeout.
      * @returns ConnectResult with user identity on success.
-     * @throws AuthenticationException on auth failure (transport stays attached).
+     * @throws AuthenticationException when the server rejects authentication. Credential
+     * resolution checks the argument, configured environment, and stored client state
+     * (initialized by `config.auth` and updated after authentication). The transport stays attached.
      */
     login(credential?: string | {
         code: string;
@@ -2620,6 +2886,9 @@ export declare class RocketRideClient extends DAPClient {
      *
      * @param credential - API key / Zitadel access_token / rr_ user token / PKCE code object.
      * @param options - Optional overrides: uri and/or timeout.
+     * @throws AuthenticationException when the server rejects authentication. Credential
+     * resolution checks the argument, configured environment, and stored client state
+     * (initialized by `config.auth` and updated after authentication).
      */
     connect(credential?: string | {
         code: string;
@@ -2647,11 +2916,10 @@ export declare class RocketRideClient extends DAPClient {
      * Update the environment variables used for pipeline substitution.
      *
      * Replaces the client's env dictionary (seeded from `config.env` or, in
-     * Node, from `process.env`) with a copy of the given map. {@link use} and
-     * {@link validate} read it to build the `ROCKETRIDE_*` substitution env
-     * sent with the pipeline; `attach()` also consults `ROCKETRIDE_APIKEY`
-     * from it when no explicit credential is supplied. Mirrors the Python
-     * SDK's `set_env`.
+     * Node, from `process.env`) with a copy of the given map. {@link use} reads
+     * it to build the `ROCKETRIDE_*` substitution env sent with the pipeline.
+     * `login()` also consults `ROCKETRIDE_APIKEY` from it when no explicit
+     * credential is supplied. Mirrors the Python SDK's `set_env`.
      *
      * @param env - The new environment map; copied, so later caller-side
      *   mutations have no effect.
@@ -2701,9 +2969,8 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Start an RocketRide pipeline for processing data.
      *
-     * This method loads and executes a pipeline configuration. It automatically performs
-     * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
-     * placeholders with values from the .env file or the `env` dictionary passed to the constructor.
+     * This method loads a pipeline configuration and sends the client's configured
+     * `ROCKETRIDE_*` values plus any per-use overrides to the server for substitution.
      *
      * When loading from a file via `filepath`, the client automatically unwraps `.pipe` files
      * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
@@ -2754,10 +3021,8 @@ export declare class RocketRideClient extends DAPClient {
         pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
         /** Optional display name for the task (e.g. shown in dashboard). */
         name?: string;
-        /** ROCKETRIDE_* environment overrides merged on top of server-side env. */
+        /** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
         env?: Record<string, string>;
-        /** Team ID to run the task under. Defaults to the user's default team. */
-        teamId?: string;
     }): Promise<Record<string, unknown> & {
         token: string;
     }>;
@@ -3348,14 +3613,16 @@ export declare class RocketRideClient extends DAPClient {
      */
     get database(): DatabaseApi;
     /**
-     * Lazily-initialised deploy API namespace.
+     * Lazily-initialised deploy API namespace (teams-as-environments).
      *
-     * Provides typed methods for managing server-side pipeline deployments:
-     * add, remove, list, status, and update.
+     * Publish immutable pipeline versions to the org registry, point teams
+     * at them (promotion and rollback alike), schedule sources, and read
+     * the audit history.
      *
      * @example
      * ```typescript
-     * const rec = await client.deploy.add(pipeline, { schedule: '0/15 * * * *' });
+     * const { artifact } = await client.deploy.publish(pipeline, { comment: 'v2' });
+     * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
      * ```
      */
     get deploy(): DeployApi;
@@ -3365,7 +3632,8 @@ export declare class RocketRideClient extends DAPClient {
      *
      * @example
      * ```typescript
-     * const stream = { projectId: 'proj', source: 'chat_1', runKind: 'dev' as const };
+     * // Own dev stream; add teamId to address a team's deploy continuum.
+     * const stream = { projectId: 'proj', source: 'chat_1' };
      * const { chapters } = await client.log.chapters(stream);
      * const { events } = await client.log.read(stream, { fromSeq: chapters[0].beginSeq });
      * ```
@@ -4400,7 +4668,7 @@ export interface ViewMenuEntry {
     icon?: React$1.ReactNode;
     /**
      * When true, the entry renders muted and is not selectable — used by
-     * SidebarMenu; ignored by PageViewControl.
+     * SidebarMenu; ignored by TabControl.
      */
     disabled?: boolean;
     /**
@@ -4410,11 +4678,11 @@ export interface ViewMenuEntry {
      * collapses any other open section (accordion — at most ONE section is
      * open at a time, decision 2026-07-18). While the sidebar is collapsed
      * to the icon rail, sections flatten: their children render as icon
-     * squares directly. Ignored by PageViewControl and DetailPanel tabs.
+     * squares directly. Ignored by TabControl and DetailPanel tabs.
      */
     children?: ViewMenuEntry[];
 }
-/** The entry list consumed by PageViewControl and SidebarMenu. */
+/** The entry list consumed by TabControl and SidebarMenu. */
 export interface ViewMenu {
     /** Ordered list of selectable sub-view entries. */
     entries: ViewMenuEntry[];
@@ -4578,7 +4846,7 @@ export interface DashboardData {
 declare function useDashboardData(): DashboardData;
 declare function useConnectionStatus(): ConnectionStatus;
 declare function useShellApiConfig(): ShellApiConfig;
-declare function useShellEvents(iframeRef: React$1.RefObject<HTMLIFrameElement>): void;
+declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameElement>): void;
 declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
 declare function useSidebarContent(content: React$1.ReactNode | null): void;
 declare function getClient(): RocketRideClient | null;
@@ -5280,7 +5548,7 @@ interface ShellViewActivatedMsg {
 /**
  * Discriminated union of every message the shell can post to an iframe.
  *
- * `useShellEvents` constructs and sends these via `contentWindow.postMessage`.
+ * `useIframeBridge` constructs and sends these via `contentWindow.postMessage`.
  * Iframe apps receive them in their own `window.addEventListener('message', ...)` handler.
  */
 export type ShellToIframeMsg = ShellInitMsg | ShellThemeChangeMsg | ShellConnectionChangeMsg | ShellLoginMsg | ShellLogoutMsg | ServerEventMsg | ShellViewActivatedMsg;
@@ -5301,7 +5569,7 @@ interface IframeOpenTabMsg {
 /**
  * Discriminated union of every message an iframe can post to the parent shell.
  *
- * `useShellEvents` filters incoming `MessageEvent`s to those from the managed
+ * `useIframeBridge` filters incoming `MessageEvent`s to those from the managed
  * iframe and discriminates on `msg.type` to route each message.
  */
 export type IframeToShellMsg = ViewReadyMsg | ViewInitializedMsg | IframeShellLogoutMsg | IframeOpenTabMsg;
@@ -5350,7 +5618,7 @@ export declare const shellApi: {
     readonly useWorkspace: typeof useWorkspace;
     readonly useClient: typeof useClient;
     readonly useShellEvent: typeof useShellEvent;
-    readonly useShellEvents: typeof useShellEvents;
+    readonly useIframeBridge: typeof useIframeBridge;
     readonly useSubscriptions: typeof useSubscriptions;
     readonly usePolling: typeof usePolling;
     readonly useDashboardData: typeof useDashboardData;
@@ -5384,8 +5652,8 @@ export declare const shellApi: {
         children: React$1.ReactNode;
         onClick?: (e: React$1.MouseEvent<HTMLDivElement>) => void;
     }>;
-    readonly AccountPage: import("react").FC<{}>;
-    readonly SettingsPage: import("react").FC<{}>;
+    readonly AccountProvider: import("react").FC<{}>;
+    readonly SettingsProvider: import("react").FC<{}>;
     readonly BxPlus: IconComponent;
     readonly BxEditAlt: IconComponent;
     readonly BxTrash: IconComponent;

@@ -53,6 +53,7 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_task_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
+from .cmd_monitor import owner_key
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -481,12 +482,14 @@ class MiscCommands(DAPConn):
                 self.debug_message(f'Error reading task status for connection map "{control.id}": {e}')
                 continue
             task_name = getattr(status, 'name', None) or control.source
+            # Monitor keys are owner-scoped — build from the control's owner
+            # (once per control; they do not vary per connection).
+            project_key = owner_key(control.owner_id, control.project_id, control.source)
+            project_wildcard_key = f'p.{control.owner_id}.{control.project_id}.*'
+            pipe_prefix = f'{project_key}.'
             for cid, conn in conn_items:
                 if not hasattr(conn, '_monitors'):
                     continue
-                project_key = f'p.{control.project_id}.{control.source}'
-                project_wildcard_key = f'p.{control.project_id}.*'
-                pipe_prefix = f'{project_key}.'
                 if (
                     project_key in conn._monitors
                     or project_wildcard_key in conn._monitors
@@ -603,6 +606,9 @@ class MiscCommands(DAPConn):
                         'name': getattr(task_status, 'name', control.source),
                         'projectId': control.project_id,
                         'source': control.source,
+                        # Run classification stamp: dashboards and sidebars
+                        # filter deploy runs out of dev views by this field.
+                        'runKind': control.run_kind,
                         'provider': control.provider,
                         'launchType': control.launch_type.value,
                         'startTime': start,
@@ -662,18 +668,21 @@ class MiscCommands(DAPConn):
         if not key.startswith('p.'):
             return 'Task monitor'
 
-        # Strip the 'p.' prefix and split: projectId, source, [pipeId]
-        parts = key[2:].split('.', 2)
-        project_id = parts[0]
+        # Strip the 'p.' prefix and split: ownerId, projectId, source, [pipeId]
+        # (keys are owner-scoped: p.{teamId|userId}.{projectId}.{source})
+        parts = key[2:].split('.', 3)
+        if len(parts) < 2:
+            return 'Task monitor'
+        project_id = parts[1]
         project_label = project_names.get(project_id, project_id[:8])
 
-        if len(parts) == 1 or (len(parts) == 2 and parts[1] == '*'):
+        if len(parts) == 2 or (len(parts) == 3 and parts[2] == '*'):
             return f'{project_label}.*'
 
-        source = parts[1]
+        source = parts[2]
         source_label = source_names.get(f'{project_id}.{source}', source)
 
-        if len(parts) == 3:
-            return f'{project_label}.{source_label}.pipe{parts[2]}'
+        if len(parts) == 4:
+            return f'{project_label}.{source_label}.pipe{parts[3]}'
 
         return f'{project_label}.{source_label}'
