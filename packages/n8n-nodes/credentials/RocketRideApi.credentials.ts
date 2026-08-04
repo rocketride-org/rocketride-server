@@ -65,6 +65,9 @@ export class RocketRideApi implements ICredentialType {
 			baseURL: '={{$credentials.baseUrl}}',
 			url: '/version',
 			method: 'GET',
+			// Honor the same `Ignore SSL Issues` toggle a node run applies, so Test
+			// and Run make identical TLS decisions on self-signed HTTPS gateways.
+			skipSslCertificateValidation: '={{$credentials.ignoreSslIssues}}',
 		},
 	};
 }

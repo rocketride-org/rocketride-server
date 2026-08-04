@@ -21,6 +21,14 @@ describe('RocketRideApi credential', () => {
 		expect(cred.test.request.baseURL).toBe('={{$credentials.baseUrl}}');
 	});
 
+	it('forwards the Ignore SSL Issues toggle to the credential test request', () => {
+		// Test and Run must make identical TLS decisions: a node run passes
+		// skipSslCertificateValidation from the same toggle.
+		expect(cred.test.request.skipSslCertificateValidation).toBe(
+			'={{$credentials.ignoreSslIssues}}',
+		);
+	});
+
 	it('exposes baseUrl, a masked apiKey, and an SSL toggle', () => {
 		const byName = Object.fromEntries(cred.properties.map((p) => [p.name, p]));
 		expect(byName.baseUrl?.type).toBe('string');
