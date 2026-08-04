@@ -243,9 +243,23 @@ async function vendorShell(root, host, opts = {}) {
 	fs.rmSync(staging, { recursive: true, force: true });
 	fs.mkdirSync(staging, { recursive: true });
 	extractShellTgz(tgz, staging);
+
+	// step: swap with the old package held as a backup until the new one is
+	// in place — a failed rename restores it, so the workspace never ends
+	// up with NO platform package (the file: dependency makes pnpm install
+	// impossible without one)
 	const dest = path.join(rrDir, 'shell');
-	fs.rmSync(dest, { recursive: true, force: true });
-	await renameWithRetry(staging, dest);
+	const backup = path.join(rrDir, 'shell.backup');
+	fs.rmSync(backup, { recursive: true, force: true });
+	const hadDest = fs.existsSync(dest);
+	if (hadDest) await renameWithRetry(dest, backup);
+	try {
+		await renameWithRetry(staging, dest);
+	} catch (err) {
+		if (hadDest) await renameWithRetry(backup, dest);
+		throw err;
+	}
+	fs.rmSync(backup, { recursive: true, force: true });
 	const version = JSON.parse(fs.readFileSync(path.join(dest, 'package.json'), 'utf8')).version;
 
 	// step: relink — apps consume the pnpm-store copy of the file:
