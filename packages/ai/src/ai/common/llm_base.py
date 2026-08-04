@@ -6,6 +6,7 @@ from typing import Callable, List, Optional
 from rocketlib import IInstanceBase, invoke_function, warning
 from ai.common.schema import Question, Answer
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
+from ai.common.llm_adapter import LAST_LLM_USAGE_VAR
 
 
 class LLMBase(IInstanceBase):
@@ -81,6 +82,7 @@ class LLMBase(IInstanceBase):
             elif sum(len(p) for p in buf) >= 120:
                 _flush_reasoning(force=True)
 
+        LAST_LLM_USAGE_VAR.set(None)  # clear so a prior call's usage can't bleed into this answer
         try:
             answer = self._question(
                 question,
@@ -96,6 +98,9 @@ class LLMBase(IInstanceBase):
             return
 
         _flush_reasoning(force=True)  # emit any trailing partial line
+        usage = LAST_LLM_USAGE_VAR.get()
+        if usage:
+            answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
         self.instance.writeAnswers(answer)
 
     @invoke_function

@@ -9,10 +9,15 @@ ChatBase consumes Adapters and never touches provider-native content shapes.
 Design: repo discussion #1679 (RFC — virtualized provider Adapter).
 """
 
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterator, Optional, Protocol, runtime_checkable
 
 from ai.common.utils import flatten_content_blocks
+
+# Last LLM call's token usage for the current execution context. report_llm_tokens
+# publishes it here so the node can hang it on the Answer (shown in the Trace).
+LAST_LLM_USAGE_VAR: ContextVar[Optional[dict]] = ContextVar('last_llm_usage', default=None)
 
 
 @dataclass
@@ -195,9 +200,10 @@ def report_llm_tokens(
             metrics.counter('llm_cache_read_tokens', cr)
         if cc:
             metrics.counter('llm_cache_creation_tokens', cc)
-        metrics.event(
-            {'llm_tokens': {'input': it, 'output': ot, 'cache_read': cr, 'cache_creation': cc, 'model': model}}
-        )
+        usage = {'input': it, 'output': ot, 'cache_read': cr, 'cache_creation': cc, 'model': model}
+        metrics.event({'llm_tokens': usage})
+        # Publish for the node to attach to the Answer (Trace "Tokens" grid); same context.
+        LAST_LLM_USAGE_VAR.set(usage)
     except Exception as exc:
         # Best-effort accounting: keep the chat turn alive, but leave an operational trace.
         try:

@@ -85,6 +85,8 @@ class Answer(BaseModel):
 
     answer: Optional[Union[str, dict, list]] = None
     expectJson: bool = False
+    # Per-call LLM token usage (input/output/cache/model); surfaced in the Trace.
+    tokens: Optional[Dict[str, Any]] = None
 
     @field_validator('answer', mode='before')
     @classmethod

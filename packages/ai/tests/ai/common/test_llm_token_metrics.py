@@ -7,7 +7,7 @@
 
 import pytest
 
-from ai.common.llm_adapter import LangChainAdapter, _split_input_cache, report_llm_tokens
+from ai.common.llm_adapter import LAST_LLM_USAGE_VAR, LangChainAdapter, _split_input_cache, report_llm_tokens
 
 # Same singleton report_llm_tokens reports into; imported from the module (not the
 # package) to avoid pulling the taskhook side of ai.web.metrics into the test.
@@ -206,3 +206,23 @@ def test_collect_reports_usage_from_the_invoke_result():
 
     assert text == 'Hi there'
     _assert_four_counters()
+
+
+def test_publishes_last_usage_on_the_contextvar():
+    # The node reads this to hang the usage on the Answer (Trace "Tokens" grid).
+    LAST_LLM_USAGE_VAR.set(None)
+    report_llm_tokens(14, 81, model='claude-haiku-4-5', cache_read_tokens=2, cache_creation_tokens=3)
+    assert LAST_LLM_USAGE_VAR.get() == {
+        'input': 14,
+        'output': 81,
+        'cache_read': 2,
+        'cache_creation': 3,
+        'model': 'claude-haiku-4-5',
+    }
+
+
+def test_all_zero_usage_leaves_the_contextvar_unset():
+    # No usage reported -> nothing to attach, so the Answer carries no tokens.
+    LAST_LLM_USAGE_VAR.set(None)
+    report_llm_tokens(0, 0)
+    assert LAST_LLM_USAGE_VAR.get() is None
