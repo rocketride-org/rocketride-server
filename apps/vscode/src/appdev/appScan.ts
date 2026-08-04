@@ -35,6 +35,8 @@ export interface ScannedApp {
 	version?: string;
 	/** appManifest.description, if present. */
 	description?: string;
+	/** Absolute path of the app's icon file (appManifest.icon), when declared and readable. */
+	icon?: string;
 }
 
 // =============================================================================
@@ -55,10 +57,23 @@ async function probeFolder(folder: vscode.Uri): Promise<ScannedApp | null> {
 		const pkg = JSON.parse(Buffer.from(raw).toString('utf8')) as {
 			name?: string;
 			version?: string;
-			appManifest?: { id?: string; name?: string; description?: string };
+			appManifest?: { id?: string; name?: string; description?: string; icon?: string };
 		};
 		const manifest = pkg.appManifest;
 		if (!manifest?.id) return null;
+
+		// Resolve the declared icon against the app folder; drop it when the
+		// file does not actually exist so consumers can trust the path.
+		let icon: string | undefined;
+		if (manifest.icon) {
+			try {
+				const iconUri = vscode.Uri.joinPath(folder, manifest.icon);
+				await vscode.workspace.fs.stat(iconUri);
+				icon = iconUri.fsPath;
+			} catch {
+				/* icon declared but missing — fall back to the generic glyph */
+			}
+		}
 
 		return {
 			id: manifest.id,
@@ -67,6 +82,7 @@ async function probeFolder(folder: vscode.Uri): Promise<ScannedApp | null> {
 			folder: folder.fsPath,
 			version: pkg.version,
 			description: manifest.description,
+			icon,
 		};
 	} catch {
 		// Missing/unreadable/invalid package.json — not an app project
@@ -115,4 +131,43 @@ export async function scanWorkspaceApps(): Promise<ScannedApp[]> {
 		}
 	}
 	return [...found.values()];
+}
+
+// =============================================================================
+// ICON
+// =============================================================================
+
+/** Media type per icon file extension the app store accepts. */
+const ICON_MEDIA_TYPES: Record<string, string> = {
+	'.svg': 'image/svg+xml',
+	'.png': 'image/png',
+	'.jpg': 'image/jpeg',
+	'.jpeg': 'image/jpeg',
+	'.gif': 'image/gif',
+	'.webp': 'image/webp',
+};
+
+/**
+ * Converts a scanned app's icon file to a data: URI the sidebar webview can
+ * render directly. A data: URI (allowed by the webview CSP's img-src) avoids
+ * widening localResourceRoots to workspace folders just to serve one image.
+ *
+ * @param iconPath - Absolute icon file path from {@link ScannedApp.icon}.
+ * @returns The data: URI, or undefined when absent/unreadable/unknown type.
+ */
+export async function appIconDataUri(iconPath: string | undefined): Promise<string | undefined> {
+	if (!iconPath) return undefined;
+	try {
+		// Media type from the extension; unknown types get the generic glyph.
+		const ext = iconPath.slice(iconPath.lastIndexOf('.')).toLowerCase();
+		const mediaType = ICON_MEDIA_TYPES[ext];
+		if (!mediaType) return undefined;
+
+		// Read + base64-encode the file (app icons are small by store policy).
+		const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(iconPath));
+		return `data:${mediaType};base64,${Buffer.from(bytes).toString('base64')}`;
+	} catch {
+		// Unreadable icon — the row falls back to the generic glyph
+		return undefined;
+	}
 }

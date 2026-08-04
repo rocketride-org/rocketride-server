@@ -103,7 +103,47 @@ const styles: Record<string, React.CSSProperties> = {
 		fontSize: 12.5,
 		color: 'var(--rr-text-secondary)',
 	},
+	// Initializing pane (pre-iframe): headline + one-line phase detail.
+	initTitle: {
+		fontSize: 13,
+		fontWeight: 600,
+		color: 'var(--rr-text-default)',
+		marginBottom: 4,
+	},
+	initDetail: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+	},
 };
+
+// =============================================================================
+// PREVIEW INITIALIZING
+// =============================================================================
+
+/**
+ * Pre-iframe placeholder: the dev session is still coming up (pnpm install,
+ * rsbuild dev startup, first build). The preview iframe intentionally does
+ * NOT mount yet — a shell booted now could only race a dev server that is
+ * not listening, and the first descriptor load would fail with RUNTIME-004.
+ *
+ * @param props.state - The latest watch state, for the phase detail line.
+ */
+const PreviewInitializing: React.FC<{ state: WatchStatus['state'] }> = ({ state }) => (
+	<div style={styles.iframeWrap}>
+		<div style={styles.loading}>
+			<div style={{ textAlign: 'center' }}>
+				<div style={styles.initTitle}>{state === 'error' ? 'Dev session failed' : 'Initializing Services'}</div>
+				<div style={styles.initDetail}>
+					{state === 'error'
+						? 'See the Console pane for the error output.'
+						: state === 'building'
+							? 'Starting the dev server\u2026'
+							: 'Installing dependencies\u2026'}
+				</div>
+			</div>
+		</div>
+	</div>
+);
 
 // =============================================================================
 // PREVIEW IFRAME
@@ -270,6 +310,18 @@ const AppWebview: React.FC = () => {
 	const [initialStage, setInitialStage] = useState<AppBuilderStage>('develop');
 	const [reloadSeq, setReloadSeq] = useState(0);
 	const [devEntry, setDevEntry] = useState('');
+	// Latest watch state — drives the Initializing pane's phase line.
+	const [watchState, setWatchState] = useState<WatchStatus['state']>('installing');
+	// Latched true at the FIRST successful build with a known dev entry:
+	// the iframe mounts once and stays (later rebuilds go through HMR and
+	// the dev-entry origin-change remount, never back to Initializing).
+	const [previewLive, setPreviewLive] = useState(false);
+	// Latch the preview live once the dev session is genuinely ready (entry
+	// known + a completed build). Monotonic: never un-latches. MUST stay
+	// above the conditional loading return so hook order is render-stable.
+	React.useEffect(() => {
+		if (!previewLive && devEntry && watchState === 'ok') setPreviewLive(true);
+	}, [previewLive, devEntry, watchState]);
 	// The extension's auth credential — handed to the preview shell so apps
 	// that require authentication render with a real signed-in session.
 	const [authToken, setAuthToken] = useState('');
@@ -324,6 +376,7 @@ const AppWebview: React.FC = () => {
 				for (const fn of errorListeners.current) fn(msg.row);
 				break;
 			case 'appdev:watch':
+				setWatchState(msg.status.state);
 				for (const fn of watchListeners.current) fn(msg.status);
 				break;
 			case 'appdev:devServer': {
@@ -485,7 +538,7 @@ const AppWebview: React.FC = () => {
 			<AppBuilderScreen
 				host={host}
 				app={app}
-				previewPane={previewUrl ? <PreviewFrame url={previewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} authToken={authToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : undefined}
+				previewPane={previewUrl && previewLive ? <PreviewFrame url={previewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} authToken={authToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : <PreviewInitializing state={watchState} />}
 				initialStage={initialStage}
 				onStageChange={(stage) => sendMessage({ type: 'appdev:stage', stage })}
 			/>

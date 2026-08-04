@@ -36,7 +36,7 @@ import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail
 import type { DataGridLayout } from '../data-grid/persistence';
 import { ConnectionManager } from '../../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../../constants';
-import { resetRemote, setDescriptorInvalidator } from '../../util/appLoader';
+import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote } from '../../util/appLoader';
 import { SHELL_API_VERSION } from '../../apiver';
 
 // =============================================================================
@@ -377,6 +377,15 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		// below is registered before any of the body (or its finally) executes.
 		const load = (async (): Promise<boolean> => {
 		await Promise.resolve();
+		// Embedded dev preview: the locked app's remote is registered by the
+		// embedder AFTER boot (its dev server may still be installing —
+		// seconds of pnpm + rsbuild startup against a millisecond shell
+		// boot). Hold this load until the registration arrives; attempting
+		// earlier can only fail with RUNTIME-004 noise.
+		if (isDevPreviewPage() && previewLockedAppId() === appId) {
+			console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
+			await waitForDevRemote(appId);
+		}
 		try {
 			// Load with timeout to avoid indefinite hangs on unreachable remotes
 			const APP_LOAD_TIMEOUT = 15000;
