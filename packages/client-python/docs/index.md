@@ -14,7 +14,7 @@ title: Python
 <p align="center">
   <a href="https://pypi.org/project/rocketride/"><img src="https://img.shields.io/pypi/v/rocketride?color=222223&label=PyPI" alt="PyPI" /></a>
   <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub" /></a>
-  <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://discord.gg/PMXrtenMsY"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord" /></a>
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License" /></a>
 </p>
 
@@ -328,26 +328,49 @@ download_url = await client.fs_get_url('uploads/video.mp4', download_name='my vi
 
 ### Deploy
 
-Accessed via `client.deploy`. A deployment persists a pipeline on the server and runs it on a cron schedule (or on demand with `"manual"`), outliving the client connection. Each deployment is identified by its pipeline's `project_id`.
+Accessed via `client.deploy`. Teams-as-environments deployments: `publish`
+snapshots a pipeline as an **immutable, sha256-locked artifact version** in
+the org registry; `deploy` points a **team** (the environment — Staging,
+Production, ...) at a version. Promotion and rollback are the same pointer
+move. Deploy targets are always explicit — there is no default-team
+fallback. Every publish and pointer change lands in an immutable audit
+history.
 
-| Method          | Signature                                                                                                          | Returns                  | Description                                                                                                                |
-| --------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `deploy.add`    | `async def add(self, pipeline: PipelineConfig, *, schedule: str \| None = None) -> DeploymentRecord`               | `DeploymentRecord`       | Persists the pipeline as a deployment and activates it. `schedule`: 5-field cron (`"*/15 * * * *"`), preset (`@hourly`, `@daily`, …), or `"manual"` (default). |
-| `deploy.remove` | `async def remove(self, project_id: str) -> None`                                                                  | -                        | Undeploys and removes the deployment.                                                                                        |
-| `deploy.list`   | `async def list(self) -> list[DeploymentRecord]`                                                                   | `list[DeploymentRecord]` | Returns the authenticated user's deployments.                                                                                |
-| `deploy.status` | `async def status(self, project_id: str) -> DeploymentRecord`                                                      | `DeploymentRecord`       | Gets one deployment record.                                                                                                  |
-| `deploy.update` | `async def update(self, project_id: str, *, pipeline: PipelineConfig \| None = None, schedule: str \| None = None) -> None` | -                        | Replaces the pipeline and/or schedule; omitted parameters stay unchanged.                                                    |
+| Method                | Signature                                                                                                       | Returns                | Description                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `deploy.publish`      | `async def publish(self, pipeline, *, comment=None, deploy_to=None) -> PublishResult`                            | `PublishResult`        | Snapshots the pipeline as the next registry version. `deploy_to` also points that team at it (one-step).           |
+| `deploy.deploy`       | `async def deploy(self, project_id, version, team_id) -> Deployment`                                             | `Deployment`           | Points the team at a published version — promotion and rollback alike.                                              |
+| `deploy.list`         | `async def list(self, *, team_id=None, page=None, page_size=None, search=None, filters=None, sort=None)`         | `DeployListResult`     | Deployments visible to the caller, standard `{rows, total, page, pageSize}` envelope.                              |
+| `deploy.get`          | `async def get(self, project_id, team_id) -> Deployment`                                                         | `Deployment`           | One team's deployment, registry-joined.                                                                             |
+| `deploy.versions`     | `async def versions(self, project_id, *, page=None, ...) -> DeployVersionsResult`                                | `DeployVersionsResult` | The registry versions (the version strip), newest first, standard envelope.                                         |
+| `deploy.history`      | `async def history(self, project_id, *, team_id=None, page=None, ...) -> DeployHistoryResult`                    | `DeployHistoryResult`  | The immutable audit trail, newest first; rows carry `seq` (the stable append-order identity). Server-paged.        |
+| `deploy.disable`      | `async def disable(self, project_id, team_id) -> Deployment`                                                     | `Deployment`           | Disables the team deployment — the kill switch: nothing runs until enabled again.                                   |
+| `deploy.enable`       | `async def enable(self, project_id, team_id) -> Deployment`                                                      | `Deployment`           | Enables a disabled team deployment.                                                                                 |
+| `deploy.remove`       | `async def remove(self, project_id, team_id) -> Deployment`                                                      | `Deployment`           | Soft remove: hidden from listings; history and artifacts survive forever. Re-deploying revives it.                  |
+| `deploy.set_schedule` | `async def set_schedule(self, project_id, source_id, schedule, team_id, *, ttl=None) -> Deployment`              | `Deployment`           | Sets (or clears with `None`/`'manual'`) one source's 5-field cron schedule; the paused flag is untouched.           |
+| `deploy.pause_schedule` | `async def pause_schedule(self, project_id, source_id, team_id) -> Deployment`                                 | `Deployment`           | Pauses ONE source's schedule — cron/ttl kept, it just stops firing.                                                 |
+| `deploy.resume_schedule` | `async def resume_schedule(self, project_id, source_id, team_id) -> Deployment`                               | `Deployment`           | Resumes a paused source schedule.                                                                                   |
+| `deploy.preview`      | `async def preview(self, schedule, count=None) -> SchedulePreview`                                               | `SchedulePreview`      | THE single cron evaluator: validity + next occurrences. Never parse cron client-side.                               |
 
-**States:** `state` is `'active'` (scheduled runs fire per cron), `'paused'`, or `'errored'` — scheduled runs could no longer authenticate (e.g. the owner's API key was revoked) and have stopped; remove and re-add the deployment to resume. If a scheduled run is still in progress when the next tick comes due, that tick is skipped — runs of the same deployment never overlap.
+**States:** `state` is `'enabled'` (schedules fire per cron), `'disabled'` (the kill switch),
+`'errored'` (a scheduled dispatch failed on permissions and the scheduler
+stopped retrying), or `'removed'` (soft delete). Scheduled runs execute AS
+THE TEAM (no stored user credential); their logs land in the team's run-log
+continuum, readable by teammates via `client.log` with `team_id`.
 
 **Example:**
 
 ```python
-record = await client.deploy.add(my_pipeline, schedule='*/15 * * * *')
-for rec in await client.deploy.list():
-    print(rec['pipeline']['project_id'], rec['schedule'], rec['state'])
-await client.deploy.update(project_id, schedule='manual')  # pause scheduled runs
-await client.deploy.remove(project_id)
+result = await client.deploy.publish(my_pipeline, comment='v2 prompt fix')
+await client.deploy.deploy('proj-1', result['artifact']['version'], 'team-staging')
+await client.deploy.set_schedule('proj-1', 'webhook_1', '*/15 * * * *', 'team-staging')
+
+# Promote the same version to Production later — the identical gesture.
+await client.deploy.deploy('proj-1', result['artifact']['version'], 'team-prod')
+
+live = await client.deploy.list()
+for dep in live['rows']:
+    print(dep['teamId'], dep['projectId'], 'v', dep['version'], dep['state'])
 ```
 
 ---
@@ -423,7 +446,10 @@ From `rocketride.schema`. Used to parse chat response content. The client does n
 - **TASK_STATUS**: Task status with `completedCount`, `totalCount`, `completed`, `state`, `exitCode`, and many more fields.
 - **DAPMessage**: Dict with `type`, `seq`, and optional `command`, `arguments`, `body`, `success`, `message`, `event`, `token`, etc.
 - **PipelineConfig**: Pipeline definition with `name`, `description`, `version`, `components`, `source`, `project_id`.
-- **DeploymentRecord**: TypedDict with `pipeline`, `schedule`, `state` (`'active' | 'paused' | 'errored'`), `userId`, `createdAt`, `updatedAt` (Unix seconds).
+- **DeployArtifact**: one immutable registry version — `version`, `sha256`, `bytes`, `pipelineName`, `publishedBy`, `publishedAt`, `comment`.
+- **Deployment**: one team's deployment, registry-joined — `teamId`, `projectId`, `version`, `state` (`'enabled' | 'disabled' | 'errored' | 'removed'`), `schedules`, actor/timestamp fields.
+- **DeployHistoryEntry**: one audit row — `seq` (stable append-order identity), `at`, `action`, `teamId`, `version`, `actor`.
+- **PublishResult / DeployListResult / DeployVersionsResult / DeployHistoryResult / SchedulePreview**: method result shapes (list results are the standard `{rows, total, page, pageSize}` envelope).
 - **QuestionHistory**: `{ 'role': str, 'content': str }`.
 - **QuestionInstruction**: `{ 'subtitle': str, 'instructions': str }`.
 - **QuestionExample**: `{ 'given': str, 'result': str }`.
@@ -679,7 +705,7 @@ All commands accept `--uri` and `--apikey` flags, or read from environment varia
 
 - [Documentation](https://docs.rocketride.org/)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
-- [Discord](https://discord.gg/9hr3tdZmEG)
+- [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
 
 ## License

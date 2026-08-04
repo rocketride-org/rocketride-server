@@ -46,30 +46,39 @@ reconnect, resubscribe.
 `types` accepts case-insensitive `EVENT_TYPE` strings (or the equivalent integer
 bitmask, e.g. `36` = `SUMMARY | TASK`):
 
-| String      | Bit | What you get                                                         |
-| ----------- | --- | -------------------------------------------------------------------- |
-| `NONE`      | 0   | Unsubscribe (clears the registry entry)                              |
-| `DEBUGGER`  | 1   | DAP debug-protocol passthrough (stopped, threads, …)                 |
-| `DETAIL`    | 2   | Real-time per-object processing updates                              |
-| `SUMMARY`   | 4   | Periodic full `TASK_STATUS` snapshots, best for dashboards           |
-| `OUTPUT`    | 8   | Engine log / output lines                                            |
-| `FLOW`      | 16  | Pipeline component flow events (requires a trace level, see below)   |
-| `TASK`      | 32  | Lifecycle: `running`, `begin`, `end`, `restart`                      |
-| `SSE`       | 64  | Custom node-to-UI messages emitted by nodes via `monitorSSE()`       |
-| `DASHBOARD` | 128 | Server-level events (connections, monitor changes)                   |
-| `ALL`       | 255 | Everything above                                                     |
+| String      | Bit  | What you get                                                         |
+| ----------- | ---- | -------------------------------------------------------------------- |
+| `NONE`      | 0    | Unsubscribe (clears the registry entry)                              |
+| `DEBUGGER`  | 1    | DAP debug-protocol passthrough (stopped, threads, …)                 |
+| `DETAIL`    | 2    | Real-time per-object processing updates                              |
+| `SUMMARY`   | 4    | Periodic full `TASK_STATUS` snapshots, best for dashboards           |
+| `OUTPUT`    | 8    | Engine log / output lines                                            |
+| `FLOW`      | 16   | Pipeline component flow events (requires a trace level, see below)   |
+| `TASK`      | 32   | Lifecycle: `running`, `begin`, `end`, `restart`                      |
+| `SSE`       | 64   | Custom node-to-UI messages emitted by nodes via `monitorSSE()`       |
+| `DASHBOARD` | 128  | Server-level events (connections, monitor changes)                   |
+| `BILLING`   | 256  | Billing ledger events (credits/debits), org-scoped                   |
+| `DEPLOY`    | 512  | Deployment-change invalidations (`apaevt_deploy`: pointer, state, schedule, and run mutations), org-scoped — re-fetch on receipt, the body carries identity only |
+| `ALL`       | 1023 | Everything above                                                     |
 
 ### Subscription scope
 
-Replace `token: "*"` to narrow or widen what you receive:
+Replace `token: "*"` to narrow or widen what you receive. The scope IS the
+kind: adding `teamId` addresses the team's DEPLOYED run of the pipeline;
+omitting it addresses your own dev run (there is no run-kind argument).
 
-| Scope                      | Set with                          | Receives                                       |
-| -------------------------- | --------------------------------- | ---------------------------------------------- |
-| One running task           | `token`                           | Events for that task only                      |
-| One pipeline (any run)     | `projectId` + `source`            | That project + source, even across restarts    |
-| One pipe within a pipeline | `projectId` + `source` + `pipeId` | That one pipe                                  |
-| All sources in a project   | `projectId` + `source: "*"`       | Project-wide                                   |
-| All your tasks             | `token: "*"`                      | Everything your token owns                     |
+| Scope                      | Set with                                    | Receives                                       |
+| -------------------------- | ------------------------------------------- | ---------------------------------------------- |
+| One running task           | `token`                                     | Events for that task only                      |
+| Your dev run (any restart) | `projectId` + `source`                      | Your own dev run of that pipeline              |
+| A team's deployed run      | `teamId` + `projectId` + `source`           | That team's deploy run of the pipeline         |
+| One pipe within a pipeline | `projectId` + `source` + `pipeId`           | That one pipe                                  |
+| All sources in a project   | `projectId` + `source: "*"` (+ `teamId`)    | Project-wide within the chosen scope           |
+| All your tasks             | `token: "*"`                                | Everything your token owns                     |
+
+A project/source subscription only ever receives YOUR OWN dev runs —
+another user's dev run of the same pipeline is watchable only via its task
+token.
 
 ### Seeded on subscribe
 
@@ -208,7 +217,7 @@ Besides `rrext_monitor`, sent the same way over the socket:
 | Command                 | Uses                                  | Returns       | Purpose                                          |
 | ----------------------- | ------------------------------------- | ------------- | ------------------------------------------------ |
 | `rrext_get_task_status` | `token`                               | `TASK_STATUS` | Fetch current status synchronously               |
-| `rrext_get_token`       | `projectId` + `source`                | `{ token }`   | Resolve a running task's token                   |
+| `rrext_get_token`       | `projectId` + `source` (+ `teamId`)   | `{ token }`   | Resolve a running task's token — `teamId` addresses the team's deployed run, omitted = your dev run |
 | `execute`               | `{ pipeline, pipelineTraceLevel?, … }`| `{ token }`   | Start a pipeline; sets the trace level that gates `FLOW` |
 
 ## Notes

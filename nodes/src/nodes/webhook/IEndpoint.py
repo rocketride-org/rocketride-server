@@ -85,6 +85,11 @@ class IEndpoint(IEndpointBase):
                 monitorOther('usr', json.dumps([info]))
                 monitorStatus('Dropper ready - system is ready to process files')
 
+            elif self.endpoint.logicalType == 'tools':
+                # Pure tool-invoke host: the data server is up, connected
+                # tool nodes are live, no user-facing URL to advertise.
+                monitorStatus('Tools ready - system is ready to accept tool calls')
+
             elif self.endpoint.logicalType in ('webhook', 'adtoolchain'):
                 url_text_map = {
                     'webhook': 'Webhook interface URL',
@@ -147,6 +152,12 @@ class IEndpoint(IEndpointBase):
 
         Does this be setting the callback function and running
         the web server. The server will keep running until manually stopped.
+
+        Every variant runs the web server — it IS the task's DAP data-plane
+        transport (client.pipe / client.tool arrive through its 'data'
+        route on --data_port). The 'tools' variant differs only in intent:
+        no data is ever pushed, the server exists so the control-plane tool
+        dispatch can reach the connected tool nodes.
 
         Args:
             path (str): The path to scan for objects.

@@ -193,7 +193,7 @@
 				"model": "gpt-5-nano",
 				"modelSource": "provider",
 				"modelTotalTokens": 400000, // openrouter
-				"modelOutputTokens": 128000, // litellm
+				"modelOutputTokens": 128000, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -228,7 +228,7 @@
 				"model": "gpt-4.1",
 				"modelSource": "provider",
 				"modelTotalTokens": 1047576, // openrouter
-				"modelOutputTokens": 32768, // litellm
+				"modelOutputTokens": 32768, // openrouter
 				"apikey": ""
 			},
 			"gpt-4-1-mini": {
@@ -355,7 +355,7 @@
 				"model": "gpt-5.1-chat",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 128000, // openrouter
-				"modelOutputTokens": 32000, // openrouter
+				"modelOutputTokens": 16384, // openrouter
 				"apikey": ""
 			},
 			"gpt-5-3-chat": {
@@ -364,6 +364,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 128000, // openrouter
 				"modelOutputTokens": 16384, // openrouter
+				"deprecated": true,
+				"migration": "Model deprecated by OpenRouter (expiration date: 2026-08-10). Please select a current model.",
 				"apikey": ""
 			},
 			"gpt-5-6-luna": {
@@ -475,7 +477,7 @@
 				"model": "gpt-oss-120b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 131072, // litellm
+				"modelOutputTokens": 131072, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},
@@ -485,8 +487,10 @@
 				"title": "OpenAI: gpt-oss-120b (free)",
 				"model": "gpt-oss-120b:free",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 131072, // openrouter
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 131072, // manual
+				"deprecated": true,
+				"migration": "Model no longer listed in OpenRouter. Please select a current model.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -497,7 +501,7 @@
 				"model": "gpt-oss-20b",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 32768, // litellm
+				"modelOutputTokens": 131072, // openrouter
 				"capabilities": {
 					"reasoning": true
 				},

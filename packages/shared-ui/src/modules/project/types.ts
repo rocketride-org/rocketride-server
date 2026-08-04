@@ -91,7 +91,7 @@ export interface ViewState {
  * DEVELOPMENT monitors + replays the dev continuum, DEPLOY the deploy
  * continuum (plus, when the deploy feature lands, its lifecycle card).
  * The former per-view modes (status/tokens/flow/trace/errors) became
- * per-source pills inside each page's SourceSections.
+ * per-source pills inside each page's SourcePanels.
  */
 export type ProjectViewMode = 'design' | 'development' | 'deploy';
 

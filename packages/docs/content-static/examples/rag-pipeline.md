@@ -125,6 +125,6 @@ back the answer.
 ## Next steps
 
 - Swap `embedding_openai` for [`embedding_transformer`](/nodes/embedding_transformer) to run embeddings locally without an API key.
-- Swap `qdrant` for [`pinecone`](/nodes/pinecone) or [`milvus`](/nodes/milvus) without changing the rest of the pipeline.
+- Swap `qdrant` for [`pinecone`](/nodes/store_pinecone) or [`milvus`](/nodes/store_milvus) without changing the rest of the pipeline.
 - Add a [`guardrails`](/nodes/guardrails) node between the LLM and response to validate outputs.
 - See the [Qdrant integration guide](/integrations/qdrant) for configuration details.

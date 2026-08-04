@@ -21,11 +21,12 @@ from pathlib import Path
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / 'src' / 'ai' / 'common' / 'config.py'
 
 # Fake service definition: single "default" profile with empty field defaults.
+# `require_tool_call` mirrors the boolean guard field added to the agent nodes.
 _SERVICE = {
     'preconfig': {
         'default': 'default',
         'profiles': {
-            'default': {'instructions': [], 'agent_description': '', 'role': 'Assistant'},
+            'default': {'instructions': [], 'agent_description': '', 'role': 'Assistant', 'require_tool_call': False},
         },
     }
 }
@@ -106,3 +107,31 @@ class TestExplicitProfileBranchUnaffected:
     def test_explicit_profile_reads_nested(self):
         cfg = Config.getNodeConfig('agent_x', {'profile': 'default', 'default': {'instructions': ['x']}})
         assert cfg['instructions'] == ['x']
+
+
+class TestRequireToolCallResolution:
+    """The require_tool_call guard flag resolves through getNodeConfig exactly
+    as AgentBase.__init__ reads it: ``bool(config.get('require_tool_call', False))``.
+    Covers flat, nested, and default shapes so an operator can enable it either way.
+    """
+
+    def _flag(self, conn):
+        return bool(Config.getNodeConfig('agent_x', conn).get('require_tool_call', False))
+
+    def test_default_is_off(self):
+        assert self._flag({}) is False
+
+    def test_explicit_true_top_level(self):
+        assert self._flag({'require_tool_call': True}) is True
+
+    def test_explicit_false_top_level(self):
+        assert self._flag({'require_tool_call': False}) is False
+
+    def test_nested_true_under_default(self):
+        assert self._flag({'default': {'require_tool_call': True}}) is True
+
+    def test_nested_false_stays_off(self):
+        assert self._flag({'default': {'require_tool_call': False}}) is False
+
+    def test_top_level_true_beats_nested_false(self):
+        assert self._flag({'require_tool_call': True, 'default': {'require_tool_call': False}}) is True

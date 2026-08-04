@@ -61,6 +61,86 @@ async def start_server_task(server: 'TaskServer', token: str, pipeline: Dict[str
     return exec_response['body']['token']
 
 
+async def start_server_task_as_team(
+    server: 'TaskServer',
+    pipeline: Dict[str, Any],
+    *,
+    org_id: str,
+    team_id: str,
+    trigger: str = 'schedule',
+    ttl: Optional[int] = None,
+    trace_level: Optional[str] = None,
+    debug_out: bool = False,
+) -> str:
+    """Execute ``pipeline`` as a TEAM deployment run — no stored credential.
+
+    The trusted dispatch path for scheduled/deployed runs: instead of
+    replaying a user token, the connection's identity is CONSTRUCTED
+    server-side as the team — a synthetic AccountInfo whose only grant is
+    the task permission set on ``team_id``. Consequences, all deliberate:
+
+      - The env merge uses org+team layers only (no user layer) — a deploy
+        run's configuration never depends on which human deployed it.
+      - The run carries NO human identity at all: the team owns it. Billing
+        debits attribute to org+team; who deployed or fired the run lives
+        exclusively in the audit log and deployment history.
+      - ``run_kind='deploy'`` and ``trigger`` travel as TRUSTED connection
+        attributes read by on_execute — never as DAP arguments, so remote
+        clients cannot spoof a deploy run.
+
+    Raises:
+        RuntimeError: Execute request did not succeed.
+    """
+    from ai.account import account
+    from ai.account.models import AccountInfo
+
+    conn = _InProcessConn(server)
+
+    # Server-constructed team identity: full task permissions on the ONE
+    # team, nothing else. No userToken — deploy runs hold no credential,
+    # and no user identity: the team is the owner.
+    conn._account_info = AccountInfo(
+        userId='',
+        displayName='',
+        email='',
+        defaultTeam=team_id,
+        organization={
+            'id': org_id,
+            'name': '',
+            'permissions': [],
+            'teams': [
+                {
+                    'id': team_id,
+                    'name': '',
+                    'permissions': ['task.control', 'task.monitor', 'task.data', 'task.store'],
+                }
+            ],
+        },
+        capabilities=list(account.capabilities),
+    )
+    conn._authenticated = True
+
+    # The trusted, non-wire channel for run classification.
+    conn._trusted_run_kind = 'deploy'
+    conn._trusted_trigger = trigger
+
+    # The schedule's run window rides the execute arguments: start_task
+    # reads 'ttl', and a deploy run ALWAYS sends it. 0 means no window
+    # (run until the pipeline exits); N means seconds until shutdown (the
+    # 'fixed window' schedule option). Omitting it would silently apply
+    # the server's DEFAULT idle timeout, which is a dev-task policy.
+    # The per-source execution settings ride the same way as a dev run:
+    # 'pipelineTraceLevel' plus '--trace=debugOut' in the task args.
+    arguments: Dict[str, Any] = {'pipeline': pipeline, 'teamId': team_id, 'ttl': int(ttl) if ttl else 0}
+    if trace_level:
+        arguments['pipelineTraceLevel'] = trace_level
+    if debug_out:
+        arguments['args'] = ['--trace=debugOut']
+    exec_response = await conn.request('execute', arguments=arguments)
+
+    return exec_response['body']['token']
+
+
 # =============================================================================
 # PRIVATE
 # =============================================================================

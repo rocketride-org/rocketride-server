@@ -114,7 +114,7 @@ const ExplorerSidebar: React.FC = () => {
 	const refresh = useCallback(async () => {
 		if (!client || !isConnected) { setEntries([]); return; }
 		try {
-			const allEntries = await listRecursive(client, '');
+			const allEntries = await listRecursive(client, '@');
 			setEntries(allEntries);
 		} catch {
 			setEntries([]);
@@ -193,7 +193,10 @@ const ExplorerSidebar: React.FC = () => {
 		if (!client) return;
 		try {
 			const name = sourcePath.includes('/') ? sourcePath.substring(sourcePath.lastIndexOf('/') + 1) : sourcePath;
-			const newPath = targetDir ? `${targetDir}/${name}` : name;
+			// The tree is rooted at the '@' mount (listRecursive above), so an
+			// empty targetDir IS that root — carry '@' through instead of
+			// letting a bare name silently target the plain user store.
+			const newPath = `${targetDir || '@'}/${name}`;
 			if (newPath === sourcePath) return;
 			await client.fsRename(sourcePath, newPath);
 			// Keep open editor tabs in sync with the move.  A moved file must
@@ -228,7 +231,8 @@ const ExplorerSidebar: React.FC = () => {
 		if (!client) return;
 		try {
 			for (const file of files) {
-				const path = targetDir ? `${targetDir}/${file.name}` : file.name;
+				// Same root rule as handleMove: '' targetDir is the '@' mount.
+				const path = `${targetDir || '@'}/${file.name}`;
 				const { handle } = await client.fsOpen(path, 'w');
 				const chunkSize = 4 * 1024 * 1024; // 4 MB
 				try {

@@ -85,9 +85,17 @@
 		// Define the values that will be merged into any profile configuration
 		// specified, unless the profile is 'absolute'
 		"default": "default",
-		// Defines profiles used with the "profile": key
+		// Defines profiles used with the "profile": key. "default" keeps its name
+		// so pipelines saved before the URL profile existed still resolve.
 		"profiles": {
 			"default": {
+				"title": "Manual configuration (host and port)",
+				"mode": "manual",
+				"graph": "agent"
+			},
+			"url": {
+				"title": "FalkorDB URL (connection string)",
+				"mode": "url",
 				"graph": "agent"
 			}
 		}
@@ -126,7 +134,17 @@
 			"default": "",
 			"secure": true,
 			"optional": true,
-			"description": "Password for the FalkorDB instance. Leave empty for no auth.",
+			"description": "Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries.",
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"graph_falkordb.url": {
+			"type": "string",
+			"title": "FalkorDB URL",
+			"default": "",
+			"secure": true,
+			"description": "Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. The URL may carry credentials, so it is stored encrypted; the password can also be left out of it and typed in the Password field below, which then replaces whatever the URL embeds.",
 			"ui": {
 				"ui:widget": "password"
 			}
@@ -196,6 +214,36 @@
 			"minimum": 100,
 			"maximum": 600000,
 			"description": "Server-side timeout for a single query."
+		},
+		//
+		// The two connection profiles. Everything the driver reads must be listed
+		// inside the profile object: the resolved config is the profile section
+		// merged with connConfig[profile], so top-level keys are not seen.
+		//
+		"graph_falkordb.default": {
+			"object": "default",
+			"properties": ["graph_falkordb.host", "graph_falkordb.port", "graph_falkordb.username", "graph_falkordb.password", "graph_falkordb.tls", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
+		},
+		"graph_falkordb.urlProfile": {
+			"object": "url",
+			"properties": ["graph_falkordb.url", "graph_falkordb.password", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
+		},
+		"graph_falkordb.profile": {
+			"type": "string",
+			"title": "Connection",
+			"description": "How this node connects to FalkorDB",
+			"default": "default",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["graph_falkordb.default"]
+				},
+				{
+					"value": "url",
+					"properties": ["graph_falkordb.urlProfile"]
+				}
+			]
 		}
 	},
 	//
@@ -211,7 +259,7 @@
 		{
 			"section": "Pipe",
 			"title": "FalkorDB",
-			"properties": ["type", "graph_falkordb.host", "graph_falkordb.port", "graph_falkordb.username", "graph_falkordb.password", "graph_falkordb.tls", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
+			"properties": ["type", "graph_falkordb.profile"]
 		}
 	]
 }

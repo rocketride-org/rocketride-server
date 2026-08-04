@@ -111,7 +111,6 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 
 	const isConnected = connection.state === 'connected';
 	const hasUnknown = (unknownTasks?.length ?? 0) > 0;
-
 	// --- Static top-nav menu (New pipeline / Monitor) ------------------------
 
 	// The fixed nav actions rendered above the Explorer as a stock SidebarMenu.
@@ -163,7 +162,13 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 				    (activeId=''); the id-narrowing guard keeps onNavigate's union
 				    contract without a cast. SidebarMenu reads the collapsed flag
 				    from context, so no explicit collapsed prop is wired here. */}
-				<SidebarMenu menu={navMenu} activeId="" onSelect={(id) => { if (id === 'new' || id === 'monitor') onNavigate(id); }} />
+				<SidebarMenu
+					menu={navMenu}
+					activeId=""
+					onSelect={(id) => {
+						if (id === 'new' || id === 'monitor') onNavigate(id);
+					}}
+				/>
 			</div>
 
 			{/* ── Explorer (file tree) ────────────────────────────────── */}
@@ -171,12 +176,12 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 			    the typed no-op replaces the old `null as any` cast. */}
 			<Explorer vfs={NOOP_VFS} config={PIPELINE_CONFIG} entries={explorerEntries} statuses={explorerStatuses} isConnected={isConnected} showChildActions={isSubscribed} activeFilePath={activeFilePath} onOpenFile={onOpenFile} onFileManage={onFileManage} fileActions={fileActions} onChildAction={handleChildAction} onRefresh={onRefresh} />
 
-			{/* ── Unknown tasks (Other) ───────────────────────────────── */}
+			{/* ── Unknown tasks (AD-HOC) — server tasks with no .pipe file */}
 			{hasUnknown && (
 				<div style={{ padding: '2px 6px', flexShrink: 0 }}>
 					<div style={{ ...S.row, marginTop: 4, ...hoverBg('unknown-root') }} onMouseEnter={() => setHoveredRow('unknown-root')} onMouseLeave={() => setHoveredRow(null)} onClick={() => setUnknownExpanded((p) => !p)}>
 						{unknownExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} />}
-						<span style={{ ...S.rowName, fontWeight: 600 }}>Other</span>
+						<span style={{ ...S.rowName, ...commonStyles.labelUppercase, color: 'var(--rr-text-secondary)' }}>Ad-hoc</span>
 						<span style={S.spacer} />
 						<span style={{ fontSize: 11, color: 'var(--rr-text-secondary)' }}>{unknownTasks!.length} running</span>
 					</div>

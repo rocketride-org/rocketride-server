@@ -101,7 +101,7 @@
 				"title": "Cloud Chat",
 				"model": "deepseek-chat",
 				"modelSource": "manual",
-				"modelTotalTokens": 131072, // openrouter
+				"modelTotalTokens": 163840, // openrouter
 				"modelOutputTokens": 16000, // openrouter
 				"serverbase": "https://api.deepseek.com/v1",
 				"apikey": ""
@@ -167,7 +167,7 @@
 				"model": "deepseek-chat-v3-0324",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 163840, // openrouter
-				"modelOutputTokens": 16384, // openrouter
+				"modelOutputTokens": 65536, // openrouter
 				"apikey": ""
 			},
 			"deepseek-chat-v3-1": {
@@ -207,7 +207,7 @@
 				"title": "DeepSeek: R1 Distill Llama 70B",
 				"model": "deepseek-r1-distill-llama-70b",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 128000, // openrouter
+				"modelTotalTokens": 8192, // openrouter
 				"modelOutputTokens": 8192, // openrouter
 				"apikey": "",
 				"capabilities": {
@@ -259,8 +259,8 @@
 				"title": "DeepSeek: DeepSeek V3.2",
 				"model": "deepseek-v3.2",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 131072, // openrouter
-				"modelOutputTokens": 64000, // openrouter
+				"modelTotalTokens": 163840, // openrouter
+				"modelOutputTokens": 65536, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true
@@ -292,7 +292,7 @@
 				"model": "deepseek-v4-flash",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
-				"modelOutputTokens": 384000, // openrouter
+				"modelOutputTokens": 393216, // openrouter
 				"apikey": "",
 				"capabilities": {
 					"reasoning": true

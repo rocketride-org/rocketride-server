@@ -10,7 +10,7 @@
 export { default as ProjectView } from './ProjectView';
 export type { IProjectViewProps } from './ProjectView';
 export type { IViewProps, ProjectViewMode, ViewState, TaskStatus, TraceEvent, TraceRow, TraceLevel } from './types';
-export { parseServerEvent } from './utils';
+export { parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from './utils';
 export type { ParsedServerEvent } from './utils';
 
 // Run-log continuum delivery + projections (the source-section building

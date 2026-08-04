@@ -33,6 +33,8 @@ _ENV_ATTR_MAP = {
     'ACCESS_KEY': 'accessKey',
     'APIKEY': 'apikey',
     'KEY': 'apikey',
+    'KEY_ID': 'apiKeyId',
+    'KEY_SECRET': 'apiKeySecret',
     'REGION': 'region',
     'HOST': 'host',
     'PORT': 'port',

@@ -21,7 +21,7 @@
  *   5. Active tasks      -- live running tasks (CardDataGrid, LOCAL mode —
  *      poll-fed rows apply silently)
  *
- * All data is received as props; the host (AccountPage) is responsible for
+ * All data is received as props; the host (AccountProvider) is responsible for
  * fetching via the BillingApi.
  */
 

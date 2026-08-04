@@ -14,9 +14,10 @@ directly for save-time validation. The configured `modelOutputTokens` is passed 
 the model as `max_tokens`. Token counts for budgeting are estimated at roughly
 4 characters per token.
 
-When the selected model is flagged as reasoning-capable, the node enables
-extended thinking automatically and streams the model's reasoning over the
-`thinking` SSE lane; see "Extended thinking" below.
+Extended thinking is opt-in per node via the `extendedThinking` field and is off by
+default. When it is enabled on a reasoning-capable model, the node streams the model's
+reasoning over the `thinking` SSE lane on the interactive streaming path only — the
+agent / `expectJson` path never requests it; see "Extended thinking" below.
 
 ---
 
@@ -37,6 +38,7 @@ extended thinking automatically and streams the model's reasoning over the
 | `modelSource`      | string                       | Where the model definition comes from (`manual` or `openrouter`)                                     |
 | `model`            | string (custom profile only) | Anthropic model ID, used only when `profile` is `custom`                                             |
 | `modelTotalTokens` | number (custom profile only) | Total context tokens for the custom profile; must be greater than 0                                  |
+| `extendedThinking` | boolean, `false`             | Request extended thinking for this node. Ignored unless the model is reasoning-capable               |
 
 The model ID and token limits for named profiles are fixed by the profile. Only the
 `custom` profile exposes `model` and `modelTotalTokens` directly.
@@ -61,14 +63,16 @@ Default profile: **Claude Sonnet 4.6**.
 
 ## Extended thinking
 
-Whether thinking is requested is driven by the model's `capabilities.reasoning`
-flag in the node configuration (stamped from OpenRouter model sync). When set,
-the node builds provider-correct thinking parameters based on the model name.
+Whether thinking is requested is driven by two things: the model's
+`capabilities.reasoning` flag in the node configuration (stamped from OpenRouter
+model sync) **and** the node's own `extendedThinking` toggle, which is off by
+default. Both must be on. When they are, the node builds provider-correct
+thinking parameters based on the model name.
 Routing prefixes such as `openrouter/anthropic/` are stripped before matching.
 
 | Model                                  | Thinking parameters sent                                                                                                                                                                                                                      |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Any Haiku model                        | None. Haiku has no extended thinking; sending parameters would return a 400.                                                                                                                                                                  |
+| Legacy Claude 3 / 3.5 Haiku            | None. Those models have no extended thinking; sending parameters would return a 400. Haiku 4.5 and newer are not excluded and follow the row below.                                                                                            |
 | `claude-opus-4-7` / `claude-opus-4-8` | `thinking: {type: "adaptive", display: "summarized"}` (adaptive thinking)                                                                                                                                                                    |
 | Other Claude models                    | `thinking: {type: "enabled", budget_tokens: N}` plus the `interleaved-thinking-2025-05-14` beta header, where `N` is half the output-token limit (minimum 2,048, always below `max_tokens`). Skipped entirely if the output window is too small for a valid budget. |
 

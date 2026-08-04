@@ -24,10 +24,11 @@
 import React, { useState, useMemo, useRef, useCallback, useEffect, CSSProperties } from 'react';
 import type { ListPageRequest, ListPageResponse } from 'rocketride';
 import type { DashboardResponse, DashboardConnection, DashboardTask, ActivityEvent } from './types';
-import { OverviewTab, ConnectionsGrid, TasksGrid, ActivityGrid } from './components';
-import { TabPanelContent } from '../../components/tab-panel/TabPanelContent';
-import { PageViewControl } from '../../components/page-view-control/PageViewControl';
-import type { ITabPanelPanel } from '../../components/tab-panel/TabPanelContent';
+import { OverviewPanel, ConnectionsPanel, TasksPanel, ActivityPanel } from './components';
+import { TabPanel } from '../../components/tab-panel/TabPanel';
+import { ContentHeader } from '../../components/content-header/ContentHeader';
+import { TabControl } from '../../components/tab-control/TabControl';
+import type { ITabPanelPanel } from '../../components/tab-panel/TabPanel';
 import type { ViewMenu } from '../../types/viewMenu';
 import { commonStyles } from '../../themes/styles';
 
@@ -80,7 +81,7 @@ const styles = {
 		cursor: 'default',
 		letterSpacing: '0.05em',
 	} as CSSProperties,
-	// Fills the space below the top PageViewControl strip; TabPanelContent's
+	// Fills the space below the top TabControl strip; TabPanel's
 	// 100%-height wrapper resolves against this definite flex box.
 	pageBody: {
 		display: 'flex',
@@ -96,6 +97,13 @@ const styles = {
 // =============================================================================
 
 export interface IMonitorViewProps {
+	/**
+	 * Document display name for the page header. When provided, the view
+	 * renders a stock {@link ContentHeader} titled with this name (matching
+	 * the host's tab title), pinned between the page strip and the scrolling
+	 * page bodies. No header renders without it.
+	 */
+	documentTitle?: string;
 	/** Full dashboard snapshot from rrext_dashboard response, or null if not yet loaded. */
 	data: DashboardResponse | null;
 	/** Activity events pushed from the server (newest first). */
@@ -124,11 +132,22 @@ export interface IMonitorViewProps {
 
 type TabId = 'overview' | 'connections' | 'tasks' | 'activity';
 
+/**
+ * Per-page header subtitles — "{Page} — {short descriptor}" (the ProjectView
+ * DOC_SUBVIEW_SUBTITLES convention).
+ */
+const PAGE_SUBTITLES: Record<TabId, string> = {
+	overview: 'Overview — server health at a glance.',
+	connections: 'Connections — every client attached to this server.',
+	tasks: 'Tasks — running and recent pipeline tasks.',
+	activity: 'Activity — the live server event feed.',
+};
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
 
-const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, onRefresh, listConnections, listTasks, onRefetchReady }) => {
+const MonitorView: React.FC<IMonitorViewProps> = ({ documentTitle, data, events, isConnected, onRefresh, listConnections, listTasks, onRefetchReady }) => {
 	const [activeTab, setActiveTab] = useState<TabId>('overview');
 
 	// ── Combined remote-grid refetch ─────────────────────────────────────
@@ -153,7 +172,7 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, o
 		});
 	}, [onRefetchReady]);
 
-	// ViewMenu declaration — rendered by this view's own PageViewControl strip.
+	// ViewMenu declaration — rendered by this view's own TabControl strip.
 	const viewMenu = useMemo<ViewMenu>(
 		() => ({
 			entries: [
@@ -183,7 +202,7 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, o
 			overview: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<OverviewTab data={data} events={events} onRefresh={onRefresh} />
+						<OverviewPanel data={data} events={events} onRefresh={onRefresh} />
 					</div>
 				),
 			},
@@ -193,29 +212,21 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, o
 						{/* Snapshot rows back the LOCAL grid; a host fetcher switches
 						    it REMOTE (conditional spread keeps the prop truly absent
 						    for hosts without one). */}
-						<ConnectionsGrid
-							connections={data.connections}
-							{...(listConnections ? { listConnections } : {})}
-							onRefetchReady={handleConnectionsRefetchReady}
-						/>
+						<ConnectionsPanel connections={data.connections} {...(listConnections ? { listConnections } : {})} onRefetchReady={handleConnectionsRefetchReady} />
 					</div>
 				),
 			},
 			tasks: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<TasksGrid
-							tasks={data.tasks}
-							{...(listTasks ? { listTasks } : {})}
-							onRefetchReady={handleTasksRefetchReady}
-						/>
+						<TasksPanel tasks={data.tasks} {...(listTasks ? { listTasks } : {})} onRefetchReady={handleTasksRefetchReady} />
 					</div>
 				),
 			},
 			activity: {
 				content: (
 					<div style={commonStyles.tabContent}>
-						<ActivityGrid events={events} />
+						<ActivityPanel events={events} />
 					</div>
 				),
 			},
@@ -225,10 +236,13 @@ const MonitorView: React.FC<IMonitorViewProps> = ({ data, events, isConnected, o
 	return (
 		<div style={styles.root}>
 			{/* Page strip — the view renders its own tabs at the very top. */}
-			<PageViewControl menu={viewMenu} activeId={activeTab} onSelect={(id) => setActiveTab(id as TabId)} />
+			<TabControl menu={viewMenu} activeId={activeTab} onSelect={(id) => setActiveTab(id as TabId)} />
+			{/* Page title, PINNED with the strip (shell hosts only — see the
+			    documentTitle prop); only the panel bodies below scroll. */}
+			{documentTitle && <ContentHeader title={documentTitle} subtitle={PAGE_SUBTITLES[activeTab]} />}
 			{/* Page bodies fill the space below the strip. */}
 			<div style={styles.pageBody}>
-				<TabPanelContent panels={panels} activeId={activeTab} />
+				<TabPanel panels={panels} activeId={activeTab} />
 			</div>
 			{!isConnected && (
 				<div style={styles.disconnectOverlay}>

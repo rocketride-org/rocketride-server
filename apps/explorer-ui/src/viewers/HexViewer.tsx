@@ -49,6 +49,11 @@ const ROW_HEIGHT = 20;
 /** Extra rows to render above and below the visible area. */
 const OVERSCAN = 10;
 
+// Browsers clamp an element's scroll extent (~2^24 px in Chromium). Cap the spacer
+// well under that; for larger files the byte offset is driven from an authoritative
+// `topRow` rather than raw scrollTop, so it never inherits the pixel clamp.
+const MAX_SPACER_HEIGHT = 8_000_000;
+
 // A successful ranged fetch returns 206 Partial Content. Anything else — most
 // notably 200 (server/proxy ignored the Range header and sent the whole file) —
 // must not be cached under a single chunk index, so we skip it.
@@ -161,6 +166,13 @@ const S = {
 		color: 'var(--rr-text-disabled)',
 		fontStyle: 'italic',
 	} as CSSProperties,
+	errorRow: {
+		display: 'flex',
+		lineHeight: `${ROW_HEIGHT}px`,
+		height: ROW_HEIGHT,
+		whiteSpace: 'pre',
+		color: 'var(--rr-color-error, var(--rr-text-secondary))',
+	} as CSSProperties,
 	address: {
 		color: 'var(--rr-text-secondary)',
 		paddingLeft: 16,
@@ -247,11 +259,18 @@ function formatFileSize(bytes: number): string {
 class RangeDataSource {
 	private _url: string = '';
 	private _fileSize: number = 0;
-	private _chunks = new Map<number, Uint8Array>();   // chunkIndex → data
+	private _chunks = new Map<number, Uint8Array>();   // chunkIndex → data (LRU: insertion order = age)
 	private _pending = new Map<number, Promise<void>>(); // in-flight fetches
+	private _failures = new Map<number, number>();       // chunkIndex → consecutive failures
+	private _errors = new Map<number, string>();         // chunkIndex → last error message
 	private _getUrl: () => Promise<string>;
 	private _getStat: () => Promise<number>;
 	private _onUpdate: () => void;
+
+	/** Resident chunk ceiling (256 × 64 KB ≈ 16 MB) — far more than any viewport needs. */
+	private static readonly MAX_CACHED_CHUNKS = 256;
+	/** Stop refetching a chunk after this many consecutive failures. */
+	private static readonly MAX_RETRIES = 3;
 
 	constructor(
 		getUrl: () => Promise<string>,
@@ -300,6 +319,7 @@ class RangeDataSource {
 		while (written < actualLength) {
 			const ci = Math.floor(pos / CHUNK_SIZE);
 			const chunk = this._chunks.get(ci)!;
+			this._touch(ci);
 			const chunkStart = ci * CHUNK_SIZE;
 			const localOffset = pos - chunkStart;
 			const available = Math.min(chunk.length - localOffset, actualLength - written);
@@ -311,8 +331,29 @@ class RangeDataSource {
 		return result;
 	}
 
+	/** Move a chunk to the "newest" end of the insertion-ordered map. */
+	private _touch(chunkIndex: number): void {
+		const v = this._chunks.get(chunkIndex);
+		if (v !== undefined) {
+			this._chunks.delete(chunkIndex);
+			this._chunks.set(chunkIndex, v);
+		}
+	}
+
+	/** Drop least-recently-used chunks once the budget is exceeded. */
+	private _evict(): void {
+		while (this._chunks.size > RangeDataSource.MAX_CACHED_CHUNKS) {
+			const oldest = this._chunks.keys().next().value;
+			if (oldest === undefined) break;
+			this._chunks.delete(oldest);
+		}
+	}
+
 	private async _fetchChunk(chunkIndex: number): Promise<void> {
 		if (this._pending.has(chunkIndex) || this._chunks.has(chunkIndex)) return;
+		// Give up after MAX_RETRIES — otherwise a permanently-failing chunk is
+		// refetched on every re-render (a silent request storm). See chunkError().
+		if ((this._failures.get(chunkIndex) ?? 0) >= RangeDataSource.MAX_RETRIES) return;
 
 		const promise = this._doFetch(chunkIndex);
 		this._pending.set(chunkIndex, promise);
@@ -341,17 +382,77 @@ class RangeDataSource {
 		}
 
 		if (response.status !== HTTP_PARTIAL_CONTENT) {
-			return; // silently skip failed / non-partial chunks
+			// A 200 means the server/proxy ignored Range and is streaming the WHOLE
+			// file — cancel the body so a multi-GB response isn't buffered into memory.
+			if (response.status === 200) {
+				await response.body?.cancel();
+				this._recordFailure(chunkIndex, 'Server ignored Range header (200) — partial content unsupported');
+			} else {
+				this._recordFailure(chunkIndex, `Expected 206, got ${response.status}`);
+			}
+			return;
 		}
 
 		const buf = await response.arrayBuffer();
+		this._failures.delete(chunkIndex);
+		this._errors.delete(chunkIndex);
 		this._chunks.set(chunkIndex, new Uint8Array(buf));
+		this._evict();
+		this._onUpdate();
+	}
+
+	/** Record a failed fetch and let the UI paint the error state. */
+	private _recordFailure(chunkIndex: number, message: string): void {
+		// delete+set moves the record to the newest end (like _touch does for _chunks),
+		// so eviction below drops the least-recently-failed chunk — never one that's
+		// still actively failing (which would reset its retry count and bypass MAX_RETRIES).
+		const count = (this._failures.get(chunkIndex) ?? 0) + 1;
+		this._failures.delete(chunkIndex);
+		this._failures.set(chunkIndex, count);
+		this._errors.delete(chunkIndex);
+		this._errors.set(chunkIndex, message);
+		// Bound the failure bookkeeping like _chunks (oldest-first) so a long session
+		// with many transient failures can't grow these maps without limit.
+		while (this._failures.size > RangeDataSource.MAX_CACHED_CHUNKS) {
+			const oldest = this._failures.keys().next().value;
+			if (oldest === undefined) break;
+			this._failures.delete(oldest);
+			this._errors.delete(oldest);
+		}
+		this._onUpdate();
+	}
+
+	/**
+	 * For the row renderer: the permanent error message for the chunk covering
+	 * `offset`, or null while it is still loading / has retries left.
+	 */
+	chunkError(offset: number): string | null {
+		const ci = Math.floor(offset / CHUNK_SIZE);
+		return (this._failures.get(ci) ?? 0) >= RangeDataSource.MAX_RETRIES
+			? (this._errors.get(ci) ?? 'Failed to load')
+			: null;
+	}
+
+	/** True when at least one chunk has permanently failed (drives the Retry button). */
+	hasFailures(): boolean {
+		for (const count of this._failures.values()) {
+			if (count >= RangeDataSource.MAX_RETRIES) return true;
+		}
+		return false;
+	}
+
+	/** Clear failure bookkeeping so failed chunks are fetched again. */
+	retryFailed(): void {
+		this._failures.clear();
+		this._errors.clear();
 		this._onUpdate();
 	}
 
 	dispose(): void {
 		this._chunks.clear();
 		this._pending.clear();
+		this._failures.clear();
+		this._errors.clear();
 	}
 }
 
@@ -369,7 +470,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 	const [endian, setEndian] = useState<Endianness>('little');
 	const [hoveredRowIdx, setHoveredRowIdx] = useState(-1);
 	const [goToValue, setGoToValue] = useState('');
-	const [scrollTop, setScrollTop] = useState(0);
+	const [topRow, setTopRow] = useState(0); // authoritative top file row (drives the byte offset)
 	const [viewportHeight, setViewportHeight] = useState(0);
 	const [fileSize, setFileSize] = useState(0);
 	const [ready, setReady] = useState(false);
@@ -378,6 +479,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 
 	const viewportRef = useRef<HTMLDivElement>(null);
 	const dsRef = useRef<RangeDataSource | null>(null);
+	const syncingRef = useRef(false); // guards against the programmatic-scroll feedback loop
 
 	// --- Initialise the range data source ------------------------------------
 
@@ -385,6 +487,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 		setReady(false);
 		setError(null);
 		setFileSize(0);
+		setTopRow(0); // reset scroll offset so a stale row from a bigger file can't outrun a smaller one
 		let disposed = false;
 
 		const ds = new RangeDataSource(
@@ -428,32 +531,93 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 		return () => observer.disconnect();
 	}, [ready]);
 
-	const handleScroll = useCallback(() => {
-		if (viewportRef.current) {
-			setScrollTop(viewportRef.current.scrollTop);
-		}
-	}, []);
-
 	// --- Virtual scroll calculations -----------------------------------------
+	//
+	// `topRow` (the file row shown at the top of the viewport) is the single
+	// source of truth for the byte offset. The scrollbar is only an input device:
+	//   - files under the spacer cap → scrollbar maps 1:1 to rows (exact, native feel)
+	//   - larger files → spacer is clamped, scrollbar becomes an approximate ratio
+	//     control, and go-to / keyboard provide exact positioning.
 
 	const totalRows = Math.ceil(fileSize / BYTES_PER_ROW) || 1;
-	const totalHeight = totalRows * ROW_HEIGHT;
+	const idealHeight = totalRows * ROW_HEIGHT;
+	const spacerHeight = Math.min(idealHeight, MAX_SPACER_HEIGHT);
+	const isScaled = idealHeight > MAX_SPACER_HEIGHT;
 
-	const firstVisible = Math.floor(scrollTop / ROW_HEIGHT);
 	const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT);
-	const renderStart = Math.max(0, firstVisible - OVERSCAN);
-	const renderEnd = Math.min(totalRows, firstVisible + visibleCount + OVERSCAN);
+	const renderStart = Math.max(0, topRow - OVERSCAN);
+	const renderEnd = Math.min(totalRows, topRow + visibleCount + OVERSCAN);
 
 	const modeInfo = DISPLAY_MODES[mode];
+
+	// Map an authoritative row back to a scrollbar position (best-effort sync
+	// after go-to / keyboard navigation). Exact for unscaled files.
+	const rowToScrollTop = useCallback((rowIndex: number): number => {
+		const el = viewportRef.current;
+		if (!el || !isScaled) return rowIndex * ROW_HEIGHT;
+		const maxScroll = Math.max(1, spacerHeight - el.clientHeight);
+		const maxTopRow = Math.max(1, totalRows - Math.floor(el.clientHeight / ROW_HEIGHT));
+		return Math.round((rowIndex / maxTopRow) * maxScroll);
+	}, [isScaled, spacerHeight, totalRows]);
+
+	// User-driven scroll → derive topRow. Ignore the programmatic scrolls we trigger.
+	const handleScroll = useCallback(() => {
+		const el = viewportRef.current;
+		if (!el) return;
+		if (syncingRef.current) { syncingRef.current = false; return; }
+		if (!isScaled) {
+			setTopRow(Math.floor(el.scrollTop / ROW_HEIGHT));
+			return;
+		}
+		const maxScroll = Math.max(1, spacerHeight - el.clientHeight);
+		const maxTopRow = Math.max(0, totalRows - Math.floor(el.clientHeight / ROW_HEIGHT));
+		setTopRow(Math.round((el.scrollTop / maxScroll) * maxTopRow));
+	}, [isScaled, spacerHeight, totalRows]);
+
+	// Move to an exact row (authoritative) and best-effort sync the scrollbar.
+	const goToRow = useCallback((rowIndex: number) => {
+		const clampedRow = Math.min(Math.max(rowIndex, 0), totalRows - 1);
+		setTopRow(clampedRow);
+		const el = viewportRef.current;
+		if (el) {
+			// Only arm the guard when the scroll position actually changes — a no-op
+			// assignment fires no scroll event, which would leave the flag stuck true
+			// and swallow the user's next real scroll.
+			const nextScrollTop = rowToScrollTop(clampedRow);
+			if (nextScrollTop !== el.scrollTop) {
+				syncingRef.current = true;
+				el.scrollTop = nextScrollTop;
+			}
+		}
+	}, [totalRows, rowToScrollTop]);
 
 	// --- Go-to-offset handler ------------------------------------------------
 
 	const handleGoTo = useCallback(() => {
 		const offset = parseInt(goToValue, 16);
-		if (isNaN(offset) || !viewportRef.current) return;
-		const rowIndex = Math.floor(Math.min(offset, fileSize - 1) / BYTES_PER_ROW);
-		viewportRef.current.scrollTop = rowIndex * ROW_HEIGHT;
-	}, [goToValue, fileSize]);
+		if (isNaN(offset)) return;
+		const clamped = Math.min(Math.max(offset, 0), fileSize - 1);
+		goToRow(Math.floor(clamped / BYTES_PER_ROW));
+	}, [goToValue, fileSize, goToRow]);
+
+	// --- Keyboard navigation (essential once the scrollbar is coarse) ---------
+
+	const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+		const el = viewportRef.current;
+		const page = Math.max(1, Math.floor((el?.clientHeight ?? 0) / ROW_HEIGHT) - 1);
+		let next: number;
+		switch (e.key) {
+			case 'ArrowDown': next = topRow + 1; break;
+			case 'ArrowUp':   next = topRow - 1; break;
+			case 'PageDown':  next = topRow + page; break;
+			case 'PageUp':    next = topRow - page; break;
+			case 'Home':      next = 0; break;
+			case 'End':       next = totalRows - 1; break;
+			default: return;
+		}
+		e.preventDefault();
+		goToRow(next);
+	}, [topRow, totalRows, goToRow]);
 
 	// --- Build visible rows --------------------------------------------------
 
@@ -462,6 +626,8 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 		address: string;
 		hex: string | null;
 		asciiCells: Array<{ char: string; printable: boolean }> | null;
+		/** Permanent load error for this row's chunk, or null while loading/ok. */
+		error: string | null;
 	}
 
 	const rows = useMemo((): HexRow[] => {
@@ -482,7 +648,9 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 			const addr = formatAddress(rowByteOffset);
 
 			if (!data) {
-				result.push({ rowIndex: rowIdx, address: addr, hex: null, asciiCells: null });
+				// Distinguish "still loading" from a permanent failure for this row's chunk.
+				const err = ds.chunkError(rowByteOffset) ?? ds.chunkError(rowByteOffset + BYTES_PER_ROW - 1);
+				result.push({ rowIndex: rowIdx, address: addr, hex: null, asciiCells: null, error: err });
 				continue;
 			}
 
@@ -514,13 +682,16 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 				}
 			}
 
-			result.push({ rowIndex: rowIdx, address: addr, hex: hexParts.join(' '), asciiCells });
+			result.push({ rowIndex: rowIdx, address: addr, hex: hexParts.join(' '), asciiCells, error: null });
 		}
 
 		return result;
 	}, [renderStart, renderEnd, fileSize, modeInfo, endian, tick]);
 
 	// --- Render --------------------------------------------------------------
+
+	// Re-read each render (tick drives re-renders when chunk state changes).
+	const hasErrors = dsRef.current?.hasFailures() ?? false;
 
 	if (error) return <div style={viewerStyles.message}>{error}</div>;
 	if (!ready) return <div style={viewerStyles.message}>Loading...</div>;
@@ -564,6 +735,19 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 					/>
 				</div>
 
+				{hasErrors && (
+					<>
+						<div style={S.separator} />
+						<button
+							style={S.modeBtn(false)}
+							onClick={() => dsRef.current?.retryFailed()}
+							title="Retry chunks that failed to load"
+						>
+							⚠ Retry
+						</button>
+					</>
+				)}
+
 				<span style={S.infoText}>
 					{fileSize.toLocaleString()} bytes ({formatFileSize(fileSize)})
 				</span>
@@ -574,17 +758,28 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 				style={S.viewport}
 				ref={viewportRef}
 				onScroll={handleScroll}
+				onKeyDown={handleKeyDown}
+				tabIndex={0}
 			>
-				{/* Spacer sets the full scrollable height */}
-				<div style={S.spacer(totalHeight)}>
-					{/* Position visible rows absolutely within the spacer */}
-					<div style={S.rowsContainer(renderStart * ROW_HEIGHT)}>
+				{/* Spacer supplies the scroll range (bounded so browsers don't clamp offsets) */}
+				<div style={S.spacer(spacerHeight)}>
+					{/*
+					  Unscaled: rows sit at their true pixel offset (exact native scrolling,
+					  unchanged for files under the cap). Scaled: the spacer no longer maps
+					  1:1 to rows, so rows ride the top of the viewport via sticky positioning,
+					  shifted up by the overscan rows above topRow.
+					*/}
+					<div
+						style={isScaled
+							? { position: 'sticky', top: 0, transform: `translateY(${-(topRow - renderStart) * ROW_HEIGHT}px)` }
+							: S.rowsContainer(renderStart * ROW_HEIGHT)}
+					>
 						{rows.map((row) => {
 							if (!row.hex || !row.asciiCells) {
 								return (
-									<div key={row.rowIndex} style={S.loadingRow}>
+									<div key={row.rowIndex} style={row.error ? S.errorRow : S.loadingRow}>
 										<span style={S.address}>{row.address}</span>
-										<span style={S.hexArea}>loading...</span>
+										<span style={S.hexArea}>{row.error ? `⚠ ${row.error}` : 'loading...'}</span>
 									</div>
 								);
 							}

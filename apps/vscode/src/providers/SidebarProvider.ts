@@ -29,7 +29,9 @@ import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
+import { getLogger } from '../shared/util/output';
 import { getProjectProvider } from '../extension';
 
 // =============================================================================
@@ -41,6 +43,10 @@ interface ProjectEntryDTO {
 	projectId?: string;
 	sources?: { id: string; name: string; provider?: string }[];
 }
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
 
 // =============================================================================
 // PROVIDER
@@ -57,6 +63,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
+
+	private logger = getLogger();
 
 	/**
 	 * Creates the sidebar provider.
@@ -130,19 +138,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						await this.configManager.updateConnectionMode('development', message.mode);
 						this.sendFullUpdate();
 						break;
-					case 'setDevelopmentTeam':
-						this.configManager.setTeamId('development', message.teamId);
-						this.sendFullUpdate();
-						break;
 					case 'setDeployTargetMode':
 						await this.configManager.updateConnectionMode('deployment', message.mode);
 						// Reconnect the DEPLOY manager (not dev) when deploy mode changes
 						await this.deployManager.disconnect();
 						await this.deployManager.initialize();
-						this.sendFullUpdate();
-						break;
-					case 'setDeployTargetTeam':
-						this.configManager.setTeamId('deployment', message.teamId);
 						this.sendFullUpdate();
 						break;
 					case 'cloudSignIn': {
@@ -342,7 +342,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					event: event.body,
 				});
 			} else if (event?.event === 'apaevt_status_update') {
-				// Forward status updates (errors/warnings) to webview
+				// Forward status updates (errors/warnings) to webview.
+				// Deploy runs never touch the dev lists (THE one host-side
+				// classifier, shared with ProjectProvider's status cache) —
+				// their status belongs to the deployment surfaces, and the '*'
+				// subscription delivers them here whenever a team-scoped run
+				// is visible.
+				if (isDeployRunBody(event.body)) return;
 				const projectId = event.body?.project_id;
 				const sourceId = event.body?.source;
 				if (projectId && sourceId) {
@@ -364,17 +370,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// DATA
 	// =========================================================================
 
-	/**
-	 * Returns teams from a client's ConnectResult (already cached from connect()).
-	 * No DAP request needed — teams are part of the auth handshake response.
-	 */
-	private getTeamsFromClient(client: import('rocketride').RocketRideClient | undefined): Array<{ id: string; name: string }> {
-		const info = client?.getAccountInfo();
-		if (!info?.organization) return [];
-		return info.organization.teams ?? [];
-	}
-
-	/** Sends connection state + entries + user identity + teams to the webview. */
+	/** Sends connection state + entries + user identity to the webview. */
 	private async sendFullUpdate(): Promise<void> {
 		if (!this._view) return;
 
@@ -401,18 +397,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// Dev connection
 				connectionState: status.state,
 				connectionMode: config.development.connectionMode,
-				developmentTeamId: config.development.teamId,
 				devProgressMessage: status.progressMessage,
 				devProgressLogLine: status.progressLogLine,
 				// Deploy connection
 				deployConnectionState: deployStatus.state,
 				deployConnectionMode: config.deployment.connectionMode,
-				deployTargetTeamId: config.deployment.teamId,
 				deployProgressMessage: deployStatus.progressMessage,
 				deployProgressLogLine: deployStatus.progressLogLine,
-				// Teams (from respective servers)
-				teams: this.getTeamsFromClient(this.connectionManager.getClient()),
-				deployTeams: this.getTeamsFromClient(this.deployManager.getClient()),
 				// Shared
 				cloudConnected,
 				userName: userName || undefined,

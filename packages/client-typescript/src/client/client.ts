@@ -332,9 +332,14 @@ export class DataPipe {
  * Identifies a monitor subscription key.
  *
  * - `{ token }` — monitors a specific running task by its session token.
- * - `{ projectId, source }` — monitors a project/source regardless of task.
+ * - `{ projectId, source }` — monitors the CALLER's own dev run of the
+ *   project/source (the server binds the connection's user identity).
+ * - `{ teamId, projectId, source }` — monitors the team's DEPLOYED run.
+ *
+ * The scope IS the kind: teamId present addresses the deploy continuum,
+ * absent addresses your dev run — there is no run-kind argument.
  */
-export type MonitorKey = { token: string } | { projectId: string; source: string; pipeId?: number };
+export type MonitorKey = { token: string } | { teamId?: string; projectId: string; source: string; pipeId?: number };
 
 type LifecyclePriority = 'foreground' | 'background';
 
@@ -1460,11 +1465,9 @@ export class RocketRideClient extends DAPClient {
 			name?: string;
 			/** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
 			env?: Record<string, string>;
-			/** Team ID to run the task under. Defaults to the user's default team. */
-			teamId?: string;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env, teamId } = options;
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -1536,9 +1539,6 @@ export class RocketRideClient extends DAPClient {
 		if (effectiveName !== undefined) {
 			arguments_.name = effectiveName;
 		}
-		if (teamId !== undefined) {
-			arguments_.teamId = teamId;
-		}
 
 		// Send execution request to server
 		try {
@@ -1586,8 +1586,15 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.projectId - The project identifier.
 	 * @param options.source - The source component identifier.
 	 * @param options.pipeline - The pipeline configuration to restart with.
+	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void> {
+	async restart(options: {
+		token?: string;
+		projectId: string;
+		source: string;
+		pipeline: Record<string, unknown>;
+		teamId?: string;
+	}): Promise<void> {
 		try {
 			await this.call(
 				'restart',
@@ -1596,6 +1603,7 @@ export class RocketRideClient extends DAPClient {
 					projectId: options.projectId,
 					source: options.source,
 					pipeline: options.pipeline,
+					...(options.teamId ? { teamId: options.teamId } : {}),
 				},
 			);
 		} catch (err) {
@@ -1634,13 +1642,18 @@ export class RocketRideClient extends DAPClient {
 	 * The token is required for operations like terminate and restart.
 	 * Returns undefined if no task is currently running for the given project/source.
 	 *
+	 * The scope IS the kind: pass teamId to resolve the team's DEPLOYED run;
+	 * omit it to resolve your own dev run.
+	 *
 	 * @param options.projectId - The project identifier.
 	 * @param options.source - The source component identifier.
+	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async getTaskToken(options: { projectId: string; source: string }): Promise<string | undefined> {
+	async getTaskToken(options: { projectId: string; source: string; teamId?: string }): Promise<string | undefined> {
 		const body = await this.call('rrext_get_token', {
 			projectId: options.projectId,
 			source: options.source,
+			...(options.teamId ? { teamId: options.teamId } : {}),
 		});
 		return body?.token as string | undefined;
 	}
@@ -2233,6 +2246,11 @@ export class RocketRideClient extends DAPClient {
 			if (key.pipeId !== undefined) {
 				args.pipeId = key.pipeId;
 			}
+			// The scope IS the kind: teamId addresses the team's deploy run,
+			// absent addresses the caller's own dev run.
+			if (key.teamId) {
+				args.teamId = key.teamId;
+			}
 			await this.call('rrext_monitor', args);
 		}
 	}
@@ -2260,16 +2278,20 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Convert a MonitorKey to a stable string for map lookup.
+	 *
+	 * Project keys use a JSON-array encoding because the ids are free text:
+	 * a delimiter-joined string cannot round-trip a source containing the
+	 * delimiter (a source like 'chat@legacy' would decode as a team scope)
+	 * — and reconnect round-trips EVERY key through this pair, so a
+	 * misparse silently rewrites the subscription. MUST stay symmetric
+	 * with _monitorStringToKey. The string is private registry state; it
+	 * never travels on the wire.
 	 */
 	private _monitorKeyToString(key: MonitorKey): string {
 		if ('token' in key) {
 			return `t:${key.token}`;
 		}
-		let s = `p:${key.projectId}.${key.source}`;
-		if (key.pipeId !== undefined) {
-			s += `.${key.pipeId}`;
-		}
-		return s;
+		return `p:${JSON.stringify([key.projectId, key.source, key.pipeId ?? null, key.teamId ?? ''])}`;
 	}
 
 	/**
@@ -2280,16 +2302,18 @@ export class RocketRideClient extends DAPClient {
 			return { token: keyStr.slice(2) };
 		}
 		if (keyStr.startsWith('p:')) {
-			const rest = keyStr.slice(2);
-			const dotIdx = rest.indexOf('.');
-			if (dotIdx === -1) return null;
-			const projectId = rest.slice(0, dotIdx);
-			const remaining = rest.slice(dotIdx + 1);
-			const parts = remaining.split('.');
-			if (parts.length === 2 && !isNaN(Number(parts[1]))) {
-				return { projectId, source: parts[0], pipeId: Number(parts[1]) };
+			try {
+				const [projectId, source, pipeId, teamId] = JSON.parse(keyStr.slice(2)) as [string, string, number | null, string];
+				return {
+					projectId,
+					source,
+					...(pipeId !== null ? { pipeId } : {}),
+					...(teamId ? { teamId } : {}),
+				};
+			} catch {
+				// A malformed registry string has no valid key — skip it.
+				return null;
 			}
-			return { projectId, source: remaining };
 		}
 		return null;
 	}
@@ -3104,14 +3128,16 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Lazily-initialised deploy API namespace.
+	 * Lazily-initialised deploy API namespace (teams-as-environments).
 	 *
-	 * Provides typed methods for managing server-side pipeline deployments:
-	 * add, remove, list, status, and update.
+	 * Publish immutable pipeline versions to the org registry, point teams
+	 * at them (promotion and rollback alike), schedule sources, and read
+	 * the audit history.
 	 *
 	 * @example
 	 * ```typescript
-	 * const rec = await client.deploy.add(pipeline, { schedule: '0/15 * * * *' });
+	 * const { artifact } = await client.deploy.publish(pipeline, { comment: 'v2' });
+	 * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
 	 * ```
 	 */
 	get deploy(): DeployApi {
@@ -3127,7 +3153,8 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @example
 	 * ```typescript
-	 * const stream = { projectId: 'proj', source: 'chat_1', runKind: 'dev' as const };
+	 * // Own dev stream; add teamId to address a team's deploy continuum.
+	 * const stream = { projectId: 'proj', source: 'chat_1' };
 	 * const { chapters } = await client.log.chapters(stream);
 	 * const { events } = await client.log.read(stream, { fromSeq: chapters[0].beginSeq });
 	 * ```

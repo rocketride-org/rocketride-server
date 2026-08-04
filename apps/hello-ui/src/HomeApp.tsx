@@ -51,7 +51,7 @@ const { useWorkspace, ConnectionManager } = getShellApi();
 // CONSTANTS
 // =============================================================================
 
-const DISCORD_URL = 'https://discord.gg/rocketride';
+const DISCORD_URL = 'https://discord.gg/PMXrtenMsY';
 
 /** Honor the OS "reduce motion" setting for card hover transitions. */
 const REDUCE_MOTION =

@@ -28,6 +28,10 @@ env:
   # that is the actual cross-OS compile test. A read-only nuget cache can be
   # layered in later to speed up the triplet-matching legs.
   VCPKG_BINARY_SOURCES: clear
+  # From-source builds every dep, so keep peak disk low: vcpkg drops each port's
+  # buildtree/package staging right after it builds. Needed on the smaller (72G)
+  # runners, where the final link otherwise runs out of space.
+  VCPKG_CLEAN_AFTER_BUILD: '1'
 
 jobs:
   os-matrix:
@@ -44,8 +48,29 @@ jobs:
           - ubuntu:24.04
           - ubuntu:26.04
           - fedora:latest
-          - almalinux:9 # RHEL-compatible; may need EPEL / RHEL-column tuning in compiler-unix.sh — a break here is informative
+          - almalinux:10 # RHEL-compatible
     steps:
+      # Log the runner disk up front — hosted-runner disk size has varied between
+      # runs (seen 72G and 145G), and the from-source build + ML test wheels are
+      # disk-heavy, so keep an eye on it.
+      - name: Report disk size
+        shell: sh
+        run: df -h / 2>/dev/null || true
+
+      # Memory headroom is the one resource this job never measured. The engine
+      # dying mid-test-run shows up only as ECONNREFUSED on the client side, and
+      # an OOM kill (SIGKILL) leaves nothing in the engine's own output - so
+      # without this there is no way to tell an OOM from a clean exit after the
+      # fact. cgroup v2 files exist inside the container; /proc/meminfo is the
+      # host view. Both are best-effort.
+      - name: Report memory headroom
+        shell: sh
+        run: |
+          grep -E '^(MemTotal|MemAvailable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null || true
+          echo "cgroup memory.max:     $(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo n/a)"
+          echo "cgroup memory.current: $(cat /sys/fs/cgroup/memory.current 2>/dev/null || echo n/a)"
+          echo "/dev/shm size:         $(df -h /dev/shm 2>/dev/null | awk 'NR==2{print $2}' || echo n/a)"
+
       # Minimal base images ship without git, Python, or the Python build
       # backends. actions/checkout needs git; compiler-unix.sh installs the
       # C/C++ toolchain but requires — and does not install — python3 plus the
@@ -107,8 +132,39 @@ jobs:
         shell: bash
         run: |
           chmod +x ./builder || true
-          ./builder build --verbose --autoinstall
+          # --system-compiler: install a repo clang + its runtime libs where available;
+          # tarball fallback only where no in-range clang exists (Fedora/EL).
+          ./builder build --verbose --autoinstall --system-compiler
+
+      # Building every vcpkg dep from source leaves multi-GB rebuild scratch
+      # (buildtrees/downloads/packages). The installed libs are in vcpkg_installed
+      # and are kept; drop the scratch so the test phase has disk headroom — some
+      # node requirements pull multi-GB ML wheels (torch/CUDA).
+      - name: Reclaim vcpkg build scratch
+        shell: bash
+        run: |
+          df -h / 2>/dev/null || true
+          rm -rf build/vcpkg/buildtrees build/vcpkg/downloads build/vcpkg/packages || true
+          df -h / 2>/dev/null || true
 
       - name: Unit tests
         shell: bash
         run: ./builder test --verbose --sequential
+
+      # Runs only when the tests failed. memory.events.oom_kill is a cumulative
+      # counter that survives the killed process, so a non-zero value here is
+      # positive proof the cgroup OOM killer fired during this job - the one
+      # thing the job's own logs can never show, since SIGKILL is silent and
+      # dmesg needs privileges the container doesn't have.
+      - name: Post-failure resource forensics
+        if: failure()
+        shell: sh
+        run: |
+          echo "=== cgroup memory events (oom_kill > 0 proves an OOM kill) ==="
+          cat /sys/fs/cgroup/memory.events 2>/dev/null || echo "memory.events unavailable"
+          echo "=== memory at failure ==="
+          grep -E '^(MemTotal|MemAvailable|SwapFree):' /proc/meminfo 2>/dev/null || true
+          echo "cgroup memory.max:  $(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo n/a)"
+          echo "cgroup memory.peak: $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo n/a)"
+          echo "=== disk at failure ==="
+          df -h / 2>/dev/null || true

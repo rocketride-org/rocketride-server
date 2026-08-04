@@ -69,6 +69,12 @@ Error executeTask(const file::Path &path, json::Value &value) noexcept {
     // Make sure the paths exist
     if (auto ccode = config::paths().makePaths()) return ccode;
 
+    // Recover any dump left by a previous run; harmless to repeat per task.
+    // Cannot move earlier: before makePaths() the log dir may not exist and
+    // createCrashDumpPath() silently redirects to the system temp dir, and
+    // before monitor::init() the notify callback is still empty.
+    ap::plat::minidumpSweep();
+
     // Enable traces that we specified - there is an ambiguity here. It
     // appears that the app is putting this in the config section for .json
     // and in the task section for .task. Since we used to look for it in
