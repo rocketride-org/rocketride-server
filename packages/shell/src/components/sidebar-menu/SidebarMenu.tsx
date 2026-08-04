@@ -12,7 +12,9 @@
  * it likes. Row geometry matches the Explorer's compact rows (22px line
  * height, 5px radius) so the two read as one family when stacked in a
  * sidebar; the active entry takes the theme's standard list highlight and
- * count badges right-align via the shared {@link ViewMenuBadge}.
+ * count badges right-align via the shared {@link ViewMenuBadge}. A
+ * `sectionLabel` sits flush at indent 0 with every row nested 10px beneath
+ * it; an unlabeled menu keeps its rows flush where the label would sit.
  *
  * Multi-level (2026-07-18): an entry that declares `children` renders as an
  * expandable SECTION — a bolder row with a right-aligned chevron that
@@ -47,7 +49,11 @@ export interface ISidebarMenuProps {
 	activeId: string;
 	/** Fired with an entry id when the user selects it. */
 	onSelect: (id: string) => void;
-	/** Section label above the menu, e.g. the owning document name. Optional. */
+	/**
+	 * Section label above the menu, e.g. the owning document name. The label
+	 * sits flush at indent 0 and every row nests 10px beneath it; without a
+	 * label, rows sit flush where the label would. Optional.
+	 */
 	sectionLabel?: string;
 	/**
 	 * Collapsed (icon-rail) rendering: entries draw icon-only (the entry's
@@ -70,9 +76,10 @@ const styles = {
 	} as CSSProperties,
 
 	// Optional uppercase section header naming the owning document — the
-	// Explorer's section-header label treatment.
+	// Explorer's section-header font treatment, horizontally aligned with the
+	// base row text (indent 0) so its 10px-nested rows read as members.
 	sectionLabel: {
-		padding: '6px 12px 4px',
+		padding: '6px 8px 4px',
 		fontSize: 11,
 		fontWeight: 600,
 		textTransform: 'uppercase',
@@ -200,12 +207,15 @@ const styles = {
 		flexShrink: 0,
 	} as CSSProperties,
 
-	// Child rows indent under their section: the extra left padding equals
-	// the parent's icon column (17px) + gap (6px) + the row's own base
-	// padding (8px), so a child's icon lines up with its section's label.
-	childIndent: {
-		paddingLeft: 31,
-	} as CSSProperties,
+	// Left padding for a row's nesting position, composed over the base row
+	// padding (8px). A labeled menu nests EVERY row 10px under its header
+	// (the header itself stays flush at indent 0). Section children add the
+	// parent's icon column (17px) + gap (6px) so a child's icon lines up
+	// with its section's label. Extra padding rather than margin so the
+	// hover/active pill still spans the full menu width.
+	rowIndent: (grouped: boolean, child: boolean): CSSProperties => ({
+		paddingLeft: 8 + (grouped ? 10 : 0) + (child ? 23 : 0),
+	}),
 
 	// First-letter fallback glyph for entries that declare no icon.
 	letterGlyph: {
@@ -243,6 +253,9 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 	// shell-provided context (false outside a provider).
 	const ctxCollapsed = useSidebarCollapsed();
 	const isCollapsed = collapsed ?? ctxCollapsed;
+
+	// Group flag: a labeled menu nests every row 10px under its header.
+	const grouped = Boolean(sectionLabel);
 
 	/**
 	 * Resolve the section (top-level entry with children) containing an
@@ -324,7 +337,7 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 				aria-current={isActive || undefined}
 				aria-disabled={isDisabled || undefined}
 				tabIndex={isDisabled ? -1 : 0}
-				style={indented ? { ...styles.item(isActive, isHovered, isDisabled), ...styles.childIndent } : styles.item(isActive, isHovered, isDisabled)}
+				style={{ ...styles.item(isActive, isHovered, isDisabled), ...styles.rowIndent(grouped, indented) }}
 				onClick={() => { if (!isDisabled) onSelect(entry.id); }}
 				onKeyDown={(e) => onItemKeyDown(e, entry.id, isDisabled)}
 				onMouseEnter={() => setHoveredId(entry.id)}
@@ -396,7 +409,7 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 							role="button"
 							aria-expanded={isOpen}
 							tabIndex={0}
-							style={styles.sectionRow(isHovered)}
+							style={{ ...styles.sectionRow(isHovered), ...styles.rowIndent(grouped, false) }}
 							onClick={() => toggleSection(entry.id)}
 							onKeyDown={(e) => onSectionKeyDown(e, entry.id)}
 							onMouseEnter={() => setHoveredId(entry.id)}

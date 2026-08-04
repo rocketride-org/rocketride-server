@@ -16,6 +16,7 @@
 import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from '../contract/versions/v0';
 import type { ShellApiV1 } from '../contract/versions/v1';
+import type { ShellApiV2 } from '../contract/versions/v2';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -578,12 +579,20 @@ import type { IConnectionCardProps as Frozen_IConnectionCardProps } from '../con
 import type { IConnectionCardProps as Current_IConnectionCardProps } from './api';
 import type { IConnectionCardAddProps as Frozen_IConnectionCardAddProps } from '../contract/versions/v1';
 import type { IConnectionCardAddProps as Current_IConnectionCardAddProps } from './api';
+import type { IConnectionCardDisplay as Frozen_IConnectionCardDisplay } from '../contract/versions/v2';
+import type { IConnectionCardDisplay as Current_IConnectionCardDisplay } from './api';
+import type { IConnectionFormField as Frozen_IConnectionFormField } from '../contract/versions/v2';
+import type { IConnectionFormField as Current_IConnectionFormField } from './api';
+import type { IConnectionManagerViewProps as Frozen_IConnectionManagerViewProps } from '../contract/versions/v2';
+import type { IConnectionManagerViewProps as Current_IConnectionManagerViewProps } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
 void _floor_v0;
 const _floor_v1: ShellApiV1 = {} as ShellApiShape;
 void _floor_v1;
+const _floor_v2: ShellApiV2 = {} as ShellApiShape;
+void _floor_v2;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1150,3 +1159,9 @@ const _t_IConnectionCardProps: Frozen_IConnectionCardProps = {} as Current_IConn
 void _t_IConnectionCardProps;
 const _t_IConnectionCardAddProps: Frozen_IConnectionCardAddProps = {} as Current_IConnectionCardAddProps;
 void _t_IConnectionCardAddProps;
+const _t_IConnectionCardDisplay: Frozen_IConnectionCardDisplay = {} as Current_IConnectionCardDisplay;
+void _t_IConnectionCardDisplay;
+const _t_IConnectionFormField: Frozen_IConnectionFormField = {} as Current_IConnectionFormField;
+void _t_IConnectionFormField;
+const _t_IConnectionManagerViewProps: Frozen_IConnectionManagerViewProps<any> = {} as Current_IConnectionManagerViewProps<any>;
+void _t_IConnectionManagerViewProps;

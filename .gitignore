@@ -225,3 +225,9 @@ downloads/maven-3.9.6.tar.gz
 # One of the python modules keeps installing this
 include/python3.12/greenlet/greenlet.h
 .rocketride/
+
+# Per-app pnpm lockfiles from the App Builder's ephemeral --ignore-workspace
+# dev-preview installs (--no-lockfile now prevents writing them; this ignores
+# any that predate the flag). The root lockfile is the in-tree source of truth;
+# a standalone app repo mints its own.
+apps/*/pnpm-lock.yaml

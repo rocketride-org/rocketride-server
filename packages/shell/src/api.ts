@@ -259,6 +259,7 @@ import { MessageList } from './components/chat/components/MessageList';
 import { MarkdownRenderer } from './components/chat/components/MarkdownRenderer';
 import { useChatMessages } from './components/chat/hooks/useChatMessages';
 import { ConnectionCard, ConnectionCardAdd } from './components/connection-card/ConnectionCard';
+import { ConnectionManagerView } from './components/connection-manager/ConnectionManagerView';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import { formatBytes, formatDate, formatDuration } from './util/format';
@@ -287,7 +288,7 @@ export {
 	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
 	formatDuration, formatDateValue,
 	ChatView, MessageList, MarkdownRenderer, useChatMessages,
-	ConnectionCard, ConnectionCardAdd,
+	ConnectionCard, ConnectionCardAdd, ConnectionManagerView,
 	commonStyles,
 	applyTheme, isInVSCode, OAUTH_ROOT_URL,
 	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
@@ -299,6 +300,7 @@ export type { IButtonProps, ButtonVariant } from './components/button/Button';
 export type { IStatusBadgeProps, IStatusDotProps, StatusVariant } from './components/status-badge/StatusBadge';
 export type { IChatViewProps, ChatMessage, UseChatMessagesOptions } from './components/chat/types';
 export type { IConnectionCardProps, IConnectionCardAddProps } from './components/connection-card/ConnectionCard';
+export type { IConnectionManagerViewProps, IConnectionCardDisplay, IConnectionFormField } from './components/connection-manager/ConnectionManagerView';
 export type { IEmptyStateProps } from './components/empty-state/EmptyState';
 export type { IBannerProps, BannerVariant } from './components/banner/Banner';
 export type { IInputFieldProps } from './components/input-field/InputField';

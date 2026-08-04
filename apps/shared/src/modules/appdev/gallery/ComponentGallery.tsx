@@ -37,14 +37,16 @@
  * change (plan decision D-H).
  *
  * The gallery's own chrome is dogfooded from the library it documents:
- * StatusBadge for the group chip, Banner for doc notes, Button for the
- * copy action, ToggleGroup / InputField inside the KnobsPanel, and
- * commonStyles for lists, tables, and text treatments.
+ * SidebarMenu for the grouped entry list, StatusBadge for the group chip,
+ * Banner for doc notes, Button for the copy action, ToggleGroup /
+ * InputField inside the KnobsPanel, and commonStyles for tables and text
+ * treatments.
  */
 
 import React, { Suspense, useMemo, useState } from 'react';
 import { Banner } from 'shell';
 import { Button } from 'shell';
+import { SidebarMenu } from 'shell';
 import { StatusBadge } from 'shell';
 import { commonStyles } from 'shell';
 import { KnobsPanel } from './KnobsPanel';
@@ -72,18 +74,14 @@ const styles: Record<string, React.CSSProperties> = {
 		background: 'var(--rr-bg-default)',
 	},
 	// ── Left: grouped component list ─────────────────────────────────────
+	// Horizontal inset is deliberately thin: each SidebarMenu brings its own
+	// container padding, so the outer pane only adds the divider and scroll.
 	list: {
 		width: 210,
 		flexShrink: 0,
 		borderRight: '1px solid var(--rr-border)',
 		overflowY: 'auto',
-		padding: '10px 8px 16px',
-	},
-	listGroupLabel: {
-		...commonStyles.labelUppercase,
-		fontSize: 10,
-		display: 'block',
-		padding: '12px 8px 5px',
+		padding: '8px 2px 16px',
 	},
 	// ── Right: detail pane ───────────────────────────────────────────────
 	detail: {
@@ -412,21 +410,27 @@ export const ComponentGallery: React.FC = () => {
 
 	return (
 		<div style={styles.wrap}>
-			{/* LEFT: grouped component list */}
+			{/* LEFT: grouped component list — one flat SidebarMenu per gallery
+			    group (dogfooding the stock nav list). Flat menus rather than a
+			    single menu with children: sections are an accordion (at most one
+			    open), and the gallery keeps every group visible at once. The
+			    collapsed flag is pinned false because this nav lives in the
+			    editor area — a shell-level SidebarCollapsedContext provider must
+			    not iconify it when the real sidebar collapses. */}
 			<div style={styles.list}>
 				{GALLERY_GROUPS.map((group) => (
-					<React.Fragment key={group.id}>
-						<span style={styles.listGroupLabel}>{group.label}</span>
-						{GALLERY_ENTRIES.filter((candidate) => candidate.group === group.id).map((candidate) => (
-							<div
-								key={candidate.id}
-								style={commonStyles.listRow(candidate.id === entry.id)}
-								onClick={() => selectEntry(candidate.id)}
-							>
-								{candidate.name}
-							</div>
-						))}
-					</React.Fragment>
+					<SidebarMenu
+						key={group.id}
+						sectionLabel={group.label}
+						menu={{
+							entries: GALLERY_ENTRIES
+								.filter((candidate) => candidate.group === group.id)
+								.map((candidate) => ({ id: candidate.id, label: candidate.name })),
+						}}
+						activeId={entry.id}
+						onSelect={selectEntry}
+						collapsed={false}
+					/>
 				))}
 			</div>
 

@@ -282,7 +282,65 @@ export function registerDevRemote(appId: string, moduleId: string, name: string,
 			}),
 		{ name, moduleId },
 	);
+	// Release any descriptor loads holding for this registration (embedded
+	// previews pause the locked app's first load until the dev remote exists).
+	devRegisteredApps.add(appId);
+	for (const release of devRemoteWaiters.get(appId) ?? []) release();
+	devRemoteWaiters.delete(appId);
 	invalidateAppDescriptor(appId);
+}
+
+// =============================================================================
+// DEV-REMOTE WAIT — embedded previews hold the locked app's first load
+// =============================================================================
+
+/** App ids whose dev remote registration has arrived this page. */
+const devRegisteredApps = new Set<string>();
+/** Pending load releases per app id, resolved by registerDevRemote. */
+const devRemoteWaiters = new Map<string, Array<() => void>>();
+
+/**
+ * Whether this page is an embedded dev preview (`rrdev=1`, or the session
+ * marker that survives the OAuth redirect stripping the query string).
+ * Such a page ALWAYS receives an rrdev:registerRemote for its locked app,
+ * so loading that app before the registration arrives can only fail.
+ */
+export function isDevPreviewPage(): boolean {
+	try {
+		if (new URLSearchParams(window.location.search).get('rrdev') === '1') return true;
+		return sessionStorage.getItem('rr:dev') === '1';
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The app id this page is session-locked to (`?appid=` / `?appId=`), or ''.
+ * Read from the URL directly: the value identifies WHICH app's first load
+ * the dev-preview hold applies to.
+ */
+export function previewLockedAppId(): string {
+	try {
+		const params = new URLSearchParams(window.location.search);
+		return params.get('appId') || params.get('appid') || '';
+	} catch {
+		return '';
+	}
+}
+
+/**
+ * Resolves once the app's dev remote registration has arrived (immediately
+ * when it already has). Callers gate the preview-locked app's descriptor
+ * load on this so the load cannot race the app dev server's startup
+ * (pnpm install + rsbuild take seconds; the shell boots in milliseconds).
+ */
+export function waitForDevRemote(appId: string): Promise<void> {
+	if (devRegisteredApps.has(appId)) return Promise.resolve();
+	return new Promise((resolve) => {
+		const list = devRemoteWaiters.get(appId) ?? [];
+		list.push(resolve);
+		devRemoteWaiters.set(appId, list);
+	});
 }
 
 /**

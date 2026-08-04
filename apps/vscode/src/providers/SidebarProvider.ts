@@ -33,7 +33,7 @@ import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
 import { getProjectProvider } from '../extension';
-import { scanWorkspaceApps } from '../appdev/appScan';
+import { scanWorkspaceApps, appIconDataUri } from '../appdev/appScan';
 import type { ScannedApp } from '../appdev/appScan';
 
 // =============================================================================
@@ -46,6 +46,9 @@ interface AppRowDTO {
 	name: string;
 	status: 'local' | 'dev' | 'draft' | 'pending' | 'approved' | 'rejected' | 'live';
 	folder?: string;
+	/** Host-resolved icon (a data: URI here — loadable under the webview CSP
+	 * regardless of localResourceRoots, which only cover the extension dir). */
+	iconUrl?: string;
 }
 
 // =============================================================================
@@ -242,7 +245,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private async buildAppRows(): Promise<AppRowDTO[]> {
 		const rows = new Map<string, AppRowDTO>();
 		for (const app of this.scannedApps) {
-			rows.set(app.id, { id: app.id, name: app.name, status: 'local', folder: app.folder });
+			rows.set(app.id, { id: app.id, name: app.name, status: 'local', folder: app.folder, iconUrl: await appIconDataUri(app.icon) });
 		}
 
 		// Server statuses — best-effort: OSS engines reject the marketplace

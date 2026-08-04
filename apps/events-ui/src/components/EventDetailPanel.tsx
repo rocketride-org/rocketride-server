@@ -29,7 +29,7 @@ import type { CSSProperties } from 'react';
 import { DetailPanel, LabelValue, Section } from 'shell';
 // The shared token-themed JSON tree (deep import, matching this app's existing
 // `shared/themes/styles` import) — the one JSON viewer, not a per-app copy.
-import { JsonTree } from 'shared/components/trace/JsonTree';
+import { JsonTree } from './JsonTree';
 import type { EventRow } from '../types';
 import { eventColor } from '../styles';
 import { formatTime } from '../format';

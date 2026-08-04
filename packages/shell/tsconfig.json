@@ -28,9 +28,6 @@
 		"allowJs": true,
 		"checkJs": false,
 		"paths": {
-			"shared/*": [
-				"../../packages/shared-ui/src/*"
-			],
 			"shell": [
 				"./src/index.ts"
 			]
@@ -39,8 +36,7 @@
 	"include": [
 		"src/**/*",
 		"*.ts",
-		"*.tsx",
-		"../../packages/shared-ui/src/types/global.d.ts"
+		"*.tsx"
 	],
 	"exclude": [
 		"node_modules",

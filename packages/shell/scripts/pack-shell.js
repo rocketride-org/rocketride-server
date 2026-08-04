@@ -183,6 +183,17 @@ async function main() {
 	// apps themselves never import 'rocketride'; the shell barrel is the
 	// only door.
 	dependencies['rocketride'] = sdkPkg.version;
+	// The vendored SDK rides as a plain directory, so npm/pnpm never read
+	// ITS manifest to install its runtime deps — carry them here as deps
+	// of the package instead. Without this, Node consumers (the vscode
+	// extension host) lose ws: the SDK's dynamic import('ws') then fails
+	// at runtime and no WebSocket connection can ever open. ws lives in
+	// the SDK's optionalDependencies (browsers must install cleanly
+	// without it), so both sections are carried, each keeping its tier.
+	for (const [name, spec] of Object.entries(sdkPkg.dependencies ?? {})) {
+		if (!dependencies[name]) dependencies[name] = spec;
+	}
+	const optionalDependencies = { ...(sdkPkg.optionalDependencies ?? {}) };
 	const manifest = {
 		name: 'shell',
 		version: workspacePkg.version,
@@ -202,6 +213,7 @@ async function main() {
 			'./package.json': './package.json',
 		},
 		dependencies,
+		...(Object.keys(optionalDependencies).length ? { optionalDependencies } : {}),
 		bundleDependencies: ['rocketride'],
 		rocketride: {
 			shellApiVersion: frozen.version,

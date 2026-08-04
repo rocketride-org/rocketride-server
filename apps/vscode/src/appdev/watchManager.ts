@@ -188,13 +188,19 @@ export class WatchManager {
 	private runInstall(app: ScannedApp): Promise<boolean> {
 		this.notify(app.id, { state: 'installing' });
 		this.logger.output(`[appdev] pnpm install: ${app.id} (${app.folder})`);
-		this.console(app.id, 'log', `$ pnpm install --ignore-workspace  (${app.folder})`);
+		this.console(app.id, 'log', `$ pnpm install --ignore-workspace --no-lockfile --prefer-offline  (${app.folder})`);
 		return new Promise<boolean>((resolve) => {
 			// --ignore-workspace: app folders often live INSIDE another pnpm
 			// workspace (the monorepo, a dist tree) — without it pnpm walks up,
 			// installs that workspace's projects, and the app's own
 			// node_modules (with rsbuild) never materializes.
-			const proc = spawn('pnpm', ['install', '--ignore-workspace'], {
+			// --no-lockfile: this is an ephemeral dev-preview install; the
+			// monorepo's root lockfile is the source of truth in-tree, and a
+			// standalone app repo mints its own. Writing one here only churns
+			// git and can drift from the root. --prefer-offline: resolve from
+			// the store when a range is already satisfied, so one slow registry
+			// response cannot stall every preview install.
+			const proc = spawn('pnpm', ['install', '--ignore-workspace', '--no-lockfile', '--prefer-offline'], {
 				cwd: app.folder,
 				shell: process.platform === 'win32',
 				env: { ...process.env, NO_COLOR: '1' },

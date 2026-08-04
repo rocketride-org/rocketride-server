@@ -150,12 +150,9 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      shared:
-        specifier: file:../shared
-        version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
-        specifier: link:../../.rocketride/shell
-        version: link:../../.rocketride/shell
+        specifier: file:../../.rocketride/shell
+        version: file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13))
     devDependencies:
       '@rsbuild/core':
         specifier: ~2.0.11
@@ -363,12 +360,9 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      shared:
-        specifier: file:../shared
-        version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
-        specifier: link:../../.rocketride/shell
-        version: link:../../.rocketride/shell
+        specifier: file:../../.rocketride/shell
+        version: file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13))
     devDependencies:
       '@rsbuild/core':
         specifier: ~2.0.11
@@ -412,12 +406,9 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      shared:
-        specifier: file:../shared
-        version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
-        specifier: link:../../.rocketride/shell
-        version: link:../../.rocketride/shell
+        specifier: file:../../.rocketride/shell
+        version: file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13))
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -449,12 +440,9 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      shared:
-        specifier: file:../shared
-        version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
-        specifier: link:../../.rocketride/shell
-        version: link:../../.rocketride/shell
+        specifier: file:../../.rocketride/shell
+        version: file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13))
     devDependencies:
       '@rsbuild/core':
         specifier: ~2.0.11
@@ -483,12 +471,9 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      shared:
-        specifier: file:../shared
-        version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
-        specifier: link:../../.rocketride/shell
-        version: link:../../.rocketride/shell
+        specifier: file:../../.rocketride/shell
+        version: file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13))
     devDependencies:
       '@rsbuild/core':
         specifier: ~2.0.11
@@ -520,12 +505,9 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      shared:
-        specifier: file:../shared
-        version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
-        specifier: link:../../.rocketride/shell
-        version: link:../../.rocketride/shell
+        specifier: file:../../.rocketride/shell
+        version: file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13))
     devDependencies:
       '@rsbuild/core':
         specifier: ~2.0.11
@@ -657,8 +639,8 @@ importers:
         specifier: file:../shared
         version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
-        specifier: link:../../.rocketride/shell
-        version: link:../../.rocketride/shell
+        specifier: file:../../.rocketride/shell
+        version: file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13))
     devDependencies:
       '@chromatic-com/storybook':
         specifier: ^1.7.0
@@ -910,9 +892,6 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      shared:
-        specifier: file:../shared
-        version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
         specifier: link:../../.rocketride/shell
         version: link:../../.rocketride/shell
@@ -1038,12 +1017,9 @@ importers:
       react-dom:
         specifier: ^18.2.0
         version: 18.3.1(react@18.3.1)
-      shared:
-        specifier: file:../shared
-        version: file:apps/shared(9093c53052787d522400d2a061cd8c23)
       shell:
-        specifier: link:../../.rocketride/shell
-        version: link:../../.rocketride/shell
+        specifier: file:../../.rocketride/shell
+        version: file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13))
     devDependencies:
       '@rsbuild/core':
         specifier: ~2.0.11
@@ -10690,6 +10666,11 @@ packages:
   shell-quote@1.8.4:
     resolution: {integrity: sha512-VsC6n6vz1ihYYyZZwX7YZSF5l5x36ca17OC+a69h94YqB7X6XLwf+5MOgynYir2SLFUbl8gIYvBo8K8RoNQ6bQ==}
     engines: {node: '>= 0.4'}
+
+  shell@file:.rocketride/shell:
+    resolution: {directory: .rocketride/shell, type: directory}
+    bundledDependencies:
+      - rocketride
 
   side-channel-list@1.0.0:
     resolution: {integrity: sha512-FCLHtRD/gnpCiCHEiJLOwdmFP+wzCmDEkc9y7NsYxeF4u7Btsn1ZuwgwJGxImImHicJArLP4R0yX4c2KCrMrTA==}
@@ -24463,6 +24444,42 @@ snapshots:
   shebang-regex@3.0.0: {}
 
   shell-quote@1.8.4: {}
+
+  shell@file:.rocketride/shell(node-fetch@2.7.0(encoding@0.1.13)):
+    dependencies:
+      '@fontsource-variable/figtree': 5.2.10
+      '@module-federation/runtime': 2.5.1(node-fetch@2.7.0(encoding@0.1.13))
+      '@stripe/react-stripe-js': 3.10.0(@stripe/stripe-js@5.10.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@stripe/stripe-js': 5.10.0
+      '@types/react': 18.3.31
+      '@types/react-dom': 18.3.7(@types/react@18.3.31)
+      '@types/tabulator-tables': 6.2.11
+      allotment: 1.20.5(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      chart.js: 4.5.1
+      commander: 12.1.0
+      glob: 13.0.6
+      lucide-react: 0.460.0(react@18.3.1)
+      react: 18.3.1
+      react-chartjs-2: 5.3.1(chart.js@4.5.1)(react@18.3.1)
+      react-dom: 18.3.1(react@18.3.1)
+      react-markdown: 10.1.0(@types/react@18.3.31)(react@18.3.1)
+      react-syntax-highlighter: 15.6.6(react@18.3.1)
+      rehype-raw: 7.0.0
+      rehype-sanitize: 6.0.0
+      remark-gfm: 4.0.1
+      shaders: 2.5.109(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      tabulator-tables: 6.5.2
+    optionalDependencies:
+      ws: 8.21.0
+    transitivePeerDependencies:
+      - bufferutil
+      - node-fetch
+      - pixi.js
+      - solid-js
+      - supports-color
+      - svelte
+      - utf-8-validate
+      - vue
 
   side-channel-list@1.0.0:
     dependencies:

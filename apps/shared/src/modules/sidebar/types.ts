@@ -88,6 +88,12 @@ export interface AppListItem {
 	 * public version).
 	 */
 	status: 'local' | 'dev' | 'draft' | 'pending' | 'approved' | 'rejected' | 'live';
+	/**
+	 * Icon URL for the row, already resolved by the host to something the
+	 * view can load directly (a data: URI in the VSCode webview; a served
+	 * URL on web hosts). Rows without one render the generic app glyph.
+	 */
+	iconUrl?: string;
 	/** Bound workspace folder (VSCode hosts; absent for server-only rows). */
 	folder?: string;
 }
