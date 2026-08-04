@@ -14,6 +14,7 @@ import {
 	buildChatBody,
 	buildRunBody,
 	coerceJsonObject,
+	declaredBinaryBytes,
 	formatBytes,
 	isConnectionError,
 	MAX_UPLOAD_BYTES,
@@ -253,17 +254,32 @@ export class RocketRide implements INodeType {
 					}
 
 					const form = new FormData();
+					const uploadLimitError = (gotBytes: number) =>
+						new NodeOperationError(
+							this.getNode(),
+							`Upload exceeds the ${formatBytes(MAX_UPLOAD_BYTES)} limit (got ${formatBytes(gotBytes)}). Reduce the file size or upload fewer files at once.`,
+							{ itemIndex: i },
+						);
 					let totalBytes = 0;
 					for (const fieldName of fieldNames) {
 						const binary = this.helpers.assertBinaryData(i, fieldName);
+						// Fail fast on oversized binaries before buffering them into
+						// memory, using the declared size when one is available. The
+						// post-buffer check below stays authoritative (declared sizes
+						// are advisory in n8n).
+						const declared = await declaredBinaryBytes(
+							binary,
+							typeof this.helpers.getBinaryMetadata === 'function'
+								? this.helpers.getBinaryMetadata.bind(this.helpers)
+								: undefined,
+						);
+						if (declared !== undefined && totalBytes + declared > MAX_UPLOAD_BYTES) {
+							throw uploadLimitError(totalBytes + declared);
+						}
 						const buffer = await this.helpers.getBinaryDataBuffer(i, fieldName);
 						totalBytes += buffer.length;
 						if (totalBytes > MAX_UPLOAD_BYTES) {
-							throw new NodeOperationError(
-								this.getNode(),
-								`Upload exceeds the ${formatBytes(MAX_UPLOAD_BYTES)} limit (got ${formatBytes(totalBytes)}). Reduce the file size or upload fewer files at once.`,
-								{ itemIndex: i },
-							);
+							throw uploadLimitError(totalBytes);
 						}
 						form.append(
 							fieldName,

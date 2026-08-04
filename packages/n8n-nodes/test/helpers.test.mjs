@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	buildRunBody,
 	coerceJsonObject,
+	declaredBinaryBytes,
 	parseRocketRideResponse,
 } from '../nodes/RocketRide/helpers.ts';
 
@@ -61,5 +62,34 @@ describe('parseRocketRideResponse', () => {
 	});
 	it('wraps non-JSON strings under result', () => {
 		expect(parseRocketRideResponse('plain text')).toEqual({ result: 'plain text' });
+	});
+});
+
+describe('declaredBinaryBytes', () => {
+	it('prefers the numeric bytes field when present', async () => {
+		expect(await declaredBinaryBytes({ data: '', mimeType: 'x', bytes: 42 })).toBe(42);
+	});
+
+	it('falls back to getBinaryMetadata for externally-stored binaries', async () => {
+		const size = await declaredBinaryBytes({ data: '', mimeType: 'x', id: 'bin-1' }, async () => ({
+			fileSize: 1234,
+		}));
+		expect(size).toBe(1234);
+	});
+
+	it('returns the exact decoded length for in-memory base64 data', async () => {
+		const payload = Buffer.from('hello!!');
+		const b64 = payload.toString('base64');
+		expect(await declaredBinaryBytes({ data: b64, mimeType: 'x' })).toBe(payload.length);
+	});
+
+	it('returns undefined when no reliable size is available', async () => {
+		// External binary, no metadata helper — and a metadata helper that throws.
+		expect(await declaredBinaryBytes({ data: '', mimeType: 'x', id: 'bin-1' })).toBeUndefined();
+		expect(
+			await declaredBinaryBytes({ data: '', mimeType: 'x', id: 'bin-1' }, async () => {
+				throw new Error('gone');
+			}),
+		).toBeUndefined();
 	});
 });

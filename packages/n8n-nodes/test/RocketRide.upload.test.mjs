@@ -81,4 +81,73 @@ describe('RocketRide.execute — Upload Files', () => {
 		expect(ctx.calls.length).toBe(0);
 		expect(result[0][0].json.error).toMatch(/exceeds the 16/);
 	});
+
+	it('rejects oversized uploads from declared metadata bytes without buffering', async () => {
+		let buffered = false;
+		const ctx = makeContext({
+			params: { operation: 'uploadFiles', inputDataFieldName: 'data' },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			binaries: {
+				data: {
+					meta: { fileName: 'big.bin', mimeType: 'application/octet-stream', bytes: 17 * 1024 * 1024 },
+					buffer: Buffer.alloc(0),
+				},
+			},
+			httpMock: () => ({ status: 'OK', data: {} }),
+			continueOnFail: true,
+		});
+		ctx.helpers.getBinaryDataBuffer = async () => {
+			buffered = true;
+			return Buffer.alloc(0);
+		};
+
+		const result = await RocketRide.prototype.execute.call(ctx);
+		expect(buffered).toBe(false);
+		expect(ctx.calls.length).toBe(0);
+		expect(result[0][0].json.error).toMatch(/exceeds the 16/);
+	});
+
+	it('rejects oversized externally-stored binaries via getBinaryMetadata without buffering', async () => {
+		let buffered = false;
+		const ctx = makeContext({
+			params: { operation: 'uploadFiles', inputDataFieldName: 'data' },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			binaries: {
+				data: {
+					meta: { fileName: 'big.bin', mimeType: 'application/octet-stream', id: 'bin-1' },
+					buffer: Buffer.alloc(0),
+				},
+			},
+			httpMock: () => ({ status: 'OK', data: {} }),
+			continueOnFail: true,
+		});
+		ctx.helpers.getBinaryMetadata = async () => ({ fileSize: 20 * 1024 * 1024 });
+		ctx.helpers.getBinaryDataBuffer = async () => {
+			buffered = true;
+			return Buffer.alloc(0);
+		};
+
+		const result = await RocketRide.prototype.execute.call(ctx);
+		expect(buffered).toBe(false);
+		expect(ctx.calls.length).toBe(0);
+		expect(result[0][0].json.error).toMatch(/exceeds the 16/);
+	});
+
+	it('uploads normally when the declared size is under the limit', async () => {
+		const ctx = makeContext({
+			params: { operation: 'uploadFiles', inputDataFieldName: 'data' },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			binaries: {
+				data: {
+					meta: { fileName: 'ok.txt', mimeType: 'text/plain', bytes: 5 },
+					buffer: Buffer.from('hello'),
+				},
+			},
+			httpMock: () => ({ status: 'OK', data: {} }),
+		});
+
+		await RocketRide.prototype.execute.call(ctx);
+		expect(ctx.calls.length).toBe(1);
+		expect(ctx.calls[0].body.get('data').name).toBe('ok.txt');
+	});
 });

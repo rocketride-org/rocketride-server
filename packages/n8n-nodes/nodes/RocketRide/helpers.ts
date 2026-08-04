@@ -1,4 +1,4 @@
-import type { GenericValue, IDataObject } from 'n8n-workflow';
+import type { GenericValue, IBinaryData, IDataObject } from 'n8n-workflow';
 
 export type RocketRidePayloadMode = 'text' | 'json' | 'structured';
 
@@ -38,6 +38,43 @@ export function coerceJsonObject(value: unknown): IDataObject {
 
 /** Max bytes accepted for a single multipart upload — matches n8n's default payload cap. */
 export const MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
+
+/**
+ * Best-effort declared size of a binary *before* it is buffered into memory, so
+ * oversized uploads can fail fast instead of being fully materialized first.
+ *
+ * Resolution order:
+ * 1. `binary.bytes` — numeric size n8n stamps on the metadata when known.
+ * 2. `getMetadata(binary.id)` — authoritative size for externally-stored
+ *    binaries (filesystem / S3 modes).
+ * 3. The base64 `data` payload length — exact decoded size for in-memory mode.
+ *
+ * Returns `undefined` when no reliable size is available; the caller's
+ * post-buffer check remains authoritative (metadata is advisory in n8n).
+ */
+export async function declaredBinaryBytes(
+	binary: IBinaryData,
+	getMetadata?: (binaryDataId: string) => Promise<{ fileSize: number }>,
+): Promise<number | undefined> {
+	if (typeof binary.bytes === 'number') {
+		return binary.bytes;
+	}
+	if (binary.id !== undefined && getMetadata !== undefined) {
+		try {
+			const meta = await getMetadata(binary.id);
+			if (typeof meta?.fileSize === 'number') {
+				return meta.fileSize;
+			}
+		} catch {
+			// Advisory only — fall through to the post-buffer check.
+		}
+	}
+	if (binary.id === undefined && typeof binary.data === 'string' && binary.data.length > 0) {
+		const padding = binary.data.endsWith('==') ? 2 : binary.data.endsWith('=') ? 1 : 0;
+		return Math.floor((binary.data.length * 3) / 4) - padding;
+	}
+	return undefined;
+}
 
 /** Human-readable byte size for error messages. */
 export function formatBytes(bytes: number): string {
