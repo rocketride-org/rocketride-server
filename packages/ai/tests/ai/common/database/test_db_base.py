@@ -35,6 +35,7 @@ from sqlalchemy import (
 
 from ai.common.database.db_global_base import DatabaseGlobalBase
 from ai.common.database.db_instance_base import DatabaseInstanceBase
+from ai.common.schema import Question
 from ai.common.utils import parse_bool
 
 
@@ -308,6 +309,52 @@ def test_get_sql_surfaces_explain_error_not_rejected_sql():
     result = inst.get_sql({'question': 'all users'})
 
     assert result == {'error': 'column "userz" does not exist', 'valid': False}
+
+
+class _FakeInstance:
+    """Minimal stand-in for IFilterInstance: records what each lane receives."""
+
+    def __init__(self, lanes):
+        self._lanes = lanes
+        self.text_written = None
+        self.answer_written = None
+
+    def getListeners(self):
+        return list(self._lanes)
+
+    def writeText(self, text):
+        self.text_written = text
+
+    def writeTable(self, markdown):
+        pass
+
+    def writeAnswers(self, answer):
+        self.answer_written = answer
+
+
+def test_write_questions_surfaces_explain_error_not_rejected_sql():
+    """writeQuestions() must report the EXPLAIN error on text/answer lanes, not the rejected SQL.
+
+    Mirrors the get_sql() fix: writeQuestions() has its own separate fallback
+    path (db_instance_base.py) that must not regress to emitting the rejected
+    SQL as if it were the LLM's prose answer.
+    """
+    fake_global = _FakeGlobal(explain_error='syntax error near FROM')
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': 'true',
+        'query': 'SELECT * FROM',
+    }
+    fake_instance = _FakeInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('all users')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'syntax error near FROM'
+    assert fake_instance.answer_written.getText() == 'syntax error near FROM'
 
 
 # ---------------------------------------------------------------------------
