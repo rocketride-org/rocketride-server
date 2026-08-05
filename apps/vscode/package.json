@@ -6,11 +6,11 @@
 	"publisher": "rocketride",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/rocketride-ai/rocketride-server.git"
+		"url": "https://github.com/rocketride-org/rocketride-server.git"
 	},
-	"homepage": "https://github.com/rocketride-ai/rocketride-server#readme",
+	"homepage": "https://github.com/rocketride-org/rocketride-server#readme",
 	"bugs": {
-		"url": "https://github.com/rocketride-ai/rocketride-server/issues"
+		"url": "https://github.com/rocketride-org/rocketride-server/issues"
 	},
 	"license": "MIT",
 	"keywords": [

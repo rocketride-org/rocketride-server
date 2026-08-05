@@ -18,8 +18,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://rocketride.ai"
-Repository = "https://github.com/rocketride/rocketride-clients"
+Homepage = "https://github.com/rocketride-org/rocketride-server"
+Documentation = "https://github.com/rocketride-org/rocketride-server#readme"
+Repository = "https://github.com/rocketride-org/rocketride-server.git"
+"Bug Reports" = "https://github.com/rocketride-org/rocketride-server/issues"
 
 [project.scripts]
 rocketride-mcp = "rocketride_mcp.server:main"

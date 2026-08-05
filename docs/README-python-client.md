@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-python.png" alt="RocketRide Python SDK" width="900">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/banner-python.png" alt="RocketRide Python SDK" width="900">
 </p>
 
 <p align="center">
@@ -25,7 +25,8 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
+    # your engine (or RocketRide Cloud: uri='https://api.rocketride.ai')
+    async with RocketRideClient(uri='ws://localhost:5565', auth='my-key') as client:
         result = await client.use(filepath='pipeline.pipe')
         token = result['token']
         out = await client.send(token, 'Hello, pipeline!', objinfo={'name': 'input.txt'}, mimetype='text/plain')
@@ -36,10 +37,12 @@ async def main():
 asyncio.run(main())
 ```
 
+Where the key comes from: when the VS Code extension connects to a self-hosted engine, it writes `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` into your workspace `.env` automatically. For RocketRide Cloud, create a key at [cloud.rocketride.ai](https://cloud.rocketride.ai/).
+
 **Important:** `client.send()` / `client.send_files()` are intended for pipelines whose **source** is `webhook` or `dropper`.  
 If your pipeline source is `chat`, use `client.chat()` instead.
 
-If you need a minimal `.pipe` to test `send()` end-to-end, start with:
+If you need a minimal `.pipe` to test `send()` end-to-end, start with (`project_id` is any identifier you choose; it groups the pipeline's runs and logs):
 
 ```json
 {
@@ -47,7 +50,7 @@ If you need a minimal `.pipe` to test `send()` end-to-end, start with:
     { "id": "webhook_1", "provider": "webhook", "config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "webhook" } },
     { "id": "response_text_1", "provider": "response_text", "config": { "laneName": "text" }, "input": [{ "lane": "text", "from": "webhook_1" }] }
   ],
-  "project_id": "<your-project-id>",
+  "project_id": "quickstart",
   "viewport": { "x": 0, "y": 0, "zoom": 1 },
   "version": 1
 }
@@ -56,32 +59,36 @@ If you need a minimal `.pipe` to test `send()` end-to-end, start with:
 Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocketride-org/rocketride-server) or download the extension directly in your IDE.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/install.png" alt="Install RocketRide extension" width="600">
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/install-extension.png" alt="Install RocketRide extension" width="600">
 </p>
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
-It lets you build, debug, and deploy production AI workflows without leaving your IDE --
-using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
+[RocketRide](https://rocketride.org) is an open source, developer-native AI pipeline platform.
+It lets you build, debug, and deploy production AI workflows without leaving your IDE, using a visual drag-and-drop canvas or code-first with the Python and TypeScript SDKs. This package is the Python SDK: it connects your application to a RocketRide engine and runs your `.pipe` pipelines.
 
-- **50+ ready-to-use nodes** - 13 LLM providers, 8 vector databases, OCR, NER, PII anonymization, and more
-- **High-performance C++ engine** - production-grade speed and reliability
-- **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
-- **MIT licensed** - fully open-source, OSI-compliant
+- **115+ pipeline nodes**: 16 LLM providers, 9 vector databases, OCR, NER, PII anonymization, and more
+- **High-performance C++ engine**: native multithreading built for AI and data workloads
+- **MIT licensed**: fully open source, OSI-compliant
 
-You build your `.pipe` - and you run it against the fastest AI runtime available.
+There are two ways to run the engine your client connects to:
 
-<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/docs/images/canvas.png" alt="RocketRide visual canvas builder" width="800">
+- **Self-hosted**: free and MIT licensed. Run the engine locally, in Docker, or on-premises, and point the client at it (for example `ws://localhost:5565`).
+- **[RocketRide Cloud](https://cloud.rocketride.ai/)**: managed hosting at `https://api.rocketride.ai`, if you would rather not run an engine yourself.
+
+The same `.pipe` file runs unchanged on both.
+
+<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/images/pipeline-example.png" alt="Build and run AI pipelines inside your IDE" width="800">
 
 ## Features
 
 - **Pipeline execution** - Start with `use()`, send data via `send()`, `send_files()`, or `pipe()`
-- **Chat** - Conversational AI via `chat()` and `Question`
+- **Chat** - Conversational AI via `chat()` and `Question`, with incremental output via the optional `on_sse` callback
 - **Event streaming** - Real-time events via `on_event` and `set_events()`
 - **File upload** - `send_files()` with progress; streaming with `pipe()`
-- **Connection lifecycle** - Optional persist mode, reconnection, and callbacks (`on_connected`, `on_disconnected`, `on_connect_error`)
-- **Project storage** - Save, retrieve, and version-control pipelines on the server
+- **Connection lifecycle** - Optional persist mode with automatic reconnection, plus callbacks (`on_connected`, `on_disconnected`, `on_connect_error`)
+- **Run logs and traces** - Read per-run event logs, console output, and traces via `client.log`
+- **File store** - Server-side file storage via `fs_open()`, `fs_read()`, `fs_write()`, `fs_list_dir()`, and friends
 - **Async-first** - Built on `asyncio` and `websockets`; supports `async with` context manager
 - **CLI included** - Manage pipelines from the command line
 
@@ -110,16 +117,16 @@ RocketRideClient(
 )
 ```
 
-**Why the options matter:** `uri` and `auth` tell the client _where_ and _how_ to authenticate. `persist` and `max_retry_time` control what happens when the connection fails or the server is not ready yet: with `persist=True` the client retries with exponential backoff and calls `on_connect_error` on each failure, so you can show "Still connecting..." or "Connection failed" without implementing retry logic yourself. Use `on_disconnected` only for "we were connected and then dropped"; use `on_connect_error` for "failed to connect" or "gave up after max retry time."
+**Why the options matter:** `uri` and `auth` tell the client _where_ and _how_ to authenticate. `persist` controls what happens when the connection fails or the server is not ready yet: with `persist=True` the client retries with linear backoff (0.25s increments, capped at 15s) and calls `on_connect_error` on each failure, so you can show "Still connecting..." or "Connection failed" without implementing retry logic yourself. Reconnection never gives up, except on auth failure. Use `on_disconnected` only for "we were connected and then dropped"; use `on_connect_error` for "failed to connect."
 
 | Argument              | Type                      | Required | Description                                                                                                                                          |
 | --------------------- | ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `uri`                 | `str`                     | Yes\*    | Server URI. \*Can be empty if `ROCKETRIDE_URI` is set in env/`.env`.                                                                                 |
+| `uri`                 | `str`                     | Yes\*    | Server URI. `http(s)://` and `ws(s)://` schemes are both accepted and normalized automatically. \*Can be empty if `ROCKETRIDE_URI` is set in env/`.env`.     |
 | `auth`                | `str`                     | Yes\*    | API key. \*Can be empty if `ROCKETRIDE_APIKEY` is set.                                                                                               |
 | `env`                 | `dict`                    | No       | Override env; if omitted, `.env` is loaded. Use when passing config in code instead of env files.                                                    |
 | `module`              | `str`                     | No       | Client name for logging.                                                                                                                             |
 | `request_timeout`     | `float`                   | No       | Default timeout in ms for requests. Prevents a single DAP call from hanging.                                                                         |
-| `max_retry_time`      | `float`                   | No       | Max time in ms to keep retrying connection. Use (e.g. 300000) so the app can show "gave up" after a bounded time.                                    |
+| `max_retry_time`      | `float`                   | No       | Deprecated: accepted but ignored. Reconnection uses linear backoff (0.25s increments, 15s cap) and never gives up.                                   |
 | `persist`             | `bool`                    | No       | Enable automatic reconnection. Default: `False`. Set `True` for long-lived scripts or UIs.                                                           |
 | `on_event`            | async callable            | No       | Called with each server event dict. Use for progress or status updates.                                                                              |
 | `on_connected`        | async callable            | No       | Called when connection is established.                                                                                                               |
@@ -134,10 +141,9 @@ Raises `ValueError` if both `uri` and `ROCKETRIDE_URI` are empty or if `auth` is
 
 ```python
 client = RocketRideClient(
-    uri='https://api.rocketride.ai',
+    uri='ws://localhost:5565',
     auth='my-key',
     persist=True,
-    max_retry_time=300000,
     on_connect_error=lambda msg: print('Connect error:', msg),
     on_event=handle_event,
 )
@@ -155,7 +161,7 @@ client = RocketRideClient(
 **Example:**
 
 ```python
-async with RocketRideClient(uri='wss://api.rocketride.ai', auth=os.environ['ROCKETRIDE_APIKEY']) as client:
+async with RocketRideClient(uri='ws://localhost:5565', auth=os.environ['ROCKETRIDE_APIKEY']) as client:
     result = await client.use(filepath='pipeline.pipe')
     token = result['token']
     await client.send(token, 'Hello, pipeline!')
@@ -165,13 +171,21 @@ async with RocketRideClient(uri='wss://api.rocketride.ai', auth=os.environ['ROCK
 
 | Method                | Signature                                                                                             | Returns         | Description                                                                                                                                                                                                                                                                                                                     |
 | --------------------- | ----------------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connect`             | `async def connect(self, credential: Optional[str] = None, *, timeout: Optional[float] = None) -> ConnectResult` | `ConnectResult` | Opens the WebSocket and performs DAP auth. Optional `credential` overrides the constructor `auth` for this connection attempt. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only). In **persist** mode, on failure the client calls `on_connect_error` and retries; on **auth** failure it does not retry. |
-| `disconnect`          | `async def disconnect(self) -> None`                                                                  | -               | Closes the connection and cancels reconnection. Call when the user disconnects or the script is done.                                                                                                                                                                                                                           |
+| `connect`             | `async def connect(self, credential: Optional[str] = None, *, timeout: Optional[float] = None) -> ConnectResult` | `ConnectResult` | Opens the WebSocket and performs DAP auth (wraps `attach()` + `login()`). Optional `credential` overrides the constructor `auth` for this connection attempt. Optional `timeout` (ms) bounds the connect + auth handshake (non-persist only). In **persist** mode, on failure the client calls `on_connect_error` and retries; on **auth** failure it does not retry. |
+| `disconnect`          | `async def disconnect(self) -> None`                                                                  | -               | Closes the connection and cancels reconnection (wraps `logout()` + `detach()`). Call when the user disconnects or the script is done.                                                                                                                                                                                           |
+| `attach`              | `async def attach(self, uri: Optional[str] = None, *, timeout: Optional[float] = None) -> None`       | -               | Opens the WebSocket **without** authenticating. Use for public, unauthenticated operations. No-op if already attached to the same URI.                                                                                                                                                                                          |
+| `login`               | `async def login(self, credential: Optional[str] = None, *, uri: Optional[str] = None, timeout: Optional[float] = None) -> ConnectResult` | `ConnectResult` | Authenticates over an attached transport. Supports credential rotation: a different credential triggers a best-effort logout first. Returns full user identity.                                                                                                                                                                 |
+| `logout`              | `async def logout(self) -> None`                                                                      | -               | Deauthenticates without closing the socket; the connection reverts to attached-only.                                                                                                                                                                                                                                            |
+| `detach`              | `async def detach(self) -> None`                                                                      | -               | Tears down the WebSocket and cancels reconnection.                                                                                                                                                                                                                                                                              |
+| `is_attached`         | `def is_attached(self) -> bool`                                                                       | `bool`          | Whether the WebSocket is open, regardless of auth state.                                                                                                                                                                                                                                                                        |
+| `is_authenticated`    | `def is_authenticated(self) -> bool`                                                                  | `bool`          | Whether the auth handshake has succeeded on the current connection.                                                                                                                                                                                                                                                             |
 | `is_connected`        | `def is_connected(self) -> bool`                                                                      | `bool`          | Whether the client is connected. Check before calling `use()` or `send()` if needed.                                                                                                                                                                                                                                            |
 | `get_connection_info` | `def get_connection_info(self) -> dict`                                                               | `dict`          | Current connection state and URI. Returns `{ 'connected': bool, 'transport': str, 'uri': str }`. Useful for debugging or displaying "Connected to ..." in the UI.                                                                                                                                                               |
 | `get_apikey`          | `def get_apikey(self) -> Optional[str]`                                                               | `str \| None`   | The API key in use. For debugging only; avoid logging in production.                                                                                                                                                                                                                                                            |
 
 ### Low-level DAP
+
+RocketRide clients talk to the engine over DAP (Debug Adapter Protocol) messages on a WebSocket. The methods below let you send commands the higher-level API does not wrap.
 
 | Method          | Signature                                                                                                                | Returns | Description                                                                                                                                       |
 | --------------- | ------------------------------------------------------------------------------------------------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -198,7 +212,7 @@ if client.did_fail(res):
 
 | Method            | Signature                                                                                                                                                                                                | Returns | Description                                                                                                                                                                                              |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `use`             | `async def use(self, *, token: str = None, filepath: str = None, pipeline: dict = None, source: str = None, threads: int = None, use_existing: bool = None, args: list = None, ttl: int = None) -> dict` | `dict`  | Starts a pipeline. Requires `filepath` or `pipeline`. The client substitutes `${ROCKETRIDE_*}` from its env. Returns a dict with at least `'token'`; use that token for all data and control operations. |
+| `use`             | `async def use(self, *, token: str = None, filepath: str = None, pipeline: dict = None, source: str = None, threads: int = None, use_existing: bool = None, args: list = None, ttl: int = None, pipelineTraceLevel: str = None, name: str = None, env: dict = None, team_id: str = None) -> dict` | `dict`  | Starts a pipeline. Requires `filepath` or `pipeline`. `${ROCKETRIDE_*}` variables are resolved server-side; use `env` to pass per-call `ROCKETRIDE_*` overrides. Returns a dict with at least `'token'`; use that token for all data and control operations. |
 | `terminate`       | `async def terminate(self, token: str) -> None`                                                                                                                                                          | -       | Stops the pipeline and frees server resources.                                                                                                                                                           |
 | `get_task_status` | `async def get_task_status(self, token: str) -> dict`                                                                                                                                                    | `dict`  | Returns current task status (e.g. completed count, total, state). Poll until `completed` or use for progress display.                                                                                    |
 
@@ -208,9 +222,11 @@ if client.did_fail(res):
 
 | Method       | Signature                                                                                                                      | Returns               | Description                                                                                                                                        |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pipe`       | `async def pipe(self, token: str, objinfo: dict = None, mime_type: str = None, provider: str = None) -> DataPipe`              | `DataPipe`            | Creates a **streaming** pipe: open, then one or more write, then close. Use for large or chunked data. Default MIME: `'application/octet-stream'`. |
-| `send`       | `async def send(self, token: str, data: str \| bytes, objinfo: dict = None, mimetype: str = None) -> PIPELINE_RESULT`          | `PIPELINE_RESULT`     | Sends data in **one shot** (open pipe, write once, close). Use when you have the full payload in memory.                                           |
+| `pipe`       | `async def pipe(self, token: str, objinfo: dict = None, mime_type: str = None, provider: str = None, on_sse=None) -> DataPipe` | `DataPipe`            | Creates a **streaming** pipe: open, then one or more write, then close. Use for large or chunked data. Default MIME: `'application/octet-stream'`. |
+| `send`       | `async def send(self, token: str, data: str \| bytes, objinfo: dict = None, mimetype: str = None, on_sse=None) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Sends data in **one shot** (open pipe, write once, close). Use when you have the full payload in memory.                                           |
 | `send_files` | `async def send_files(self, files: List[str \| Tuple[str, dict] \| Tuple[str, dict, str]], token: str) -> List[UPLOAD_RESULT]` | `List[UPLOAD_RESULT]` | Uploads files. Each item: path `str`, or `(path, objinfo)`, or `(path, objinfo, mimetype)`. Progress via `on_event` as `apaevt_status_upload`.     |
+
+The optional `on_sse` callback (async `(type: str, data: dict)`) receives incremental server-sent output, e.g. token-by-token LLM text, while the request is in flight.
 
 **When to use pipe vs send:** Use `send()` for a single string or bytes. Use `pipe()` when you read a file in chunks, or when data arrives incrementally.
 
@@ -240,7 +256,7 @@ result = await pipe.close()
 
 | Method         | Signature                                                                           | Returns        | Description                                                                                                                                                   |
 | -------------- | ----------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_services` | `async def get_services(self) -> dict`                                              | `dict`         | Returns all service definitions. Use to discover what the server supports.                                                                                    |
+| `get_services` | `async def get_services(self) -> dict`                                              | `dict`         | Returns `{'services': {...}, 'version': ...}`; the definitions are under the `services` key. Use to discover what the server supports.                        |
 | `get_service`  | `async def get_service(self, service: str) -> Optional[dict]`                       | `dict \| None` | Returns one service by name; `None` if not found or on error.                                                                                                 |
 | `validate`     | `async def validate(self, pipeline: PipelineConfig, *, source: str = None) -> dict` | `dict`         | Validates a pipeline configuration without starting it. Returns validation results (e.g. errors, warnings). Use to check pipeline correctness before `use()`. |
 | `ping`         | `async def ping(self, token: str = None) -> None`                                   | -              | Liveness check; raises on failure.                                                                                                                            |
@@ -249,9 +265,36 @@ result = await pipe.close()
 
 | Method | Signature                                                                    | Returns           | Description                                                                                                                                                                                       |
 | ------ | ---------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat` | `async def chat(self, *, token: str, question: Question) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Sends the `Question` to the AI for the given token and returns the pipeline result. The answer is in the result body; use the schema's answer helpers if you need to parse JSON from the AI text. |
+| `chat` | `async def chat(self, *, token: str, question: Question, on_sse=None) -> PIPELINE_RESULT` | `PIPELINE_RESULT` | Sends the `Question` to the AI for the given token and returns the pipeline result. Pass `on_sse` to receive the answer incrementally as it is generated. The answer is in the result body; use the schema's answer helpers if you need to parse JSON from the AI text. |
 
-**How it works:** The client opens a pipe with the question MIME type, writes the serialized `Question`, closes the pipe, and returns the server result. The pipeline must support the chat provider.
+**How it works:** The client opens a pipe with the question MIME type, writes the serialized `Question`, closes the pipe, and returns the server result. Works with chat, webhook, and dropper sources.
+
+### Run logs (`client.log`)
+
+Every task writes one continuous JSONL event log per `projectId.source.runKind`, and `client.log` reads it: run chapters for an activity timeline, ranged event reads, raw segment fetches, deletion, and a DVR-style event stream (`open_event_stream()`) that covers both live monitoring and replay.
+
+| Method              | Signature                                                                                              | Returns          | Description                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------ | ---------------- | ------------------------------------------------------------------------------------------------------- |
+| `chapters`          | `async def chapters(self, project_id: str, source: str, run_kind: str) -> LogChaptersResult`           | `LogChaptersResult` | The stream's runs (chapters): begin/end/outcome per run.                                             |
+| `read`              | `async def read(self, project_id: str, source: str, run_kind: str, *, from_seq=None, to_seq=None, from_time=None, to_time=None, to_segment=None, cursor=None, max_events=None, max_bytes=None, types=None) -> LogReadResult` | `LogReadResult`  | Ranged, paged event read over the continuum; filter by sequence, time, segment, or event `types`.       |
+| `segment`           | `async def segment(self, project_id: str, source: str, run_kind: str, segment: int, *, offset: int = 0, max_bytes=None) -> LogSegmentResult` | `LogSegmentResult` | Fetches one segment's raw JSONL bytes, chunked by byte offset.                                        |
+| `delete`            | `async def delete(self, project_id: str, source: str, run_kind: str, *, before_time=None, all: bool = False) -> LogDeleteResult` | `LogDeleteResult` | Deletes run log data, either everything (`all=True`) or events before `before_time`.                    |
+| `open_event_stream` | `def open_event_stream(self, project_id: str, source: str, run_kind: str) -> LogEventStream`           | `LogEventStream` | DVR session: `seek()`, `get_status()`, `get_console()`, `get_traces()`, `get_trace()`, `play()`, `pause()`, `close_event_stream()`. |
+
+**Example - tail a run's console and traces:**
+
+```python
+session = client.log.open_event_stream('proj-1', 'chat_1', 'dev')
+await session.seek('live')
+console = await session.get_console(500)   # exactly what the console showed
+traces = await session.get_traces(50)      # in-flight + last 50 closed
+if traces['closed']:
+    detail = await session.get_trace(traces['closed'][0]['beginSeq'])
+session.pause()
+session.close_event_stream()
+```
+
+See the [run logs documentation](https://docs.rocketride.org/) for the full event shape and DVR session API.
 
 ---
 
@@ -312,9 +355,10 @@ From `rocketride.schema`. Used to parse chat response content. The client does n
 
 | Method        | Signature                              | Description                                                      |
 | ------------- | -------------------------------------- | ---------------------------------------------------------------- |
+| `setAnswer`   | `setAnswer(self, value: str \| dict \| list)` | Sets the answer value. With `expectJson=True`, strings are parsed as JSON; raises `ValueError` if not valid JSON. |
 | `getText`     | `getText(self) -> str`                 | Get the answer as plain text.                                    |
-| `getJson`     | `getJson(self) -> Optional[dict]`      | Get the answer as parsed JSON; returns `None` if not valid JSON. |
-| `isJson`      | `isJson(self) -> bool`                 | Whether the answer contains valid JSON.                          |
+| `getJson`     | `getJson(self) -> Optional[dict \| list]` | Get the answer as parsed JSON (a dict or a list). Returns `None` if there is no answer; raises `ValueError` if the text is not valid JSON. |
+| `isJson`      | `isJson(self) -> bool`                 | Whether this answer is expected to be JSON (returns the `expectJson` flag). |
 | `parsePython` | `parsePython(self, value: str) -> Any` | Extracts Python code from a code block in the response.          |
 
 ---
@@ -380,7 +424,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
+    client = RocketRideClient(uri='ws://localhost:5565', auth='my-key')
     await client.connect()
     result = await client.use(filepath='pipeline.pipe')
     token = result['token']
@@ -399,10 +443,21 @@ asyncio.run(main())
 import asyncio
 from rocketride import RocketRideClient
 
+# The minimal webhook pipeline from the Quick Start above, as a Python dict
+my_pipeline_config = {
+    'components': [
+        {'id': 'webhook_1', 'provider': 'webhook', 'config': {'hideForm': True, 'mode': 'Source', 'parameters': {}, 'type': 'webhook'}},
+        {'id': 'response_text_1', 'provider': 'response_text', 'config': {'laneName': 'text'}, 'input': [{'lane': 'text', 'from': 'webhook_1'}]},
+    ],
+    'project_id': 'quickstart',
+    'viewport': {'x': 0, 'y': 0, 'zoom': 1},
+    'version': 1,
+}
+
 
 async def main():
-    async with RocketRideClient(uri='wss://api.rocketride.ai', auth='my-key') as client:
-        result = await client.use(pipeline={'pipeline': my_pipeline_config})
+    async with RocketRideClient(uri='ws://localhost:5565', auth='my-key') as client:
+        result = await client.use(pipeline=my_pipeline_config)
         token = result['token']
         await client.send(token, '{"data": 1}')
         status = await client.get_task_status(token)
@@ -422,10 +477,9 @@ from rocketride import RocketRideClient
 
 async def main():
     client = RocketRideClient(
-        uri='https://api.rocketride.ai',
+        uri='ws://localhost:5565',
         auth='my-key',
         persist=True,
-        max_retry_time=300000,
         on_connected=lambda info: print('Connected:', info),
         on_disconnected=lambda reason, has_error: print('Disconnected:', reason, has_error),
         on_connect_error=lambda msg: print('Connect error:', msg),
@@ -447,7 +501,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
+    client = RocketRideClient(uri='ws://localhost:5565', auth='my-key')
     await client.connect()
     result = await client.use(filepath='vectorize.pipe')
     token = result['token']
@@ -482,7 +536,7 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
+    async with RocketRideClient(uri='ws://localhost:5565', auth='my-key') as client:
         result = await client.use(filepath='ingest.pipe')
         token = result['token']
         pipe = await client.pipe(token, objinfo={'name': 'large.csv'}, mime_type='text/csv')
@@ -510,7 +564,7 @@ from rocketride.schema import Question, Answer
 
 
 async def main():
-    async with RocketRideClient(uri='https://api.rocketride.ai', auth='my-key') as client:
+    async with RocketRideClient(uri='ws://localhost:5565', auth='my-key') as client:
         result = await client.use(filepath='chat_pipeline.pipe')
         token = result['token']
         question = Question(expectJson=True)
@@ -519,12 +573,11 @@ async def main():
         question.addQuestion('Summarize the main points and list keywords.')
         response = await client.chat(token=token, question=question)
         answer_text = response.get('data', {}).get('answer') or (response.get('answers') or [None])[0]
-        answer = Answer(expectJson=True)
-        answer.setAnswer(answer_text or '')
-        if answer.isJson():
+        structured = None
+        if answer_text:
+            answer = Answer(expectJson=True)
+            answer.setAnswer(answer_text)  # raises ValueError if the answer is not valid JSON
             structured = answer.getJson()
-        else:
-            structured = answer.getText()
         print(structured)
         await client.terminate(token)
 
@@ -540,9 +593,9 @@ from rocketride import RocketRideClient
 
 
 async def main():
-    client = RocketRideClient(uri='https://api.rocketride.ai', auth='my-key')
+    client = RocketRideClient(uri='ws://localhost:5565', auth='my-key')
     await client.connect()
-    services = await client.get_services()
+    services = (await client.get_services())['services']
     print('Available:', list(services.keys()))
     ocr = await client.get_service('ocr')
     if ocr:
@@ -570,24 +623,26 @@ rocketride status --token <token>            # Monitor task progress
 rocketride stop --token <token>              # Terminate a running task
 rocketride list                              # List all active tasks
 rocketride events ALL --token <token>        # Stream task events
-rocketride rrext_store get_all_projects      # List stored projects
+rocketride store dir                         # List the account file store
 ```
 
 All commands accept `--uri` and `--apikey` flags, or read from environment variables.
 
 ## Configuration
 
-| Variable            | Description                                                            |
-| ------------------- | ---------------------------------------------------------------------- |
-| `ROCKETRIDE_URI`    | Server URI (e.g. `wss://api.rocketride.ai` or `ws://localhost:5565`) |
-| `ROCKETRIDE_APIKEY` | API key for authentication                                             |
+| Variable            | Description                                                                                            |
+| ------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ROCKETRIDE_URI`    | Server URI: e.g. `ws://localhost:5565` for a self-hosted engine, or `https://api.rocketride.ai` for RocketRide Cloud |
+| `ROCKETRIDE_APIKEY` | API key for authentication                                                                             |
 
 ## Links
 
 - [Documentation](https://docs.rocketride.org/)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
+- [TypeScript SDK](https://www.npmjs.com/package/rocketride)
 - [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
+- [RocketRide Cloud](https://cloud.rocketride.ai/)
 
 ## License
 

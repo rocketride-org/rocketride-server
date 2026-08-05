@@ -62,10 +62,10 @@ test = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/rocketride-ai/rocketride-server"
-Documentation = "https://github.com/rocketride-ai/rocketride-server#readme"
-Repository = "https://github.com/rocketride-ai/rocketride-server.git"
-"Bug Reports" = "https://github.com/rocketride-ai/rocketride-server/issues"
+Homepage = "https://github.com/rocketride-org/rocketride-server"
+Documentation = "https://github.com/rocketride-org/rocketride-server#readme"
+Repository = "https://github.com/rocketride-org/rocketride-server.git"
+"Bug Reports" = "https://github.com/rocketride-org/rocketride-server/issues"
 
 [project.scripts]
 rocketride = "rocketride.cli.main:main"
