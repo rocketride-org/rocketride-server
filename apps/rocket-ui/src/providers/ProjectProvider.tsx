@@ -528,6 +528,21 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	}, []);
 
 	/**
+	 * Fetches the FULL definition (config schema) for one service provider.
+	 * The bulk services payload is summary-only, so the canvas requests
+	 * definitions on demand and caches them. Throws while disconnected so the
+	 * canvas treats the request as retryable rather than caching a miss.
+	 *
+	 * @param provider - The service provider key (e.g. "db_mysql").
+	 * @returns The full service definition, or undefined when the server has none.
+	 */
+	const handleGetNodeSchema = useCallback(async (provider: string): Promise<Record<string, unknown> | undefined> => {
+		const c = getClient();
+		if (!c) throw new Error('Not connected to server');
+		return (await c.getService(provider)) as Record<string, unknown> | undefined;
+	}, []);
+
+	/**
 	 * Handles opening a link in a webview (currently a no-op in the new model).
 	 *
 	 * @param url         - The URL to open.
@@ -849,6 +864,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 					fetchTimeline={fetchTimeline}
 					onContentChanged={handleContentChanged}
 					onValidate={handleValidate}
+					getNodeSchema={handleGetNodeSchema}
 					onPipelineAction={handlePipelineAction}
 					onViewStateChange={handleViewStateChange}
 					onPrefsChange={handlePrefsChange}

@@ -599,6 +599,23 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 					break;
 				}
 
+				case 'project:getNodeSchema': {
+					// The bulk services payload is summary-only; the canvas requests
+					// one provider's FULL definition (config schema) on demand and
+					// caches it webview-side, so this fires once per provider.
+					try {
+						const client = this.connectionManager.getClient();
+						if (!client) throw new Error('Not connected to server');
+						const service = await client.getService(data.provider);
+						webview.postMessage({ type: 'project:nodeSchemaResponse', requestId: data.requestId, service });
+					} catch (error) {
+						const msg = error instanceof Error ? error.message : String(error);
+						this.logger.error(`Fetching service definition for '${data.provider}': ${msg}`);
+						webview.postMessage({ type: 'project:nodeSchemaResponse', requestId: data.requestId, error: msg });
+					}
+					break;
+				}
+
 				case 'project:requestSave': {
 					await document.save();
 					break;

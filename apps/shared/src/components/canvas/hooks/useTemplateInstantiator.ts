@@ -46,7 +46,7 @@ import { useFlowProject } from '../context/FlowProjectContext';
 import { generateNodeId, getEdgesFromNodes, getProjectComponents } from '../util/graph';
 import type { IProject } from '../types';
 import { PIPELINE_SCHEMA_VERSION } from '../types';
-import { resolveDefaultFormData } from '../util/helpers';
+import { hasConfigurableSchema, resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 import type { ITemplate } from '../templates/types';
 import type { INodeData } from '../types';
@@ -156,13 +156,12 @@ export function useTemplateInstantiator() {
 
 				if (pipe?.schema) {
 					formData = resolveDefaultFormData(nodeId, pipe.schema);
-					const validation = validateFormData(pipe.schema, formData);
-					formDataValid = validation.errors.length === 0;
-				} else if (service) {
-					// Service exists but has no schema — check if it needs config
-					const pipeSchema = pipe?.schema as { properties?: Record<string, unknown> } | undefined;
-					const hasSchema = pipeSchema?.properties?.hideForm == undefined && pipeSchema?.properties != undefined;
-					formDataValid = !hasSchema;
+					// hideForm/no-properties schemas render no config form — seed
+					// their defaults but never flag the node as needing configuration
+					if (hasConfigurableSchema(pipe)) {
+						const validation = validateFormData(pipe.schema, formData);
+						formDataValid = validation.errors.length === 0;
+					}
 				}
 
 				if (!formDataValid) unconfiguredCount++;

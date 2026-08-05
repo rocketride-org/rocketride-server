@@ -43,7 +43,7 @@ import { templates as templateCatalog } from '../templates';
 import { commonStyles } from 'shell';
 import type { ITemplate } from '../templates/types';
 import { Icon } from '../util/Icon';
-import { resolveDefaultFormData } from '../util/helpers';
+import { hasConfigurableSchema, resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 import TemplatePickerDialog from './TemplatePickerDialog';
 
@@ -215,7 +215,9 @@ export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: 
 		const service = servicesJson?.[providerKey];
 		const pipe = service?.Pipe as { schema?: Record<string, unknown> } | undefined;
 		let formDataValid = true;
-		if (pipe?.schema) {
+		// hideForm/no-properties schemas render no config form — those nodes
+		// never need configuration, so only configurable schemas validate
+		if (pipe?.schema && hasConfigurableSchema(pipe)) {
 			const formData = resolveDefaultFormData(providerKey, pipe.schema);
 			const validation = validateFormData(pipe.schema, formData);
 			formDataValid = validation.errors.length === 0;
@@ -249,7 +251,7 @@ export default function EmptyCanvasPrompt({ instantiateTemplate, onNodeAdded }: 
 								onMouseEnter={() => setHoveredKey(key)}
 								onMouseLeave={() => setHoveredKey(null)}
 							>
-								<Icon name={service.icon} style={styles.itemIcon} />
+								<Icon name={service.icon} width="18px" height="18px" style={styles.itemIcon} />
 
 								<span style={styles.itemTitle}>{service.title ?? key}</span>
 							</button>
