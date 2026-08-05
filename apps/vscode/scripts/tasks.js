@@ -250,6 +250,32 @@ function makeCleanStagingAction() {
 // Module Definition
 // =============================================================================
 
+function makeTestAction() {
+	return {
+		description: 'Testing vscode',
+		run: async (ctx, task) => {
+			// Runs the output of vscode:compile-typescript rather than the sources,
+			// so the extension needs no TS test runner of its own and the tests are
+			// proven to compile under tsconfig.json.
+			const testDir = path.join(BUILD_DIR, 'out', 'test');
+			if (!(await exists(testDir))) {
+				throw new Error('No compiled tests found — vscode:compile-typescript must run first');
+			}
+
+			// extension.test.js requires the `vscode` module, which only resolves
+			// inside an Extension Development Host, so plain node cannot run it.
+			const testFiles = (await glob('*.test.js', { cwd: testDir })).filter((f) => f !== 'extension.test.js').sort();
+
+			if (testFiles.length === 0) {
+				task.output = 'No vscode test files found';
+				return;
+			}
+
+			await execCommand('node', ['--test', '--test-reporter=spec', ...testFiles], { task, cwd: testDir });
+		},
+	};
+}
+
 module.exports = {
 	name: 'vscode',
 	description: 'RocketRide VSCode Extension',
@@ -268,6 +294,7 @@ module.exports = {
 		{ name: 'vscode:clean-staging', action: makeCleanStagingAction },
 
 		// Public actions (have descriptions)
+		{ name: 'vscode:test', action: makeTestAction },
 		{
 			name: 'vscode:compile',
 			action: () => ({
@@ -279,7 +306,7 @@ module.exports = {
 			name: 'vscode:build',
 			action: () => ({
 				description: 'Build vscode',
-				steps: ['client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:test', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{

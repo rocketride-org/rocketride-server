@@ -57,3 +57,12 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 |---------|---------|-------------|
 | `rocketride.integrations.copilot` | - | Enable GitHub Copilot integration for pipeline development |
 | `rocketride.integrations.cursor` | - | Enable Cursor IDE integration |
+
+## Where the Settings Page Saves
+
+The **Settings** page writes to your **user** settings, never to the workspace. Two consequences are worth knowing:
+
+- **Only fields you changed are written.** The page is populated with the values currently in effect, so saving after editing one field leaves the rest of your user settings untouched — a value pinned by a project never leaks into your global settings.
+- **A project can override what you save.** VS Code resolves a setting as workspace folder → workspace → user, so a key set in the project's `.vscode/settings.json` wins over the Settings page. When that happens the page reports which keys are overridden instead of a plain "saved" confirmation; change those keys in the project's `.vscode/settings.json` to affect this window.
+
+**Direct Connect** (on-prem) requires a Host URL that can address a server — for example `localhost:5565` or `https://engine.example.com`. The scheme and the default port `5565` are filled in when omitted. This is a format check only; use **Test Connection** to confirm the server is actually reachable.

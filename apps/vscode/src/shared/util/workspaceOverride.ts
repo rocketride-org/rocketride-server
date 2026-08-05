@@ -70,3 +70,34 @@ export function isShadowedByWorkspace<T>(info: WorkspaceInspection<T> | undefine
 	}
 	return !valuesEqual(override, desired);
 }
+
+/**
+ * Multi-root variant of {@link isShadowedByWorkspace}.
+ *
+ * `vscode.workspace.getConfiguration(section)` has no `ConfigurationScope`, so
+ * its `inspect()` cannot attribute a `workspaceFolderValue` to any folder — in a
+ * multi-root workspace a folder-level override would go unreported. Callers pass
+ * the unscoped inspection plus one per `vscode.WorkspaceFolder.uri`; the write is
+ * shadowed if *any* scope conflicts.
+ */
+export function isShadowedByAnyScope<T>(infos: Array<WorkspaceInspection<T> | undefined>, desired: T): boolean {
+	return infos.some((info) => isShadowedByWorkspace(info, desired));
+}
+
+/**
+ * Whether the value the Settings UI sent back is the same one it was given, i.e.
+ * the user never touched this field.
+ *
+ * The UI is populated with *effective* values, so every key round-trips on save
+ * even when untouched. Writing those back to Global copies a workspace-pinned
+ * value into the user's global settings and silently changes it for every other
+ * window — the very divergence this feature exists to prevent. `undefined` and
+ * `null` are treated as the same "unset" so a first save doesn't persist a
+ * value that was never chosen.
+ */
+export function isUnchanged<T>(effective: T | undefined, desired: T): boolean {
+	if (effective === undefined || effective === null) {
+		return desired === undefined || desired === null;
+	}
+	return valuesEqual(effective, desired);
+}

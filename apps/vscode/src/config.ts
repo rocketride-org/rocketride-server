@@ -27,7 +27,7 @@
 
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
-import { isShadowedByWorkspace } from './shared/util/workspaceOverride';
+import { isShadowedByAnyScope, isUnchanged } from './shared/util/workspaceOverride';
 
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
@@ -437,10 +437,15 @@ export class ConfigManager {
 	 * The caller is responsible for explicitly driving connection transitions
 	 * after this method returns (the normal debounced handlers are suppressed).
 	 *
+	 * Keys whose submitted value already matches the effective one are skipped
+	 * entirely: the UI round-trips every key on save, and writing an untouched
+	 * one would persist a workspace-pinned value into the user's Global settings.
+	 *
 	 * @returns `shadowedKeys` — the keys whose Global write is masked by a
-	 *   conflicting value in the active workspace's `.vscode/settings.json`, so
-	 *   the change will not take effect in this window. The caller surfaces this
-	 *   to the user instead of a misleading "saved" confirmation.
+	 *   conflicting value in the workspace's `.vscode/settings.json` (any folder
+	 *   of a multi-root workspace), so the change will not take effect in this
+	 *   window. The caller surfaces this to the user instead of a misleading
+	 *   "saved" confirmation.
 	 */
 	public async applyAllSettings(s: SettingsSnapshot): Promise<{ shadowedKeys: string[] }> {
 		if (!this.context) {
@@ -452,10 +457,30 @@ export class ConfigManager {
 			const wc = vscode.workspace.getConfiguration(this.configSection);
 			const shadowedKeys: string[] = [];
 
-			// Writes the key to the user (Global) target and records it when a
-			// conflicting workspace-level value would mask the write in this window.
+			// An unscoped getConfiguration() cannot resolve folder-level settings,
+			// so inspect each workspace folder as well — otherwise a `.vscode/`
+			// override in a multi-root workspace masks the write unreported.
+			const folders = vscode.workspace.workspaceFolders ?? [];
+			const inspectAllScopes = (key: string) => [wc.inspect(key), ...folders.map((folder) => vscode.workspace.getConfiguration(this.configSection, folder.uri).inspect(key))];
+
 			const write = async (key: string, value: unknown): Promise<void> => {
-				if (isShadowedByWorkspace(wc.inspect(key), value)) {
+				// A key the caller never supplied (the Welcome page renders a subset
+				// of the Settings page) arrives as undefined, and `update(key,
+				// undefined)` *removes* the user's value. Never let a form erase a
+				// setting it does not show. `null` is a real value here — a null
+				// deployment.connectionMode means "share the development one".
+				if (value === undefined) {
+					return;
+				}
+				// The Settings UI is populated with effective values, so untouched
+				// keys round-trip back here unchanged. Writing them would copy a
+				// workspace-pinned value into the user's Global settings and change
+				// it for every other window — the divergence this feature prevents.
+				if (isUnchanged(wc.get(key), value)) {
+					return;
+				}
+				// Record when a conflicting workspace-level value masks the write.
+				if (isShadowedByAnyScope(inspectAllScopes(key), value)) {
 					shadowedKeys.push(`${this.configSection}.${key}`);
 				}
 				await wc.update(key, value, vscode.ConfigurationTarget.Global);

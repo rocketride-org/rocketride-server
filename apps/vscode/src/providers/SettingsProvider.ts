@@ -40,7 +40,11 @@ import { AgentManager } from '../agents/agent-manager';
 import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { isValidHostUrl } from '../shared/util/hostUrl';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
+
+/** Shown when a Direct Connect Host URL is missing or unusable. */
+const HOST_URL_EXAMPLES = 'localhost:5565 or https://engine.example.com';
 
 export class SettingsProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -338,13 +342,13 @@ export class SettingsProvider {
 			// Cast to the typed snapshot (webview sends the full SettingsData shape)
 			const snapshot = settings as unknown as SettingsSnapshot;
 
-			// Validate: Direct Connect (on-prem) mode requires a Host URL
-			if (snapshot.development.connectionMode === 'onprem' && !snapshot.development.hostUrl?.trim()) {
-				this.showMessage(webview, 'error', 'Please enter a Host URL for the development Direct Connect connection.');
+			// Validate: Direct Connect (on-prem) mode requires a usable Host URL
+			if (snapshot.development.connectionMode === 'onprem' && !isValidHostUrl(snapshot.development.hostUrl)) {
+				this.showMessage(webview, 'error', `Enter a valid Host URL for the development Direct Connect connection — for example ${HOST_URL_EXAMPLES}.`);
 				return;
 			}
-			if (snapshot.deployment.connectionMode === 'onprem' && !snapshot.deployment.hostUrl?.trim()) {
-				this.showMessage(webview, 'error', 'Please enter a Host URL for the deployment Direct Connect connection.');
+			if (snapshot.deployment.connectionMode === 'onprem' && !isValidHostUrl(snapshot.deployment.hostUrl)) {
+				this.showMessage(webview, 'error', `Enter a valid Host URL for the deployment Direct Connect connection — for example ${HOST_URL_EXAMPLES}.`);
 				return;
 			}
 
