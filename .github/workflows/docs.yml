@@ -8,6 +8,7 @@ on:
   push:
     branches: [develop]
     paths:
+      - 'docs/**'
       - 'packages/docs/**'
       - 'nodes/src/nodes/**/README.md'
       - 'packages/*/docs/**'
