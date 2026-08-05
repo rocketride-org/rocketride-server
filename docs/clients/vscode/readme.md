@@ -44,6 +44,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 
 - **Visual canvas builder** - Drag, drop, and wire up AI workflows directly in VS Code. Create `.pipe` files to get started.
 - **Debugging & live traces** - Monitor running pipelines in real time with execution traces, token usage, and memory stats, see exactly what your agents are doing at every step.
+
 - **Connection manager** - Connect to a local engine, Docker container, system service, on-premises server, or RocketRide Cloud. Separate development and deployment targets let you build locally and deploy to a different environment.
 - **SDKs for TypeScript, Python & MCP** - Embed pipelines in your apps or expose them as tools for AI assistants.
 
