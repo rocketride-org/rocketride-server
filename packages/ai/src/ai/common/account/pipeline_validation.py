@@ -15,7 +15,8 @@ class AccountPipelineValidation:
 
         # Check if user has required plan for pipeline
         if len(required_plans):
-            account_plans = set(getattr(account_info, 'plans', []))
+            # AccountInfo has no plans field today; missing or None fails closed.
+            account_plans = set(getattr(account_info, 'plans', None) or [])
             for required_plan in required_plans:
                 if required_plan not in account_plans:
                     return False

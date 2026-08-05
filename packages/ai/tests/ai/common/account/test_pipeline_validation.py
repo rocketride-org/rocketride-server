@@ -15,31 +15,16 @@ External deps:
   a provider id, or None if unknown. Tests patch it via monkeypatch.
 """
 
-import importlib.util
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from _engine_stubs import import_with_engine_stubs
 
-def _load_import_helper():
-    path = Path(__file__).parents[2] / 'modules/task/conftest.py'
-    spec = importlib.util.spec_from_file_location('task_conftest_import_helper', path)
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module.import_with_engine_stubs
-
-
-def _import_pipeline_validation():
-    return _load_import_helper()(
-        'ai.common.account.pipeline_validation',
-        {'getServiceDefinition': lambda _provider_id: None},
-    )
-
-
-pv = _import_pipeline_validation()
+pv = import_with_engine_stubs(
+    'ai.common.account.pipeline_validation',
+    {'getServiceDefinition': lambda _provider_id: None},
+)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +145,17 @@ def test_validate_rejects_account_without_plans_field(patch_service_definitions)
     }
     validator = pv.AccountPipelineValidation()
     assert validator.validate(SimpleNamespace(), pipeline) is False
+
+
+def test_validate_rejects_account_with_none_plans(patch_service_definitions):
+    """An account with plans=None should deny required plans, not crash."""
+    patch_service_definitions['providerA'] = {'plans': ['pro']}
+    pipeline = {
+        'source': 'a',
+        'components': [{'id': 'a', 'provider': 'providerA', 'input': []}],
+    }
+    validator = pv.AccountPipelineValidation()
+    assert validator.validate(SimpleNamespace(plans=None), pipeline) is False
 
 
 # ---------------------------------------------------------------------------
