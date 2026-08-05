@@ -732,7 +732,7 @@ export class ConnectionManager implements IConnectionManager {
 		// has already published identity before bootstrap restores shell-only state.
 		if (!operation) {
 			if (result.userToken) this.saveToken(result.userToken);
-			this.updateConnectionStatus({ lastFailure: undefined });
+			this.clearLatchedFailure();
 			this.accountInfo = result;
 			this.emit('shell:login', { user: result });
 		}
@@ -809,9 +809,24 @@ export class ConnectionManager implements IConnectionManager {
 		this.lifecycleOwner = undefined;
 	}
 
+	/**
+	 * Retire a latched failure after an authenticated connect. Anonymous
+	 * connects must NOT call this: a public connect following a session expiry
+	 * would otherwise erase the recovery banner before the user acts on it.
+	 */
+	private clearLatchedFailure(): void {
+		if (this.connectionStatus.lastFailure) this.updateConnectionStatus({ lastFailure: undefined });
+	}
+
 	private publishConnected(operation: ShellConnectionOperation): void {
 		if (!this.isCurrentOperation(operation) || operation.connectedPublished) return;
 		operation.connectedPublished = true;
+		// NB: no `lastFailure: undefined` here. This publisher runs for every
+		// CONNECTED transition including anonymous/public connects, so clearing
+		// unconditionally would wipe a "session expired" banner before the user
+		// could act on it. updateConnectionStatus() clears network latches on
+		// CONNECTED; an auth latch is cleared only by an authenticated connect
+		// (see clearLatchedFailure callers).
 		this.updateConnectionStatus({
 			state: ConnectionState.CONNECTED,
 			lastConnected: new Date(),
@@ -819,7 +834,6 @@ export class ConnectionManager implements IConnectionManager {
 			errorKind: undefined,
 			retryAttempt: 0,
 			progressMessage: undefined,
-			lastFailure: undefined,
 		});
 		this.emit('shell:connected', {});
 		void this.refreshServices().catch((error: unknown) => {
@@ -899,6 +913,9 @@ export class ConnectionManager implements IConnectionManager {
 			this.updateConnectionStatus({ lastFailure: undefined });
 			this.assertCurrentOperation(operation);
 			this.accountInfo = result;
+			// Identity established — this is the only signal that retires an
+			// auth latch (publishConnected deliberately no longer does).
+			this.clearLatchedFailure();
 
 			// Persist token
 			if (result.userToken) {
