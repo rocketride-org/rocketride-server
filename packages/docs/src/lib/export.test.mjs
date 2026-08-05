@@ -147,3 +147,38 @@ describe('exportDocs — check mode with a missing dest', () => {
 		assert.equal(existsSync(path.join(root, target.dest)), false, 'check mode created nothing');
 	});
 });
+
+// The real DIR_EXPORTS entry for `.rocketride/docs` carries `checked: false`
+// because that dest is gitignored and never materializes in a fresh clone/CI
+// checkout — a fresh checkout is exactly what this fixture simulates by never
+// exporting anything before running check mode.
+describe('exportDocs — check mode skips a checked:false DIR_EXPORTS entry', () => {
+	let root;
+	const dirEntry = DIR_EXPORTS.find((e) => e.checked === false);
+	const fileTarget = FILE_EXPORTS[0];
+
+	before(async () => {
+		root = await makeProject();
+		for (const { source } of FILE_EXPORTS) {
+			await writeFile(path.join(root, source), `# Content of ${source}\n`);
+		}
+		await writeFile(path.join(root, dirEntry.source, 'a.md'), '# A\n');
+		// Never run exportDocs — dirEntry.dest (fresh-clone: gitignored, absent) and
+		// fileTarget.dest both do not exist yet.
+	});
+
+	after(async () => {
+		await rm(root, { recursive: true, force: true });
+	});
+
+	it('reports no drift for the missing checked:false dest while still flagging a missing FILE_EXPORT', async () => {
+		assert.ok(dirEntry, 'DIR_EXPORTS declares a checked:false entry to exercise');
+		assert.equal(existsSync(path.join(root, dirEntry.dest)), false, 'dest absent, as in a fresh clone');
+		const { drifted } = await exportDocs({ projectRoot: root, check: true });
+		assert.ok(
+			!drifted.some((d) => d === dirEntry.dest || d.startsWith(`${dirEntry.dest}/`)),
+			'checked:false dest produced no drift entries'
+		);
+		assert.ok(drifted.includes(fileTarget.dest), `${fileTarget.dest} still flagged as drifted`);
+	});
+});

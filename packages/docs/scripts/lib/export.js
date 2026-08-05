@@ -28,7 +28,9 @@
  * opening the package copy knows to edit upstream instead.
  *
  * `docs:check` runs the same computation with `check: true` to catch a dest
- * that was hand-edited or never exported, without writing anything.
+ * that was hand-edited or never exported, without writing anything. A
+ * DIR_EXPORTS entry may opt out of that check via `checked: false` when its
+ * dest is gitignored and only ever materializes locally (see DIR_EXPORTS).
  */
 
 const path = require('path');
@@ -42,7 +44,10 @@ const FILE_EXPORTS = [
 	{ source: 'docs/mcp/readme.md', dest: 'packages/client-mcp/README.md' },
 ];
 const DIR_EXPORTS = [
-	{ source: 'docs/agents', dest: '.rocketride/docs' },
+	// dest is gitignored and absent in a fresh clone/CI checkout (local materialization
+	// only, like the vsix readme copy) — drift-checking it would always fail, so it
+	// participates in `docs:export` but is skipped entirely by `docs:check`.
+	{ source: 'docs/agents', dest: '.rocketride/docs', checked: false },
 ];
 
 /**
@@ -74,7 +79,9 @@ async function exportDocs({ projectRoot, check = false }) {
 		await apply(dest, HEADER(source) + content);
 	}
 
-	for (const { source, dest } of DIR_EXPORTS) {
+	for (const { source, dest, checked = true } of DIR_EXPORTS) {
+		if (check && !checked) continue; // gitignored, local-only dest — not drift-checked
+
 		const srcDirAbs = path.join(projectRoot, source);
 		const destDirAbs = path.join(projectRoot, dest);
 		const srcFiles = (await exists(srcDirAbs)) ? (await readDir(srcDirAbs)).filter((f) => f.endsWith('.md')) : [];
