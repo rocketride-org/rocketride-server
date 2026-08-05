@@ -28,9 +28,9 @@ the model server.
 
 Each record is sent to the vendor in a single request — there is no chunking.
 The vendor caps per-request input length (OpenAI rejects text over ~4096
-characters with a 400; ElevenLabs ~5000; Rime ~500, model-dependent), so split
-long inputs upstream (e.g. a chunker node) before this node. One record over the
-cap fails that record.
+characters with a 400; ElevenLabs ~5000; Rime 1,000 for coda/mistv2/mistv3 and
+unlimited for arcana), so split long inputs upstream (e.g. a chunker node)
+before this node. One record over the cap fails that record.
 
 ## Code layout
 
