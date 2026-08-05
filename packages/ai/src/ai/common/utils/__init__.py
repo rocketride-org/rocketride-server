@@ -3,6 +3,8 @@ Small shared utility modules.
 
 Public surface:
 - ``safe_str`` — convert any value to a string without raising.
+- ``flatten_content_blocks`` — split a provider response's ``content``
+  (string, or Anthropic-style typed blocks) into visible text and reasoning.
 - ``normalize_tool_input``, ``validate_tool_input_schema``, and the
   ``require_*`` / ``optional_*`` / ``require_dict`` / ``int_arg`` validators
   — strict parsing of LLM-supplied tool arguments.
@@ -20,7 +22,8 @@ Public surface:
   — image/ndarray (de)serialization helpers.
 - ``validate_public_url`` — reject non-public/SSRF-prone URLs.
 
-Implementations live in submodules (``string_utils``, ``tool_args``,
+Implementations live in submodules (``string_utils``, ``content_blocks``,
+``tool_args``,
 ``config_utils``, ``agent_tools``, ``file_utils``, ``cuda_utils``,
 ``http_retry``, ``image_utils``, ``url_utils``); this package re-exports them so
 the canonical import path is ``from ai.common.utils import <name>``.
@@ -28,6 +31,7 @@ the canonical import path is ``from ai.common.utils import <name>``.
 
 from .agent_tools import langchain_messages_to_transcript, normalize_bound_tools
 from .config_utils import config_int, parse_bool
+from .content_blocks import flatten_content_blocks
 from .file_utils import decode_data_url, guess_filename
 from .cuda_utils import pick_torch_device, pick_torch_dtype, resolve_pipeline_device
 from .http_retry import get_with_retry, post_with_retry
@@ -53,6 +57,7 @@ __all__ = [
     'colorize_depth',
     'config_int',
     'decode_data_url',
+    'flatten_content_blocks',
     'guess_filename',
     'get_with_retry',
     'int_arg',

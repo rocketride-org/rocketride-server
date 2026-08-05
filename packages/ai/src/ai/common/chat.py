@@ -20,6 +20,7 @@ from ai.common.config import Config
 from ai.common.util import parseJson
 from ai.common.validation import validate_model_name, validate_max_tokens, validate_prompt
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR, dispatch_native_chat_stream
+from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
 
 
 def _stop_kwargs() -> dict:
@@ -36,61 +37,6 @@ def _stop_kwargs() -> dict:
     """
     stop = STOP_SEQUENCES_VAR.get()
     return {'stop': stop} if stop else {}
-
-
-def _make_think_tag_splitter():
-    """Split ``<think>...</think>`` CoT out of the content stream (Ollama, Perplexity).
-
-    Returns a ``feed(text) -> (visible, reasoning)`` closure; tags may span deltas.
-    """
-    OPEN, CLOSE = '<think>', '</think>'
-    state = {'mode': 'visible', 'buf': ''}
-
-    def feed(text: str):
-        if not text:
-            return '', ''
-        buf = state['buf'] + text
-        visible_parts: list = []
-        reasoning_parts: list = []
-        while buf:
-            if state['mode'] == 'visible':
-                idx = buf.find(OPEN)
-                if idx < 0:
-                    # Hold back trailing chars that could be a partial '<think>'.
-                    safe = len(buf) - (len(OPEN) - 1)
-                    if safe > 0:
-                        visible_parts.append(buf[:safe])
-                        buf = buf[safe:]
-                    break
-                if idx:
-                    visible_parts.append(buf[:idx])
-                buf = buf[idx + len(OPEN) :]
-                state['mode'] = 'thinking'
-            else:
-                idx = buf.find(CLOSE)
-                if idx < 0:
-                    safe = len(buf) - (len(CLOSE) - 1)
-                    if safe > 0:
-                        reasoning_parts.append(buf[:safe])
-                        buf = buf[safe:]
-                    break
-                if idx:
-                    reasoning_parts.append(buf[:idx])
-                buf = buf[idx + len(CLOSE) :]
-                state['mode'] = 'visible'
-        state['buf'] = buf
-        return ''.join(visible_parts), ''.join(reasoning_parts)
-
-    def flush():
-        """Emit anything buffered at end-of-stream (e.g. an unterminated tag)."""
-        tail = state['buf']
-        state['buf'] = ''
-        if state['mode'] == 'thinking':
-            return '', tail
-        return tail, ''
-
-    feed.flush = flush  # type: ignore[attr-defined]
-    return feed
 
 
 class ChatBase:
@@ -238,12 +184,10 @@ class ChatBase:
             Should raise appropriate exceptions for API failures, authentication
             errors, or other provider-specific issues
         """
-        # Ask the LLM. The stop kwarg is only added when the agent set stop sequences,
-        # so non-agent callers (and backends/mocks without a stop param) are unaffected.
-        results = self._llm.invoke(prompt, **_stop_kwargs())
-
-        # Return the results
-        return results.content
+        # Non-streaming: invoke through the adapter — same shared normalization as streaming,
+        # but a genuinely different mechanism, so the streaming fallback can still recover.
+        text, _items = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs()).collect(prompt)
+        return text
 
     def getTokens(self, value: str) -> int:
         """
@@ -454,64 +398,33 @@ class ChatBase:
         falling back to non-streaming invoke() only if nothing reached the UI yet.
         """
         prompt = validate_prompt(prompt, self._modelTotalTokens, self.getTokens)
-
-        text_parts: list = []
-        finish_reason: Optional[str] = None
         try:
-            stream = self._raw_client.responses.create(
-                model=self._model,
-                input=prompt,
-                reasoning={'summary': 'auto'},
-                max_output_tokens=self._modelOutputTokens,
-                stream=True,
-            )
-            for event in stream:
-                etype = getattr(event, 'type', '') or ''
-                if etype == 'response.reasoning_summary_text.delta':
-                    delta = getattr(event, 'delta', '') or ''
-                    if delta and on_reasoning_chunk is not None:
-                        on_reasoning_chunk(delta)
-                elif etype == 'response.output_text.delta':
-                    delta = getattr(event, 'delta', '') or ''
-                    if delta:
-                        text_parts.append(delta)
-                        if on_chunk is not None:
-                            on_chunk(delta)
-                elif etype == 'response.completed':
-                    resp = getattr(event, 'response', None)
-                    if resp is not None:
-                        status = getattr(resp, 'status', None)
-                        if status == 'completed':
-                            finish_reason = 'stop'
-                        elif status == 'incomplete':
-                            details = getattr(resp, 'incomplete_details', None)
-                            reason = getattr(details, 'reason', None) if details else None
-                            finish_reason = reason or 'length'
-                        else:
-                            finish_reason = status or 'stop'
-                elif etype in ('response.failed', 'response.error'):
-                    finish_reason = 'error'
+            adapter = NativeOpenAIResponsesAdapter(self)
+            text, _items = drive_adapter(adapter, prompt, on_chunk, on_reasoning_chunk)
+            if not text:
+                # No text (e.g. response.failed) → route to the fallback below, like the Anthropic path.
+                raise RuntimeError('OpenAI Responses stream produced no text')
+            if on_finish is not None:
+                on_finish(adapter.finish_reason)
+            return text
         except Exception as e:
             warning(f'Reasoning streaming disabled for model={self._model} ({type(e).__name__}): {e}.')
-            # Only retry non-streaming if nothing has reached the UI; otherwise
-            # the full fallback would arrive on top of the partial we already streamed.
+            # Only retry non-streaming if nothing reached the UI; otherwise the full
+            # fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
-                results = self._llm.invoke(prompt, **_stop_kwargs())
-                content = getattr(results, 'content', '') or ''
-                content_text = content if isinstance(content, str) else str(content)
-                text_parts = [content_text]
-                # Push the fallback answer through on_chunk so the open UI bubble
-                # gets the visible text (the caller dedupes the final pipeline result).
+                adapter = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs())
+                content_text, _items = adapter.collect(prompt)
+                # Reasoning reaches its own lane; it must never land in the visible text.
+                if adapter.reasoning and on_reasoning_chunk is not None:
+                    on_reasoning_chunk(adapter.reasoning)
                 if content_text and on_chunk is not None:
                     on_chunk(content_text)
-                finish_reason = 'stop'
-            else:
-                finish_reason = 'error'
-
-        if on_finish is not None:
-            on_finish(finish_reason)
-
-        return ''.join(text_parts)
+                if on_finish is not None:
+                    on_finish('stop')
+                return content_text
+            if on_finish is not None:
+                on_finish('error')
+            return ''
 
     def chat_string(
         self,
@@ -593,64 +506,14 @@ class ChatBase:
         result = None
         if on_chunk_w is not None and _llm is not None and hasattr(_llm, 'stream'):
             try:
-                parts = []
-                finish_reason: Optional[str] = None
-                _signature_only_note_sent = False
-                _think_split = _make_think_tag_splitter()
-                for piece in _llm.stream(prompt, **_stop_kwargs()):
-                    # content: str for OpenAI-style, list of typed blocks for Anthropic.
-                    content = piece.content
-                    text = ''
-                    thinking_delta = ''
-                    if isinstance(content, list):
-                        for b in content:
-                            if not isinstance(b, dict):
-                                continue
-                            btype = b.get('type', '')
-                            if btype == 'thinking':
-                                # carries either text deltas or a signature-only final delta.
-                                piece_text = b.get('thinking') or b.get('text') or ''
-                                if piece_text:
-                                    thinking_delta += piece_text
-                                elif b.get('signature') and not _signature_only_note_sent:
-                                    if on_reasoning_chunk_w is not None:
-                                        thinking_delta += (
-                                            '_Extended thinking ran, but this stream only delivered the '
-                                            'block verification signature, not the readable chain-of-thought '
-                                            'text. The answer below still reflects internal reasoning._\n\n'
-                                        )
-                                        _signature_only_note_sent = True
-                            elif btype == 'reasoning':
-                                # LangChain v1 standard block (thinking → reasoning).
-                                piece_text = b.get('reasoning') or b.get('text') or ''
-                                if piece_text:
-                                    thinking_delta += piece_text
-                            elif btype == 'text' or not btype:
-                                text += b.get('text', '')
-                    elif isinstance(content, str):
-                        # Strip inline `<think>...</think>` (Perplexity sonar-reasoning fallback).
-                        text, _thinking_inline = _think_split(content)
-                        if _thinking_inline:
-                            thinking_delta += _thinking_inline
-                    if thinking_delta and on_reasoning_chunk_w is not None:
-                        on_reasoning_chunk_w(thinking_delta)
-                    if text:
-                        on_chunk_w(text)
-                        parts.append(text)
-                    reason = (piece.response_metadata or {}).get('finish_reason')
-                    if reason:
-                        finish_reason = reason
-                # Drain chars buffered by the <think> splitter (partial-tag tail).
-                tail_visible, tail_reasoning = _think_split.flush()
-                if tail_visible:
-                    on_chunk_w(tail_visible)
-                    parts.append(tail_visible)
-                if tail_reasoning and on_reasoning_chunk_w is not None:
-                    on_reasoning_chunk_w(tail_reasoning)
-                if parts:
-                    result = ''.join(parts)
+                # Stream the LangChain path through the normalized adapter; drive_adapter
+                # fans text/thinking to the callbacks and returns the joined answer.
+                adapter = LangChainAdapter(_llm, stream_kwargs=_stop_kwargs())
+                answer, _items = drive_adapter(adapter, prompt, on_chunk_w, on_reasoning_chunk_w)
+                if answer:
+                    result = answer
                     if on_finish is not None:
-                        on_finish(finish_reason)
+                        on_finish(adapter.finish_reason)
             except Exception as e:
                 warning(
                     f'Streaming disabled for model={self._model} '

@@ -595,6 +595,9 @@ class TestContinuum:
         assert chapters[0]['outcome'] == 'ok'
         assert chapters[1]['outcome'] == 'error'
         assert chapters[1]['beginSeq'] > chapters[0]['beginSeq']
+        # The chapter records the run's trace level (run 2 opened with
+        # 'summary'), so consumers can tell "untraced" from "no data yet".
+        assert chapters[1]['traceLevel'] == 'summary'
         # Seq continued past run 1 via the catalog floor lift.
         assert raise_floor2 is not None
         assert state2['floor_calls'] and state2['floor_calls'][0] == run1_last + 1

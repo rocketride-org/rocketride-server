@@ -97,12 +97,10 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 			// Development
 			['connectionMode', 'development.connectionMode'],
 			['hostUrl', 'development.hostUrl'],
-			['developmentTeamId', 'development.teamId'],
 			['local.engineVersion', 'development.local.engineVersion'],
 			// Deployment
 			['deployTargetMode', 'deployment.connectionMode'],
 			['deployHostUrl', 'deployment.hostUrl'],
-			['deployTargetTeamId', 'deployment.teamId'],
 			['deploy.local.engineVersion', 'deployment.local.engineVersion'],
 		];
 
@@ -290,6 +288,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				// deploy removed — register redirect command so sidebar "Deploy" opens Settings
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
+				// File-less per-team deployment tabs (teams-as-environments)
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				const account = new AccountProvider(context);
 				const environment = new EnvironmentProvider(context);
@@ -623,12 +622,16 @@ export async function deactivate(): Promise<void> {
 /** Cached GitHub releases (engine binaries). Populated by ConnectionMessageHandler.fetchAndBroadcastVersions(). */
 export let cachedEngineVersions: Array<{ tag_name: string; prerelease: boolean }> = [];
 /** Replaces the cached engine version list. Called by ConnectionMessageHandler after a successful GitHub API fetch. */
-export const setCachedEngineVersions = (v: typeof cachedEngineVersions) => { cachedEngineVersions = v; };
+export const setCachedEngineVersions = (v: typeof cachedEngineVersions) => {
+	cachedEngineVersions = v;
+};
 
 /** Cached GHCR container tags (Docker images). Populated by ConnectionMessageHandler.fetchAndBroadcastDockerTags(). */
 export let cachedDockerTags: string[] = [];
 /** Replaces the cached Docker tag list. Called by ConnectionMessageHandler after a successful GHCR API fetch. */
-export const setCachedDockerTags = (t: string[]) => { cachedDockerTags = t; };
+export const setCachedDockerTags = (t: string[]) => {
+	cachedDockerTags = t;
+};
 
 // Export getters for provider access
 export const getExtensionContext = () => extensionContext;

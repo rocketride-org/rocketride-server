@@ -118,10 +118,12 @@ jobs:
         #
         # --autoinstall: let the builder install its own Node deps + missing
         #                tooling on a fresh runner (mirrors _build.yaml's Build).
+        # --system-compiler: a PR touching packages/server/ forces a full vcpkg
+        #                compile; install clang-18 system-wide, like that Build.
         shell: bash
         run: |
           set -o pipefail
-          ./builder check-externals:run --autoinstall 2>&1 | tee check-externals.log
+          ./builder check-externals:run --autoinstall --system-compiler 2>&1 | tee check-externals.log
 
       - name: Annotate failures
         # Always run so warnings surface even when the run "succeeded"
@@ -204,7 +206,8 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INSTALL_ALL_INPUT" = "false" ]; then
             INSTALL_ALL=''
           fi
-          ./builder check-externals:run --rebuild-cache $INSTALL_ALL --autoinstall 2>&1 | tee check-externals.log
+          # --system-compiler: clang-18 system-wide, matching _build.yaml's Build.
+          ./builder check-externals:run --rebuild-cache $INSTALL_ALL --autoinstall --system-compiler 2>&1 | tee check-externals.log
 
       - name: Annotate failures
         if: always()

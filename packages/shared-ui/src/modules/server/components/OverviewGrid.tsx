@@ -230,12 +230,7 @@ function nameCellEl(row: ConnTaskRow): HTMLElement {
 function typeCellEl(row: ConnTaskRow): HTMLElement {
 	const el = document.createElement('span');
 	Object.assign(el.style, domStyles.typeLabel);
-	el.style.color =
-		row.kind === 'client'
-			? 'var(--rr-color-success)'
-			: row.completed
-				? 'var(--rr-text-disabled)'
-				: 'var(--rr-border-focus)';
+	el.style.color = row.kind === 'client' ? 'var(--rr-color-success)' : row.completed ? 'var(--rr-text-disabled)' : 'var(--rr-border-focus)';
 	el.textContent = row.kind;
 	return el;
 }
@@ -326,8 +321,8 @@ export const OverviewGrid: React.FC<IOverviewGridProps> = ({ data, onRefresh }) 
 				detail: `${task.provider} · ${task.projectId?.slice(0, 8) ?? ''}${task.source ? ` · ${task.source}` : ''}`,
 				messagesIn: null,
 				messagesOut: null,
-				cpu: task.completed ? null : m?.cpu_percent ?? 0,
-				memory: task.completed ? null : m?.cpu_memory_mb ?? 0,
+				cpu: task.completed ? null : (m?.cpu_percent ?? 0),
+				memory: task.completed ? null : (m?.cpu_memory_mb ?? 0),
 				elapsed: task.elapsedTime,
 				elapsedText: formatUptime(task.elapsedTime),
 				status: taskStatusText(task),
@@ -337,7 +332,10 @@ export const OverviewGrid: React.FC<IOverviewGridProps> = ({ data, onRefresh }) 
 			};
 		};
 		const running = data.tasks.filter((t) => !t.completed).map(taskRow);
-		const completed = data.tasks.filter((t) => t.completed).slice(0, 5).map(taskRow);
+		const completed = data.tasks
+			.filter((t) => t.completed)
+			.slice(0, 5)
+			.map(taskRow);
 		return [...connRows, ...running, ...completed];
 	}, [data]);
 
@@ -347,79 +345,82 @@ export const OverviewGrid: React.FC<IOverviewGridProps> = ({ data, onRefresh }) 
 	 * default view (array order = display order); no default sort, so the
 	 * connections-then-tasks data order holds.
 	 */
-	const columns = useMemo<GridColumnDefinition[]>(() => [
-		{
-			title: 'Name',
-			field: 'name',
-			rrType: 'string',
-			rrDefault: true,
-			rrDescription: 'Client or task display name; the second line carries the identity detail — connection number with message in/out counters for clients, provider · project · source for tasks.',
-			headerSort: true,
-			formatter: (cell: CellComponent) => nameCellEl(cell.getRow().getData() as ConnTaskRow),
-		},
-		{
-			title: 'Type',
-			field: 'kind',
-			rrType: 'enum',
-			rrDefault: true,
-			rrDescription: 'Row kind: client is an authenticated WebSocket connection, task is a managed task from the server registry.',
-			width: 90,
-			headerSort: true,
-			formatter: (cell: CellComponent) => typeCellEl(cell.getRow().getData() as ConnTaskRow),
-		},
-		{
-			title: 'CPU',
-			field: 'cpu',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'CPU utilisation of a running task as a percentage of one core (the cpu_percent metric); connections and completed tasks report none.',
-			headerSort: true,
-			sorter: 'number',
-			// Gauge for running tasks; muted placeholder elsewhere.
-			formatter: (cell: CellComponent) => {
-				const cpu = cell.getValue() as number | null;
-				if (cpu === null) return mutedEl('--');
-				return gaugeEl(cpu, `${cpu.toFixed(0)}%`, 'var(--rr-border-focus)');
+	const columns = useMemo<GridColumnDefinition[]>(
+		() => [
+			{
+				title: 'Name',
+				field: 'name',
+				rrType: 'string',
+				rrDefault: true,
+				rrDescription: 'Client or task display name; the second line carries the identity detail — connection number with message in/out counters for clients, provider · project · source for tasks.',
+				headerSort: true,
+				formatter: (cell: CellComponent) => nameCellEl(cell.getRow().getData() as ConnTaskRow),
 			},
-		},
-		{
-			title: 'Memory',
-			field: 'memory',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Resident CPU memory of a running task in MB (the cpu_memory_mb metric); the gauge scales against a 2048 MB reference; connections and completed tasks report none.',
-			headerSort: true,
-			sorter: 'number',
-			// Gauge for running tasks; muted placeholder elsewhere.
-			formatter: (cell: CellComponent) => {
-				const mem = cell.getValue() as number | null;
-				if (mem === null) return mutedEl('--');
-				return gaugeEl((mem / 2048) * 100, `${mem.toFixed(0)}M`, 'var(--rr-accent)');
+			{
+				title: 'Type',
+				field: 'kind',
+				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Row kind: client is an authenticated WebSocket connection, task is a managed task from the server registry.',
+				width: 90,
+				headerSort: true,
+				formatter: (cell: CellComponent) => typeCellEl(cell.getRow().getData() as ConnTaskRow),
 			},
-		},
-		{
-			title: 'Elapsed',
-			field: 'elapsed',
-			rrType: 'number',
-			rrDefault: true,
-			rrDescription: 'Row age in seconds: time since the connection was established (shown as a relative age) or the task runtime duration (shown as a compact duration).',
-			headerSort: true,
-			sorter: 'number',
-			formatter: (cell: CellComponent) => monoEl((cell.getRow().getData() as ConnTaskRow).elapsedText),
-		},
-		{
-			title: 'Status',
-			field: 'status',
-			rrType: 'enum',
-			rrDefault: true,
-			rrDescription: 'Live state: connected for clients; running or idle (ttl) for active tasks (idle when past 80% of the TTL); exit N once a task finishes (non-zero = failure).',
-			headerSort: true,
-			formatter: (cell: CellComponent) => {
-				const row = cell.getRow().getData() as ConnTaskRow;
-				return badgeEl(statusVariant(row), String(cell.getValue() ?? ''));
+			{
+				title: 'CPU',
+				field: 'cpu',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'CPU utilisation of a running task as a percentage of one core (the cpu_percent metric); connections and completed tasks report none.',
+				headerSort: true,
+				sorter: 'number',
+				// Gauge for running tasks; muted placeholder elsewhere.
+				formatter: (cell: CellComponent) => {
+					const cpu = cell.getValue() as number | null;
+					if (cpu === null) return mutedEl('--');
+					return gaugeEl(cpu, `${cpu.toFixed(0)}%`, 'var(--rr-border-focus)');
+				},
 			},
-		},
-	], []);
+			{
+				title: 'Memory',
+				field: 'memory',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Resident CPU memory of a running task in MB (the cpu_memory_mb metric); the gauge scales against a 2048 MB reference; connections and completed tasks report none.',
+				headerSort: true,
+				sorter: 'number',
+				// Gauge for running tasks; muted placeholder elsewhere.
+				formatter: (cell: CellComponent) => {
+					const mem = cell.getValue() as number | null;
+					if (mem === null) return mutedEl('--');
+					return gaugeEl((mem / 2048) * 100, `${mem.toFixed(0)}M`, 'var(--rr-accent)');
+				},
+			},
+			{
+				title: 'Elapsed',
+				field: 'elapsed',
+				rrType: 'number',
+				rrDefault: true,
+				rrDescription: 'Row age in seconds: time since the connection was established (shown as a relative age) or the task runtime duration (shown as a compact duration).',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => monoEl((cell.getRow().getData() as ConnTaskRow).elapsedText),
+			},
+			{
+				title: 'Status',
+				field: 'status',
+				rrType: 'enum',
+				rrDefault: true,
+				rrDescription: 'Live state: connected for clients; running or idle (ttl) for active tasks (idle when past 80% of the TTL); exit N once a task finishes (non-zero = failure).',
+				headerSort: true,
+				formatter: (cell: CellComponent) => {
+					const row = cell.getRow().getData() as ConnTaskRow;
+					return badgeEl(statusVariant(row), String(cell.getValue() ?? ''));
+				},
+			},
+		],
+		[]
+	);
 
 	return (
 		<>
@@ -453,17 +454,9 @@ export const OverviewGrid: React.FC<IOverviewGridProps> = ({ data, onRefresh }) 
 			</Card>
 
 			{/* ── Connection record panel (client row click) ──────────────────── */}
-			<ConnectionRecordPanel
-				connectionId={selectedConnId}
-				connections={data?.connections ?? []}
-				onClose={() => setSelectedConnId(null)}
-			/>
+			<ConnectionRecordPanel connectionId={selectedConnId} connections={data?.connections ?? []} onClose={() => setSelectedConnId(null)} />
 			{/* Task record panel (task row click). */}
-			<TaskRecordPanel
-				taskId={selectedTaskId}
-				tasks={data?.tasks ?? []}
-				onClose={() => setSelectedTaskId(null)}
-			/>
+			<TaskRecordPanel taskId={selectedTaskId} tasks={data?.tasks ?? []} onClose={() => setSelectedTaskId(null)} />
 		</>
 	);
 };

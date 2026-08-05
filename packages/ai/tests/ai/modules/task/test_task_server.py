@@ -537,7 +537,9 @@ async def test_monitor_ttl_terminates_idle_task(monkeypatch):
     with pytest.raises(_LoopBreak):
         await TaskServer._monitor_ttl(ts)
 
-    ts.stop_task.assert_awaited_once_with('tk_idle')
+    # The reason MUST be 'ttl': it is what makes the run record as a
+    # completed window instead of a cancelled run.
+    ts.stop_task.assert_awaited_once_with('tk_idle', reason='ttl')
 
 
 @pytest.mark.asyncio
@@ -588,6 +590,9 @@ async def test_remove_task_calls_stop_and_broadcasts():
         token='tk_rm',
         userId='u1',
         teamId='t1',
+        run_kind='dev',
+        # Monitor-key cleanup builds the owner-scoped key from the control.
+        owner_id='u1',
         task=task,
         project_id='proj-1',
         source='src-1',

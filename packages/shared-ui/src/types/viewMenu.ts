@@ -27,7 +27,7 @@
 // A ViewMenu is a plain data declaration of a view's selectable entries. Two
 // stock components consume it, each with its own contract:
 //
-// - PageViewControl — the tabs-across-the-top strip showing a view's pages.
+// - TabControl — the tabs-across-the-top strip showing a view's pages.
 //   The VIEW ITSELF renders it as the very first element of its own content
 //   column (above any ContentHeader — the title lives inside each page, below
 //   the strip). There is no publish/host machinery: consistency is enforced
@@ -65,7 +65,7 @@ export interface ViewMenuEntry {
 	icon?: ReactNode;
 	/**
 	 * When true, the entry renders muted and is not selectable — used by
-	 * SidebarMenu; ignored by PageViewControl.
+	 * SidebarMenu; ignored by TabControl.
 	 */
 	disabled?: boolean;
 	/**
@@ -75,7 +75,7 @@ export interface ViewMenuEntry {
 	 * collapses any other open section (accordion — at most ONE section is
 	 * open at a time, decision 2026-07-18). While the sidebar is collapsed
 	 * to the icon rail, sections flatten: their children render as icon
-	 * squares directly. Ignored by PageViewControl and DetailPanel tabs.
+	 * squares directly. Ignored by TabControl and DetailPanel tabs.
 	 */
 	children?: ViewMenuEntry[];
 }
@@ -84,7 +84,7 @@ export interface ViewMenuEntry {
 // MENU
 // =============================================================================
 
-/** The entry list consumed by PageViewControl and SidebarMenu. */
+/** The entry list consumed by TabControl and SidebarMenu. */
 export interface ViewMenu {
 	/** Ordered list of selectable sub-view entries. */
 	entries: ViewMenuEntry[];

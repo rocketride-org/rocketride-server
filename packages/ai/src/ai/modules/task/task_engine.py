@@ -71,6 +71,62 @@ from .types import LAUNCH_TYPE
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
 
+# Serialized-size cap for one trace payload. Trace (and its derived flow)
+# is the only unbounded event payload — a component can attach whole
+# documents or model responses — and every event fans out to EVERY
+# subscribed websocket and into the run-log continuum. Payloads over the
+# cap are replaced by an honest truncation marker.
+CONST_TRACE_PAYLOAD_CAP = 1_000_000
+# How much of the oversized payload the marker keeps: the cap minus a
+# little headroom for the marker fields themselves — an over-cap payload
+# still ships (just under) the full megabyte, clipped rather than shrunk.
+CONST_TRACE_PREVIEW_BYTES = CONST_TRACE_PAYLOAD_CAP - 1_024
+
+
+def cap_trace_payload(trace: Any) -> Any:
+    """Clamp one trace payload to ``CONST_TRACE_PAYLOAD_CAP`` serialized bytes.
+
+    Under the cap the payload passes through untouched. Over it, the whole
+    structure is replaced with a marker — ``{'truncated': True,
+    'originalBytes': N, 'preview': <first bytes of the serialized JSON>}`` —
+    because pruning arbitrary nested user data field-by-field is guesswork,
+    while the marker is honest and bounded. Applied ONCE where apaevt_trace
+    is parsed, so the broadcast trace, the derived flow, and the run-log
+    continuum all carry the same clamped payload (replay reproduces exactly
+    what live viewers saw).
+
+    Args:
+        trace: The raw trace payload from the engine event.
+
+    Returns:
+        The payload unchanged, or the truncation marker.
+    """
+    if not trace:
+        return trace
+    try:
+        raw = json.dumps(trace)
+    except (TypeError, ValueError):
+        # Unserializable payloads fail later anyway — leave them for the
+        # transport's own error handling rather than masking the bug here.
+        return trace
+    if len(raw) <= CONST_TRACE_PAYLOAD_CAP:
+        return trace
+    # The bound must hold for the marker AS IT TRAVELS: `preview` holds
+    # already-serialized JSON text, and re-serializing it escapes every
+    # quote/backslash (control chars become 6-byte \uXXXX escapes), so an
+    # object-heavy preview inflates well past its slice length. Size the
+    # serialized marker and trim proportionally until it fits.
+    preview = raw[:CONST_TRACE_PREVIEW_BYTES]
+    while preview:
+        marker = {'truncated': True, 'originalBytes': len(raw), 'preview': preview}
+        size = len(json.dumps(marker))
+        if size <= CONST_TRACE_PAYLOAD_CAP:
+            return marker
+        # Proportional trim converges in a couple of passes; the -1 makes
+        # progress even when the ratio rounds to no change.
+        preview = preview[: max(0, len(preview) * CONST_TRACE_PAYLOAD_CAP // size - 1)]
+    return {'truncated': True, 'originalBytes': len(raw), 'preview': ''}
+
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
@@ -220,6 +276,8 @@ class Task(DAPBase):
         team_id: str = '',
         org_id: str = '',
         env: Dict[str, str] = None,
+        run_kind: str = 'dev',
+        trigger: str = 'manual',
         **kwargs,
     ) -> None:
         """
@@ -235,7 +293,13 @@ class Task(DAPBase):
             client_id: Account identifier for store access scoping
             team_id: Owning team id (rides the task file as trusted identity)
             org_id: Owning org id (rides the task file as trusted identity)
-            **kwargs: Additional DAP configuration
+            run_kind: Run classification ('dev' | 'deploy') — picks the
+                run-log continuum; only the trusted dispatch sets 'deploy'
+            trigger: What fired the run ('' | 'manual' | 'schedule');
+                '' is the interactive-dev spelling (only the trusted
+                dispatch stamps manual/schedule); stamped on the
+                run-begin marker
+            **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
         # Store authentication
         self.id = id
@@ -295,6 +359,10 @@ class Task(DAPBase):
         # Lifecycle state
         self._tmpfile = None
         self._stop_requested = False
+        # WHY the stop was requested ('user' | 'ttl'); None until requested.
+        # A ttl-window expiry is SUCCESS (the run stayed up exactly as
+        # configured), so the run-log outcome derives from this.
+        self._stop_reason: 'str | None' = None
 
         # Client connections
         self._debugger: Optional[TaskConn] = None
@@ -349,9 +417,18 @@ class Task(DAPBase):
         # start; None if logging setup failed, which must never break the run).
         # run_kind separates the dev and deploy continua; the deploy feature's
         # trusted dispatch path sets 'deploy', everything else logs as 'dev'.
+        # Both classifications gate storage anchors, run-log scoping, and
+        # token ownership downstream — reject anything outside the closed
+        # vocabulary HERE, the one construction choke point, so a bad value
+        # can never pick a storage scope. ('' trigger = an interactive dev
+        # run: only the trusted dispatch stamps manual/schedule.)
+        if run_kind not in ('dev', 'deploy'):
+            raise ValueError(f'invalid run_kind: {run_kind!r}')
+        if trigger not in ('', 'manual', 'schedule'):
+            raise ValueError(f'invalid trigger: {trigger!r}')
         self._run_log: Optional[RunLogWriter] = None
-        self._run_kind: str = kwargs.get('run_kind', 'dev')
-        self._run_trigger: str = kwargs.get('trigger', 'manual')
+        self._run_kind: str = run_kind
+        self._run_trigger: str = trigger
 
         # Subprocess debugging flag
         self._debug_subprocess = False
@@ -379,6 +456,65 @@ class Task(DAPBase):
         Delegates to :func:`pipeline.resolve_pipeline_env`.
         """
         return resolve_pipeline_env(pipeline, self._env)
+
+    # Providers that connect to the per-tenant RocketRide cloud database and
+    # therefore need ROCKETRIDE_DB_DSN injected into the task subprocess.
+    _ROCKETRIDE_DB_PROVIDERS = frozenset({'rocketride_sql', 'rocketride_vector', 'rocketride_graph'})
+
+    def _pipeline_uses_rocketride_db(self) -> bool:
+        """True when any pipeline component is a RocketRide cloud DB node."""
+        components = self._pipeline.get('components') or []
+        return any(
+            isinstance(component, dict) and component.get('provider') in self._ROCKETRIDE_DB_PROVIDERS
+            for component in components
+        )
+
+    async def _build_subprocess_env(self) -> Dict[str, str]:
+        """Build the environment for the task subprocess.
+
+        Credential hygiene for the RocketRide cloud DB path:
+
+        - The broker credential can resolve ANY tenant's DSN — it must never
+          reach node subprocesses, which run user pipeline code.
+        - A DSN inherited from the parent environment must not leak into
+          pipelines that didn't resolve one (and must not survive a broker
+          failure as a stale value pointing at who-knows-which tenant).
+
+        Children only ever get the single DSN resolved here, for pipelines
+        that actually contain one of the DB nodes. Identity is NOT delivered
+        through the environment (it rides the task file's 'identity' block —
+        the ROCKETRIDE_* env namespace is caller-influenced by design).
+        """
+        subprocess_env = os.environ.copy()
+
+        subprocess_env.pop('ROCKETRIDE_DB_BROKER_URL', None)
+        subprocess_env.pop('ROCKETRIDE_DB_BROKER_TOKEN', None)
+        subprocess_env.pop('ROCKETRIDE_DB_DSN', None)
+        subprocess_env.pop('ROCKETRIDE_DB_RESOLVE_ERROR', None)
+
+        # Resolve the per-tenant DSN server-side (the SaaS account context
+        # exists only in this process) and hand it to the node subprocess via
+        # env — the same delivery mechanism as ROCKETRIDE_CLIENT_ID. Scoped to
+        # pipelines that actually contain one of the DB nodes so unrelated
+        # tasks never trigger provisioning. Resolution failure is non-fatal
+        # here: the node surfaces its own clear error, with the failure reason
+        # passed down so it isn't misreported as a sign-in problem.
+        if self._pipeline_uses_rocketride_db():
+            try:
+                from ai.account import account
+
+                dsn = await account.resolve_db_dsn(self.client_id)
+                subprocess_env['ROCKETRIDE_DB_DSN'] = dsn
+            except NotImplementedError:
+                # Broker env not configured (open-source default) — the
+                # node raises the sign-in message itself.
+                pass
+            except Exception as e:
+                self.debug_message(f'RocketRide DB DSN resolution failed: {e}')
+                reason = (str(e).strip().splitlines() or [repr(e)])[0]
+                subprocess_env['ROCKETRIDE_DB_RESOLVE_ERROR'] = reason
+
+        return subprocess_env
 
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
@@ -916,6 +1052,7 @@ class Task(DAPBase):
                         'name': self._status.name,
                         'projectId': self.project_id,
                         'source': self.source,
+                        **({'reason': self._stop_reason} if self._stop_reason else {}),
                     },
                     id=self.id,
                 )
@@ -959,13 +1096,16 @@ class Task(DAPBase):
                 if self._is_restarting:
                     self._run_log.note_restart()
                 else:
+                    # A ttl-window expiry is SUCCESS: the run stayed up
+                    # exactly as configured, then shut down. Only a real
+                    # stop (or abnormal exit) reads as cancelled.
                     if self._status.state == TASK_STATE.CANCELLED.value:
-                        outcome = 'cancelled'
+                        outcome = 'ok' if self._stop_reason == 'ttl' else 'cancelled'
                     elif self._status.exitCode == 0:
                         outcome = 'ok'
                     else:
                         outcome = 'error'
-                    await self._run_log.end_run(outcome, self._status.exitMessage or '')
+                    await self._run_log.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
                     self._run_log = None
             except Exception as e:
                 self.debug_message(f'Run-log close failed: {e}')
@@ -1156,6 +1296,15 @@ class Task(DAPBase):
         if isinstance(body, dict) and 'project_id' not in body:
             body['project_id'] = self.project_id
             body['source'] = self.source
+        # Concrete identity stamp: teamId/userId/runKind ride every event
+        # body so watchers can scope streams client-side (two teams or two
+        # devs running the SAME project no longer alias in a watch UI), and
+        # server-side subscription filters can match these fields verbatim
+        # when they land. Idempotent like the project_id stamp above.
+        if isinstance(body, dict) and 'runKind' not in body:
+            body['runKind'] = self._run_kind
+            body['teamId'] = self.team_id
+            body['userId'] = self.client_id
 
         # Append to the run-log continuum: what clients see is what replay
         # reproduces (the writer filters/samples/caps internally; never
@@ -1365,7 +1514,7 @@ class Task(DAPBase):
             total_pipes = body.get('total_pipes', 0)
             pipe_index = body.get('id', '')
             component_name = body.get('pipe_id', '')
-            trace = body.get('trace', {})
+            raw_trace = body.get('trace', {})
 
             # total_pipes=0 marks a synthetic trace (tool-call events emit it
             # as "unknown") — keep the data lane's real pipe count.
@@ -1389,13 +1538,21 @@ class Task(DAPBase):
                 'op': operation,
                 'pipes': pipes,
                 'component': component_name,
-                'trace': trace or {},
+                # Filled below only when tracing is on — the clamp
+                # serializes the whole trace, wasted work for a body that
+                # never leaves this method (synthetic tool-call traces
+                # arrive regardless of trace level).
+                'trace': {},
             }
             # Send out a status update when needed
             self._status_updated = True
 
             # If this task is started with tracing
             if self._pipelineTraceLevel:
+                # Clamp oversized payloads HERE, before the rebuilt body
+                # fans out to the broadcast, the derived flow, and the
+                # run-log continuum.
+                body['trace'] = cap_trace_payload(raw_trace) or {}
                 # Build the derived flow event only when it will actually be
                 # delivered — build_event assigns its continuum seq, and a
                 # built-but-unsent event would leave a gap. It inherits the
@@ -1865,6 +2022,7 @@ class Task(DAPBase):
             self._service_up_notes = []
             self._service_down_notes = []
             self._stop_requested = False
+            self._stop_reason = None
             self._is_terminating = False
 
             # Set our current state
@@ -1979,7 +2137,9 @@ class Task(DAPBase):
             # Launch subprocess. Identity travels in the TASK FILE (see
             # _build_task's 'identity' block), never the environment — the
             # ROCKETRIDE_* env namespace is caller-influenced by design.
-            subprocess_env = os.environ.copy()
+            # _build_subprocess_env additionally scrubs the RocketRide DB
+            # broker credentials and injects the resolved per-tenant DSN.
+            subprocess_env = await self._build_subprocess_env()
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
@@ -2022,14 +2182,28 @@ class Task(DAPBase):
                 # user identity — internal-only entry).
                 from ai.account import RequestContext, Store
 
+                # The store view anchors at the run's OWNER namespace: the
+                # TEAM for deploy runs (which carry no user identity — every
+                # path they write is '@/Team/=<id>/'-prefixed anyway), the
+                # user for dev runs. An internal-context store REQUIRES a
+                # concrete anchor — an empty one raises, and the except below
+                # would silently disable the run log for the whole run.
                 self._run_log = RunLogWriter(
-                    Store.file_store(RequestContext.internal('run-log'), client_id=self.client_id),
+                    Store.file_store(
+                        RequestContext.internal('run-log'),
+                        client_id=self.team_id if self._run_kind == 'deploy' else self.client_id,
+                    ),
                     self.client_id,
                     self.project_id,
                     self.source,
                     self._run_kind,
                     self.stamp_log_event,
                     self.raise_log_seq_floor,
+                    # Deploy runs write the TEAM continuum (teams are the
+                    # environments — teammates watch/replay the same stream);
+                    # dev runs stay in the owner's tree. The writer's scope
+                    # helper turns this into the '@/Team/=<id>/' store prefix.
+                    team_id=self.team_id if self._run_kind == 'deploy' else '',
                     debug=self.debug_message,
                 )
                 await self._run_log.open(
@@ -2122,9 +2296,14 @@ class Task(DAPBase):
             self.debug_message(f'Task startup failed: {e}')
             raise
 
-    async def stop_task(self) -> None:
+    async def stop_task(self, reason: str = 'user') -> None:
         """
         Initiate graceful task termination with resource cleanup.
+
+        Args:
+            reason: WHY the stop happens — 'user' (explicit request) or
+                'ttl' (the run window elapsed). Drives the recorded run
+                outcome: a ttl expiry is a successful run, not a cancel.
         """
         try:
             # Prevent race conditions
@@ -2132,8 +2311,9 @@ class Task(DAPBase):
                 # Get subprocess reference
                 engine = self._engine_process
 
-                # Mark as user-requested stop and block new operations
+                # Mark as a requested stop and block new operations.
                 self._stop_requested = True
+                self._stop_reason = reason
                 self._is_terminating = True
 
                 # Handle subprocess termination

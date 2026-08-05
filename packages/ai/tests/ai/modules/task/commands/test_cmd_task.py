@@ -140,9 +140,10 @@ async def test_on_execute_requires_task_control_permission():
 
 
 @pytest.mark.asyncio
-async def test_on_execute_checks_permission_on_the_target_team(monkeypatch):
-    """The task.control check runs against the CLIENT-SUPPLIED teamId (not
-    defaultTeam) so a foreign team cannot be targeted.
+async def test_on_execute_rejects_client_team_override(monkeypatch):
+    """A client-supplied teamId that differs from the session's team context
+    (the profile-assigned development team) is REJECTED, not honored — clients
+    no longer choose which team a run executes under.
     """
     from ai.account import account as account_mod
 
@@ -155,15 +156,37 @@ async def test_on_execute_checks_permission_on_the_target_team(monkeypatch):
     server.start_task = AsyncMock(return_value={'token': 'tk_new'})
     conn = _make_conn(account_info=_account_info(default_team='team-1', organization=organization), server=server)
 
-    await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-target'}})
+    with pytest.raises(PermissionError, match='development team'):
+        await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-target'}})
 
-    conn.verify_team_permission.assert_called_once_with('team-target', 'task.control')
+    server.start_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_execute_accepts_team_id_matching_session_team(monkeypatch):
+    """A teamId EQUAL to the session's team passes (the trusted in-process
+    dispatch sends teamId = the synthesized defaultTeam) and task.control is
+    verified on that team.
+    """
+    from ai.account import account as account_mod
+
+    # The check passes, so execution continues into the secret merge —
+    # stub it out so the test never depends on the ambient account backend.
+    monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
+
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(default_team='team-1'), server=server)
+
+    await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-1'}})
+
+    conn.verify_team_permission.assert_called_once_with('team-1', 'task.control')
 
 
 @pytest.mark.asyncio
 async def test_on_execute_foreign_team_denied_before_secret_merge(monkeypatch):
-    """A denied teamId aborts BEFORE the env/secret merge and before start_task —
-    the cross-team secret-exfiltration hole this check closes.
+    """A foreign teamId aborts BEFORE the env/secret merge and before
+    start_task — the cross-team secret-exfiltration hole this check closes.
     """
     from ai.account import account as account_mod
 
@@ -173,14 +196,64 @@ async def test_on_execute_foreign_team_denied_before_secret_merge(monkeypatch):
     server = MagicMock()
     server.start_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.verify_team_permission = MagicMock(side_effect=PermissionError('denied'))
 
-    with pytest.raises(PermissionError, match='denied'):
+    with pytest.raises(PermissionError, match='development team'):
         await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
 
     # Neither the secret merge nor the task start may have been reached.
     merged_env.assert_not_awaited()
     server.start_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_on_execute_run_kind_cannot_be_spoofed_via_dap(monkeypatch):
+    """arguments.run_kind/trigger are IGNORED: run classification comes only
+    from the trusted in-process dispatch attributes, so a remote client can
+    never write into the deploy continuum or claim a scheduled trigger.
+    """
+    from ai.account import account as account_mod
+
+    # The dev path merges the user env layer — stub it out so the test
+    # never depends on the ambient account backend.
+    monkeypatch.setattr(account_mod, 'get_merged_env', AsyncMock(return_value={}))
+
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+
+    await TaskCommands.on_execute(
+        conn, {'arguments': {'pipeline': {'components': []}, 'run_kind': 'deploy', 'trigger': 'schedule'}}
+    )
+
+    kwargs = server.start_task.call_args.kwargs
+    assert kwargs['run_kind'] == 'dev'
+    assert kwargs['trigger'] == ''
+
+
+@pytest.mark.asyncio
+async def test_on_execute_trusted_attributes_classify_deploy_runs(monkeypatch):
+    """The in-process dispatch sets _trusted_run_kind/_trusted_trigger on its
+    connection; on_execute forwards them to start_task and SKIPS the user
+    env layer (a deployment's config must not depend on who deployed it).
+    """
+    from ai.account import account as account_singleton
+
+    merged = AsyncMock(return_value={})
+    monkeypatch.setattr(account_singleton, 'get_merged_env', merged)
+
+    server = MagicMock()
+    server.start_task = AsyncMock(return_value={'token': 'tk_new'})
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn._trusted_run_kind = 'deploy'
+    conn._trusted_trigger = 'schedule'
+
+    await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
+
+    kwargs = server.start_task.call_args.kwargs
+    assert kwargs['run_kind'] == 'deploy'
+    assert kwargs['trigger'] == 'schedule'
+    # No user layer for deploy runs.
+    assert merged.await_args.kwargs['user_id'] == ''
 
 
 @pytest.mark.asyncio
@@ -291,7 +364,25 @@ async def test_on_rrext_get_token_returns_token_from_server():
     response = await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
     assert response == {'type': 'response', 'body': {'token': 'tk_found'}}
     server.get_task_control_by_project.assert_called_once_with(
-        'proj-1', 'src-1', conn._account_info, require='task.monitor'
+        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id=''
+    )
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_get_token_team_scope_resolves_deploy_run():
+    """A teamId argument scopes the lookup (and permission check) to that team."""
+    server = MagicMock()
+    server.get_task_control_by_project = MagicMock(return_value=SimpleNamespace(token='tk_deploy'))
+
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_team_permission = MagicMock()
+    response = await TaskCommands.on_rrext_get_token(
+        conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1', 'teamId': 'team-1'}}
+    )
+    assert response == {'type': 'response', 'body': {'token': 'tk_deploy'}}
+    conn.verify_team_permission.assert_called_once_with('team-1', 'task.monitor')
+    server.get_task_control_by_project.assert_called_once_with(
+        'proj-1', 'src-1', conn._account_info, require='task.monitor', team_id='team-1'
     )
 
 
@@ -316,6 +407,7 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
             token=token,
             userId='user-1',
             teamId=team_id,
+            run_kind='dev',
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
@@ -340,6 +432,9 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     tokens = [t['token'] for t in response['body']['tasks']]
     assert tokens == ['tk_running_mine']
     assert response['body']['tasks'][0]['name'] == 'my-pipeline'
+    # Run classification rides every row — clients must not infer deploy-ness
+    # from a non-empty teamId (dev runs carry an attribution team too).
+    assert response['body']['tasks'][0]['runKind'] == 'dev'
 
 
 @pytest.mark.asyncio
@@ -354,6 +449,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         token='tk_1',
         userId='user-1',
         teamId='team-1',
+        run_kind='dev',
         source='my-source',
         pipeline=None,
         task=task,

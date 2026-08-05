@@ -406,7 +406,7 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 			...(isSaas ? [{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') } satisfies SidebarFooterMenuItem] : []),
 			{ id: 'environment', label: 'Variables', icon: BxLock, dividerBefore: !isSaas, onClick: () => onOverlay('environment') },
 			// Settings is a global workspace view (shell "General" plus any installed app's
-			// settings), so it's always available. Per-app gating lives in SettingsPage.
+			// settings), so it's always available. Per-app gating lives in SettingsProvider.
 			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
 			{
 				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,

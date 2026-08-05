@@ -432,6 +432,7 @@ class RequestProcessing:
 async def task_Data(
     request: Request,
     token: Optional[str] = Query(None, description='Token returned from task execute'),
+    teamId: Optional[str] = Query(None, description="Address the team's DEPLOY run of the path's project/source"),
     authorization: str = Header(..., description='Bearer API key in the Authorization header'),
 ) -> Response:
     r"""
@@ -470,17 +471,41 @@ async def task_Data(
 
     try:
         if token is None:
-            project_id = request.path_params.get('project_id')
-            source = request.path_params.get('source')
-            if project_id is not None and source is not None:
+            # Task-scoped credentials ARE the task — no project lookup needed
+            # (and none permitted: a pk_/tk_ key is locked to its run).
+            account = request.state.account
+            auth = getattr(account, 'auth', '') or ''
+            if auth.startswith('tk_'):
+                token = auth
+            elif auth.startswith('pk_'):
                 try:
-                    control = request.app.state.task.get_task_control_by_project(project_id, source)
+                    control = request.app.state.task.get_task_control_by_public_key(auth)
                     token = control.token
                 except RuntimeError:
-                    # Documented missing-task case ('Your pipeline is not
-                    # running') — fall back to token=None so the request takes
-                    # the normal auth/404 path. Anything else propagates.
+                    # Missing-task case — fall through to the normal auth/404 path
                     pass
+            else:
+                project_id = request.path_params.get('project_id')
+                source = request.path_params.get('source')
+                if project_id is not None and source is not None:
+                    try:
+                        # Owner-scoped resolution: teamId query ⇒ the team's
+                        # deploy run; absent ⇒ the caller's own dev run.
+                        # PermissionError propagates — an authenticated caller
+                        # must never resolve someone else's task token.
+                        control = request.app.state.task.get_task_control_by_project(
+                            project_id,
+                            source,
+                            account,
+                            require='task.data',
+                            team_id=teamId or '',
+                        )
+                        token = control.token
+                    except RuntimeError:
+                        # Documented missing-task case ('Your pipeline is not
+                        # running') — fall back to token=None so the request takes
+                        # the normal auth/404 path. Anything else propagates.
+                        pass
 
         # Get the WebServer instance from application state
         server: WebServer = request.app.state.server
@@ -515,6 +540,7 @@ async def task_Data(
 async def task_Process(
     request: Request,
     token: Optional[str] = Query(None, description='Token returned from task execute'),
+    teamId: Optional[str] = Query(None, description="Address the team's DEPLOY run of the path's project/source"),
     authorization: str = Header(..., description='Bearer API key in the Authorization header'),
 ) -> DataResult:
     r"""
@@ -522,4 +548,4 @@ async def task_Process(
 
     DEPRECATED - Use /task/data.
     """
-    return await task_Data(request=request, token=token, authorization=authorization)
+    return await task_Data(request=request, token=token, teamId=teamId, authorization=authorization)

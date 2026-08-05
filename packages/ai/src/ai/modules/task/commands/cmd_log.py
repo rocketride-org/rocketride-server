@@ -28,11 +28,13 @@
 # via the stream's control file — clients never touch storage directly.
 # Dispatches on ``arguments.subcommand`` (chapters / read / segment / delete),
 # the same shape as rrext_store and rrext_deploy. Streams are addressed by the plain
-# identity tuple (projectId + source + runKind) — NEVER by token: tokens are
-# credentials and appear nowhere in the log system.
+# identity pair (projectId + source) — NEVER by token: tokens are
+# credentials and appear nowhere in the log system. The SCOPE IS THE KIND:
+# ``teamId`` present addresses that team's DEPLOY continuum, absent addresses
+# the caller's own DEV stream — run kind is derived, not an argument.
 # =============================================================================
 
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
 from ai.account import Store
 from ai.common.dap import DAPConn, TransportBase
@@ -40,9 +42,6 @@ from ai.modules.task.run_log import RunLogReader
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
-
-# Run kinds a stream may be addressed by (separate continua per kind).
-_VALID_RUN_KINDS = frozenset({'dev', 'deploy'})
 
 
 # =============================================================================
@@ -57,9 +56,10 @@ class LogCommands(DAPConn):
     Provides ``on_rrext_log`` which dispatches on ``arguments.subcommand`` to
     the matching ``_log_*`` handler. Permissions differ per subcommand
     (``task.monitor`` for reads, ``task.control`` for the destructive
-    delete), so each handler verifies its own permission. All access is
-    scoped to the authenticated user's own streams in v1 — the store paths
-    are derived from ``self._account_info.userId``, never from caller input.
+    delete), so each handler verifies its own permission. Unscoped requests
+    serve the caller their OWN streams (paths derived from
+    ``self._account_info.userId``); an optional ``teamId`` targets a team's
+    DEPLOY continuum, gated by the caller's permission on that team.
     """
 
     def __init__(
@@ -121,36 +121,86 @@ class LogCommands(DAPConn):
     # SHARED RESOLUTION
     # =========================================================================
 
-    def _reader_for(self, args: Dict[str, Any]) -> RunLogReader:
+    def _scope_for(self, args: Dict[str, Any]) -> Tuple[str, str]:
         """
-        Build a reader for the stream named by the identity-tuple arguments.
+        Resolve the stream scope from the addressing arguments.
+
+        THE SCOPE IS THE KIND: ``teamId`` present addresses that team's
+        DEPLOY continuum (deploy runs execute as the team and log into its
+        tree); absent addresses the caller's own DEV stream. Run kind is
+        derived from the scope — it is not part of the wire contract.
 
         Args:
-            args: Must contain ``projectId``, ``source``, ``runKind``.
+            args: The subcommand arguments.
 
         Returns:
-            A RunLogReader scoped to the CALLER's user id.
+            ``(team_id, run_kind)`` — ``('', 'dev')`` for own streams,
+            ``(<id>, 'deploy')`` for a team scope.
+        """
+        team_id = args.get('teamId') or ''
+        return team_id, ('deploy' if team_id else 'dev')
+
+    def _verify_log_access(self, args: Dict[str, Any], perm: str) -> None:
+        """
+        The permission gate for every log subcommand.
+
+        Team-scoped requests (deploy streams) resolve ``perm`` against the
+        TARGET team — membership is the read/write right, exactly the
+        deployment model (teams are the environments). Unscoped requests
+        keep the original default-team check. Denials are uniform: a foreign
+        or unknown team reads the same as a permission miss (no existence
+        leak).
+
+        Args:
+            args: The subcommand arguments (consulted for ``teamId``).
+            perm: 'task.monitor' for reads, 'task.control' for delete.
+
+        Raises:
+            PermissionError: Caller lacks ``perm`` in the resolved scope.
+        """
+        # Step 1: resolve the scope the request addresses.
+        team_id, _ = self._scope_for(args)
+
+        # Step 2: team scope resolves against THAT team; otherwise the
+        # caller's default team, as before.
+        if team_id:
+            self.verify_team_permission(team_id, perm)
+        else:
+            self.verify_permission(perm)
+
+    def _reader_for(self, args: Dict[str, Any]) -> RunLogReader:
+        """
+        Build a reader for the stream named by the addressing arguments.
+
+        Args:
+            args: Must contain ``projectId`` and ``source``; ``teamId``
+                selects that team's deploy continuum (run kind is derived
+                from the scope — see ``_scope_for``).
+
+        Returns:
+            A RunLogReader scoped to the CALLER's user id, or to the TEAM
+            when ``teamId`` is given (permission-checked by the handler).
 
         Raises:
             ValueError: On missing/invalid identity arguments.
         """
         project_id = args.get('projectId')
         source = args.get('source')
-        run_kind = args.get('runKind')
 
         if not project_id:
             raise ValueError('projectId is required')
         if not source:
             raise ValueError('source is required')
-        if run_kind not in _VALID_RUN_KINDS:
-            raise ValueError(f'runKind must be one of {sorted(_VALID_RUN_KINDS)}')
+        team_id, run_kind = self._scope_for(args)
 
-        # Store scoping comes from the AUTHENTICATED user, never from input:
-        # v1 serves each caller their own streams only. .logs is a SYSTEM
-        # TREE — the file API denies it to every session identity — so the
-        # reader acts through an INTERNAL identity anchored at the caller's
-        # namespace. The DOMAIN permission gate is this command layer's own
-        # verify_permission('task.monitor'/'task.control') checks above.
+        # Store scoping comes from the AUTHENTICATED user, never from raw
+        # input: unscoped requests serve the caller their own streams only,
+        # and a teamId scope is permission-checked at the handler before
+        # this runs. .logs is a SYSTEM TREE — the file API denies it to
+        # every session identity — so the reader acts through an INTERNAL
+        # identity anchored at the caller's namespace; the reader's scope
+        # helper turns teamId into the '@/Team/=<id>/' prefix. The DOMAIN
+        # permission gate is _verify_log_access above.
         from ai.account import RequestContext
 
         return RunLogReader(
@@ -159,6 +209,7 @@ class LogCommands(DAPConn):
             project_id,
             source,
             run_kind,
+            team_id=team_id,
         )
 
     # =========================================================================
@@ -176,7 +227,7 @@ class LogCommands(DAPConn):
         start/end + horizon complete the timeline — everything the UI needs
         from ONE small read, no segment access.
         """
-        self.verify_permission('task.monitor')
+        self._verify_log_access(args, 'task.monitor')
 
         try:
             body = await self._reader_for(args).chapters()
@@ -204,7 +255,7 @@ class LogCommands(DAPConn):
         carry ``nextSeq`` when paged and ``truncatedAtSeq`` when the request
         reached below the retention horizon.
         """
-        self.verify_permission('task.monitor')
+        self._verify_log_access(args, 'task.monitor')
 
         reader = self._reader_for(args)
         try:
@@ -236,7 +287,7 @@ class LogCommands(DAPConn):
         ``nextOffset`` until ``final``. The active segment is served up to
         its current length; the live subscription covers growth past that.
         """
-        self.verify_permission('task.monitor')
+        self._verify_log_access(args, 'task.monitor')
 
         segment = args.get('segment')
         if segment is None:
@@ -273,7 +324,7 @@ class LogCommands(DAPConn):
         Deletes hit BOTH locations (store + spool) with the lease/ordering
         disciplines; a live stream's mutation routes through its writer.
         """
-        self.verify_permission('task.control')
+        self._verify_log_access(args, 'task.control')
 
         before_time = args.get('beforeTime')
         delete_all = bool(args.get('all'))

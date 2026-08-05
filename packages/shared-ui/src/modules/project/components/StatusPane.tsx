@@ -126,6 +126,13 @@ const styles: Record<string, CSSProperties> = {
 		flexDirection: 'column',
 		gap: 16,
 	},
+	// Traceless run: the trace-fed sections gray out and go inert — the
+	// same dimming as the dead-zone ghost, signalling "disabled" at a glance.
+	tracelessDim: {
+		opacity: 0.45,
+		pointerEvents: 'none',
+		userSelect: 'none',
+	},
 	componentRow: {
 		display: 'flex',
 		alignItems: 'center',
@@ -262,6 +269,10 @@ const TILE_LABELS = ['Completions', 'Data processed', 'Tokens charged', 'Peak GP
  * completions, and idle gaps.
  */
 export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapter, position, onOpenTrace, onJumpToRun, componentNames }) => {
+	// Whether THIS run recorded traces: the chapter carries its trace level
+	// (null/'none' = tracing was OFF; absent = pre-stamp legacy chapter, so
+	// keep the generic wording rather than accusing the user).
+	const traceOff = chapter != null && 'traceLevel' in chapter && (chapter.traceLevel == null || chapter.traceLevel === 'none');
 	// --- Trailing-median deviation (run duration vs recent completed runs) ---
 	const deviation = useMemo(() => {
 		if (!chapter || !chapters) return null;
@@ -406,14 +417,15 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 				/>
 			</MiniContainer>
 
-			{/* Two-up: component timing left, slowest completions right */}
-			<div style={styles.columns}>
+			{/* Two-up: component timing left, slowest completions right —
+			    grayed/inert when this run recorded no traces. */}
+			<div style={traceOff ? { ...styles.columns, ...styles.tracelessDim } : styles.columns}>
 				<div>
 					<div style={styles.sectionTitle}>
 						Where the time went <span style={styles.sectionHint}>&mdash; this run</span>
 					</div>
 					{componentRows.length === 0 ? (
-						<div style={styles.emptyHint}>No component timing recorded &mdash; component stats require pipeline tracing.</div>
+						<div style={styles.emptyHint}>{traceOff ? 'Pipeline tracing is not enabled for this run — set the Trace level to record component stats.' : 'No component timing recorded — component stats require pipeline tracing.'}</div>
 					) : (
 						componentRows.map((row) => (
 							<div
@@ -435,7 +447,7 @@ export const StatusPane: React.FC<IStatusPaneProps> = ({ status, chapters, chapt
 						Slowest completions
 					</div>
 					{slowest.length === 0 ? (
-						<div style={styles.emptyHint}>No completions recorded yet{componentRows.length === 0 ? ' — requires pipeline tracing' : ''}.</div>
+						<div style={styles.emptyHint}>{traceOff ? 'Pipeline tracing is not enabled for this run.' : `No completions recorded yet${componentRows.length === 0 ? ' — requires pipeline tracing' : ''}.`}</div>
 					) : (
 						slowest.map((doc) => {
 							const clickable = onOpenTrace && doc.beginSeq != null;

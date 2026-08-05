@@ -43,14 +43,7 @@ export interface ITaskRecordPanelProps {
  * Avatar background palette — the six categorical chart tokens, cycled by a
  * task-id character hash so avatars stay theme-aware (no raw hex).
  */
-const AVATAR_COLORS = [
-	'var(--rr-chart-blue)',
-	'var(--rr-chart-green)',
-	'var(--rr-chart-yellow)',
-	'var(--rr-chart-purple)',
-	'var(--rr-chart-orange)',
-	'var(--rr-chart-red)',
-];
+const AVATAR_COLORS = ['var(--rr-chart-blue)', 'var(--rr-chart-green)', 'var(--rr-chart-yellow)', 'var(--rr-chart-purple)', 'var(--rr-chart-orange)', 'var(--rr-chart-red)'];
 
 /** Memory gauge reference: the fill scales against this many MB = 100%. */
 const MEMORY_GAUGE_REFERENCE_MB = 2048;
@@ -245,8 +238,8 @@ export const TaskRecordPanel: React.FC<ITaskRecordPanelProps> = ({ taskId, tasks
 	// Step 4: live resource metrics — only running tasks report them; the
 	// completed placeholders mirror the grid's muted cells.
 	const metrics = record.metrics as Record<string, number> | null;
-	const cpu = record.completed ? null : metrics?.cpu_percent ?? 0;
-	const mem = record.completed ? null : metrics?.cpu_memory_mb ?? 0;
+	const cpu = record.completed ? null : (metrics?.cpu_percent ?? 0);
+	const mem = record.completed ? null : (metrics?.cpu_memory_mb ?? 0);
 
 	// Step 5: TTL / idle pair mirrors the grid cell — '-' once completed,
 	// 'none' when no timeout is set, warning-tinted past 80% of the TTL.
@@ -264,45 +257,42 @@ export const TaskRecordPanel: React.FC<ITaskRecordPanelProps> = ({ taskId, tasks
 	}
 
 	return (
-		<DetailPanel
-			persistKey="panelDetailTaskWidth"
-			open
-			onClose={onClose}
-			avatar={
-				<div style={styles.avatar(AVATAR_COLORS[avatarColorIndex(record.id)])}>#{record.id.slice(0, 4)}</div>
-			}
-			title={record.name || record.id}
-			subtitle={record.id}
-		>
+		<DetailPanel persistKey="panelDetailTaskWidth" open onClose={onClose} avatar={<div style={styles.avatar(AVATAR_COLORS[avatarColorIndex(record.id)])}>#{record.id.slice(0, 4)}</div>} title={record.name || record.id} subtitle={record.id}>
 			{/* ── Task Info ────────────────────────────────────────────────── */}
 			<Section label="Task Info">
 				<LabelValue label="Name">{record.name || record.id}</LabelValue>
-				<LabelValue label="ID" mono>{record.id}</LabelValue>
+				<LabelValue label="ID" mono>
+					{record.id}
+				</LabelValue>
 				<LabelValue label="Source">{record.source}</LabelValue>
 				{record.provider && <LabelValue label="Provider">{record.provider}</LabelValue>}
-				{record.projectId && <LabelValue label="Project" mono>{record.projectId}</LabelValue>}
-				<LabelValue label="Started at" mono>{formatTime(record.startTime)}</LabelValue>
-				<LabelValue label="Elapsed" mono>{formatUptime(record.elapsedTime)}</LabelValue>
+				{record.projectId && (
+					<LabelValue label="Project" mono>
+						{record.projectId}
+					</LabelValue>
+				)}
+				<LabelValue label="Started at" mono>
+					{formatTime(record.startTime)}
+				</LabelValue>
+				<LabelValue label="Elapsed" mono>
+					{formatUptime(record.elapsedTime)}
+				</LabelValue>
 			</Section>
 
 			{/* ── Resources — CPU / memory gauges (running tasks only) ─────── */}
 			<Section label="Resources">
-				<LabelValue label="CPU">
-					{cpu === null
-						? <span style={commonStyles.textMuted}>-</span>
-						: gaugeValue(cpu, `${cpu.toFixed(0)}%`, 'var(--rr-border-focus)')}
-				</LabelValue>
-				<LabelValue label="Memory">
-					{mem === null
-						? <span style={commonStyles.textMuted}>-</span>
-						: gaugeValue((mem / MEMORY_GAUGE_REFERENCE_MB) * 100, `${mem.toFixed(0)} MB`, 'var(--rr-accent)')}
-				</LabelValue>
+				<LabelValue label="CPU">{cpu === null ? <span style={commonStyles.textMuted}>-</span> : gaugeValue(cpu, `${cpu.toFixed(0)}%`, 'var(--rr-border-focus)')}</LabelValue>
+				<LabelValue label="Memory">{mem === null ? <span style={commonStyles.textMuted}>-</span> : gaugeValue((mem / MEMORY_GAUGE_REFERENCE_MB) * 100, `${mem.toFixed(0)} MB`, 'var(--rr-accent)')}</LabelValue>
 			</Section>
 
 			{/* ── Progress — completions and the idle-timeout pair ─────────── */}
 			<Section label="Progress">
-				<LabelValue label="Completions" mono>{formatNumber(record.completedCount)}</LabelValue>
-				<LabelValue label="TTL / Idle" mono>{ttlIdle}</LabelValue>
+				<LabelValue label="Completions" mono>
+					{formatNumber(record.completedCount)}
+				</LabelValue>
+				<LabelValue label="TTL / Idle" mono>
+					{ttlIdle}
+				</LabelValue>
 			</Section>
 
 			{/* ── Status — the same badge family as the grid ───────────────── */}

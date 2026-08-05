@@ -29,28 +29,10 @@
 // =============================================================================
 
 // Shell component prop contracts — used by apps implementing App/Sidebar
-export type {
-	ShellAppProps,
-	ShellSidebarProps,
-} from './workspace/types';
+export type { ShellAppProps, ShellSidebarProps } from './workspace/types';
 
 // Workspace and shell configuration types
-export type {
-	WorkspacePrefs,
-	WorkspaceState,
-	AppWorkspaceState,
-	AppManifestEntry,
-	AppDescriptor,
-	SettingValue,
-	SettingSchema,
-	AppConfiguration,
-	ShellConfig,
-	ShellBrandingConfig,
-	ShellThemeConfig,
-	ShellThemeOption,
-	ShellAccountConfig,
-	ShellApiConfig,
-} from './workspace/types';
+export type { WorkspacePrefs, WorkspaceState, AppWorkspaceState, AppManifestEntry, AppDescriptor, SettingValue, SettingSchema, AppConfiguration, ShellConfig, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig, ShellApiConfig } from './workspace/types';
 
 // Event bus type map — ShellEventMap re-exported from the shared contract
 export type { ShellConnectionEventMap as ShellEventMap } from 'shared';
@@ -162,14 +144,14 @@ export { useSubscriptions } from './hooks/useSubscriptions';
 // VIEWS — shell-owned overlays
 // =============================================================================
 
-export { default as AccountPage } from './views/account/AccountPage';
-export { default as SettingsPage } from './views/settings/SettingsPage';
+export { default as AccountProvider } from './providers/AccountProvider';
+export { default as SettingsProvider } from './providers/SettingsProvider';
 
 // Hook for plugin views to subscribe to shell lifecycle events (iframe protocol)
-export { useShellEvents } from './views/useShellEvents';
+export { useIframeBridge } from './hooks/useIframeBridge';
 
 // TypeScript message type definitions for the iframe protocol
-export type { ShellToIframeMsg, IframeToShellMsg, ShellInitMsg } from './views/ShellIframeProtocol';
+export type { ShellToIframeMsg, IframeToShellMsg, ShellInitMsg } from './hooks/iframeBridgeProtocol';
 
 // =============================================================================
 // COMPONENT LIBRARY — opt-in document management

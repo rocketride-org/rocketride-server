@@ -21,6 +21,16 @@ on:
         required: false
         type: boolean
         default: false
+      tag_suffix:
+        description: >-
+          Custom tag suffix for builds that must NOT touch the shared tags —
+          experimental / workshop / hotfix branches. When set, the image is
+          published ONLY as <version>-<suffix> and `latest` is deliberately
+          skipped, so a branch build cannot become what everything else
+          resolves to. Empty preserves the previous behaviour exactly.
+        required: false
+        type: string
+        default: ''
 
 jobs:
   docker:
@@ -79,9 +89,18 @@ jobs:
           file: docker/Dockerfile.engine
           push: true
           platforms: linux/amd64
+          # Three mutually exclusive shapes, in priority order:
+          #   tag_suffix set   -> <version>-<suffix>   and NO latest
+          #   prerelease true  -> <version>-prerelease and no latest
+          #   otherwise        -> <version>            and latest
+          # The suffix wins over `prerelease` on purpose: a suffixed build is
+          # by definition one that must not land on a shared tag, and that
+          # intent should not depend on the caller also getting `prerelease`
+          # right. `latest` is withheld for the same reason — an experimental
+          # branch silently becoming `latest` is the worst outcome available.
           tags: |
-            ghcr.io/${{ github.repository_owner }}/rocketride-engine:${{ inputs.server_version }}${{ inputs.prerelease && '-prerelease' || '' }}
-            ${{ inputs.prerelease == false && format('ghcr.io/{0}/rocketride-engine:latest', github.repository_owner) || '' }}
+            ghcr.io/${{ github.repository_owner }}/rocketride-engine:${{ inputs.server_version }}${{ inputs.tag_suffix != '' && format('-{0}', inputs.tag_suffix) || (inputs.prerelease && '-prerelease' || '') }}
+            ${{ (inputs.prerelease == false && inputs.tag_suffix == '') && format('ghcr.io/{0}/rocketride-engine:latest', github.repository_owner) || '' }}
           labels: |
             org.opencontainers.image.revision=${{ steps.revision.outputs.sha }}
 

@@ -23,7 +23,13 @@ const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('.
 const NODES_GLOB = 'nodes/src/nodes/*/README.md';
 const GENERATED_START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->';
 const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
-const IGNORE = ['**/node_modules/**', '**/build/**', '**/dist/**', 'packages/docs/**'];
+// Node sources and node tests are excluded from the package-mount pass: node
+// markdown is the nodes contributor's domain (staged when the node's top-level
+// README carries the generated markers, and not otherwise), and a node
+// directory may legitimately be *named* docs (tool_google_workspace's Google
+// Docs variant), which would otherwise match DOCS_GLOB and abort the build as
+// unmounted.
+const IGNORE = ['**/node_modules/**', '**/build/**', '**/dist/**', 'packages/docs/**', 'nodes/src/nodes/**', 'nodes/test/**'];
 
 const PLACEHOLDER_NOTE = '> **Placeholder.** Generated stub for the documentation spine. Real content lands in a later phase.';
 
