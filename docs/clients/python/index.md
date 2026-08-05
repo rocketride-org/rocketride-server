@@ -62,8 +62,6 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 
 You build your `.pipe` - and you run it against the fastest AI runtime available.
 
-<img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/develop/docs/images/canvas.png" alt="RocketRide visual canvas builder" width="800" />
-
 ## Features
 
 - **Pipeline execution** - Start with `use()`, send data via `send()`, `send_files()`, or `pipe()`
