@@ -295,3 +295,34 @@ def test_media_stream_ops_share_one_live_event_loop():
     assert len(seen) == 4  # open, chunk, chunk, close
     assert len(loops) == 1, f'handle ops crossed {len(loops)} loops: {[op for op, _ in seen]}'
     assert all(not loop.is_closed() for loop in loops)
+
+
+def test_abort_deletes_partial_even_when_close_fails():
+    # A failed close on an aborted stream must not strand the partial file.
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='s2')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
+    fs.close_write.side_effect = RuntimeError('close boom')
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')  # abort path
+    fs.delete.assert_awaited_once_with('output/s2.png')
+
+
+def test_end_close_failure_deletes_partial_and_raises():
+    # On END, a failed commit leaves an incomplete file: delete it, propagate
+    # the error (engine marks the object failed), and emit no reference.
+    import pytest
+
+    fs = _fs()
+    inst = _sink_instance(fs, has_name=False, object_id='s3')
+    from rocketlib import AVI_ACTION
+
+    inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
+    inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
+    fs.close_write.side_effect = RuntimeError('close boom')
+    with pytest.raises(RuntimeError, match='close boom'):
+        inst.writeImage(AVI_ACTION.END, 'image/png', b'')
+    fs.delete.assert_awaited_once_with('output/s3.png')
+    inst.instance.writeJson.assert_not_called()

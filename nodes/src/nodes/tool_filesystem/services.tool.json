@@ -9,7 +9,7 @@
 	"prefix": "fs",
 	"icon": "file-system.svg",
 	"documentation": "https://docs.rocketride.org",
-	"description": ["File system tool for agents. Reads, writes, deletes, lists, and creates directories within the account-scoped RocketRide file store (the same store exposed via the client SDK's fs_* methods).", "All operations are scoped to users/<client_id>/files/, resolved from the ROCKETRIDE_CLIENT_ID env var injected by the task engine.", "Per-operation toggles (allowRead, allowWrite, allowDelete, allowList, allowMkdir, allowStat) gate which methods the agent can call."],
+	"description": ["File system tool for agents. Reads, writes, deletes, lists, and creates directories within the account-scoped RocketRide file store (the same store exposed via the client SDK's fs_* methods).", "All operations are scoped to the task's storage anchor (the owning user's file tree for development runs, the task's team subtree for deployed runs), resolved automatically from the running task.", "Per-operation toggles (allowRead, allowWrite, allowDelete, allowList, allowMkdir, allowStat) gate which methods the agent can call."],
 	"lanes": {},
 	"preconfig": {
 		"default": "default",

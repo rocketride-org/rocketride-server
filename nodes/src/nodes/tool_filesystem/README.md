@@ -182,7 +182,8 @@ fully scanned — this is not a long-running server.
   fails the task.
 - **Delivery:** the scan reports each file to the engine (name + size), which queues
   it and calls back into the node to render it: the file is read in full and sent onto
-  the `tags` lane as a raw object for a downstream parser node to interpret; the parser
+  the **Data** lane (`tags` internally) as a raw object for a downstream parser node
+  to interpret; the parser
   sniffs the file type from the extension in the entry name. Because delivery rides the
   engine's scan/render contract, per-object completed/failed accounting and the task
   exit code are handled by the engine — a successful run ends with exit code 0.

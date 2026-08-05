@@ -539,8 +539,13 @@ class IInstance(IInstanceBase):
             return
         st = streams.pop(kind, None)
         if st and st.get('handle') is not None:
+            # Best-effort close, then best-effort delete — separately, so a
+            # failed close never strands the partial file in the store.
             try:
                 _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+            except Exception:
+                pass
+            try:
                 _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
             except Exception:
                 pass
@@ -577,7 +582,16 @@ class IInstance(IInstanceBase):
             st = streams.pop(kind, None)
             if st is None or st['handle'] is None:
                 return
-            _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+            try:
+                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle'], _SINK_CONNECTION_ID))
+            except Exception:
+                # A failed commit leaves an incomplete file: remove it before
+                # propagating, so downstream never sees a truncated object.
+                try:
+                    _run_on_stream_loop(self.IGlobal.file_store.delete(st['path']))
+                except Exception:
+                    pass
+                raise
             self._sink_emit([self._sink_ref(st['path'], st['mime'])])
 
     def writeImage(self, aviAction, mimeType: str, buffer: bytes):
