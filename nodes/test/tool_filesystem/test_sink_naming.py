@@ -2,7 +2,7 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
-"""Tests for the tool_filesystem sink: services.json contract, config, and the
+"""Tests for the tool_filesystem sink: services*.json contracts, config, and the
 per-lane naming/path helpers.
 """
 
@@ -20,7 +20,7 @@ import pytest
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_filesystem'
 
 
-def _load_services(name='services.json'):
+def _load_services(name='services.tool.json'):
     return json.loads((_NODE_DIR / name).read_text())
 
 
