@@ -49,6 +49,7 @@ import { BarStatus } from './providers/BarStatusProvider';
 import { WelcomeProvider } from './providers/WelcomeProvider';
 import { AccountProvider } from './providers/AccountProvider';
 import { EnvironmentProvider } from './providers/EnvironmentProvider';
+import { NewAppProvider } from './providers/NewAppProvider';
 // BillingProvider removed — billing is now a tab in AccountProvider
 // AuthProvider removed — auth failures now open the Settings page directly
 import { AgentManager } from './agents/agent-manager';
@@ -56,7 +57,6 @@ import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 import { AppScreenProvider } from './providers/AppScreenProvider';
 import { initWatchManager } from './appdev/watchManager';
-import { createApp } from './appdev/scaffolder';
 import { debugApp } from './appdev/debug';
 
 // Extension context — set once in activate(), available via getExtensionContext()
@@ -312,7 +312,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				const account = new AccountProvider(context);
 				const environment = new EnvironmentProvider(context);
-				context.subscriptions.push(account, environment);
+				// New App wizard — registers rocketride.app.create itself
+				const newApp = new NewAppProvider(context);
+				context.subscriptions.push(account, environment, newApp);
 
 				// Register unified project editor (canvas + status + trace)
 				project = new ProjectProvider(context);
@@ -450,9 +452,6 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand('rocketride.app.open', (appId: string) => {
 			void appScreen?.show(appId);
-		}),
-		vscode.commands.registerCommand('rocketride.app.create', () => {
-			void createApp();
 		}),
 		vscode.commands.registerCommand('rocketride.app.debug', (appId: string) => {
 			void debugApp(appId);
