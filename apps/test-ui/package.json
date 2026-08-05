@@ -23,7 +23,7 @@
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "shell": "link:../../.rocketride/shell"
+    "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
     "@module-federation/rsbuild-plugin": "^2.5.1",

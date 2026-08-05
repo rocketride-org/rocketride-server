@@ -601,7 +601,7 @@
 		"proper-lockfile": "^4.1.2",
 		"shared": "file:../shared",
 		"tar": "^7.5.15",
-		"shell": "link:../../.rocketride/shell"
+		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"files": [
 		"README.md",
