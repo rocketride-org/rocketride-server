@@ -3,6 +3,12 @@
 // =============================================================================
 
 /** A connection failure whose kind determines the UI recovery action. */
+/**
+ * Message for a rejected credential. Shared so the two `userId` gates
+ * (transport connect and the shell's own result check) can never drift apart.
+ */
+export const AUTH_REJECTED_MESSAGE = 'Authentication failed: unknown user or invalid credentials.';
+
 export class ConnectionFailure extends Error {
 	constructor(
 		message: string,

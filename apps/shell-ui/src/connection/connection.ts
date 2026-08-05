@@ -47,7 +47,7 @@ import { ConnectionState } from 'shared/types/connection';
 import type { ConnectionMode, ConnectionStatus } from 'shared/types/connection';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
-import { ConnectionFailure } from './errors';
+import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
 import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
@@ -704,7 +704,7 @@ export class ConnectionManager implements IConnectionManager {
 	/** Reject login results that do not identify an authenticated account. */
 	private requireAuthenticatedResult(result: ConnectResult | null | undefined): ConnectResult {
 		if (!result?.userId) {
-			throw new ConnectionFailure('Authentication failed: unknown user or invalid credentials.', 'auth');
+			throw new ConnectionFailure(AUTH_REJECTED_MESSAGE, 'auth');
 		}
 		return result;
 	}

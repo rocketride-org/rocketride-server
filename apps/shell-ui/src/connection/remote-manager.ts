@@ -38,7 +38,7 @@ import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptC
 import type { ManagerInfo } from 'shared';
 import { BaseManager, ShellConnectionConfig } from './base-manager';
 import { CONNECT_TIMEOUT_MS } from '../constants';
-import { ConnectionFailure, withTimeout } from './errors';
+import { AUTH_REJECTED_MESSAGE, ConnectionFailure, withTimeout } from './errors';
 
 // =============================================================================
 // REMOTE MANAGER
@@ -94,7 +94,7 @@ export class RemoteManager extends BaseManager {
 
 		// Validate the result — SDK resolves even on auth failure
 		if (!result.userId) {
-			throw new ConnectionFailure('Authentication failed: unknown user or invalid credentials.', 'auth');
+			throw new ConnectionFailure(AUTH_REJECTED_MESSAGE, 'auth');
 		}
 
 		// Cache server info if available. serverVersion is sent by newer servers
