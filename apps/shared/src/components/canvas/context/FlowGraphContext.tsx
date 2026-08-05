@@ -58,7 +58,7 @@ export type FlowNode = Node<INodeData>;
 import { getNodesFromProject, getEdgesFromNodes, getProjectComponents, generateNodeId, DEFAULT_EDGE } from '../util/graph';
 import { useFlowPreferences } from './FlowPreferencesContext';
 import { useFlowProject } from './FlowProjectContext';
-import { resolveDefaultFormData } from '../util/helpers';
+import { hasConfigurableSchema, resolveDefaultFormData } from '../util/helpers';
 import { validateFormData } from '../util/rjsf';
 
 // =============================================================================
@@ -299,7 +299,7 @@ function projectContentSig(project?: { components?: unknown } | null): string {
  */
 export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactElement {
 	const { isLocked, projectLayout, updateProjectLayout } = useFlowPreferences();
-	const { currentProject, initialViewport, servicesJson, onContentChanged, patchToolchainState } = useFlowProject();
+	const { currentProject, initialViewport, servicesJson, requestNodeSchema, onContentChanged, patchToolchainState } = useFlowProject();
 
 	// --- ReactFlow hooks ---------------------------------------------------
 
@@ -687,8 +687,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const service = servicesJson?.[data.provider];
 			if (!service) return true;
 			const pipe = service.Pipe as { schema?: { properties?: Record<string, unknown> } } | undefined;
-			const hasSchema = pipe?.schema?.properties?.hideForm == undefined && pipe?.schema?.properties != undefined;
-			return hasSchema ? false : true;
+			return hasConfigurableSchema(pipe) ? false : true;
 		},
 		[servicesJson]
 	);
@@ -762,8 +761,12 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			if (pipe?.schema && Object.keys(formData).length === 0) {
 				formData = resolveDefaultFormData(id, pipe.schema);
-				const validation = validateFormData(pipe.schema, formData as Record<string, unknown>);
-				formDataValid = validation.errors.length === 0;
+				// hideForm/no-properties schemas render no config form — seed
+				// their defaults but never flag the node as needing configuration
+				if (hasConfigurableSchema(pipe)) {
+					const validation = validateFormData(pipe.schema, formData as Record<string, unknown>);
+					formDataValid = validation.errors.length === 0;
+				}
 			}
 
 			// config is the persisted form data — use resolved defaults if empty
@@ -926,9 +929,17 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				const service = servicesJson?.[provider];
 				const pipe = (service as any)?.Pipe as { schema?: Record<string, unknown> } | undefined;
 				if (pipe?.schema) {
-					const formData = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
-					const validation = validateFormData(pipe.schema, formData);
-					const valid = validation.errors.length === 0;
+					// Backfill schema defaults UNDER the persisted config. Nodes
+					// created while the full definition was unavailable are missing
+					// the hidden defaults (e.g. the `mode: "Source"` marker the
+					// DEVELOPMENT page keys on); explicit node values always win.
+					const existing = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
+					const config = { ...(resolveDefaultFormData(String(node.id), pipe.schema) as Record<string, unknown>), ...existing };
+					(data as any).config = config;
+					// hideForm/no-properties schemas render no config form: force
+					// valid (self-healing any stale persisted flag) instead of
+					// validating a form the user could never fill in.
+					const valid = hasConfigurableSchema(pipe) ? validateFormData(pipe.schema, config).errors.length === 0 : true;
 					(data as any).formDataValid = valid;
 					if (!valid) unconfigured++;
 				}
@@ -1048,12 +1059,22 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			const pipe = (service as any)?.Pipe as { schema?: Record<string, unknown> } | undefined;
 			if (!pipe?.schema) return node;
 
-			const formData = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
-			const validation = validateFormData(pipe.schema, formData);
-			const valid = validation.errors.length === 0;
-			if ((data as any).formDataValid !== valid) {
+			// Backfill schema defaults UNDER the persisted config. Nodes created
+			// while the full definition was unavailable are missing the hidden
+			// defaults (e.g. the `mode: "Source"` marker the DEVELOPMENT page
+			// keys on); explicit node values always win, so the merge only adds
+			// keys and is idempotent.
+			const existing = (data?.config ?? data?.formData ?? {}) as Record<string, unknown>;
+			const config = { ...(resolveDefaultFormData(String(node.id), pipe.schema) as Record<string, unknown>), ...existing };
+			const configGrew = Object.keys(config).length !== Object.keys(existing).length;
+
+			// hideForm/no-properties schemas render no config form: force valid
+			// (self-healing any stale persisted flag) instead of validating a
+			// form the user could never fill in.
+			const valid = hasConfigurableSchema(pipe) ? validateFormData(pipe.schema, config).errors.length === 0 : true;
+			if (configGrew || (data as any).formDataValid !== valid) {
 				changed = true;
-				return { ...node, data: { ...data, formDataValid: valid } };
+				return { ...node, data: { ...data, config, formDataValid: valid } };
 			}
 			if (!valid) unconfigured++;
 			return node;
@@ -1081,6 +1102,23 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		// Only re-run when servicesJson changes, not on every node change
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [servicesJson]);
+
+	// --- Fetch full definitions for every provider on the canvas ------------
+	// The bulk catalog is summary-only (no config schemas), so canvas load and
+	// every node add request the provider's full definition on demand. The
+	// project context caches each result and folds it into servicesJson, which
+	// re-runs the validation effect above (red gear) as definitions land.
+	useEffect(() => {
+		for (const node of nodes) {
+			const provider = (node.data as Record<string, unknown>)?.provider as string | undefined;
+			if (!provider) continue;
+			const service = servicesJson?.[provider];
+			// Only summaries need resolving; a merged full definition has Pipe.
+			if (service && !(service as Record<string, unknown>).Pipe) {
+				requestNodeSchema(provider);
+			}
+		}
+	}, [nodes, servicesJson, requestNodeSchema]);
 
 	// --- Restore viewport + clear loading guard when flow is ready ----------
 	useEffect(() => {

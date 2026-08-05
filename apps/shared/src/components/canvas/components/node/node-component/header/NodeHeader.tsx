@@ -234,7 +234,7 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 			{/* Node icon */}
 			<ConditionalRender condition={icon}>
 				<div style={styles.boxImage}>
-					<Icon name={icon} style={styles.nodeIcon} />
+					<Icon name={icon} width="1rem" height="1rem" style={styles.nodeIcon} />
 				</div>
 			</ConditionalRender>
 

@@ -122,7 +122,10 @@ export default defineConfig(() => {
 			},
 		},
 		output: {
-			distPath: { root: '../../build/apps/rocket-ui' },
+			// Honor the builder's overlay build root (saas mode) so the bundle
+			// lands where the copy step reads it; standalone falls back to the
+			// repo-relative build dir.
+			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'apps', 'rocket-ui') },
 			// 'auto' derives the public path from remoteEntry.js's load URL at runtime,
 			// so chunks resolve correctly regardless of which server/path hosts the remote.
 			assetPrefix: 'auto',

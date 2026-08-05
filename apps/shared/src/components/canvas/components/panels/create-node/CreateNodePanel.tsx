@@ -541,7 +541,7 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 														(e.currentTarget as HTMLElement).style.backgroundColor = '';
 													}}
 												>
-													{service.icon && <Icon name={service.icon} style={styles.iconTileIcon} />}
+													{service.icon && <Icon name={service.icon} width={28} height={28} style={styles.iconTileIcon} />}
 													<span style={styles.iconTileTitle}>{service.title ?? key}</span>
 													{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.iconTileExperimental}>Experimental</span>}
 												</div>
@@ -570,7 +570,7 @@ export default function CreateNodePanel({ onClose }: ICreateNodePanelProps): Rea
 													(e.currentTarget as HTMLElement).style.backgroundColor = '';
 												}}
 											>
-												{service.icon && <Icon name={service.icon} style={styles.itemIcon} />}
+												{service.icon && <Icon name={service.icon} width="16px" height="16px" style={styles.itemIcon} />}
 												<span style={styles.itemTitle}>{service.title ?? key}</span>
 												{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
 												{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}

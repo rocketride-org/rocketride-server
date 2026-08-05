@@ -63,15 +63,16 @@ const { registerApp } = require('./registerApp');
 const registry = require('./registry');
 
 // Shared dependency sources — same for every remote app. Dual-layout:
-// the platform repo carries the shell/shared SOURCE under packages/;
-// standalone app repos carry the shared library at shared/ and the shell
-// prebuilt in .rocketride/shell (vendored via client:update). Missing dirs
-// hash as 'missing', so preferring the platform layout is safe.
+// the platform repo carries the shell SOURCE under packages/ and the
+// shared library at apps/shared; standalone app repos carry the shared
+// library at shared/ and the shell prebuilt in .rocketride/shell
+// (vendored via client:update). Missing dirs hash as 'missing', so
+// preferring the platform layout is safe.
 const SHELL_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shell', 'src'))
 	? path.join(PROJECT_ROOT, 'packages', 'shell', 'src')
 	: path.join(PROJECT_ROOT, '.rocketride', 'shell');
-const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shared', 'src'))
-	? path.join(PROJECT_ROOT, 'packages', 'shared', 'src')
+const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'apps', 'shared', 'src'))
+	? path.join(PROJECT_ROOT, 'apps', 'shared', 'src')
 	: path.join(PROJECT_ROOT, 'shared', 'src');
 
 /**

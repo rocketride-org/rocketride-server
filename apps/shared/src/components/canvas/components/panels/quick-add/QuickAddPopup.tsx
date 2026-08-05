@@ -445,7 +445,7 @@ export default function QuickAddPopup(): ReactElement | null {
 										(e.currentTarget as HTMLElement).style.backgroundColor = '';
 									}}
 								>
-									<Icon name={service.icon} style={styles.itemIcon} />
+									<Icon name={service.icon} width="16px" height="16px" style={styles.itemIcon} />
 									<span style={styles.itemTitle}>{service.title ?? key}</span>
 									{Array.isArray(service.classType) && service.classType.includes('tool') && <span style={styles.badge}>Tool</span>}
 									{!!(service.capabilities && IServiceCapabilities.Experimental & service.capabilities) && <span style={styles.experimentalBadge}>Experimental</span>}
