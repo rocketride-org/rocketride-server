@@ -293,6 +293,14 @@ export interface OrgInfo {
 	name: string;
 
 	/**
+	 * Public developer slug — the organisation's app publisher identity, the
+	 * first segment of app linkage names ('<developerId>.<appName>').
+	 * Null/absent until the organisation registers as a marketplace developer
+	 * (and always absent on OSS servers).
+	 */
+	developerId?: string | null;
+
+	/**
 	 * Organisation-level permission strings granted to the authenticated user.
 	 * These apply across all teams within the organisation.
 	 */
