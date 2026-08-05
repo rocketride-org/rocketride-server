@@ -128,6 +128,31 @@ function makeTestAction() {
 	};
 }
 
+function makeExportAction() {
+	return {
+		description: 'Export docs-owned files to their package destinations',
+		run: async (ctx, task) => {
+			const { exportDocs } = require('./lib/export');
+			const { written } = await exportDocs({ projectRoot: PROJECT_ROOT, task });
+			task.output = `Exported ${written.length} files`;
+		}
+	};
+}
+
+function makeCheckAction() {
+	return {
+		description: 'Verify exported docs copies are in sync',
+		run: async (ctx, task) => {
+			const { exportDocs } = require('./lib/export');
+			const { drifted } = await exportDocs({ projectRoot: PROJECT_ROOT, check: true, task });
+			if (drifted.length) {
+				throw new Error(`docs:check: exported copies are out of sync:\n${drifted.map((d) => `  ${d}`).join('\n')}\nRun './builder docs:export' to refresh them.`);
+			}
+			task.output = 'Docs exports in sync';
+		}
+	};
+}
+
 function makeCleanAction() {
 	return {
 		description: 'Clean docs',
@@ -186,6 +211,14 @@ module.exports = {
 		{
 			name: 'docs:test',
 			action: makeTestAction
+		},
+		{
+			name: 'docs:export',
+			action: makeExportAction
+		},
+		{
+			name: 'docs:check',
+			action: makeCheckAction
 		},
 		{
 			name: 'docs:clean',
