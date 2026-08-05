@@ -2240,14 +2240,14 @@ describe('RocketRideClient sendFiles concurrency', () => {
 		await client.sendFiles(files, 'task-token', 2);
 
 		expect((client as any).pipe).toHaveBeenCalledTimes(5);
-		expect(maxActive).toBeLessThanOrEqual(2);
+		expect(maxActive).toBe(2);
 	});
 
-	it('rejects non-finite maxConcurrent', async () => {
+	it.each([Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 2.5])('rejects invalid maxConcurrent: %s', async (maxConcurrent) => {
 		const client = new RocketRideClient({ auth: 'test-key', uri: 'http://localhost:5565' });
 		const files = [{ file: new File(['file'], 'file.txt', { type: 'text/plain' }) }];
 
-		await expect(client.sendFiles(files, 'task-token', Number.NaN)).rejects.toThrow(RangeError);
+		await expect(client.sendFiles(files, 'task-token', maxConcurrent)).rejects.toThrow(RangeError);
 	});
 });
 

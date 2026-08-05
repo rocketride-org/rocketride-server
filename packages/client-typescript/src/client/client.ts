@@ -1388,8 +1388,8 @@ export class RocketRideClient extends DAPClient {
 		maxConcurrent = 5
 	): Promise<UPLOAD_RESULT[]> {
 		const results: UPLOAD_RESULT[] = new Array(files.length);
-		if (!Number.isFinite(maxConcurrent)) {
-			throw new RangeError('maxConcurrent must be a finite number');
+		if (!Number.isFinite(maxConcurrent) || !Number.isInteger(maxConcurrent) || maxConcurrent < 1) {
+			throw new RangeError('maxConcurrent must be a positive integer');
 		}
 		const concurrency = Math.max(1, Math.floor(maxConcurrent));
 

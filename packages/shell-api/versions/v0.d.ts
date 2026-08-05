@@ -3127,7 +3127,7 @@ export declare class RocketRideClient extends DAPClient {
         file: File;
         objinfo?: Record<string, unknown>;
         mimetype?: string;
-    }>, token: string, maxConcurrent?: number): Promise<UPLOAD_RESULT[]>;
+    }>, token: string): Promise<UPLOAD_RESULT[]>;
     /**
      * Ask a question to RocketRide's AI and get an intelligent response.
      */
