@@ -370,7 +370,7 @@ test('initialize attaches with the native handshake timeout', () => {
 	}
 });
 
-test('onConnected ignores stale callbacks but accepts the active authenticated connection', async () => {
+test('onConnected ignores stale callbacks, accepts the active connection, and preserves an auth latch', async () => {
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 	const originalAttach = RocketRideClient.prototype.attach;
 	const originalIsAttached = RocketRideClient.prototype.isAttached;
@@ -405,8 +405,20 @@ test('onConnected ignores stale callbacks but accepts the active authenticated c
 		await client._callerOnConnected();
 
 		assert.equal(manager.connectionStatus.state, ConnectionState.CONNECTED);
-		assert.equal(manager.connectionStatus.lastFailure, undefined);
 		assert.equal(emitted.filter(({ event }) => event === 'shell:connected').length, 1);
+
+		// The SDK's isAuthenticated() reports transport-level auth, which is also
+		// true for the anonymous connects the landing page makes — so publishing
+		// CONNECTED must NOT retire an auth latch, or a "session expired" banner
+		// would vanish before the user acts on it. Only an authenticated login
+		// path clears it (covered by the auth-recovery test below).
+		assert.deepEqual(manager.connectionStatus.lastFailure, { kind: 'auth', lastError: 'expired' });
+
+		// A network latch, by contrast, is retired the moment we reconnect.
+		manager.connectionStatus.lastFailure = { kind: 'network', lastError: 'unreachable' };
+		manager.lifecycleOwner.connectedPublished = false;
+		await client._callerOnConnected();
+		assert.equal(manager.connectionStatus.lastFailure, undefined);
 	} finally {
 		RocketRideClient.prototype.attach = originalAttach;
 		RocketRideClient.prototype.isAttached = originalIsAttached;
