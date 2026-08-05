@@ -100,7 +100,11 @@ class IGlobal(IGlobalBase):
         handed straight to the caller — no temp file round-trip.
         """
         synth = _ENGINES[self._engine]['synthesize']
-        return synth(text, self._model, self._voice, self._api_key), _MP3_MIME
+        audio = synth(text, self._model, self._voice, self._api_key)
+        if not audio:
+            # A 200 with an empty body would otherwise become a zero-byte clip.
+            raise Exception(f'{_ENGINES[self._engine]["label"]} returned no audio for the request')
+        return audio, _MP3_MIME
 
     def endGlobal(self):
         """Nothing to release — the HTTP client is created per request."""

@@ -257,6 +257,14 @@ class TestRimeDispatch:
         assert (raw, mime) == (b'AUDIO', 'audio/mpeg')
         assert fake_requests.last.json == {'text': 'speak this', 'speaker': 'cove', 'modelId': 'mistv3'}
 
+    def test_synthesize_rejects_empty_audio(self, fake_requests):
+        """A 200 with an empty body must raise, not hand back a zero-byte clip."""
+        fake_requests.response = _FakeResponse(content=b'')
+        g = _ig.IGlobal()
+        g._engine, g._model, g._voice, g._api_key = 'rime', 'mistv3', 'cove', 'k'
+        with pytest.raises(Exception, match='no audio'):
+            g.synthesize('speak this')
+
 
 class TestRimeSchema:
     """services.tts_rime.json — model-scoped speaker enums must merge under `voice`.
