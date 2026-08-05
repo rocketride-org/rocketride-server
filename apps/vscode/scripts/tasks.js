@@ -40,12 +40,12 @@ const STUBS_DIR = path.join(DOCS_DIR, 'stubs');
 const README_SRC = path.join(DOCS_DIR, 'README-vscode.md');
 const README_DEST = path.join(APP_ROOT, 'README.md');
 
-// State keys for source fingerprints (webview bundles shared-ui via Canvas)
+// State keys for source fingerprints (webview bundles shared via Canvas)
 const SRC_HASH_KEY = 'vscode.srcHash';
 const BUNDLE_HASH_KEY = 'vscode.bundleHash';
 const SHARED_UI_HASH_KEY = 'vscode.sharedUiHash';
-// The extension-host bundle's OWN shared-ui fingerprint — esbuild inlines
-// shared-ui (appdev templates) into rocketride.js, and reusing the webview's
+// The extension-host bundle's OWN shared fingerprint — esbuild inlines
+// shared (appdev templates) into rocketride.js, and reusing the webview's
 // SHARED_UI_HASH_KEY would let whichever step ran first mark the other clean.
 const BUNDLE_SHARED_UI_HASH_KEY = 'vscode.bundleSharedUiHash';
 
@@ -57,7 +57,7 @@ const BUILD_WEBVIEW_DIR = path.join(BUILD_DIR, 'webview');
 const VSCODE_DIST_DIR = path.join(DIST_ROOT, 'vscode');
 
 // =============================================================================
-// Helpers: change detection (vscode src + shared-ui, which webview bundles)
+// Helpers: change detection (vscode src + shared, which webview bundles)
 // =============================================================================
 
 async function hasVscodeOrSharedUiChanged() {
@@ -92,7 +92,7 @@ function makeBuildWebviewAction() {
 			// Typecheck the webview project first — rsbuild (SWC) only strips
 			// types, so without this gate webview/protocol drift is invisible
 			// to the build. The hash gate above covers exactly this project's
-			// inputs (vscode src + shared-ui), so cached skips stay skips.
+			// inputs (vscode src + shared), so cached skips stay skips.
 			await execCommand('npx', ['tsc', '-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
 
 			await execCommand('pnpm', ['exec', 'rsbuild', 'build'], { task, cwd: APP_ROOT });
@@ -127,10 +127,10 @@ function makeCompileTypescriptAction() {
 function makeBundleExtensionAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check vscode src AND shared-ui (own hash keys so compile-typescript /
+			// Check vscode src AND shared (own hash keys so compile-typescript /
 			// build-webview saving theirs doesn't cause this step to skip). esbuild
-			// inlines shared-ui (the appdev templates) into rocketride.js, so a
-			// shared-ui-only change must rebuild the host bundle too.
+			// inlines shared (the appdev templates) into rocketride.js, so a
+			// shared-only change must rebuild the host bundle too.
 			const [vsrc, sharedUi] = await Promise.all([
 				hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY),
 				hasSourceChanged(SHARED_UI_SRC, BUNDLE_SHARED_UI_HASH_KEY),
@@ -322,7 +322,15 @@ module.exports = {
 			name: 'vscode:build',
 			action: () => ({
 				description: 'Build vscode',
-				steps: ['shared-ui:test', 'shared-ui:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				// shell:build first: the webviews compile against the INSTALLED
+				// shell package, and on a fresh clone the installed artifact is
+				// the bootstrap stub until shell:build replaces it (its chained
+				// install relinks the workspace). Cache-skipped when the shell
+				// is unchanged and the real artifact is in place.
+				// Builds gate on drift CHECKS only (silent unless they fail);
+				// unit tests (shared:test) run under test targets, never as
+				// build steps — a normal build must not stream test output.
+				steps: ['shell:build', 'shared:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{

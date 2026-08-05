@@ -241,8 +241,8 @@ export default defineConfig(({ command }) => {
 				// Zitadel OAuth2 client ID registered for this SPA.
 				'process.env.RR_ZITADEL_CLIENT_ID': e('RR_ZITADEL_CLIENT_ID'),
 
-				// OAuth broker root URL — read at module load by shared-ui/config/oauth.ts;
-				// the shell bundles shared-ui from source so it must define this (like rslib/vscode).
+				// OAuth broker root URL — read at module load by shared/config/oauth.ts;
+				// the shell bundles shared from source so it must define this (like rslib/vscode).
 				'process.env.REACT_APP_OAUTH_ROOT_URL': e('REACT_APP_OAUTH_ROOT_URL'),
 			},
 		},
@@ -264,7 +264,7 @@ export default defineConfig(({ command }) => {
 			assetPrefix: '/shell/',
 
 			// Watch the two aliased package sources for changes so that HMR
-			// picks up edits to shared-ui without a manual restart. The shell lives inside src/ and is watched automatically.
+			// picks up edits to shared without a manual restart. The shell lives inside src/ and is watched automatically.
 
 		},
 		output: {

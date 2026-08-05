@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// ACCOUNT VIEW — thin shell wrapper around shared-ui AccountView.
+// ACCOUNT VIEW — thin shell wrapper around shared AccountView.
 //
 // Owns all DAP fetching, shell auth, and event wiring. Passes pure data
 // and async callbacks down to the host-agnostic AccountView.
@@ -56,7 +56,7 @@ const accountStyles = {
  * Cloud-UI AccountView wrapper.
  *
  * Fetches account data via DAP commands (`rrext_account_*`) and delegates
- * all rendering to the shared-ui AccountView. Listens for `shell:accountUpdate`
+ * all rendering to the shared AccountView. Listens for `shell:accountUpdate`
  * bus events to keep the profile in sync with server-pushed updates.
  */
 const AccountProvider: React.FC = () => {

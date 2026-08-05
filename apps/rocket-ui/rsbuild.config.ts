@@ -62,9 +62,10 @@ export default defineConfig(() => {
 		resolve: {
 			alias: {
 				shared: path.resolve(__dirname, '../shared/src'),
-				// The vendored shell package (compiled): only a fallback — at
-				// runtime the host's MF share scope provides 'shell'.
-				'shell$': path.resolve(__dirname, '../../.rocketride/shell/dist/index.js'),
+				// shell carries NO alias: the fallback resolves through the
+				// INSTALLED platform package (the workspace's canonical
+				// .rocketride/shell/shell.tgz) — at runtime the host's MF
+				// share scope provides 'shell' anyway.
 			},
 		},
 		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
@@ -75,8 +76,8 @@ export default defineConfig(() => {
 			entry: {
 				index: './src/index.ts',
 			},
-			// shared-ui's config/oauth.ts reads this env var at MODULE LOAD, so any
-			// bundle that compiles shared-ui from source must define it (the shell
+			// shared's config/oauth.ts reads this env var at MODULE LOAD, so any
+			// bundle that compiles shared from source must define it (the shell
 			// host does the same). Needed here because the project module
 			// (ProjectView/canvas) bundles into rocket-ui instead of riding the
 			// shell's 'shared' share. Optional: '' falls back to the library's

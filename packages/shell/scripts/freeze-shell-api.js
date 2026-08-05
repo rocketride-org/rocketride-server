@@ -365,7 +365,7 @@ function cleanup() {
 // =============================================================================
 
 /**
- * Step 1 — type-check shared-ui and the shell contract program. A frozen
+ * Step 1 — type-check shared and the shell contract program. A frozen
  * contract must never be generated from a broken tree.
  *
  * @param {string} [failureNote] Extra recovery instruction printed on failure

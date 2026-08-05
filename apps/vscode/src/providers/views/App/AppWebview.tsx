@@ -8,7 +8,7 @@
  *
  * THIN by design (decision D7): the entire App Builder surface — the
  * DEVELOP | DEPLOY | STORE views, their panes, forms, and state — lives in
- * shared-ui's `modules/appdev`. This webview contributes exactly two things:
+ * shared's `modules/appdev`. This webview contributes exactly two things:
  *
  *  1. The BRIDGE adapter: an IAppBuilderHost whose data accessors and
  *     actions ride useMessaging to the extension host
@@ -114,6 +114,27 @@ const styles: Record<string, React.CSSProperties> = {
 		fontSize: 12,
 		color: 'var(--rr-text-secondary)',
 	},
+	// Unresponsive-shell overlay actions (Retry / Show anyway).
+	overlayButton: {
+		fontFamily: 'inherit',
+		fontSize: 12,
+		padding: '4px 12px',
+		borderRadius: 3,
+		border: '1px solid transparent',
+		cursor: 'pointer',
+		background: 'var(--rr-brand)',
+		color: 'var(--rr-text-on-brand, #ffffff)',
+	},
+	overlayButtonGhost: {
+		fontFamily: 'inherit',
+		fontSize: 12,
+		padding: '4px 12px',
+		borderRadius: 3,
+		border: '1px solid var(--rr-border)',
+		cursor: 'pointer',
+		background: 'transparent',
+		color: 'var(--rr-text-secondary)',
+	},
 };
 
 // =============================================================================
@@ -126,17 +147,22 @@ const styles: Record<string, React.CSSProperties> = {
  * NOT mount yet — a shell booted now could only race a dev server that is
  * not listening, and the first descriptor load would fail with RUNTIME-004.
  *
- * @param props.state - The latest watch state, for the phase detail line.
+ * On error the pane says WHY, center-screen: the host supplies the reason
+ * with every error status (server unreachable, not connected, the failing
+ * pnpm line, a compile failure). The generic console pointer is only the
+ * fallback for a producer that failed to say.
+ *
+ * @param props.status - The latest watch status (state + error reason).
  */
-const PreviewInitializing: React.FC<{ state: WatchStatus['state'] }> = ({ state }) => (
+const PreviewInitializing: React.FC<{ status: WatchStatus }> = ({ status }) => (
 	<div style={styles.iframeWrap}>
 		<div style={styles.loading}>
-			<div style={{ textAlign: 'center' }}>
-				<div style={styles.initTitle}>{state === 'error' ? 'Dev session failed' : 'Initializing Services'}</div>
+			<div style={{ textAlign: 'center', maxWidth: 460, padding: '0 24px' }}>
+				<div style={styles.initTitle}>{status.state === 'error' ? 'Dev session failed' : 'Initializing Services'}</div>
 				<div style={styles.initDetail}>
-					{state === 'error'
-						? 'See the Console pane for the error output.'
-						: state === 'building'
+					{status.state === 'error'
+						? (status.reason ?? 'See the Console pane for the error output.')
+						: status.state === 'building'
 							? 'Starting the dev server\u2026'
 							: 'Installing dependencies\u2026'}
 				</div>
@@ -166,8 +192,18 @@ const PreviewInitializing: React.FC<{ state: WatchStatus['state'] }> = ({ state 
  * @param props.devEntry - The dev server's remoteEntry.js URL, when up.
  */
 const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary | null; devEntry: string; authToken: string; inheritAuth: boolean; explicitAuthSeq: number }> = ({ url, reloadSeq, app, devEntry, authToken, inheritAuth, explicitAuthSeq }) => {
-	const [ready, setReady] = useState(false);
+	// Shell page lifecycle: 'loading' until the shell's dev hooks post
+	// devReady; 'unresponsive' when they never arrive (server down, wrong
+	// URL — the iframe would be sitting on a silent chrome error page);
+	// 'ready' reveals the frame.
+	const [phase, setPhase] = useState<'loading' | 'ready' | 'unresponsive'>('loading');
+	// Bumped per retry: remounts the iframe with a FRESH cache-buster so
+	// every attempt is a clean parent-initiated navigation (an errored
+	// frame cannot be re-navigated from script, and a cached error page
+	// must not satisfy the reload).
+	const [attemptSeq, setAttemptSeq] = useState(0);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
+	const ready = phase === 'ready';
 
 	// Latest registration facts, readable from the message listener without
 	// re-subscribing: the shell can boot ANY number of times inside one
@@ -244,17 +280,19 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- fires per explicit sign-in only
 	}, [explicitAuthSeq]);
 
-	// Reveal on the shell's devReady handshake; fall back on iframe load +
-	// grace delay for shells without the hooks (older engine builds).
+	// Reveal on the shell's devReady handshake. A shell that never answers
+	// is a FAILED page (server down, wrong URL — the frame silently sits on
+	// a chrome error page), so the timeout declares it UNRESPONSIVE and the
+	// pane says so center-screen instead of revealing a blank error frame.
 	// EVERY devReady re-injects — internal shell navigations (auth redirect,
 	// user reload) boot a fresh page that knows nothing of the dev remote.
 	React.useEffect(() => {
-		setReady(false);
+		setPhase('loading');
 		const onMsg = (e: MessageEvent): void => {
 			if (e.data && typeof e.data === 'object' && (e.data as { type?: string }).type === 'shell:devReady') {
 				// A devReady is a FRESH page (boot, auth navigation, the HMR
 				// client's own failure reload) — it knows nothing; inject.
-				setReady(true);
+				setPhase('ready');
 				injectedRef.current = false;
 				// Answer the session handshake FIRST and unconditionally: the
 				// fresh shell holds its boot behind this answer, and it must
@@ -265,12 +303,21 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 			}
 		};
 		window.addEventListener('message', onMsg);
-		const fallback = setTimeout(() => setReady(true), 3000);
+		const fallback = setTimeout(() => setPhase((p) => (p === 'ready' ? p : 'unresponsive')), 6000);
 		return () => {
 			window.removeEventListener('message', onMsg);
 			clearTimeout(fallback);
 		};
-	}, [reloadSeq, url, inject, postAuthState]);
+	}, [reloadSeq, attemptSeq, url, inject, postAuthState]);
+
+	// Unresponsive auto-retry: keep re-attempting politely (fresh iframe +
+	// fresh cache-buster each time) so a server coming back turns the
+	// message into a live preview without any click.
+	React.useEffect(() => {
+		if (phase !== 'unresponsive') return;
+		const timer = setTimeout(() => setAttemptSeq((n) => n + 1), 8000);
+		return () => clearTimeout(timer);
+	}, [phase]);
 
 	// First-arrival inject: the rsbuild banner (and thus the entry URL) can
 	// land seconds after devReady on first boot. LATER entry updates do NOT
@@ -281,13 +328,32 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	}, [ready, devEntry, app, inject]);
 
 
+	// Fresh cache-buster per attempt: the _ts from the init payload is fixed
+	// for the panel's lifetime, so retries mint their own.
+	const attemptUrl = attemptSeq === 0 ? url : `${url.replace(/([?&])_ts=\d+/, '$1_ts=' + Date.now())}`;
+	const shellOrigin = ((): string => { try { return new URL(url).origin; } catch { return url; } })();
+
 	return (
 		<div style={styles.iframeWrap}>
-			{!ready && <div style={styles.loading}>Loading preview…</div>}
+			{phase === 'loading' && <div style={styles.loading}>Loading preview…</div>}
+			{phase === 'unresponsive' && (
+				<div style={styles.loading}>
+					<div style={{ textAlign: 'center', maxWidth: 460, padding: '0 24px' }}>
+						<div style={styles.initTitle}>Preview shell not responding</div>
+						<div style={styles.initDetail}>
+							The shell at {shellOrigin} did not load — is the server running? Retrying automatically; the preview appears as soon as it answers.
+						</div>
+						<div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center' }}>
+							<button type="button" style={styles.overlayButton} onClick={() => setAttemptSeq((n) => n + 1)}>Retry now</button>
+							<button type="button" style={styles.overlayButtonGhost} onClick={() => setPhase('ready')}>Show anyway</button>
+						</div>
+					</div>
+				</div>
+			)}
 			<iframe
-				key={reloadSeq}
+				key={`${reloadSeq}:${attemptSeq}`}
 				ref={iframeRef}
-				src={url}
+				src={attemptUrl}
 				style={{ ...styles.iframe, visibility: ready ? 'visible' : 'hidden' }}
 				allow="clipboard-read; clipboard-write"
 			/>
@@ -310,8 +376,9 @@ const AppWebview: React.FC = () => {
 	const [initialStage, setInitialStage] = useState<AppBuilderStage>('develop');
 	const [reloadSeq, setReloadSeq] = useState(0);
 	const [devEntry, setDevEntry] = useState('');
-	// Latest watch state — drives the Initializing pane's phase line.
-	const [watchState, setWatchState] = useState<WatchStatus['state']>('installing');
+	// Latest watch status — drives the Initializing pane's phase line and,
+	// on error, its center-screen reason.
+	const [watchStatus, setWatchStatus] = useState<WatchStatus>({ state: 'installing' });
 	// Latched true at the FIRST successful build with a known dev entry:
 	// the iframe mounts once and stays (later rebuilds go through HMR and
 	// the dev-entry origin-change remount, never back to Initializing).
@@ -320,8 +387,8 @@ const AppWebview: React.FC = () => {
 	// known + a completed build). Monotonic: never un-latches. MUST stay
 	// above the conditional loading return so hook order is render-stable.
 	React.useEffect(() => {
-		if (!previewLive && devEntry && watchState === 'ok') setPreviewLive(true);
-	}, [previewLive, devEntry, watchState]);
+		if (!previewLive && devEntry && watchStatus.state === 'ok') setPreviewLive(true);
+	}, [previewLive, devEntry, watchStatus]);
 	// The extension's auth credential — handed to the preview shell so apps
 	// that require authentication render with a real signed-in session.
 	const [authToken, setAuthToken] = useState('');
@@ -376,7 +443,7 @@ const AppWebview: React.FC = () => {
 				for (const fn of errorListeners.current) fn(msg.row);
 				break;
 			case 'appdev:watch':
-				setWatchState(msg.status.state);
+				setWatchStatus(msg.status);
 				for (const fn of watchListeners.current) fn(msg.status);
 				break;
 			case 'appdev:devServer': {
@@ -538,7 +605,7 @@ const AppWebview: React.FC = () => {
 			<AppBuilderScreen
 				host={host}
 				app={app}
-				previewPane={previewUrl && previewLive ? <PreviewFrame url={previewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} authToken={authToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : <PreviewInitializing state={watchState} />}
+				previewPane={previewUrl && previewLive ? <PreviewFrame url={previewUrl} reloadSeq={reloadSeq} app={app} devEntry={devEntry} authToken={authToken} inheritAuth={inheritAuth} explicitAuthSeq={explicitAuthSeq} /> : <PreviewInitializing status={watchStatus} />}
 				initialStage={initialStage}
 				onStageChange={(stage) => sendMessage({ type: 'appdev:stage', stage })}
 			/>

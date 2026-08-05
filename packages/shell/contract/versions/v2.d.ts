@@ -6176,7 +6176,7 @@ interface ShellConnectionEventMap {
      * Cloud-ui may emit a simpler version or omit it entirely.
      *
      * Both shell and VSCode now share the ConnectionStatus type from
-     * shared-ui/types/connection.ts.
+     * shared/types/connection.ts.
      */
     "shell:statusChange": ConnectionStatus;
     /** Fired when a connection attempt or operation fails with an error. */
@@ -6220,7 +6220,7 @@ interface ShellConnectionEventMap {
      * previous list entirely.
      *
      * The `apps` array contains server app entries. Typed as a minimal
-     * interface to avoid importing shell's AppManifestEntry into shared-ui.
+     * interface to avoid importing shell's AppManifestEntry into shared.
      * Hosts cast to their concrete AppManifestEntry type.
      */
     "shell:appsUpdated": {
@@ -7862,7 +7862,7 @@ export interface IPrefsApi {
     setPref: (key: string, value: unknown) => void;
 }
 /**
- * Provides the app's prefs accessor to every shared-ui component beneath it.
+ * Provides the app's prefs accessor to every shared component beneath it.
  * Mount ONCE near the app root with a value backed by the host's prefs store.
  *
  * @param props.value - The `{ getPref, setPref }` implementation for this host.
@@ -8780,7 +8780,7 @@ export declare const PopupRow: React$1.FC<{
  * Cloud-UI AccountView wrapper.
  *
  * Fetches account data via DAP commands (`rrext_account_*`) and delegates
- * all rendering to the shared-ui AccountView. Listens for `shell:accountUpdate`
+ * all rendering to the shared AccountView. Listens for `shell:accountUpdate`
  * bus events to keep the profile in sync with server-pushed updates.
  */
 export declare const AccountProvider: React$1.FC;
@@ -10412,7 +10412,7 @@ export declare function useAnnouncements(): Announcement[];
  * Shared value formatters — human-readable byte sizes, dates, and durations.
  *
  * Consolidated for reuse across apps (ported from the per-app formatter copies).
- * Pure functions with no dependencies; safe to import anywhere in shared-ui.
+ * Pure functions with no dependencies; safe to import anywhere in shared.
  */
 /**
  * Formats a byte count as a human-readable size with a unit suffix.
@@ -10538,7 +10538,7 @@ export declare function applyTheme(tokens: ThemeTokens): void;
  */
 export declare const isInVSCode: () => boolean;
 /**
- * OAuth configuration for the shared-ui social-login buttons.
+ * OAuth configuration for the shared social-login buttons.
  *
  * User-OAuth (Google/Microsoft/Slack) is brokered by a RocketRide-hosted
  * function — NOT by the local engine. Self-hosters never register their own
@@ -10547,7 +10547,7 @@ export declare const isInVSCode: () => boolean;
  * social-button widgets and `useOAuthCallbacks` for the consuming flow.
  *
  * The value is inlined at build time from `REACT_APP_OAUTH_ROOT_URL`: every
- * bundler that consumes shared-ui `define`s it to a string literal (see
+ * bundler that consumes shared `define`s it to a string literal (see
  * `rslib.config.ts` and `apps/vscode/rsbuild.config.mjs`), so no `process`
  * reference survives into the webview bundle. An empty/unset value falls back
  * to the production broker URL.
@@ -11159,7 +11159,7 @@ interface PlanPickerProps {
      * Optional per-plan CTA overrides, keyed by ``stripePriceId``. Lets a host
      * app render context-aware labels (e.g. "Selected", "Upgrade", "Switch
      * plan") and disable a card's CTA — without baking any subscription logic
-     * into shared-ui (this component ships in the VS Code extension too). A plan
+     * into shared (this component ships in the VS Code extension too). A plan
      * with no entry falls back to ``ctaLabel``. Only used with ``onPlanCta``.
      */
     ctaConfig?: Record<string, {

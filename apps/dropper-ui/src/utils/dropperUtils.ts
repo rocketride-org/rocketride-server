@@ -4,7 +4,7 @@
  * See LICENSE file for details.
  */
 
-import { UPLOAD_RESULT } from 'rocketride';
+import { UPLOAD_RESULT } from 'shell/client';
 import { ProcessedResults, GroupedContent, ContentBlock } from '../types/dropper.types';
 
 // ============================================================================

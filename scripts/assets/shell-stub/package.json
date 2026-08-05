@@ -1,0 +1,15 @@
+{
+	"name": "shell",
+	"version": "0.0.0-stub",
+	"description": "Placeholder shell package — satisfies the workspace's file: tarball dependency on a fresh clone; the first shell:build replaces it with the real platform package.",
+	"license": "MIT",
+	"main": "./index.js",
+	"types": "./shell.d.ts",
+	"exports": {
+		".": { "types": "./shell.d.ts", "default": "./index.js" },
+		"./client": { "types": "./client.d.ts", "default": "./client.js" },
+		"./themes/rocketride-default.css": "./themes/rocketride-default.css",
+		"./tokens.css": "./tokens.css",
+		"./package.json": "./package.json"
+	}
+}

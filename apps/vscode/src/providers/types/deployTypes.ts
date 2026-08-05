@@ -10,7 +10,7 @@
  * pulling in `shared/modules/*` (which is only resolvable under the webview
  * tsconfig).
  *
- * The view-model DTOs mirror `packages/shared-ui/src/components/deploy-panel/types.ts`
+ * The view-model DTOs mirror `packages/shared/src/components/deploy-panel/types.ts`
  * (the contract of record) field-for-field, so the webview can hand them to
  * the shared DeployPanel / DeploymentView components unchanged —
  * structural typing keeps the two in lockstep, and the extension host does
@@ -18,7 +18,7 @@
  */
 
 // =============================================================================
-// VIEW-MODEL DTOS (mirror shared-ui deploy/types.ts)
+// VIEW-MODEL DTOS (mirror shared deploy/types.ts)
 // =============================================================================
 
 /** A team the caller can see (and possibly deploy to). */

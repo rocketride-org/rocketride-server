@@ -25,7 +25,7 @@
 // =============================================================================
 
 /**
- * The App Builder view layer. Deliberately NOT exported from the shared-ui
+ * The App Builder view layer. Deliberately NOT exported from the shared
  * main barrel (the deploy-panel precedent — keep the shared singleton's
  * surface lean); hosts import 'shared/modules/appdev' directly, exactly
  * like 'shared/modules/project'.

@@ -50,7 +50,7 @@
 // =============================================================================
 
 // Theme styles FIRST — a leaf module (no imports back into this graph) that
-// MUST initialize before any shared-ui module below re-enters this barrel:
+// MUST initialize before any shared module below re-enters this barrel:
 // shared modules spread commonStyles into top-level style consts at module
 // init, so in the shell⇄shared import cycle this binding has to be live
 // before the first 'shared/*' import statement evaluates.
@@ -82,8 +82,8 @@ import { ConnectionManager } from './connection/connection';
 import { ConnectionState } from './types/connection';
 
 // Workspace-preferences accessor + provider (re-exported from shared) — the ONE
-// prefs API every app and shared-ui surface reads/writes through (get/set a key
-// in the app's workspace prefs bag). shared-ui sits below shell, so the
+// prefs API every app and shared surface reads/writes through (get/set a key
+// in the app's workspace prefs bag). shared sits below shell, so the
 // implementation lives there; the shell surfaces it here as the frozen contract.
 import { usePrefs, PrefsProvider } from './components/contexts/PrefsContext';
 
@@ -204,7 +204,7 @@ export type { DocSplitLayoutProps } from './components/docs/DocSplitLayout';
 export type { DocExplorerProps, DocExplorerConfig, DocEntry, DocEntryChild, DocEntryStatus } from './components/docs/DocExplorer';
 export type { IVirtualFileSystem } from './modules/explorer/types';
 
-// ViewMenu declaration types (consumed by shared-ui's TabControl/SidebarMenu)
+// ViewMenu declaration types (consumed by shared's TabControl/SidebarMenu)
 export type { DashboardData } from './hooks/useDashboardData';
 export type { ViewMenu, ViewMenuEntry } from './types/viewMenu';
 
@@ -268,7 +268,7 @@ import { formatBytes, formatDate, formatDuration } from './util/format';
 // Values graduated from deep shell/src imports when the package exports map
 // closed those paths: theme application (vscode webviews apply tokens at
 // mount), the vscode-host probe, the OAuth root, and the pipeline-schema
-// runtime values shared-ui's project module re-exports.
+// runtime values shared's project module re-exports.
 import { applyTheme } from './themes';
 import { isInVSCode } from './themes/vscode';
 import { OAUTH_ROOT_URL } from './auth/oauth';
@@ -333,7 +333,7 @@ export type { DashboardResponse, DashboardOverview, DashboardConnection, Dashboa
 // PLATFORM VIEW MODULES — the shared partition's shell half, now in-package
 // =============================================================================
 //
-// These view modules were shared-ui residents that shell's own surface always
+// These view modules were shared residents that shell's own surface always
 // re-exported pieces of (Explorer, the dashboard types). With the partition
 // they live in packages/shell, so their host-facing components graduate to
 // the contract: the vscode webviews and first-party apps consume them from
@@ -359,7 +359,7 @@ export type { EventTone } from './modules/server/components';
 export type { CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './modules/checkout/types';
 export type { EnvironmentSlotConfig, EnvironmentScope } from './modules/environment';
 
-// The FULL pipeline-schema type family — shared-ui's project module and the
+// The FULL pipeline-schema type family — shared's project module and the
 // vscode Project webview consume all of it, so the whole set is surface.
 export type { IProject, IValidateResponse, IServiceCatalog, IProjectComponent, IComponentUI, IControlConnection, IInputConnection, IPosition, IDimensions, IService, IServiceSchema, IServiceLaneEntry, INodeConfig, IComponentValidatePayload, IValidatePipelinePayload, IToolchainExport, IToolchainState, IForm, IFormData, ITaskStatus, IFlowData } from './types/project';
 

@@ -7,7 +7,7 @@
  * CanvasPanel component — Pipeline canvas editor.
  *
  * ```tsx
- * import CanvasPanel from '@shared-ui/components/canvas';
+ * import CanvasPanel from '@shared/components/canvas';
  * <CanvasPanel project={...} servicesJson={...} ... />
  * ```
  */

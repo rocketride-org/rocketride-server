@@ -99,7 +99,7 @@ These changes affect code that imports and calls the Python or TypeScript client
 
 #### Shell UI (Web Host)
 - **Shell-ui replaces cloud-ui**: new Module Federation host application served by Python `shell` module (`ai.modules.shell`) with public HTTP routes for SPA and all static assets under `/shell/`. Unifies OSS and SaaS into single codebase. Server-side app manifest delivery via `get_public_apps()` / `get_apps_for_user()` on AccountBase. Pre-auth info probe returns public apps for marketplace. Connect response includes authenticated user's full entitled app list (#803)
-- **MUI removal**: replaced Material UI with plain CSS/HTML across entire shared-ui package; runtime theme system with light/dark JSON tokens
+- **MUI removal**: replaced Material UI with plain CSS/HTML across entire shared package; runtime theme system with light/dark JSON tokens
 - **Theme rebrand**: replaced legacy purple (#5900FF) with cyan (#00b9ec) TOKENS palette. Light theme updated to warm-neutral (cream/stone backgrounds instead of pure white) (#803)
 - **Theme flash fix**: `index.html` inline script sets `--rr-bg-default` and body background synchronously before React renders. `createShellConfig` reads saved theme from localStorage instead of always defaulting to rocketride-light, eliminating tan background during 1.5s OAuth code-exchange window (#878)
 - **Chat module**: host-agnostic chat surface following established module pattern (props-in, callbacks-out, `--rr-*` CSS tokens). `ChatView` (MessageList + ChatInputField), `MessageBubble` (user/bot/system/status with markdown), `MarkdownRenderer` (react-markdown + GFM + syntax highlighting + charts), `ChartRenderer` (chart.js with circular-reference guard), `TypingIndicator` (animated bouncing dots), `useChatMessages` hook (message state + sendMessage + monotonic IDs) (#724)
@@ -134,7 +134,7 @@ These changes affect code that imports and calls the Python or TypeScript client
 - **Database DIALECT**: `QuestionType.DIALECT` for engine capability discovery. SDK callers can ask which engine a database pipeline is connected to (`DatabaseDialect` enum). `_db_dialect()` abstract method on `DatabaseInstanceBase`. `services.json` now exposes UI-toggleable `allow_execute` boolean
 - **Handle-based streaming I/O**: generic filesystem-style interface (`open`/`read`/`write`/`close`/`delete`/`stat`/`mkdir`/`list_dir`) on `FileStore`, replacing monolithic in-memory buffering. Domain methods become thin convenience wrappers on client SDKs. Supports S3 multipart upload (5 MB buffer), Azure staged blocks (4 MB buffer), and local filesystem. Handles tagged with owning `connection_id` and force-closed on connection termination (#600)
 - **`@tool_function` decorators**: collapsed the two-class pattern (IInstance + ToolsBase driver) into a single class. Any `IInstanceBase` subclass can declare tool entry points with a decorator; the method name becomes the tool ID, decorator carries schema/description, base class `invoke()` dispatches automatically. Eliminates parallel driver classes, factory methods, and boilerplate delegation (#599)
-- **Experimental + Deprecated capability flags**: `DEPRECATED = BIT(15)`, `EXPERIMENTAL = BIT(16)` in `PROTOCOL_CAPS`. Both flags wired through C++ parser, pybind11 bindings, both client SDKs, and shared-ui. Yellow "EXPERIMENTAL" badge rendered on canvas nodes, Add Node slider, and Quick Add popup (#606)
+- **Experimental + Deprecated capability flags**: `DEPRECATED = BIT(15)`, `EXPERIMENTAL = BIT(16)` in `PROTOCOL_CAPS`. Both flags wired through C++ parser, pybind11 bindings, both client SDKs, and shared. Yellow "EXPERIMENTAL" badge rendered on canvas nodes, Add Node slider, and Quick Add popup (#606)
 - **Docker-compose and healthcheck**: `HEALTHCHECK` instruction in `Dockerfile.engine` using curl to `/ping`. `docker-compose.yml` with engine, PostgreSQL+pgvector, Milvus (+ etcd, MinIO), ChromaDB. Override file for dev hot-reloading. All images pinned to specific versions. Security warnings in `.env.example` (#496)
 - **Billing commands mixin**: `BillingCommands` in TaskConn's MRO for `rrext_account_billing`. OSS implementation routes on `arguments.subcommand` with stubs so UI doesn't hang in half-rendered state (#692)
 - **Task engine extraction**: `task_engine` and `cmd_data` extracted as standalone modules (#661)
@@ -206,12 +206,12 @@ These changes affect code that imports and calls the Python or TypeScript client
 - **MCP Resources and Prompts**: `rocketride://` URI resources (pipeline list, server status, node registry) with graceful error handling for disconnected clients. Three prompt templates (analyze-document, chat-with-data, evaluate-pipeline) with required argument validation and message rendering. 44 tests (#541)
 
 #### Agents & Pipelines
-- **Agent framework overhaul**: ProjectView architecture with shared-ui migration (#670)
+- **Agent framework overhaul**: ProjectView architecture with shared migration (#670)
 - **Example pipeline templates** for common AI workflows (#572)
 
 #### Build System
 - **Rsbuild upgrade**: all UI apps upgraded from pinned 0.4/1.1 to ~1.7.5, eliminating Node.js `DEP0180` deprecation warnings in Node 22+. ESM config migration (`.ts` → `.mts`). cmake minimum bumped from 3.14 to 3.19. `@rspack/binding-*` platform pins removed. Service config renamed `config.json` → `service-config.json` with migration (#905)
-- **Build-input caching**: source fingerprinting (`buildInputHash()` + `hasBuildInputChanged()`) skips UI modules whose inputs haven't changed. `appModule.js` factory eliminates ~80 lines of boilerplate per app. Shell-ui tracks own src/ + shared-ui/src + package.json. `--force` flag bypasses caching. Clean actions clear cached hashes (#877)
+- **Build-input caching**: source fingerprinting (`buildInputHash()` + `hasBuildInputChanged()`) skips UI modules whose inputs haven't changed. `appModule.js` factory eliminates ~80 lines of boilerplate per app. Shell-ui tracks own src/ + shared/src + package.json. `--force` flag bypasses caching. Clean actions clear cached hashes (#877)
 - **Builder CLI**: `server:run` action (build + run without shell dev server). `--taskserver=ADDR` replaces `--testport`. `--modelserver` semantics clarified (bare flag = start local, `=ADDR` = use existing). `--simulate-gpus=N` forwarded to model server. `parseServerAddress()` utility (#803, #877)
 
 #### CI/CD
@@ -359,7 +359,7 @@ These changes affect code that imports and calls the Python or TypeScript client
   - **Minimatch**: all 4 major lines patched (3→≥3.1.4, 5→≥5.1.8, 9→≥9.0.7, 10→≥10.2.3) (#887)
   - **Core**: undici→≥7.24.0 (6 advisories), lodash→≥4.18.0, lodash-es→≥4.18.0 (#888)
   - handlebars→≥4.7.9, protobufjs→≥7.5.5 (#783)
-- Bumped: aiohttp, pygit2 1.15→1.19, soundfile 0.12→0.13, requests, ws 8.19→8.20, postcss 8.5.6→8.5.10, nltk, spacy, spacy-transformers, cymem, murmurhash, preshed, srsly, thinc, psycopg2-binary, pymysql, opensearch-py, npm-production group (adm-zip, tar, lucide-react, dockerode, web-vitals), shared-ui devDependencies (rollup, @types/react, @types/react-dom), cosign-installer, ossf/scorecard-action, gh-actions group (pnpm/action-setup, github/codeql-action, softprops/action-gh-release, dorny/paths-filter)
+- Bumped: aiohttp, pygit2 1.15→1.19, soundfile 0.12→0.13, requests, ws 8.19→8.20, postcss 8.5.6→8.5.10, nltk, spacy, spacy-transformers, cymem, murmurhash, preshed, srsly, thinc, psycopg2-binary, pymysql, opensearch-py, npm-production group (adm-zip, tar, lucide-react, dockerode, web-vitals), shared devDependencies (rollup, @types/react, @types/react-dom), cosign-installer, ossf/scorecard-action, gh-actions group (pnpm/action-setup, github/codeql-action, softprops/action-gh-release, dorny/paths-filter)
 
 ## [1.0.3] - 2026-03-01
 

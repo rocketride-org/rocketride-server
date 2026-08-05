@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * EnvironmentProvider — thin shell wrapper around shared-ui EnvironmentView.
+ * EnvironmentProvider — thin shell wrapper around shared EnvironmentView.
  *
  * Owns all DAP fetching and auth wiring. Passes pure data and async
  * callbacks down to the host-agnostic EnvironmentView. Unlike the VS Code
@@ -26,7 +26,7 @@ import { useAuthUser } from '../hooks/useAuthUser';
  * Cloud-UI EnvironmentView wrapper.
  *
  * Fetches env data via the RocketRide client and delegates all rendering
- * to the shared-ui EnvironmentView. Shell-UI always has a single SaaS
+ * to the shared EnvironmentView. Shell-UI always has a single SaaS
  * connection, so a single slot is passed.
  */
 const EnvironmentProvider: React.FC = () => {

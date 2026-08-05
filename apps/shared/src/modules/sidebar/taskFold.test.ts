@@ -12,7 +12,7 @@
 // each bulk-snapshot row), errors/warnings surviving the bulk rebuild, and
 // the team/project scoping of the two deploy-run folds.
 //
-// Run via `shared-ui:test` (node --import tsx --test), matching the package
+// Run via `shared:test` (node --import tsx --test), matching the package
 // convention.
 // =============================================================================
 

@@ -5,7 +5,7 @@
 import type { PipelineConfig } from 'shell';
 import type { ViewItem } from './tabs';
 
-// Re-export ViewState from shared-ui — single source of truth
+// Re-export ViewState from shared — single source of truth
 export type { ViewState } from 'shared/modules/project';
 
 // =============================================================================

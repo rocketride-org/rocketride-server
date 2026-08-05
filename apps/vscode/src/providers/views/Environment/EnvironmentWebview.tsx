@@ -8,11 +8,11 @@
  *
  * Translates `env:*` postMessage events from EnvironmentProvider into pure
  * props for the host-agnostic EnvironmentView component. All rendering is
- * delegated to shared-ui; this file only manages messaging state.
+ * delegated to shared; this file only manages messaging state.
  *
  * Architecture:
  *   EnvironmentProvider (Node.js) <-> postMessage <-> EnvironmentWebview (browser)
- *     -> EnvironmentView (shared-ui)
+ *     -> EnvironmentView (shared)
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';

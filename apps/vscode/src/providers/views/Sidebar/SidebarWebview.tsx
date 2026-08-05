@@ -19,7 +19,7 @@
  *
  * Architecture:
  *   SidebarProvider (Node.js) ↔ postMessage ↔ SidebarViewWebview (browser)
- *     → SidebarView (shared-ui) + SidebarFooter (shared-ui)
+ *     → SidebarView (shared) + SidebarFooter (shared)
  */
 
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
@@ -465,7 +465,7 @@ const SidebarViewWebview: React.FC = () => {
 
 	// No headerSlot: the VS Code host has no home-app destination, so it injects no
 	// host-specific top nav. The "Home" button is a SaaS-shell concept owned by the
-	// web host (rocket-ui), intentionally absent from shared-ui / this extension.
+	// web host (rocket-ui), intentionally absent from shared / this extension.
 	return <SidebarView connection={connection} isSubscribed={subscribed} entries={entries} activeTasks={activeTasks} unknownTasks={unknownTasks} onNavigate={onNavigate} onOpenFile={onOpenFile} onSourceAction={onSourceAction} onRefresh={onRefresh} footerSlot={footerSlot} onOpenUnknownTask={onOpenUnknownTask} appBuilder={{ apps, onNewApp, onOpenApp }} sidebarMode={sidebarMode} onSidebarModeChange={onSidebarModeChange} />;
 };
 

@@ -214,6 +214,12 @@ export interface WatchStatus {
 	durationMs?: number;
 	/** Where the dev bundle is served from ("localhost:3011"). */
 	target?: string;
+	/**
+	 * WHY the state is 'error', human-readable ("Not connected to a
+	 * RocketRide server — ...", the failing pnpm line, ...). Every error
+	 * producer must supply one: "see the log" is not an error message.
+	 */
+	reason?: string;
 }
 
 // =============================================================================

@@ -105,7 +105,7 @@ export default function GoogleDrivePickerWidget<
 	// Cache of file ID to display name, populated lazily via the Drive REST API
 	const [fileNames, setFileNames] = useState<Record<string, string>>({});
 
-	// Google Picker config: host passes via formContext because shared-ui has no access to process.env
+	// Google Picker config: host passes via formContext because shared has no access to process.env
 	const developerKey = (formContext?.googlePickerDeveloperKey as string) ?? '';
 	const clientId = (formContext?.googlePickerClientId as string) ?? '';
 	// The appId is the numeric prefix of the OAuth client ID (before the first dash)

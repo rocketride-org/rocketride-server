@@ -34,6 +34,8 @@ export interface AppWatchStatus {
 	state: 'idle' | 'installing' | 'building' | 'ok' | 'error';
 	durationMs?: number;
 	target?: string;
+	/** WHY the state is 'error' — every error producer supplies one. */
+	reason?: string;
 }
 
 // =============================================================================
@@ -278,12 +280,18 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		// Start the inner loop (setting-gated by rocketride.appdev.autoWatch)
 		if (app) {
 			// Vendor the platform package FIRST, then start the watch: the
-			// watch's pnpm install imports .rocketride/shell, and racing it
-			// against the vendor swap is what tore the package mid-install.
+			// watch's workspace install resolves .rocketride/shell/shell.tgz,
+			// so the tarball must be on disk before pnpm reads it.
 			// ensureShell inside vendorAppTypes is single-flight, so several
 			// panels opening concurrently share ONE vendor pass. The chain
 			// stays fire-and-forget: the App Builder must not wait on it.
-			void vendorAppTypes(this.context, app.folder).then(() => ensureWatch(app));
+			// A FAILED vendor pass never starts the watch — its install could
+			// only fail on the missing tarball; the panel gets the REASON
+			// (center-screen) instead of a downstream pnpm ENOENT.
+			void vendorAppTypes(this.context, app.folder).then((result) => {
+				if (result.ok) return ensureWatch(app);
+				this.notifyWatch(appId, { state: 'error', target: 'platform package', reason: result.reason });
+			});
 		} else {
 			// No workspace binding = no dev server, ever — say so loudly
 			// instead of a silent dead preview.
@@ -347,6 +355,27 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 */
 	public notifyError(appId: string, message: string, source?: string): void {
 		this.panels.get(appId)?.webview.postMessage({ type: 'appdev:error', row: { time: AppScreenProvider.feedTime(), message, source } });
+	}
+
+	/**
+	 * Push a watch status to EVERY open panel — the workspace-global install
+	 * belongs to all of them, not just the app that happened to trigger it.
+	 *
+	 * @param status - The watch status to broadcast.
+	 */
+	public notifyWatchAll(status: AppWatchStatus): void {
+		for (const appId of this.panels.keys()) this.notifyWatch(appId, status);
+	}
+
+	/**
+	 * Push one console row to EVERY open panel (workspace-global install
+	 * output).
+	 *
+	 * @param level - Row severity.
+	 * @param text - Row text (one line).
+	 */
+	public notifyConsoleAll(level: 'log' | 'warn' | 'error', text: string): void {
+		for (const appId of this.panels.keys()) this.notifyConsole(appId, level, text);
 	}
 
 	// =========================================================================
@@ -414,6 +443,23 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			};
 			for (const panel of this.panels.values()) {
 				panel.webview.postMessage({ type: 'appdev:event', row });
+			}
+			// Reconnect recovery: panels parked on the platform-package error
+			// (server was down / not connected at open) retry the vendor pass
+			// now that a server is reachable — center-screen error to running
+			// preview without closing and reopening the app.
+			if (this.connectionManager.isConnected()) {
+				for (const [appId, status] of this.lastWatch) {
+					if (status.state !== 'error' || status.target !== 'platform package') continue;
+					void (async () => {
+						const apps = await scanWorkspaceApps();
+						const app = apps.find((a) => a.id === appId);
+						if (!app) return;
+						const result = await vendorAppTypes(this.context, app.folder);
+						if (result.ok) return ensureWatch(app);
+						this.notifyWatch(appId, { state: 'error', target: 'platform package', reason: result.reason });
+					})();
+				}
 			}
 		});
 		this.disposables.push(onStatus);

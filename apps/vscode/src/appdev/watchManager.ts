@@ -23,6 +23,7 @@
 import * as vscode from 'vscode';
 import { spawn, ChildProcess } from 'child_process';
 import { ConnectionManager } from '../connection/connection';
+import { extractInstallCause } from './appTypes';
 import { getLogger } from '../shared/util/output';
 import type { ScannedApp } from './appScan';
 import type { AppScreenProvider, AppWatchStatus } from '../providers/AppScreenProvider';
@@ -41,6 +42,10 @@ interface WatchSession {
 	reloadTimer?: NodeJS.Timeout;
 	/** Millisecond stamp when the current build started (for the badge). */
 	buildStart?: number;
+	/** Watches the app's package.json — a dep edit reinstalls and restarts. */
+	pkgWatcher?: vscode.FileSystemWatcher;
+	/** Debounce timer for package.json change bursts. */
+	pkgTimer?: NodeJS.Timeout;
 }
 
 // =============================================================================
@@ -49,8 +54,15 @@ interface WatchSession {
 
 export class WatchManager {
 	private sessions = new Map<string, WatchSession>();
-	/** Apps mid-install (pre-session) — guards duplicate concurrent starts. */
+	/** Apps mid-start (awaiting the shared install) — guards double-spawns. */
 	private starting = new Set<string>();
+	/**
+	 * Single-flight memo for the WORKSPACE-GLOBAL install: concurrent watch
+	 * starts for several apps await the same `pnpm install` at the workspace
+	 * root. Unlike ensureShell's memo it is INVALIDATABLE — a package.json
+	 * change (or a fresh scaffold) resets it so the next start reinstalls.
+	 */
+	private installPromise: Promise<boolean> | null = null;
 	private connectionManager = ConnectionManager.getInstance();
 	private logger = getLogger();
 
@@ -66,23 +78,52 @@ export class WatchManager {
 	}
 
 	/**
+	 * Invalidates the shared workspace install so the next start (or an
+	 * explicit ensureInstalled) runs `pnpm install` again — called when a
+	 * package.json changes or a fresh app is scaffolded into the workspace.
+	 */
+	public invalidateInstall(): void {
+		this.installPromise = null;
+	}
+
+	/**
+	 * Ensures the workspace-global install has run (single-flight). Safe to
+	 * call from anywhere — scaffolding uses it to link a brand-new app
+	 * without waiting for a watch session.
+	 *
+	 * @param triggerAppId - The app whose console carries the install output.
+	 * @returns True when the install succeeded (or was already done).
+	 */
+	public ensureInstalled(triggerAppId?: string): Promise<boolean> {
+		if (!this.installPromise) {
+			this.installPromise = this.runWorkspaceInstall(triggerAppId).then((ok) => {
+				// A failed install must not be memoized as done — the next
+				// start retries instead of trusting a broken node_modules.
+				if (!ok) this.installPromise = null;
+				return ok;
+			});
+		}
+		return this.installPromise;
+	}
+
+	/**
 	 * Starts (or reuses) the watch session for an app.
 	 *
-	 * Always runs `pnpm install` first: package.json may have changed since
-	 * the last session (or the app may be freshly scaffolded/cloned with no
-	 * node_modules at all), and an up-to-date tree makes the install a
-	 * ~1s no-op. Only then does `rsbuild dev` spawn.
+	 * Awaits the shared workspace install first: package.json may have
+	 * changed since the last session (or the app may be freshly scaffolded
+	 * with no node_modules at all); the single-flight memo makes concurrent
+	 * starts share one `pnpm install`. Only then does `rsbuild dev` spawn.
 	 *
 	 * @param app - The scanned workspace app to watch.
 	 */
 	public async start(app: ScannedApp): Promise<void> {
 		if (this.sessions.has(app.id) || this.starting.has(app.id)) return;
 
-		// Dependencies first — guarded so a second open during the install
-		// doesn't race a duplicate session.
+		// Dependencies first — the starting guard means "don't double-spawn
+		// while awaiting the shared install".
 		this.starting.add(app.id);
 		try {
-			const installed = await this.runInstall(app);
+			const installed = await this.ensureInstalled(app.id);
 			if (!installed) return;
 			// A session that appeared while installing wins — never double-spawn
 			if (this.sessions.has(app.id)) return;
@@ -105,6 +146,26 @@ export class WatchManager {
 		const session: WatchSession = { app, proc, buildStart: Date.now() };
 		this.sessions.set(app.id, session);
 		this.notify(app.id, { state: 'building' });
+
+		// package.json watcher: a dependency edit invalidates the shared
+		// install and restarts THIS session (other apps' dev servers survive
+		// a root install — pnpm only rewrites the changed project's links).
+		// The cycle cannot self-trigger: nothing in install/restart writes
+		// package.json. Disposed in stop() so watcher lifetime tracks the
+		// session. Known edge: an edit landing while the install is mid-
+		// flight is swallowed by the starting guard — accepted (the debounce
+		// makes it rare, and the preview Reload button recovers).
+		session.pkgWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(app.folder), 'package.json'));
+		const onPkgChange = (): void => {
+			if (session.pkgTimer) clearTimeout(session.pkgTimer);
+			session.pkgTimer = setTimeout(() => {
+				this.logger.output(`[appdev] package.json changed: ${app.id} — reinstalling and restarting`);
+				this.invalidateInstall();
+				void this.restart(app);
+			}, 800);
+		};
+		session.pkgWatcher.onDidChange(onPkgChange);
+		session.pkgWatcher.onDidCreate(onPkgChange);
 
 		// Parse stdout for the dev origin and build results
 		proc.stdout?.on('data', (chunk: Buffer) => this.handleOutput(session, chunk.toString('utf8')));
@@ -134,6 +195,8 @@ export class WatchManager {
 		if (!session) return;
 		this.sessions.delete(appId);
 		if (session.reloadTimer) clearTimeout(session.reloadTimer);
+		if (session.pkgTimer) clearTimeout(session.pkgTimer);
+		session.pkgWatcher?.dispose();
 		try {
 			// Windows: kill() only reaches the immediate process — rsbuild's
 			// children (the dev server) survive and squat the port across
@@ -179,53 +242,83 @@ export class WatchManager {
 	// =========================================================================
 
 	/**
-	 * Runs `pnpm install` in the app folder, reporting 'installing' to the
-	 * DEV badge while it runs.
+	 * Runs `pnpm install` at the WORKSPACE root — one install shared by all
+	 * apps (they are workspace members; pnpm materializes each member's
+	 * node_modules links from the root). Badge state and installer output
+	 * broadcast to every open panel: a global install belongs to all of
+	 * them. A failure names the offending project through pnpm's own output.
 	 *
-	 * @param app - The app whose dependencies should be installed.
+	 * Assumes workspaceFolders[0] (same known limitation as ensureShell —
+	 * apps in a second workspace root are not covered).
+	 *
+	 * @param triggerAppId - The app that initiated the install (error focus).
 	 * @returns True when the install succeeded (or was a no-op).
 	 */
-	private runInstall(app: ScannedApp): Promise<boolean> {
-		this.notify(app.id, { state: 'installing' });
-		this.logger.output(`[appdev] pnpm install: ${app.id} (${app.folder})`);
-		this.console(app.id, 'log', `$ pnpm install --ignore-workspace --no-lockfile --prefer-offline  (${app.folder})`);
+	private runWorkspaceInstall(triggerAppId?: string): Promise<boolean> {
+		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		if (!workspaceRoot) return Promise.resolve(false);
+		this.appScreen.notifyWatchAll({ state: 'installing' });
+		this.logger.output(`[appdev] pnpm install (workspace) at ${workspaceRoot}${triggerAppId ? ` — triggered by ${triggerAppId}` : ''}`);
+		this.appScreen.notifyConsoleAll('log', `$ pnpm install --prefer-offline  (${workspaceRoot})`);
 		return new Promise<boolean>((resolve) => {
-			// --ignore-workspace: app folders often live INSIDE another pnpm
-			// workspace (the monorepo, a dist tree) — without it pnpm walks up,
-			// installs that workspace's projects, and the app's own
-			// node_modules (with rsbuild) never materializes.
-			// --no-lockfile: this is an ephemeral dev-preview install; the
-			// monorepo's root lockfile is the source of truth in-tree, and a
-			// standalone app repo mints its own. Writing one here only churns
-			// git and can drift from the root. --prefer-offline: resolve from
-			// the store when a range is already satisfied, so one slow registry
-			// response cannot stall every preview install.
-			const proc = spawn('pnpm', ['install', '--ignore-workspace', '--no-lockfile', '--prefer-offline'], {
-				cwd: app.folder,
+			// Workspace model: no --ignore-workspace (the root workspace file
+			// claims apps/*), no --no-lockfile (the root lockfile is the
+			// honest record of what the workspace resolves).
+			// --prefer-offline: resolve from the store when a range is already
+			// satisfied, so one slow registry response cannot stall installs.
+			const proc = spawn('pnpm', ['install', '--prefer-offline'], {
+				cwd: workspaceRoot,
 				shell: process.platform === 'win32',
 				env: { ...process.env, NO_COLOR: '1' },
 			});
-			// Mirror installer output into the panel Console + extension log
-			proc.stdout?.on('data', (chunk: Buffer) => this.consoleLines(app.id, 'log', chunk.toString('utf8')));
-			proc.stderr?.on('data', (chunk: Buffer) => this.consoleLines(app.id, 'warn', chunk.toString('utf8')));
+			// Mirror installer output into every open panel's Console, and
+			// accumulate it so a failure can NAME its cause.
+			let output = '';
+			proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); this.consoleAllLines('log', chunk.toString('utf8')); });
+			proc.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); this.consoleAllLines('warn', chunk.toString('utf8')); });
 			proc.on('exit', (code) => {
 				if (code === 0) {
-					this.console(app.id, 'log', 'pnpm install: done');
+					this.appScreen.notifyConsoleAll('log', 'pnpm install: done');
+					// Clear the broadcast 'installing' badge; running sessions
+					// immediately re-assert their real state below.
+					this.appScreen.notifyWatchAll({ state: 'idle' });
+					for (const s of this.sessions.values()) {
+						this.notify(s.app.id, { state: s.buildStart ? 'building' : 'ok', target: s.devOrigin?.replace(/^https?:\/\//, '') });
+					}
 					resolve(true);
 				} else {
-					this.logger.output(`[appdev] pnpm install failed (${code}): ${app.id}`);
-					this.appScreen.notifyError(app.id, `pnpm install exited with code ${code}`, 'pnpm install');
-					this.notify(app.id, { state: 'error', target: 'pnpm install' });
+					const reason = `pnpm install failed: ${extractInstallCause(output, code)}`;
+					this.logger.output(`[appdev] workspace ${reason}`);
+					if (triggerAppId) this.appScreen.notifyError(triggerAppId, reason, 'pnpm install');
+					this.appScreen.notifyWatchAll({ state: 'error', target: 'pnpm install', reason });
 					resolve(false);
 				}
 			});
 			proc.on('error', (err) => {
-				this.logger.output(`[appdev] pnpm not found: ${err.message}`);
-				this.appScreen.notifyError(app.id, `pnpm could not be started: ${err.message}`, 'pnpm install');
-				this.notify(app.id, { state: 'error', target: 'pnpm install' });
+				const reason = `pnpm could not be started: ${err.message}`;
+				this.logger.output(`[appdev] ${reason}`);
+				if (triggerAppId) this.appScreen.notifyError(triggerAppId, reason, 'pnpm install');
+				this.appScreen.notifyWatchAll({ state: 'error', target: 'pnpm install', reason });
 				resolve(false);
 			});
 		});
+	}
+
+	/**
+	 * Splits raw workspace-install output into rows broadcast to every open
+	 * panel's Console (blank lines dropped), mirroring the extension log.
+	 *
+	 * @param level - Row severity.
+	 * @param text - Raw chunk (possibly multi-line).
+	 */
+	private consoleAllLines(level: 'log' | 'warn' | 'error', text: string): void {
+		for (const line of text.split(/\r?\n/)) {
+			const trimmed = line.trim();
+			if (trimmed) {
+				this.logger.output(`[appdev] ${trimmed}`);
+				this.appScreen.notifyConsoleAll(level, trimmed);
+			}
+		}
 	}
 
 	/**
@@ -292,7 +385,7 @@ export class WatchManager {
 		} else if (/build failed|error {3}/i.test(text)) {
 			session.buildStart = undefined;
 			this.appScreen.notifyError(session.app.id, 'rsbuild build failed — see the Console pane for compiler output', 'rsbuild');
-			this.notify(session.app.id, { state: 'error', target: session.devOrigin?.replace(/^https?:\/\//, '') });
+			this.notify(session.app.id, { state: 'error', target: session.devOrigin?.replace(/^https?:\/\//, ''), reason: 'The app failed to compile — the Console pane carries the compiler output.' });
 		} else if (/building|compiling/i.test(text) && session.buildStart === undefined) {
 			session.buildStart = Date.now();
 			this.notify(session.app.id, { state: 'building', target: session.devOrigin?.replace(/^https?:\/\//, '') });

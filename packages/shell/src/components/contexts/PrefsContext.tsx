@@ -4,9 +4,9 @@
 // =============================================================================
 
 /**
- * PrefsContext — THE one workspace-preferences accessor for shared-ui.
+ * PrefsContext — THE one workspace-preferences accessor for shared.
  *
- * A single, host-agnostic `{ getPref, setPref }` API that any shared-ui component
+ * A single, host-agnostic `{ getPref, setPref }` API that any shared component
  * (DetailPanel, the canvas, record panels) reads via {@link usePrefs}, plus a
  * {@link PrefsProvider} each host wires ONCE from whatever prefs store it owns:
  *
@@ -16,7 +16,7 @@
  *     host over postMessage). So the canvas works in both with no extra code.
  *   - A VS Code webview: the prefs it holds + a prefs-write message to the host.
  *
- * `shared-ui` sits BELOW shell in the layer graph and cannot import it, so it
+ * `shared` sits BELOW shell in the layer graph and cannot import it, so it
  * can never call `useWorkspace` itself — the value is always PROVIDED by the app
  * (which can see both layers). Where no provider is mounted, {@link usePrefs}
  * returns a no-op accessor: reads yield `undefined`, writes are dropped, so a
@@ -59,7 +59,7 @@ const PrefsContext = createContext<IPrefsApi | null>(null);
 // =============================================================================
 
 /**
- * Provides the app's prefs accessor to every shared-ui component beneath it.
+ * Provides the app's prefs accessor to every shared component beneath it.
  * Mount ONCE near the app root with a value backed by the host's prefs store.
  *
  * @param props.value - The `{ getPref, setPref }` implementation for this host.
