@@ -2,8 +2,7 @@
 Zhipu AI GLM provider handler (Handler A) — cloud models only.
 
 Fetches models from the Z.ai /models endpoint and syncs the cloud profiles
-(glm-4-6, glm-4-5, glm-4-5-air, glm-4-5-flash) into
-nodes/src/nodes/llm_glm/services.json.
+(the glm-* family) into nodes/src/nodes/llm_glm/services.json.
 
 The Z.ai API (api.z.ai) is OpenAI-compatible, so the openai SDK can be used
 with a custom base_url. The model_filter in sync_models.config.json keeps
