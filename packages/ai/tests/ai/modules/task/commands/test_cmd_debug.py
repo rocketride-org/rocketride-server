@@ -1,12 +1,13 @@
 """
 Unit tests for ai.modules.task.commands.cmd_debug.DebugCommands.
 
-Focus areas: ``on_initialize`` (static capabilities), ``on_launch`` (org
-resolution + start_task delegation + state tracking), ``on_attach``
-(token resolution + debug availability + state tracking), ``on_terminate``
-/ ``on_disconnect`` (stop / detach paths), ``on_pause`` / ``on_continue``
-(threadId injection), ``on_configurationDone`` (debug availability skip),
-``on_threads``.
+Focus areas: ``on_initialize`` (static capabilities), ``on_attach``
+(token resolution + debug availability + state tracking), ``on_disconnect``
+(detach path), ``on_pause`` / ``on_continue`` (threadId injection),
+``on_configurationDone`` (debug availability skip), ``on_threads``.
+
+``on_launch`` and ``on_terminate`` are task lifecycle, not debugging, and
+live on TaskCommands — their tests are in ``test_cmd_task.py``.
 
 Tests use ``__new__`` to skip the multi-mixin __init__ and seed
 ``_debug_token``, ``_debug_id``, ``_account_info``, ``_server``.
@@ -14,7 +15,7 @@ Tests use ``__new__`` to skip the multi-mixin __init__ and seed
 
 from __future__ import annotations
 
-from types import MethodType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -39,12 +40,6 @@ def _make_conn(*, account_info=None, server=None, debug_token=None, debug_id=Non
     conn.verify_permission = MagicMock()
     conn.verify_team_permission = MagicMock()  # granted by default
     conn.get_task = MagicMock()
-    # Bind the REAL org resolver (defined on TaskConn, next to
-    # verify_team_permission) so on_launch exercises real membership-based
-    # resolution against the stub AccountInfo's organization.
-    from ai.modules.task.task_conn import TaskConn
-
-    conn.resolve_org_for_team = MethodType(TaskConn.resolve_org_for_team, conn)
     conn.get_task_token = MagicMock(return_value='tk_x')
     # request() is defined on TaskConn (not DebugCommands); on_pause /
     # on_continue / on_configurationDone / on_threads call self.request().
@@ -79,75 +74,6 @@ async def test_on_initialize_returns_debug_capabilities():
     assert caps['supportsConditionalBreakpoints'] is True
     assert caps['supportsStepBack'] is False
     assert 'exceptionBreakpointFilters' in caps
-
-
-# ---------------------------------------------------------------------------
-# on_launch
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_on_launch_starts_task_with_resolved_org_and_stores_token():
-    """on_launch resolves org_id from devTeam, calls start_task, and records _debug_*."""
-    server = MagicMock()
-    server.start_task = AsyncMock(return_value={'id': 'task-99', 'token': 'tk_99'})
-    conn = _make_conn(account_info=_account_info(), server=server)
-
-    event = await DebugCommands.on_launch(conn, {'arguments': {}})
-
-    server.start_task.assert_awaited_once()
-    assert server.start_task.call_args.kwargs['org_id'] == 'org-1'
-    assert server.start_task.call_args.kwargs['attach_debugger'] is True
-    conn.send_response.assert_awaited_once()
-    assert conn._debug_token == 'tk_99'
-    assert conn._debug_id == 'task-99'
-    assert event['event'] == 'initialized'
-
-
-@pytest.mark.asyncio
-async def test_on_launch_rejects_when_already_debugging():
-    """A second on_launch on a connection with _debug_token raises RuntimeError."""
-    conn = _make_conn(account_info=_account_info(), debug_token='tk_existing')
-    with pytest.raises(RuntimeError, match='already active'):
-        await DebugCommands.on_launch(conn, {'arguments': {}})
-
-
-@pytest.mark.asyncio
-async def test_on_launch_rejects_unpermitted_dev_team():
-    """Lacking task.debug on the development team denies the launch before any
-    task is started.
-    """
-    server = MagicMock()
-    server.start_task = AsyncMock()
-    conn = _make_conn(account_info=_account_info(), server=server)
-    conn.verify_team_permission = MagicMock(side_effect=PermissionError('denied for team'))
-    with pytest.raises(PermissionError, match='denied for team'):
-        await DebugCommands.on_launch(conn, {'arguments': {}})
-    server.start_task.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_on_launch_rejects_client_team_override():
-    """A client-supplied teamId differing from the development team is
-    rejected outright — debug runs always execute under the profile-assigned
-    development team.
-    """
-    server = MagicMock()
-    server.start_task = AsyncMock()
-    conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
-    with pytest.raises(PermissionError, match='development team'):
-        await DebugCommands.on_launch(conn, {'arguments': {'teamId': 'team-foreign'}})
-    server.start_task.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_on_launch_checks_task_debug_on_dev_team():
-    """on_launch verifies task.debug against the development team."""
-    server = MagicMock()
-    server.start_task = AsyncMock(return_value={'id': 'task-1', 'token': 'tk_1'})
-    conn = _make_conn(account_info=_account_info(dev_team='team-1'), server=server)
-    await DebugCommands.on_launch(conn, {'arguments': {}})
-    conn.verify_team_permission.assert_called_once_with('team-1', 'task.debug')
 
 
 # ---------------------------------------------------------------------------
@@ -199,24 +125,6 @@ async def test_on_attach_records_token_and_emits_initialized():
     assert conn._debug_id == 'task-77'
     assert event['event'] == 'initialized'
     conn.send_response.assert_awaited_once()
-
-
-# ---------------------------------------------------------------------------
-# on_terminate
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_on_terminate_injects_debug_token_and_calls_stop_task():
-    """on_terminate uses _debug_token when the request omits 'token'."""
-    server = MagicMock()
-    server.stop_task = AsyncMock()
-    conn = _make_conn(account_info=_account_info(), server=server, debug_token='tk_active')
-    conn.get_task_token = MagicMock(return_value='tk_active')
-
-    response = await DebugCommands.on_terminate(conn, {'arguments': {}})
-    server.stop_task.assert_awaited_once_with('tk_active')
-    assert response['type'] == 'response'
 
 
 # ---------------------------------------------------------------------------
