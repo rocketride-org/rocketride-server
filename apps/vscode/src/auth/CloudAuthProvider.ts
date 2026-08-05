@@ -24,6 +24,7 @@ import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import type { ConnectResult } from 'rocketride';
 import { generatePkce, buildAuthUrl } from './pkce';
+import { resolveCloudAppUrl } from './resolveCloudAppUrl';
 
 import { EventEmitter } from 'events';
 
@@ -34,26 +35,6 @@ import { EventEmitter } from 'events';
 const SECRET_KEY_TOKEN = 'rocketride.cloudToken';
 const SECRET_KEY_NAME = 'rocketride.cloudUserName';
 const REDIRECT_URI = `${vscode.env.uriScheme}://rocketride.rocketride/auth/callback`;
-
-/**
- * Resolve the Cloud web app URL for the same environment as the API endpoint
- * used for token exchange (`ROCKETRIDE_URI`). Maps `api.*` hosts to `cloud.*`
- * so staging/dev builds do not open production.
- */
-function resolveCloudAppUrl(cloudApiUrl: string): string {
-	try {
-		const url = new URL(RocketRideClient.normalizeUri(cloudApiUrl));
-		if (url.hostname.startsWith('api.')) {
-			url.hostname = `cloud.${url.hostname.slice('api.'.length)}`;
-		}
-		url.pathname = '/';
-		url.search = '';
-		url.hash = '';
-		return url.toString();
-	} catch {
-		return 'https://cloud.rocketride.ai/';
-	}
-}
 
 // =============================================================================
 // CLASS
