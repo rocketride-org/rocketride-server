@@ -161,7 +161,8 @@ export function clearStoredVerifier(): void {
  * @param clientId      - Zitadel application client ID
  * @param redirectUri   - Where Zitadel redirects after auth (typically window.location.origin)
  * @param challenge     - PKCE code_challenge (from generatePkce)
- * @param register      - If true, shows signup form instead of login form
+ * @param _register     - Historical sign-up intent flag; both flows now land on
+ *                        the login page (with its Register link), see below
  * @returns The fully formed authorization URL string ready for browser navigation.
  */
 export function buildAuthUrl(
@@ -169,7 +170,7 @@ export function buildAuthUrl(
     clientId: string,
     redirectUri: string,
     challenge: string,
-    register = false,
+    _register = false,
 ): string {
     // Assemble the standard OAuth 2.0 authorization request parameters.
     // The scope includes openid and profile for basic identity, email and phone
@@ -184,9 +185,13 @@ export function buildAuthUrl(
         code_challenge_method: 'S256',
     });
 
-    // When the caller requests registration mode, set the `prompt=create` hint
-    // so Zitadel presents the sign-up form rather than the sign-in form.
-    if (register) params.set('prompt', 'create');
+    // Always land on Zitadel's login page (prompt=login): it forces the login UI
+    // so Zitadel never silently reuses its SSO session (account switching stays
+    // possible), and its built-in "Register" link covers new users. prompt=create
+    // dead-ends returning users on the sign-up form with no path to log in
+    // ("could not sign up at this time"), so the register flag no longer maps
+    // to it. The parameter is kept so callers' intent stays visible at call sites.
+    params.set('prompt', 'login');
 
     // Strip any trailing slash from the base URL before appending the path
     // to avoid a double-slash in the resulting URL.

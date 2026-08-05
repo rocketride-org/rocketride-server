@@ -13,7 +13,8 @@
     "categories": ["built-in"],
     "mode": "free",
     "authenticated": false,
-    "showStatusBar": true
+    "showStatusBar": true,
+    "shells": ["oss"]
   },
   "scripts": {
     "build": "pnpm rsbuild build",

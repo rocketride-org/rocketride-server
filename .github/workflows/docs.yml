@@ -9,7 +9,7 @@ on:
     branches: [develop]
     paths:
       - 'packages/docs/**'
-      - 'nodes/src/nodes/**/doc.md'
+      - 'nodes/src/nodes/**/README.md'
       - 'packages/*/docs/**'
       - 'apps/*/docs/**'
       - '.github/workflows/docs.yml'
@@ -32,6 +32,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+          # docs:gather stamps each page with its source file's last commit
+          # date, which feeds the sitemap's <lastmod>. A shallow clone has a
+          # single commit, so every page would date to the clone day.
+          fetch-depth: 0
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

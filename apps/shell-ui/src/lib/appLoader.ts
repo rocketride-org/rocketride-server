@@ -29,7 +29,7 @@
  */
 
 import { registerRemotes, loadRemote } from '@module-federation/runtime';
-import type { AppManifestEntry, AppDescriptor, AppSettingDefinition } from '../workspace/types';
+import type { AppManifestEntry, AppDescriptor, AppConfiguration } from '../workspace/types';
 
 /**
  * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
@@ -48,7 +48,9 @@ export interface ServerAppEntry {
 	icon?: string;
 	/** Category tags. */
 	categories?: string[];
-	/** App-specific setting definitions. */
+	/** Settings contribution (VSCode contributes.configuration shape). */
+	configuration?: unknown;
+	/** @deprecated Legacy flat settings list from pre-configuration servers. */
 	settings?: unknown[];
 	/** URL to the MF remote entry file. */
 	entry: string;
@@ -72,6 +74,27 @@ export interface ServerAppEntry {
  * @param serverApps - App entries from the server.
  * @returns Array of AppManifestEntry objects ready for the shell.
  */
+// Module-level record of registered remotes (moduleId -> entry URL) so
+// resetRemote() can tear down and re-register a container without callers
+// having to thread the entry URL through.
+const registeredEntries = new Map<string, string>();
+
+/**
+ * Tear down a remote's (possibly half-initialized) MF container and register
+ * it fresh. Used by the app-load retry path: a failed first load leaves the
+ * container partially executed, and re-loading the CACHED container throws
+ * TDZ errors ("Cannot access 'x' before initialization") instead of retrying
+ * the real fetch. Safe for failed containers — nothing has successfully
+ * consumed them, unlike force-re-registering a live, loaded remote.
+ *
+ * @param moduleId - The MF container name (AppManifestEntry.moduleId).
+ */
+export function resetRemote(moduleId: string): void {
+	const entry = registeredEntries.get(moduleId);
+	if (!entry) return;
+	registerRemotes([{ name: moduleId, entry }], { force: true });
+}
+
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
 	// Drop entries missing a remoteEntry URL — the server may include
 	// apps that have no built UI yet (e.g. server-only nodes).
@@ -86,6 +109,9 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		{ force: true },
 	);
 
+	// Record the registered URLs so resetRemote() can rebuild a container.
+	for (const a of validApps) registeredEntries.set(a.moduleId, a.entry);
+
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return validApps.map((a) => ({
 		id:            a.id,
@@ -94,7 +120,10 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 		description:   a.description,
 		icon:          a.icon,
 		categories:    a.categories,
-		settings:      (a.settings ?? []) as AppSettingDefinition[],
+		// Settings contribution — validated structurally by the registry builder,
+		// so legacy array-shaped `settings` rows from an un-reseeded server are
+		// simply ignored rather than crashing the shell.
+		configuration: a.configuration as AppConfiguration | undefined,
 		authenticated: a.authenticated,
 		showHeader:    a.showHeader,
 		showStatusBar: a.showStatusBar,

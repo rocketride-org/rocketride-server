@@ -90,6 +90,8 @@ from .pipeline import (
 from .task import (
     TASK_STATUS,
     TASK_STATE,
+    TASK_STATUS_COMPONENT_STAT,
+    TASK_STATUS_SLOWEST_DOC,
     TASK_STATUS_FLOW,
     TASK_TOKENS,
     TASK_METRICS,
@@ -115,6 +117,10 @@ from .dashboard import (
     DASHBOARD_CONNECTION,
     DASHBOARD_TASK,
     DASHBOARD_RESPONSE,
+    LIST_SORT_SPEC,
+    LIST_PAGE_REQUEST,
+    LIST_CONNECTIONS_RESPONSE,
+    LIST_TASKS_RESPONSE,
     DASHBOARD_EVENT,
     DASHBOARD_EVENT_CONNECTION_ADDED,
     DASHBOARD_EVENT_CONNECTION_REMOVED,
@@ -150,16 +156,49 @@ from .account import (
     TeamMemberParams,
 )
 
-# Deploy types: deployment records.
-from .deploy import DeploymentRecord
+# Deploy types: teams-as-environments deployment records.
+from .deploy import (
+    DeployActor,
+    DeployArtifact,
+    DeployHistoryEntry,
+    DeployHistoryResult,
+    DeployListResult,
+    Deployment,
+    DeploymentSchedule,
+    DeployVersionsResult,
+    PublishResult,
+    SchedulePreview,
+)
 
-# Billing types: subscriptions, Stripe plans, compute credits.
+# Run-log types: the per-task event continuum (chapters, reads, deletes).
+from .log import (
+    LogRunKind,
+    LogChapter,
+    LogActivitySpan,
+    LogChaptersResult,
+    LogEvent,
+    LogReadResult,
+    LogSegmentResult,
+    LogDeleteResult,
+    LogTraceSummary,
+    LogTracesResult,
+    LogTraceDetail,
+    LogPlayItem,
+)
+
+# Billing types: subscriptions, Stripe plans, compute credits, promo codes.
 from .billing import (
+    AppPrice,
     BillingDetail,
     PlanAction,
     StripePlan,
     CreditBalance,
     CreditPack,
+    LedgerTransaction,
+    PromoRedemption,
+    PromoValidation,
+    TransactionsResult,
+    UsageRollup,
 )
 
 # Service types: shapes for service discovery responses, slot/lane descriptors,
@@ -197,6 +236,8 @@ __all__ = [
     'PipelineComponent',
     'PipelineConfig',
     # Task types
+    'TASK_STATUS_COMPONENT_STAT',
+    'TASK_STATUS_SLOWEST_DOC',
     'TASK_STATUS',
     'TASK_STATE',
     'TASK_STATUS_FLOW',
@@ -216,6 +257,10 @@ __all__ = [
     'DASHBOARD_CONNECTION',
     'DASHBOARD_TASK',
     'DASHBOARD_RESPONSE',
+    'LIST_SORT_SPEC',
+    'LIST_PAGE_REQUEST',
+    'LIST_CONNECTIONS_RESPONSE',
+    'LIST_TASKS_RESPONSE',
     'DASHBOARD_EVENT',
     'DASHBOARD_EVENT_CONNECTION_ADDED',
     'DASHBOARD_EVENT_CONNECTION_REMOVED',
@@ -253,11 +298,39 @@ __all__ = [
     'InviteMemberParams',
     'TeamMemberParams',
     # Deploy types
-    'DeploymentRecord',
+    'DeployActor',
+    'DeployArtifact',
+    'DeployHistoryEntry',
+    'DeployHistoryResult',
+    'DeployListResult',
+    'Deployment',
+    'DeploymentSchedule',
+    'DeployVersionsResult',
+    'PublishResult',
+    'SchedulePreview',
+    # Run-log types
+    'LogRunKind',
+    'LogChapter',
+    'LogActivitySpan',
+    'LogChaptersResult',
+    'LogEvent',
+    'LogReadResult',
+    'LogSegmentResult',
+    'LogDeleteResult',
+    'LogTraceSummary',
+    'LogTracesResult',
+    'LogTraceDetail',
+    'LogPlayItem',
     # Billing types
+    'AppPrice',
     'BillingDetail',
     'PlanAction',
     'StripePlan',
     'CreditBalance',
     'CreditPack',
+    'LedgerTransaction',
+    'PromoRedemption',
+    'PromoValidation',
+    'TransactionsResult',
+    'UsageRollup',
 ]

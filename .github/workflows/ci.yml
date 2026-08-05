@@ -195,7 +195,7 @@ jobs:
             --ignore-unfixed
 
       - name: Upload Trivy SARIF
-        uses: github/codeql-action/upload-sarif@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
         if: always()
         with:
           sarif_file: 'trivy-${{ matrix.dockerfile }}.sarif'
@@ -241,12 +241,62 @@ jobs:
           gitleaks detect --config .gitleaks.toml --verbose --redact --log-opts="${BASE}..HEAD"
 
   # ---------------------------------------------------------------------------
+  #  Shell API contract — fail the PR on an incompatible or un-frozen change to
+  #  shell-ui's public surface. `shell:check` runs the contract tsc pre-check
+  #  (so REMOVING/breaking a frozen member fails via the per-version floors) and
+  #  the actionable-drift check (so ADDING an export without `shell:freeze`
+  #  fails). A second step regenerates the committed floors from the immutable
+  #  versions/*.d.ts and fails on any diff — so a per-version floor cannot be
+  #  hand-edited/dropped to launder a removed export past the tsc floors. Only
+  #  runs when code changed; skipped for docs-only PRs.
+  # ---------------------------------------------------------------------------
+  shell-contract:
+    name: Shell API contract
+    needs: [changes]
+    # Least privilege: this job only checks out code and runs local scripts.
+    permissions:
+      contents: read
+    if: >-
+      always() &&
+      github.event_name != 'schedule' &&
+      (github.event_name != 'pull_request' || needs.changes.outputs.code == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: shell:check — verify the shell-api contract is current & unbroken
+        # Equivalent to `./builder shell:check`. The target builds the rocketride
+        # SDK first (shared-ui type-checks against its dist/types), then runs the
+        # contract check. Nonzero exit fails the PR.
+        run: node scripts/build.js shell:check
+      - name: shell contract floors are un-tampered — regen must be a no-op
+        # Regenerate the barrels + per-version floors from the immutable frozen
+        # versions, then fail on any diff. A nonzero diff means the committed
+        # contract-check.generated.ts (or a shell-api barrel) was hand-edited —
+        # e.g. a `_floor_vN` line dropped so a removed export slips past tsc. The
+        # SDK/tsc prereqs are already warm from the step above.
+        run: |
+          node scripts/build.js shell:regen
+          git diff --exit-code -- \
+            apps/shell-ui/src/contract-check.generated.ts \
+            packages/shell-api/index.ts \
+            packages/shell-api/latest.ts
+
+  # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.
   #  Aggregates all CI results so skipped builds don't block PRs.
   # ---------------------------------------------------------------------------
   ci-ok:
     name: CI OK
-    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks]
+    needs: [init, changes, build, helm-changes, helm-lint, ruff-check, gitleaks, shell-contract]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -254,11 +304,11 @@ jobs:
         run: |
           if [[ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
             echo "❌ One or more CI jobs failed or were cancelled."
-            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}"
+            echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
             exit 1
           fi
           echo "✅ All CI checks passed (or were correctly skipped)."
-          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}"
+          echo "Results: init=${{ needs.init.result }}, changes=${{ needs.changes.result }}, build=${{ needs.build.result }}, helm-changes=${{ needs.helm-changes.result }}, helm-lint=${{ needs.helm-lint.result }}, ruff-check=${{ needs['ruff-check'].result }}, gitleaks=${{ needs.gitleaks.result }}, shell-contract=${{ needs['shell-contract'].result }}"
 
   # ---------------------------------------------------------------------------
   #  Discord — update PR embed with final check counts after CI completes.

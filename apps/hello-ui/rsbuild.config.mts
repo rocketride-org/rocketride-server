@@ -31,6 +31,10 @@ export default defineConfig(() => {
 				// remotes don't embed their own copy, keeping remoteEntry.js
 				// stable across app-code-only rebuilds.
 				runtime: false,
+				// loaded-first: use the host's already-loaded shared instances instead of
+				// version-first's boot-time download of EVERY registered remoteEntry.js
+				// just to compare shared versions (everything here is singleton + co-deployed).
+				shareStrategy: 'loaded-first',
 				shared: {
 					// eager: true makes shared-scope negotiation synchronous on
 					// both host and remote, eliminating the async deadlock that
@@ -43,6 +47,7 @@ export default defineConfig(() => {
 					// (fonts, Chart.js, MUI) as a "just in case" fallback.
 					'shell-ui': { singleton: true, requiredVersion: false, import: false },
 					'shared':   { singleton: true, requiredVersion: false, import: false },
+					'rocketride': { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],

@@ -25,13 +25,14 @@
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
-import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse } from './types/index.js';
+import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, PipelineConfig, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinition, ValidationResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse } from './types/index.js';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
+import { LogApi } from './log.js';
 import { AuthenticationException, ConnectionException, PipeException } from './exceptions/index.js';
 
 // Global counter for generating unique client IDs
@@ -140,7 +141,7 @@ export class DataPipe {
 
 		if (this._client.didFail(response)) {
 			const base = response.message || 'Failed to open a data pipe.';
-			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + "- Pipeline source is 'chat' (use client.chat()), not webhook/dropper\n" + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
+			const msg = `${base}\n\n` + 'Common causes:\n' + "- Pipeline isn't running (wrong token or task terminated)\n" + '- Pipeline source must be chat, webhook, or dropper\n' + "- MIME type doesn't match the source lane (try mimeType='text/plain')\n";
 			throw new PipeException({ ...response, message: msg });
 		}
 
@@ -256,6 +257,45 @@ export class DataPipe {
 			}
 		}
 	}
+
+	/**
+	 * Invoke a @tool_function on a pipeline node using this pipe.
+	 *
+	 * The call reuses this pipe's existing pipeline instance, avoiding the
+	 * overhead of borrowing a new one from the pool.
+	 *
+	 * @param tool - Name of the @tool_function to invoke
+	 * @param nodeId - Target node ID.  When empty the call broadcasts to all
+	 *                 tool-lane nodes; the first node that owns the tool handles it.
+	 * @param input - Arguments forwarded to the tool function
+	 * @returns The tool's return value (typically a record/object)
+	 * @throws Error if the pipe is not open or no node handles the tool
+	 */
+	async tool<T = any>(tool: string, nodeId = '', input: Record<string, unknown> = {}): Promise<T> {
+		if (!this._opened) {
+			throw new Error('Pipe is not open');
+		}
+
+		const request = this._client.buildRequest('rrext_process', {
+			arguments: {
+				subcommand: 'tool',
+				tool,
+				nodeId,
+				input,
+				pipe_id: this._pipeId,
+			},
+			token: this._token,
+		});
+
+		const response = await this._client.request(request);
+
+		if (this._client.didFail(response)) {
+			const msg = response.message || `Tool "${tool}" invocation failed.`;
+			throw new Error(msg);
+		}
+
+		return (response.body as any)?.result as T;
+	}
 }
 
 /**
@@ -285,9 +325,14 @@ export class DataPipe {
  * Identifies a monitor subscription key.
  *
  * - `{ token }` — monitors a specific running task by its session token.
- * - `{ projectId, source }` — monitors a project/source regardless of task.
+ * - `{ projectId, source }` — monitors the CALLER's own dev run of the
+ *   project/source (the server binds the connection's user identity).
+ * - `{ teamId, projectId, source }` — monitors the team's DEPLOYED run.
+ *
+ * The scope IS the kind: teamId present addresses the deploy continuum,
+ * absent addresses your dev run — there is no run-kind argument.
  */
-export type MonitorKey = { token: string } | { projectId: string; source: string; pipeId?: number };
+export type MonitorKey = { token: string } | { teamId?: string; projectId: string; source: string; pipeId?: number };
 
 export class RocketRideClient extends DAPClient {
 	private _uri!: string;
@@ -326,21 +371,28 @@ export class RocketRideClient extends DAPClient {
 	/** Lazily-created deploy API namespace. */
 	private _deploy?: DeployApi;
 
+	/** Lazily-created run-log API namespace. */
+	private _log?: LogApi;
+
 	/** Optional trace callback for observing all call() traffic. */
 	private _onTrace?: (traceType: TraceType, message: DAPMessage) => void;
 
 	/**
 	 * Creates a new RocketRideClient instance.
 	 *
-	 * Configuration priority (highest to lowest):
-	 * 1. Values passed in config parameter (auth, uri)
-	 * 2. Values from env parameter (if provided)
-	 * 3. Values from .env file (Node.js only)
-	 * 4. Default values
+	 * `config.env` is copied as the configured environment map when provided;
+	 * otherwise Node.js values are copied from `process.env`. The two maps are not merged.
+	 * `config.uri` overrides `ROCKETRIDE_URI`; `config.auth` supplies the fallback
+	 * credential used when `login()` receives no credential and the configured environment
+	 * has no `ROCKETRIDE_APIKEY`.
+	 *
+	 * The client does not load `.env` files; load them into `process.env` before construction
+	 * (for example, start Node with `--env-file=.env`).
 	 *
 	 * @param config - Configuration options for the client
-	 * @param config.auth - API key for authentication (required)
-	 * @param config.uri - Server URI (default: CONST_DEFAULT_SERVICE)
+	 * @param config.auth - Optional initial API key; `login()` can also use
+	 *   `ROCKETRIDE_APIKEY` from the configured environment
+	 * @param config.uri - Server URI (default: CONST_DEFAULT_WEB_CLOUD)
 	 * @param config.env - Environment variables dictionary for configuration and substitution
 	 * @param config.onEvent - Callback for server events
 	 * @param config.onConnected - Callback when connection is established
@@ -349,8 +401,6 @@ export class RocketRideClient extends DAPClient {
 	 * @param config.requestTimeout - Default timeout in ms for individual requests
 	 * @param config.maxRetryTime - Max total time in ms to keep retrying connections
 	 * @param config.module - Optional module name for client identification
-	 *
-	 * @throws Error if auth is not provided via config, env, or .env file
 	 *
 	 * @example
 	 * ```typescript
@@ -376,8 +426,7 @@ export class RocketRideClient extends DAPClient {
 		// Check if we're in Node.js or browser environment
 		const isBrowser = typeof window !== 'undefined';
 
-		// Build environment variables dictionary
-		// Priority: provided env > process.env (Node.js only)
+		// Use config.env exclusively when supplied; otherwise copy process.env in Node.js.
 		let clientEnv: Record<string, string> = {};
 
 		if (config.env) {
@@ -734,7 +783,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param credential - API key, rr_ token, or PKCE code object.
 	 * @param options - Optional URI override and/or timeout.
 	 * @returns ConnectResult with user identity on success.
-	 * @throws AuthenticationException on auth failure (transport stays attached).
+	 * @throws AuthenticationException when the server rejects authentication. Credential
+	 * resolution checks the argument, configured environment, and stored client state
+	 * (initialized by `config.auth` and updated after authentication). The transport stays attached.
 	 */
 	async login(
 		credential?: string | { code: string; verifier: string; redirectUri: string },
@@ -818,6 +869,9 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param credential - API key / Zitadel access_token / rr_ user token / PKCE code object.
 	 * @param options - Optional overrides: uri and/or timeout.
+	 * @throws AuthenticationException when the server rejects authentication. Credential
+	 * resolution checks the argument, configured environment, and stored client state
+	 * (initialized by `config.auth` and updated after authentication).
 	 */
 	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		this._currentReconnectDelay = 250;
@@ -834,10 +888,10 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Returns the ID of the user's primary organization.
+	 * Returns the ID of the user's organization.
 	 */
 	getOrgId(): string | undefined {
-		return this._connectResult?.organizations?.[0]?.id;
+		return this._connectResult?.organization?.id;
 	}
 
 	/**
@@ -852,7 +906,19 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Update the environment variables used for pipeline substitution.
 	 *
-	 * The env dictionary is used by {@link use} and {@link validate} to replace
+	 * Replaces the client's env dictionary (seeded from `config.env` or, in
+	 * Node, from `process.env`) with a copy of the given map. {@link use} reads
+	 * it to build the `ROCKETRIDE_*` substitution env sent with the pipeline.
+	 * `login()` also consults `ROCKETRIDE_APIKEY` from it when no explicit
+	 * credential is supplied. Mirrors the Python SDK's `set_env`.
+	 *
+	 * @param env - The new environment map; copied, so later caller-side
+	 *   mutations have no effect.
+	 */
+	setEnv(env: Record<string, string>): void {
+		this._env = { ...env };
+	}
+
 	// ============================================================================
 	// PING METHODS
 	// ============================================================================
@@ -965,9 +1031,8 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Start an RocketRide pipeline for processing data.
 	 *
-	 * This method loads and executes a pipeline configuration. It automatically performs
-	 * environment variable substitution on the pipeline config, replacing ${ROCKETRIDE_*}
-	 * placeholders with values from the .env file or the `env` dictionary passed to the constructor.
+	 * This method loads a pipeline configuration and sends the client's configured
+	 * `ROCKETRIDE_*` values plus any per-use overrides to the server for substitution.
 	 *
 	 * When loading from a file via `filepath`, the client automatically unwraps `.pipe` files
 	 * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
@@ -1019,13 +1084,11 @@ export class RocketRideClient extends DAPClient {
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 			/** Optional display name for the task (e.g. shown in dashboard). */
 			name?: string;
-			/** ROCKETRIDE_* environment overrides merged on top of server-side env. */
+			/** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
 			env?: Record<string, string>;
-			/** Team ID to run the task under. Defaults to the user's default team. */
-			teamId?: string;
 		} = {}
 	): Promise<Record<string, unknown> & { token: string }> {
-		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env, teamId } = options;
+		const { token, filepath, pipeline, source, threads, useExisting, args, ttl, pipelineTraceLevel, name, env } = options;
 
 		// Validate required parameters
 		if (!pipeline && !filepath) {
@@ -1054,7 +1117,7 @@ export class RocketRideClient extends DAPClient {
 		// Create a deep copy of the pipeline config to avoid modifying the original
 		const processedConfig = JSON.parse(JSON.stringify(pipelineConfig));
 
-		// Override source if specified (after substitution)
+		// Override source if specified before sending the execution request.
 		if (source !== undefined) {
 			processedConfig.source = source;
 		}
@@ -1083,7 +1146,7 @@ export class RocketRideClient extends DAPClient {
 		if (pipelineTraceLevel !== undefined) {
 			arguments_.pipelineTraceLevel = pipelineTraceLevel;
 		}
-		// Build ROCKETRIDE_* env from client's .env + caller overrides
+		// Filter _env (seeded by config.env/process.env or replaced by setEnv), then apply per-use overrides.
 		const rocketEnv: Record<string, string> = {};
 		for (const [k, v] of Object.entries(this._env)) {
 			if (k.startsWith('ROCKETRIDE_')) rocketEnv[k] = v;
@@ -1096,9 +1159,6 @@ export class RocketRideClient extends DAPClient {
 		const effectiveName = name ?? (filepath ? filepath.replace(/^.*[\\/]/, '').replace(/\.pipe(?:\.json)?$/, '') : undefined);
 		if (effectiveName !== undefined) {
 			arguments_.name = effectiveName;
-		}
-		if (teamId !== undefined) {
-			arguments_.teamId = teamId;
 		}
 
 		// Send execution request to server
@@ -1147,8 +1207,15 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.projectId - The project identifier.
 	 * @param options.source - The source component identifier.
 	 * @param options.pipeline - The pipeline configuration to restart with.
+	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async restart(options: { token?: string; projectId: string; source: string; pipeline: Record<string, unknown> }): Promise<void> {
+	async restart(options: {
+		token?: string;
+		projectId: string;
+		source: string;
+		pipeline: Record<string, unknown>;
+		teamId?: string;
+	}): Promise<void> {
 		try {
 			await this.call(
 				'restart',
@@ -1157,6 +1224,7 @@ export class RocketRideClient extends DAPClient {
 					projectId: options.projectId,
 					source: options.source,
 					pipeline: options.pipeline,
+					...(options.teamId ? { teamId: options.teamId } : {}),
 				},
 			);
 		} catch (err) {
@@ -1195,13 +1263,18 @@ export class RocketRideClient extends DAPClient {
 	 * The token is required for operations like terminate and restart.
 	 * Returns undefined if no task is currently running for the given project/source.
 	 *
+	 * The scope IS the kind: pass teamId to resolve the team's DEPLOYED run;
+	 * omit it to resolve your own dev run.
+	 *
 	 * @param options.projectId - The project identifier.
 	 * @param options.source - The source component identifier.
+	 * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
 	 */
-	async getTaskToken(options: { projectId: string; source: string }): Promise<string | undefined> {
+	async getTaskToken(options: { projectId: string; source: string; teamId?: string }): Promise<string | undefined> {
 		const body = await this.call('rrext_get_token', {
 			projectId: options.projectId,
 			source: options.source,
+			...(options.teamId ? { teamId: options.teamId } : {}),
 		});
 		return body?.token as string | undefined;
 	}
@@ -1457,8 +1530,9 @@ export class RocketRideClient extends DAPClient {
 			const objinfo = { name: `Question ${this._nextChatId}` };
 			this._nextChatId += 1;
 
-			// Create pipe instance
-			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', 'chat', onSSE);
+			// Create pipe instance — no provider filter so chat() works with chat, webhook,
+			// and dropper sources. The rocketride-question MIME type routes to the 'questions' lane.
+			const pipe = await this.pipe(token, objinfo, 'application/rocketride-question', undefined, onSSE);
 
 			try {
 				// Open the communication channel to the AI
@@ -1784,6 +1858,11 @@ export class RocketRideClient extends DAPClient {
 			if (key.pipeId !== undefined) {
 				args.pipeId = key.pipeId;
 			}
+			// The scope IS the kind: teamId addresses the team's deploy run,
+			// absent addresses the caller's own dev run.
+			if (key.teamId) {
+				args.teamId = key.teamId;
+			}
 			await this.call('rrext_monitor', args);
 		}
 	}
@@ -1808,16 +1887,20 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Convert a MonitorKey to a stable string for map lookup.
+	 *
+	 * Project keys use a JSON-array encoding because the ids are free text:
+	 * a delimiter-joined string cannot round-trip a source containing the
+	 * delimiter (a source like 'chat@legacy' would decode as a team scope)
+	 * — and reconnect round-trips EVERY key through this pair, so a
+	 * misparse silently rewrites the subscription. MUST stay symmetric
+	 * with _monitorStringToKey. The string is private registry state; it
+	 * never travels on the wire.
 	 */
 	private _monitorKeyToString(key: MonitorKey): string {
 		if ('token' in key) {
 			return `t:${key.token}`;
 		}
-		let s = `p:${key.projectId}.${key.source}`;
-		if (key.pipeId !== undefined) {
-			s += `.${key.pipeId}`;
-		}
-		return s;
+		return `p:${JSON.stringify([key.projectId, key.source, key.pipeId ?? null, key.teamId ?? ''])}`;
 	}
 
 	/**
@@ -1828,16 +1911,18 @@ export class RocketRideClient extends DAPClient {
 			return { token: keyStr.slice(2) };
 		}
 		if (keyStr.startsWith('p:')) {
-			const rest = keyStr.slice(2);
-			const dotIdx = rest.indexOf('.');
-			if (dotIdx === -1) return null;
-			const projectId = rest.slice(0, dotIdx);
-			const remaining = rest.slice(dotIdx + 1);
-			const parts = remaining.split('.');
-			if (parts.length === 2 && !isNaN(Number(parts[1]))) {
-				return { projectId, source: parts[0], pipeId: Number(parts[1]) };
+			try {
+				const [projectId, source, pipeId, teamId] = JSON.parse(keyStr.slice(2)) as [string, string, number | null, string];
+				return {
+					projectId,
+					source,
+					...(pipeId !== null ? { pipeId } : {}),
+					...(teamId ? { teamId } : {}),
+				};
+			} catch {
+				// A malformed registry string has no valid key — skip it.
+				return null;
 			}
-			return { projectId, source: remaining };
 		}
 		return null;
 	}
@@ -2176,6 +2261,35 @@ export class RocketRideClient extends DAPClient {
 		await this.call('rrext_store', { subcommand: 'fs_rename', old_path: oldPath, new_path: newPath });
 	}
 
+	/**
+	 * Get a direct HTTP URL for accessing a file in the store.
+	 *
+	 * For cloud backends (S3, Azure) this returns a presigned/SAS URL.
+	 * For local filesystem backends this returns a JWT-signed URL pointing
+	 * at the server's `/task/fetch` endpoint.
+	 *
+	 * The returned URL can be used directly as `src` on `<img>`, `<video>`,
+	 * `<audio>`, and `<iframe>` elements for native browser streaming.
+	 *
+	 * @param path - Relative path within the account store
+	 * @param expiresIn - URL validity in seconds (default 3600)
+	 * @param downloadName - If set, the URL forces a browser download with this
+	 *   filename (`Content-Disposition: attachment`). This is the only reliable
+	 *   way to control the download filename for cross-origin cloud URLs, where
+	 *   the `<a download>` attribute is ignored. Omit for inline streaming.
+	 * @returns A direct HTTP(S) URL to the file
+	 */
+	async fsGetUrl(path: string, expiresIn: number = 3600, downloadName?: string): Promise<string> {
+		this.validateStorePath(path);
+		const body = await this.call('rrext_store', {
+			subcommand: 'fs_geturl',
+			path,
+			expires_in: expiresIn,
+			download_name: downloadName,
+		});
+		return (body as any).url;
+	}
+
 	// ============================================================================
 	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
 	// ============================================================================
@@ -2256,6 +2370,10 @@ export class RocketRideClient extends DAPClient {
 	 * @throws Error if any segment is `..` or contains illegal characters
 	 */
 	private validateStorePath(path: string): void {
+		// Reject absolute paths — store paths must be relative
+		if (path.startsWith('/') || path.startsWith('\\')) {
+			throw new Error(`Path must be relative (got ${path})`);
+		}
 		// Normalise Windows-style backslashes to forward slashes before splitting
 		for (const segment of path.replace(/\\/g, '/').split('/')) {
 			// Reject parent-directory traversal attempts in any position of the path
@@ -2311,6 +2429,53 @@ export class RocketRideClient extends DAPClient {
 	 */
 	async getDashboard(): Promise<DashboardResponse> {
 		return this.call<DashboardResponse>('rrext_dashboard', {});
+	}
+
+	/**
+	 * Build the wire arguments for a rrext_list_* command from a page request.
+	 *
+	 * Only supplied fields are forwarded, so server defaults (page 1, size 50,
+	 * default sort) apply when the caller omits them.
+	 *
+	 * @param req - The list page request (already in wire naming, e.g. page_size)
+	 * @returns The wire argument record for RocketRideClient.call
+	 */
+	private buildListArgs(req: ListPageRequest): Record<string, unknown> {
+		const args: Record<string, unknown> = {};
+		// Forward each convention argument only when the caller provided it
+		if (req.page !== undefined) args.page = req.page;
+		if (req.page_size !== undefined) args.page_size = req.page_size;
+		if (req.search !== undefined) args.search = req.search;
+		if (req.sort !== undefined) args.sort = req.sort;
+		if (req.filters !== undefined) args.filters = req.filters;
+		return args;
+	}
+
+	/**
+	 * Retrieve one page of the caller's active connections (platform list-API
+	 * convention). Rows carry the same shape as the dashboard's connections
+	 * list; the default sort is connectedAt ascending (registration order,
+	 * matching the dashboard) with the monotonic id as tiebreak.
+	 * Requires 'task.monitor' permission.
+	 *
+	 * @param req - Paging, search, sort, and filter arguments (all optional)
+	 * @returns The standard { rows, total, page, pageSize } envelope
+	 */
+	async listConnections(req: ListPageRequest = {}): Promise<ListConnectionsResponse> {
+		return this.call<ListConnectionsResponse>('rrext_list_connections', this.buildListArgs(req));
+	}
+
+	/**
+	 * Retrieve one page of the caller's tasks (platform list-API convention).
+	 * Rows carry the same shape as the dashboard's tasks list; the default
+	 * sort is startTime ascending (creation order, matching the dashboard)
+	 * with the task id as tiebreak. Requires 'task.monitor' permission.
+	 *
+	 * @param req - Paging, search, sort, and filter arguments (all optional)
+	 * @returns The standard { rows, total, page, pageSize } envelope
+	 */
+	async listTasks(req: ListPageRequest = {}): Promise<ListTasksResponse> {
+		return this.call<ListTasksResponse>('rrext_list_tasks', this.buildListArgs(req));
 	}
 
 	// ============================================================================
@@ -2569,14 +2734,16 @@ export class RocketRideClient extends DAPClient {
 	}
 
 	/**
-	 * Lazily-initialised deploy API namespace.
+	 * Lazily-initialised deploy API namespace (teams-as-environments).
 	 *
-	 * Provides typed methods for managing server-side pipeline deployments:
-	 * add, remove, list, status, and update.
+	 * Publish immutable pipeline versions to the org registry, point teams
+	 * at them (promotion and rollback alike), schedule sources, and read
+	 * the audit history.
 	 *
 	 * @example
 	 * ```typescript
-	 * const rec = await client.deploy.add(pipeline, { schedule: '0/15 * * * *' });
+	 * const { artifact } = await client.deploy.publish(pipeline, { comment: 'v2' });
+	 * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
 	 * ```
 	 */
 	get deploy(): DeployApi {
@@ -2584,6 +2751,25 @@ export class RocketRideClient extends DAPClient {
 			this._deploy = new DeployApi(this);
 		}
 		return this._deploy;
+	}
+
+	/**
+	 * Run-log API namespace — chapters, ranged reads, and deletion over the
+	 * per-task event continuum.
+	 *
+	 * @example
+	 * ```typescript
+	 * // Own dev stream; add teamId to address a team's deploy continuum.
+	 * const stream = { projectId: 'proj', source: 'chat_1' };
+	 * const { chapters } = await client.log.chapters(stream);
+	 * const { events } = await client.log.read(stream, { fromSeq: chapters[0].beginSeq });
+	 * ```
+	 */
+	get log(): LogApi {
+		if (!this._log) {
+			this._log = new LogApi(this);
+		}
+		return this._log;
 	}
 
 	// ============================================================================
@@ -2629,6 +2815,42 @@ export class RocketRideClient extends DAPClient {
 
 		// Unwrap the body envelope
 		return (response.body ?? response) as T;
+	}
+
+	/**
+	 * Invoke a @tool_function on a pipeline node.
+	 *
+	 * Sends a `tool` subcommand through the DAP data connection.  The server
+	 * borrows a pipeline instance from the pool, dispatches the tool call
+	 * through the control plane, and returns the result directly — no
+	 * Question, Answer, or SSE overhead.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access
+	 * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
+	 * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
+	 *                         tool-lane nodes; the first node that owns the tool handles it.
+	 * @param options.input - Arguments forwarded to the tool function
+	 * @param options.timeout - Optional per-request timeout in ms
+	 * @returns The tool's return value (typically a record/object)
+	 * @throws Error if the server signals failure or no node handles the requested tool
+	 */
+	async tool<T = any>(options: {
+		token: string;
+		tool: string;
+		nodeId?: string;
+		input?: Record<string, unknown>;
+		timeout?: number;
+	}): Promise<T> {
+		const result = await this.call<{ result: T }>('rrext_process', {
+			subcommand: 'tool',
+			tool: options.tool,
+			nodeId: options.nodeId ?? '',
+			input: options.input ?? {},
+		}, {
+			token: options.token,
+			timeout: options.timeout,
+		});
+		return result.result;
 	}
 }
 

@@ -1,40 +1,54 @@
----
-title: Transformer Embedding
-date: 2026-04-08
-sidebar_position: 1
----
+# embedding_transformer
 
-<head>
-  <title>Transformer Embedding - RocketRide Documentation</title>
-</head>
+A RocketRide embedding node that converts text into vector representations using local sentence-transformer models.
 
 ## What it does
 
-Generates text embeddings using local sentence-transformer models. Runs on the model server — no API key required. GPU-accelerated when available.
+Generates text embeddings using local sentence-transformer models. Runs on the model server, so no API key is required. GPU-accelerated when available (the node declares the `gpu` capability).
 
-**Lanes:**
+Uses the `SentenceTransformer` class to load the configured Hugging Face model at pipeline start. On load, the node reports the model's vector size and maximum token count, and streams loading progress via monitor status so long model downloads are visible in the UI.
+
+Documents are encoded in batches: incoming document chunks are buffered until 64 documents accumulate, then encoded in a single batch and written downstream. Any remaining documents are flushed when the input closes. Questions are encoded immediately, all questions in a request in one batch.
+
+Each encoded item gets two fields set: `embedding` (the vector as a list of floats) and `embedding_model` (the model name that produced it).
+
+---
+
+## Configuration
+
+### Lanes
 
 | Lane in     | Lane out    | Description                                           |
 | ----------- | ----------- | ----------------------------------------------------- |
 | `documents` | `documents` | Embed document chunks, attach vector to each document |
 | `questions` | `questions` | Embed a question for vector similarity lookup         |
 
-The `questions` lane is used when querying a vector store — the store expects an embedded question to compare against stored document vectors.
+The `questions` lane is used when querying a vector store: the store expects an embedded question to compare against stored document vectors.
 
-## Configuration
+### Fields
 
-| Field | Description                          |
-| ----- | ------------------------------------ |
-| Model | Embedding model (see profiles below) |
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Hugging face model to use for embedding |
+| `truncate_dim` | number | Truncate embeddings to this dimensionality (0 = use model default) |
+| `document_prefix` | string | Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ') |
+| `query_prefix` | string | Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ') |
+| `profile` | string | Default "miniLM". Embedding model |
 
-**Custom model options** (shown when Custom is selected):
+**Custom model options** (shown when the `custom` profile is selected):
 
-| Field               | Description                                       |
-| ------------------- | ------------------------------------------------- |
-| Model name          | Any Hugging Face sentence-transformer model       |
-| Truncate dimensions | Reduce embedding size (0 = model default)         |
-| Document prefix     | Prefix prepended to document text before encoding |
-| Query prefix        | Prefix prepended to query text before encoding    |
+| Field                       | Type / Default | Description                                                                              |
+| --------------------------- | -------------- | ---------------------------------------------------------------------------------------- |
+| `embedding.model`           | string         | Any Hugging Face sentence-transformer model name                                         |
+| `embedding.truncate_dim`    | number         | Truncate embeddings to this dimensionality (0 = use model default)                       |
+| `embedding.document_prefix` | string         | Prefix prepended to document text before encoding (e.g. `search_document: `, `passage: `) |
+| `embedding.query_prefix`    | string         | Prefix prepended to query text before encoding (e.g. `search_query: `, `query: `)        |
+
+The prefixes matter for asymmetric models (such as Nomic or E5) that were trained with distinct document/query markers; leave both blank for the bundled symmetric profiles.
+
+The node also exposes an `embedding.preprocessor` combo field (default `preprocessor_langchain`) that selects the chunking preprocessor used ahead of embedding.
+
+---
 
 ## Profiles
 
@@ -43,4 +57,29 @@ The `questions` lane is used when querying a vector store — the store expects 
 | miniLM _(default)_ | `sentence-transformers/multi-qa-MiniLM-L6-cos-v1`  | General use, good performance |
 | miniAll            | `sentence-transformers/all-MiniLM-L6-v2`           | General use alternative       |
 | mpnet              | `sentence-transformers/multi-qa-mpnet-base-cos-v1` | Higher quality                |
-| Custom             | _(user-specified)_                                 | Any Hugging Face model        |
+| custom             | _(user-specified)_                                 | Any Hugging Face model        |
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `embedding.document_prefix` | `string` | **Document prefix**<br/>Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ') |  |
+| `embedding.model` | `string` | **Model name**<br/>Hugging face model to use for embedding |  |
+| `embedding.preprocessor` |  |  | `"preprocessor_langchain"` |
+| `embedding.profile` | `string` | **Model**<br/>Embedding model | `"miniLM"` |
+| `embedding.query_prefix` | `string` | **Query prefix**<br/>Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ') |  |
+| `embedding.truncate_dim` | `number` | **Truncate dimensions**<br/>Truncate embeddings to this dimensionality (0 = use model default) |  |
+
+## Dependencies
+
+- `numpy`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/embedding_transformer)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

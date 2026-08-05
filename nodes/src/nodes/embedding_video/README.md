@@ -1,35 +1,86 @@
 # embedding_video
 
-Turns video into searchable vectors by sampling and encoding its frames.
+A pipeline filter node that extracts frames from a video stream and encodes each frame as a vector embedding using a Hugging Face vision model.
 
 ## What it does
 
-It pulls frames from a video at an interval you choose and runs each through a vision model like CLIP, converting what's on screen into numbers. Those embeddings capture the video's semantic and structural features, so you can run similarity search, cluster videos, or feed them into multimodal RAG workflows. It runs on the model server and uses the GPU when one is available.
+Receives a video stream on its `video` input lane, buffers the full video in memory, then decodes it with **OpenCV** (`cv2.VideoCapture`) via a temporary file. Frames are sampled at a configurable interval and each is passed through a vision embedding model (CLIP by default, loaded via PyTorch and `transformers`) to produce a fixed-length numeric vector. One document is emitted per frame; all documents for a video are flushed as a single batch when processing completes.
 
-**Lanes:**
+The embedding engine is shared with the `embedding_image` node and a thread lock serializes GPU access, so concurrent video streams do not race for the model. The node is flagged **experimental** and declares a **gpu** capability.
 
-| Lane in | Lane out    | Description                                          |
-| ------- | ----------- | --------------------------------------------------- |
-| `video` | `documents` | Embed extracted video frames into document objects  |
+Three safety limits apply out of the box:
 
-Output documents carry an `embedding` vector, ready for ingestion into a vector store.
+- Videos larger than `maxVideoSizeMB` (default 500 MB) are rejected with a warning and produce no output.
+- Frame extraction is capped at `max_frames` (default 50) per video; set to `0` for unlimited.
+- If the container does not report a frame rate, a fallback of 30 fps is used when computing timestamps.
+
+Supported containers: MP4 (`video/mp4`), AVI (`video/x-msvideo`), QuickTime (`video/quicktime`), WebM (`video/webm`). An unrecognized MIME type is still processed, treated as MP4.
+
+---
 
 ## Configuration
 
-| Field            | Default | Description                                                       |
-| ---------------- | ------- | ---------------------------------------------------------------- |
-| Model            | *(see profiles)* | Hugging Face vision model used for frame embedding.     |
-| Interval         | `5`     | Seconds between extracted frames.                                |
-| Maximum frames   | `50`    | Cap on total frames extracted (`0` = unlimited).                 |
-| Start time       | `0`     | Start offset in seconds for frame extraction (`0` = beginning).  |
-| Duration         | `0`     | Duration in seconds to extract (`0` = end of video).             |
-| Max video size (MB) | `500`| Reject videos larger than this size.                             |
+### Lanes
+
+| Lane in | Lane out    | Description                                         |
+| ------- | ----------- | --------------------------------------------------- |
+| `video` | `documents` | One document per extracted frame, with an embedding |
+
+Each output document contains:
+
+- `type`: `Image`, with `page_content` holding the frame as a base64-encoded PNG
+- `embedding`: the frame's embedding vector (list of floats), plus `embedding_model` (the model identifier string)
+- metadata: `time_stamp` (seconds from the start of the video), `frame_number` (frame index in the source), and a per-video `chunkId` counter
+- provenance: `metadata.source` (the source video's media detail — `source_mime`, `duration`, `fps`, `width`, `height`, …) and `metadata.name` = `<video-stem>.frame<N>` (N = frame position); both omitted when the source carried no stream descriptor
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Hugging Face model to use for frame embedding |
+| `profile` | string | Default "openai-patch16". Embedding model for video frames |
+| `interval` | number | Default 5. Time in seconds between extracted frames |
+| `max_frames` | number | Default 50. Limit the total number of frames extracted from the video. Set to 0 for unlimited. |
+| `start_time` | number | Default 0.  |
+| `duration` | number | Default 0.  |
+| `maxVideoSizeMB` | number | Default 500. Maximum allowed video file size in megabytes. Videos exceeding this limit will be rejected. |
+
+The extraction window runs from `start_time` to `start_time + duration`, clamped to the actual video length.
+
+---
 
 ## Profiles
 
-| Profile                | Model                          | Notes                                 |
-| ---------------------- | ------------------------------ | ------------------------------------- |
-| OpenAI 16×16 _(default)_ | `openai/clip-vit-base-patch16` | Good performance, lower memory        |
-| OpenAI 32×32           | `openai/clip-vit-base-patch32` | Lower performance, better recognition |
-| Google 16×16           | `google/vit-base-patch16-224`  | Fast, accurate, general-purpose       |
-| Custom                 | _(user-specified)_             | Any Hugging Face vision model         |
+| Profile ID                 | Model                          | Notes                                  |
+| -------------------------- | ------------------------------ | -------------------------------------- |
+| `openai-patch16` (default) | `openai/clip-vit-base-patch16` | Good performance, lower memory         |
+| `openai-patch32`           | `openai/clip-vit-base-patch32` | Lower performance, better recognition  |
+| `google16x224`             | `google/vit-base-patch16-224`  | Fast, accurate, general-purpose        |
+| `custom`                   | user-specified via `model`     | Any Hugging Face vision model          |
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `embedding.duration` | `number` | **Duration (in seconds) for frame extraction (0=end of video)** | `0` |
+| `embedding.interval` | `number` | **Interval (in seconds) between frames**<br/>Time in seconds between extracted frames | `5` |
+| `embedding.maxVideoSizeMB` | `number` | **Maximum video file size (MB)**<br/>Maximum allowed video file size in megabytes. Videos exceeding this limit will be rejected. | `500` |
+| `embedding.max_frames` | `number` | **Maximum number of frames to extract (0=unlimited)**<br/>Limit the total number of frames extracted from the video. Set to 0 for unlimited. | `50` |
+| `embedding.model` | `string` | **Model name**<br/>Hugging Face model to use for frame embedding |  |
+| `embedding.profile` | `string` | **Model**<br/>Embedding model for video frames | `"openai-patch16"` |
+| `embedding.start_time` | `number` | **Start time (in seconds) for frame extraction (0=beginning)** | `0` |
+
+## Dependencies
+
+- `transformers`
+- `accelerate`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/embedding_video)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

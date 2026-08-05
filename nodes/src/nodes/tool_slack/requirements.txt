@@ -1,0 +1,2 @@
+# Official Slack SDK (WebClient + WebhookClient)
+slack_sdk>=3.27.0,<4.0.0

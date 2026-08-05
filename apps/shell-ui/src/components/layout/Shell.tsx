@@ -49,7 +49,9 @@ import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
-import { SS_PENDING_APP_ID } from '../../constants';
+import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
+import { registerAndMapApps } from '../../lib/appLoader';
+import type { ServerAppEntry } from '../../lib/appLoader';
 
 // =============================================================================
 // STYLES
@@ -168,7 +170,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// ── Derived flags ─────────────────────────────────────────────────────
 	const isSaas = (config.capabilities ?? []).includes('saas');
-	const defaultAppId = isSaas ? 'rocketride.home' : 'rocketride.hello';
+	const defaultAppId = getHomeAppId(isSaas);
 
 	// ── React state ───────────────────────────────────────────────────────
 	const [renderPhase, setRenderPhase] = useState<RenderPhase>('loading');
@@ -180,25 +182,38 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const mountedRef = useRef(true);
 
 	// ── Connection state ──────────────────────────────────────────────────
-	const { client, isConnected, statusMessage } = useShellConnection();
+	const { isConnected, statusMessage } = useShellConnection();
 
-	// ── Apps — probe catalog + post-auth desktop metadata ─────────────────
-	// MF remotes are registered once at bootstrap from the probe — they
-	// never change after auth. Post-auth, ConnectResult.apps only adds
-	// desktop metadata (appStatus, onDesktop) onto existing probe entries.
+	// ── Apps — probe catalog + post-auth merge ────────────────────────────
+	// The pre-auth probe registers public MF remotes. Post-auth, the
+	// ConnectResult may include additional apps the user is entitled to
+	// (e.g. apps gated by requiredPermissions). Those need to be registered
+	// as MF remotes and merged into the app list so they can be launched.
 	const apps = useMemo(() => {
 		if (!identity?.apps?.length) return config.apps;
 
-		// Index desktop metadata by app id for fast lookup
-		const desktopById = new Map(
-			(identity.apps as Array<{ id: string; appStatus?: string; onDesktop?: boolean }>)
-				.map((a) => [a.id, a]),
-		);
+		// Index ConnectResult apps by id
+		const identityApps = identity.apps as Array<ServerAppEntry & { appStatus?: string; onDesktop?: boolean }>;
+		const identityById = new Map(identityApps.map((a) => [a.id, a]));
+
 		// Overlay desktop metadata onto probe entries
-		return config.apps.map((a) => {
-			const da = desktopById.get(a.id);
+		const probeIds = new Set(config.apps.map((a) => a.id));
+		const merged = config.apps.map((a) => {
+			const da = identityById.get(a.id);
 			return da ? { ...a, appStatus: da.appStatus, onDesktop: da.onDesktop } : a;
 		});
+
+		// Register and append apps that were NOT in the probe (e.g. permission-gated)
+		const newApps = identityApps.filter((a) => !probeIds.has(a.id) && a.entry && a.moduleId);
+		if (newApps.length > 0) {
+			const registered = registerAndMapApps(newApps);
+			for (const app of registered) {
+				const da = identityById.get(app.id);
+				merged.push(da ? { ...app, appStatus: da.appStatus, onDesktop: da.onDesktop } : app);
+			}
+		}
+
+		return merged;
 	}, [identity?.apps, config.apps]);
 
 	// =====================================================================
@@ -302,11 +317,20 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				if (mountedRef.current) setRenderPhase('goodbye');
 			});
 		} else {
+			// Return to the home app before the auth gate re-runs. Otherwise
+			// ShellLayout still sees an auth-required app (e.g. Pipeline Builder)
+			// active with identity===null and emits shell:loginRequest →
+			// startOAuth, bouncing the signing-out user to the Zitadel login
+			// screen instead of the logged-out home. switchApp updates the live
+			// workspace (and clears the persisted rr:appId via persistActiveApp);
+			// setActiveAppId keeps the startup seed in sync for any later remount.
+			setActiveAppId(defaultAppId);
+			cm.emit('shell:switchApp', { appId: defaultAppId });
 			cm.logout().finally(() => {
 				if (mountedRef.current) setRenderPhase('shell');
 			});
 		}
-	}, [cm, sessionAppId]);
+	}, [cm, sessionAppId, defaultAppId]);
 
 	useEffect(() => {
 		return cm.on('shell:logoutRequest', () => handleLogout());
@@ -473,14 +497,12 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	} : config;
 
 	const stripeKey = config.apiConfig.RR_STRIPE_PUBLISHABLE_KEY ?? '';
-	const orgId = identity?.organizations?.[0]?.id ?? '';
+	const orgId = identity?.organization?.id ?? '';
 
 	return (
 		<ShellIdentityContext.Provider value={identity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
 				<WorkspaceProvider
-					client={client}
-					isConnected={isConnected}
 					apps={apps}
 					workspaceDir={config.workspaceDir}
 					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}

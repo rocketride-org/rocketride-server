@@ -137,7 +137,7 @@
 			"type": "string",
 			"title": "Database description",
 			"default": "",
-			"description": "What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.",
+			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
 			"ui": {
 				"ui:widget": "textarea"
 			}

@@ -14,6 +14,8 @@ from types import MappingProxyType
 from typing import Any, Dict, List, Optional, Tuple
 
 from ai.web.metrics import metrics
+from ai.common.utils.image_utils import image_to_bytes
+from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 
 logger = logging.getLogger('rocketlib.models.vision')
@@ -206,17 +208,6 @@ class VisionLoader(BaseLoader):
         return results
 
 
-def _image_to_bytes(image: Any) -> bytes:
-    """Convert PIL Image or bytes to PNG bytes for sending to model server."""
-    if isinstance(image, bytes):
-        return image
-    if hasattr(image, 'save'):
-        buf = io.BytesIO()
-        image.convert('RGB').save(buf, format='PNG')
-        return buf.getvalue()
-    raise TypeError(f'Expected PIL Image or bytes, got {type(image)}')
-
-
 def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> List[float]:
     """
     Run loader pipeline for a single image (local facade helper).
@@ -238,14 +229,17 @@ def _extract_embedding_from_bundle(bundle: Any, image: Any, metadata: Dict) -> L
     results = VisionLoader.postprocess(bundle, raw, 1, ['embedding'], metadata)
     t_post = (time.perf_counter() - t0) * 1000
 
-    # Report all perf counters — same shape as model server response
+    # Report all perf counters — same keys as model server response
+    # (pending_request.py build_dap_result).
+    # gpu_memory is in GB-sec (model_gb * inference_sec).
+    inference_sec = (t_pre + t_gpu + t_post) / 1000.0
     metrics.add_time(
         {
-            'preprocess': t_pre,
-            'gpu': t_gpu,
-            'postprocess': t_post,
-            'queue_wait': 0,
-            'latency': t_pre + t_gpu + t_post,
+            'gpu_preprocess': t_pre,
+            'gpu_compute': t_gpu,
+            'gpu_postprocess': t_post,
+            'gpu_queue_wait': 0,
+            'gpu_memory': model_gpu_gb(bundle) * inference_sec,
         }
     )
 
@@ -300,7 +294,7 @@ class CLIPModel:
 
         if self._proxy_mode:
             # Model server mode — ModelClient.send_command handles perf timing
-            image_bytes = _image_to_bytes(image)
+            image_bytes = image_to_bytes(image)
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {'data': image_bytes, 'output_fields': ['embedding']},
@@ -362,7 +356,7 @@ class ViTModel:
 
         if self._proxy_mode:
             # Model server mode — ModelClient.send_command handles perf timing
-            image_bytes = _image_to_bytes(image)
+            image_bytes = image_to_bytes(image)
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {'data': image_bytes, 'output_fields': ['embedding']},

@@ -271,46 +271,12 @@ class DeepAgentDriver(AgentBase):
         """
         super().__init__(iGlobal)
 
-        # Read user-configured values directly from connConfig so we work with
-        # both pipe shapes:
-        #   * flat:   {"description": "...", "instructions": [...]}
-        #   * nested: {"default": {"description": "...", "instructions": [...]}}
-        # The UI currently writes the nested shape; ``Config.getNodeConfig``
-        # in the no-profile branch does not descend into that wrapper, so we
-        # overlay the resolved values here. We also re-assign the base-class
-        # ``_instructions`` / ``_agent_description`` for the same reason.
-        values = self._read_connconfig_values()
-        self._instructions = values.get('instructions', []) or []
-        self._agent_description = (values.get('agent_description', '') or '').strip()
-        self._description: str = (values.get('description', '') or '').strip()
-        self._system_prompt: str = (values.get('system_prompt', '') or '').strip()
-
-    def _read_connconfig_values(self) -> Dict[str, Any]:
-        """Return the user-configured field values for this node.
-
-        Handles both pipe shapes the engine may deliver:
-
-        * Flat: ``connConfig`` is the value dict itself.
-        * Nested: ``connConfig`` wraps the values under the default-profile key
-          (the shape the UI writes, e.g. ``{"default": {...}}``).
-        """
-        from rocketlib import IJson as _IJson, getServiceDefinition
-
-        raw = self._iGlobal.glb.connConfig
-        conn = _IJson.toDict(raw) if raw else {}
-        if not isinstance(conn, dict):
-            return {}
-
-        # If the UI nested values under the default-profile key, use those.
-        try:
-            service = getServiceDefinition(self._iGlobal.glb.logicalType) or {}
-            default_profile = (service.get('preconfig') or {}).get('default')
-        except Exception:
-            default_profile = None
-
-        if default_profile and isinstance(conn.get(default_profile), dict):
-            return conn[default_profile]
-        return conn
+        # ``_instructions`` / ``_agent_description`` are already loaded by
+        # ``AgentBase.__init__`` from the resolved config (which handles both the
+        # flat and nested-under-default pipe shapes). Read this driver's two extra
+        # fields from the same resolved config.
+        self._description: str = (self._config.get('description', '') or '').strip()
+        self._system_prompt: str = (self._config.get('system_prompt', '') or '').strip()
 
     def _run(self, *, context: AgentContext, question: Question) -> AgentRunResult:
         """Execute the agent using ``deepagents.create_deep_agent``."""
@@ -483,6 +449,9 @@ class DeepAgentDriver(AgentBase):
                         pipe_id=context.pipe_id,
                         framework=context.framework,
                         started_at=context.started_at,
+                        # Share the parent's tool tally so a host tool a sub-agent
+                        # invokes counts toward the parent run's require_tool_call guard.
+                        invoked_tools=context.invoked_tools,
                     )
 
                     sub_llm = _build_deepagent_llm(self, sub_context)

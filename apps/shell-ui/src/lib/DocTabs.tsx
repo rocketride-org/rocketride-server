@@ -32,7 +32,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
-import type { Documents, SplitOrientation } from './Documents';
+import type { Documents, Public, SplitOrientation } from './Documents';
 
 // =============================================================================
 // STYLES
@@ -42,7 +42,7 @@ import type { Documents, SplitOrientation } from './Documents';
 const DND_MIME = 'application/x-rr-editor';
 
 const styles = {
-	bar: (isActiveGroup: boolean, isDragOver: boolean): CSSProperties => ({
+	bar: (_isActiveGroup: boolean, isDragOver: boolean): CSSProperties => ({
 		display: 'flex',
 		height: 36,
 		flexShrink: 0,
@@ -157,7 +157,7 @@ const styles = {
  */
 export interface DocTabsProps {
 	/** The Documents instance to read state from and dispatch actions to. */
-	docs: Documents;
+	docs: Public<Documents>;
 	/** The editor group whose tabs should be rendered. */
 	groupId: string;
 	/** Whether this group is the currently focused group. */
@@ -400,7 +400,7 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
  */
 interface SplitButtonProps {
 	/** Ref to the button element for positioning. */
-	btnRef: React.RefObject<HTMLButtonElement | null>;
+	btnRef: React.RefObject<HTMLButtonElement>;
 	/** Whether the dropdown menu is currently open. */
 	open: boolean;
 	/** Toggle the dropdown open/closed. */

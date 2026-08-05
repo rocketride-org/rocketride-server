@@ -61,6 +61,21 @@ REQUIREMENTS_GLOBS = [
     'ai/**/requirement*.txt',
 ]
 
+# Bootstrap tools install outside any constraint, so pin them or they float to 'latest' and a
+# later install downgrades them. Lockstep with packages/server/scripts/tasks.js.
+_BOOTSTRAP_TOOL_VERSIONS: dict[str, str] = {
+    'wheel': '0.47.0',
+    'setuptools': '82.0.1',
+    'uv': '0.11.25',
+}
+
+
+def _tool_spec(name: str) -> str:
+    """Pinned pip spec for a bootstrap tool; bare name if unpinned."""
+    version = _BOOTSTRAP_TOOL_VERSIONS.get(name)
+    return f'{name}=={version}' if version else name
+
+
 # Track processed requirements to avoid redundant installs in same session
 _processed: set[str] = set()
 
@@ -263,9 +278,57 @@ def _get_executable_dir() -> str:
     return os.path.dirname(os.path.abspath(sys.executable))
 
 
-def _get_cache_dir() -> str:
-    """Get the cache directory path."""
-    return os.path.join(_get_executable_dir(), 'cache')
+def engine_cache_dir(create: bool = False) -> str:
+    """Return (and create if needed) the engine cache directory (``<executable dir>/cache``).
+
+    Single source of truth for the cache location.
+
+    Args:
+        create: Create directory if indicated.
+
+    Returns:
+        Absolute path to the engine cache directory.
+    """
+    path = os.path.join(_get_executable_dir(), 'cache')
+    if create:
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
+def model_cache_dir(name: str, create: bool = True) -> str:
+    """Return (and create if required) a per-model cache directory under the engine cache.
+
+    Args:
+        name: Subdirectory name for this model's weights/assets.
+        create: Create directory if indicated
+
+    Returns:
+        Absolute path to the created ``<engine cache>/models/<name>`` directory.
+    """
+    path = os.path.join(engine_cache_dir(), 'models', name)
+    if create:
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _get_combined_path() -> str:
+    """Path to the concatenated requirements file (the constraints-compile input)."""
+    return os.path.join(engine_cache_dir(), 'combined.txt')
+
+
+def _get_constraints_path() -> str:
+    """Path to the compiled constraints file applied (``-c``) to every install."""
+    return os.path.join(engine_cache_dir(), 'constraints.txt')
+
+
+def _constraints_args(constraints_path: str, exe_dir: str) -> list[str]:
+    """Return uv ``-c`` args if the constraints file exists and is non-empty, else ``[]``.
+
+    Relative to exe_dir (the subprocess cwd) — uv splits the value on whitespace.
+    """
+    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
+        return ['-c', os.path.relpath(constraints_path, exe_dir)]
+    return []
 
 
 def _run(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
@@ -395,7 +458,8 @@ def _ensure_wheel():
 
     updateProgress('Installing wheel...')
     result = _run(
-        [sys.executable, '-m', 'pip', 'install', 'wheel', '--quiet', '--disable-pip-version-check'], check=False
+        [sys.executable, '-m', 'pip', 'install', _tool_spec('wheel'), '--quiet', '--disable-pip-version-check'],
+        check=False,
     )
 
     if result.returncode != 0:
@@ -431,7 +495,8 @@ def _ensure_setuptools():
 
     updateProgress('Installing setuptools...')
     result = _run(
-        [sys.executable, '-m', 'pip', 'install', 'setuptools', '--quiet', '--disable-pip-version-check'], check=False
+        [sys.executable, '-m', 'pip', 'install', _tool_spec('setuptools'), '--quiet', '--disable-pip-version-check'],
+        check=False,
     )
 
     if result.returncode != 0:
@@ -452,7 +517,10 @@ def _ensure_uv():
         return
 
     updateProgress('Installing uv...')
-    result = _run([sys.executable, '-m', 'pip', 'install', 'uv', '--quiet', '--disable-pip-version-check'], check=False)
+    result = _run(
+        [sys.executable, '-m', 'pip', 'install', _tool_spec('uv'), '--quiet', '--disable-pip-version-check'],
+        check=False,
+    )
 
     if result.returncode != 0:
         error(f'Failed to install uv: {result.stderr}')
@@ -628,9 +696,9 @@ def _compile_constraints(constraints_path: str):
         _uv_abs_path(),
         'pip',
         'compile',
-        './cache/combined.txt',
+        _get_combined_path(),
         '--output-file',
-        './cache/constraints.txt',
+        _get_constraints_path(),
         '--python',
         sys.executable,  # Explicitly specify Python version to avoid mismatch
         '--index-strategy',
@@ -663,12 +731,12 @@ def ensure_constraints() -> str:
 
     Returns the path to the constraints file.
     """
-    cache_dir = _get_cache_dir()
+    cache_dir = engine_cache_dir()
     os.makedirs(cache_dir, exist_ok=True)
 
     hash_file = os.path.join(cache_dir, 'requirements.hash')
-    combined_path = os.path.join(cache_dir, 'combined.txt')
-    constraints_path = os.path.join(cache_dir, 'constraints.txt')
+    combined_path = _get_combined_path()
+    constraints_path = _get_constraints_path()
 
     # Find all requirement files
     req_files = _find_requirement_files()
@@ -705,6 +773,22 @@ def ensure_constraints() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _write_excludes_file() -> str:
+    """Write uv's resolution-excludes file (rewritten each call) and return its path.
+
+    Excludes `uv` (bootstrapped by depends.py; pip-installing it crashes on Windows)
+    and, on non-Darwin, plain `onnxruntime` (it clobbers onnxruntime-gpu in the same
+    folder; the gpu build provides `import onnxruntime`).
+    """
+    excludes_path = os.path.join(engine_cache_dir(), 'excludes.txt')
+    excludes = 'uv\n'
+    if platform.system() != 'Darwin':
+        excludes += 'onnxruntime\n'
+    with open(excludes_path, 'w', encoding='utf-8') as f:
+        f.write(excludes)
+    return excludes_path
+
+
 def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]:
     """
     Run uv pip install --dry-run and return list of packages that would be installed.
@@ -731,17 +815,12 @@ def _install_dry_run(requirements_path: str, constraints_path: str) -> list[str]
         '--no-color',
     ]
 
-    # Exclude uv from resolution — it's bootstrapped by depends.py and
-    # installing it as a pip package crashes on Windows (os error 32)
-    excludes_path = os.path.join(_get_cache_dir(), 'excludes.txt')
-    if not os.path.exists(excludes_path):
-        with open(excludes_path, 'w', encoding='utf-8') as f:
-            f.write('uv\n')
-    args.extend(['--excludes', excludes_path])
+    # uv splits --excludes on whitespace, so an absolute path with a space (macOS
+    # "Application Support") breaks resolution; pass it relative to the cwd (exe_dir).
+    # See #1256.
+    args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
-    # Only add constraints if the file exists and has content
-    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        args.extend(['-c', './cache/constraints.txt'])
+    args.extend(_constraints_args(constraints_path, exe_dir))
 
     debug(f'Dry-run: {args}')
     result = subprocess.run(
@@ -797,7 +876,6 @@ def _install_requirements(requirements_path: str, constraints_path: str):
     # Start heartbeat early — the dry-run can block on uv's internal lock
     # for minutes, and we need monitorStatus events to keep the task startup
     # timeout alive during that time.
-    updateProgress(f'Installing {os.path.basename(requirements_path)}')
     _start_heartbeat()
     try:
         return _install_requirements_inner(requirements_path, constraints_path)
@@ -840,15 +918,10 @@ def _install_requirements_inner(requirements_path: str, constraints_path: str):
         '--no-build-isolation',  # Don't create temp venvs (engine.exe can't create venvs)
     ]
 
-    # Exclude uv from resolution (same excludes file as dry-run)
-    excludes_path = os.path.join(_get_cache_dir(), 'excludes.txt')
-    if not os.path.exists(excludes_path):
-        with open(excludes_path, 'w', encoding='utf-8') as f:
-            f.write('uv\n')
-    uv_args.extend(['--excludes', excludes_path])
+    # Relative to cwd (exe_dir) — see the --excludes note in _install_dry_run (#1256).
+    uv_args.extend(['--excludes', os.path.relpath(_write_excludes_file(), exe_dir)])
 
-    if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-        uv_args.extend(['-c', './cache/constraints.txt'])
+    uv_args.extend(_constraints_args(constraints_path, exe_dir))
 
     # Run uv and stream output (heartbeat is already running from the caller)
     debug(f'Install: {uv_args}')
@@ -917,7 +990,7 @@ def depends(requirements: Optional[str] = None):
             debug('  Already processed, skipping')
             return
 
-    cache_dir = _get_cache_dir()
+    cache_dir = engine_cache_dir()
     lock_path = os.path.join(cache_dir, 'install.lock')
 
     with FileLock(lock_path):
@@ -971,7 +1044,7 @@ def main():
     through to 'uv pip'. Falls back to standard pip if uv can't build
     source distributions due to virtualenv creation issues.
     """
-    cache_dir = _get_cache_dir()
+    cache_dir = engine_cache_dir()
     lock_path = os.path.join(cache_dir, 'install.lock')
 
     with FileLock(lock_path):
@@ -997,10 +1070,8 @@ def main():
                 uv_args += ['--index-strategy', 'unsafe-best-match']
 
             # For install/sync commands, add constraints file if available
-            constraints_path = os.path.join(cache_dir, 'constraints.txt')
             if sys.argv[1] in ('install', 'sync'):
-                if os.path.exists(constraints_path) and os.path.getsize(constraints_path) > 0:
-                    uv_args.extend(['-c', './cache/constraints.txt'])
+                uv_args.extend(_constraints_args(_get_constraints_path(), exe_dir))
 
             # Run uv
             result = subprocess.run(uv_args, cwd=exe_dir)

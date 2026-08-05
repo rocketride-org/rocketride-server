@@ -72,3 +72,17 @@ export const HOME_APP_ID = 'rocketride.home';
 
 /** The hello app shown to unauthenticated users (OSS). */
 export const HELLO_APP_ID = 'rocketride.hello';
+
+/**
+ * Resolve the platform's "home" app for the current deployment mode.
+ *
+ * SaaS shells land on the cloud home app; OSS shells land on the hello app.
+ * Shell (defaultAppId) and Sidebar (Home button, logo click) must agree on
+ * this destination, so the mapping lives here as the single source of truth.
+ *
+ * @param isSaas - True when the server reports the 'saas' capability.
+ * @returns The home appId for this deployment.
+ */
+export function getHomeAppId(isSaas: boolean): string {
+	return isSaas ? HOME_APP_ID : HELLO_APP_ID;
+}

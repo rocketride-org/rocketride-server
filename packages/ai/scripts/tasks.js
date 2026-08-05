@@ -66,7 +66,9 @@ function makeRunPytestAction(options = {}) {
         run: async (ctx, task) => {
             const aiTestRequirements = path.join(TESTS_DIR, 'requirements.txt');
             task.output = `Installing AI test requirements (${aiTestRequirements})...`;
-            await execCommand(ENGINE, ['-m', 'pip', 'install', '--quiet', '-r', aiTestRequirements], {
+            // Install via depends() so the engine's constraints apply; plain pip
+            // ignores them and resolves unpinned deps (e.g. pillow) to latest.
+            await execCommand(ENGINE, ['-c', 'import sys; from depends import depends; depends(sys.argv[1])', aiTestRequirements], {
                 task,
                 cwd: SERVER_DIR
             });

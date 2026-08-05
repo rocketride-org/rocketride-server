@@ -27,9 +27,14 @@ from ai.modules.data.data_conn import DataConn
 
 
 def _make_conn():
-    """Build a DataConn instance with __init__ bypassed."""
+    """Build a DataConn instance with __init__ bypassed.
+
+    `DataConn._target` is a lazy `@property` delegating to `self._server._target`,
+    so target injection happens on the server mock — not directly on the conn.
+    """
     conn = DataConn.__new__(DataConn)
-    conn._target = MagicMock()
+    conn._server = MagicMock()
+    conn._server._target = MagicMock()
     conn.debug_message = MagicMock()
     return conn
 
@@ -74,6 +79,27 @@ def test_determine_lane_question_without_listener_falls_back_to_raw():
     conn = _make_conn()
     pipe = _make_pipe_with_listeners([])
     assert conn._determine_lane('application/rocketride-question+json', pipe) == 'raw'
+
+
+def test_determine_lane_json_with_json_listener():
+    """'application/json' maps to the 'json' lane when that listener exists."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['json'])
+    assert conn._determine_lane('application/json', pipe) == 'json'
+
+
+def test_determine_lane_json_without_listener_falls_back_to_raw():
+    """Without a 'json' listener, 'application/json' falls back to raw."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners([])
+    assert conn._determine_lane('application/json', pipe) == 'raw'
+
+
+def test_determine_lane_json_tolerates_charset_parameter():
+    """'application/json; charset=utf-8' still maps to the 'json' lane."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['json'])
+    assert conn._determine_lane('application/json; charset=utf-8', pipe) == 'json'
 
 
 @pytest.mark.parametrize(

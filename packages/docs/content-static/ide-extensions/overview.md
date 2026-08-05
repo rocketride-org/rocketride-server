@@ -7,7 +7,7 @@ sidebar_label: Overview
 
 RocketRide ships a single extension that turns your editor into a visual pipeline builder:
 author `.pipe` files on a drag-and-drop canvas, deploy a runtime, run pipelines, and trace
-every call — without leaving your IDE.
+every call, without leaving your IDE.
 
 ## Install
 
@@ -30,6 +30,6 @@ workspace so the editor's AI understands how to build RocketRide pipelines.
 
 ## Where to go next
 
-- **[VS Code](/ide-extensions/vscode)** — installation, the canvas, deploying a runtime, and
+- **[VS Code](/ide-extensions/vscode)**: installation, the canvas, deploying a runtime, and
   usage (the detailed guide; applies to all supported editors, including forks like Cursor,
   Windsurf, and VSCodium).

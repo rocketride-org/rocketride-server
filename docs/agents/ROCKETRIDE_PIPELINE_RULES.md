@@ -47,7 +47,7 @@ Complete reference for building RocketRide pipelines across any project.
 }
 ```
 
-**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional — the VS Code extension manages it automatically.
+**Field ordering matters:** `components` must come first. The `project_id`, `viewport`, and `version` fields go at the bottom. The `source` field is optional: the VS Code extension manages it automatically.
 
 ---
 
@@ -55,14 +55,14 @@ Complete reference for building RocketRide pipelines across any project.
 
 ### Required Fields
 
-#### `components` (array, required — must be first)
+#### `components` (array, required, must be first)
 
 - Array of component objects
 - Each component must have a unique `id`
 - Components are connected via `input` arrays
 - **Must be the first field in the JSON object**
 
-#### `project_id` (string, required — goes at the bottom)
+#### `project_id` (string, required, goes at the bottom)
 
 - **MUST be a unique GUID** for each pipeline file
 - **Format:** Standard UUID/GUID (e.g., `85be2a13-ad93-49ed-a1e1-4b0f763ca618`)
@@ -97,13 +97,13 @@ Complete reference for building RocketRide pipelines across any project.
 
 **Note:** Do NOT reuse GUIDs from other pipelines. Each `.pipe` file must have its own unique GUID.
 
-#### `viewport` (object, required — goes at the bottom)
+#### `viewport` (object, required, goes at the bottom)
 
 - Stores the visual zoom/pan state of the pipeline editor
 - Format: `{ "x": 0, "y": 0, "zoom": 1 }`
 - Managed by the VS Code extension; use default values when creating manually
 
-#### `version` (number, required — goes at the bottom)
+#### `version` (number, required, goes at the bottom)
 
 - Pipeline format version. Always set to `1`
 
@@ -111,7 +111,7 @@ Complete reference for building RocketRide pipelines across any project.
 
 - ID of the entry point component where data enters the pipeline
 - Managed automatically by the VS Code extension
-- When writing pipelines by hand, you can omit this field — the extension will add it
+- When writing pipelines by hand, you can omit this field, the extension will add it
 
 ---
 
@@ -239,7 +239,7 @@ Lanes are typed data channels that connect components:
 | `text`      | question     | `questions`                                |
 | `documents` | embedding    | `documents` (with vectors)                 |
 | `questions` | embedding    | `questions` (with vectors)                 |
-| `documents` | vector_db    | — (stored)                                 |
+| `documents` | vector_db    | - (stored)                                 |
 | `questions` | vector_db    | `documents`, `answers`, `questions`        |
 | `questions` | llm          | `answers`                                  |
 | `image`     | ocr          | `text`, `table`                            |
@@ -430,6 +430,48 @@ Example:
 }
 ```
 
+#### Lifecycle guarantee (open / flush / close)
+
+Each component runs its lifecycle exactly once per object, in dependency order:
+
+- A component is **opened before any upstream component may emit to it** (including data
+  emitted during an upstream's own open).
+- A component is **flushed (`closing`) only after ALL of its upstream inputs have
+  flushed**, and closed after they close.
+
+This matters for a **merging (join)** component that buffers its inputs and emits on flush
+(for example an embedder or chunker that accumulates and writes on `closing`): it is
+guaranteed to receive every upstream branch's flush-time output before it flushes itself,
+so no branch is dropped regardless of the order components were added on the canvas.
+
+The same guarantee applies **inside a control node's sub-pipeline**, to any depth. A
+control node (for example `tool_pipe`) that drives an inline sub-pipeline flushes and
+closes that sub-pipeline in dependency order on each invocation — a join in the
+sub-pipeline receives every branch's flush-time output before it flushes, exactly as at
+the top level. The flush completes before the tool reads its result, so a diamond
+sub-pipeline returns the merged output of all branches, not just the first. Nesting works
+the same way: a sub-pipeline may itself contain an agent that invokes another `tool_pipe`,
+and each level flushes its own sub-pipeline in order.
+
+For this guarantee to hold, each sub-pipeline node has exactly one lifecycle owner. Three
+wirings break that and are **rejected when the pipeline opens** (`Ec::InvalidParam`):
+
+- **A node that drives a sub-pipeline must not also be data-fed.** Do not wire a data
+  input into an invoke node (e.g. `tool_pipe`) that also has output lanes connected to a
+  sub-pipeline — its owning region and its per-invocation run would both drive that
+  sub-pipeline. (An invoke node with *no* sub-pipeline may be data-fed; there is nothing to
+  double-drive.)
+- **A sub-pipeline node must not be shared between two control nodes.** A node reachable
+  from two different invoke nodes has ambiguous ownership and is rejected. Give each invoke
+  node its own sub-pipeline.
+- **A sub-pipeline must not merge into the main pipeline (or a second start).** Every node
+  a control node's sub-pipeline reaches must belong to that sub-pipeline only. If a
+  sub-pipeline node is also reachable from the source — because the main flow (or another
+  start) feeds into it, or the sub-pipeline flows back into a main-flow node — the main
+  flow owns it and flushes it at end-of-object, not during the invocation, so the tool
+  would read an incomplete result. Keep the sub-pipeline self-contained; end each branch in
+  its own response node.
+
 ### Rule 5: Lane Compatibility
 
 - The output lane type of one component must match the input lane type of the next
@@ -607,7 +649,7 @@ chat →   → agent_b →  → response_answers (single node, multiple inputs)
 ```
 
 **Use Case:** Run multiple agents on the same question simultaneously and collect all answers
-**Key Point:** Use a **single** `response_answers` node with multiple `input` entries — one per agent. Do NOT create a separate response node per agent.
+**Key Point:** Use a **single** `response_answers` node with multiple `input` entries: one per agent. Do NOT create a separate response node per agent.
 
 ```json
 {

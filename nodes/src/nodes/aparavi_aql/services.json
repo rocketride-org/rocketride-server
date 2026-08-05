@@ -54,7 +54,7 @@
 		"Queries the Aparavi data governance platform using AQL (Aparavi Query Language). ",
 		"Accepts natural-language questions, generates AQL SELECT statements via the ",
 		"connected LLM, and returns file metadata rows from the Aparavi STORE table. ",
-		"Schema is fixed — no dynamic introspection required."
+		"Schema is fixed, no dynamic introspection required."
 	],
 	//
 	// Optional:
@@ -68,7 +68,7 @@
 	},
 	//
 	//	Optional:
-	//		Pure tool node — no pipeline lanes
+	//		Pure tool node: no pipeline lanes
 	//
 	"lanes": {},
 	//
@@ -113,7 +113,7 @@
 			"type": "string",
 			"title": "Data description",
 			"default": "",
-			"description": "What is this data used for? Describe its content and purpose — this helps the LLM generate more accurate AQL queries.",
+			"description": "What is this data used for? Describe its content and purpose, this helps the LLM generate more accurate AQL queries.",
 			"ui": {
 				"ui:widget": "textarea"
 			}

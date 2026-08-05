@@ -1,40 +1,99 @@
----
-title: Perplexity
-date: 2026-04-08
-sidebar_position: 1
----
+# llm_perplexity
 
-<head>
-  <title>Perplexity - RocketRide Documentation</title>
-</head>
+A RocketRide LLM node that connects Perplexity AI's Sonar models to a pipeline with built-in real-time web search.
 
 ## What it does
 
-Connects Perplexity AI Sonar models to your pipeline. Sonar models include real-time web search — responses are grounded in current web content rather than training data alone. Used primarily as an `llm` invoke connection by agents and other nodes that need an LLM. Can also be used directly via lanes.
+Routes questions through Perplexity AI's Sonar family of models, each of which grounds responses in current web content rather than training data alone. The node is registered with `classType: llm` and the `invoke` capability, so agents and other LLM-consuming nodes can use it as a drop-in model connection. It can also be driven directly via the `questions`/`answers` lane pair.
 
-**Lanes:**
+Uses `langchain-openai` (`ChatOpenAI`) against Perplexity's OpenAI-compatible endpoint at `https://api.perplexity.ai`. Temperature is fixed at `0`. The SDK's built-in retries are disabled; the node manages its own retry loop with per-model timeouts and exponential backoff (see "Timeouts and retries" below). Prompt length is checked against the model's token limit before each request, using a word-based estimate (approximately 0.75 words per token).
 
-| Lane in     | Lane out  | Description                                          |
-| ----------- | --------- | ---------------------------------------------------- |
-| `questions` | `answers` | Send a question directly, receive a generated answer |
+---
 
 ## Configuration
 
-| Field   | Description                             |
-| ------- | --------------------------------------- |
-| Model   | Sonar model to use (see profiles below) |
-| API Key | Perplexity AI API key                   |
+| Field               | Type / Default         | Description                                              |
+|---------------------|------------------------|----------------------------------------------------------|
+| `profile`           | enum, default `sonar`  | Which Sonar model profile to activate (see Profiles)     |
+| `apikey`            | string                 | Perplexity AI API key for the selected profile           |
+| `model`             | string (per profile)   | Perplexity model identifier, set automatically by profile|
+| `modelTotalTokens`  | number (per profile)   | Total context window in tokens                           |
+| `modelOutputTokens` | number (per profile)   | Maximum output tokens per response                       |
+
+The `model`, `modelTotalTokens`, and `modelOutputTokens` values are preset by the chosen profile; only `apikey` needs to be supplied per profile.
+
+### Lanes
+
+| Lane in     | Lane out  | Description                                          |
+|-------------|-----------|------------------------------------------------------|
+| `questions` | `answers` | Send a question directly, receive a generated answer |
+
+---
 
 ## Profiles
 
-| Profile             | Model                 | Context |
-| ------------------- | --------------------- | ------- |
-| Sonar _(default)_   | `sonar`               | 128,000 |
-| Sonar Pro           | `sonar-pro`           | 200,000 |
-| Sonar Reasoning     | `sonar-reasoning`     | 128,000 |
-| Sonar Reasoning Pro | `sonar-reasoning-pro` | 128,000 |
-| Sonar Deep Research | `sonar-deep-research` | 128,000 |
+| Profile                       | Model                 | Context (tokens) | Max output | Model source |
+|-------------------------------|-----------------------|------------------|------------|--------------|
+| Sonar (default)               | `sonar`               | 127,072          | 4,096      | manual       |
+| Sonar Pro                     | `sonar-pro`           | 200,000          | 8,000      | manual       |
+| Sonar Reasoning               | `sonar-reasoning`     | 128,000          | 4,096      | manual       |
+| Sonar Reasoning Pro           | `sonar-reasoning-pro` | 128,000          | 4,096      | manual       |
+| Sonar Deep Research           | `sonar-deep-research` | 128,000          | 4,096      | manual       |
+| Perplexity: Sonar Pro Search  | `sonar-pro-search`    | 200,000          | 8,000      | OpenRouter   |
+
+All profiles except `sonar-pro-search` use manually configured model metadata. The `sonar-pro-search` profile pulls token limits from OpenRouter.
+
+---
+
+## Timeouts and retries
+
+Request timeout and retry behavior scale with model complexity:
+
+| Model(s)                    | Timeout | Max retries | Base delay |
+|-----------------------------|---------|-------------|------------|
+| `sonar-deep-research`       | 180 s   | 3           | 2.0 s      |
+| `sonar-reasoning*` models   | 120 s   | 2           | 1.5 s      |
+| All other models            | 60 s    | 2           | 1.0 s      |
+
+Retries use exponential backoff (`base_delay x 2^attempt`) and only fire on transient failures: timeouts, connection/network errors, and HTTP 500/502/503/504 responses. Authentication errors, quota/billing errors, and input validation errors fail immediately without retrying.
+
+After all retries are exhausted, raw API errors are translated into concise user-facing messages covering: bad API key, rate limiting, quota/billing issues, invalid input, model unavailability, content policy violations, timeouts, and network errors.
+
+---
+
+## Authentication
+
+Set `apikey` to a valid Perplexity AI API key in the selected profile's config panel. The key is validated at save time by sending a minimal 10-token probe request (`"Hi"`) to `https://api.perplexity.ai`. If the probe fails, a concise warning is surfaced rather than a raw error dump. For HTTP 401 responses that return an HTML page (a known Perplexity behavior), the node extracts the page title or `<h1>` text and formats it into a readable message.
+
+To obtain an API key, visit [https://www.perplexity.ai/settings/api](https://www.perplexity.ai/settings/api).
+
+---
 
 ## Upstream docs
 
 - [Perplexity AI documentation](https://docs.perplexity.ai/)
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `model` | `string` | **Model**<br/>Perplexity AI model |  |
+| `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
+| `perplexity.profile` | `string` | **Model**<br/>Perplexity AI model | `"sonar-pro"` |
+
+## Dependencies
+
+- `openai`
+- `langchain-openai`
+- `langchain-core`
+- `langchain`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_perplexity)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

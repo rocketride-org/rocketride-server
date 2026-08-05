@@ -61,8 +61,8 @@ def getEmbedding(provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any])
         raise Exception(f'Module {provider} is not an embedding provider')
 
     # This is a warning from pytorch that the sentence transformers
-    # use. We really can't do anything about it at this time except
-    # wait for transformers to be updated
+    # use. We pin transformers to a specific version on purpose
+    # (see requirements_transformers.txt), so we suppress this warning here.
     warnings.filterwarnings('ignore', message='TypedStorage is deprecated.*')
 
     # Get the class

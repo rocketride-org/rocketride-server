@@ -24,9 +24,11 @@
 		"paths": {
 			"shared": ["../../packages/shared-ui/src/index.ts"],
 			"shared/*": ["../../packages/shared-ui/src/*"],
-			"shell-ui": ["./src/index.ts"]
+			"shell-ui": ["./src/index.ts"],
+			"shell-api": ["../../packages/shell-api/index.ts"],
+			"shell-api/*": ["../../packages/shell-api/*"]
 		}
 	},
-	"include": ["src/**/*", "*.ts", "*.tsx"],
+	"include": ["src/**/*", "*.ts", "*.tsx", "../../packages/shared-ui/src/types/global.d.ts"],
 	"exclude": ["node_modules", "dist", "build"]
 }

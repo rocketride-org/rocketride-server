@@ -10,7 +10,7 @@ A node lives in `nodes/src/nodes/<node>/` and is defined by one or more
 
 A directory may contain several definitions (`services.chat.json`,
 `services.manager.json`, …); each registers a separate service/variant. The files
-are **JSONC** — `//` comments and trailing commas are allowed, so they cannot be
+are **JSONC**: `//` comments and trailing commas are allowed, so they cannot be
 read with a strict JSON parser.
 
 > For the catalog of all nodes and how they wire together, see
@@ -41,7 +41,7 @@ read with a strict JSON parser.
 
 ---
 
-## `lanes` — how the node connects (data flow)
+## `lanes`: how the node connects (data flow)
 
 `lanes` maps each **input** lane to the list of **output** lanes it produces:
 
@@ -53,13 +53,13 @@ read with a strict JSON parser.
 
 Two nodes are wire-compatible when an upstream **output** type matches a
 downstream **input** type. Nodes with **no `lanes`** (most `tool` nodes) do not
-flow data — they **bind to an agent's tool channel** instead. The full lane-type
+flow data, they **bind to an agent's tool channel** instead. The full lane-type
 ontology and the wire-vs-bind rule live in
 [README-nodes.md → How nodes connect](README-nodes.md#how-nodes-connect).
 
 ---
 
-## `preconfig` and `profiles` — preset configurations
+## `preconfig` and `profiles`: preset configurations
 
 `preconfig` holds the default profile name and a map of named **profiles**. A
 profile is a preset bundle of values (model, token limits, etc.) merged into the
@@ -77,7 +77,7 @@ node config unless the profile is `absolute`:
 
 ---
 
-## `fields` — the configuration schema (rendered by the canvas)
+## `fields`: the configuration schema (rendered by the canvas)
 
 `fields` is a JSON-Schema-flavored description of every configurable value. The
 canvas renders it with **RJSF (React JSON Schema Form)**, so each field becomes a
@@ -98,7 +98,7 @@ form control automatically. Supported per-field keys include `type`, `title`,
 
 Two dynamic features are used heavily:
 
-- **Profile selector** — a field (commonly `<node>.profile`) whose options are
+- **Profile selector**: a field (commonly `<node>.profile`) whose options are
   generated from the profiles via a reference pattern, and which swaps the visible
   fields with `conditional`:
 
@@ -115,12 +115,12 @@ Two dynamic features are used heavily:
   }
   ```
 
-- **Property groups** — an entry whose `properties` array lists which fields to
+- **Property groups**: an entry whose `properties` array lists which fields to
   show together for a given profile/object.
 
 ---
 
-## `shape` — UI layout
+## `shape`: UI layout
 
 `shape` arranges fields into labeled sections in the node's config panel:
 

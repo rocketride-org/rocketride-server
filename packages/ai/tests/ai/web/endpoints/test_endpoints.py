@@ -26,6 +26,7 @@ from fastapi.testclient import TestClient
 import ai.web.endpoints  # noqa: F401  (ensures the submodules are loaded)
 
 auth_callback_mod = sys.modules['ai.web.endpoints.auth_callback']
+vscode_oauth_bounce_mod = sys.modules['ai.web.endpoints.vscode_oauth_bounce']
 ping_mod = sys.modules['ai.web.endpoints.ping']
 shutdown_mod = sys.modules['ai.web.endpoints.shutdown']
 status_mod = sys.modules['ai.web.endpoints.status']
@@ -319,3 +320,63 @@ def test_auth_callback_response_is_html_content_type(monkeypatch):
     app.get('/cb')(auth_callback_mod.auth_callback)
     r = _client(app).get('/cb')
     assert r.headers['content-type'].startswith('text/html')
+
+
+# ---------------------------------------------------------------------------
+# vscode_oauth_bounce — broker → VS Code deep-link forwarder
+# ---------------------------------------------------------------------------
+
+
+def _bounce_client() -> TestClient:
+    """TestClient with the bounce handler mounted at its real path."""
+    app = FastAPI()
+    app.get('/auth/vscode/google')(vscode_oauth_bounce_mod.vscode_oauth_bounce)
+    return _client(app)
+
+
+def test_vscode_oauth_bounce_default_scheme_is_vscode():
+    """Without a ``scheme`` param the page targets the vscode:// deep link."""
+    r = _bounce_client().get('/auth/vscode/google')
+    assert r.status_code == 200
+    assert r.headers['content-type'].startswith('text/html')
+    assert '"vscode"' in r.text
+    assert "'://rocketride.rocketride/auth/google'" in r.text
+
+
+def test_vscode_oauth_bounce_honors_allowed_scheme():
+    """An allowlisted editor scheme (e.g. cursor) is injected verbatim."""
+    r = _bounce_client().get('/auth/vscode/google', params={'scheme': 'cursor'})
+    assert r.status_code == 200
+    assert '"cursor"' in r.text
+    assert '"vscode"' not in r.text
+
+
+@pytest.mark.parametrize('bad', ['javascript', 'https', 'vscode://x', 'file', '', 'VSCODE'])
+def test_vscode_oauth_bounce_rejects_unlisted_scheme(bad):
+    """Anything outside the allowlist falls back to the vscode scheme."""
+    r = _bounce_client().get('/auth/vscode/google', params={'scheme': bad})
+    assert r.status_code == 200
+    assert '"vscode"' in r.text
+    # The rejected value must not appear as the injected JS literal.
+    if bad and bad != 'vscode':
+        assert f'"{bad}"' not in r.text
+
+
+def test_vscode_oauth_bounce_never_interpolates_tokens_into_html():
+    """Token material stays in location.search — never in the HTML body."""
+    secret = 'ya29.SECRET-ACCESS-TOKEN'
+    r = _bounce_client().get(
+        '/auth/vscode/google', params={'scheme': 'vscode', 'tokens': secret, 'state': 'abc123state'}
+    )
+    assert r.status_code == 200
+    assert secret not in r.text
+    assert 'abc123state' not in r.text
+
+
+def test_vscode_oauth_bounce_forwards_only_expected_params():
+    """The script forwards exactly the params CloudAuthProvider reads."""
+    r = _bounce_client().get('/auth/vscode/google')
+    for key in ('tokens', 'state', 'oauth_error', 'error', 'error_description'):
+        assert f"'{key}'" in r.text
+    # Our own routing param must not be forwarded to the deep link.
+    assert "'scheme'" not in r.text

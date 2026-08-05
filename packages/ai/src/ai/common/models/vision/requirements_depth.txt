@@ -1,0 +1,2 @@
+# Depth-specific extras, installed after the shared requirements_vision.txt base.
+accelerate

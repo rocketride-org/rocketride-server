@@ -58,15 +58,15 @@ This project uses GitHub-native scanning on the `develop` branch. CodeQL and Sco
 | **Dependabot**                               | Dependency vulnerabilities                           |
 | **GitHub Secret Scanning + Push Protection** | Credential leak prevention                           |
 
-Tool configuration, cadence, and exact workflow names are maintained in `.github/workflows/` and the repository's security settings — refer to those as the source of truth.
+Tool configuration, cadence, and exact workflow names are maintained in `.github/workflows/` and the repository's security settings, refer to those as the source of truth.
 
 ### Two-Person Control on Alert Dismissals
 
 To prevent unilateral dismissal of security findings, this repository operates under GitHub's **Delegated Alert Dismissal**, enabled at the `rocketride-org` organization level:
 
-1. **Request** — any maintainer with write access can submit a dismissal request. The request **must** include a documented justification: compensating controls, mitigation rationale, or basis for "accepted risk". This justification is recorded as the dismissal comment on the alert.
-2. **Approval** — must be given by a *different* authorized reviewer under GitHub Delegated Alert Dismissal (organization owner, security manager, or explicitly delegated custom role). The requester cannot self-approve.
-3. **Dismissal** — GitHub auto-applies the dismissal once approval lands. The full `request → approval → dismissal` trail is preserved on the alert and serves as the system-of-record for audit.
+1. **Request**: any maintainer with write access can submit a dismissal request. The request **must** include a documented justification: compensating controls, mitigation rationale, or basis for "accepted risk". This justification is recorded as the dismissal comment on the alert.
+2. **Approval**: must be given by a *different* authorized reviewer under GitHub Delegated Alert Dismissal (organization owner, security manager, or explicitly delegated custom role). The requester cannot self-approve.
+3. **Dismissal**: GitHub auto-applies the dismissal once approval lands. The full `request → approval → dismissal` trail is preserved on the alert and serves as the system-of-record for audit.
 
 Direct (one-step) dismissal is blocked at the organization level.
 
@@ -99,7 +99,7 @@ When closing an alert, choose one of:
 - Branch deletion disallowed
 - Linear history enforced
 - Stale reviews dismissed on new pushes
-- **Admin bypass disabled** — protection rule applies to all users including org owners
+- **Admin bypass disabled**: protection rule applies to all users including org owners
 
 ## Access Reviews
 

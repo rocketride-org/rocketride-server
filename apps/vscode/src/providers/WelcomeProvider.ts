@@ -182,11 +182,8 @@ export class WelcomeProvider {
 					hostUrl: config.development.hostUrl,
 					apiKey,
 					hasApiKey: this.configManager.hasApiKey(),
-					teamId: config.development.teamId,
 					local: {
 						engineVersion: config.development.local.engineVersion,
-						debugOutput: config.development.local.debugOutput,
-						engineArgs: config.development.local.engineArgs,
 					},
 				},
 				deployment: {
@@ -194,11 +191,8 @@ export class WelcomeProvider {
 					hostUrl: config.deployment.hostUrl,
 					hasApiKey: !!config.deployment.apiKey,
 					apiKey: config.deployment.apiKey || '',
-					teamId: config.deployment.teamId,
 					local: {
 						engineVersion: config.deployment.local.engineVersion,
-						debugOutput: config.deployment.local.debugOutput,
-						engineArgs: config.deployment.local.engineArgs,
 					},
 				},
 				defaultPipelinePath: config.defaultPipelinePath,

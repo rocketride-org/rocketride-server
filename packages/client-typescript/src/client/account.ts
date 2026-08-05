@@ -81,6 +81,19 @@ export class AccountApi {
 	}
 
 	/**
+	 * Switches the user's active organization.
+	 *
+	 * The server updates the user's default_org_id and resets the default
+	 * team to the first team in the new org. All connections for this user
+	 * receive a refreshed AccountInfo via shell:accountUpdate.
+	 *
+	 * @param orgId - The org ID to switch to.
+	 */
+	async setDefaultOrg(orgId: string): Promise<void> {
+		await this.client.call('rrext_account_me', { subcommand: 'set_default_org', orgId });
+	}
+
+	/**
 	 * Permanently deletes the current user's account.
 	 */
 	async deleteAccount(): Promise<void> {
@@ -189,6 +202,16 @@ export class AccountApi {
 	 */
 	async removeMember(orgId: string, userId: string): Promise<void> {
 		await this.client.call('rrext_account_members', { subcommand: 'delete', orgId, userId });
+	}
+
+	/**
+	 * Resends the initialization email for a pending org member.
+	 *
+	 * @param orgId  - Organisation UUID.
+	 * @param userId - The pending member's user ID.
+	 */
+	async resendInvite(orgId: string, userId: string): Promise<void> {
+		await this.client.call('rrext_account_members', { subcommand: 'resend_invite', orgId, userId });
 	}
 
 	// =========================================================================

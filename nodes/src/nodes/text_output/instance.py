@@ -23,14 +23,12 @@
 
 import errno
 from os.path import dirname
-import smbclient
-from smbprotocol.exceptions import SMBOSError
 
 import engLib
 from engLib import Entry
 
 # import errors
-from rocketlib import Ec
+from rocketlib import Ec, shorten_path_components
 
 
 class Instance:
@@ -58,8 +56,17 @@ class Instance:
         """Call from engLib, process object startup."""
         self.current_object = object
         self.target_object_text = ''
-        # Build full path of target object
-        self.target_object_path = f'//{self.IEndpoint.server}/{self.instance.targetObjectPath}.txt'
+        # Build full path of target object.
+        #
+        # This node writes over SMB via smbclient (the SMB protocol, not the
+        # Win32 file API), so the \\?\ extended-length prefix does NOT apply and
+        # must not be added — it is not a valid SMB path. The remote filesystem
+        # still enforces the 255-char per-component limit, though, so we
+        # deterministically hash-truncate any over-long segment of the derived
+        # name (a no-op for normal names; stable across runs so the change /
+        # skip detection in get_transform_key stays consistent).
+        safe_target = shorten_path_components(f'{self.instance.targetObjectPath}.txt')
+        self.target_object_path = f'//{self.IEndpoint.server}/{safe_target}'
 
         try:
             # Get key of the last transform
@@ -81,6 +88,8 @@ class Instance:
 
     def close(self):
         """Call from engLib, process object complete."""
+        import smbclient
+
         if not self.current_object.objectFailed:
             try:
                 # Write only non-empty file
@@ -117,6 +126,9 @@ class Instance:
 
     def get_transform_key(self) -> str:
         """Build transform key for current object."""
+        import smbclient
+        from smbprotocol.exceptions import SMBOSError
+
         source_change_key = (
             self.current_object.changeKey or f'{self.current_object.modifyTime};{self.current_object.size}'
         )

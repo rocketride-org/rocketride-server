@@ -19,7 +19,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 // Paths
-const { PROJECT_ROOT, DIST_ROOT } = require('./lib/paths');
+const { PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('./lib/paths');
 const OUTPUT_FILE = path.join(DIST_ROOT, 'THIRD_PARTY_LICENSES.md');
 
 // ============================================================================
@@ -758,7 +758,7 @@ function generateLicenseFile(allLicenses) {
 async function main() {
     console.log('=== License Aggregation ===\n');
     
-    ensureDir(DIST_DIR);
+    ensureDir(DIST_ROOT);
     
     // Collect all licenses
     const projectLicenses = collectProjectLicenses().map(l => ({ ...l, category: 'PROJECT' }));

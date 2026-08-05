@@ -1,49 +1,128 @@
----
-title: Accessibility Describe
-date: 2026-04-08
-sidebar_position: 1
----
+# accessibility_describe
 
-<head>
-  <title>Accessibility Describe - RocketRide Documentation</title>
-</head>
+A RocketRide image-filter node that turns an image into a structured scene description optimized for blind and visually impaired users.
 
 ## What it does
 
-Analyzes an image using Google Gemini Vision and produces a structured scene description optimized for blind and visually impaired users. Output covers environment type, hazards with positions, key objects, visible text, people, and navigation guidance — kept under 150 words by default.
+Receives an image on its input lane, sends it to **Google Gemini Vision** (via the
+`google-genai` SDK), and emits a text description designed for assistive use, for
+example real-time narration on smart glasses. The description covers environment type,
+hazards with positions, key objects, visible text read verbatim (OCR), people, and
+navigation guidance, kept under 150 words by the default prompt.
 
-**Lanes:** `image` → `text`
+The node buffers the incoming image stream, base64-encodes it as a data URL, and sends
+it together with the analysis prompt in a single `generate_content` call. Requests run
+with `temperature: 0.3` and `max_output_tokens: 1024`. Transient failures (timeouts,
+connection errors, 5xx responses) are retried up to 3 times with exponential backoff.
+API errors are translated into user-friendly messages covering authentication, rate
+limiting, safety blocks, model unavailability, and timeouts.
 
-## Models
+The default model is `gemini-2.5-flash`. A Google AI API key is required: the node
+fails at startup without one, and rejects keys starting with `sk-` (OpenAI keys) with a
+clear error.
 
-| Model                        | Notes                                    |
-| ---------------------------- | ---------------------------------------- |
-| Gemini 2.5 Flash _(default)_ | Fast, efficient — good for real-time use |
-| Gemini 2.5 Pro               | Highest quality                          |
-| Gemini 2.0 Flash             | Balanced                                 |
-
-All models use a 1M token context window. Requires a **Google AI API key** from [aistudio.google.com](https://aistudio.google.com/apikey).
+---
 
 ## Configuration
 
-| Field               | Default            | Description                                                                                       |
-| ------------------- | ------------------ | ------------------------------------------------------------------------------------------------- |
-| Vision Model        | `gemini-2.5-flash` | Which Gemini model to use                                                                         |
-| API Key             | —                  | Google AI API key                                                                                 |
-| System Instructions | built-in           | Sets the assistant's overall behavior and priorities                                              |
-| Analysis Prompt     | built-in           | Prompt sent with each image                                                                       |
-| Hazard Priority     | `High`             | `High` always leads with hazards; `Medium` includes them when present; `Low` uses standard order  |
-| Spatial Format      | `Clock`            | `Clock` uses clock positions (12 o'clock); `Relative` uses left/right/ahead; `Both` combines them |
+### Lanes
+
+| Lane | Direction | Description |
+|------|-----------|-------------|
+| `image` | input | The image to describe (streamed; any image MIME type) |
+| `text` | output | The accessibility-optimized scene description |
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Google Gemini vision model |
+| `modelTotalTokens` | number | Maximum context length in tokens |
+| `systemPrompt` | string | Default "You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions.". Define the accessibility description behavior and priorities |
+| `prompt` | string | Default "Describe this image for a blind person. Include: environment type, hazards with positions, key objects with clock positions, visible text, people, and navigation guidance. Keep under 150 words.". Prompt template for generating accessibility descriptions from images |
+| `prioritizeHazards` | string | Default "high". How aggressively to prioritize hazard detection |
+| `spatialFormat` | string | Default "clock". How to describe spatial positions |
+| `profile` | string | Default "gemini-2.5-flash". Select the Gemini vision model for accessibility descriptions |
+
+If `accessibility.systemPrompt` or `accessibility.prompt` is left empty, the node falls
+back to a generic `systemPrompt` / `prompt` config value, then to its built-in defaults.
+
+### Hazard priority
+
+| Value | Effect |
+|-------|--------|
+| `high` (default) | The model must lead with hazards; if none exist it explicitly states the area appears safe |
+| `medium` | Hazards are included in their spatial context when present |
+| `low` | Standard description order, no extra hazard emphasis |
+
+### Spatial format
+
+| Value | Effect |
+|-------|--------|
+| `clock` (default) | Clock positions (12 o'clock = straight ahead) |
+| `relative` | Relative directions (left, right, ahead, behind) |
+| `both` | Both clock positions and relative directions |
+
+Both settings are applied as modifiers appended to the system prompt at runtime.
+
+---
+
+## Profiles
+
+| Profile | Model | Notes |
+|---------|-------|-------|
+| `gemini-2.5-flash` (default) | `gemini-2.5-flash` | Fast and efficient, suitable for real-time use |
+| `gemini-2.5-pro` | `gemini-2.5-pro` | Highest quality |
+| `gemini-2.0-flash` | `gemini-2.0-flash` | Balanced |
+
+All profiles use a 1M (1,048,576) token context window.
+
+---
 
 ## Default output structure
 
-```
-1. ENVIRONMENT  — type of place
-2. HAZARDS      — obstacles, stairs, vehicles (with positions)
-3. KEY OBJECTS  — notable items with clock positions and distances
-4. TEXT         — any visible text read verbatim
-5. PEOPLE       — count, positions, and actions
-6. NAVIGATION   — clear path forward, turns, or barriers
+```text
+1. ENVIRONMENT  - type of place
+2. HAZARDS      - obstacles, stairs, vehicles (with positions)
+3. KEY OBJECTS  - notable items with clock positions and distances
+4. TEXT         - any visible text read verbatim
+5. PEOPLE       - count, positions, and actions
+6. NAVIGATION   - clear path forward, turns, or barriers
 ```
 
-Customize the **Analysis Prompt** field to change this structure.
+Customize the **Analysis Prompt** (`accessibility.prompt`) field to change this structure.
+
+---
+
+## Authentication
+
+Requires a **Google AI API key**: get one at
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey) and set it in the
+node's API key field. The node validates the key at startup: a missing key raises an
+error immediately, and a key with the `sk-` prefix is rejected as an OpenAI key.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `accessibility.prioritizeHazards` | `string` | **Hazard Priority**<br/>How aggressively to prioritize hazard detection | `"high"` |
+| `accessibility.prompt` | `string` | **Analysis Prompt**<br/>Prompt template for generating accessibility descriptions from images | `"Describe this image for a blind person. Include: environment type, hazards with positions, key objects with clock positions, visible text, people, and navigation guidance. Keep under 150 words."` |
+| `accessibility.spatialFormat` | `string` | **Spatial Format**<br/>How to describe spatial positions | `"clock"` |
+| `accessibility.systemPrompt` | `string` | **System Instructions**<br/>Define the accessibility description behavior and priorities | `"You are an accessibility-focused scene analyzer designed to help blind and visually impaired users understand their surroundings through image descriptions."` |
+| `accessibility_describe.profile` | `string` | **Vision Model**<br/>Select the Gemini vision model for accessibility descriptions | `"gemini-2.5-flash"` |
+| `model` | `string` | **Model**<br/>Google Gemini vision model |  |
+| `modelTotalTokens` | `number` | **Tokens**<br/>Maximum context length in tokens |  |
+
+## Dependencies
+
+- `google-genai` `>=1.14.0`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/accessibility_describe)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

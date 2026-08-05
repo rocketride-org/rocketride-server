@@ -22,7 +22,7 @@ from rocketlib import debug, error
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 
-from ai.common.utils import safe_str
+from ai.common.utils import parse_bool, safe_str
 
 from ._internal.host import AgentContext, AgentHostServices
 from ._internal.utils import (
@@ -32,6 +32,17 @@ from ._internal.utils import (
     new_run_id,
     truncate_at_stop_words,
 )
+
+
+class ToolCallRequiredError(RuntimeError):
+    """Raised by ``run_agent`` when the optional ``require_tool_call`` guard is
+    enabled but the driver produced an answer without invoking any tool.
+
+    Signals a likely *fabricated* answer — a planning model that narrated a
+    tool chain in prose instead of actually calling the tools.  ``run_agent``
+    catches it and returns a ``RocketRide.agent.guard.v1`` error answer instead
+    of delivering the ungrounded content.
+    """
 
 
 class AgentBase(ABC):
@@ -75,9 +86,21 @@ class AgentBase(ABC):
         # for this node instance.
         config = Config.getNodeConfig(self._iGlobal.glb.logicalType, self._iGlobal.glb.connConfig)
 
+        # Keep the resolved config so subclasses can read their own extra fields
+        # without re-resolving (and without re-implementing shape handling).
+        self._config = config
+
         # And save any specific instructions
         self._instructions = config.get('instructions', [])
         self._agent_description = config.get('agent_description', '') or ''
+
+        # Optional runtime guardrail.  When enabled, `run_agent` fails any run
+        # that produces an answer without invoking at least one tool (see
+        # `ToolCallRequiredError`).  Off by default — opt-in per node config so
+        # existing pipelines that legitimately answer tool-free are unaffected.
+        # parse_bool (not bool()) so a stringified "false"/"0"/"no" disables it
+        # instead of tripping the guard on every run.
+        self._require_tool_call = parse_bool(config.get('require_tool_call'), False)
 
     # =========================================================================
     # PIPELINE-FACING ENTRYPOINT
@@ -136,6 +159,10 @@ class AgentBase(ABC):
                 return safe_str(value)
 
         task_id = None
+        # Bound before the try so the guard/error handlers can read them even if
+        # a failure occurs before the context is built or `_run` returns.
+        context = None
+        raw = None
         try:
             # Add any global instructions from the config
             for inst in self._instructions:
@@ -170,6 +197,18 @@ class AgentBase(ABC):
                 question=question,
             )
 
+            # Fabrication guardrail — before accepting the answer, assert the
+            # run actually grounded itself in at least one tool call when the
+            # operator required it.  A weak planning model can narrate a tool
+            # chain in prose without ever calling a tool; require_tool_call
+            # turns that silent failure into a loud, structural one.
+            if self._require_tool_call and not context.invoked_tools:
+                raise ToolCallRequiredError(
+                    'require_tool_call is enabled but the agent produced an '
+                    'answer without invoking any tool (possible narrated or '
+                    'fabricated tool chain)'
+                )
+
             if not isinstance(content, str):
                 content = safe_str(content)
 
@@ -183,6 +222,7 @@ class AgentBase(ABC):
                     'run_id': run_id,
                     'started_at': started_at,
                     'ended_at': ended_at,
+                    'tool_calls': len(context.invoked_tools),
                 },
                 'stack': [],
             }
@@ -194,6 +234,37 @@ class AgentBase(ABC):
             answer_payload['stack'] = stack
 
             debug(f'agent base _run completed run_id={run_id} content_len={len(content or "")}')
+
+        except ToolCallRequiredError as e:
+            # Guardrail tripped: the run answered without invoking any tool.
+            # Reject the (likely fabricated) content and return a distinct
+            # guard answer — not the generic _run-failed path — so the cause is
+            # unambiguous in traces and to downstream handling.
+            guard_message = str(e)
+            error(f'agent base tool-call guard tripped run_id={run_id}: {guard_message}')
+            ended_at = now_iso()
+            answer_payload = {
+                'content': guard_message,
+                'meta': {
+                    'framework': self.FRAMEWORK,
+                    'agent_id': self._agent_id(iInstance),
+                    'run_id': run_id,
+                    'started_at': started_at,
+                    'ended_at': ended_at,
+                    'tool_calls': 0,
+                    **({'task_id': task_id} if task_id else {}),
+                },
+                'stack': [
+                    {
+                        'kind': 'RocketRide.agent.guard.v1',
+                        'name': 'tool_call_required',
+                        'payload': {'guard': 'require_tool_call', 'message': guard_message},
+                    },
+                    # Keep the rejected framework output for diagnosis — an operator
+                    # investigating a tripped guard wants to see what was narrated.
+                    {'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)},
+                ],
+            }
 
         except Exception as e:
             error_type = type(e).__name__
@@ -208,6 +279,7 @@ class AgentBase(ABC):
                     'run_id': run_id,
                     'started_at': started_at,
                     'ended_at': ended_at,
+                    'tool_calls': len(context.invoked_tools) if context is not None else 0,
                     **({'task_id': task_id} if task_id else {}),
                 },
                 'stack': [],
@@ -306,7 +378,10 @@ class AgentBase(ABC):
             q = Question(role=role or '')
             q.addQuestion(transcript)
 
-        result = context.llm.invoke(IInvokeLLM.Ask(question=q))
+        # Forward stop words to the provider API (via the node's ask handler) so the model
+        # actually stops generating at e.g. "\nObservation:", and keep the post-hoc
+        # truncation below as a defense-in-depth net against any marker drift.
+        result = context.llm.invoke(IInvokeLLM.Ask(question=q, stop=stop_words))
         return truncate_at_stop_words(extract_text(result), stop_words)
 
     def call_llm_json(
@@ -371,6 +446,14 @@ class AgentBase(ABC):
         Returns:
             The raw tool output (whatever the tool returned).
         """
+        # Record the invocation for the require_tool_call guard.  This adapter
+        # is the single choke point every framework driver routes real tool
+        # calls through, so counting here covers all agent frameworks at once.
+        # Recorded before invoke() so a tool that raises still counts — the
+        # agent genuinely attempted to use a tool, which is not fabrication.
+        # (Local reads such as memory.peek never reach this adapter and so are
+        # correctly excluded from "did the agent ground itself in a tool".)
+        context.invoked_tools.append(tool_name)
         return context.tools.invoke(tool_name, args)
 
     # =========================================================================

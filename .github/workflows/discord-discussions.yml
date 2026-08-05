@@ -19,7 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_DISCUSSIONS_WEBHOOK_URL }}
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_DISCUSSIONS_FORUM_WEBHOOK_URL }}
+      # Optional: bot token (Manage Threads) to archive closed / unarchive
+      # reopened discussion forum threads. Webhooks can't archive; without this
+      # secret the embed still reflects state, threads just stay unarchived.
+      DISCORD_GITHUB_BOT_TOKEN: ${{ secrets.DISCORD_GITHUB_BOT_TOKEN }}
       REPO: ${{ github.repository }}
     steps:
       - name: Checkout helper script
@@ -35,13 +39,23 @@ jobs:
         run: |
           # ── Guard: bail if webhook is not configured ─────────────────────
           if [ -z "$DISCORD_WEBHOOK_URL" ]; then
-            echo "DISCORD_DISCUSSIONS_WEBHOOK_URL secret is not set — skipping"
+            echo "DISCORD_DISCUSSIONS_FORUM_WEBHOOK_URL secret is not set — skipping"
             exit 0
           fi
 
           # ── Source the shared discord_curl helper (retry/backoff + status sink) ──
           # shellcheck source=scripts/discord-helper.sh
           source "${GITHUB_WORKSPACE}/.github/workflows/scripts/discord-helper.sh"
+
+          # Back-compat shims: these notifiers source the helper from the default
+          # branch (fork-safety), so on the PR that first introduces new helper
+          # functions the default-branch helper won't have them yet. Define no-op
+          # fallbacks so the workflow degrades gracefully instead of aborting
+          # (command not found / exit 127); the real implementations take over
+          # automatically once this merges to the default branch.
+          command -v discord_applied_tags   >/dev/null 2>&1 || discord_applied_tags()   { printf '[]'; }
+          command -v extract_discord_thread >/dev/null 2>&1 || extract_discord_thread() { :; }
+          command -v discord_sync_thread    >/dev/null 2>&1 || discord_sync_thread()    { :; }
 
           NUMBER="${{ github.event.discussion.number }}"
           OWNER="${REPO%/*}"
@@ -51,7 +65,7 @@ jobs:
           QUERY='query($owner:String!,$name:String!,$number:Int!){
             repository(owner:$owner,name:$name){
               discussion(number:$number){
-                id title url number body
+                id title url number body createdAt
                 closed
                 locked
                 comments{ totalCount }
@@ -82,6 +96,7 @@ jobs:
           IS_CLOSED=$(echo   "$DISCUSSION" | jq -r '.closed')
           AUTHOR=$(echo      "$DISCUSSION" | jq -r '.author.login')
           AVATAR=$(echo      "$DISCUSSION" | jq -r '.author.avatarUrl')
+          CREATED=$(echo     "$DISCUSSION" | jq -r '.createdAt[0:10]')
 
           CATEGORY_NAME=$(echo  "$DISCUSSION" | jq -r '.category.name')
           CATEGORY_EMOJI=$(echo "$DISCUSSION" | jq -r '.category.emoji // empty')
@@ -136,26 +151,47 @@ jobs:
             --arg  desc     "$BODY" \
             --arg  author   "$AUTHOR" \
             --arg  avatar   "$AVATAR" \
+            --arg  opened   "$AUTHOR started this discussion on $CREATED" \
             --arg  repo     "$REPO" \
             --arg  state    "$STATE" \
             --arg  answer   "$ANSWER_STATUS" \
             --arg  category "$CATEGORY_DISPLAY" \
             --arg  comments "$COMMENT_COUNT" \
             --arg  labels   "$LABELS" \
+            --arg  num      "$NUMBER" \
             --argjson color "$COLOR" \
             '{embeds: [{
               title: $title, url: $url, color: $color,
               description: (if $desc == "" then null else $desc end),
-              author: {name: $author, url: ("https://github.com/" + $author), icon_url: $avatar},
+              author: {name: $opened, url: ("https://github.com/" + $author), icon_url: $avatar},
               fields: [
                 {name: "State",    value: $state,    inline: true},
                 (if $answer != "" then {name: "Answer", value: $answer, inline: true} else empty end),
                 {name: "Category", value: $category, inline: true},
                 {name: "Comments", value: $comments, inline: true},
-                {name: "Labels",   value: $labels,   inline: true},
-                {name: "Repo",     value: $repo,     inline: true}
-              ]
+                {name: "Labels",   value: $labels,   inline: true}
+              ],
+              footer: {text: ($repo + " · #" + $num)}
             }]}')
+
+          # ── Forum thread name + tags + starter (link) message ────────────
+          # The forum post's ROOT message is a plain link (bold headline + URL):
+          # Discord unfurls it into the GitHub card, which becomes the forum
+          # grid-view image. thread_name (max 100) and applied_tags (state,
+          # answer status, category) go on this create POST; the detail embed is
+          # posted as a 2nd message afterward.
+          THREAD_NAME=$(jq -rn --arg t "#$NUMBER $TITLE" '$t | if length > 100 then .[:100] else . end')
+          FORUM_TAGS_CONFIG="${GITHUB_WORKSPACE}/.github/workflows/scripts/discord-forum-tags.json"
+          if [ "$IS_CLOSED" = "true" ]; then DISC_TAG_STATE="closed"; else DISC_TAG_STATE="open"; fi
+          DISC_ANSWER=""
+          if [ "$IS_ANSWERABLE" = "true" ]; then
+            if [ -n "$ANSWER_CHOSEN" ]; then DISC_ANSWER="answered"; else DISC_ANSWER="unanswered"; fi
+          fi
+          LABELS_JSON=$(echo "$DISCUSSION" | jq -c '[.labels.nodes[].name]')
+          APPLIED_TAGS=$(discord_applied_tags "$FORUM_TAGS_CONFIG" discussions "$DISC_TAG_STATE" "$LABELS_JSON" "$DISC_ANSWER" "$CATEGORY_NAME")
+          STARTER_CONTENT=$(jq -rn --arg t "**#$NUMBER  $TITLE**" --arg u "$URL" '$t + "\n" + $u')
+          STARTER_PAYLOAD=$(jq -n --arg c "$STARTER_CONTENT" --arg tn "$THREAD_NAME" --argjson tags "$APPLIED_TAGS" \
+            '{content: $c, thread_name: $tn, applied_tags: $tags}')
 
           # ── Paginated marker search (scans every comment page until marker found) ──
           # Uses `first:100, after:$cursor` so markers stay discoverable regardless of
@@ -185,10 +221,10 @@ jobs:
 
               # GraphQL returns author.login as "github-actions" (no [bot] suffix);
               # REST returns "github-actions[bot]". Match either to be safe.
-              m=$(echo "$page" | jq -c '
+              m=$(echo "$page" | jq -c --arg re "$DISCORD_MARKER_PATTERN" '
                 [.data.repository.discussion.comments.nodes[]
                   | select((.author.login == "github-actions" or .author.login == "github-actions[bot]")
-                    and (.body | test("^<!-- discord-msg-id:[0-9]+ -->\\s*$")))
+                    and (.body | test($re)))
                 ] | first // empty')
 
               if [ -n "$m" ] && [ "$m" != "null" ]; then
@@ -203,27 +239,33 @@ jobs:
           }
 
           DISCORD_MSG_ID=""
+          DISCORD_THREAD_ID=""
           MARKER_COMMENT_ID=""
           MARKER=$(find_marker)
           if [ -n "$MARKER" ] && [ "$MARKER" != "null" ]; then
-            DISCORD_MSG_ID=$(echo "$MARKER" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+            DISCORD_MSG_ID=$(echo "$MARKER" | jq -r '.body' | extract_discord_marker)
+            DISCORD_THREAD_ID=$(echo "$MARKER" | jq -r '.body' | extract_discord_thread)
             MARKER_COMMENT_ID=$(echo "$MARKER" | jq -r '.id')
           fi
 
           # Normalize webhook URL so POST and PATCH share one base. The previous
-          # awk-split approach desynced if DISCORD_DISCUSSIONS_WEBHOOK_URL had a
+          # awk-split approach desynced if DISCORD_DISCUSSIONS_FORUM_WEBHOOK_URL had a
           # trailing slash or query string (e.g. ?thread_id=...): PATCH 404'd,
           # the 404 branch deleted the marker as "message gone", then fell through
           # to POST → fresh repost on every discussion update.
           BASE="${DISCORD_WEBHOOK_URL%%\?*}"
           BASE="${BASE%/}"
 
+          # Forum PATCH/DELETE must be scoped to the thread the message lives in.
+          THREAD_QS=""
+          [ -n "$DISCORD_THREAD_ID" ] && THREAD_QS="?thread_id=$DISCORD_THREAD_ID"
+
           # ── Post or patch ────────────────────────────────────────────────
           if [ -n "$DISCORD_MSG_ID" ]; then
             PATCH_BODY=$(discord_curl -X PATCH \
               -H "Content-Type: application/json" \
               -d "$PAYLOAD" \
-              "$BASE/messages/$DISCORD_MSG_ID") || true
+              "$BASE/messages/$DISCORD_MSG_ID$THREAD_QS") || true
             PATCH_STATUS=$(cat "$DISCORD_STATUS_FILE")
             echo "PATCH status: $PATCH_STATUS"
 
@@ -232,6 +274,9 @@ jobs:
               gh api graphql -f query='mutation($id:ID!){ deleteDiscussionComment(input:{id:$id}){ clientMutationId } }' \
                 -f id="$MARKER_COMMENT_ID" || true
               DISCORD_MSG_ID=""
+              # Stale thread is gone too — clear it so the archive step targets
+              # the recreated thread (NEW_THREAD_ID), not the deleted one.
+              DISCORD_THREAD_ID=""
             elif [ "$PATCH_STATUS" != "200" ]; then
               echo "PATCH failed ($PATCH_STATUS): $PATCH_BODY"
               exit 1
@@ -239,32 +284,68 @@ jobs:
           fi
 
           if [ -z "$DISCORD_MSG_ID" ]; then
-            # --no-retry-5xx makes POST at-most-once per the discord-helper
-            # contract: only 429 is safe to retry (request guaranteed rejected);
-            # transient 5xx or no-response could each create a duplicate message.
+            # 1) Create the forum thread via the starter (link) message.
+            #    --no-retry-5xx makes it at-most-once per the discord-helper
+            #    contract: only 429 is safe to retry (request guaranteed
+            #    rejected); a transient 5xx / no-response that actually landed
+            #    would spawn a duplicate forum thread.
             if ! RESPONSE=$(discord_curl --no-retry-5xx -X POST \
               -H "Content-Type: application/json" \
-              -d "$PAYLOAD" \
+              -d "$STARTER_PAYLOAD" \
               "$BASE?wait=true"); then
-              echo "::error::Discord POST failed (status $(cat "$DISCORD_STATUS_FILE")) after retries"
+              echo "::error::Discord starter POST failed (status $(cat "$DISCORD_STATUS_FILE")) after retries"
               exit 1
             fi
-            NEW_MSG_ID=$(echo "$RESPONSE" | jq -r '.id')
+            # For a forum create, channel_id is the new thread's id (== starter msg id).
+            NEW_THREAD_ID=$(echo "$RESPONSE" | jq -r '.channel_id // empty')
+            NEW_THREAD_QS=""
+            [ -n "$NEW_THREAD_ID" ] && NEW_THREAD_QS="?thread_id=$NEW_THREAD_ID"
+
+            # 2) Post the detail embed as the 2nd message in the thread. If it
+            #    fails, delete the just-created thread so the next event retries
+            #    cleanly instead of leaving a link-only post behind.
+            if ! DETAIL=$(discord_curl --no-retry-5xx -X POST -H "Content-Type: application/json" -d "$PAYLOAD" \
+              "$BASE?wait=true&thread_id=$NEW_THREAD_ID"); then
+              discord_curl -X DELETE "$BASE/messages/$NEW_THREAD_ID$NEW_THREAD_QS" > /dev/null || true
+              echo "::error::Discord detail embed POST failed (status $(cat "$DISCORD_STATUS_FILE"))"
+              exit 1
+            fi
+            NEW_MSG_ID=$(echo "$DETAIL" | jq -r '.id')
 
             # ── Race guard: re-search for a marker created by a concurrent run ──
             EXISTING_MARKER=$(find_marker)
 
             if [ -n "$EXISTING_MARKER" ] && [ "$EXISTING_MARKER" != "null" ]; then
-              # Another run won the race — delete our duplicate message, use theirs
-              discord_curl -X DELETE "$BASE/messages/$NEW_MSG_ID" > /dev/null || true
-              DISCORD_MSG_ID=$(echo "$EXISTING_MARKER" | jq -r '.body' | grep -o 'discord-msg-id:[0-9]*' | cut -d':' -f2)
+              # Another run won — delete our whole duplicate thread (deleting the
+              # root/starter message removes it), then patch the winner's embed.
+              discord_curl -X DELETE "$BASE/messages/$NEW_THREAD_ID$NEW_THREAD_QS" > /dev/null || true
+              DISCORD_MSG_ID=$(echo "$EXISTING_MARKER" | jq -r '.body' | extract_discord_marker)
+              WINNER_THREAD_ID=$(echo "$EXISTING_MARKER" | jq -r '.body' | extract_discord_thread)
+              WINNER_QS=""
+              [ -n "$WINNER_THREAD_ID" ] && WINNER_QS="?thread_id=$WINNER_THREAD_ID"
               discord_curl -X PATCH -H "Content-Type: application/json" -d "$PAYLOAD" \
-                "$BASE/messages/$DISCORD_MSG_ID" > /dev/null || true
+                "$BASE/messages/$DISCORD_MSG_ID$WINNER_QS" > /dev/null || true
             else
               DISCORD_MSG_ID="$NEW_MSG_ID"
+              COMMENT_BODY=$(render_discord_marker "$DISCORD_MSG_ID" "$NEW_THREAD_ID")
               gh api graphql \
                 -f query='mutation($id:ID!,$body:String!){ addDiscussionComment(input:{discussionId:$id,body:$body}){ clientMutationId } }' \
                 -f id="$NODE_ID" \
-                -f body="<!-- discord-msg-id:${DISCORD_MSG_ID} -->"
+                -f body="$COMMENT_BODY"
             fi
+          fi
+
+          # ── Sync forum thread: archive flag + live tags in ONE PATCH ─────
+          # No-op unless DISCORD_GITHUB_BOT_TOKEN is set. archived + applied_tags
+          # are set together so re-tagging also works on reopen and on threads
+          # Discord auto-archived by inactivity (an applied_tags edit on an
+          # already-archived thread is rejected with 400). Tags cover state,
+          # answer status, category, and labels.
+          FINAL_THREAD_ID="${DISCORD_THREAD_ID:-}"
+          [ -z "$FINAL_THREAD_ID" ] && FINAL_THREAD_ID="${WINNER_THREAD_ID:-}"
+          [ -z "$FINAL_THREAD_ID" ] && FINAL_THREAD_ID="${NEW_THREAD_ID:-}"
+          if [ "$IS_CLOSED" = "true" ]; then
+            discord_sync_thread "$FINAL_THREAD_ID" true "$APPLIED_TAGS"
+          else
+            discord_sync_thread "$FINAL_THREAD_ID" false "$APPLIED_TAGS"
           fi

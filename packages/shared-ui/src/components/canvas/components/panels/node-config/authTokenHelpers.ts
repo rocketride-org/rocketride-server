@@ -45,15 +45,24 @@
  * Kept separate from RJSF form state to survive field-dropping re-renders.
  */
 export interface IAuthTokensRef {
-	/** Generic user authentication token. */
+	/** Generic user authentication token (parameters scope). */
 	userToken?: string;
-	/** Authentication method identifier (e.g. "oauth2", "apikey"). */
+	/** Authentication method identifier (e.g. "oauth2", "apikey") (parameters scope). */
 	authType?: string;
-	/** Google-specific OAuth tokens and expiry metadata. */
+	/** Google-specific OAuth tokens and expiry metadata (parameters scope). */
 	google?: {
 		userToken?: string;
 		accessToken?: string;
 		tokenExpiry?: number;
+	};
+	/**
+	 * Tokens living at the config ROOT — flat node schemas (e.g. tool_gmail)
+	 * keep authType/userToken at the top level, which is where the engine
+	 * reads them (cfg.get('authType') / cfg.get('userToken')).
+	 */
+	root?: {
+		userToken?: string;
+		authType?: string;
 	};
 }
 
@@ -91,6 +100,15 @@ export type IFormDataWithParameters = Record<string, any> & {
 export function persistTokensFromFormData(formData: IFormDataWithParameters, tokensRef: { current: IAuthTokensRef }): void {
 	const params = formData?.parameters ?? {};
 
+	// Root-scoped tokens (flat node schemas like tool_gmail)
+	if (formData?.userToken || formData?.authType) {
+		tokensRef.current.root = {
+			...(tokensRef.current.root ?? {}),
+			...(formData.userToken && { userToken: formData.userToken as string }),
+			...(formData.authType && { authType: formData.authType as string }),
+		};
+	}
+
 	// Copy each known token field, but only if a value exists
 	if (params.userToken) tokensRef.current.userToken = params.userToken;
 	if (params.authType) tokensRef.current.authType = params.authType;
@@ -126,13 +144,21 @@ export function persistTokensFromFormData(formData: IFormDataWithParameters, tok
  * @returns Form data with tokens restored.
  */
 export function mergeAuthTokensIntoFormData(formData: IFormDataWithParameters, previousFormData: IFormDataWithParameters, tokensRef: { current: IAuthTokensRef }): IFormDataWithParameters {
+	const prevRoot = previousFormData ?? {};
 	const prevParams = previousFormData?.parameters ?? {};
 	const newParams = formData?.parameters ?? {};
 	const persisted = tokensRef.current;
 
-	// Resolve each token: previousParams > persistedRef > newParams
+	// Root-scoped tokens (flat node schemas like tool_gmail). userToken is a
+	// conditional-hidden field RJSF drops while authType === 'service', so it
+	// is restored from the previous data / ref. authType is a visible field —
+	// the new form value must win or the user's selection reverts on change.
+	const rootUserToken = formData?.userToken || prevRoot.userToken || persisted.root?.userToken;
+	const rootAuthType = formData?.authType || prevRoot.authType || persisted.root?.authType;
+
+	// Parameters-scoped tokens: previousParams > persistedRef (> newParams for authType)
 	const userToken = prevParams.userToken || persisted.userToken;
-	const authType = prevParams.authType || persisted.authType || newParams.authType;
+	const authType = newParams.authType || prevParams.authType || persisted.authType;
 	const googleUserToken = prevParams.google?.userToken || persisted.google?.userToken;
 	const googleAccessToken = prevParams.google?.accessToken || persisted.google?.accessToken;
 	const googleTokenExpiry = prevParams.google?.tokenExpiry || persisted.google?.tokenExpiry;
@@ -140,20 +166,37 @@ export function mergeAuthTokensIntoFormData(formData: IFormDataWithParameters, p
 	// Build merged form data with recovered tokens overlaid
 	const merged: IFormDataWithParameters = {
 		...formData,
-		parameters: {
+		...(rootUserToken && { userToken: rootUserToken }),
+		...(rootAuthType && { authType: rootAuthType }),
+	};
+
+	// Emit `parameters`/`google` only when the form already carries them or a
+	// token resolved into that scope — fabricating empty objects here pollutes
+	// every node's saved config with `"parameters": {"google": {}}`.
+	const google = {
+		...(newParams.google ?? {}),
+		...(googleUserToken && { userToken: googleUserToken }),
+		...(googleAccessToken && { accessToken: googleAccessToken }),
+		...(googleTokenExpiry && { tokenExpiry: googleTokenExpiry }),
+	};
+	const hasGoogle = Object.keys(google).length > 0;
+	if (formData?.parameters || userToken || authType || hasGoogle) {
+		merged.parameters = {
 			...newParams,
 			...(userToken && { userToken }),
 			...(authType && { authType }),
-			google: {
-				...(newParams.google ?? {}),
-				...(googleUserToken && { userToken: googleUserToken }),
-				...(googleAccessToken && { accessToken: googleAccessToken }),
-				...(googleTokenExpiry && { tokenExpiry: googleTokenExpiry }),
-			},
-		},
-	};
+			...(hasGoogle && { google }),
+		};
+	}
 
 	// Sync the ref with the latest resolved tokens
+	if (rootUserToken || rootAuthType) {
+		tokensRef.current.root = {
+			...(tokensRef.current.root ?? {}),
+			...(rootUserToken && { userToken: rootUserToken as string }),
+			...(rootAuthType && { authType: rootAuthType as string }),
+		};
+	}
 	if (userToken) tokensRef.current.userToken = userToken;
 	if (authType) tokensRef.current.authType = authType;
 	if (googleUserToken || googleAccessToken || googleTokenExpiry) {
@@ -185,8 +228,9 @@ export function mergeAuthTokensIntoFormData(formData: IFormDataWithParameters, p
  * @param onChanged  - Callback to notify the host that content changed.
  */
 export async function persistOAuthTokensAndSave(nodeId: string, formData: IFormDataWithParameters, updateNode: (nodeId: string, data: Record<string, unknown>) => void, onChanged: () => void): Promise<void> {
-	// Apply token-enriched form data to the node
-	updateNode(nodeId, { formData });
+	// Apply token-enriched form data to the node's canonical config field —
+	// serialization reads data.config, so any other key is never saved.
+	updateNode(nodeId, { config: formData });
 
 	// Wait for React to flush: microtask → animation frame → resolved
 	await new Promise<void>((resolve) => {

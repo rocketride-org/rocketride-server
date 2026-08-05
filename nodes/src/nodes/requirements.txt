@@ -10,7 +10,9 @@ charset-normalizer
 # GHSA-m959-cc7f-wv43 (DNS constraint enforcement, fix 46.0.6),
 # GHSA-p423-j2cm-9vmq (buffer overflow, fix 46.0.7).
 cryptography>=46.0.7,<47
-idna
+# Pinned to cover GHSA-65pc-fj4g-8rjx (crafted input to idna.encode() can
+# bypass the CVE-2024-3651 fix), patched in 3.10.
+idna>=3.10
 requests
 urllib3
 numpy

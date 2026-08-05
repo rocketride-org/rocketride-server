@@ -1,0 +1,115 @@
+{
+	"title": "Pose Estimation",
+	"protocol": "pose_estimation://",
+	"classType": ["image"],
+	"capabilities": ["gpu", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.pose_estimation",
+	"prefix": "pose_estimation",
+	"description": ["Top-down human pose estimation using RTMPose (Apache-2.0) via the rtmlib ONNX wrapper. ", "RTMDet-nano performs person detection first, then RTMPose predicts 17 COCO keypoints per person crop. ", "Image or document in; annotated frame out with the per-person keypoint array attached to the document's metadata. ", "v1 is human-only (Sapiens deferred pending license review)."],
+	"icon": "pose-estimation.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.pose_estimation.profile}", "Max persons: ${parameters.pose_estimation.max_persons}"],
+	"lanes": {
+		"image": ["text", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to run pose estimation on.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Annotated image as raw stream - skeleton + keypoint overlay."
+				},
+				{
+					"lane": "text",
+					"description": "JSON array of persons: [{label: 'person', box, keypoints: [{name, x, y, score}, ...]}]."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "rtmpose-medium",
+		"profiles": {
+			"rtmpose-tiny": {
+				"title": "RTMPose Tiny",
+				"profile": "rtmpose-tiny",
+				"threshold": 0.3,
+				"max_persons": 20
+			},
+			"rtmpose-medium": {
+				"title": "RTMPose Medium",
+				"profile": "rtmpose-medium",
+				"threshold": 0.3,
+				"max_persons": 20
+			},
+			"rtmpose-large": {
+				"title": "RTMPose Large",
+				"profile": "rtmpose-large",
+				"threshold": 0.3,
+				"max_persons": 20
+			}
+		}
+	},
+	"fields": {
+		"pose_estimation.profile": {
+			"title": "Model",
+			"type": "string",
+			"default": "rtmpose-medium",
+			"enum": ["*>preconfig.profiles.*.title"]
+		},
+		"pose_estimation.threshold": {
+			"type": "number",
+			"title": "Keypoint score threshold",
+			"description": "Minimum per-keypoint confidence (0.0–1.0). Keypoints below this score are skipped when drawing the skeleton.",
+			"default": 0.3,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"pose_estimation.max_persons": {
+			"type": "number",
+			"title": "Max persons per frame",
+			"description": "Cap on persons retained per frame (sorted by detection score). Limits memory + compute on crowd scenes.",
+			"default": 20,
+			"minimum": 1,
+			"maximum": 200
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Pose Estimation",
+			"properties": ["pose_estimation.profile", "pose_estimation.threshold", "pose_estimation.max_persons"]
+		}
+	],
+	"test": {
+		"profiles": ["rtmpose-medium"],
+		"outputs": ["text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Estimate human pose in a portrait",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "keypoints" }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["rtmpose-tiny", "rtmpose-medium", "rtmpose-large"],
+		"outputs": ["text"],
+		"timeout": 180,
+		"cases": [
+			{
+				"name": "Estimate human pose in a portrait",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "keypoints" }
+				}
+			}
+		]
+	}
+}

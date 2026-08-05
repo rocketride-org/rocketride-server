@@ -28,6 +28,11 @@
 	"register": "filter",
 	//
 	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["An internal filter that chunks incoming text, computes embeddings via the configured embedding component, and writes the resulting documents to the vector store."],
+	//
+	// Optional:
 	//     The node is the actual physical node to instantiate - if
 	//     not specified, the protocol will be used
 	//

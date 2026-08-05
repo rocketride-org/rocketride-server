@@ -1,4 +1,10 @@
 numpy
+
+# Resolve docopt and num2words from wheels only, so the embedded engine installs
+# them without building any source distribution.
+--only-binary docopt
+--only-binary num2words
+
 # Kokoro-82M: official inference package (not transformers AutoModel)
 kokoro>=0.9.4
 soundfile>=0.13.1

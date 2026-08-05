@@ -115,30 +115,28 @@ class Account(AccountBase):
             defaultTeam='local',
             # Single synthetic organisation with org.admin so that
             # resolve_team_permissions expands to the full permission set.
-            organizations=[
-                {
-                    'id': 'local',
-                    'name': 'Local',
-                    'permissions': ['org.admin'],
-                    'teams': [
-                        {
-                            'id': 'local',
-                            'name': 'Development',
-                            'permissions': [
-                                'team.admin',
-                                'read',
-                                'write',
-                                'execute',
-                                'task.control',
-                                'task.data',
-                                'task.monitor',
-                                'task.debug',
-                                'task.store',
-                            ],
-                        }
-                    ],
-                }
-            ],
+            organization={
+                'id': 'local',
+                'name': 'Local',
+                'permissions': ['org.admin'],
+                'teams': [
+                    {
+                        'id': 'local',
+                        'name': 'Development',
+                        'permissions': [
+                            'team.admin',
+                            'read',
+                            'write',
+                            'execute',
+                            'task.control',
+                            'task.data',
+                            'task.monitor',
+                            'task.debug',
+                            'task.store',
+                        ],
+                    }
+                ],
+            },
             # OSS: all apps are on the desktop and free — return full manifest
             # entries so the shell can register MF remotes after auth
             apps=[
@@ -234,6 +232,10 @@ class Account(AccountBase):
         self._saas_only()
 
     # audit() is inherited from AccountBase as a no-op — OSS has no database.
+
+    # resolve_db_dsn is inherited from AccountBase: env-gated broker call
+    # (ROCKETRIDE_DB_BROKER_URL/_TOKEN); raises the cloud-sign-in error when
+    # the environment is not configured — the open-source default.
 
     # =========================================================================
     # APP MANIFEST — read from static apps.json

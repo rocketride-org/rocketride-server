@@ -50,7 +50,7 @@ command processing layer in a task execution and debugging infrastructure.
 The actual task execution and management is delegated to the TaskServer.
 """
 
-from typing import TYPE_CHECKING, Dict, Any, Optional
+from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 
 # Only import for type checking to avoid circular import errors
@@ -203,30 +203,30 @@ class DebugCommands(DAPConn):
             Exception: If task creation or debugger attachment fails
         """
         try:
-            # Verify permission - don't have a task yet
-            self.verify_permission('task.debug')
-
             # Each debug session must have it's own unique connection
             if self._debug_token:
                 raise RuntimeError('Debugger already active on this session')
 
-            # Use client-supplied teamId if present, otherwise fall back to defaultTeam.
+            # Debug runs are development runs: they ALWAYS execute under the
+            # user's profile-assigned development team. Clients do not choose
+            # a team at launch; a stray teamId is rejected rather than
+            # silently ignored so the caller is never surprised by which team
+            # the run was billed/authorized under.
             args = request.get('arguments') or {}
-            team_id = args.get('teamId') or self._account_info.defaultTeam
+            team_id = self._account_info.defaultTeam
+            requested_team = args.get('teamId')
+            if requested_team and requested_team != team_id:
+                raise PermissionError('Debug tasks run in your assigned development team; change it in your profile')
 
-            # Resolve org_id by walking the organizations/teams tree.
-            org_id: Optional[str] = None
-            for org in self._account_info.organizations or []:
-                for team in org.get('teams', []):
-                    if team.get('id') == team_id:
-                        org_id = org.get('id', '')
-                        break
-                if org_id is not None:
-                    break
-            if org_id is None:
-                raise PermissionError(
-                    f'Team {team_id!r} does not belong to any organisation for user {self._account_info.userId!r}'
-                )
+            # Verify task.debug on the development team.
+            self.verify_team_permission(team_id, 'task.debug')
+
+            # Resolve the org that owns the TARGET team. Members resolve via
+            # their own org; callers passing the permission check without
+            # membership (sys.admin, internal) resolve via the account backend
+            # so the task file never carries an empty orgId as trusted
+            # identity (rejected if the team's org cannot be determined).
+            org_id = await self.resolve_org_for_team(team_id)
 
             # Create and start the new task, obtaining a unique token
             response = await self._server.start_task(

@@ -266,6 +266,24 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
+    ///		Returns the complete task-file JSON of the task currently
+    ///		executing in this process, or None when no task is
+    ///		running. This is how subprocess python reads trusted
+    ///		task-file data (identity, storage anchor) without
+    ///		per-endpoint plumbing — published around the task's
+    ///		begin/end window by ITask::execute.
+    ///------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(getTask, []() -> py::object {
+        // Read the published task (a copy; null when none is running)
+        auto task = engine::task::ITask::currentTask();
+        if (task.isNull()) return py::none();
+
+        // Hand python its own dict representation
+        return pyjson::jsonToDict(task);
+    });
+
+    //-------------------------------------------------------------
+    /// @details
     ///		Declares a debug output function which can accept
     ///		multiple arguments. All arguments MUST be convertable
     ///		to python strings. This is for nodes to output
@@ -900,6 +918,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(sendTagEndObject, &IServiceFilterInstance::cb_sendTagEndObject)
         .PYBIND(sendText, &IServiceFilterInstance::cb_sendText)
         .PYBIND(sendTable, &IServiceFilterInstance::cb_sendTable)
+        .PYBIND(sendJson, &IServiceFilterInstance::cb_sendJson)
         .PYBIND(sendAudio, &IServiceFilterInstance::cb_sendAudio,
                 py::arg("action"), py::arg("mimeType"),
                 py::arg("streamData") = py::bytes())
@@ -943,6 +962,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(writeTag, &IServiceFilterInstance::cb_writeTag)
         .PYBIND(writeText, &IServiceFilterInstance::cb_writeText)
         .PYBIND(writeTable, &IServiceFilterInstance::cb_writeTable)
+        .PYBIND(writeJson, &IServiceFilterInstance::cb_writeJson)
         .PYBIND(writeAudio, &IServiceFilterInstance::cb_writeAudio,
                 py::arg("action"), py::arg("mimeType"),
                 py::arg("streamData") = py::bytes())
@@ -965,7 +985,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(writeTagEndObject,
                 &IServiceFilterInstance::cb_writeTagEndObject)
         .PYBIND(close, &IServiceFilterInstance::cb_close)
-        .PYBIND(closing, &IServiceFilterInstance::cb_close)
+        .PYBIND(closing, &IServiceFilterInstance::cb_closing)
 
         .PYBIND_PROP_READONLY_CUSTOM(
             currentObject, [](IServiceFilterInstance &obj) -> py::object {
@@ -1176,6 +1196,9 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND(__delitem__, &IJson::delitem)
         .PYBIND(__getitem__, &IJson::getitem)
         .PYBIND(__setitem__, &IJson::setitem);
+
+    py::implicitly_convertible<py::dict, IJson>();
+    py::implicitly_convertible<py::list, IJson>();
 
     //-------------------------------------------------------------
     /// @details

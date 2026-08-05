@@ -33,6 +33,8 @@ _ENV_ATTR_MAP = {
     'ACCESS_KEY': 'accessKey',
     'APIKEY': 'apikey',
     'KEY': 'apikey',
+    'KEY_ID': 'apiKeyId',
+    'KEY_SECRET': 'apiKeySecret',
     'REGION': 'region',
     'HOST': 'host',
     'PORT': 'port',
@@ -135,6 +137,7 @@ _LLM_MOCK_CREDENTIALS = {
     'tool_exa_search': {'apikey': 'mock-exa-search-placeholder-for-tests'},
     'tool_tavily': {'apikey': 'mock-tavily-placeholder-for-tests'},
     'tool_deepl': {'apikey': 'mock-deepl-placeholder-for-tests'},
+    'tool_slack': {'token': 'xoxb-mock-placeholder-for-tests'},
 }
 
 
@@ -179,6 +182,9 @@ class PipelineBuilder:
         config = {}
         if profile:
             config['profile'] = profile
+
+        if provider == self.config.provider and self.config.config:
+            config.update(self.config.config)
         # Inject credentials into the pipeline config.
         #
         # `ROCKETRIDE_MOCK` (set by the test runner) and per-group

@@ -1,5 +1,5 @@
 {
-	"--rr-brand": "#f7901f",
+	"--rr-brand": "#0e639c",
 	"--rr-palette-mode": "light",
 	"--rr-bg-default": "#ffffff",
 	"--rr-bg-paper": "#ffffff",
@@ -33,9 +33,9 @@
 	"--rr-border-focus": "#0078d4",
 	"--rr-border-input": "#858585",
 	"--rr-border-paper": "none",
-	"--rr-accent": "#f7901f",
-	"--rr-accent-faded": "rgba(247, 144, 31, 0.5)",
-	"--rr-bg-button": "#f7901f",
+	"--rr-accent": "#0e639c",
+	"--rr-accent-faded": "rgba(14, 99, 156, 0.5)",
+	"--rr-bg-button": "#0e639c",
 	"--rr-fg-button": "#ffffff",
 	"--rr-btn-sm-height": "16px",
 	"--rr-btn-sm-padding": "0 6px",
@@ -68,5 +68,11 @@
 	"--rr-font-size-subtitle": "0.875rem",
 	"--rr-font-weight-h5": "400",
 	"--rr-font-weight-button": "600",
-	"--rr-annotation-bg-default": "#fff9c4"
+	"--rr-annotation-bg-default": "#fff9c4",
+	"--rr-chart-blue": "#4263eb",
+	"--rr-chart-green": "#2b8a3e",
+	"--rr-chart-yellow": "#e67700",
+	"--rr-chart-purple": "#7048e8",
+	"--rr-chart-orange": "#e67a2e",
+	"--rr-chart-red": "#c92a2a"
 }

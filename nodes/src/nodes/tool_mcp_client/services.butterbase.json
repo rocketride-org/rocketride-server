@@ -31,7 +31,7 @@
 	"node": "python",
 	//
 	// Optional:
-	//		Reuses the generic MCP client implementation — this is a branded preset,
+	//		Reuses the generic MCP client implementation, this is a branded preset,
 	//		not a separate node (no duplicated code).
 	//
 	"path": "nodes.tool_mcp_client",
@@ -50,7 +50,7 @@
 	// Optional:
 	//		Description of this node shown in the pipeline builder
 	//
-	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more — as tools named butterbase.<tool>.", "This is a branded preset of the generic MCP Client (Streamable HTTP), so it shares the same implementation. Prerequisite: enable Developer Mode on your Butterbase app so the agent can create/modify resources."],
+	"description": ["Connects to the Butterbase MCP server and exposes its backend tools for agent tool-calling.", "Butterbase is an AI-optimized Backend-as-a-Service (managed database, authentication, object storage, serverless functions, RAG). The agent can create apps, evolve schemas, configure auth, deploy functions, and more, as tools named butterbase.<tool>.", "This is a branded preset of the generic MCP Client (Streamable HTTP), so it shares the same implementation. Prerequisite: enable Developer Mode on your Butterbase app so the agent can create/modify resources."],
 	//
 	// Optional:
 	//		Rendering hints for the UI: which config fields to surface on the node tile

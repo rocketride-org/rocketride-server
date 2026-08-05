@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 import time
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -101,7 +102,12 @@ def _resolve_path_params(url: str, path_params: Optional[Dict[str, str]]) -> str
         return url
     resolved = url
     for key, value in path_params.items():
-        resolved = re.sub(rf':{re.escape(key)}\b', str(value), resolved)
+        # Encode (safe='') so the value stays one path segment and cannot slip
+        # past the URL allowlist, which is checked against the unresolved
+        # template. The function replacement keeps it literal (no re.sub
+        # backslash/group-ref interpretation, e.g. '\1' -> re.error).
+        replacement = quote(str(value), safe='')
+        resolved = re.sub(rf':{re.escape(key)}\b', lambda _m, r=replacement: r, resolved)
     return resolved
 
 

@@ -28,7 +28,6 @@
 	--ifm-font-family-base: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	--ifm-heading-font-family: var(--ifm-font-family-base);
 	--ifm-code-font-size: 92%;
-	--ifm-heading-font-weight: 650;
 
 	/* Light mode: Horizon darkened for contrast on white */
 	--ifm-color-primary: #1f9fd0;
@@ -94,6 +93,10 @@
 :root:not(#\#):not(#\#) {
 	--ifm-background-color: #ffffff;
 	--ifm-background-surface-color: #f5f7fb;
+	/* Infima build-injects --ifm-heading-font-weight: var(--ifm-font-weight-bold)
+	 * at (2,0,1), beating our plain :root — match the hack so headings render at
+	 * the intended 500. */
+	--ifm-heading-font-weight: 500;
 	/* Infima also boosts its .navbar/.footer element rules to (2,1,0), so they
 	 * win over class overrides — feed their tokens the surface color instead, so
 	 * navbar and footer paint identically. */
@@ -180,12 +183,6 @@ body {
 	transition: none !important;
 }
 
-.navbar__title {
-	font-weight: 700;
-	letter-spacing: -0.01em;
-	color: var(--ifm-heading-color);
-}
-
 .navbar__logo {
 	height: 1.75rem;
 }
@@ -195,13 +192,6 @@ body {
 .navbar__link--colored:not(#\#):not(#\#),
 .navbar__link--colored:not(#\#):not(#\#):hover {
 	color: var(--ifm-link-color);
-}
-
-/* Brand (logo + "RocketRide" title) on the left: tint the title to the link
- * accent on hover, matching the other navbar links. Double :not(#\#) keeps the
- * specificity above Infima's navbar rules. */
-.navbar__brand:not(#\#):not(#\#):hover .navbar__title {
-	color: var(--ifm-link-hover-color);
 }
 
 /* GitHub link with live star count (custom-githubStars navbar item). */
@@ -230,6 +220,47 @@ body {
 	height: 0.95rem;
 	flex-shrink: 0;
 	color: var(--ifm-font-color-base);
+}
+
+/* Discord link (custom-discord navbar item), icon only, next to GitHub. */
+.navbar-discord {
+	display: inline-flex;
+	align-items: center;
+}
+
+.navbar-discord__icon {
+	width: 1.1rem;
+	height: 1.1rem;
+	flex-shrink: 0;
+	color: var(--ifm-font-color-base);
+	transition: color 0.15s ease;
+}
+
+.navbar-discord:hover .navbar-discord__icon {
+	color: var(--ifm-link-hover-color);
+}
+
+/* Search box themed to the brand (local search uses Infima's .navbar__search-input;
+   background-color, not background, so Infima's search-glyph image is preserved). */
+.navbar__search-input {
+	background-color: var(--ifm-color-emphasis-100);
+	border: 1px solid var(--rr-panel-border);
+	border-radius: 999px;
+	color: var(--ifm-font-color-base);
+	transition:
+		border-color 0.15s ease,
+		box-shadow 0.15s ease,
+		background-color 0.15s ease;
+}
+
+.navbar__search-input::placeholder {
+	color: var(--ifm-color-emphasis-600);
+}
+
+.navbar__search-input:focus {
+	outline: none;
+	border-color: var(--ifm-color-primary);
+	box-shadow: 0 0 0 3px rgba(65, 182, 230, 0.25);
 }
 
 /* ----------------------------------------------------------------------------
@@ -269,6 +300,36 @@ body {
 	border-left: none !important;
 }
 
+/* Breadcrumb row with a right-aligned "View source" action (node pages).
+ * The stock breadcrumbs keep their own bottom margin; move it to the row so
+ * the link stays vertically centered against the crumbs. */
+.rr-breadcrumbs-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 0.8rem;
+}
+
+.rr-breadcrumbs-row .theme-doc-breadcrumbs {
+	margin-bottom: 0 !important;
+}
+
+.rr-view-source {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.85rem;
+	font-weight: 500;
+	white-space: nowrap;
+	color: var(--ifm-color-emphasis-600);
+}
+
+.rr-view-source:hover {
+	color: var(--ifm-link-color);
+	text-decoration: none;
+}
+
 /* Right "on this page" nav: only the current-section (active) link takes the
  * theme link color (Imperial Indigo light / Horizon Blue dark) + bold; every
  * other link is plain body text (black light / white dark), not Infima's grey
@@ -301,6 +362,9 @@ body {
 }
 
 .markdown table {
+	display: block;
+	width: max-content;
+	max-width: 100%;
 	border-radius: 12px;
 	overflow: hidden;
 	border: 1px solid var(--rr-panel-border);
@@ -378,12 +442,15 @@ article a {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.5rem;
+	overflow: hidden;
 }
 
 .rr-quickstart-btn:not(#\#):not(#\#),
 .rr-quickstart-btn:not(#\#):not(#\#):hover {
-	background-color: var(--ifm-link-color);
-	border-color: var(--ifm-link-color);
+	background: linear-gradient(135deg, var(--rr-horizon) 0%, var(--rr-amethyst) 100%);
+	background-color: var(--rr-amethyst);
+	background-clip: padding-box;
+	border: 0;
 	color: #fff;
 }
 
@@ -394,6 +461,8 @@ article a {
 .rr-quickstart-btn__icon {
 	width: 1.15em;
 	height: 1.15em;
+	position: relative;
+	top: 0.15em;
 }
 
 /* Never underline the side-card links. Infima's `a:hover:not(#\#):not(#\#)`
@@ -633,7 +702,7 @@ article a {
 
 .rr-footer__columns {
 	display: grid;
-	grid-template-columns: repeat(3, 1fr);
+	grid-template-columns: repeat(4, 1fr);
 	gap: 2rem;
 }
 
@@ -732,4 +801,13 @@ article a {
 .docs-md-actions .button:hover {
 	background: var(--ifm-color-primary);
 	color: #fff;
+}
+
+/* ----------------------------------------------------------------------------
+ * Prev / Next pagination buttons: border takes the theme link color on hover
+ * (not Infima's default primary blue). Border only; labels are unchanged. Match
+ * the :not(#\#):not(#\#) hack to win against Infima's component-rule specificity.
+ * ------------------------------------------------------------------------- */
+.pagination-nav__link:hover:not(#\#):not(#\#) {
+	border-color: var(--ifm-link-color);
 }

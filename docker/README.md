@@ -1,4 +1,4 @@
-# Docker — RocketRide Local Development Stack
+# Docker: RocketRide Local Development Stack
 
 ## Prerequisites
 

@@ -120,8 +120,10 @@ class CProfileCommands(DAPConn):
         Returns:
             DAP response with the subprocess result body.
         """
-        # Look up the task control entry by token
-        control = self._server.get_task_control(target)
+        # Look up the task control entry by token, requiring task.control on
+        # the TASK'S team. Without this, any defaultTeam task.control holder
+        # could drive the profiler inside another team's engine subprocess.
+        control = self._server.get_task_control(target, self._account_info, require='task.control')
         task = control.task
 
         # Wait for the task to reach running state
@@ -157,6 +159,7 @@ class CProfileCommands(DAPConn):
         - Local: { "command": "rrext_cprofile_start", "arguments": { "session": "test" } }
         - Proxy: { "command": "rrext_cprofile_start", "arguments": { "target": "tk_abc", "session": "test" } }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -187,6 +190,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_stop" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -215,6 +219,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_status" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -243,6 +248,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_report" }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 
@@ -274,6 +280,7 @@ class CProfileCommands(DAPConn):
         Usage Example:
         { "command": "rrext_cprofile_report_tree", "arguments": { "max_depth": 30, "min_pct": 0.5 } }
         """
+        self.verify_permission('task.control')
         args = request.get('arguments', {})
         target = args.get('target', None)
 

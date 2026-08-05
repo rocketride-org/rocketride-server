@@ -29,7 +29,9 @@ import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PipelineFileParser, ParsedPipelineFile, ServiceClassInfo } from '../shared/util/pipelineParser';
 import { GenericEvent, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { isSubscribed } from '../shared/util/subscriptionGate';
+import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
+import { getLogger } from '../shared/util/output';
 import { getProjectProvider } from '../extension';
 
 // =============================================================================
@@ -41,6 +43,10 @@ interface ProjectEntryDTO {
 	projectId?: string;
 	sources?: { id: string; name: string; provider?: string }[];
 }
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
 
 // =============================================================================
 // PROVIDER
@@ -57,6 +63,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	// ── Pipeline file state ──────────────────────────────────────────────────
 	private parsedFiles = new Map<string, ParsedPipelineFile>();
+
+	private logger = getLogger();
 
 	/**
 	 * Creates the sidebar provider.
@@ -130,19 +138,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 						await this.configManager.updateConnectionMode('development', message.mode);
 						this.sendFullUpdate();
 						break;
-					case 'setDevelopmentTeam':
-						this.configManager.setTeamId('development', message.teamId);
-						this.sendFullUpdate();
-						break;
 					case 'setDeployTargetMode':
 						await this.configManager.updateConnectionMode('deployment', message.mode);
 						// Reconnect the DEPLOY manager (not dev) when deploy mode changes
 						await this.deployManager.disconnect();
 						await this.deployManager.initialize();
-						this.sendFullUpdate();
-						break;
-					case 'setDeployTargetTeam':
-						this.configManager.setTeamId('deployment', message.teamId);
 						this.sendFullUpdate();
 						break;
 					case 'cloudSignIn': {
@@ -284,7 +284,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			// Subscribe to task lifecycle events
 			const client = this.connectionManager.getClient();
 			if (client) {
-				client.addMonitor({ token: '*' }, ['task', 'output']).catch((err) => {
+				// 'task' only: the wildcard 'output' subscription existed to feed
+				// the removed Rocket Ride: Console mirror — per-editor monitors
+				// subscribe to output themselves for the Log pane.
+				client.addMonitor({ token: '*' }, ['task']).catch((err) => {
 					console.error('[SidebarProvider] Failed to subscribe to task events:', err);
 				});
 			}
@@ -339,7 +342,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 					event: event.body,
 				});
 			} else if (event?.event === 'apaevt_status_update') {
-				// Forward status updates (errors/warnings) to webview
+				// Forward status updates (errors/warnings) to webview.
+				// Deploy runs never touch the dev lists (THE one host-side
+				// classifier, shared with ProjectProvider's status cache) —
+				// their status belongs to the deployment surfaces, and the '*'
+				// subscription delivers them here whenever a team-scoped run
+				// is visible.
+				if (isDeployRunBody(event.body)) return;
 				const projectId = event.body?.project_id;
 				const sourceId = event.body?.source;
 				if (projectId && sourceId) {
@@ -361,17 +370,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// DATA
 	// =========================================================================
 
-	/**
-	 * Returns teams from a client's ConnectResult (already cached from connect()).
-	 * No DAP request needed — teams are part of the auth handshake response.
-	 */
-	private getTeamsFromClient(client: import('rocketride').RocketRideClient | undefined): Array<{ id: string; name: string }> {
-		const info = client?.getAccountInfo();
-		if (!info?.organizations?.length) return [];
-		return info.organizations[0].teams ?? [];
-	}
-
-	/** Sends connection state + entries + user identity + teams to the webview. */
+	/** Sends connection state + entries + user identity to the webview. */
 	private async sendFullUpdate(): Promise<void> {
 		if (!this._view) return;
 
@@ -398,18 +397,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// Dev connection
 				connectionState: status.state,
 				connectionMode: config.development.connectionMode,
-				developmentTeamId: config.development.teamId,
 				devProgressMessage: status.progressMessage,
 				devProgressLogLine: status.progressLogLine,
 				// Deploy connection
 				deployConnectionState: deployStatus.state,
 				deployConnectionMode: config.deployment.connectionMode,
-				deployTargetTeamId: config.deployment.teamId,
 				deployProgressMessage: deployStatus.progressMessage,
 				deployProgressLogLine: deployStatus.progressLogLine,
-				// Teams (from respective servers)
-				teams: this.getTeamsFromClient(this.connectionManager.getClient()),
-				deployTeams: this.getTeamsFromClient(this.deployManager.getClient()),
 				// Shared
 				cloudConnected,
 				userName: userName || undefined,
@@ -528,11 +522,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			if (missing.length > 0) return;
 
 			const pipeName = path.basename(fsPath).replace(/\.pipe(?:\.json)?$/, '');
+			// Same per-task settings as editor launches (ProjectProvider.runPipeline)
+			// — a pipeline must run identically regardless of where it is started.
+			const cfg = ConfigManager.getInstance().getConfig();
 			await client.use({
 				pipeline: pipelineJson,
 				source: sourceId ?? '',
-				args: ConfigManager.getInstance().getEngineArgs('development'),
+				pipelineTraceLevel: cfg.pipelineTraceLevel,
+				args: ConfigManager.getInstance().getTaskArgs(),
 				name: pipeName,
+				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
 			});
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);
@@ -671,7 +670,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	public dispose(): void {
 		const client = this.connectionManager.getClient();
 		if (client) {
-			client.removeMonitor({ token: '*' }, ['task', 'output']).catch(() => {});
+			client.removeMonitor({ token: '*' }, ['task']).catch(() => {});
 		}
 		for (const d of this.disposables) d.dispose();
 		this.disposables = [];

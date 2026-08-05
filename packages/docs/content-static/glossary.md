@@ -17,18 +17,18 @@ See [Pipelines](/concepts/pipelines).
 One vertex of the pipeline graph: a single unit that does one job (call a model,
 embed text, query a store, run a tool). Has a unique `id`, a
 [provider](#provider), and `config`. See
-[Nodes & connectors](/concepts/nodes-connectors).
+[Nodes](/concepts/nodes).
 
 ### Provider
 
-What a component _is_ — the value that determines its behaviour (e.g.
+What a component _is_: the value that determines its behaviour (e.g.
 `llm_openai`, `qdrant`, `webhook`). Swapping providers is a config change, not a
 code change.
 
 ### Connector
 
 A [node](#component--node) at the edge of the graph that reads from or writes to
-an external system — a **source** (brings data in) or a **target** (sends results
+an external system: a **source** (brings data in) or a **target** (sends results
 out).
 
 ### Class type
@@ -50,8 +50,8 @@ the helper, pointing back at the invoker.
 
 ### Agent
 
-A node that reasons in a loop — choosing which model to call and which tools to
-use — over one or more **waves** until it produces a result. See
+A node that reasons in a loop, choosing which model to call and which tools to
+use, over one or more **waves** until it produces a result. See
 [Agents & tools](/concepts/agents-tools-skills).
 
 ### Tool
@@ -83,7 +83,7 @@ controlled over the [WebSocket protocol](/protocols/websocket).
 
 ### MCP
 
-The Model Context Protocol — exposes running pipelines as tools for AI
+The Model Context Protocol: exposes running pipelines as tools for AI
 assistants. See [MCP](/protocols/mcp).
 
 ### WebSocket protocol

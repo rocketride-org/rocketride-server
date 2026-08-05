@@ -150,7 +150,7 @@ class MockCollection:
         items = list(self._storage.items())
 
         # Filter by ids if provided
-        if ids:
+        if ids is not None:
             items = [(id, data) for id, data in items if id in ids]
 
         count = 0
@@ -214,7 +214,7 @@ class MockCollection:
 
     def delete(self, ids: List[str] = None, where: Optional[Dict] = None):
         """Delete items from the collection."""
-        if ids:
+        if ids is not None:
             for id in ids:
                 if id in self._storage:
                     del self._storage[id]
@@ -228,7 +228,7 @@ class MockCollection:
 
     def update(self, ids: List[str] = None, where: Optional[Dict] = None, new_metadata: Dict = None):
         """Update items in the collection."""
-        if ids:
+        if ids is not None:
             for id in ids:
                 if id in self._storage and new_metadata:
                     self._storage[id]['metadata'].update(new_metadata)

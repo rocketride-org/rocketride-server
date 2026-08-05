@@ -148,14 +148,13 @@ def _load_iinstance():
     pkg_stub.IGlobal = iglobal_mod
 
     try:
-        spec = importlib.util.spec_from_file_location(
-            f'{pkg_name}.IInstance',
-            _IINSTANCE_PATH,
-            submodule_search_locations=[],
-        )
+        # Plain MODULE spec: submodule_search_locations (even []) would make
+        # this a package spec whose parent is itself, tripping Python 3.12's
+        # "__package__ != __spec__.parent" deprecation on relative imports.
+        # module_from_spec derives __package__ from the spec parent instead.
+        spec = importlib.util.spec_from_file_location(f'{pkg_name}.IInstance', _IINSTANCE_PATH)
         assert spec is not None and spec.loader is not None
         mod = importlib.util.module_from_spec(spec)
-        mod.__package__ = pkg_name
         sys.modules[f'{pkg_name}.IInstance'] = mod
         scaffold.append(f'{pkg_name}.IInstance')
         spec.loader.exec_module(mod)
@@ -168,10 +167,16 @@ def _load_iinstance():
 
 
 _mod = _load_iinstance()
-# Bind the module's `warning` reference to our stub (see tavily test rationale:
-# `from rocketlib import warning` binds at import time, so under the engine's
-# pytest runner the real logger would otherwise be used).
+# Rebind the names the v0 module imported into its own namespace at import time
+# (`from rocketlib import warning`, `from ai.common.utils import post_with_retry,
+# normalize_tool_input`). The import-time sys.modules stubs in _load_iinstance only
+# take effect when those modules weren't already imported — so when a prior test on
+# the same pytest worker imported the REAL `ai.common.utils`/`rocketlib`, the real
+# implementations leak in and `post_with_retry` makes a live network call (HTTP 401).
+# Rebinding here makes the stubbing robust regardless of import order.
 _mod.warning = _stub_warning
+_mod.post_with_retry = _stub_post_with_retry
+_mod.normalize_tool_input = lambda args, **_kw: args if isinstance(args, dict) else {}
 
 _shape_chat = _mod._shape_chat
 IInstance = _mod.IInstance

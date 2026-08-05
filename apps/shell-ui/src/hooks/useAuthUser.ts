@@ -26,7 +26,7 @@
  * connectClient() succeeds and returns a ConnectResult.
  */
 
-import React, { createContext, useContext } from 'react';
+import { createContext, useContext } from 'react';
 import type { ConnectResult } from 'rocketride';
 
 // Re-export ConnectResult under the public alias AuthUser so consumers

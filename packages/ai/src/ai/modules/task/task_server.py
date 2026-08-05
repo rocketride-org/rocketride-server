@@ -83,16 +83,14 @@ from ai.constants import (
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import TASK_STATUS, EVENT_TYPE
 from ai.web import WebServer
-from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
+from ai.account.models import AccountInfo, resolve_task_permissions
 from ai.account.store import Store
-from ai.account.deployment_store import DeploymentStore
 from .task_conn import TaskConn
 from .task_engine import Task
 from .types import LAUNCH_TYPE
 from .pipeline import resolve_implied_source
+from .commands.cmd_monitor import owner_key
 
-# todo: feat/deploy2 - enable TaskScheduler
-# from .task_scheduler import TaskScheduler
 from rocketlib import debug
 
 
@@ -125,6 +123,13 @@ class TASK_CONTROL:
     teamId: str = ''
     orgId: str = ''
 
+    # Run classification: 'dev' | 'deploy'. Part of task identity — the
+    # OWNER of a dev run is its user, the owner of a deploy run is its
+    # team, and the token digest, monitor keys, and lookups all scope by
+    # that owner. teamId above remains billing/permission attribution and
+    # is NOT the owner for dev runs.
+    run_kind: str = 'dev'
+
     # Public token - used in as alt auth
     public_auth: str = ''
 
@@ -140,6 +145,15 @@ class TASK_CONTROL:
 
     # And finally, the task reference
     task: Optional[Task] = None
+
+    @property
+    def owner_id(self) -> str:
+        """
+        The identity that OWNS this run: the team for deploy runs, the
+        user for dev runs. Monitor keys and identity lookups scope by this
+        value — never by the attribution teamId of a dev run.
+        """
+        return self.teamId if self.run_kind == 'deploy' else self.userId
 
 
 class TaskServer(DAPBase):
@@ -216,12 +230,6 @@ class TaskServer(DAPBase):
         self._allocated_ports: List[int] = []
 
         # Shared store instance (lazy-loaded via property)
-        self._store_instance: Optional[Store] = None
-        self._deployments_instance: Optional[DeploymentStore] = None
-
-        # Scheduler for running deployed pipelines
-        # todo: feat/deploy2 - enable TaskScheduler
-        # self.scheduler = TaskScheduler(self)
 
         # Start background tasks that must be cancelled on shutdown.
         self._bg_tasks: List[asyncio.Task] = [
@@ -229,9 +237,6 @@ class TaskServer(DAPBase):
             asyncio.create_task(self._cleanup_tasks()),
             # TTL monitoring
             asyncio.create_task(self._monitor_ttl()),
-            # Run scheduled deployments
-            # todo: feat/deploy2 - enable TaskScheduler
-            # asyncio.create_task(self.scheduler.start()),
         ]
 
         # Store reference to parent server for statistics integration
@@ -256,16 +261,10 @@ class TaskServer(DAPBase):
         Returns:
             Store: The shared store instance
         """
-        if self._store_instance is None:
-            self._store_instance = Store.create()
-        return self._store_instance
-
-    @property
-    def deployments(self) -> DeploymentStore:
-        """Shared DeploymentStore instance, lazy-initialized on first access."""
-        if self._deployments_instance is None:
-            self._deployments_instance = DeploymentStore(self.store._store)
-        return self._deployments_instance
+        # The process-wide singleton — TaskServer no longer owns a private
+        # instance, so server code and Store.file_store(ctx) call sites can
+        # never diverge onto different stores.
+        return Store.instance()
 
     async def _cleanup_tasks(self) -> None:
         """
@@ -375,8 +374,9 @@ class TaskServer(DAPBase):
                         self.debug_message(
                             f'Task "{control.id}" exceeded TTL ({control.task._idle_time}s >= {control.task._ttl}s), terminating...'
                         )
-                        # Terminate the idle task
-                        await self.stop_task(control.token)
+                        # Terminate the idle task — reason 'ttl', so the
+                        # run records as completed, never as cancelled.
+                        await self.stop_task(control.token, reason='ttl')
 
             except Exception as e:
                 # Log errors but continue operation to maintain system stability
@@ -384,8 +384,6 @@ class TaskServer(DAPBase):
 
     async def shutdown(self) -> None:
         """Cancel all background tasks."""
-        # todo: feat/deploy2 - enable TaskScheduler
-        # await self.scheduler.stop()
         bg_tasks = getattr(self, '_bg_tasks', [])
         for task in bg_tasks:
             if not task.done():
@@ -526,14 +524,13 @@ class TaskServer(DAPBase):
                 # Log cleanup errors but continue processing other tasks
                 self.debug_message(f'Error during disconnection cleanup for task "{control.id}": {e}')
 
-        # Close any open file store handles for this connection
-        if hasattr(conn, '_account_info') and conn._account_info:
-            try:
-                client_id = conn._account_info.userId
-                if client_id in self.store._file_stores:
-                    await self.store._file_stores[client_id].close_all_handles(connection_id)
-            except Exception as e:
-                self.debug_message(f'Error closing file handles for connection {connection_id}: {e}')
+        # Close any open file store handles for this connection. The handle
+        # registry is Store-wide (shared across all FileStore instances), so
+        # this covers every store the connection ever constructed.
+        try:
+            await self.store.close_all_handles(connection_id)
+        except Exception as e:
+            self.debug_message(f'Error closing file handles for connection {connection_id}: {e}')
 
         # Log successful disconnection cleanup
         self.debug_message(f'Connection {connection_id} disconnected and cleaned up.')
@@ -554,14 +551,12 @@ class TaskServer(DAPBase):
             phoneNumberVerified=False,
             locale='',
             defaultTeam=control.teamId,
-            organizations=[
-                {
-                    'id': control.orgId,
-                    'name': '',
-                    'permissions': [],
-                    'teams': [{'id': control.teamId, 'name': '', 'permissions': permissions}],
-                }
-            ],
+            organization={
+                'id': control.orgId,
+                'name': '',
+                'permissions': [],
+                'teams': [{'id': control.teamId, 'name': '', 'permissions': permissions}],
+            },
         )
 
     async def authenticate(self, authorization: str) -> Optional[AccountInfo]:
@@ -604,28 +599,83 @@ class TaskServer(DAPBase):
         source: str,
         account_info: Optional[AccountInfo] = None,
         require: Optional[str] = None,
+        team_id: str = '',
     ) -> TASK_CONTROL:
         """
-        Retrieve task control structure by project_id + source.
+        Retrieve task control structure by its owner-scoped identity.
 
-        If account_info is provided:
-          - Checks task ownership (control.userId == account_info.userId)
-          - If require is specified, checks that permission against the task's team
+        The scope IS the kind: ``team_id`` set addresses the team's DEPLOY
+        run of ``project_id``/``source``; ``team_id`` absent addresses the
+        caller's own DEV run (owner = ``account_info.userId``). Both are
+        unique by construction — task identity is {owner}.{project}.{source}.
+
+        Without ``account_info`` (legacy/OSS/HTTP fallback) the pair is
+        scanned unscoped: a single match returns, multiple matches raise
+        instead of silently returning an arbitrary run.
+
+        Args:
+            project_id (str): Project identity of the run
+            source (str): Source component id of the run
+            account_info (Optional[AccountInfo]): Caller identity for scoping
+                and permission checks
+            require (Optional[str]): Permission that must be granted on the
+                run's team (e.g. 'task.monitor')
+            team_id (str): Owner team — addresses that team's deploy run;
+                empty addresses the caller's dev run
 
         Raises:
-            RuntimeError: If task doesn't exist
-            PermissionError: If ownership or permission check fails
+            RuntimeError: If no (or ambiguously many) matching tasks exist
+            PermissionError: If the permission check fails
         """
-        for control in self._task_control.values():
-            if control.project_id == project_id and control.source == source:
-                if account_info is not None:
-                    perms = resolve_task_permissions(account_info, control.teamId)
-                    if not perms:
-                        raise PermissionError('Access denied: no permissions for this task')
-                    if require and require not in perms:
-                        raise PermissionError(f'Permission {require!r} denied for this task')
-                return control
 
+        def _verify(control: TASK_CONTROL) -> TASK_CONTROL:
+            """Apply the team permission check against the run's team."""
+            if account_info is not None:
+                perms = resolve_task_permissions(account_info, control.teamId)
+                if not perms:
+                    raise PermissionError('Access denied: no permissions for this task')
+                if require and require not in perms:
+                    raise PermissionError(f'Permission {require!r} denied for this task')
+            return control
+
+        # Team scope: the team's deploy run. A team scope without a caller
+        # identity is never legitimate — permission must resolve somewhere.
+        if team_id:
+            if account_info is None:
+                raise PermissionError('Not authenticated')
+            for control in self._task_control.values():
+                if (
+                    control.run_kind == 'deploy'
+                    and control.teamId == team_id
+                    and control.project_id == project_id
+                    and control.source == source
+                ):
+                    return _verify(control)
+            raise RuntimeError('Your pipeline is not running')
+
+        # Dev scope: the caller's own run — unique per user by construction.
+        if account_info is not None:
+            for control in self._task_control.values():
+                if (
+                    control.run_kind == 'dev'
+                    and control.userId == account_info.userId
+                    and control.project_id == project_id
+                    and control.source == source
+                ):
+                    return _verify(control)
+            raise RuntimeError('Your pipeline is not running')
+
+        # Legacy unscoped scan (OSS single-user / HTTP fallback): tolerate a
+        # unique match; refuse to guess between several runs.
+        matches = [
+            control
+            for control in self._task_control.values()
+            if control.project_id == project_id and control.source == source
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            raise RuntimeError('Multiple pipelines are running for this project; specify a scope')
         raise RuntimeError('Your pipeline is not running')
 
     def get_task_control_by_public_key(self, public_auth: str) -> TASK_CONTROL:
@@ -673,8 +723,14 @@ class TaskServer(DAPBase):
         if not control:
             raise RuntimeError('Your pipeline is not running')
 
+        # Resolve against the TASK'S team (the old resolve_team_permissions
+        # call raised on foreign teams instead of denying uniformly).
+        # sys.admin and internal identities bypass INSIDE the resolver — it
+        # returns the full permission set for them — so no outer short-circuit.
         if account_info is not None and require:
-            perms = resolve_team_permissions(account_info, control.teamId)
+            perms = resolve_task_permissions(account_info, control.teamId)
+            if not perms:
+                raise PermissionError('Access denied: no permissions for this task')
             if require not in perms:
                 raise PermissionError(f'Permission {require!r} denied for this task')
 
@@ -737,7 +793,13 @@ class TaskServer(DAPBase):
         if port in self._allocated_ports:
             self._allocated_ports.remove(port)
 
-    async def broadcast_server_event(self, type: EVENT_TYPE, event: Dict[str, Any], user_id: str = None) -> None:
+    async def broadcast_server_event(
+        self,
+        type: EVENT_TYPE,
+        event: Dict[str, Any],
+        user_id: str = None,
+        org_id: str = None,
+    ) -> None:
         """
         Broadcast a server-level event to all connections subscribed via the '*' wildcard.
 
@@ -752,14 +814,13 @@ class TaskServer(DAPBase):
                 Expected keys: 'event' (str) and 'body' (Any).
             user_id (str, optional): When provided, restricts delivery to connections
                 whose authenticated userId matches this value (tenant scoping).
-                Pass None to broadcast to all '*'-subscribed connections regardless of tenant.
+            org_id (str, optional): When provided, restricts delivery to connections
+                whose primary org matches this value (org scoping for billing events).
         """
         for conn in list(self._connections.values()):
             try:
-                await conn.send_server_event(type, event=event, user_id=user_id)
+                await conn.send_server_event(type, event=event, user_id=user_id, org_id=org_id)
             except Exception as e:
-                # Log individual delivery failures so dashboard-event drops leave
-                # a trace; match the pattern used by broadcast_task_event below.
                 self.debug_message(f'Failed to broadcast server event to connection: {e}')
 
     async def push_account_update(self, user_id: str) -> None:
@@ -909,8 +970,9 @@ class TaskServer(DAPBase):
         # Ensure task is properly stopped and resources are cleaned up
         await control.task.stop_task()
 
-        # Remove monitor subscriptions that reference this task from all connections
-        project_key = f'p.{control.project_id}.{control.source}'
+        # Remove monitor subscriptions that reference this task from all
+        # connections — keys are owner-scoped, so build from the control
+        project_key = owner_key(control.owner_id, control.project_id, control.source)
         for conn in self._connections.values():
             if hasattr(conn, '_monitors'):
                 # Remove exact source key, pipe-scoped keys, and token-scoped keys
@@ -948,6 +1010,8 @@ class TaskServer(DAPBase):
         team_id: str = '',
         org_id: str = '',
         env: Dict[str, str] | None = None,
+        run_kind: str = 'dev',
+        trigger: str = '',
     ) -> str:
         """
         Create and start a new computational task with full lifecycle management.
@@ -1027,6 +1091,10 @@ class TaskServer(DAPBase):
         control.userId = user_id
         control.teamId = team_id
         control.orgId = org_id
+        # Run classification MUST be set before token generation below: the
+        # token digest scopes by the run's OWNER (user for dev, team for
+        # deploy), which is derived from run_kind.
+        control.run_kind = run_kind
         control.token = args.get('token', None)
         control.pipeline = args.get('pipeline', None)
         control.source = args.get('source', None)
@@ -1077,11 +1145,26 @@ class TaskServer(DAPBase):
         if not control.provider:
             raise ValueError(f'Source "{control.source}" not found in pipeline')
 
+        # Owner-scoped token identity: a task is uniquely
+        # {owner}.{projectId}.{source} — the owner FIELD NAME (userId vs
+        # teamId) disambiguates dev from deploy even if the id spaces ever
+        # collided, so a dev run and a deploy run of the same pipeline
+        # never hash to the same token, and neither do two teams' deploys
+        # or two users' dev runs. Dev = once per user (total); deploy =
+        # once per team (actor-independent — deploy dispatch carries no
+        # user identity). The 'kind' discriminator keeps the tk_ and pk_
+        # DIGESTS distinct, not just their prefixes.
+        if control.run_kind == 'deploy':
+            owner_content = {'teamId': control.teamId}
+        else:
+            owner_content = {'userId': control.userId}
+
         # Build the token
         if control.token is None:
             control.token = self._server.account.generate_token(
                 content={
-                    'userId': control.userId,
+                    'kind': 'task',
+                    **owner_content,
                     'project_id': control.project_id,
                     'source': control.source,
                 },
@@ -1091,6 +1174,8 @@ class TaskServer(DAPBase):
         # Build the public token
         control.public_auth = self._server.account.generate_token(
             content={
+                'kind': 'public',
+                **owner_content,
                 'project_id': control.project_id,
                 'source': control.source,
             },
@@ -1159,7 +1244,11 @@ class TaskServer(DAPBase):
                 provider=control.provider,
                 ttl=ttl,
                 client_id=control.client_id,
+                team_id=control.teamId,
+                org_id=control.orgId,
                 env=env or {},
+                run_kind=run_kind,
+                trigger=trigger,
             )
 
             # Register task in central registry
@@ -1341,7 +1430,7 @@ class TaskServer(DAPBase):
             self.debug_message(f'Failed to restart task: {str(e)}')
             raise
 
-    async def stop_task(self, token: str):
+    async def stop_task(self, token: str, reason: str = 'user'):
         """
         Stop a running task with proper cleanup and resource management.
 
@@ -1371,7 +1460,7 @@ class TaskServer(DAPBase):
 
             # Only terminate tasks that were launched or executed directly
             if control.launch_type in (LAUNCH_TYPE.LAUNCH, LAUNCH_TYPE.EXECUTE):
-                await control.task.stop_task()
+                await control.task.stop_task(reason)
                 self.debug_message(f'Task "{control.id}" stopped on request')
 
         except Exception as e:

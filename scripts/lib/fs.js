@@ -234,6 +234,76 @@ async function copyFileEnsure(src, dest) {
 }
 
 /**
+ * Fill a buffer from a file handle, looping until it is full or EOF is hit.
+ *
+ * A single read() may return fewer bytes than requested even mid-file, so this
+ * keeps reading into the same buffer until the requested window is complete.
+ * That guarantees two files are compared on aligned byte boundaries.
+ *
+ * @param {import('fs/promises').FileHandle} fh - Open file handle
+ * @param {Buffer} buf - Destination buffer to fill
+ * @returns {Promise<number>} Bytes read into buf (0 once EOF is reached)
+ */
+async function readChunkFull(fh, buf) {
+    let offset = 0;
+    while (offset < buf.length) {
+        const { bytesRead } = await fh.read(buf, offset, buf.length - offset, null);
+        if (bytesRead === 0) break; // EOF
+        offset += bytesRead;
+    }
+    return offset;
+}
+
+/**
+ * Byte-compare the contents of two files.
+ *
+ * Used by the incremental sync to decide whether a file actually changed.
+ * File size is a cheap pre-filter — differently-sized files are never equal,
+ * so callers should skip this call when sizes differ. Same-size files must be
+ * compared by content, because a same-length edit (e.g. a swapped
+ * content-hash string in an index.html) does not change the size and cannot
+ * be detected by size or mtime alone.
+ *
+ * The compare runs in bounded chunks and stops at the first mismatch, so it
+ * never allocates two whole-file buffers — a large same-size asset costs two
+ * fixed windows, not two full copies in memory.
+ *
+ * @param {string} a - First file path
+ * @param {string} b - Second file path
+ * @returns {Promise<boolean>} True if both files have identical bytes
+ */
+async function filesEqual(a, b) {
+    const CHUNK_SIZE = 64 * 1024;
+    // Open sequentially with nested try/finally. Opening both under Promise.all
+    // would leak the first handle if the second open rejected (Promise.all
+    // rejects at once, orphaning the resolved handle) — a slow FD leak that can
+    // build to EMFILE across a large sync.
+    const fhA = await fsp.open(a, 'r');
+    try {
+        const fhB = await fsp.open(b, 'r');
+        try {
+            const bufA = Buffer.allocUnsafe(CHUNK_SIZE);
+            const bufB = Buffer.allocUnsafe(CHUNK_SIZE);
+            for (;;) {
+                const [readA, readB] = await Promise.all([
+                    readChunkFull(fhA, bufA),
+                    readChunkFull(fhB, bufB),
+                ]);
+                // Divergent lengths (or one file hitting EOF first) => not equal.
+                if (readA !== readB) return false;
+                // Both reached EOF with every prior window equal => identical.
+                if (readA === 0) return true;
+                if (!bufA.subarray(0, readA).equals(bufB.subarray(0, readB))) return false;
+            }
+        } finally {
+            await fhB.close();
+        }
+    } finally {
+        await fhA.close();
+    }
+}
+
+/**
  * Copy a directory recursively
  * @param {string} src - Source directory path
  * @param {string} dest - Destination directory path
@@ -686,6 +756,9 @@ module.exports = {
     copyFileEnsure,
     copyDir,
     copyDirEnsure,
+
+    // Comparing
+    filesEqual,
     
     // Stats
     stat,

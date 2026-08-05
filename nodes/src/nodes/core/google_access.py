@@ -124,15 +124,53 @@ def resolve_google_access(config: dict, spec: AccessSpec) -> GoogleAccess:
 
 _G = 'https://www.googleapis.com/auth'
 
+# The full mailbox scope is its own host, not under _G/. Only this scope can
+# permanently delete (messages.delete); gmail.modify only trashes.
+_GMAIL_FULL = 'https://mail.google.com/'
+
+
+def _scope_satisfied(required: str, granted: set[str]) -> bool:
+    """True when a granted scope covers the required one, including supersets."""
+    if required in granted:
+        return True
+    # The full mailbox scope supersets every Gmail scope
+    if required.startswith(f'{_G}/gmail.') and _GMAIL_FULL in granted:
+        return True
+    # gmail.readonly is implied by gmail.modify (read + organize)
+    if required == f'{_G}/gmail.readonly' and f'{_G}/gmail.modify' in granted:
+        return True
+    # A '.readonly' scope is implied by its writable counterpart (drive,
+    # spreadsheets, documents, calendar, presentations, contacts)
+    if required.endswith('.readonly') and required[: -len('.readonly')] in granted:
+        return True
+    return False
+
+
+def missing_scopes(granted: set[str], required: list[str]) -> list[str]:
+    """
+    Required scopes not satisfied by the granted set.
+
+    Fail-open when the grant is unknown (empty set): older tokens may lack a
+    scope field, and the absence of evidence must not block validation.
+    """
+    if not granted:
+        return []
+    return [s for s in required if not _scope_satisfied(s, granted)]
+
+
 GMAIL = AccessSpec(
     scopes={
         'readonly': [f'{_G}/gmail.readonly'],
         'modify': [f'{_G}/gmail.modify'],
         'send': [f'{_G}/gmail.modify', f'{_G}/gmail.send'],
+        # settings.basic: filters, IMAP, POP, vacation, forwarding addresses
+        'settings': [f'{_G}/gmail.modify', f'{_G}/gmail.settings.basic'],
+        # settings.sharing: sendAs write, delegation, S/MIME management
+        'settings_sharing': [f'{_G}/gmail.modify', f'{_G}/gmail.settings.basic', f'{_G}/gmail.settings.sharing'],
+        'full': [_GMAIL_FULL],  # superset: read/modify/send/permanent-delete
     },
     default='modify',
-    # No allowHardDelete: permanent delete (messages.delete) needs the full
-    # https://mail.google.com/ scope, which no tier here grants. gmail.modify only trashes.
+    flags=('allowHardDelete',),
 )
 DRIVE = AccessSpec(
     scopes={'readonly': [f'{_G}/drive.readonly'], 'write': [f'{_G}/drive']},
@@ -150,7 +188,9 @@ DOCS = AccessSpec(
 CALENDAR = AccessSpec(
     scopes={'readonly': [f'{_G}/calendar.readonly'], 'write': [f'{_G}/calendar']},
     default='write',
-    flags=('allowDelete',),
+    # allowPublicSharing gates default/domain ACL grants (calendar exposure),
+    # mirroring the Drive sharing gate; allowDelete gates event/calendar deletion.
+    flags=('allowDelete', 'allowPublicSharing'),
 )
 SLIDES = AccessSpec(
     scopes={'readonly': [f'{_G}/presentations.readonly'], 'write': [f'{_G}/presentations']},

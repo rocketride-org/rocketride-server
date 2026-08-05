@@ -132,7 +132,8 @@
 			"title": "Instructions",
 			"description": "Multiple instructions to add to questions before sending to LLM",
 			"items": {
-				"type": "string"
+				"type": "string",
+				"format": "textarea"
 			}
 		}
 	},

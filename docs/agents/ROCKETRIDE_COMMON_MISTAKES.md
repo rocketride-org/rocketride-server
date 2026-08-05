@@ -27,12 +27,7 @@ A comprehensive guide to avoiding common pitfalls when building RocketRide pipel
 
 ```python
 # Pipeline has custom laneName
-{
-  "provider": "response_answers",
-  "config": {
-    "lanes": [{"laneId": "answers", "laneName": "chat_response"}]
-  }
-}
+{'provider': 'response_answers', 'config': {'lanes': [{'laneId': 'answers', 'laneName': 'chat_response'}]}}
 
 # But code expects default key
 response = await client.chat(token=token, question=question)
@@ -269,6 +264,65 @@ The `source` field must reference an actual component ID that exists in the comp
 
 ---
 
+### Mistake 9: Sharing a Control Node's Sub-Pipeline
+
+**Problem:**
+
+```json
+{
+	"id": "pipe_tool_1",
+	"provider": "tool_pipe",
+	"control": [{ "classType": "tool", "from": "agent_1" }]
+},
+{
+	"id": "sub_a",
+	"provider": "prompt",
+	"input": [
+		{ "lane": "text", "from": "pipe_tool_1" },
+		{ "lane": "questions", "from": "chat_1" } // ERROR: also fed by the main flow
+	]
+}
+```
+
+**Why This Happens:**
+A control node (`tool_pipe`) runs its sub-pipeline on every invocation: it opens, writes,
+flushes, and closes those nodes itself. A node that is *also* reachable from the source is
+owned by the main flow instead, and is flushed at end-of-object — not during the
+invocation — so the tool would read an incomplete result. Each node can have only one
+lifecycle owner, so the engine rejects the pipeline when it opens:
+
+```text
+Control node "Pipeline Tool" (pipe_tool_1) reaches node "Prompt" (sub_a) that the main
+flow owns; a control node's sub-pipeline must not be shared with the main pipeline or
+another start
+```
+
+**Solution:** keep the sub-pipeline self-contained — remove the second input and end the
+branch in its own response node:
+
+```json
+{
+	"id": "sub_a",
+	"provider": "prompt",
+	"input": [{ "lane": "text", "from": "pipe_tool_1" }] // CORRECT: only the tool feeds it
+}
+```
+
+**Rule:** every node a control node's sub-pipeline reaches must belong to that
+sub-pipeline only. Three wirings break this and are rejected at open:
+
+| Wiring | Message contains |
+|---|---|
+| Sub-pipeline shared with the main flow or a second start | `must not be shared with the main pipeline or another start` |
+| One sub-pipeline node reached by two control nodes | `is reachable from two control roots` |
+| An invoke node that is itself data-fed | `drives a sub-pipeline and is also data-fed` |
+
+Invoking the **same** tool from two agents is fine — that is one sub-pipeline with one
+owner. Only *sharing nodes* between sub-pipelines is rejected. Runnable examples of each
+rejection live in `examples/incorrect/`.
+
+---
+
 ## SDK Mistakes (Python & TypeScript)
 
 These mistakes apply to both Python and TypeScript SDKs. Examples are shown in both languages.
@@ -358,7 +412,7 @@ for key, lane_type in result_types.items():
 if answer_key and answer_key in response and len(response[answer_key]) > 0:
     answer = response[answer_key][0]
 else:
-    answer = "No answer received"
+    answer = 'No answer received'
 ```
 
 **Simpler Solution (if you know you're using defaults):**
@@ -366,7 +420,7 @@ else:
 ```python
 # Use .get() with defaults
 answers = response.get('answers', [])
-answer = answers[0] if answers else "No answer received"
+answer = answers[0] if answers else 'No answer received'
 ```
 
 **Understanding result_types:**
@@ -378,7 +432,7 @@ response = {
     'chat_response': ['The answer...'],  # Actual data
     'result_types': {'chat_response': 'answers'},  # Maps 'chat_response' → 'answers' lane
     'name': 'Question 1',
-    'objectId': '...'
+    'objectId': '...',
 }
 
 # result_types tells you:
@@ -405,7 +459,7 @@ def extract_answer(response: dict) -> str:
 
     # Fallback: try default 'answers' key
     answers = response.get('answers', [])
-    return answers[0] if answers else "No answer received"
+    return answers[0] if answers else 'No answer received'
 ```
 
 **Best Practice (TypeScript):**
@@ -445,7 +499,7 @@ function extractAnswer(response: any): string {
 
 ```python
 # Python: Chat pipeline but using send()
-response = await client.send(token, "Hello")  # ERROR: Chat source expects Question objects
+response = await client.send(token, 'Hello')  # ERROR: Chat source expects Question objects
 ```
 
 ```typescript
@@ -463,7 +517,7 @@ The `send()` method is for raw data (webhook/dropper sources), not for conversat
 from rocketride.schema import Question
 
 question = Question()
-question.addQuestion("Hello")
+question.addQuestion('Hello')
 response = await client.chat(token=token, question=question)  # CORRECT: Correct for chat source
 ```
 
@@ -588,6 +642,7 @@ await client.connect()
 result = await client.use(filepath='chat.pipe')  # CORRECT: Start once
 token = result['token']
 
+
 async def ask_question(question_text):
     # Just use the existing pipeline
     question = Question()
@@ -595,9 +650,10 @@ async def ask_question(question_text):
     response = await client.chat(token=token, question=question)  # CORRECT: Reuse token
     return response
 
+
 # Ask many questions
-answer1 = await ask_question("What is AI?")
-answer2 = await ask_question("Tell me more")
+answer1 = await ask_question('What is AI?')
+answer2 = await ask_question('Tell me more')
 
 # Disconnect when done
 await client.disconnect()
@@ -843,7 +899,7 @@ ROCKETRIDE_QDRANT_HOST=localhost
 # Python: Blocking the event loop with synchronous input()
 async def chat_loop():
     while True:
-        user_input = input("You: ")  # ERROR: BLOCKS the entire event loop!
+        user_input = input('You: ')  # ERROR: BLOCKS the entire event loop!
         response = await client.chat(token=token, question=question)
         print(response)
 ```
@@ -890,13 +946,15 @@ from concurrent.futures import ThreadPoolExecutor
 # Create a thread pool for blocking I/O
 _input_executor = ThreadPoolExecutor(max_workers=1)
 
-async def async_input(prompt: str = "") -> str:
+
+async def async_input(prompt: str = '') -> str:
     """
     Non-blocking async input that doesn't block the event loop.
     This allows websocket ping/pong keepalive to work properly.
     """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_input_executor, input, prompt)
+
 
 # Use it in your async code
 async def chat_loop():
@@ -908,7 +966,7 @@ async def chat_loop():
 
     while True:
         # CORRECT: Non-blocking input - event loop stays responsive
-        user_input = await async_input("You: ")
+        user_input = await async_input('You: ')
 
         if user_input.lower() == 'quit':
             break
@@ -918,7 +976,7 @@ async def chat_loop():
 
         # Event loop can process websocket messages while waiting
         response = await client.chat(token=token, question=question)
-        print(f"Bot: {response['answers'][0]}")
+        print(f'Bot: {response["answers"][0]}')
 
     await client.disconnect()
 ```
@@ -1001,9 +1059,9 @@ Both Python and TypeScript/Node.js have other blocking operations that must be a
 
 ```python
 # ERROR: BLOCKING - Don't use these in async functions
-time.sleep(5)           # Use: await asyncio.sleep(5)
-open('file.txt').read() # Use: async with aiofiles.open('file.txt') as f
-requests.get(url)       # Use: async with aiohttp.ClientSession()
+time.sleep(5)  # Use: await asyncio.sleep(5)
+open('file.txt').read()  # Use: async with aiofiles.open('file.txt') as f
+requests.get(url)  # Use: async with aiohttp.ClientSession()
 ```
 
 **TypeScript:**
@@ -1343,7 +1401,7 @@ dictToJson(question)  # ERROR: C++ engine crash (pyjson.hpp)
 ```
 
 **Why This Happens:**
-The C++ engine's JSON utilities expect plain Python dicts. Pydantic `BaseModel` instances are not directly serializable by the engine's `dictToJson` and similar functions—passing them causes a crash.
+The C++ engine's JSON utilities expect plain Python dicts. Pydantic `BaseModel` instances are not directly serializable by the engine's `dictToJson` and similar functions, passing them causes a crash.
 
 **Solution:**
 

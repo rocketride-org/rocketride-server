@@ -29,7 +29,8 @@ via RPC (``ModelClient``).  Subprocess nodes should never load GPU
 libraries directly — doing so wastes VRAM, bypasses billing, and risks
 CUDA context conflicts.
 
-This module installs a ``sys.meta_path`` import hook that blocks
+This module installs a ``sys.meta_path`` import hook (using the modern
+:pep:`451` ``find_spec`` / ``exec_module`` protocol) that blocks
 ``torch``, ``tensorflow``, ``onnxruntime``, ``cupy``, and their
 submodules.  Any ``import torch`` in a node will raise ``ImportError``
 with a clear message directing the developer to use ``ai.common.models``.
@@ -45,7 +46,7 @@ a non-None value — in local mode, GPU libraries load normally.
 """
 
 import sys
-from typing import Optional
+from importlib.machinery import ModuleSpec
 
 from .base import get_model_server_address
 
@@ -77,9 +78,16 @@ class _GPUImportBlocker:
     ``sys.meta_path`` finder that blocks GPU library imports.
 
     When Python's import machinery encounters a module name, it calls
-    ``find_module`` on each entry in ``sys.meta_path``.  This class
-    intercepts blocked module names and raises ``ImportError`` before
-    the real finder can load them.
+    ``find_spec`` on each entry in ``sys.meta_path``.  For a blocked
+    module this class returns a spec pointing at itself as the loader;
+    the loader's ``exec_module`` then raises ``ImportError`` before the
+    real module can be executed.
+
+    This uses the modern :pep:`451` finder/loader protocol
+    (``find_spec`` + ``create_module`` / ``exec_module``).  The legacy
+    ``find_module`` / ``load_module`` protocol it replaced was removed
+    from the import system in Python 3.12, where it would have silently
+    become a no-op.
 
     Attributes:
         _blocked: Frozenset of top-level module names to block.
@@ -94,48 +102,68 @@ class _GPUImportBlocker:
         """
         self._blocked = blocked
 
-    def find_module(self, fullname: str, path: Optional[str] = None):
+    def find_spec(self, fullname: str, path=None, target=None):
         """
-        Check if the requested module should be blocked.
+        Return a blocking spec if the requested module should be blocked.
 
-        Called by Python's import machinery for every import.  Returns
-        ``self`` (the loader) if the module is blocked, signalling that
-        this finder will handle it.  Returns ``None`` to let the next
+        Called by Python's import machinery for every import.  Returns a
+        ``ModuleSpec`` whose loader is ``self`` when the module is
+        blocked, signalling that this finder will handle it (and its
+        ``exec_module`` will raise).  Returns ``None`` to let the next
         finder in ``sys.meta_path`` handle it.
 
         Args:
             fullname: Fully qualified module name (e.g. ``'torch.nn'``).
-            path: Module search path (unused).
+            path: Parent package ``__path__`` (unused).
+            target: Module being reloaded, if any (unused).
 
         Returns:
-            ``self`` if blocked, ``None`` otherwise.
+            A ``ModuleSpec`` if blocked, ``None`` otherwise.
         """
         # Extract the top-level package name (e.g. 'torch' from 'torch.nn.functional')
         top_level = fullname.split('.')[0]
 
         # Check if this top-level package is in our blocked set
         if top_level in self._blocked:
-            return self
+            return ModuleSpec(fullname, self)
 
         # Not blocked — let the normal import machinery handle it
         return None
 
-    def load_module(self, fullname: str):
+    def create_module(self, spec):
+        """
+        Use default module creation semantics.
+
+        Required so ``self`` is a valid loader.  Returning ``None`` tells
+        the import system to create the module the default way — though
+        control never gets that far in practice, because ``exec_module``
+        raises first.
+
+        Args:
+            spec: The ``ModuleSpec`` produced by ``find_spec`` (unused).
+
+        Returns:
+            ``None`` — use default module creation.
+        """
+        return None
+
+    def exec_module(self, module):
         """
         Raise ImportError for blocked modules.
 
-        Called by Python after ``find_module`` returns ``self``.  Always
-        raises ``ImportError`` with a descriptive message explaining why
-        the import is blocked and what to use instead.
+        Called by Python after ``find_spec`` returns a blocking spec.
+        Always raises ``ImportError`` with a descriptive message
+        explaining why the import is blocked and what to use instead.
 
         Args:
-            fullname: Fully qualified module name being imported.
+            module: The module object being executed; ``module.__name__``
+                is the fully qualified name from the blocking spec.
 
         Raises:
             ImportError: Always — this is the whole point of the guard.
         """
         raise ImportError(
-            f'Direct import of "{fullname}" is blocked in model server mode. '
+            f'Direct import of "{module.__name__}" is blocked in model server mode. '
             f'GPU inference runs on the model server via ai.common.models. '
             f'Do not import GPU libraries directly in nodes.'
         )

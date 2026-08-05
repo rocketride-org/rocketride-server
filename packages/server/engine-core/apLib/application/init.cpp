@@ -26,6 +26,14 @@ void engine() {
         "    --stream     Sends task instructions via stdin. If not specified");
     LOGOUTPUT(
         "                 tasks must be specified as taskFile or taskDir");
+    LOGOUTPUT(
+        "    --node_path=<dir>  Directory containing a 'local_nodes' folder of");
+    LOGOUTPUT(
+        "                 workspace-local nodes to load alongside the built-in");
+    LOGOUTPUT(
+        "                 nodes. Each node's services.json must use");
+    LOGOUTPUT(
+        "                 \"path\": \"local_nodes.<node>\".");
     LOGOUTPUT("\n");
 }
 

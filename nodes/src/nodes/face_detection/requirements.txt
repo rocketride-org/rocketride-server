@@ -1,0 +1,3 @@
+mediapipe>=0.10.35
+Pillow
+numpy

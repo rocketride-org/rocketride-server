@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A component that connects to locally-hosted open-source vision models through Ollama ", "for image analysis, description, and visual understanding tasks. Supports Llama 3.2 Vision, ", "LLaVA, Moondream, MiniCPM-V, and other multimodal models. Runs entirely on-premise with no ", "external API keys required — ideal for privacy-sensitive applications."],
+	"description": ["A component that connects to locally-hosted open-source vision models through Ollama ", "for image analysis, description, and visual understanding tasks. Supports Llama 3.2 Vision, ", "LLaVA, Moondream, MiniCPM-V, and other multimodal models. Runs entirely on-premise with no ", "external API keys required, ideal for privacy-sensitive applications."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node

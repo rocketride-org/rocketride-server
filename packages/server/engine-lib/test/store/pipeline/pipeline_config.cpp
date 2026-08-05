@@ -126,6 +126,29 @@ TEST_CASE("PipelineConfig") {
                       "'pipeline.version' is unsupported");
     }
 
+    SECTION("version:upgrade:graph") {
+        auto &component = pipeline["components"][4];
+
+        SECTION("falkordb") {
+            component["provider"] = "tool_falkordb";
+            component["config"]["type"] = "tool_falkordb";
+
+            REQUIRE_NO_ERROR(config.validate());
+            REQUIRE(component["provider"] == "graph_falkordb");
+            REQUIRE(component["config"]["type"] == "graph_falkordb");
+        }
+
+        SECTION("neo4j") {
+            component["provider"] = "db_neo4j";
+
+            REQUIRE_NO_ERROR(config.validate());
+            REQUIRE(component["provider"] == "graph_neo4j");
+            REQUIRE_FALSE(component["config"].isMember("type"));
+        }
+
+        REQUIRE(pipeline["version"] == IServices::VERSION);
+    }
+
     SECTION("source:missing:optional") {
         pipeline.removeMember("source");
 
@@ -506,6 +529,51 @@ TEST_CASE("PipelineConfig") {
         REQUIRE(_anyOf(chain, "preproc_1"));
         REQUIRE(_anyOf(chain, "embed_1"));
         REQUIRE_FALSE(_anyOf(chain, "response_1"));
+    }
+
+    SECTION("provider:unregistered") {
+        // A component whose provider has no registered service definition (e.g.
+        // a debug-only node excluded from a release/NDEBUG build) must fail
+        // validation cleanly. Before the guard in PipelineConfig::validate this
+        // dereferenced a null comp.def in the lane-linking loop and crashed with
+        // an SEH access violation (0xc0000005) instead of returning an error.
+        pipeline = R"({
+            "source": "source_1",
+            "components": [
+                {
+                    "id": "source_1",
+                    "provider": "filesys",
+                    "config": {}
+                },
+                {
+                    "id": "ghost_1",
+                    "provider": "this_provider_is_not_registered",
+                    "config": {},
+                    "input": [
+                        {
+                            "from": "source_1",
+                            "lane": "tags"
+                        }
+                    ]
+                },
+                {
+                    "id": "response_1",
+                    "provider": "response",
+                    "config": {},
+                    "input": [
+                        {
+                            "from": "ghost_1",
+                            "lane": "text"
+                        }
+                    ]
+                }
+            ]
+        })"_json;
+
+        REQUIRE_ERROR(config.validate(), Ec::InvalidParam,
+                      "Component ghost_1 references a provider with no "
+                      "registered service definition; it is unavailable in "
+                      "this engine build (e.g. a debug-only node)");
     }
 
     SECTION("chain") {

@@ -1,0 +1,265 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "FalkorDB",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "graph_falkordb://",
+	//
+	// Required:
+	//		Class type of the node - what it does. It is both a graph database
+	//		(wired into a pipeline through the questions lane) and a tool (bound
+	//		to an agent), so it appears under both categories
+	//
+	"classType": ["graph", "tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	// 		and is optional for most node
+	//
+	"path": "nodes.graph_falkordb",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "falkordb",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["A processing component that connects to a FalkorDB graph database. ", "Accepts natural-language questions, translates them to Cypher queries ", "via an LLM, and returns results to the pipeline. Also exposes the graph ", "to an agent as a tool. Queries are read-only by default, enforced by the server."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "falkordb.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": [],
+	//
+	// Optional:
+	//		Defines the invoke connections that may/must be connected
+	// 		which are utilized by this driver
+	//
+	"invoke": {
+		"llm": {
+			"description": "LLM to use to craft Cypher queries from question",
+			"min": 1
+		}
+	},
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"questions": ["table", "text", "answers"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "default",
+		// Defines profiles used with the "profile": key. "default" keeps its name
+		// so pipelines saved before the URL profile existed still resolve.
+		"profiles": {
+			"default": {
+				"title": "Manual configuration (host and port)",
+				"mode": "manual",
+				"graph": "agent"
+			},
+			"url": {
+				"title": "FalkorDB URL (connection string)",
+				"mode": "url",
+				"graph": "agent"
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local fields definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		"graph_falkordb.host": {
+			"type": "string",
+			"title": "Host",
+			"default": "localhost",
+			"description": "FalkorDB host, e.g. localhost or your-instance.falkordb.cloud."
+		},
+		"graph_falkordb.port": {
+			"type": "integer",
+			"title": "Port",
+			"default": 6379,
+			"minimum": 1,
+			"maximum": 65535,
+			"description": "FalkorDB port (Redis protocol). FalkorDB Cloud assigns a per-instance port."
+		},
+		"graph_falkordb.username": {
+			"type": "string",
+			"title": "Username",
+			"default": "",
+			"optional": true,
+			"description": "Username, e.g. \"default\" for FalkorDB Cloud. Leave empty for no auth."
+		},
+		"graph_falkordb.password": {
+			"type": "string",
+			"title": "Password",
+			"default": "",
+			"secure": true,
+			"optional": true,
+			"description": "Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries.",
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"graph_falkordb.url": {
+			"type": "string",
+			"title": "FalkorDB URL",
+			"default": "",
+			"secure": true,
+			"description": "Connection string as shown in the FalkorDB Cloud console, e.g. falkor://falkordb@r-xxxx.instance-yyyy.cloud:53939. Use falkors:// for TLS. The URL may carry credentials, so it is stored encrypted; the password can also be left out of it and typed in the Password field below, which then replaces whatever the URL embeds.",
+			"ui": {
+				"ui:widget": "password"
+			}
+		},
+		"graph_falkordb.tls": {
+			"type": "boolean",
+			"title": "TLS",
+			"default": false,
+			"description": "Connect with TLS. Required by FalkorDB Cloud TLS endpoints."
+		},
+		"graph_falkordb.graph": {
+			"type": "string",
+			"title": "Default Graph",
+			"default": "agent",
+			"description": "A FalkorDB server hosts many graphs. This is the one queried when the caller does not name another."
+		},
+		"graph_falkordb.db_description": {
+			"type": "string",
+			"title": "Graph Description",
+			"default": "",
+			"optional": true,
+			"description": "What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries.",
+			"ui": {
+				"ui:widget": "textarea"
+			}
+		},
+		"graph_falkordb.allow_writes": {
+			"type": "boolean",
+			"title": "Allow Writes",
+			"default": false,
+			"description": "Permit CREATE/MERGE/SET/DELETE in the query tool. When off, queries run via GRAPH.RO_QUERY and the server itself rejects write clauses."
+		},
+		"graph_falkordb.allow_execute": {
+			"type": "boolean",
+			"title": "Allow Execute",
+			"default": false,
+			"description": "Enable the execute tool, which runs raw Cypher with no LLM translation and no read-only gate. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
+		},
+		"graph_falkordb.max_attempts": {
+			"type": "integer",
+			"title": "Max Validation Attempts",
+			"default": 5,
+			"minimum": 1,
+			"maximum": 10,
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query."
+		},
+		"graph_falkordb.max_rows": {
+			"type": "integer",
+			"title": "Max Rows",
+			"default": 250,
+			"minimum": 1,
+			"maximum": 25000,
+			"description": "Upper cap on rows returned per query. Results beyond it are cut and flagged as truncated."
+		},
+		"graph_falkordb.max_execute_rows": {
+			"type": "integer",
+			"title": "Max Execute Rows",
+			"default": 25000,
+			"minimum": 1,
+			"maximum": 25000,
+			"description": "Upper cap on rows returned by the execute tool. The query fails if exceeded, so one statement cannot exhaust worker memory."
+		},
+		"graph_falkordb.query_timeout_ms": {
+			"type": "integer",
+			"title": "Query Timeout (ms)",
+			"default": 30000,
+			"minimum": 100,
+			"maximum": 600000,
+			"description": "Server-side timeout for a single query."
+		},
+		//
+		// The two connection profiles. Everything the driver reads must be listed
+		// inside the profile object: the resolved config is the profile section
+		// merged with connConfig[profile], so top-level keys are not seen.
+		//
+		"graph_falkordb.default": {
+			"object": "default",
+			"properties": ["graph_falkordb.host", "graph_falkordb.port", "graph_falkordb.username", "graph_falkordb.password", "graph_falkordb.tls", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
+		},
+		"graph_falkordb.urlProfile": {
+			"object": "url",
+			"properties": ["graph_falkordb.url", "graph_falkordb.password", "graph_falkordb.graph", "graph_falkordb.db_description", "graph_falkordb.allow_writes", "graph_falkordb.allow_execute", "graph_falkordb.max_attempts", "graph_falkordb.max_rows", "graph_falkordb.max_execute_rows", "graph_falkordb.query_timeout_ms"]
+		},
+		"graph_falkordb.profile": {
+			"type": "string",
+			"title": "Connection",
+			"description": "How this node connects to FalkorDB",
+			"default": "default",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "default",
+					"properties": ["graph_falkordb.default"]
+				},
+				{
+					"value": "url",
+					"properties": ["graph_falkordb.urlProfile"]
+				}
+			]
+		}
+	},
+	//
+	// No "test" block: like every other database node (db_neo4j, db_postgres,
+	// db_arango), answering on the questions lane needs a live server and a
+	// connected LLM, which the dynamic node runner has neither of. The node is
+	// covered by nodes/test/test_graph_falkordb.py instead.
+	//
+	// Required:
+	//		The shape defines how the fields are laid out in the UI
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "FalkorDB",
+			"properties": ["type", "graph_falkordb.profile"]
+		}
+	]
+}

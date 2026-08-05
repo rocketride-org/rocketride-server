@@ -318,7 +318,7 @@ const toggleGroup: CSSProperties = {
 // Typical full-page view composition:
 //   columnFill               ← root div that fills the shell pane
 //     headerBar              ← fixed-height top bar (title + actions)
-//     tabContent             ← scrollable body (clears the overlay tab bar)
+//     tabContent             ← scrollable body (standard 24px gutters)
 //
 // For views without a tab bar, use viewPadding instead of tabContent.
 // splitHeader is for a two-column row inside a content area (not the page top).
@@ -338,15 +338,16 @@ const splitHeader: CSSProperties = {
 };
 
 /**
- * Tab content area — padded wrapper for views with an overlay pill bar.
- * Top padding clears the absolutely-positioned bar (15px + 38px + 15px + 11px = 79px).
- * Centres content to a max-width of 800px.
+ * Tab content area — standard padded wrapper for a view's scrollable body.
+ * Uses the standard page grammar: 20px top and 24px side/bottom gutters, full
+ * width. The old 79px top cleared the now-retired overlay pill bar; the tabs
+ * are the view-rendered TabControl strip at the top of the content
+ * column now, so no top clearance is needed. Long-form field groups cap their
+ * own width (~640px) per the style guide — the page itself is not indented.
  * Scrolling is handled by the TabPanel panel div, not this element.
  */
 const tabContent: CSSProperties = {
-	padding: '79px 30px 30px',
-	maxWidth: 800,
-	margin: '0 auto',
+	padding: '20px 24px 24px',
 	width: '100%',
 	boxSizing: 'border-box',
 };

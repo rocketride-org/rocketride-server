@@ -1,0 +1,7 @@
+# contract-check: skip-install  reason: BiRefNet extras (kornia/timm/einops) on top of the transformers baseline; PR lane skips, nightly --install-all verifies.
+# Background-removal-specific extras, installed after the shared requirements_vision.txt base.
+accelerate
+huggingface-hub
+timm
+einops
+kornia

@@ -1,6 +1,6 @@
 # Dependabot Smoke Tests
 
-PR CI currently runs build, lint, secret scanning, and CodeQL — but **not** unit/integration tests. For Python dependency bumps, that means a bumped `litellm` or `spacy-transformers` can pass CI yet break runtime code (the weekly model-sync workflow, pipeline node execution).
+PR CI currently runs build, lint, secret scanning, and CodeQL, but **not** unit/integration tests. For Python dependency bumps, that means a bumped `litellm` or `spacy-transformers` can pass CI yet break runtime code (the weekly model-sync workflow, pipeline node execution).
 
 These scripts exist to give a reviewer a 30-second answer to "does this dep bump actually run?" before merging a Dependabot PR.
 
@@ -23,9 +23,9 @@ bash tools/dependabot-smoke/smoke-litellm.sh
 bash tools/dependabot-smoke/smoke-nodes.sh --changed-only
 ```
 
-Exit `0` means imports + key APIs work. Non-zero means a real breakage — report on the PR, do not merge.
+Exit `0` means imports + key APIs work. Non-zero means a real breakage, report on the PR, do not merge.
 
-## Future work — wire into PR CI
+## Future work: wire into PR CI
 
 These are designed to be cheap and parallelizable. The follow-up to actually gate Dependabot PRs on them is tracked in a separate issue (link in the PR that introduced this directory). Sketch:
 

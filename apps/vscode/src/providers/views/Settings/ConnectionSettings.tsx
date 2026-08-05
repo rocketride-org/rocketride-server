@@ -4,35 +4,42 @@
 // =============================================================================
 
 /**
- * ConnectionSettings — "Development Mode" section of the VS Code Settings page.
+ * ConnectionSettings — "Development" section of the VS Code Settings page.
  *
- * Wraps the shared ConnectionConfig component in a card with a header and
- * save button. Passes through all connection-related props.
+ * Renders the shared ConnectionConfig for the development group as a flat page
+ * (page header + description + controls). The Settings surface owns the single
+ * Save/Cancel footer, so this component no longer carries a card or save button.
  */
 
-import React from 'react';
-import { MessageData, SettingsData, ConnectionMode, EngineVersionItem, settingsStyles as S, SettingsCardHeader } from './SettingsWebview';
+import React, { CSSProperties } from 'react';
+import { MessageData, SettingsData, ConnectionMode, EngineVersionItem, settingsStyles as S } from './SettingsWebview';
 import { ConnectionConfig } from '../components/ConnectionConfig';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
+
+// ============================================================================
+// STYLES
+// ============================================================================
+
+const styles = {
+	// Whole-section warning treatment when onprem mode is selected without an API key.
+	warning: {
+		border: '1px solid var(--vscode-editorWarning-foreground)',
+		backgroundColor: 'var(--vscode-editorWarning-background)',
+		borderRadius: 6,
+		padding: 16,
+	} as CSSProperties,
+};
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
-/** Props for the Development Mode connection settings card. */
+/** Props for the Development connection settings page. */
 interface ConnectionSettingsProps {
 	/** Full settings object — group fields are read from `settings.development`. */
 	settings: SettingsData;
 	/** Partial-merge callback for settings changes. */
 	onSettingsChange: (settings: Partial<SettingsData>) => void;
-	/** Persist all settings to extension storage. */
-	onSave: () => void;
-	/** Revert to last-saved settings. */
-	onCancel?: () => void;
-	/** True when the user has unsaved edits. */
-	dirty?: boolean;
-	/** True briefly after a successful save (shows "Saved" badge). */
-	saved?: boolean;
 	/** Remove stored API key from secret storage. */
 	onClearCredentials: () => void;
 	/** Test connection via ioControl — mode + optional params (hostUrl, apiKey for onprem). */
@@ -49,10 +56,15 @@ interface ConnectionSettingsProps {
 	onCloudSignIn?: () => void;
 	onCloudSignOut?: () => void;
 	onProbeCloudServer?: () => void;
-	onFetchTeams?: () => void;
 	/** Whether the probed server supports SaaS/OAuth. */
 	isSaas?: boolean;
-	teams?: Array<{ id: string; name: string }>;
+	/** Whether the user has an active subscription. */
+	isSubscribed?: boolean;
+	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
+	onFetchPlans?: () => Promise<any[]>;
+	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
+	onCheckoutSuccess?: () => void;
 	// -- Docker panel props --
 	dockerStatus: DockerStatus;
 	dockerProgress: string | null;
@@ -92,8 +104,9 @@ interface ConnectionSettingsProps {
 // COMPONENT
 // ============================================================================
 
+/** Development connection settings page (flat, card-less). */
 export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => {
-	const { settings, onSettingsChange, onSave } = props;
+	const { settings, onSettingsChange } = props;
 
 	/** When switching to onprem, clear the hostUrl if it still holds a cloud or localhost value. */
 	const handleConnectionModeChange = (mode: ConnectionMode) => {
@@ -109,79 +122,73 @@ export const ConnectionSettings: React.FC<ConnectionSettingsProps> = (props) => 
 		onSettingsChange({ development: groupUpdates } as Partial<SettingsData>);
 	};
 
+	// Highlight the whole section when onprem mode is selected without an API key.
 	const showAccountWarning = settings.development.connectionMode === 'onprem' && !settings.development.apiKey.trim();
+	const wrapperStyle: CSSProperties = showAccountWarning ? { ...S.pageBody, ...styles.warning } : S.pageBody;
 
 	return (
-		<div
-			style={{
-				...S.card,
-				...(showAccountWarning
-					? {
-							borderColor: 'var(--vscode-editorWarning-foreground)',
-							backgroundColor: 'var(--vscode-editorWarning-background)',
-						}
-					: {}),
-			}}
-			id="developmentSection"
-		>
-			<SettingsCardHeader title="Development Mode" onSave={onSave} onCancel={props.onCancel} dirty={props.dirty} saved={props.saved} />
-			<div style={S.cardBody}>
-				<div style={S.sectionDescription}>Where pipelines run during development. Cloud and Direct Connect modes require authentication.</div>
-				<div style={S.formGrid}>
-					<ConnectionConfig
-						simplified={false}
-						idPrefix="dev"
-						group="development"
-						otherGroupMode={settings.deployment.connectionMode}
-						serverCapabilities={props.serverCapabilities}
-						onConnectionModeChange={handleConnectionModeChange}
-						settings={settings}
-						onSettingsChange={onSettingsChange}
-						cloudSignedIn={props.cloudSignedIn ?? false}
-						cloudUserName={props.cloudUserName ?? ''}
-						onCloudSignIn={props.onCloudSignIn!}
-						onCloudSignOut={props.onCloudSignOut!}
-						onProbeCloudServer={props.onProbeCloudServer}
-						onFetchTeams={props.onFetchTeams}
-						isSaas={props.isSaas}
-						teams={props.teams ?? []}
-						onClearCredentials={props.onClearCredentials}
-						onTestConnection={props.onTestConnection}
-						testMessage={props.testMessage}
-						engineVersions={props.engineVersions}
-						engineVersionsLoading={props.engineVersionsLoading}
-						dockerStatus={props.dockerStatus}
-						dockerProgress={props.dockerProgress}
-						dockerError={props.dockerError}
-						dockerBusy={props.dockerBusy}
-						dockerAction={props.dockerAction}
-						dockerVersions={props.dockerVersions}
-						dockerSelectedVersion={props.dockerSelectedVersion}
-						onDockerVersionChange={props.onDockerVersionChange}
-						onDockerInstall={props.onDockerInstall}
-						onDockerUpdate={props.onDockerUpdate}
-						onDockerRemove={props.onDockerRemove}
-						onDockerStart={props.onDockerStart}
-						onDockerStop={props.onDockerStop}
-						serviceStatus={props.serviceStatus}
-						serviceProgress={props.serviceProgress}
-						serviceError={props.serviceError}
-						serviceBusy={props.serviceBusy}
-						serviceAction={props.serviceAction}
-						serviceVersions={props.serviceVersions}
-						serviceSelectedVersion={props.serviceSelectedVersion}
-						onServiceVersionChange={props.onServiceVersionChange}
-						onServiceInstall={props.onServiceInstall}
-						onServiceUpdate={props.onServiceUpdate}
-						onServiceRemove={props.onServiceRemove}
-						onServiceStart={props.onServiceStart}
-						onServiceStop={props.onServiceStop}
-						sudoPromptVisible={props.sudoPromptVisible}
-						sudoPasswordInput={props.sudoPasswordInput}
-						onSudoPasswordChange={props.onSudoPasswordChange}
-						onSudoSubmit={props.onSudoSubmit}
-					/>
-				</div>
+		<div style={wrapperStyle} id="developmentSection">
+			<div style={S.pageHeader}>
+				<h2 style={S.pageTitle}>Development</h2>
+			</div>
+			<div style={S.sectionDescription}>Where pipelines run during development. Cloud and Direct Connect modes require authentication.</div>
+			<div style={S.formGrid}>
+				<ConnectionConfig
+					simplified={false}
+					idPrefix="dev"
+					group="development"
+					otherGroupMode={settings.deployment.connectionMode}
+					serverCapabilities={props.serverCapabilities}
+					onConnectionModeChange={handleConnectionModeChange}
+					settings={settings}
+					onSettingsChange={onSettingsChange}
+					cloudSignedIn={props.cloudSignedIn ?? false}
+					cloudUserName={props.cloudUserName ?? ''}
+					onCloudSignIn={props.onCloudSignIn!}
+					onCloudSignOut={props.onCloudSignOut!}
+					onProbeCloudServer={props.onProbeCloudServer}
+					isSaas={props.isSaas}
+					onClearCredentials={props.onClearCredentials}
+					onTestConnection={props.onTestConnection}
+					testMessage={props.testMessage}
+					engineVersions={props.engineVersions}
+					engineVersionsLoading={props.engineVersionsLoading}
+					dockerStatus={props.dockerStatus}
+					dockerProgress={props.dockerProgress}
+					dockerError={props.dockerError}
+					dockerBusy={props.dockerBusy}
+					dockerAction={props.dockerAction}
+					dockerVersions={props.dockerVersions}
+					dockerSelectedVersion={props.dockerSelectedVersion}
+					onDockerVersionChange={props.onDockerVersionChange}
+					onDockerInstall={props.onDockerInstall}
+					onDockerUpdate={props.onDockerUpdate}
+					onDockerRemove={props.onDockerRemove}
+					onDockerStart={props.onDockerStart}
+					onDockerStop={props.onDockerStop}
+					serviceStatus={props.serviceStatus}
+					serviceProgress={props.serviceProgress}
+					serviceError={props.serviceError}
+					serviceBusy={props.serviceBusy}
+					serviceAction={props.serviceAction}
+					serviceVersions={props.serviceVersions}
+					serviceSelectedVersion={props.serviceSelectedVersion}
+					onServiceVersionChange={props.onServiceVersionChange}
+					onServiceInstall={props.onServiceInstall}
+					onServiceUpdate={props.onServiceUpdate}
+					onServiceRemove={props.onServiceRemove}
+					onServiceStart={props.onServiceStart}
+					onServiceStop={props.onServiceStop}
+					sudoPromptVisible={props.sudoPromptVisible}
+					sudoPasswordInput={props.sudoPasswordInput}
+					onSudoPasswordChange={props.onSudoPasswordChange}
+					onSudoSubmit={props.onSudoSubmit}
+					isSubscribed={props.isSubscribed}
+					onFetchPlans={props.onFetchPlans}
+					onCreateCheckout={props.onCreateCheckout}
+					onConfirmPending={props.onConfirmPending}
+					onCheckoutSuccess={props.onCheckoutSuccess}
+				/>
 			</div>
 		</div>
 	);

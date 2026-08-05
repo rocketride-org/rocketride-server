@@ -38,21 +38,9 @@ CONST_METRICS_STOP_TIMEOUT = 5.0  # seconds to wait for metrics monitoring to st
 # =============================================================================
 CONST_BILLING_API_TIMEOUT = 10.0  # seconds timeout for HTTP requests to billing API
 
-# =============================================================================
-# Billing Rates (tokens per resource-hour)
-# =============================================================================
-CONST_RATE_VCPU_HOUR = 1020  # tokens per vCPU-hour
-CONST_RATE_MEMORY_GB_HOUR = 100  # tokens per memory GB-hour
-CONST_RATE_GPU_GB_HOUR = 2140  # tokens per GPU GB-hour
-CONST_RATE_GPU_INFERENCE_SECOND = 0.594  # tokens per GPU-second of inference
-
-# =============================================================================
-# Custom Node Billing Rates (counter_name → tokens per unit)
-# =============================================================================
-CONST_CUSTOM_BILLING_RATES: dict[str, float] = {
-    'pagesProcessed': 5.0,  # tokens per page
-    # Add more as nodes are created
-}
+# Billing rates are loaded from the metrics_conversions DB table at startup
+# and cached in Account._billing_rates. See Account.get_billing_rates().
+# Admins manage rates via the Billing Rates page in the admin UI.
 
 # =============================================================================
 # Task Engine Configuration
@@ -66,6 +54,62 @@ CONST_SUBPROCESS_BUFFER_LIMIT = 16 * 1024 * 1024  # bytes for subprocess stdin/s
 CONST_STATUS_UPDATE_CANCEL_TIMEOUT = 2.0  # seconds to wait for status update task cancellation
 CONST_DEFAULT_TTL = 15 * 60  # default time-to-live for idle tasks in seconds (15 minutes)
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
+
+# =============================================================================
+# Run Logging (per-task JSONL event continuum) Configuration
+# =============================================================================
+# Run-analytics slowest-completions list: the status body keeps this many
+# of the run's slowest completions (insert-sorted, slowest first).
+CONST_ANALYTICS_SLOWEST_DOCS = 10
+
+# Sealed-segment size: the active spool segment seals at this many bytes
+# (on a line boundary) and uploads as one immutable store object.
+CONST_LOG_SEGMENT_BYTES = 16 * 1024 * 1024  # 16 MB
+
+# Backstop seal: seal a non-empty active segment older than this many seconds
+# even if under the size threshold (caps host-loss tail + store lag for
+# low-volume long-lived streams at <= 1 object/day).
+CONST_LOG_BACKSTOP_SEAL_SECONDS = 24 * 60 * 60  # 24 hours
+
+# Ring size: fixed length of the control file's segments array; the oldest
+# segment is evicted (store + spool) when the ring is full.
+CONST_LOG_SEGMENTS = 64  # 64 x 16 MB = 1 GB retained per stream
+
+# Chapters cap: newest-N run chapters kept in the control file (in addition
+# to horizon trimming) so the control file stays small under rapid dev runs.
+CONST_LOG_CHAPTERS = 512
+
+# Per-event payload cap: larger event payload fields are truncated with a
+# marker before logging (metadata + timestamps always survive).
+CONST_LOG_EVENT_PAYLOAD_BYTES = 64 * 1024  # 64 KB
+
+# Stream history age per run kind (seconds): segments wholly older than this
+# are evicted even if the ring is not full.
+CONST_LOG_HISTORY_SECONDS_DEV = 7 * 24 * 60 * 60  # 7 days
+CONST_LOG_HISTORY_SECONDS_DEPLOY = 30 * 24 * 60 * 60  # 30 days
+
+# Status-event sampling: at most one apaevt_status_update is logged per this
+# many seconds (coarse post-hoc metrics without bloating the log).
+CONST_LOG_STATUS_SAMPLE_SECONDS = 5.0
+
+# rrext_log read paging defaults (callers may lower, never raise).
+CONST_LOG_READ_MAX_EVENTS = 2000
+CONST_LOG_READ_MAX_BYTES = 4 * 1024 * 1024  # 4 MB
+
+# rrext_log segment raw-fetch chunk ceiling: whole-line-aligned raw JSONL bytes
+# per response. Sized well under the transport's 4 MB message budget because
+# the chunk rides JSON-escaped inside the DAP envelope.
+CONST_LOG_SEGMENT_FETCH_BYTES = 2 * 1024 * 1024  # 2 MB
+
+# Segment keyframe bounds (DVR v2). The keyframe carries accumulated state so
+# every segment folds standalone: recently-closed trace summaries, the console
+# scrollback (terminal semantics — display truth at any position), and a
+# sanity ceiling on open-frame entries (leak armor only; real concurrency is
+# bounded by threadCount).
+CONST_LOG_KF_CLOSED_TRACES = 50
+CONST_LOG_KF_SCROLLBACK_LINES = 2000
+CONST_LOG_KF_SCROLLBACK_LINE_CHARS = 400
+CONST_LOG_KF_OPEN_CEILING = 4096
 
 # =============================================================================
 # Task Server Configuration
@@ -90,6 +134,7 @@ CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in b
 # =============================================================================
 CONST_DATA_PIPE_TIMEOUT = 60.0  # seconds of inactivity before pipe is considered zombie
 CONST_DATA_SHUTDOWN_TIMEOUT = 30.0  # seconds to wait for data connection shutdown
+CONST_DATA_OPEN_TARGET_WAIT = 5.0  # seconds `_open` waits for source to bind `state.target`
 
 # =============================================================================
 # HTTP/Stream Configuration

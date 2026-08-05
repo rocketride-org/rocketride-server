@@ -2,7 +2,7 @@
 // Shared answer rendering — used by render_answer and render_invoke (LLM Ask output)
 // =============================================================================
 
-import React, { ReactElement } from 'react';
+import { ReactElement } from 'react';
 import { RS } from './styles';
 import { JsonTree } from '../JsonTree';
 

@@ -33,6 +33,9 @@ Primary Responsibilities:
 1. Handles DAP 'rrext_services' command for service definition retrieval
 2. Provides access to connector schemas, UI schemas, and metadata
 3. Returns service information for pipeline configuration and validation
+4. Handles DAP 'rrext_dashboard' for the full monitoring snapshot, plus
+   'rrext_list_connections' / 'rrext_list_tasks' — paginated views of the
+   same caller-scoped rows following the platform list-API convention
 
 Architecture:
 -------------
@@ -41,13 +44,16 @@ Architecture:
 - Provides read-only access to service metadata
 """
 
+import os
 import time
-from typing import TYPE_CHECKING, Dict, Any, List
+from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
 from rocketlib import getServiceDefinitions, getServiceDefinition, validatePipeline
 from ai.common.dap import DAPConn, TransportBase
+from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_task_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
+from .cmd_monitor import owner_key
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -188,14 +194,21 @@ class MiscCommands(DAPConn):
                 # Determine org and team IDs from account info
                 org_id = ''
                 team_id = getattr(self._account_info, 'defaultTeam', '') or ''
-                for org in getattr(self._account_info, 'organizations', []):
+                org = getattr(self._account_info, 'organization', None)
+                if org:
                     org_id = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
-                    if org_id:
-                        break
-                merged_env = await account.get_merged_env(
-                    user_id=self._account_info.userId,
-                    org_id=org_id,
-                    team_id=team_id,
+
+                # sys.admin: seed with server RR_* keys mapped to ROCKETRIDE_*
+                if 'sys.admin' in (self._account_info.sysPermissions or []):
+                    merged_env = {'ROCKETRIDE_' + k[3:]: v for k, v in os.environ.items() if k.startswith('RR_')}
+
+                # Layer org → team → user secrets on top
+                merged_env.update(
+                    await account.get_merged_env(
+                        user_id=self._account_info.userId,
+                        org_id=org_id,
+                        team_id=team_id,
+                    )
                 )
 
             # Resolve ${ROCKETRIDE_*} variables before validation
@@ -242,136 +255,19 @@ class MiscCommands(DAPConn):
             # Require monitor permission
             self.verify_permission('task.monitor')
 
-            server = self._server
             current_time = time.time()
-            caller_user_id = self._account_info.userId
 
-            # Snapshot tasks the caller has access to (own, teammate, org admin)
-            task_controls = [
-                c for c in server._task_control.values() if resolve_task_permissions(self._account_info, c.teamId)
-            ]
-            # Connections are user-scoped (not task-scoped), so filter by userId
-            conn_items = [
-                (cid, conn)
-                for cid, conn in server._connections.items()
-                if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.userId == caller_user_id
-            ]
+            # Snapshot the caller-visible server state (permission + tk_ scoping)
+            task_controls, conn_items = self._scoped_state()
 
-            # Task-scoped tokens (tk_) can only see their own task
-            caller_auth = self._account_info.auth if hasattr(self._account_info, 'auth') else ''
-            if caller_auth.startswith('tk_'):
-                task_controls = [c for c in task_controls if c.token == caller_auth]
-                conn_items = [(cid, conn) for cid, conn in conn_items if cid == self._connection_id]
-
-            # Build connection-to-task mapping by scanning task controls
-            conn_tasks: Dict[int, List[str]] = {}
-            for control in task_controls:
-                if control.task is None:
-                    continue
-                task_name = getattr(control.task.get_status(), 'name', None) or control.source
-                for cid, conn in conn_items:
-                    if not hasattr(conn, '_monitors'):
-                        continue
-                    project_key = f'p.{control.project_id}.{control.source}'
-                    project_wildcard_key = f'p.{control.project_id}.*'
-                    pipe_prefix = f'{project_key}.'
-                    if (
-                        project_key in conn._monitors
-                        or project_wildcard_key in conn._monitors
-                        or '*' in conn._monitors
-                        or any(k.startswith(pipe_prefix) for k in conn._monitors)
-                    ):
-                        conn_tasks.setdefault(cid, []).append(task_name)
-
-            # Build project ID → friendly name map from task controls
-            # so monitor keys like p.{uuid}.{source} can be displayed readably
-            project_names: Dict[str, str] = {}
-            source_names: Dict[str, str] = {}
-            for control in task_controls:
-                if control.task is None:
-                    continue
-                status = control.task.get_status()
-                task_name = getattr(status, 'name', None) or control.source
-                # Use the task_name prefix (before the dot) as project label
-                name_parts = task_name.split('.', 1)
-                project_names.setdefault(control.project_id, name_parts[0])
-                source_names.setdefault(
-                    f'{control.project_id}.{control.source}', name_parts[-1] if len(name_parts) > 1 else control.source
-                )
-
-            # Build connections list
-            connections = []
-            for conn_id, conn in conn_items:
-                conn_info: Dict[str, Any] = {
-                    'id': conn_id,
-                    'connectedAt': getattr(conn, '_connected_at', current_time),
-                    'lastActivity': getattr(conn, '_last_activity', current_time),
-                    'messagesIn': getattr(conn, '_messages_in', 0),
-                    'messagesOut': getattr(conn, '_messages_out', 0),
-                    'authenticated': getattr(conn, '_authenticated', False),
-                    'clientId': None,
-                    'clientInfo': getattr(conn, '_client_info', {}),
-                    'monitors': self._build_monitors_list(conn._monitors, project_names, source_names)
-                    if hasattr(conn, '_monitors')
-                    else [],
-                    'attachedTasks': conn_tasks.get(conn_id, []),
-                }
-                if hasattr(conn, '_account_info') and conn._account_info:
-                    conn_info['clientId'] = conn._account_info.userId
-                connections.append(conn_info)
-
-            # Build tasks list
-            tasks = []
-            for control in task_controls:
-                try:
-                    task_status = control.task.get_status()
-                    start = getattr(task_status, 'startTime', 0) or 0
-                    end = getattr(task_status, 'endTime', 0) or 0
-                    completed = getattr(task_status, 'completed', False)
-                    if completed and start > 0 and end > 0:
-                        elapsed = end - start
-                    elif start > 0:
-                        elapsed = current_time - start
-                    else:
-                        elapsed = 0
-
-                    # Convert Pydantic metrics model to plain dict for JSON serialization
-                    metrics_raw = getattr(task_status, 'metrics', None)
-                    metrics_dict = metrics_raw.model_dump() if hasattr(metrics_raw, 'model_dump') else metrics_raw
-
-                    tasks.append(
-                        {
-                            'id': control.id,
-                            'name': getattr(task_status, 'name', control.source),
-                            'projectId': control.project_id,
-                            'source': control.source,
-                            'provider': control.provider,
-                            'launchType': control.launch_type.value,
-                            'startTime': start,
-                            'elapsedTime': elapsed,
-                            'completed': completed,
-                            'status': getattr(task_status, 'status', None) if not completed else None,
-                            'exitCode': getattr(task_status, 'exitCode', None) if completed else None,
-                            'endTime': end if completed else None,
-                            'connections': control.task.get_connection_count(),
-                            'state': getattr(task_status, 'state', 0),
-                            'idleTime': getattr(control.task, '_idle_time', 0),
-                            'ttl': getattr(control.task, '_ttl', 0),
-                            'metrics': metrics_dict,
-                            'totalCount': getattr(task_status, 'totalCount', 0),
-                            'completedCount': getattr(task_status, 'completedCount', 0),
-                            'rateCount': getattr(task_status, 'rateCount', 0),
-                            'rateSize': getattr(task_status, 'rateSize', 0),
-                        }
-                    )
-                except Exception as e:
-                    self.debug_message(f'Error building task info for "{control.id}": {e}')
-                    continue
+            # Materialize the connection and task row lists via the shared builders
+            connections = self._build_connection_rows(task_controls, conn_items, current_time)
+            tasks = self._build_task_rows(task_controls, current_time)
 
             # Build overview — derive from sanitized tasks list to avoid
             # re-calling get_status() on potentially torn-down controls
             active_count = sum(1 for task in tasks if not task['completed'])
-            start_time = getattr(server._server, '_startTime', None) or current_time
+            start_time = getattr(self._server._server, '_startTime', None) or current_time
             overview = {
                 'totalConnections': len(conn_items),
                 'activeTasks': active_count,
@@ -390,6 +286,353 @@ class MiscCommands(DAPConn):
         except Exception as e:
             self.debug_message(f'Failed to retrieve dashboard data: {str(e)}')
             raise
+
+    async def on_rrext_list_connections(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_list_connections' command: a paginated view of the
+        caller's active connections following the platform list-API
+        convention. Same permission gate and caller scoping as
+        on_rrext_dashboard — connections are filtered to the caller's userId
+        (and to the single owning connection under tk_ task-token auth).
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments (Dict[str, Any], optional):
+                    - page (int): 1-based page number (default 1)
+                    - page_size (int): Rows per page (clamped 1..100, default 50)
+                    - search (str): Free text over clientId / clientInfo /
+                      attachedTasks / userName / orgName
+                    - sort (List[Dict]): [{'field': <row key>, 'dir': 'asc'|'desc'}]
+                    - filters (Dict): Flat {key: value} record — string means
+                      contains/equality by the row value's type, array means
+                      set membership, __gte/__lte suffixes carry range bounds
+
+        Returns:
+            Dict[str, Any]: DAP response containing:
+                - body: { rows, total, page, pageSize } — rows carry the same
+                  shape as the dashboard's connections list
+        """
+        try:
+            # Require monitor permission (same gate as the dashboard snapshot)
+            self.verify_permission('task.monitor')
+
+            # Extract the list-convention arguments
+            args = request.get('arguments', {}) or {}
+            current_time = time.time()
+
+            # Snapshot the caller-visible server state (permission + tk_ scoping)
+            task_controls, conn_items = self._scoped_state()
+
+            # Materialize the full row set, then apply search / filters /
+            # sort / paging via the shared in-memory paginator
+            rows = self._build_connection_rows(task_controls, conn_items, current_time)
+            body = paginate_rows(
+                rows,
+                args,
+                # Name-ish/text fields of a connection row (identity names
+                # included so the grid search finds users and organizations)
+                searchable_keys=('clientId', 'clientInfo', 'attachedTasks', 'userName', 'orgName'),
+                # Default sort mirrors the dashboard's display order: the
+                # connection registry iterates in registration order (oldest
+                # first), i.e. ascending 'connectedAt'; the monotonic 'id'
+                # row key is the deterministic tiebreak.
+                default_sort=('connectedAt', 'asc'),
+                tiebreak_key='id',
+            )
+            return self.build_response(request, body=body)
+
+        except Exception as e:
+            self.debug_message(f'Failed to list connections: {str(e)}')
+            raise
+
+    async def on_rrext_list_tasks(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle DAP 'rrext_list_tasks' command: a paginated view of the
+        caller's tasks following the platform list-API convention. Same
+        permission gate and caller scoping as on_rrext_dashboard — tasks are
+        limited to those resolve_task_permissions grants the caller (own,
+        teammate, org admin; only the owning task under tk_ token auth).
+
+        Args:
+            request (Dict[str, Any]): DAP request containing:
+                - arguments (Dict[str, Any], optional):
+                    - page (int): 1-based page number (default 1)
+                    - page_size (int): Rows per page (clamped 1..100, default 50)
+                    - search (str): Free text over id / name / source /
+                      provider / projectId
+                    - sort (List[Dict]): [{'field': <row key>, 'dir': 'asc'|'desc'}]
+                    - filters (Dict): Flat {key: value} record — string means
+                      contains/equality by the row value's type, array means
+                      set membership, __gte/__lte suffixes carry range bounds
+
+        Returns:
+            Dict[str, Any]: DAP response containing:
+                - body: { rows, total, page, pageSize } — rows carry the same
+                  shape as the dashboard's tasks list
+        """
+        try:
+            # Require monitor permission (same gate as the dashboard snapshot)
+            self.verify_permission('task.monitor')
+
+            # Extract the list-convention arguments
+            args = request.get('arguments', {}) or {}
+            current_time = time.time()
+
+            # Snapshot the caller-visible server state (permission + tk_ scoping)
+            task_controls, _conn_items = self._scoped_state()
+
+            # Materialize the full row set, then apply search / filters /
+            # sort / paging via the shared in-memory paginator
+            rows = self._build_task_rows(task_controls, current_time)
+            body = paginate_rows(
+                rows,
+                args,
+                # Name-ish/text fields of a task row
+                searchable_keys=('id', 'name', 'source', 'provider', 'projectId'),
+                # Default sort mirrors the dashboard's display order: the
+                # task registry iterates in creation order (oldest first),
+                # i.e. ascending 'startTime' (the row's launch timestamp);
+                # the 'id' row key is the deterministic tiebreak.
+                default_sort=('startTime', 'asc'),
+                tiebreak_key='id',
+            )
+            return self.build_response(request, body=body)
+
+        except Exception as e:
+            self.debug_message(f'Failed to list tasks: {str(e)}')
+            raise
+
+    # =========================================================================
+    # CALLER SCOPING + ROW BUILDERS (shared by dashboard and list commands)
+    # =========================================================================
+
+    def _scoped_state(self) -> Tuple[List[Any], List[Tuple[int, Any]]]:
+        """
+        Snapshot the server state visible to the calling account.
+
+        Applies the shared caller scoping used by on_rrext_dashboard and the
+        rrext_list_* commands: tasks the caller may monitor (own, teammate,
+        org admin — via resolve_task_permissions) and connections owned by
+        the caller's userId. Task-scoped tokens (tk_) narrow both lists to
+        the single owning task/connection.
+
+        Returns:
+            Tuple[List[Any], List[Tuple[int, Any]]]:
+                (task controls, [(connection id, connection), ...]).
+        """
+        server = self._server
+        caller_user_id = self._account_info.userId
+
+        # Snapshot tasks the caller has access to (own, teammate, org admin)
+        task_controls = [
+            c for c in server._task_control.values() if resolve_task_permissions(self._account_info, c.teamId)
+        ]
+        # Connections are user-scoped (not task-scoped), so filter by userId
+        conn_items = [
+            (cid, conn)
+            for cid, conn in server._connections.items()
+            if hasattr(conn, '_account_info') and conn._account_info and conn._account_info.userId == caller_user_id
+        ]
+
+        # Task-scoped tokens (tk_) can only see their own task
+        caller_auth = self._account_info.auth if hasattr(self._account_info, 'auth') else ''
+        if caller_auth.startswith('tk_'):
+            task_controls = [c for c in task_controls if c.token == caller_auth]
+            conn_items = [(cid, conn) for cid, conn in conn_items if cid == self._connection_id]
+
+        return task_controls, conn_items
+
+    def _build_connection_rows(
+        self,
+        task_controls: List[Any],
+        conn_items: List[Tuple[int, Any]],
+        current_time: float,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build the wire row dicts for a list of active connections.
+
+        Each row carries the connection's identity, traffic counters, active
+        monitor subscriptions (with human-friendly labels), and the display
+        names of the tasks it is attached to. Identity is resolved
+        server-side from the connection's AccountInfo: the stable userId, a
+        human userName (displayName falling back to email), and the org
+        membership (orgId/orgName). All four are None until the connection
+        authenticates (and org keys stay None without an org membership).
+
+        Args:
+            task_controls (List[Any]): Caller-visible task controls (used to
+                resolve monitor labels and attached-task names).
+            conn_items (List[Tuple[int, Any]]): Caller-visible (id, conn) pairs.
+            current_time (float): Timestamp used for fallback values.
+
+        Returns:
+            List[Dict[str, Any]]: One wire row per connection.
+        """
+        # Build connection-to-task mapping by scanning task controls
+        conn_tasks: Dict[int, List[str]] = {}
+        for control in task_controls:
+            if control.task is None:
+                continue
+            try:
+                status = control.task.get_status()
+            except Exception as e:
+                # Control torn down between snapshot and row build — skip it, the
+                # same defensive stance _build_task_rows takes, so one dead task
+                # never fails the whole connections/dashboard response.
+                self.debug_message(f'Error reading task status for connection map "{control.id}": {e}')
+                continue
+            task_name = getattr(status, 'name', None) or control.source
+            # Monitor keys are owner-scoped — build from the control's owner
+            # (once per control; they do not vary per connection).
+            project_key = owner_key(control.owner_id, control.project_id, control.source)
+            project_wildcard_key = f'p.{control.owner_id}.{control.project_id}.*'
+            pipe_prefix = f'{project_key}.'
+            for cid, conn in conn_items:
+                if not hasattr(conn, '_monitors'):
+                    continue
+                if (
+                    project_key in conn._monitors
+                    or project_wildcard_key in conn._monitors
+                    or '*' in conn._monitors
+                    or any(k.startswith(pipe_prefix) for k in conn._monitors)
+                ):
+                    conn_tasks.setdefault(cid, []).append(task_name)
+
+        # Build project ID → friendly name map from task controls
+        # so monitor keys like p.{uuid}.{source} can be displayed readably
+        project_names: Dict[str, str] = {}
+        source_names: Dict[str, str] = {}
+        for control in task_controls:
+            if control.task is None:
+                continue
+            try:
+                status = control.task.get_status()
+            except Exception as e:
+                # Control torn down mid-snapshot — skip it (matches _build_task_rows).
+                self.debug_message(f'Error reading task status for project map "{control.id}": {e}')
+                continue
+            task_name = getattr(status, 'name', None) or control.source
+            # Use the task_name prefix (before the dot) as project label
+            name_parts = task_name.split('.', 1)
+            project_names.setdefault(control.project_id, name_parts[0])
+            source_names.setdefault(
+                f'{control.project_id}.{control.source}', name_parts[-1] if len(name_parts) > 1 else control.source
+            )
+
+        # Build connections list
+        connections = []
+        for conn_id, conn in conn_items:
+            conn_info: Dict[str, Any] = {
+                'id': conn_id,
+                'connectedAt': getattr(conn, '_connected_at', current_time),
+                'lastActivity': getattr(conn, '_last_activity', current_time),
+                'messagesIn': getattr(conn, '_messages_in', 0),
+                'messagesOut': getattr(conn, '_messages_out', 0),
+                'authenticated': getattr(conn, '_authenticated', False),
+                'clientId': None,
+                # Resolved caller identity — all None until the connection
+                # authenticates (unauthenticated connections carry no account).
+                'userId': None,
+                'userName': None,
+                'orgId': None,
+                'orgName': None,
+                'clientInfo': getattr(conn, '_client_info', {}),
+                'monitors': self._build_monitors_list(conn._monitors, project_names, source_names)
+                if hasattr(conn, '_monitors')
+                else [],
+                'attachedTasks': conn_tasks.get(conn_id, []),
+            }
+            if hasattr(conn, '_account_info') and conn._account_info:
+                account = conn._account_info
+                conn_info['clientId'] = account.userId
+                # Server-side identity resolution from AccountInfo: the stable
+                # user id plus a human display name, preferring displayName and
+                # falling back to the account email (None when both are empty).
+                conn_info['userId'] = account.userId
+                conn_info['userName'] = getattr(account, 'displayName', '') or getattr(account, 'email', '') or None
+                # Org membership — AccountInfo.organization is an OrgInfo dict
+                # (None when the user has no org); mirror on_rrext_validate's
+                # dict/object dual handling for test doubles.
+                org = getattr(account, 'organization', None)
+                if org:
+                    conn_info['orgId'] = org.get('id') if isinstance(org, dict) else getattr(org, 'id', None)
+                    conn_info['orgName'] = org.get('name') if isinstance(org, dict) else getattr(org, 'name', None)
+            connections.append(conn_info)
+
+        return connections
+
+    def _build_task_rows(
+        self,
+        task_controls: List[Any],
+        current_time: float,
+    ) -> List[Dict[str, Any]]:
+        """
+        Build the wire row dicts for a list of task controls.
+
+        Each row carries the task's identity, launch info, timing (startTime
+        plus a live elapsedTime for running tasks), completion state, and
+        processing metrics. Controls whose status cannot be read (torn down
+        mid-snapshot) are logged and skipped.
+
+        Args:
+            task_controls (List[Any]): Caller-visible task controls.
+            current_time (float): Timestamp used to compute running elapsed time.
+
+        Returns:
+            List[Dict[str, Any]]: One wire row per readable task control.
+        """
+        # Build tasks list
+        tasks = []
+        for control in task_controls:
+            try:
+                task_status = control.task.get_status()
+                start = getattr(task_status, 'startTime', 0) or 0
+                end = getattr(task_status, 'endTime', 0) or 0
+                completed = getattr(task_status, 'completed', False)
+                if completed and start > 0 and end > 0:
+                    elapsed = end - start
+                elif start > 0:
+                    elapsed = current_time - start
+                else:
+                    elapsed = 0
+
+                # Convert Pydantic metrics model to plain dict for JSON serialization
+                metrics_raw = getattr(task_status, 'metrics', None)
+                metrics_dict = metrics_raw.model_dump() if hasattr(metrics_raw, 'model_dump') else metrics_raw
+
+                tasks.append(
+                    {
+                        'id': control.id,
+                        'name': getattr(task_status, 'name', control.source),
+                        'projectId': control.project_id,
+                        'source': control.source,
+                        # Run classification stamp: dashboards and sidebars
+                        # filter deploy runs out of dev views by this field.
+                        'runKind': control.run_kind,
+                        'provider': control.provider,
+                        'launchType': control.launch_type.value,
+                        'startTime': start,
+                        'elapsedTime': elapsed,
+                        'completed': completed,
+                        'status': getattr(task_status, 'status', None) if not completed else None,
+                        'exitCode': getattr(task_status, 'exitCode', None) if completed else None,
+                        'endTime': end if completed else None,
+                        'connections': control.task.get_connection_count(),
+                        'state': getattr(task_status, 'state', 0),
+                        'idleTime': getattr(control.task, '_idle_time', 0),
+                        'ttl': getattr(control.task, '_ttl', 0),
+                        'metrics': metrics_dict,
+                        'totalCount': getattr(task_status, 'totalCount', 0),
+                        'completedCount': getattr(task_status, 'completedCount', 0),
+                        'rateCount': getattr(task_status, 'rateCount', 0),
+                        'rateSize': getattr(task_status, 'rateSize', 0),
+                    }
+                )
+            except Exception as e:
+                self.debug_message(f'Error building task info for "{control.id}": {e}')
+                continue
+
+        return tasks
 
     @staticmethod
     def _mask_apikey(apikey: str) -> str:
@@ -425,18 +668,21 @@ class MiscCommands(DAPConn):
         if not key.startswith('p.'):
             return 'Task monitor'
 
-        # Strip the 'p.' prefix and split: projectId, source, [pipeId]
-        parts = key[2:].split('.', 2)
-        project_id = parts[0]
+        # Strip the 'p.' prefix and split: ownerId, projectId, source, [pipeId]
+        # (keys are owner-scoped: p.{teamId|userId}.{projectId}.{source})
+        parts = key[2:].split('.', 3)
+        if len(parts) < 2:
+            return 'Task monitor'
+        project_id = parts[1]
         project_label = project_names.get(project_id, project_id[:8])
 
-        if len(parts) == 1 or (len(parts) == 2 and parts[1] == '*'):
+        if len(parts) == 2 or (len(parts) == 3 and parts[2] == '*'):
             return f'{project_label}.*'
 
-        source = parts[1]
+        source = parts[2]
         source_label = source_names.get(f'{project_id}.{source}', source)
 
-        if len(parts) == 3:
-            return f'{project_label}.{source_label}.pipe{parts[2]}'
+        if len(parts) == 4:
+            return f'{project_label}.{source_label}.pipe{parts[3]}'
 
         return f'{project_label}.{source_label}'

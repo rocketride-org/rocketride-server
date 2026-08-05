@@ -15,7 +15,7 @@ import EnvVarSuggestions from '../env-var-suggestions/EnvVarSuggestions';
 // Component
 // =============================================================================
 
-const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, onBlur, onFocus, options, formContext }) => {
+const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, onBlur, onFocus, options, schema, formContext }) => {
 	const [controlledValue, setControlledValue] = useState(value ?? '');
 
 	useEffect(() => {
@@ -42,7 +42,9 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 	);
 
 	const handleKeyDown = useCallback(
-		(e: KeyboardEvent<HTMLTextAreaElement>) => {
+		// MUI TextField forwards onKeyDown from its root <div>, so the event is
+		// typed to HTMLDivElement even though the editable surface is a textarea.
+		(e: KeyboardEvent<HTMLDivElement>) => {
 			if (!autocomplete.isOpen) return;
 			if (e.key === 'ArrowDown') {
 				e.preventDefault();
@@ -90,6 +92,8 @@ const TextareaWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus
 				disabled={disabled || readonly}
 				error={!!rawErrors?.length}
 				variant="outlined"
+				InputLabelProps={{ shrink: true }}
+				helperText={typeof options?.description === 'string' ? options.description : schema?.description}
 			/>
 			{envKeys.length > 0 && (
 				<EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />

@@ -12,46 +12,29 @@ class ImageProcessor:
     @staticmethod
     def load_image_from_bytes(image_data: bytes) -> Image:
         """
-        Load an image from raw bytes and ensure it is in PNG format internally.
+        Load an image from raw bytes into a fully-decoded Pillow Image.
 
-        This method attempts to open the image data using Pillow's Image.open().
-        If the loaded image format is not PNG, it converts the image to PNG in memory,
-        reopening it from the PNG buffer to normalize the format.
+        Opens the bytes with Pillow and forces a full decode (``load()``) so the
+        image stays usable after the source buffer is released. The image keeps its
+        original mode/format; callers use the pixel data, not ``.format``.
 
         Args:
             image_data (bytes): The raw image data in bytes.
 
         Returns:
-            Image: A Pillow Image object guaranteed to be in PNG format.
+            Image: A fully-loaded Pillow Image, or None on failure.
 
         Raises:
             ValueError: If no image data is provided.
-
-        Notes:
-            - The .copy() call after reopening the PNG buffer is necessary to avoid
-              issues related to the underlying buffer being closed once the BytesIO
-              context manager exits.
-            - This method may raise or return None on failure; the caller should check.
         """
         if not image_data:
             raise ValueError('No image data provided')
 
         try:
-            # Open the image from bytes buffer
+            # Decode once; load() forces a full read so the image detaches from the
+            # buffer (replaces a costly format-normalizing PNG re-encode round-trip).
             image = Image.open(io.BytesIO(image_data))
-
-            # Check the image format; if not PNG, convert to PNG in-memory
-            if image.format != 'PNG':
-                with io.BytesIO() as png_buffer:
-                    # Save the image as PNG into the in-memory buffer
-                    image.save(png_buffer, format='PNG')
-
-                    # Rewind the buffer to the beginning before reading
-                    png_buffer.seek(0)
-
-                    # Re-open the image from the PNG buffer and copy to detach from buffer
-                    image = Image.open(png_buffer).copy()
-
+            image.load()
             return image
 
         except Exception as e:
@@ -121,25 +104,33 @@ class ImageProcessor:
         return thumbnail
 
     @staticmethod
-    def get_bytes(image: Image) -> bytes:
+    def get_bytes(image: Image, fmt: str = 'PNG', quality: int = 90, compress_level: int = 6) -> bytes:
         """
-        Convert a Pillow Image to PNG format bytes.
+        Encode a Pillow Image to bytes.
 
-        This method saves the image as PNG to preserve transparency and full color data.
-        No conversion to RGB is needed since PNG supports RGBA and other modes.
+        PNG by default (preserves alpha). Pass ``fmt='JPEG'`` for a smaller/faster
+        encode; non-RGB modes (e.g. RGBA) are coerced to RGB since JPEG has no alpha.
 
         Args:
             image (Image): The Pillow Image object to convert.
+            fmt (str): 'PNG' (default) or 'JPEG'.
+            quality (int): JPEG quality (ignored for PNG).
+            compress_level (int): PNG zlib level 0-9 (ignored for non-PNG). Default 6
+                matches Pillow. Lower trades file size for speed — e.g. 1 cuts a 30 MP
+                RGBA encode from ~16 s to ~2-3 s, which matters for full-res cutouts.
 
         Returns:
-            bytes: The PNG image data.
+            bytes: The encoded image data.
         """
         buffered = io.BytesIO()
-
-        # Save image to buffer in PNG format (supports transparency)
-        image.save(buffered, format='PNG')
-
-        # Retrieve byte data from buffer
+        if fmt.upper() in ('JPEG', 'JPG'):
+            if image.mode not in ('RGB', 'L'):
+                image = image.convert('RGB')
+            image.save(buffered, format='JPEG', quality=quality)
+        elif fmt.upper() == 'PNG':
+            image.save(buffered, format='PNG', compress_level=compress_level)
+        else:
+            image.save(buffered, format=fmt)
         return buffered.getvalue()
 
     @staticmethod

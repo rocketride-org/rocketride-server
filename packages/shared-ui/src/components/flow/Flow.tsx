@@ -4,8 +4,9 @@
 // =============================================================================
 
 import React, { CSSProperties } from 'react';
-import type { TaskStatus, Pipeline } from '../../modules/project/types';
+import type { TaskStatus } from '../../modules/project/types';
 import { commonStyles } from '../../themes/styles';
+import { EmptyState } from '../empty-state/EmptyState';
 
 // =============================================================================
 // STYLES (component-specific only)
@@ -68,6 +69,15 @@ const styles = {
 // =============================================================================
 // Types
 // =============================================================================
+
+/**
+ * A single active pipeline derived from `taskStatus.pipeflow.byPipe`, whose
+ * entries map a numeric pipeline instance id to its ordered stage names.
+ */
+interface Pipeline {
+	id: number;
+	stages: string[];
+}
 
 interface FlowProps {
 	taskStatus: TaskStatus | null | undefined;
@@ -143,7 +153,7 @@ export const SourceFlowContent: React.FC<SourceFlowContentProps> = ({ taskStatus
 						</div>
 					))
 				) : (
-					<div style={commonStyles.empty}>No active pipelines</div>
+					<EmptyState title="No active pipelines" description="Documents in flight appear here while the pipeline runs or when replaying a recorded run." />
 				)
 			) : Object.keys(componentData).length > 0 ? (
 				Object.entries(componentData).map(([name, data]) => (
@@ -166,7 +176,7 @@ export const SourceFlowContent: React.FC<SourceFlowContentProps> = ({ taskStatus
 					</div>
 				))
 			) : (
-				<div style={commonStyles.empty}>No active components</div>
+				<EmptyState title="No active components" description="Component activity appears here while the pipeline runs or when replaying a recorded run." />
 			)}
 		</div>
 	);
@@ -256,7 +266,7 @@ const Flow: React.FC<FlowProps> = ({ taskStatus, viewMode, onViewModeChange }) =
 					</button>
 				</div>
 			</div>
-			<div style={styles.content}>{viewMode === 'pipeline' ? activePipelines.length > 0 ? activePipelines.map(renderPipelineCard) : <div style={commonStyles.empty}>No active pipelines</div> : Object.keys(componentData).length > 0 ? Object.entries(componentData).map(([name, data]) => renderComponentCard(name, data)) : <div style={commonStyles.empty}>No active components</div>}</div>
+			<div style={styles.content}>{viewMode === 'pipeline' ? activePipelines.length > 0 ? activePipelines.map(renderPipelineCard) : <EmptyState title="No active pipelines" description="Documents in flight appear here while the pipeline runs or when replaying a recorded run." /> : Object.keys(componentData).length > 0 ? Object.entries(componentData).map(([name, data]) => renderComponentCard(name, data)) : <EmptyState title="No active components" description="Component activity appears here while the pipeline runs or when replaying a recorded run." />}</div>
 		</div>
 	);
 };

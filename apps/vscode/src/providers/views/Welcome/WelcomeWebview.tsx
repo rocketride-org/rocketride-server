@@ -53,7 +53,7 @@ import '../../styles/root.css';
 
 interface WelcomeExtraSettings {}
 
-type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string } | { type: 'teamsLoaded'; teams: Array<{ id: string; name: string }> } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
+type IncomingMessage = { type: 'settingsLoaded'; settings: SettingsData & WelcomeExtraSettings; logoDarkUri?: string; logoLightUri?: string } | { type: 'showMessage'; level: 'success' | 'error' | 'info' | 'warning'; message: string } | { type: 'versionsLoaded'; versions: EngineVersionItem[] } | { type: 'cloud:status'; signedIn: boolean; userName: string } | { type: 'dockerStatus'; status: DockerStatus } | { type: 'dockerVersionsLoaded'; tags: string[] } | { type: 'serviceStatus'; status: ServiceStatus } | { type: 'serviceNeedsSudo' } | { type: 'ioProgress'; mode: string; command: string; message: string } | { type: 'ioResult'; mode: string; command: string; success: boolean; error?: string };
 
 type OutgoingMessage = { type: string; [key: string]: unknown };
 
@@ -133,19 +133,21 @@ const DEFAULT_SETTINGS: SettingsData = {
 		hostUrl: 'http://localhost:5565',
 		apiKey: '',
 		hasApiKey: false,
-		teamId: '',
-		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+		local: { engineVersion: 'latest' },
 	},
 	deployment: {
 		connectionMode: null,
 		hostUrl: '',
 		hasApiKey: false,
 		apiKey: '',
-		teamId: '',
-		local: { engineVersion: 'latest', debugOutput: false, engineArgs: '' },
+		local: { engineVersion: 'latest' },
 	},
 	defaultPipelinePath: 'pipelines',
 	pipelineRestartBehavior: 'prompt',
+	pipelineTtl: 900,
+	pipelineTraceLevel: 'summary',
+	taskArguments: '',
+	pipelineDebugOutput: false,
 	envVars: {},
 	autoAgentIntegration: true,
 	integrationCopilot: false,
@@ -185,7 +187,6 @@ export const Welcome: React.FC = () => {
 	// Cloud auth
 	const [cloudSignedIn, setCloudSignedIn] = useState(false);
 	const [cloudUserName, setCloudUserName] = useState('');
-	const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
 
 	// Docker state
 	const [dockerStatus, setDockerStatus] = useState<DockerStatus>({ state: 'not-installed', version: null, publishedAt: null, imageTag: null });
@@ -238,10 +239,6 @@ export const Welcome: React.FC = () => {
 				case 'cloud:status':
 					setCloudSignedIn((msg as any).signedIn);
 					setCloudUserName((msg as any).userName || '');
-					break;
-
-				case 'teamsLoaded':
-					setTeams((msg as any).teams || []);
 					break;
 
 				// Status polling — actual OS/Docker daemon state
@@ -362,7 +359,6 @@ export const Welcome: React.FC = () => {
 			}
 			if (devMode === 'cloud' && prev.development.connectionMode !== 'cloud') {
 				sendMessage({ type: 'cloud:getStatus' });
-				// Teams are fetched by CloudPanel after it confirms the server is SaaS
 			}
 
 			return next;
@@ -387,10 +383,6 @@ export const Welcome: React.FC = () => {
 	const handleProbeCloudServer = (cloudUrl: string) => {
 		setIsSaasProbed(undefined);
 		sendMessage({ type: 'probeServerInfo', hostUrl: cloudUrl } as any);
-	};
-
-	const handleFetchTeams = (cloudUrl: string) => {
-		sendMessage({ type: 'fetchTeams', hostUrl: cloudUrl } as any);
 	};
 
 	/**
@@ -513,9 +505,7 @@ export const Welcome: React.FC = () => {
 						onCloudSignIn={() => sendMessage({ type: 'cloud:signIn' })}
 						onCloudSignOut={() => sendMessage({ type: 'cloud:signOut' })}
 						onProbeCloudServer={handleProbeCloudServer}
-						onFetchTeams={handleFetchTeams}
 						isSaas={isSaasProbed}
-						teams={teams}
 						onClearCredentials={() => {
 							setSettings((prev) => ({
 								...prev,

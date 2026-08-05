@@ -7,16 +7,207 @@
  * ProfilePanel — the Profile tab within AccountView.
  *
  * Displays the user's avatar card with identity information, organization
- * and team memberships with "Set default" actions, a Sign Out button, and
- * an inline Edit Profile modal. All server interactions are delegated to
- * the host via callback props.
+ * and team memberships with development-team assignment, and the Edit Profile
+ * record panel — an edit-only form DetailPanel per the interaction standard
+ * (2026-07-18): [Save Changes] MATERIALIZES only while a field differs from
+ * the seeded profile snapshot; Cancel / X / Escape on a dirty form raise the
+ * stock "Discard changes?" confirm (the DetailPanel owns the X / Escape
+ * guard via the dirty / editing props; the footer Cancel routes through its
+ * own check); a successful Save closes the panel (correct for a form-only
+ * panel). Per the concurrent-edit ruling, the form seeds ONCE per open and
+ * never re-seeds mid-edit — the user's typing is sacred. Errors render as an
+ * in-panel Banner at the top of the body. Grouped sections render as stock
+ * Cards. All server interactions are delegated to the host via callback props.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
+import { Card } from '../../../components/card/Card';
+import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
+import { Banner } from '../../../components/banner/Banner';
+import { Button } from '../../../components/button/Button';
 import type { ConnectResult, ProfileUpdate } from '../types';
-import { S, Badge, PermPill, Avatar, Modal, initials, avatarColor } from './shared';
+import { S, Badge, Avatar, initials, avatarColor } from './shared';
+
+// =============================================================================
+// STYLES
+// =============================================================================
+
+const styles = {
+	/** Vertical stack of the panel's cards (standard 16px rhythm). */
+	stack: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 16,
+	} as CSSProperties,
+
+	/** Identity card inner row: avatar + identity block + edit action. */
+	identityRow: {
+		padding: '24px 24px 20px',
+		display: 'flex',
+		alignItems: 'center',
+		gap: 18,
+	} as CSSProperties,
+
+	/**
+	 * Large circular avatar with a deterministic color background.
+	 *
+	 * @param seed - Name or email seeding the color.
+	 */
+	avatarLarge: (seed: string): CSSProperties => ({
+		width: 64,
+		height: 64,
+		borderRadius: '50%',
+		background: avatarColor(seed),
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		fontSize: 24,
+		fontWeight: 700,
+		color: 'var(--rr-fg-button)',
+		flexShrink: 0,
+	}),
+
+	/** Flex-growing identity text block. */
+	identityInfo: {
+		flex: 1,
+		minWidth: 0,
+	} as CSSProperties,
+
+	/** Display name line. */
+	displayName: {
+		fontSize: 18,
+		fontWeight: 700,
+		color: 'var(--rr-text-primary)',
+		marginBottom: 4,
+	} as CSSProperties,
+
+	/** Preferred username line beneath the display name. */
+	username: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		marginBottom: 12,
+	} as CSSProperties,
+
+	/** Wrapping row of contact entries (email / phone). */
+	contactRow: {
+		display: 'flex',
+		flexWrap: 'wrap',
+		gap: '4px 16px',
+	} as CSSProperties,
+
+	/** One contact entry: value text + verification pill. */
+	contactItem: {
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		display: 'flex',
+		alignItems: 'center',
+		gap: 5,
+	} as CSSProperties,
+
+	/** Green "Verified" pill next to a verified email / phone. */
+	verifiedPill: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: 3,
+		fontSize: 10,
+		fontWeight: 600,
+		padding: '1px 6px',
+		borderRadius: 4,
+		background: 'var(--rr-bg-surface-alt)',
+		color: 'var(--rr-color-success)',
+	} as CSSProperties,
+
+	/** Amber "Unverified" pill next to an unverified email / phone. */
+	unverifiedPill: {
+		fontSize: 10,
+		fontWeight: 600,
+		padding: '1px 5px',
+		borderRadius: 4,
+		background: 'var(--rr-bg-surface-alt)',
+		color: 'var(--rr-color-warning)',
+	} as CSSProperties,
+
+	/**
+	 * Membership org row: dimmed when the org is not the active one.
+	 *
+	 * @param active - Whether the org is the user's active organization.
+	 */
+	orgRow: (active: boolean): CSSProperties => ({
+		...S.rowItem,
+		borderBottom: 'none',
+		opacity: active ? 1 : 0.45,
+	}),
+
+	/** Green check label for the active org / development team. */
+	activeLabel: {
+		fontSize: 11,
+		color: 'var(--rr-color-success)',
+		fontWeight: 600,
+	} as CSSProperties,
+
+	/** Indented "Teams" caption above the active org's team rows. */
+	teamsCaption: {
+		paddingLeft: 40,
+		paddingTop: 4,
+		paddingBottom: 4,
+	} as CSSProperties,
+
+	/** Small caption text for the "Teams" label. */
+	teamsCaptionText: {
+		...commonStyles.labelUppercase,
+		fontSize: 9,
+	} as CSSProperties,
+
+	/**
+	 * Team row under the active org: indented, tight vertical padding, and a
+	 * divider only after the last team when another org row follows.
+	 *
+	 * @param isLast    - Whether this is the last team in the org.
+	 * @param needsRule - Whether a divider should follow (another org is next).
+	 */
+	teamRow: (isLast: boolean, needsRule: boolean): CSSProperties => ({
+		...S.rowItem,
+		paddingLeft: 40,
+		paddingRight: 60,
+		paddingTop: 2,
+		paddingBottom: isLast ? 12 : 2,
+		borderBottom: isLast && needsRule ? '1px solid var(--rr-border)' : 'none',
+	}),
+
+	/**
+	 * Small square team chip with a deterministic color background.
+	 *
+	 * @param name - Team name seeding the color.
+	 */
+	teamChip: (name: string): CSSProperties => ({
+		width: 20,
+		height: 20,
+		borderRadius: 5,
+		background: avatarColor(name),
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		fontSize: 10,
+		fontWeight: 700,
+		color: 'var(--rr-fg-button)',
+		flexShrink: 0,
+	}),
+
+	/** Spacing wrapper for the in-panel error Banner at the top of the body. */
+	errorBanner: {
+		marginBottom: 12,
+	} as CSSProperties,
+
+	/** Read-only input treatment (login name). */
+	inputReadOnly: {
+		...commonStyles.inputField,
+		opacity: 0.6,
+		cursor: 'default',
+	} as CSSProperties,
+};
 
 // =============================================================================
 // PROPS
@@ -30,12 +221,10 @@ export interface ProfilePanelProps {
 	authUser: ConnectResult | null;
 	/** Async handler that persists a ProfileUpdate and resolves on success. */
 	onSave: (fields: ProfileUpdate) => Promise<void>;
-	/** Sets the user's preferred default team by its ID. */
+	/** Assigns the team the user's development runs execute under, by its ID. */
 	onSetDefaultTeam: (teamId: string) => void;
-	/** Triggers the logout flow. */
-	onLogout: () => void;
-	/** Async handler that permanently deletes the user account. */
-	onDeleteAccount: () => Promise<void>;
+	/** Switches the user's active organization by its ID. */
+	onSetDefaultOrg: (orgId: string) => void;
 }
 
 // =============================================================================
@@ -43,23 +232,7 @@ export interface ProfilePanelProps {
 // =============================================================================
 
 /** A small green "Verified" pill shown next to a verified email or phone number. */
-const VerifiedBadge: React.FC = () => (
-	<span
-		style={{
-			display: 'inline-flex',
-			alignItems: 'center',
-			gap: 3,
-			fontSize: 10,
-			fontWeight: 600,
-			padding: '1px 6px',
-			borderRadius: 4,
-			background: 'var(--rr-bg-surface-alt)',
-			color: 'var(--rr-color-success)',
-		}}
-	>
-		{'\u2713'} Verified
-	</span>
-);
+const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} Verified</span>;
 
 // =============================================================================
 // PROFILE PANEL
@@ -69,14 +242,15 @@ const VerifiedBadge: React.FC = () => (
  * The Profile tab panel.
  *
  * Displays a large avatar card with the user's identity information,
- * a list of their organizations and team memberships with a "Set default"
- * action per team, a Sign Out button, and an inline Edit Profile modal.
+ * a list of their organizations and team memberships with a development-team
+ * assignment action per team, and an inline Edit Profile modal.
  */
-export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onLogout, onDeleteAccount }) => {
+export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDefaultTeam, onSetDefaultOrg }) => {
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
-	 * Called both on mount and whenever the underlying data changes, so the
-	 * edit modal always opens pre-populated with the freshest values.
+	 * Called exactly when the edit panel OPENS — the concurrent-edit ruling
+	 * (2026-07-18) forbids re-seeding staged fields while the panel is open,
+	 * so a profile refresh mid-edit never clobbers the user's typing.
 	 */
 	const fromProfile = (): ProfileUpdate => ({
 		displayName: profile?.displayName || authUser?.displayName || '',
@@ -88,16 +262,22 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 		locale: profile?.locale || authUser?.locale || '',
 	});
 
-	const [editOpen, setEditOpen] = React.useState(false);
-	const [fields, setFields] = React.useState<ProfileUpdate>(fromProfile);
-	const [saving, setSaving] = React.useState(false);
-	const [error, setError] = React.useState<string | null>(null);
+	const [editOpen, setEditOpen] = useState(false);
+	// Staged form fields, seeded once per open from the profile snapshot.
+	const [fields, setFields] = useState<ProfileUpdate>(fromProfile);
+	// The snapshot the form was seeded from — the dirty compare's baseline.
+	// Comparing against LIVE props instead would falsely dirty a clean form
+	// whenever the profile refreshes mid-edit.
+	const [seeded, setSeeded] = useState<ProfileUpdate>(fromProfile);
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	// Footer-Cancel discard confirm (the DetailPanel guards X / Escape itself;
+	// the footer Cancel routes through this local gate per the standard).
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-	// Re-sync form fields when the server profile or auth user data is refreshed.
-	React.useEffect(() => {
-		setFields(fromProfile());
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [profile?.displayName, profile?.email, authUser?.email]);
+	// Dirty flag: any staged field differs from the seeded snapshot. Drives
+	// the materializing [Save Changes] and arms the discard guard.
+	const dirty = (Object.keys(fields) as Array<keyof ProfileUpdate>).some((key) => fields[key] !== seeded[key]);
 
 	/** Returns a change handler for a specific ProfileUpdate field key. */
 	const set = (key: keyof ProfileUpdate) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -105,24 +285,33 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 		setError(null);
 	};
 
-	/** Opens the edit modal and resets its form to the current profile snapshot. */
+	/**
+	 * Opens the edit panel, seeding the form AND the dirty baseline from the
+	 * freshest profile snapshot. This transition is the ONLY seeding point —
+	 * there is deliberately no prop-driven re-seed effect (see fromProfile).
+	 */
 	const openEdit = () => {
-		setFields(fromProfile());
+		const snapshot = fromProfile();
+		setFields(snapshot);
+		setSeeded(snapshot);
 		setError(null);
 		setEditOpen(true);
 	};
-	/** Closes the edit modal and clears any pending error message. */
+	/** Closes the edit panel and clears its transient state. */
 	const closeEdit = () => {
 		setEditOpen(false);
 		setError(null);
+		setConfirmDiscard(false);
 	};
 
-	/** Submits the edited profile fields; shows an inline error on failure. */
+	/** Submits the edited profile fields; a failure stays open with the staged
+	    values intact and shows the in-panel Banner. */
 	const handleSave = async () => {
 		setSaving(true);
 		setError(null);
 		try {
 			await onSave(fields);
+			// After Save the panel closes — correct for a form-only panel.
 			setEditOpen(false);
 		} catch (e) {
 			setError(e instanceof Error ? e.message : 'Save failed');
@@ -132,117 +321,152 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 	};
 
 	// Prefer the server-side profile value over the cached auth token value.
-	const displayName = profile?.displayName || authUser?.displayName || '\u2014';
+	const displayName = profile?.displayName || authUser?.displayName || '—';
 	const email = profile?.email || authUser?.email || '';
-	const orgs = profile?.organizations ?? authUser?.organizations ?? [];
+	const org = profile?.organization ?? authUser?.organization ?? null;
+	const memberships = profile?.memberships ?? (org ? [org] : []);
+	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
 
 	return (
-		<section>
-			<div style={{ ...commonStyles.card, marginBottom: 14 }}>
-				<div style={{ padding: '24px 24px 20px', display: 'flex', alignItems: 'center', gap: 18 }}>
+		<section style={styles.stack}>
+			{/* Identity card — headerless Card with the padded avatar row. */}
+			<Card noBodyPadding>
+				<div style={styles.identityRow}>
 					{/* Avatar */}
-					<div style={{ width: 64, height: 64, borderRadius: '50%', background: avatarColor(displayName || email), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{initials(displayName, email)}</div>
+					<div style={styles.avatarLarge(displayName || email)}>{initials(displayName, email)}</div>
 
 					{/* Identity */}
-					<div style={{ flex: 1, minWidth: 0 }}>
-						<div style={{ fontSize: 18, fontWeight: 700, color: 'var(--rr-text-primary)', marginBottom: 4 }}>{displayName}</div>
-						{(profile?.preferredUsername || authUser?.preferredUsername) && <div style={{ fontSize: 12, color: 'var(--rr-text-secondary)', marginBottom: 12 }}>{profile?.preferredUsername || authUser?.preferredUsername}</div>}
-						<div style={{ display: 'flex', flexWrap: 'wrap' as const, gap: '4px 16px' }}>
+					<div style={styles.identityInfo}>
+						<div style={styles.displayName}>{displayName}</div>
+						{(profile?.preferredUsername || authUser?.preferredUsername) && <div style={styles.username}>{profile?.preferredUsername || authUser?.preferredUsername}</div>}
+						<div style={styles.contactRow}>
 							{(profile?.email || authUser?.email) && (
-								<span style={{ fontSize: 12, color: 'var(--rr-text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
+								<span style={styles.contactItem}>
 									{profile?.email || authUser?.email}
 									{/* Show verified / unverified badge only when the server has provided the flag. */}
-									{profile?.emailVerified !== undefined && (profile.emailVerified ? <VerifiedBadge /> : <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: 'var(--rr-bg-surface-alt)', color: 'var(--rr-color-warning)' }}>Unverified</span>)}
+									{profile?.emailVerified !== undefined && (profile.emailVerified ? <VerifiedBadge /> : <span style={styles.unverifiedPill}>Unverified</span>)}
 								</span>
 							)}
 							{(profile?.phoneNumber || authUser?.phoneNumber) && (
-								<span style={{ fontSize: 12, color: 'var(--rr-text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
+								<span style={styles.contactItem}>
 									{profile?.phoneNumber || authUser?.phoneNumber}
-									{profile?.phoneNumberVerified !== undefined && (profile.phoneNumberVerified ? <VerifiedBadge /> : <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 4, background: 'var(--rr-bg-surface-alt)', color: 'var(--rr-color-warning)' }}>Unverified</span>)}
+									{profile?.phoneNumberVerified !== undefined && (profile.phoneNumberVerified ? <VerifiedBadge /> : <span style={styles.unverifiedPill}>Unverified</span>)}
 								</span>
 							)}
 						</div>
 					</div>
 
-					<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={openEdit}>
+					<Button variant="ghost" small onClick={openEdit}>
 						Edit Profile
-					</button>
+					</Button>
 				</div>
-			</div>
+			</Card>
 
-			{orgs.length > 0 && (
-				<div style={{ ...commonStyles.card, marginBottom: 14 }}>
-					<div style={commonStyles.cardHeader}>
-						<span style={commonStyles.labelUppercase}>Organizations / Workspaces</span>
-					</div>
+			{/* Organizations / workspaces card with team memberships. */}
+			{memberships.length > 0 && (
+				<Card header="Organizations / Workspaces" noBodyPadding>
 					<div style={S.rowList}>
-						{orgs.map((o, oi) => (
-							<React.Fragment key={o.id}>
-								{/* Org row */}
-								<div style={{ ...S.rowItem, borderBottom: 'none' }}>
-									<Avatar name={o.name} size={24} square />
-									<div style={S.rowInfo}>
-										<div style={S.rowName}>{o.name}</div>
-									</div>
-									{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
-								</div>
-								{/* Teams sub-header */}
-								{o.teams.length > 0 && (
-									<div style={{ paddingLeft: 40, paddingTop: 4, paddingBottom: 4 }}>
-										<span style={{ ...commonStyles.labelUppercase, fontSize: 9 }}>Teams</span>
-									</div>
-								)}
-								{/* Team rows — indented under the org */}
-								{o.teams.map((t, i) => {
-									const isDefault = authUser?.defaultTeam === t.id;
-									const isLast = i === o.teams.length - 1;
-									return (
-										<div key={t.id} style={{ ...S.rowItem, paddingLeft: 40, paddingRight: 60, paddingTop: 2, paddingBottom: isLast ? 12 : 2, borderBottom: isLast && oi < orgs.length - 1 ? '1px solid var(--rr-border)' : 'none' }}>
-											<div style={{ width: 20, height: 20, borderRadius: 5, background: avatarColor(t.name), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'var(--rr-fg-button)', flexShrink: 0 }}>{t.name[0]}</div>
-											<div style={S.rowInfo}>
-												<div style={S.rowName}>{t.name}</div>
-											</div>
-											{isDefault ? (
-												<span style={{ fontSize: 11, color: 'var(--rr-color-success)', fontWeight: 600 }}>{'\u2713'} Default</span>
-											) : (
-												<button style={{ ...commonStyles.buttonSecondary, ...commonStyles.cardBodyButton } as CSSProperties} onClick={() => onSetDefaultTeam(t.id)}>
-													Set default
-												</button>
-											)}
+						{memberships.map((o, oi) => {
+							const isActive = o.id === defaultOrgId;
+							return (
+								<React.Fragment key={o.id}>
+									{/* Org row */}
+									<div style={styles.orgRow(isActive)}>
+										<Avatar name={o.name} size={24} square />
+										<div style={S.rowInfo}>
+											<div style={S.rowName}>{o.name}</div>
 										</div>
-									);
-								})}
-							</React.Fragment>
-						))}
+										{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
+										{isActive ? (
+											<span style={styles.activeLabel}>{'✓'} Active</span>
+										) : (
+											<Button variant="ghost" small onClick={() => onSetDefaultOrg(o.id)}>
+												Switch to
+											</Button>
+										)}
+									</div>
+									{/* Teams — only shown for the active org */}
+									{isActive && o.teams.length > 0 && (
+										<>
+											<div style={styles.teamsCaption}>
+												<span style={styles.teamsCaptionText}>Teams</span>
+											</div>
+											{o.teams.map((t, i) => {
+												const isDefaultTeam = authUser?.defaultTeam === t.id;
+												const isLast = i === o.teams.length - 1;
+												return (
+													<div key={t.id} style={styles.teamRow(isLast, oi < memberships.length - 1)}>
+														<div style={styles.teamChip(t.name)}>{t.name[0]}</div>
+														<div style={S.rowInfo}>
+															<div style={S.rowName}>{t.name}</div>
+														</div>
+														{isDefaultTeam ? (
+															<span style={styles.activeLabel}>{'✓'} Development team</span>
+														) : (
+															<Button variant="ghost" small onClick={() => onSetDefaultTeam(t.id)}>
+																Set as development team
+															</Button>
+														)}
+													</div>
+												);
+											})}
+										</>
+									)}
+								</React.Fragment>
+							);
+						})}
 					</div>
-				</div>
+				</Card>
 			)}
 
-			{/* -- Edit Profile Dialog -- */}
+			{/* -- Edit Profile record panel (record-panel standard 2026-07-17:
+			      the profile IS a record — editing slides out from the Account
+			      dialog's edge like every other record, no dialog). Edit-only
+			      form panel: editing is always true while open, [Save Changes]
+			      MATERIALIZES only while dirty (LEFT of the stationary Cancel),
+			      and a dirty Cancel / X / Escape raises the discard confirm. -- */}
 			{editOpen && (
-				<Modal
-					title="Edit Profile"
+				<DetailPanel
+					persistKey="panelDetailProfileWidth"
+					contained
+					open
 					onClose={closeEdit}
+					avatar={<div style={styles.avatarLarge(displayName || email)}>{initials(displayName, email)}</div>}
+					title={displayName}
+					subtitle={email || undefined}
+					dirty={dirty}
+					editing
+					onExitMode={closeEdit}
+					busy={saving}
 					footer={
 						<>
-							<button style={{ ...commonStyles.buttonSecondary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={closeEdit} disabled={saving}>
+							{dirty && (
+								<Button variant="primary" small onClick={() => void handleSave()} disabled={saving}>
+									{saving ? 'Saving…' : 'Save Changes'}
+								</Button>
+							)}
+							<Button variant="ghost" small onClick={() => (dirty ? setConfirmDiscard(true) : closeEdit())} disabled={saving}>
 								Cancel
-							</button>
-							<button style={{ ...commonStyles.buttonPrimary, ...(saving ? commonStyles.buttonDisabled : {}) } as CSSProperties} onClick={handleSave} disabled={saving}>
-								{saving ? 'Saving\u2026' : 'Save Changes'}
-							</button>
+							</Button>
 						</>
 					}
 				>
+					{/* In-panel error surface (interaction standard): a stock Banner
+					    at the top of the body. */}
+					{error && (
+						<div style={styles.errorBanner}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					)}
 					<div style={S.fieldRow}>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Nickname</div>
-							<input value={fields.displayName} onChange={set('displayName')} style={commonStyles.inputField} autoFocus />
+							<input value={fields.displayName} onChange={set('displayName')} style={commonStyles.inputField} data-rr-autofocus="true" />
 							<div style={commonStyles.textMuted}>What we call you in the app</div>
 						</div>
 						<div style={S.field}>
 							<div style={S.fieldLabel}>Login Name</div>
-							<input value={fields.preferredUsername} readOnly style={{ ...commonStyles.inputField, opacity: 0.6, cursor: 'default' }} />
+							<input value={fields.preferredUsername} readOnly style={styles.inputReadOnly} />
 							<div style={commonStyles.textMuted}>Used to sign in -- contact support to change</div>
 						</div>
 						<div style={S.field}>
@@ -262,8 +486,25 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 							<input value={fields.phoneNumber} onChange={set('phoneNumber')} placeholder="+15550000000" style={commonStyles.inputField} />
 						</div>
 					</div>
-					{error && <div style={{ fontSize: 11, color: 'var(--rr-color-error)', marginTop: 4 }}>{error}</div>}
-				</Modal>
+				</DetailPanel>
+			)}
+
+			{/* -- Footer-Cancel discard confirm (stock dialog, same copy as the
+			      DetailPanel's own X / Escape guard) -- */}
+			{confirmDiscard && (
+				<ConfirmDialog
+					title="Discard changes?"
+					message="Your unsaved changes will be lost."
+					confirmLabel="Discard"
+					cancelLabel="Keep Editing"
+					destructive
+					onConfirm={() => {
+						// The confirmed discard closes the edit-only form panel.
+						setConfirmDiscard(false);
+						closeEdit();
+					}}
+					onCancel={() => setConfirmDiscard(false)}
+				/>
 			)}
 		</section>
 	);

@@ -29,26 +29,10 @@
 // =============================================================================
 
 // Shell component prop contracts — used by apps implementing App/Sidebar
-export type {
-	ShellAppProps,
-	ShellSidebarProps,
-} from './workspace/types';
+export type { ShellAppProps, ShellSidebarProps } from './workspace/types';
 
 // Workspace and shell configuration types
-export type {
-	WorkspacePrefs,
-	WorkspaceState,
-	AppWorkspaceState,
-	AppManifestEntry,
-	AppDescriptor,
-	AppSettingDefinition,
-	ShellConfig,
-	ShellBrandingConfig,
-	ShellThemeConfig,
-	ShellThemeOption,
-	ShellAccountConfig,
-	ShellApiConfig,
-} from './workspace/types';
+export type { WorkspacePrefs, WorkspaceState, AppWorkspaceState, AppManifestEntry, AppDescriptor, SettingValue, SettingSchema, AppConfiguration, ShellConfig, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig, ShellApiConfig } from './workspace/types';
 
 // Event bus type map — ShellEventMap re-exported from the shared contract
 export type { ShellConnectionEventMap as ShellEventMap } from 'shared';
@@ -88,6 +72,11 @@ export { useShellEvent } from './hooks/useShellEvent';
 
 // Connection-aware interval polling
 export { usePolling } from './hooks/usePolling';
+export type { IUsePollingOptions } from './hooks/usePolling';
+
+// Shared 3s dashboard snapshot + live activity events (module-level singleton)
+export { useDashboardData } from './hooks/useDashboardData';
+export type { DashboardData } from './hooks/useDashboardData';
 
 // Null-safe client access (only returns client when connected)
 export { useClient } from './hooks/useClient';
@@ -130,6 +119,17 @@ export { useFixedPopupPosition } from 'shared/hooks/useFixedPopupPosition';
 export { default as DebugPanel } from './components/layout/DebugPanel';
 
 // =============================================================================
+// HOST CHROME — opt-in sidebar-content registration
+// =============================================================================
+
+// Declare sidebar content for the calling view; the shell frame mounts it in
+// the sidebar's scrolling slot (rendered even while collapsed — components
+// inside read shared-ui's useSidebarCollapsed to pick their collapsed form).
+export { useSidebarContent } from './components/layout/HostChromeContext';
+// ViewMenu declaration types (re-exported from shared for app convenience).
+export type { ViewMenu, ViewMenuEntry } from 'shared';
+
+// =============================================================================
 // AUTH
 // =============================================================================
 
@@ -144,15 +144,14 @@ export { useSubscriptions } from './hooks/useSubscriptions';
 // VIEWS — shell-owned overlays
 // =============================================================================
 
-export { default as AccountPage } from './views/account/AccountPage';
-export { default as BillingPage } from './views/billing/BillingPage';
-export { default as SettingsPage } from './views/settings/SettingsPage';
+export { default as AccountProvider } from './providers/AccountProvider';
+export { default as SettingsProvider } from './providers/SettingsProvider';
 
 // Hook for plugin views to subscribe to shell lifecycle events (iframe protocol)
-export { useShellEvents } from './views/useShellEvents';
+export { useIframeBridge } from './hooks/useIframeBridge';
 
 // TypeScript message type definitions for the iframe protocol
-export type { ShellToIframeMsg, IframeToShellMsg, ShellInitMsg } from './views/ShellIframeProtocol';
+export type { ShellToIframeMsg, IframeToShellMsg, ShellInitMsg } from './hooks/iframeBridgeProtocol';
 
 // =============================================================================
 // COMPONENT LIBRARY — opt-in document management
@@ -185,3 +184,15 @@ export { useAppComponent } from './lib/useAppComponent';
 // =============================================================================
 
 export * from './icons/BoxIcon';
+
+// =============================================================================
+// CURATED API SURFACE — versioned contract entry (see api.ts)
+// =============================================================================
+
+// One typed object bundling every shell-provided symbol apps consume. Frozen by
+// `./builder shell:freeze` into packages/shell-api.
+export { getShellApi } from './api';
+export type { ShellApiShape } from './api';
+// The contract version — its own file so freeze can auto-write it (not part of
+// the frozen surface).
+export { SHELL_API_VERSION } from './apiver';

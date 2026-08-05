@@ -12,7 +12,7 @@ sidebar_position: 3
 4. Drag components from the component palette onto the canvas.
 5. Configure each component's properties in the properties panel.
 6. Connect component outputs to inputs by drawing connections between lanes.
-7. Save the file — changes are auto-saved.
+7. Save the file, changes are auto-saved.
 
 ## Running a Pipeline
 
@@ -46,19 +46,38 @@ If a pipeline is already running on the server:
 
 The visual editor provides:
 
-- **Component palette** — Browse and search available nodes (sources, LLMs, stores, etc.).
-- **Canvas** — Drag-and-drop workspace for arranging components.
-- **Properties panel** — Configure selected component settings (API keys, models, connection strings, etc.).
-- **Lane connections** — Draw lines between component output and input lanes to define data flow.
+- **Component palette**: Browse and search available nodes (sources, LLMs, stores, etc.).
+- **Canvas**: Drag-and-drop workspace for arranging components.
+- **Properties panel**: Configure selected component settings (API keys, models, connection strings, etc.).
+- **Lane connections**: Draw lines between component output and input lanes to define data flow.
+
+## Pipeline Execution Defaults
+
+Trace verbosity, the idle timeout (TTL), task arguments, and debug output for pipeline runs are configured once in **Settings → Pipeline** — they are workspace settings, not per-pipeline options:
+
+- **Pipeline Trace Level** (`rocketride.pipelineTraceLevel`, default `summary`): how much execution-trace data the engine emits — `full`, `summary`, `metadata`, or `none`. Higher levels populate the **Flow** and **Trace** tabs, but `full` inlines entire payloads (including images), which can noticeably slow runs that process large images.
+- **Pipeline TTL** (`rocketride.pipelineTTL`, default `900` = 15 minutes): how long the engine keeps a pipeline alive without activity before stopping it. Fixed choices from 15 minutes to 8 hours, plus "Run forever or until you stop it" (`0` = no timeout).
+- **Task Arguments** (`rocketride.taskArguments`, default empty): additional command-line arguments passed to each pipeline task process. The engine splits the string using shell parsing rules, so quoted paths are preserved.
+- **Pipeline Debug Output** (`rocketride.pipelineDebugOutput`, default `false`): appends `--trace=debugOut` to the task arguments (unless they already contain a `--trace=` flag) for detailed task trace logging.
+
+The extension host reads these from the workspace settings and passes them to the engine on each `run`/`restart` (the `status:pipelineAction` message carries only the action and source). The engine process itself starts with no extra flags — these settings apply per task, not to the server.
+
+## `.env` Auto-Sync
+
+After a successful engine connection, the extension syncs the workspace `.env` only for the **development** connection group using a self-hosted mode (local, Docker, service, or direct/on-prem connection). It writes the resolved `ROCKETRIDE_URI` (including a dynamic local port when applicable) and `ROCKETRIDE_APIKEY`, preserves existing comments and variables, and does not rewrite the file when its contents are already current. The RocketRide **Python SDK** reads the workspace `.env` automatically from its process working directory; the TypeScript SDK and CLIs read only process environment variables, so export the values first (for example, `set -a; source .env`).
+
+Cloud connections are not synced because their OAuth token is not an SDK API key. Deployment connections, workspaces with no folder open, and unreadable `.env` files are also skipped; a sync failure never affects the connection itself. Keep `.env` gitignored.
+
+The extension never automatically removes these keys: disconnecting, engine exit, or switching to cloud leaves the last-synced values in place. Remove them by hand if you no longer want them. Each development-group self-hosted connection syncs again, so a hand-edited `ROCKETRIDE_APIKEY` is overwritten on the next successful connection.
 
 ## Monitoring Execution
 
 The **Status** page shows:
 
-- **Component status** — Pending, running, completed, or failed indicators for each component.
-- **Data flow** — Visual representation of data moving through the pipeline.
-- **Metrics** — Completion rates and timing charts.
-- **Errors** — Detailed error messages and logs for failed components.
+- **Component status**: Pending, running, completed, or failed indicators for each component.
+- **Data flow**: Visual representation of data moving through the pipeline.
+- **Metrics**: Completion rates and timing charts.
+- **Errors**: Detailed error messages and logs for failed components.
 
 ## AI-Assisted Development
 

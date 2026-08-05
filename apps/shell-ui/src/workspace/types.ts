@@ -114,51 +114,87 @@ export interface WorkspaceState {
 }
 
 // =============================================================================
-// APP SETTING DEFINITION
+// SETTING SCHEMA — VSCode contributes.configuration compatible
 // =============================================================================
 
+/** Value types a setting may hold — mirrors the JSON primitive types. */
+export type SettingValue = string | number | boolean;
+
 /**
- * Declares a single runtime configuration setting that an app requires.
+ * JSON-Schema-style declaration of a single setting.
  *
- * Declared in the app's `package.json` under `appManifest.settings` so the
- * shell can render the Settings page without loading the app bundle.  The
- * shell aggregates settings from all subscribed apps, deduplicates by `key`,
- * and persists values to `settings.json` on disk.
+ * The shape is 100% format-compatible with a property entry in the VSCode
+ * extension specification's `contributes.configuration` section, so anyone who
+ * has written a VSCode extension already knows how to declare a RocketRide
+ * setting.  RocketRide-specific editors are expressed through the JSON-Schema
+ * `format` keyword (unknown formats are legal JSON Schema), keeping the
+ * structural compatibility intact.
+ *
+ * The display label is DERIVED from the setting key, VSCode-style:
+ * 'rocketride.pipeBuilder.pipelineTraceLevel' renders as
+ * "Pipeline Builder: Pipeline Trace Level" — there is no label field.
+ * Key casing is therefore label casing (use 'pipelineTTL' for "Pipeline TTL").
  */
-export interface AppSettingDefinition {
-	/** Key name — also used as the ShellApiConfig key (e.g. 'ROCKETRIDE_OPENAI_KEY'). */
-	key: string;
-	/** Human-readable label shown in the settings UI. */
-	label: string;
-	/** Optional description shown below the field. */
+export interface SettingSchema {
+	/** JSON type of the value. Drives the rendered control. */
+	type: 'string' | 'number' | 'integer' | 'boolean';
+	/**
+	 * Default value when the user has not set this key.  Defaults live ONLY in
+	 * the schema — `settings.json` stores deltas and never contains defaults.
+	 */
+	default?: SettingValue;
+	/** Plain-text description shown below the setting label. */
 	description?: string;
-	/** Default value used when the user has not configured this setting. */
-	default?: string;
-	/** If true and no value is set, the shell highlights this as missing. */
-	required?: boolean;
+	/** Markdown variant of the description (preferred when both are present). */
+	markdownDescription?: string;
 	/**
-	 * Field type.  Defaults to `'text'` (a regular text input).
+	 * Fixed value choices — renders as a dropdown. Typed string[] per the
+	 * frozen v0 contract; integer/number schemas may carry numeric entries in
+	 * the manifest JSON at runtime, so render through String() and coerce the
+	 * selected value back via `type`.
+	 */
+	enum?: Array<string | number>;
+	/** Per-choice descriptions aligned with `enum`. */
+	enumDescriptions?: string[];
+	/** Ordering hint within the section (lower renders first). */
+	order?: number;
+	/**
+	 * RocketRide editor extension via the JSON-Schema `format` keyword:
 	 *
-	 * - `'text'`    — standard text / password input (default)
-	 * - `'select'`  — dropdown with fixed options from the `options` array
-	 * - `'service'` — dropdown populated from the cached service catalog,
-	 *                  filtered by `classType`.  When selected the shell
-	 *                  automatically shows a companion API-key field whose
-	 *                  key follows the `ROCKETRIDE_<SUFFIX>_KEY` convention.
-	 * - `'envkey'`  — text input for a raw API key, or dropdown to pick a
-	 *                  server-side environment variable (from account env keys).
+	 * - `'rocketride.envkey'`  — the value is the NAME of a server-side
+	 *   Variable (never the secret itself); renders as a Variable picker.
+	 * - `'rocketride.service'` — the value is a service id from the cached
+	 *   service catalog; renders as a service dropdown (see `classType`).
 	 */
-	type?: 'text' | 'select' | 'service' | 'envkey';
-	/**
-	 * Fixed options for `type: 'select'` — each entry is `{ value, label }`.
-	 */
-	options?: { value: string; label: string }[];
-	/**
-	 * Service class filter — only used when `type` is `'service'`.
-	 * The dropdown is populated with services whose `classType` array
-	 * includes this value (e.g. `'llm'`).
-	 */
+	format?: string;
+	/** Service classType filter — only used with format 'rocketride.service'. */
 	classType?: string;
+	/** Extension keyword: highlight the setting as required when unset. */
+	required?: boolean;
+	/** Extension keyword: placeholder text for empty string inputs. */
+	placeholder?: string;
+}
+
+/**
+ * An app's settings contribution — the exact shape of the
+ * `contributes.configuration` section in the VSCode extension manifest
+ * specification.
+ *
+ * Declared in the app's package.json under
+ * `appManifest.contributes.configuration` and delivered to the shell on the
+ * manifest's `configuration` field.  Keys are dotted and prefixed with the
+ * app id (e.g. 'rocketride.pipeBuilder.pipelineTraceLevel') so they are
+ * globally unique and self-identify their owning app.
+ */
+export interface AppConfiguration {
+	/**
+	 * Section title shown in the settings page nav.  Defaults to the app name.
+	 * Apps that declare the SAME title are merged into one section (shared
+	 * settings across a family of apps, e.g. games).
+	 */
+	title?: string;
+	/** Setting declarations keyed by full dotted setting key. */
+	properties: Record<string, SettingSchema>;
 }
 
 // =============================================================================
@@ -194,8 +230,12 @@ export interface AppManifestEntry {
 	readme?: string;
 	/** Categories for filtering/grouping in the app store. */
 	categories?: string[];
-	/** Settings required by this app. Available at boot from the manifest. */
-	settings?: AppSettingDefinition[];
+	/**
+	 * The app's settings contribution (VSCode `contributes.configuration`
+	 * shape).  Available at boot from the manifest — the settings registry is
+	 * flattened from the configurations of all desktop apps.
+	 */
+	configuration?: AppConfiguration;
 	/**
 	 * When false, the app can run without authentication (e.g. home/landing page).
 	 * Defaults to true — most apps require the user to be logged in.
@@ -215,6 +255,13 @@ export interface AppManifestEntry {
 	appStatus?: string;
 	/** Whether this app is on the user's desktop. */
 	onDesktop?: boolean;
+	/**
+	 * The shell-api contract version this app was built against (stamped into
+	 * apps.json by the registration step from shell-ui's apiver.ts). The lowest
+	 * value across all registered apps is the oldest frozen version still in use,
+	 * which is what can be safely pruned once nothing depends on it.
+	 */
+	shellApiVersion?: number;
 	/** Async loader — dynamically imports and returns the full AppDescriptor. */
 	load: () => Promise<AppDescriptor>;
 }

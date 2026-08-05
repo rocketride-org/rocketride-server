@@ -1,0 +1,31 @@
+{
+	"components": [
+		{
+			"id": "chat_1",
+			"provider": "chat",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "chat" },
+			"ui": { "position": { "x": 20, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "tool_n8n_1",
+			"provider": "tool_n8n",
+			"config": {
+				"profile": "default",
+				"default": { "baseUrl": "${ROCKETRIDE_N8N_URL}", "apiKey": "${ROCKETRIDE_N8N_KEY}", "workflow": "rr-callback", "mode": "sync" },
+				"parameters": {}
+			},
+			"input": [{ "lane": "questions", "from": "chat_1" }],
+			"ui": { "position": { "x": 260, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		},
+		{
+			"id": "response_text_1",
+			"provider": "response_text",
+			"config": { "laneName": "text" },
+			"input": [{ "lane": "text", "from": "tool_n8n_1" }],
+			"ui": { "position": { "x": 480, "y": 200 }, "measured": { "width": 150, "height": 66 }, "nodeType": "default", "formDataValid": true }
+		}
+	],
+	"project_id": "a1f0c0de-0003-4a03-8b03-0123456789ad",
+	"viewport": { "x": 0, "y": 0, "zoom": 1 },
+	"version": 1
+}

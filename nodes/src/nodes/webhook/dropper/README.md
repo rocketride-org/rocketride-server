@@ -18,7 +18,7 @@ After the pipeline starts, the Project Log displays the dropper URL and public a
 
 | Lane in | Lane out | Description                |
 | ------- | -------- | -------------------------- |
-| —       | `data`   | Each uploaded file as data |
+| -       | `data`   | Each uploaded file as data |
 
 ## Configuration
 

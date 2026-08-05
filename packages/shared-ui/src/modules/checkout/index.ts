@@ -12,4 +12,4 @@
 export { CheckoutModal } from './CheckoutModal';
 export { PlanPicker } from './PlanPicker';
 export type { PlanPickerProps } from './PlanPicker';
-export type { CheckoutModalProps, CheckoutPlan, PlanAction } from './types';
+export type { CheckoutModalProps, CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './types';

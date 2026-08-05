@@ -18,26 +18,12 @@
 
 import React, { ReactElement, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles } from '../../themes/styles';
+import { Button } from '../button/Button';
 import EndpointInfoModal from './EndpointInfoModal';
 
 // =============================================================================
 // Styles
 // =============================================================================
-
-const btnSmBase: CSSProperties = {
-	display: 'inline-flex',
-	alignItems: 'center',
-	justifyContent: 'center',
-	height: 'var(--rr-btn-sm-height, 16px)',
-	padding: 'var(--rr-btn-sm-padding, 0 6px)',
-	borderRadius: 'var(--rr-btn-sm-radius, 3px)',
-	cursor: 'pointer',
-	fontSize: 'var(--rr-btn-sm-font-size, 9px)',
-	fontWeight: 500,
-	lineHeight: 1,
-	whiteSpace: 'nowrap',
-};
 
 const styles: Record<string, CSSProperties> = {
 	container: {
@@ -45,59 +31,6 @@ const styles: Record<string, CSSProperties> = {
 		gap: '4px',
 		marginTop: '4px',
 		width: '100%',
-	},
-	endpointRow: {
-		marginTop: '4px',
-		display: 'flex',
-		alignItems: 'center',
-		gap: '6px',
-		width: '100%',
-		backgroundColor: 'var(--rr-bg-surface-alt, var(--rr-bg-paper))',
-		border: '1px solid var(--rr-border)',
-		borderRadius: '4px',
-		padding: '3px 6px',
-	},
-	endpointLabel: {
-		fontSize: '9px',
-		color: 'var(--rr-text-disabled)',
-		flexShrink: 0,
-	},
-	endpointValue: {
-		flex: 1,
-		minWidth: 0,
-		fontSize: '9px',
-		...commonStyles.fontMono,
-		color: 'var(--rr-text-secondary)',
-		...commonStyles.textEllipsis,
-	},
-	endpointCopyBtn: {
-		...btnSmBase,
-		height: '14px',
-		padding: '0 5px',
-		fontSize: '8px',
-		border: '1px solid var(--rr-border)',
-		backgroundColor: 'transparent',
-		color: 'var(--rr-text-secondary)',
-		flexShrink: 0,
-	},
-	endpointCopyBtnSuccess: {
-		backgroundColor: 'var(--rr-accent)',
-		borderColor: 'var(--rr-accent)',
-		color: 'var(--rr-fg-button)',
-	},
-	primaryBtn: {
-		...btnSmBase,
-		flex: 1,
-		border: 'none',
-		backgroundColor: 'var(--rr-accent)',
-		color: 'var(--rr-fg-button)',
-	},
-	secondaryBtn: {
-		...btnSmBase,
-		flex: 1,
-		border: '1px solid var(--rr-border)',
-		backgroundColor: 'var(--rr-bg-paper)',
-		color: 'var(--rr-text-secondary)',
 	},
 };
 
@@ -173,31 +106,20 @@ export default function PipelineActions({ notes, host, onOpenLink, displayName }
 	const buttonLink = processLink(endpointInfo['button-link'], host);
 	const hasButton = endpointInfo['button-text'] && buttonLink;
 
+	// Stock Buttons only, at the mini (canvas-node) size — the 26px small tier
+	// overflows the node card. Clicks stop at the container so a press never
+	// bubbles into canvas node selection/drag.
 	return (
 		<>
-			<div>
-				<div style={styles.container}>
-					{hasButton && (
-						<button
-							style={styles.primaryBtn}
-							onClick={(e: React.MouseEvent) => {
-								e.stopPropagation();
-								onOpenLink?.(buttonLink, displayName);
-							}}
-						>
-							{endpointInfo['button-text']}
-						</button>
-					)}
-					<button
-						style={styles.secondaryBtn}
-						onClick={(e: React.MouseEvent) => {
-							e.stopPropagation();
-							setIsModalOpen(true);
-						}}
-					>
-						Endpoint Info
-					</button>
-				</div>
+			<div style={styles.container} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+				{hasButton && (
+					<Button mini variant="primary" onClick={() => onOpenLink?.(buttonLink, displayName)}>
+						{endpointInfo['button-text']}
+					</Button>
+				)}
+				<Button mini variant="secondary" onClick={() => setIsModalOpen(true)}>
+					Endpoint Info
+				</Button>
 			</div>
 			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} displayName={displayName} host={host} />
 		</>

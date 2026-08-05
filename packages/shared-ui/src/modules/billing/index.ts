@@ -10,13 +10,15 @@
  * the billingApi DAP wrappers, and all related types.
  */
 
-// ── View ────────────────────────────────────────────────────────────────────
-export { default as BillingView } from './BillingView';
-export type { IBillingViewProps } from './BillingView';
-
 // ── Sub-components ──────────────────────────────────────────────────────────
 export { CreditsPanel } from './components/CreditsPanel';
 export type { CreditsPanelProps } from './components/CreditsPanel';
+export { BillingDashboard } from './components/BillingDashboard';
+export type { BillingDashboardProps, ActiveTask, TopupPlan } from './components/BillingDashboard';
+export { TopUpModal } from './components/TopUpModal';
+export type { TopUpModalProps } from './components/TopUpModal';
+export { UpgradeModal } from './components/UpgradeModal';
+export type { UpgradeModalProps } from './components/UpgradeModal';
 
 // ── Types ───────────────────────────────────────────────────────────────────
-export type { BillingDetail, StripePlan, CreditBalance, CreditPack } from './types';
+export type { AppPrice, BillingDetail, StripePlan, CreditBalance, CreditPack, LedgerTransaction, TransactionsResult, UsageRollup } from './types';

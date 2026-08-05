@@ -56,7 +56,7 @@ import time
 import asyncio
 import mimetypes
 from pathlib import Path
-from typing import Dict, Any, List, Union, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 from ..core import DAPClient, PipeException
 from ..types import PIPELINE_RESULT, UPLOAD_RESULT
 
@@ -188,7 +188,7 @@ class DataMixin(DAPClient):
                     f'{msg}\n\n'
                     'Common causes:\n'
                     "- Pipeline isn't running (wrong token or task terminated)\n"
-                    '- Pipeline source is `chat` (use `client.chat()`), not `webhook`/`dropper`\n'
+                    '- Pipeline source must be chat, webhook, or dropper\n'
                     '- MIME type doesn\'t match the source lane (try `mimetype="text/plain"`)\n'
                 )
                 response = dict(response)
@@ -302,6 +302,49 @@ class DataMixin(DAPClient):
                         await self._client.set_events(self._token, [], pipe_id=self._pipe_id)
                     except Exception:
                         pass  # Best-effort cleanup
+
+        async def tool(self, *, tool: str, node_id: str = '', input: dict = None) -> Any:
+            """
+            Invoke a @tool_function on a pipeline node using this pipe.
+
+            The call reuses this pipe's existing pipeline instance, avoiding the
+            overhead of borrowing a new one from the pool.
+
+            Args:
+                tool: Name of the @tool_function to invoke.
+                node_id: Target node ID.  When empty the call broadcasts to all
+                    tool-lane nodes; the first node that owns the tool handles it.
+                input: Arguments forwarded to the tool function.
+
+            Returns:
+                The tool's return value (typically a dict).
+
+            Raises:
+                RuntimeError: If the pipe is not open.
+            """
+            if not self._opened:
+                raise RuntimeError('Pipe is not open')
+
+            request = self._client.build_request(
+                'rrext_process',
+                arguments={
+                    'subcommand': 'tool',
+                    'tool': tool,
+                    'nodeId': node_id,
+                    'input': input or {},
+                    'pipe_id': self._pipe_id,
+                },
+                token=self._token,
+            )
+
+            response = await self._client.request(request)
+
+            if self._client.did_fail(response):
+                msg = response.get('message') or f'Tool "{tool}" invocation failed.'
+                raise RuntimeError(msg)
+
+            body = response.get('body', {})
+            return body.get('result')
 
         async def __aenter__(self):
             """Enter async context manager - automatically opens pipe."""

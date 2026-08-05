@@ -31,12 +31,14 @@ get_model_server_address() reads --modelserver=<addr> from sys.argv and
 returns the raw string — no parsing or URL construction.
 """
 
+import contextlib
+import threading
 import hashlib
 import json
 import sys
 import asyncio
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketride import RocketRideClient
 from ai import node as ai_node
@@ -70,7 +72,7 @@ class BaseLoader:
     """
 
     LOADER_TYPE: str = 'base'
-    _REQUIREMENTS_FILE: Optional[str] = None
+    _REQUIREMENTS_FILE: Optional[Union[str, List[str]]] = None
     _dependencies_loaded: bool = False
     _SERVER_PARAMS = {'allocate_gpu', 'exclude_gpus', 'device'}
     _DEFAULTS: dict = {}
@@ -87,12 +89,17 @@ class BaseLoader:
         This is only needed for local mode; remote mode never imports
         the actual ML libraries.
         """
-        if cls._REQUIREMENTS_FILE and not cls._dependencies_loaded:
-            import ai.common.torch  # noqa: F401
-            from depends import depends
+        if cls._dependencies_loaded or not cls._REQUIREMENTS_FILE:
+            return
 
-            depends(cls._REQUIREMENTS_FILE)
-            cls._dependencies_loaded = True
+        import ai.common.torch  # noqa: F401
+        from depends import depends
+
+        # Accept a single file or an ordered list (e.g. shared base then extras).
+        files = [cls._REQUIREMENTS_FILE] if isinstance(cls._REQUIREMENTS_FILE, str) else cls._REQUIREMENTS_FILE
+        for req in files:
+            depends(req)
+        cls._dependencies_loaded = True
 
     @classmethod
     def generate_model_id(cls, model_name: str, **loader_options) -> str:
@@ -216,6 +223,33 @@ def get_model_server_address() -> Optional[str]:
             value = arg.split('=', 1)[1]
             return value if value else None
     return None
+
+
+def is_model_server_enabled() -> bool:
+    """
+    True when a model server is configured via ``--modelserver``.
+
+    Reflects configuration only (the flag is set with a non-empty address); it does
+    not verify the server is reachable or running.
+
+    Returns:
+        True if ``--modelserver=<address>`` is present, False otherwise.
+    """
+    return bool(get_model_server_address())
+
+
+def make_device_lock() -> contextlib.AbstractContextManager:
+    """Return the device-access guard for the current run mode.
+
+    Local in-process GPU inference must serialize, so this returns a real
+    ``threading.Lock``. In proxy mode the model server batches and the DAP transport
+    multiplexes concurrent requests, so a node-side lock would only throttle it —
+    returns a no-op ``contextlib.nullcontext`` instead.
+
+    Returns:
+        A context manager — ``threading.Lock`` locally, ``nullcontext`` when proxying.
+    """
+    return contextlib.nullcontext() if is_model_server_enabled() else threading.Lock()
 
 
 # =============================================================================

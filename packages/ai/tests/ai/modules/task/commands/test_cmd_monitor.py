@@ -54,18 +54,16 @@ def _account_info(*, user_id='user-1', team_id='team-1'):
     return SimpleNamespace(
         userId=user_id,
         userToken='token-' + user_id,
-        organizations=[
-            {
-                'id': 'org-1',
-                'permissions': [],
-                'teams': [
-                    {
-                        'id': team_id,
-                        'permissions': ['task.monitor', 'task.data', 'task.control'],
-                    }
-                ],
-            }
-        ],
+        organization={
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [
+                {
+                    'id': team_id,
+                    'permissions': ['task.monitor', 'task.data', 'task.control'],
+                }
+            ],
+        },
     )
 
 
@@ -121,8 +119,14 @@ async def test_send_server_event_filters_by_user_id_tenant_scoping():
 # ---------------------------------------------------------------------------
 
 
-def _control(*, user_id='user-1', project_id='proj-1', source='src-1', task_id='task-1', team_id='team-1'):
-    """Build a TASK_CONTROL stub for send_task_event tests."""
+def _control(
+    *, user_id='user-1', project_id='proj-1', source='src-1', task_id='task-1', team_id='team-1', run_kind='dev'
+):
+    """Build a TASK_CONTROL stub for send_task_event tests.
+
+    Mirrors TASK_CONTROL's owner model: the owner of a dev run is its user,
+    the owner of a deploy run is its team — monitor keys scope by owner.
+    """
     return SimpleNamespace(
         userId=user_id,
         teamId=team_id,
@@ -130,6 +134,8 @@ def _control(*, user_id='user-1', project_id='proj-1', source='src-1', task_id='
         source=source,
         id=task_id,
         token='tk_1',
+        run_kind=run_kind,
+        owner_id=team_id if run_kind == 'deploy' else user_id,
     )
 
 
@@ -152,7 +158,7 @@ async def test_send_task_event_uses_project_key_subscription():
     conn = _make_conn(
         account_info=_account_info(),
         server=server,
-        monitors={'p.proj-1.src-1': EVENT_TYPE.SUMMARY},
+        monitors={'p.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY},
     )
     await MonitorCommands.send_task_event(conn, EVENT_TYPE.SUMMARY, 'tk_1', {'event': 'status', 'body': {'x': 1}})
     conn.send_event.assert_awaited_once()
@@ -171,7 +177,7 @@ async def test_send_task_event_merges_global_wildcard_and_project_subscriptions(
         server=server,
         monitors={
             '*': EVENT_TYPE.TASK,
-            'p.proj-1.src-1': EVENT_TYPE.SUMMARY,
+            'p.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY,
         },
     )
     # SUMMARY only matches the project key — but the merge ensures it fires.
@@ -201,7 +207,7 @@ async def test_send_task_event_pipe_scoped_subscription():
     conn = _make_conn(
         account_info=_account_info(),
         server=server,
-        monitors={'p.proj-1.src-1.42': EVENT_TYPE.SSE},
+        monitors={'p.user-1.proj-1.src-1.42': EVENT_TYPE.SSE},
     )
     await MonitorCommands.send_task_event(
         conn, EVENT_TYPE.SSE, 'tk_1', {'event': 'sse', 'body': {'pipe_id': 42, 'message': 'hi'}}
@@ -284,7 +290,7 @@ async def test_set_monitor_with_token_resolves_to_project_key():
     conn = _make_conn(account_info=_account_info(), server=server)
     event_id = await MonitorCommands.set_monitor(conn, token='tk_1', type=EVENT_TYPE.SUMMARY)
     assert event_id == 'task-1'
-    assert 'p.proj-1.src-1' in conn._monitors
+    assert 'p.user-1.proj-1.src-1' in conn._monitors
 
 
 @pytest.mark.asyncio
@@ -296,10 +302,10 @@ async def test_set_monitor_unsubscribe_removes_key():
     conn = _make_conn(
         account_info=_account_info(),
         server=server,
-        monitors={'p.proj-1.src-1': EVENT_TYPE.SUMMARY},
+        monitors={'p.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY},
     )
     await MonitorCommands.set_monitor(conn, token='tk_1', type=EVENT_TYPE.NONE)
-    assert 'p.proj-1.src-1' not in conn._monitors
+    assert 'p.user-1.proj-1.src-1' not in conn._monitors
 
 
 @pytest.mark.asyncio
@@ -326,7 +332,7 @@ async def test_set_monitor_with_pipe_id_narrows_key():
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     await MonitorCommands.set_monitor(conn, token='tk_1', type=EVENT_TYPE.SUMMARY, pipe_id=42)
-    assert 'p.proj-1.src-1.42' in conn._monitors
+    assert 'p.user-1.proj-1.src-1.42' in conn._monitors
 
 
 @pytest.mark.asyncio
@@ -357,7 +363,7 @@ async def test_on_rrext_monitor_with_string_list_types():
     request = {'arguments': {'types': ['SUMMARY', 'TASK']}}
     await MonitorCommands.on_rrext_monitor(conn, request)
 
-    monitor_value = conn._monitors.get('p.proj-1.src-1')
+    monitor_value = conn._monitors.get('p.user-1.proj-1.src-1')
     assert monitor_value is not None
     assert monitor_value & EVENT_TYPE.SUMMARY
     assert monitor_value & EVENT_TYPE.TASK
@@ -374,7 +380,7 @@ async def test_on_rrext_monitor_with_int_types():
 
     request = {'arguments': {'types': EVENT_TYPE.SUMMARY.value}}
     await MonitorCommands.on_rrext_monitor(conn, request)
-    assert conn._monitors.get('p.proj-1.src-1') == EVENT_TYPE.SUMMARY
+    assert conn._monitors.get('p.user-1.proj-1.src-1') == EVENT_TYPE.SUMMARY
 
 
 @pytest.mark.asyncio
@@ -388,8 +394,109 @@ async def test_on_rrext_monitor_with_unknown_string_in_list_is_ignored():
 
     request = {'arguments': {'types': ['SUMMARY', 'NOPE_NOT_AN_EVENT']}}
     await MonitorCommands.on_rrext_monitor(conn, request)
-    monitor_value = conn._monitors.get('p.proj-1.src-1')
+    monitor_value = conn._monitors.get('p.user-1.proj-1.src-1')
     assert monitor_value & EVENT_TYPE.SUMMARY
+
+
+# ---------------------------------------------------------------------------
+# Owner scoping — dev keys are user-scoped, deploy keys are team-scoped
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_task_event_deploy_run_delivers_to_team_key():
+    """A deploy run's events land on the TEAM-scoped key, not a user key."""
+    server = MagicMock()
+    server.get_task_control = MagicMock(return_value=_control(run_kind='deploy'))
+    conn = _make_conn(
+        account_info=_account_info(),
+        server=server,
+        monitors={'p.team-1.proj-1.src-1': EVENT_TYPE.SUMMARY},
+    )
+    await MonitorCommands.send_task_event(conn, EVENT_TYPE.SUMMARY, 'tk_1', {'event': 'status', 'body': {}})
+    conn.send_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_task_event_dev_run_not_delivered_to_other_owner_key():
+    """A dev run's events never match another owner's subscription key."""
+    server = MagicMock()
+    server.get_task_control = MagicMock(return_value=_control(user_id='user-1'))
+    # Subscriber holds a key for user-2's dev run of the SAME project/source.
+    conn = _make_conn(
+        account_info=_account_info(),
+        server=server,
+        monitors={'p.user-2.proj-1.src-1': EVENT_TYPE.SUMMARY},
+    )
+    await MonitorCommands.send_task_event(conn, EVENT_TYPE.SUMMARY, 'tk_1', {'event': 'status', 'body': {}})
+    conn.send_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_send_task_event_dev_vs_deploy_keys_never_alias():
+    """A dev subscription of a pipeline does NOT receive its deploy run's events."""
+    server = MagicMock()
+    server.get_task_control = MagicMock(return_value=_control(run_kind='deploy'))
+    conn = _make_conn(
+        account_info=_account_info(),
+        server=server,
+        # The caller's own dev subscription for the same project/source.
+        monitors={'p.user-1.proj-1.src-1': EVENT_TYPE.SUMMARY},
+    )
+    await MonitorCommands.send_task_event(conn, EVENT_TYPE.SUMMARY, 'tk_1', {'event': 'status', 'body': {}})
+    conn.send_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_monitor_project_scope_binds_caller_as_owner():
+    """A project/source subscription without team_id binds the CALLER's userId."""
+    server = MagicMock()
+    server.get_task_control_by_project = MagicMock(return_value=_control())
+    server.broadcast_server_event = AsyncMock()
+    conn = _make_conn(account_info=_account_info(user_id='user-1'), server=server)
+    await MonitorCommands.set_monitor(conn, project_id='proj-1', source='src-1', type=EVENT_TYPE.SUMMARY)
+    assert 'p.user-1.proj-1.src-1' in conn._monitors
+
+
+@pytest.mark.asyncio
+async def test_set_monitor_team_scope_binds_team_as_owner():
+    """A project/source subscription WITH team_id builds the team-scoped key."""
+    server = MagicMock()
+    server.get_task_control_by_project = MagicMock(return_value=_control(run_kind='deploy'))
+    server.broadcast_server_event = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    await MonitorCommands.set_monitor(
+        conn, project_id='proj-1', source='src-1', type=EVENT_TYPE.SUMMARY, team_id='team-1'
+    )
+    assert 'p.team-1.proj-1.src-1' in conn._monitors
+    # The lookup was scoped to the team as well.
+    _, kwargs = server.get_task_control_by_project.call_args
+    assert kwargs.get('team_id') == 'team-1'
+
+
+@pytest.mark.asyncio
+async def test_set_monitor_token_for_deploy_run_builds_team_key():
+    """A token subscription to a deploy run lands on the team-scoped key."""
+    server = MagicMock()
+    server.get_task_control = MagicMock(return_value=_control(run_kind='deploy'))
+    server.broadcast_server_event = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    await MonitorCommands.set_monitor(conn, token='tk_1', type=EVENT_TYPE.SUMMARY)
+    assert 'p.team-1.proj-1.src-1' in conn._monitors
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_monitor_passes_team_id_through():
+    """The wire teamId argument reaches set_monitor's team scope."""
+    server = MagicMock()
+    server.get_task_control_by_project = MagicMock(return_value=_control(run_kind='deploy'))
+    server.broadcast_server_event = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.get_task_token = MagicMock(return_value=None)
+
+    request = {'arguments': {'projectId': 'proj-1', 'source': 'src-1', 'teamId': 'team-1', 'types': ['SUMMARY']}}
+    await MonitorCommands.on_rrext_monitor(conn, request)
+    assert 'p.team-1.proj-1.src-1' in conn._monitors
 
 
 # ---------------------------------------------------------------------------

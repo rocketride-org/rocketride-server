@@ -5,7 +5,7 @@ globs: ['**/*.pipe', '**/pipeline*.json', '**/*rocketride*']
 
 <!-- ROCKETRIDE:BEGIN -->
 
-# RocketRide — AI Pipeline Builder
+# RocketRide: AI Pipeline Builder
 
 Use RocketRide when building AI pipelines, document processing, RAG systems, or data integration.
 
@@ -17,13 +17,13 @@ Full docs: `.rocketride/docs/`
 
 | File                              | Read when...                                                      |
 | --------------------------------- | ----------------------------------------------------------------- |
-| ROCKETRIDE_README.md              | Starting any RocketRide work — overview + mandatory setup steps   |
-| ROCKETRIDE_QUICKSTART.md          | Writing first pipeline — complete working examples (Python & TS)  |
-| ROCKETRIDE_PIPELINE_RULES.md      | Defining pipelines — structure, lane wiring, config rules         |
-| ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring components — all providers and config fields |
-| ROCKETRIDE_COMMON_MISTAKES.md     | Before finalizing — known pitfalls to avoid                       |
-| ROCKETRIDE_python_API.md          | Python SDK — client methods, types, patterns                      |
-| ROCKETRIDE_typescript_API.md      | TypeScript SDK — client methods, types, patterns                  |
+| ROCKETRIDE_README.md              | Starting any RocketRide work: overview + mandatory setup steps   |
+| ROCKETRIDE_QUICKSTART.md          | Writing first pipeline: complete working examples (Python & TS)  |
+| ROCKETRIDE_PIPELINE_RULES.md      | Defining pipelines: structure, lane wiring, config rules         |
+| ROCKETRIDE_COMPONENT_REFERENCE.md | Choosing/configuring components: all providers and config fields |
+| ROCKETRIDE_COMMON_MISTAKES.md     | Before finalizing: known pitfalls to avoid                       |
+| ROCKETRIDE_python_API.md          | Python SDK: client methods, types, patterns                      |
+| ROCKETRIDE_typescript_API.md      | TypeScript SDK: client methods, types, patterns                  |
 | ROCKETRIDE_OBSERVABILITY.md       | Consuming runtime logs, lifecycle events, and pipeline traces     |
 
 ## Before Writing ANY RocketRide Code

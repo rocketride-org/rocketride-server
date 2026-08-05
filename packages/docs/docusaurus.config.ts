@@ -18,7 +18,7 @@ const contentPath = process.env.ROCKETRIDE_DOCS_CONTENT || path.resolve(__dirnam
 const config: Config = {
 	title: 'RocketRide Documentation',
 	tagline: 'Build, run, and ship data + AI pipelines',
-	favicon: 'img/rocketride-icon-colored.svg',
+	favicon: 'img/rocketride-favicon.jpg',
 
 	future: {
 		v4: true,
@@ -61,8 +61,14 @@ const config: Config = {
 					path: contentPath,
 					routeBasePath: '/',
 					sidebarPath: './sidebars.ts',
+					showLastUpdateTime: true,
 				},
 				blog: false,
+				sitemap: {
+					lastmod: 'date',
+					changefreq: null,
+					priority: null,
+				},
 				theme: {
 					customCss: './src/css/custom.css',
 				},
@@ -96,17 +102,19 @@ const config: Config = {
 			respectPrefersColorScheme: true,
 		},
 		navbar: {
-			title: 'RocketRide',
+			title: '',
 			hideOnScroll: false,
 			logo: {
 				alt: 'RocketRide',
-				src: 'img/rocketride-icon-colored.svg',
-				srcDark: 'img/rocketride-icon-white.svg',
+				src: 'img/rocketride-wordmark-positive.png',
+				srcDark: 'img/rocketride-wordmark-negative.png',
 				href: 'https://rocketride.ai',
 				target: '_self',
+				className: 'navbar__logo--wordmark',
 			},
 			items: [
 				{ to: '/', label: 'Home', position: 'left', className: 'navbar__link--colored' },
+				{ type: 'custom-discord', href: 'https://discord.gg/PMXrtenMsY', label: 'Discord', position: 'right' },
 				{ type: 'custom-githubStars', href: 'https://github.com/rocketride-org/rocketride-server', label: 'GitHub', position: 'right' },
 			],
 		},

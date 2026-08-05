@@ -3,9 +3,12 @@
 #
 
 requests
-pydantic
+# Single source for the pydantic version: depends compiles all requirement files into one
+# constraint set, so everything inherits this pin — a divergent pin elsewhere fails the compile.
+pydantic==2.12.5
 httpx
 psutil
 tenacity
 nvidia-ml-py
 croniter
+filetype

@@ -1,40 +1,89 @@
----
-title: OpenAI Vision
-date: 2026-04-14
-sidebar_position: 1
----
+# llm_vision_openai
+
+A RocketRide filter node that sends images to OpenAI's vision-capable models and returns the text analysis.
 
 ## What it does
 
-Sends images to OpenAI vision-capable models and returns text analysis. Accepts either a single image or a stream of image documents (e.g. from the frame grabber). Metadata such as frame number and timestamp is preserved on the `documents` output.
+Accepts single image frames or streams of image documents and calls OpenAI's Chat Completions API with each image encoded as a base64 data URL (with `detail: "auto"`), returning the model's text response. Supports the GPT-4.1 and GPT-4o model families for use cases including image analysis, OCR, visual understanding, and scene description.
 
-**Lanes:**
+Uses the official **`openai` Python SDK** (`>=2.38.0`). If no analysis prompt is configured, the node defaults to `"Describe this image in detail."`.
 
-| Lane in     | Lane out    | Description                                                                    |
-| ----------- | ----------- | ------------------------------------------------------------------------------ |
-| `image`     | `text`      | Analyze a single image, receive text                                           |
-| `documents` | `documents` | Analyze image documents, return text analysis with original metadata preserved |
+Each API call runs in a daemon thread with a **30-second hard timeout** and is retried **once** on retryable errors (rate limits, connection errors, timeouts, 5xx responses). Rate-limit retries honor the `retry-after` response header (default 60 s); other retries use exponential backoff starting at 1 s. A fresh HTTP client is created per attempt to avoid exhausting the connection pool from a prior timed-out attempt. API errors are translated to user-friendly messages covering authentication failure, rate limits, quota or billing issues, invalid input, model not found, timeout, and server unavailability.
+
+When both lanes carry the same frame, the node makes only **one** API call per frame: the first lane to process the frame caches the answer, and the second lane reuses it. The cache is cleared at the start of each new frame.
+
+---
 
 ## Configuration
 
-| Field               | Description                                             |
-| ------------------- | ------------------------------------------------------- |
-| Model               | Vision model to use (see profiles below)                |
-| API Key             | OpenAI API key (starts with `sk-`)                      |
-| System Instructions | Define the model's role and behavior for image analysis |
-| Analysis Prompt     | Describe what you want to analyze or extract from image |
+### Lanes
+
+| Lane in     | Lane out    | Description                                                                      |
+|-------------|-------------|----------------------------------------------------------------------------------|
+| `image`     | `text`      | Analyze a single image frame and emit the model's text response                  |
+| `documents` | `documents` | Analyze image documents and emit text analysis with original metadata preserved  |
+
+On the `documents` lane, each incoming `Image` document is replaced by a `Text` document containing the model's answer; the original metadata (frame number, timestamp, chunk id) is carried over. The original `Image` documents do not flow downstream. Documents with a type other than `Image` or with empty content are skipped with a warning. Image document content is expected to be base64-encoded PNG: all Image document producers (frame_grabber, thumbnail, embedding_image) normalize to PNG.
+
+If inference fails for a document after retries, the node logs a warning and continues with the next document. On the `image` lane, a failure logs a warning and emits nothing for that frame. Empty image frames on the `image` lane are also skipped with a warning.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `apikey` | string | OpenAI API key. Get one at https://platform.openai.com/api-keys |
+| `model` | string | OpenAI Vision model |
+| `modelTotalTokens` | number | Maximum context length in tokens |
+| `systemPrompt` | string | Define the model's role and behavior for image analysis |
+| `prompt` | string | Describe what you want to analyze or extract from the image |
+| `profile` | string | Default "openai-4-1". Select the OpenAI vision model to use |
+
+The selected profile supplies the `model` identifier and `modelTotalTokens` context limit. The API key, system prompt, and analysis prompt are configured per profile.
+
+---
 
 ## Profiles
 
-| Profile             | Model          | Context   |
-| ------------------- | -------------- | --------- |
-| GPT-4.1 _(default)_ | `gpt-4.1`      | 1,047,576 |
-| GPT-4.1-mini        | `gpt-4.1-mini` | 1,047,576 |
-| GPT-4.1-nano        | `gpt-4.1-nano` | 1,047,576 |
-| GPT-4o              | `gpt-4o`       | 128,000   |
-| GPT-4o-mini         | `gpt-4o-mini`  | 128,000   |
+| Profile                  | Model          | Context (tokens) |
+|--------------------------|----------------|------------------|
+| `openai-4-1` _(default)_ | `gpt-4.1`      | 1,047,576        |
+| `openai-4-1-mini`        | `gpt-4.1-mini` | 1,047,576        |
+| `openai-4-1-nano`        | `gpt-4.1-nano` | 1,047,576        |
+| `openai-4o`              | `gpt-4o`       | 128,000          |
+| `openai-4o-mini`         | `gpt-4o-mini`  | 128,000          |
 
-## Upstream docs
+---
+
+## Authentication
+
+Provide an OpenAI API key in `image_vision_openai.apikey`. The key is validated at pipeline start: it must be present and must begin with `sk-`, otherwise the node raises a configuration error before any image is processed.
+
+Upstream references:
 
 - [OpenAI Vision documentation](https://platform.openai.com/docs/guides/vision)
 - [OpenAI API keys](https://platform.openai.com/api-keys)
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `image_vision_openai.apikey` | `string` | **API Key**<br/>OpenAI API key. Get one at https://platform.openai.com/api-keys |  |
+| `image_vision_openai.profile` | `string` | **Vision Model**<br/>Select the OpenAI vision model to use | `"openai-4-1"` |
+| `model` | `string` | **Model**<br/>OpenAI Vision model |  |
+| `modelTotalTokens` | `number` | **Tokens**<br/>Maximum context length in tokens |  |
+| `vision.prompt` | `string` | **Analysis Prompt**<br/>Describe what you want to analyze or extract from the image |  |
+| `vision.systemPrompt` | `string` | **System Instructions**<br/>Define the model's role and behavior for image analysis |  |
+
+## Dependencies
+
+- `openai` `>=2.38.0`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/llm_vision_openai)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

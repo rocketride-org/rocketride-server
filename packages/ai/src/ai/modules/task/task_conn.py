@@ -59,6 +59,7 @@ This design provides a single connection point while maintaining separation
 of concerns through specialized command handler classes.
 """
 
+import logging
 import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
@@ -74,7 +75,9 @@ from .commands.cmd_account import AccountCommands
 from .commands.cmd_app import AppCommands
 from .commands.cmd_public import PublicCommands
 from .commands.cmd_deploy import DeployCommands
-from ai.account.models import AccountInfo, resolve_task_permissions, resolve_team_permissions
+from .commands.cmd_log import LogCommands
+from .commands.cmd_store import StoreCommands
+from ai.account.models import AccountInfo, RequestContext, resolve_task_permissions, resolve_team_permissions
 from ai.common.account import AccountPipelineValidation
 
 # Only import for type checking to avoid circular import errors
@@ -103,6 +106,8 @@ class TaskConn(
     AppCommands,
     PublicCommands,
     DeployCommands,
+    LogCommands,
+    StoreCommands,
     DAPConn,
 ):
     """
@@ -191,6 +196,9 @@ class TaskConn(
         CProfileCommands.__init__(self, connection_id, server, transport, **kwargs)
         AccountCommands.__init__(self, connection_id, server, transport, **kwargs)
         AppCommands.__init__(self, connection_id, server, transport, **kwargs)
+        DeployCommands.__init__(self, connection_id, server, transport, **kwargs)
+        LogCommands.__init__(self, connection_id, server, transport, **kwargs)
+        StoreCommands.__init__(self, connection_id, server, transport, **kwargs)
 
         # Store connection identifier for tracking and logging
         self._connection_id = connection_id
@@ -374,7 +382,29 @@ class TaskConn(
             return False
         try:
             perms = resolve_team_permissions(self._account_info, self._account_info.defaultTeam)
-        except PermissionError:
+        except PermissionError as exc:
+            # The session's defaultTeam is not resolvable inside account_info.organization
+            # (AccountInfo carries a single org). Deny — but never silently: without this
+            # line the caller sees a bare "Permission 'x' denied" and the real cause, an
+            # unresolvable default team, is invisible in the logs.
+            #
+            # stdlib logging, not rocketlib.debug()/warning(). Two reasons, both checked
+            # against the running cloud ALB rather than assumed:
+            #   * debug() is gated on the engine trace level, and prod runs without one
+            #     (`./engine ./ai/eaas.py --saas --host=0.0.0.0 --port=5565 ...`).
+            #   * rocketlib output goes to the engine job log, which is delivered to the
+            #     connected client — not to container stdout. The prod ALB's log is
+            #     uvicorn access lines and nothing else, so neither call would have been
+            #     visible to us. Denying a client and then reporting the reason only to
+            #     that same client is not observability.
+            # uvicorn configures root logging, so this lands on stdout and reaches
+            # CloudWatch. Volume is bounded by actual denials, and a flood of these is
+            # itself the signal — that is exactly the shape #373 had.
+            logging.getLogger(__name__).warning(
+                f'[auth] has_permission: cannot resolve defaultTeam '
+                f'{self._account_info.defaultTeam!r} for user {self._account_info.userId!r} '
+                f'-> denying {perm!r} ({exc})'
+            )
             return False
         if isinstance(perm, str):
             perm = [perm]
@@ -385,10 +415,98 @@ class TaskConn(
         if not self.has_permission(perm):
             raise PermissionError(f'Permission {perm!r} denied')
 
+    def request_context(self) -> 'RequestContext':
+        """Build the per-request identity context from connection state.
+
+        MERGE NOTE (feat/alb): this is the PRE-alb local builder. feat/alb
+        constructs the ctx once in on_receive (_build_request_context, which
+        also honours orchestrator-forwarded ``arguments._ctx``) and passes it
+        into every on_* handler. When feat/alb lands: replace calls to this
+        helper with the handler's ``ctx`` parameter and delete this method.
+        """
+        return RequestContext(
+            account_info=self._account_info,
+            conn_id=str(self._connection_id),
+            source='local',
+        )
+
+    def verify_team_permission(self, team_id: str, perm: str) -> None:
+        """Raise PermissionError unless the user holds ``perm`` on the GIVEN team.
+
+        The counterpart to verify_permission (which resolves only against the
+        caller's defaultTeam): use this whenever a command targets an object
+        that belongs to a SPECIFIC team — executing onto a team, touching a
+        team's deployment, reading a team's logs. ``sys.admin`` bypasses, the
+        same as the get_task path. A team outside the caller's org resolves to
+        no permissions and is denied — indistinguishable from a real team the
+        caller cannot access (no existence leak).
+        """
+        # Step 1: an unauthenticated connection can hold no permissions.
+        if not self._account_info:
+            raise PermissionError('Not authenticated')
+
+        # Step 2: platform admins bypass team scoping (parity with get_task).
+        if 'sys.admin' in (self._account_info.sysPermissions or []):
+            return
+
+        # Step 3: resolve the caller's permissions ON THAT team (returns []
+        # for unknown/foreign teams rather than raising — uniform denial).
+        perms = resolve_task_permissions(self._account_info, team_id)
+        if not perms:
+            raise PermissionError(f'Access denied: no permissions for team {team_id!r}')
+        if perm not in perms:
+            raise PermissionError(f'Permission {perm!r} denied for team {team_id!r}')
+
+    async def resolve_org_for_team(self, team_id: str) -> str:
+        """Resolve the org id that owns ``team_id`` for task registration.
+
+        Fast path: the caller's own membership (their single org). Callers
+        that pass verify_team_permission WITHOUT membership — sys.admin, and
+        internal via resolve_task_permissions — fall through to the account
+        backend so the task is registered with the team's REAL org: an empty
+        orgId would otherwise travel in the task file as trusted identity and
+        anchor org-scoped storage/secrets to nothing.
+
+        Args:
+            team_id: The team the task is being registered under.
+
+        Returns:
+            The owning organization id (never empty).
+
+        Raises:
+            PermissionError: The team's org cannot be resolved (unknown team,
+                or a backend without team records) — uniform denial message.
+        """
+        # Deferred import: ai.account instantiates the Account singleton on
+        # import; task_conn is imported during bootstrap before it is ready.
+        from ai.account import account
+
+        # Membership fast path — but do NOT return from inside the loop: a
+        # membership record whose org carries no id must still fall through
+        # to the backend lookup and the single empty-org guard below, or an
+        # empty orgId would ride the task file as trusted identity again.
+        org = self._account_info.organization if self._account_info else None
+        org_id = ''
+        if isinstance(org, dict) and any(t.get('id') == team_id for t in org.get('teams', [])):
+            org_id = org.get('id') or ''
+        if not org_id:
+            try:
+                team = await account.get_team(team_id)
+                org_id = (team or {}).get('orgId') or ''
+            except Exception:
+                org_id = ''
+        if not org_id:
+            # Unknown team / OSS backend without team records: deny with the
+            # SAME message as the permission check (no existence leak).
+            raise PermissionError(f'Access denied: no permissions for team {team_id!r}')
+        return org_id
+
     def require_zitadel_auth(self) -> None:
-        """Verify the connection is authenticated (any credential type is accepted)."""
+        """Verify the connection is authenticated and not waitlisted."""
         if not self._authenticated or not self._account_info:
             raise PermissionError('Not authenticated')
+        if self._account_info.waitlisted:
+            raise PermissionError('Account is waitlisted')
 
     def verify_plans(self, account_info: AccountInfo, pipeline: Dict[str, Any]) -> bool:
         """
@@ -470,12 +588,14 @@ class TaskConn(
 
         # pk_ and tk_ auth are already scoped to their task by get_task_token.
         # For all other auth types, resolve permissions against the task's team.
+        # sys.admin bypasses all team permission checks.
         if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
-            perms = resolve_task_permissions(self._account_info, control.teamId)
-            if not perms:
-                raise PermissionError('Access denied: no permissions for this task')
-            if permissions and permissions not in perms:
-                raise PermissionError(f'Permission {permissions!r} denied for this task')
+            if 'sys.admin' not in (self._account_info.sysPermissions or []):
+                perms = resolve_task_permissions(self._account_info, control.teamId)
+                if not perms:
+                    raise PermissionError('Access denied: no permissions for this task')
+                if permissions and permissions not in perms:
+                    raise PermissionError(f'Permission {permissions!r} denied for this task')
 
         return control.task
 

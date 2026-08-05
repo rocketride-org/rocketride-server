@@ -6,7 +6,7 @@
 """
 CrewAI Manager — global state for the hierarchical multi-agent CrewAI node.
 
-Loads the manager-only connConfig fields (`goal`, `backstory`), ensures the
+Loads the manager-only connConfig fields (`goal`, `backstory`, `planning`), ensures the
 process-wide CrewAI kickoff runner is running, and instantiates the
 `CrewManager` driver held on `self.agent`.
 
@@ -20,13 +20,16 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from rocketlib import IGlobalBase, IJson, OPEN_MODE
+from rocketlib import IGlobalBase, OPEN_MODE
+
+from ai.common.config import Config
 
 
 class IGlobal(IGlobalBase):
     agent: Any = None
     goal: str = ''
     backstory: str = ''
+    planning: bool = False
     _kickoff_runner: Any = None
 
     def beginGlobal(self) -> None:
@@ -43,10 +46,13 @@ class IGlobal(IGlobalBase):
         )
         depends(requirements)
 
-        conn_config = IJson.toDict(self.glb.connConfig) if self.glb.connConfig else {}
+        # Resolve through Config.getNodeConfig so profile defaults are applied and both
+        # the flat and nested-under-default pipe shapes work.
+        conn_config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
         self.goal = str(conn_config.get('goal') or '').strip()
         self.backstory = str(conn_config.get('backstory') or '').strip()
+        self.planning = bool(conn_config.get('planning', False))
 
         from ..crewai_runner import get_shared_runner
 
@@ -60,4 +66,5 @@ class IGlobal(IGlobalBase):
         self.agent = None
         self.goal = ''
         self.backstory = ''
+        self.planning = False
         self._kickoff_runner = None

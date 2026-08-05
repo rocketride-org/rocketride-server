@@ -41,6 +41,7 @@ function parseArgs(args) {
 	const requests = [];
 	const options = {
 		autoinstall: false,
+		systemCompiler: false,
 		force: false,
 		verbose: false,
 		parallel: true, // Default to parallel execution
@@ -60,6 +61,8 @@ function parseArgs(args) {
 	for (const arg of args) {
 		if (arg === '--autoinstall') {
 			options.autoinstall = true;
+		} else if (arg === '--system-compiler') {
+			options.systemCompiler = true;
 		} else if (arg === '--force' || arg === '-f') {
 			options.force = true;
 		} else if (arg === '--verbose' || arg === '-v') {
@@ -127,6 +130,10 @@ function parseArgs(args) {
 				console.error(`Invalid --arch value: ${archValue}. Use 'arm' or 'intel'.`);
 				process.exit(1);
 			}
+		} else if (arg === '--check') {
+			// shell:freeze --check: CI mode — verify the frozen shell-api
+			// contract is current without writing a new version.
+			options.check = true;
 		} else if (arg === '--rebuild-cache') {
 			// test-integrity: nuke <engine-cache>/{constraints.txt,requirements.hash}
 			// so depends.ensure_constraints() does a full uv pip compile.
@@ -249,6 +256,7 @@ Options:
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
   --stamp=STAMP       Set build stamp
+  --system-compiler   Install a compatible clang system-wide via apt/dnf (needs --autoinstall + root)
   --taskserver=ADDR   Use existing task server (port or host:port) for tests/run
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
   --verbose, -v       Show detailed output

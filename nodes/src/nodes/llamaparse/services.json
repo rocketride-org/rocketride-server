@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A document parsing component that uses LlamaParse to extract text and structured data ", "from various document formats including PDFs, images, Word documents, Excel spreadsheets, ", "and other formats. It provides high-quality text extraction with support for tables, ", "layout preservation, and markdown output formatting."],
+	"description": ["A document parsing component that uses LlamaParse to extract text and structured data ", "from various document formats including PDFs, images, Word documents, Excel spreadsheets, ", "and other formats. It provides high-quality text extraction with support for tables, ", "layout preservation, and markdown output formatting. ", "Note: output is flattened to Markdown and does not preserve cell-level provenance ", "(page boundaries, bbox coordinates, or the table-HTML cell grid), so it is not suitable ", "for audit-grade or provenance-bearing extraction; use the datalab_parse node for ", "structure-preserving parsing with page and coordinate data."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node

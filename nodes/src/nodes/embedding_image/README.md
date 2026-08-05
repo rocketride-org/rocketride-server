@@ -1,37 +1,98 @@
----
-title: Image Embedding
-date: 2026-04-08
-sidebar_position: 1
----
+# embedding_image
 
-<head>
-  <title>Image Embedding - RocketRide Documentation</title>
-</head>
+A RocketRide embedding node that generates vector embeddings from images using local vision models.
 
 ## What it does
 
-Generates vector embeddings from images using local vision models. Runs on the model server — no API key required. GPU-accelerated when available.
+Transforms image content into normalized embedding vectors that capture the semantic and
+structural characteristics of the image, enabling similarity search, clustering, and other
+multimodal workflows. Output documents have an `embedding` vector and an `embedding_model`
+name attached, ready for ingestion into a vector store.
 
-**Lanes:**
+Uses Hugging Face `transformers` vision models and supports two model families, selected
+automatically from the model name:
 
-| Lane in     | Lane out    | Description                              |
-| ----------- | ----------- | ---------------------------------------- |
-| `documents` | `documents` | Embed images carried in document objects |
-| `image`     | `documents` | Embed raw image data                     |
+- **CLIP** (model name contains `clip`, e.g. `openai/clip-vit-base-patch16`): embeds the
+  image via `get_image_features`, normalized.
+- **ViT** (anything else, e.g. `google/vit-base-patch16-224`): embeds the image as the
+  normalized CLS token of the last hidden state.
 
-Output documents have an `embedding` vector attached, ready for ingestion into a vector store.
+The model runs through a proxy that transparently routes inference either locally or to the
+model server: no API key is required, and both paths return identical results. The node is
+GPU-capable, so inference is GPU-accelerated when a GPU is available.
+
+The default model is `openai/clip-vit-base-patch16`.
+
+---
 
 ## Configuration
 
-| Field | Description                                 |
-| ----- | ------------------------------------------- |
-| Model | Embedding model to use (see profiles below) |
+### Lanes
+
+| Lane in     | Lane out    | Description                              |
+|-------------|-------------|------------------------------------------|
+| `documents` | `documents` | Embed images carried in document objects |
+| `image`     | `documents` | Embed raw image data                     |
+
+### documents lane
+
+Each incoming document must have `type: "Image"`; any other type raises a `ValueError`.
+The document's `page_content` is expected to be a base64-encoded image, which is decoded
+to a Pillow image and embedded. The enriched document (with `embedding` and
+`embedding_model` set) is forwarded on the `documents` lane; the original image is not
+re-routed through the raw image path.
+
+### image lane
+
+Raw image bytes are streamed in chunks (begin / write / end). On completion the
+accumulated bytes are decoded, embedded, and wrapped in a new document of type `Image`
+whose `page_content` is the base64-encoded image. Each image in the stream receives a
+unique `chunkId` in its metadata.
+
+### Source provenance
+
+Documents produced from the **image lane** carry the source image's media detail under
+`metadata.source` (`source_mime`, `width`, `height`, `size`, `resource_name`, …) and a
+`metadata.name` of the source stem (e.g. `photo`). Both are omitted when the incoming image
+carried no stream descriptor. Documents from the **documents lane** keep the `source`/`name`
+their upstream node already set.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Hugging face model to use for embedding |
+| `profile` | string | Default "openai-patch16". Embedding model |
+
+---
 
 ## Profiles
 
-| Profile                  | Model                          | Notes                                 |
-| ------------------------ | ------------------------------ | ------------------------------------- |
-| OpenAI 16×16 _(default)_ | `openai/clip-vit-base-patch16` | Good performance, lower memory        |
-| OpenAI 32×32             | `openai/clip-vit-base-patch32` | Lower performance, better recognition |
-| Google 16×16             | `google/vit-base-patch16-224`  | Fast, accurate, general-purpose       |
-| Custom                   | _(user-specified)_             | Any Hugging Face vision model         |
+| Profile key      | Model                          | Notes                                  |
+|------------------|--------------------------------|----------------------------------------|
+| `openai-patch16` (default) | `openai/clip-vit-base-patch16` | Good performance, lower memory         |
+| `openai-patch32` | `openai/clip-vit-base-patch32` | Lower performance, better recognition  |
+| `google16x224`   | `google/vit-base-patch16-224`  | Fast, accurate, general-purpose        |
+| `custom`         | _(user-specified)_             | Any Hugging Face vision model, via `embedding.model` |
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `embedding.model` | `string` | **Model name**<br/>Hugging face model to use for embedding |  |
+| `embedding.profile` | `string` | **Model**<br/>Embedding model | `"openai-patch16"` |
+
+## Dependencies
+
+- `transformers`
+- `accelerate`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/embedding_image)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

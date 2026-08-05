@@ -23,13 +23,23 @@
 import { useFlowGraph } from '../context/FlowGraphContext';
 import { useFlowProject } from '../context/FlowProjectContext';
 import { useFlowPreferences } from '../context/FlowPreferencesContext';
+import type { IFlowGraphContext } from '../context/FlowGraphContext';
+import type { IFlowProjectContext } from '../context/FlowProjectContext';
+import type { IFlowPreferencesContext } from '../context/FlowPreferencesContext';
+
+/**
+ * Combined shape of all three flow contexts, as returned by {@link useFlow}.
+ * Declared explicitly so the emitted declaration file does not depend on
+ * inferred types from transitive packages (TS2742 portability).
+ */
+export type IFlowContext = IFlowGraphContext & IFlowProjectContext & IFlowPreferencesContext;
 
 /**
  * Returns a combined object containing all flow context state and functions.
  *
  * @throws When called outside of a FlowProvider.
  */
-export function useFlow() {
+export function useFlow(): IFlowContext {
 	const graph = useFlowGraph();
 	const project = useFlowProject();
 	const prefs = useFlowPreferences();

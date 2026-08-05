@@ -4,14 +4,14 @@
  * Provides smart directory synchronization that only copies changed files.
  */
 const path = require('path');
-const { exists, stat, copyFileEnsure, unlink } = require('./fs');
+const { exists, stat, copyFileEnsure, unlink, filesEqual } = require('./fs');
 const { setState, } = require('./state');
 const { DIST_ROOT } = require('./paths');
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 
 /**
  * Incrementally sync source to destination directory (MIRROR or OVERLAY mode)
- * - Only copies files that are new or modified (based on mtime + size)
+ * - Only copies files that are new or modified (based on size + content)
  * - Removes files in dest that don't exist in source in MIRROR mode (default)
  * - Ignores files and directories by specified patterns (default: '\*\*\/\_\_pycache\_\_\/\*\*')
  * 
@@ -72,7 +72,12 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
             const srcStat = await stat(srcPath);
             const destStat = await stat(destPath);
 
-            if (srcStat.size === destStat.size && srcStat.mtimeMs <= destStat.mtimeMs) {
+            // Skip only when the file is genuinely unchanged. Size is a cheap
+            // pre-filter; when sizes match we must compare content, because a
+            // same-length edit (e.g. a swapped bundle-hash string in index.html)
+            // does not change the size and an mtime-ordering gate misses it — a
+            // stale file then keeps referencing a deleted sibling (#1477).
+            if (srcStat.size === destStat.size && await filesEqual(srcPath, destPath)) {
                 stats.unchanged++;
             } else {
                 if (!dryRun) {
@@ -119,7 +124,7 @@ async function syncDir(src, dest, options = {}, stats = { added: 0, updated: 0, 
 }
 
 /**
- * Incrementally sync a single file (same mtime/size rules as syncDir).
+ * Incrementally sync a single file (same size + content-compare rule as syncDir).
  *
  * @param {string} src - Source file path
  * @param {string} dest - Destination file path
@@ -152,7 +157,10 @@ async function syncFile(src, dest, options = {}, stats = { added: 0, updated: 0,
 
     // Process source file - copy new/modified
     if (destStat) {
-        if (srcStat.size === destStat.size && srcStat.mtimeMs <= destStat.mtimeMs) {
+        // Same content-comparison rule as syncDir: size pre-filter, then a
+        // byte compare on same-size files so same-length edits are not
+        // skipped by an mtime-ordering heuristic (#1477).
+        if (srcStat.size === destStat.size && await filesEqual(src, dest)) {
             stats.unchanged++;
         } else {
             if (!dryRun) {

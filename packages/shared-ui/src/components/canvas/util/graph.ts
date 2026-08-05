@@ -41,7 +41,7 @@ import { INodeType } from '../types';
 
 import type { PipelineComponent } from 'rocketride';
 
-import { IProject, IProjectComponent, INode, INodeData, IControlConnection, IInputConnection, INodeConfig } from '../types';
+import { IProject, IProjectComponent, INode, INodeData, IControlConnection, IInputConnection, INodeConfig, IPosition, IDimensions } from '../types';
 
 /**
  * Minimal node shape accepted by utility functions.
@@ -50,6 +50,17 @@ import { IProject, IProjectComponent, INode, INodeData, IControlConnection, IInp
 type INodeLike = Pick<INode, 'id' | 'data'> & {
 	type?: string;
 	parentId?: string;
+};
+
+/**
+ * Node shape accepted by the node→component converters: {@link INodeLike}
+ * plus the layout fields serialised into the component's `ui` block.
+ * Compatible with both INode (measured: IDimensions) and ReactFlow's Node,
+ * which reports `measured` with optional per-axis values before layout.
+ */
+type ISerializableNode = INodeLike & {
+	position: IPosition;
+	measured?: Partial<IDimensions>;
 };
 
 // ============================================================================
@@ -289,18 +300,27 @@ export const getEdgesFromNodes = (nodes: INodeLike[]): Edge[] => {
 // ============================================================================
 
 /**
- * Converts a single INode back into an IProjectComponent suitable for
+ * Converts a single canvas node back into an IProjectComponent suitable for
  * server-side validation or persistence.
  *
  * This is the inverse of what getNodesFromProject does — it takes the
  * thin INodeData and the node's position/dimensions and rebuilds the
- * serialised component format the server expects.
+ * serialised component format the server expects. Accepts INode and
+ * ReactFlow's Node<INodeData> alike (see {@link ISerializableNode}).
  *
  * @param node - The canvas node to convert.
  * @returns The serialised component representation.
  */
-export const getComponentFromNode = (node: INode, edges?: Edge[]): IProjectComponent => {
+export const getComponentFromNode = (node: ISerializableNode, edges?: Edge[]): IProjectComponent => {
 	const { data } = node;
+
+	// Persist the node's measured dimensions; fall back to the default node
+	// size when ReactFlow has not (fully) measured the node yet — ReactFlow
+	// reports per-axis optional values before layout completes.
+	const measured: IDimensions =
+		node.measured?.width != null && node.measured?.height != null
+			? { width: node.measured.width, height: node.measured.height }
+			: { width: 150, height: 36 };
 
 	// Build the base component with UI metadata
 	const component: IProjectComponent = {
@@ -311,6 +331,7 @@ export const getComponentFromNode = (node: INode, edges?: Edge[]): IProjectCompo
 		config: data.config ?? {},
 		ui: {
 			position: { x: node.position.x, y: node.position.y },
+			measured,
 			nodeType: (node.type as INodeType) ?? INodeType.Default,
 			formDataValid: data.formDataValid !== false,
 			parentId: node.parentId,
@@ -363,7 +384,7 @@ export const getComponentFromNode = (node: INode, edges?: Edge[]): IProjectCompo
  * @param parentId - The parent group ID to filter by, or undefined for root.
  * @returns Components at the requested level.
  */
-export const getChildComponents = (allNodes: INode[], parentId?: string, edges?: Edge[]): IProjectComponent[] => {
+export const getChildComponents = (allNodes: ISerializableNode[], parentId?: string, edges?: Edge[]): IProjectComponent[] => {
 	return allNodes.filter((node) => node.parentId === parentId).map((node) => getComponentFromNode(node, edges));
 };
 
@@ -376,7 +397,7 @@ export const getChildComponents = (allNodes: INode[], parentId?: string, edges?:
  * @param allNodes - All nodes currently on the canvas.
  * @returns The top-level component array with groups containing nested children.
  */
-export const getProjectComponents = (allNodes: INode[], edges?: Edge[]): IProjectComponent[] => {
+export const getProjectComponents = (allNodes: ISerializableNode[], edges?: Edge[]): IProjectComponent[] => {
 	/**
 	 * Gets components at a given level and recursively nests
 	 * children into any group nodes found.

@@ -132,7 +132,7 @@ interface ParsedErrWarn {
 // COMPONENT
 // =============================================================================
 
-export const Errors: React.FC<ErrorsProps> = ({ title, items, type }) => {
+export const Errors: React.FC<ErrorsProps> = ({ items, type }) => {
 	/** Parse a structured error string into its components. */
 	const parseItem = (item: string): ParsedErrWarn => {
 		const parts = item.split('*');

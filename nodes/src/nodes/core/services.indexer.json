@@ -22,6 +22,11 @@
 	//
 	"capabilities": ["internal"],
 	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["An internal component that builds an inverted word index from processed text, enabling full-text keyword search over ingested content."],
+	//
 	// Required:
 	//		The prefix map when added/removed when convertting URLs <=> paths
 	//

@@ -27,9 +27,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shared/themes/styles';
-import AccountPage from '../../views/account/AccountPage';
-import SettingsPage from '../../views/settings/SettingsPage';
-import EnvironmentPage from '../../views/environment/EnvironmentPage';
+import { ConnectionManager } from '../../connection/connection';
+import AccountProvider from '../../providers/AccountProvider';
+import SettingsProvider from '../../providers/SettingsProvider';
+import EnvironmentProvider from '../../providers/EnvironmentProvider';
 
 // =============================================================================
 // TYPES
@@ -37,6 +38,12 @@ import EnvironmentPage from '../../views/environment/EnvironmentPage';
 
 /** Shell overlay pages that render as modal dialogs over the client area. */
 export type ShellOverlay = 'account' | 'settings' | 'environment' | null;
+
+/** Opaque overlay ids a guest app is allowed to request via `shell:openOverlay`. */
+const OPENABLE_OVERLAYS = ['account', 'settings', 'environment'] as const;
+
+/** Type guard: is `id` a valid openable overlay id (not null/unknown)? */
+const isOpenableOverlay = (id: unknown): id is Exclude<ShellOverlay, null> => typeof id === 'string' && (OPENABLE_OVERLAYS as readonly string[]).includes(id);
 
 // =============================================================================
 // STYLES
@@ -63,10 +70,15 @@ const styles = {
 		flexDirection: 'column',
 		overflow: 'hidden',
 	} as CSSProperties,
+	// Close floats over the dialog's top-right corner. Shared views draw their
+	// own 38px TabControl strip at the top of the dialog, so the button is
+	// vertically centered within that band ((38 - ~24px button) / 2 = 7) and
+	// reads as the strip row's trailing control. Strip entries are left-aligned,
+	// so they never reach the button at standard dialog widths.
 	dialogClose: {
 		...commonStyles.buttonSecondary,
 		position: 'absolute',
-		top: 12,
+		top: 7,
 		right: 14,
 		zIndex: 10,
 		fontFamily: 'var(--rr-font-family)',
@@ -101,6 +113,18 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 	/** Closes the currently open overlay. */
 	const closeOverlay = useCallback(() => setOverlay(null), []);
 
+	// --- Open-overlay requests from guest apps -------------------------------
+	// Guest apps (e.g. home-ui's profile menu) can't reach `setOverlay`
+	// directly, so they emit `shell:openOverlay` over the event bus and the
+	// shell routes it into the same overlay state the sidebar uses.
+	useEffect(() => {
+		return ConnectionManager.getInstance().on('shell:openOverlay', ({ id }: { id: ShellOverlay }) => {
+			// Gate to the contracted ids so a stray runtime value can't open a
+			// blank modal shell with no page content.
+			if (isOpenableOverlay(id)) setOverlay(id);
+		});
+	}, []);
+
 	// --- Escape key handler --------------------------------------------------
 	useEffect(() => {
 		/** Closes the Account or Settings overlay when Escape is pressed. */
@@ -118,14 +142,22 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 		<OverlayContext.Provider value={setOverlay}>
 			{children}
 
-			{/* Shell-owned overlays render as modal dialogs over client area */}
+			{/* Shell-owned overlays render as modal dialogs over client area.
+			    Pages render directly; views with sub-views draw their own
+			    TabControl strip at the top of the dialog. Dismissal is
+			    deliberate only (design-owner decision 2026-07-08): the ✕ button
+			    or Escape — clicking the backdrop must NOT close the dialog. */}
 			{overlay !== null && (
-				<div style={styles.backdrop} onClick={closeOverlay}>
-					<div style={styles.dialog} onClick={(e) => e.stopPropagation()}>
-						<button style={styles.dialogClose} onClick={closeOverlay}>✕</button>
-						{overlay === 'account' && <AccountPage />}
-						{overlay === 'settings' && <SettingsPage />}
-						{overlay === 'environment' && <EnvironmentPage />}
+				<div style={styles.backdrop}>
+					{/* aria-label carries the overlay id (account/settings/…): the
+					    dialog itself has no visible heading to reference. */}
+					<div style={styles.dialog} role="dialog" aria-modal="true" aria-label={overlay}>
+						<button style={styles.dialogClose} onClick={closeOverlay} aria-label="Close" title="Close">
+							✕
+						</button>
+						{overlay === 'account' && <AccountProvider />}
+						{overlay === 'settings' && <SettingsProvider />}
+						{overlay === 'environment' && <EnvironmentProvider />}
 					</div>
 				</div>
 			)}

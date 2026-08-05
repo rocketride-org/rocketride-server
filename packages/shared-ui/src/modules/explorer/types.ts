@@ -80,6 +80,21 @@ export interface IVirtualFileSystem {
 	mkdir(path: string): Promise<void>;
 }
 
+/**
+ * A no-op {@link IVirtualFileSystem} for hosts that drive the Explorer purely
+ * through `entries` + callbacks. The Explorer never calls the VFS anymore, but
+ * the frozen shell contract keeps the `vfs` prop required — pass this instead
+ * of a hand-rolled stub or an `as any` cast.
+ */
+export const NOOP_VFS: IVirtualFileSystem = {
+	list: async () => [],
+	read: async () => undefined,
+	write: async () => undefined,
+	rename: async () => undefined,
+	delete: async () => undefined,
+	mkdir: async () => undefined,
+};
+
 // =============================================================================
 // EXPLORER ENTRY TYPES
 // =============================================================================
@@ -190,15 +205,23 @@ export interface ExplorerFileAction {
 	label: string;
 	/** Optional leading icon node. */
 	icon?: ReactNode;
-	/** Invoked with the row's file path when the item is chosen. */
-	onSelect: (path: string) => void;
+	/** Invoked with the row's file path when the item is chosen. Omit if using children. */
+	onSelect?: (path: string) => void;
+	/** Submenu items — when present, hovering the item opens a nested menu. May be a static array or a function that receives the file path. */
+	children?: ExplorerFileAction[] | ((path: string) => ExplorerFileAction[]);
 }
 
 /**
  * Props for the Explorer component.
  */
 export interface IExplorerProps {
-	/** Virtual file system provider for all file operations. */
+	/**
+	 * Unused — the Explorer no longer performs file operations itself (hosts
+	 * provide `entries` and handle actions via callbacks). It stays REQUIRED
+	 * because the frozen shell contract (shell-api v1 `DocExplorerProps`) pins
+	 * it that way — loosening it fails `shell:check`. Pass {@link NOOP_VFS};
+	 * the prop drops out with the next contract version bump.
+	 */
 	vfs: IVirtualFileSystem;
 
 	/** Component configuration (title, extensions, display names). */
@@ -242,4 +265,19 @@ export interface IExplorerProps {
 
 	/** Called when the user clicks the refresh button. */
 	onRefresh: () => void;
+
+	/**
+	 * Called when a file or directory is dragged and dropped onto a directory.
+	 * Optional — when absent, internal drag-to-move is disabled.
+	 */
+	onMove?: (sourcePath: string, targetDir: string) => void;
+
+	/**
+	 * Called when files are dropped from the OS onto the file tree.
+	 * Optional — when absent, upload-by-drop is disabled.
+	 *
+	 * @param files     - The dropped File objects.
+	 * @param targetDir - The directory path they were dropped onto ('' for root).
+	 */
+	onUpload?: (files: File[], targetDir: string) => void;
 }

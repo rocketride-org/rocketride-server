@@ -1,0 +1,221 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Segmentation",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "detect_segment://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["image"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": ["gpu", "experimental"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code - it is node dependent
+	//		and is optional for most nodes
+	//
+	"path": "nodes.detect_segment",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "detect_segment",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Pixel-level segmentation with HuggingFace-native engines: ", "Mask2Former-instance (MIT, default) for closed-set instance masks; ", "Mask2Former-semantic (MIT) for per-pixel class maps. ", "Image in (single frame or multi-frame via frame_grabber documents); annotated overlay + Masks JSON out."],
+	//
+	// Optional:
+	//		The icon to display in the UI for this node
+	//
+	"icon": "segmentation.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	// Optional:
+	//		Rendering hints indicating which fields to display on the canvas tile
+	//
+	"tile": ["Mode: ${parameters.detect_segment.mode}", "Engine: ${parameters.detect_segment.engine}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"image": ["text", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to segment.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Annotated image (translucent mask overlay) as raw stream."
+				},
+				{
+					"lane": "text",
+					"description": "Masks JSON. instance: [{label, score, box, mask}]. semantic: {semantic_map, classes, size}."
+				}
+			]
+		}
+	],
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver
+	//
+	"preconfig": {
+		"default": "mask2former-instance",
+		"profiles": {
+			"mask2former-instance": {
+				"title": "Mask2Former — Object Instances (COCO, 80 classes, default)",
+				"mode": "instance",
+				"engine": "mask2former-instance",
+				"model": "facebook/mask2former-swin-tiny-coco-instance",
+				"revision": "22c4a2f15dc88149b8b8d9f4d42c54431fbd66f6",
+				"threshold": 0.3,
+				"maxEdge": 1024
+			},
+			"mask2former-semantic": {
+				"title": "Mask2Former — Scene Regions (ADE20K, 150 classes)",
+				"mode": "semantic",
+				"engine": "mask2former-semantic",
+				"model": "facebook/mask2former-swin-tiny-ade-semantic",
+				"revision": "c8cf1b5e823aee214d937d0d001c1850ba44ef6a",
+				"threshold": 0.0,
+				"maxEdge": 1024
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions for this service
+	//
+	"fields": {
+		"detect_segment.mode": {
+			"type": "string",
+			"title": "Mode",
+			"description": "Segmentation mode. instance: per-instance masks (default). semantic: per-pixel class map. Both use Mask2Former under the hood.",
+			"default": "instance",
+			"enum": ["instance", "semantic"]
+		},
+		"detect_segment.engine": {
+			"type": "string",
+			"title": "Engine",
+			"description": "Backing engine. Gated by mode: instance -> mask2former-instance; semantic -> mask2former-semantic.",
+			"default": "mask2former-instance",
+			"enum": ["mask2former-instance", "mask2former-semantic"]
+		},
+		"detect_segment.threshold": {
+			"type": "number",
+			"title": "Confidence threshold",
+			"description": "Minimum score (0.0-1.0) to include a mask",
+			"default": 0.3,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"detect_segment.maxEdge": {
+			"type": "number",
+			"title": "Max input edge (px)",
+			"description": "Downscale source so long edge <= this value before inference; masks are upsampled back to the source size. Lower = faster + less VRAM.",
+			"default": 1024,
+			"minimum": 256,
+			"maximum": 4096
+		},
+		"detect_segment.profile": {
+			"title": "Profile",
+			"description": "Segmentation preset. Runs on CPU/MPS/CUDA via transformers.",
+			"type": "string",
+			"default": "mask2former-instance",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "mask2former-instance",
+					"properties": ["detect_segment.threshold", "detect_segment.maxEdge"]
+				},
+				{
+					"value": "mask2former-semantic",
+					"properties": ["detect_segment.threshold", "detect_segment.maxEdge"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Segmentation",
+			"properties": ["detect_segment.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["mask2former-instance"],
+		"outputs": ["text"],
+		"timeout": 180,
+		"cases": [
+			{
+				"name": "Instance-segment a person",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "person" }
+				}
+			}
+		]
+	},
+	"fulltest": [
+		{
+			"profiles": ["mask2former-instance"],
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "Instance-segment a person",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true, "contains": "person" }
+					}
+				}
+			]
+		},
+		{
+			"profiles": ["mask2former-semantic"],
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "Semantic-segment a scene",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true, "contains": "semantic_map" }
+					}
+				}
+			]
+		}
+	]
+}

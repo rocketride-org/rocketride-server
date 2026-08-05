@@ -1,0 +1,160 @@
+name: Lock node deps (universal constraints)
+
+# Ships a committed, CI-built universal constraints lockfile for the canvas nodes
+# (task #109). Today depends() -> ensure_constraints() runs `uv pip compile` over
+# all ~79 nodes/src/nodes/**/requirements.txt at install time, PER MACHINE, into a
+# transient <cache>/constraints.txt that is never committed -> it drifts between
+# runs/platforms (the Windows cryptography _rust.pyd flap was exactly that).
+#
+# This job compiles that same set ONCE with `--universal` (one lockfile valid for
+# Linux + macOS + Windows) and keeps `nodes/src/nodes/constraints.lock` committed:
+#   * push to develop / weekly / manual -> regenerate + auto-commit the lock.
+#   * pull_request touching a requirements.txt -> compile only, so a cross-node
+#     version conflict fails HERE (at CI) instead of bricking a user's first run.
+#
+# The compile mirrors how rocketlib depends.py actually installs (--no-build-isolation
+# against pre-primed PEP 517 backends), so the committed lock is faithful to runtime.
+#
+# Engine consumption side (depends() installing with `-c constraints.lock` and
+# skipping the per-machine recompute) is a separate, guarded follow-up PR — until it
+# lands this job is a lint gate that surfaces cross-node conflicts early.
+
+on:
+  workflow_dispatch:
+    inputs:
+      python_version:
+        description: 'Target CPython for the universal solve (must match the engine embedded Python)'
+        required: false
+        default: '3.12'
+  schedule:
+    - cron: '0 6 * * 1'          # weekly, Monday 06:00 UTC — catch upstream drift
+  push:
+    branches: [develop]
+    paths:
+      - 'nodes/src/nodes/**/requirements.txt'
+      - '.github/workflows/lock-node-deps.yml'
+  pull_request:
+    paths:
+      - 'nodes/src/nodes/**/requirements.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lock-node-deps-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LOCKFILE: nodes/src/nodes/constraints.lock
+  # Single source for the target Python (dispatch can override). Keep in lockstep
+  # with the engine's embedded interpreter — see rocketlib depends.py.
+  PY_VERSION: ${{ github.event.inputs.python_version || '3.12' }}
+
+jobs:
+  lock:
+    name: Compile universal node constraints
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      # SECURITY: mint the write-scoped App token ONLY on trusted (non-PR) events.
+      # This job runs `uv pip compile`, which executes arbitrary setup.py / build
+      # backends from the resolved packages — on a pull_request (incl. forks) that
+      # is attacker-controlled code, so a write token in the env is exfiltratable.
+      # PR runs are solve-only and need no push credential; they use the default
+      # read-only GITHUB_TOKEN instead.
+      - name: Generate a GitHub App token (push path only)
+        id: app-token
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Install uv (pinned for reproducible compiles)
+        uses: astral-sh/setup-uv@f94ec6bedd8674c4426838e6b50417d36b6ab231 # v5.4.1
+        with:
+          version: "0.5.29"
+
+      - name: Compile the universal lockfile from all node requirements
+        id: compile
+        run: |
+          set -euo pipefail
+          mapfile -t REQS < <(find nodes/src/nodes -name requirements.txt | sort)
+          echo "Resolving ${#REQS[@]} node requirements into one universal lockfile (py ${PY_VERSION})..."
+          # Match the runtime resolve in rocketlib depends.py so the committed lock
+          # is faithful to how a user's engine actually installs:
+          #   --no-build-isolation : depends.py builds sdists against ambient PEP 517
+          #     backends (it pre-primes wheel + setuptools); mirror that here — a dep
+          #     that only builds one way can't pass CI yet fail at a user's runtime.
+          #   --emit-index-url     : record the index the pins were resolved from.
+          #   --universal          : one lock valid across Linux/macOS/Windows (the
+          #     wheel split that bit us with cryptography).
+          # No blanket --only-binary — a few transitive deps are sdist-only (docopt).
+          VENV="${RUNNER_TEMP}/lockenv"
+          uv venv --python "${PY_VERSION}" "${VENV}"
+          # Prime the standard build backends, mirroring depends.py's _ensure_wheel +
+          # PEP 517 backend, so --no-build-isolation has what it needs to build sdists.
+          uv pip install --python "${VENV}/bin/python" wheel setuptools
+          uv pip compile --universal --no-header --emit-index-url \
+            --python "${VENV}/bin/python" \
+            --no-build-isolation \
+            --index-strategy unsafe-best-match \
+            --output-file "${LOCKFILE}" \
+            "${REQS[@]}"
+          echo "Pinned packages: $(grep -cE '^[a-zA-Z0-9].*==' "${LOCKFILE}")"
+
+      - name: Report / enforce
+        id: check
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- "${LOCKFILE}"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Lockfile already up to date."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Lockfile changed."
+            git --no-pager diff --stat -- "${LOCKFILE}"
+          fi
+
+      - name: Commit the regenerated lockfile (develop / weekly / manual)
+        if: ${{ steps.check.outputs.changed == 'true' && github.event_name != 'pull_request' }}
+        run: |
+          set -euo pipefail
+          git config user.name  'rocketride-release-bot'
+          git config user.email 'release-bot@rocketride.ai'
+          git add "${LOCKFILE}"
+          git commit -m "chore(deps): refresh universal node constraints lockfile [skip ci]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Note drift on PRs (non-blocking)
+        if: ${{ steps.check.outputs.changed == 'true' && github.event_name == 'pull_request' }}
+        run: |
+          echo "::notice::a node requirements.txt changed the resolved lockfile — it will be regenerated + committed automatically when this merges to develop."
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Node dependency lockfile"
+            echo "- Inputs: \`$(find nodes/src/nodes -name requirements.txt | wc -l)\` node requirements.txt"
+            if [ "${{ steps.compile.outcome }}" = "success" ]; then
+              echo "- Resolved: \`$(grep -cE '^[a-zA-Z0-9].*==' "${LOCKFILE}" 2>/dev/null || echo 0)\` pinned packages (universal, py ${PY_VERSION})"
+              echo "- :white_check_mark: cross-node solve succeeded"
+            else
+              echo "- :x: solve FAILED — a cross-node version conflict or unbuildable sdist surfaced (see the log). This is what would otherwise brick a user's first \`depends()\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload lockfile artifact
+        if: ${{ steps.compile.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: node-constraints-lock
+          path: ${{ env.LOCKFILE }}
+          if-no-files-found: error

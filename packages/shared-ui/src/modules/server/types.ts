@@ -12,7 +12,7 @@
 
 import type { DashboardEvent as _DashboardEvent, TaskEvent as _TaskEvent } from 'rocketride';
 
-export type { DashboardOverview, DashboardConnection, DashboardTask, DashboardResponse, DashboardEvent, TaskEvent } from 'rocketride';
+export type { DashboardOverview, DashboardConnection, DashboardTask, DashboardResponse, DashboardEvent, TaskEvent, ListPageRequest, ListPageResponse } from 'rocketride';
 
 /** Wrapper for activity events from either channel. */
 export type ActivityEvent = { source: 'task'; body: _TaskEvent; receivedAt: number } | { source: 'dashboard'; body: _DashboardEvent; receivedAt: number };

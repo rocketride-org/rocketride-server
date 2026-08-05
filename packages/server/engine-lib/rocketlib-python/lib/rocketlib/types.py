@@ -235,6 +235,7 @@ class IInvokeLLM(IInvoke):
         lane: str = 'llm'
         op: str = Field(default='ask', frozen=True)
         question: Any  # Required — client SDK's Question object
+        stop: Any = None  # Optional stop sequences forwarded to the provider API (e.g. ReAct "\nObservation:")
 
     class GetContextLength(IInvokeOp):
         """Get the maximum context length for the model."""
@@ -476,7 +477,7 @@ class Entry:
     hasPermissionId: bool
     hasServiceId: bool
     hasSize: bool
-    hasStorSize: bool
+    hasStoreSize: bool
     hasUniqueName: bool
     hasUniquePath: bool
     hasUniqueUrl: bool

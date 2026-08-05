@@ -24,34 +24,40 @@ export function useOAuthCallbacks() {
 	const { oauth2RootUrl } = useFlowProject();
 
 	/**
-	 * Applies Google OAuth callback tokens from URL into form data.
-	 * Reads `tokens` and `state` query params, parses them, and merges
-	 * access/refresh tokens + expiry into the form data's parameters.
+	 * Merges Google OAuth tokens into form data. Pure transform over the raw
+	 * `tokens`/`state` strings produced by the OAuth broker — shared by the
+	 * URL-param path (web) and the host-message path (VS Code).
+	 *
+	 * Tokens are written to the form-data ROOT (`authType`, `userToken`): node
+	 * configs are flat — the engine reads cfg.get('authType')/cfg.get('userToken')
+	 * at the top level and the generated RJSF schema names dotted services.json
+	 * field ids by their last component, so root is the only location both see.
+	 *
+	 * @param formData The node's current form data.
+	 * @param tokensParam JSON string of `{access_token, refresh_token, ...}`.
+	 * @param stateParam JSON string of `{type, node_id, ...}` (may be empty).
+	 * @return The enriched form data, or the input unchanged when no tokens.
 	 */
-	const applyGoogleOAuth = useCallback(
-		(formData: Record<string, unknown>): Record<string, unknown> => {
-			const tokensParam = getNativeQueryParam('tokens');
+	const applyGoogleTokens = useCallback(
+		(formData: Record<string, unknown>, tokensParam: string | null, stateParam: string | null): Record<string, unknown> => {
 			if (!tokensParam) return formData;
 
 			let parsedState: Record<string, unknown> = {};
-			let service: Record<string, unknown> = {};
 			let tokens: Record<string, unknown> = {};
 			let authType = '';
 
 			try {
-				const state = getNativeQueryParam('state');
-				if (state) {
-					parsedState = JSON.parse(state);
-					service = JSON.parse((parsedState?.service as string) ?? '{}');
+				if (stateParam) {
+					parsedState = JSON.parse(stateParam);
 					authType = (parsedState?.type as string) || '';
 				}
 				tokens = JSON.parse(tokensParam);
 			} catch (error) {
 				console.error('Error parsing Google OAuth callback data:', error);
+				// A malformed callback must not overwrite saved config with a
+				// token object full of undefined fields.
+				return formData;
 			}
-
-			const existingParams = (formData.parameters as Record<string, unknown>) || {};
-			const serviceParams = (service.parameters as Record<string, unknown>) || {};
 
 			const oAuthServerUrl = tokens.oauth_server_url || `${oauth2RootUrl || ''}/refresh`;
 
@@ -65,25 +71,24 @@ export function useOAuthCallbacks() {
 			};
 			const userTokenJson = JSON.stringify(fullTokenObject);
 
+			// A fresh user token with no/malformed state must still switch the
+			// node to user auth — 'service' would make the engine ignore it.
 			return {
 				...formData,
-				parameters: {
-					...existingParams,
-					...serviceParams,
-					userToken: userTokenJson,
-					...(authType && { authType }),
-					google: {
-						...((existingParams.google as Record<string, unknown>) || {}),
-						...((serviceParams.google as Record<string, unknown>) || {}),
-						userToken: userTokenJson,
-						accessToken: tokens.access_token,
-						tokenExpiry: tokens.expiry_date,
-					},
-				},
+				userToken: userTokenJson,
+				authType: authType || 'user',
 			};
 		},
 		[oauth2RootUrl]
 	);
+
+	/**
+	 * Applies Google OAuth callback tokens from the page URL into form data.
+	 * Web hosts return from the broker via a full-page redirect carrying the
+	 * `tokens`/`state` query params; this reads them and delegates to
+	 * {@link applyGoogleTokens}.
+	 */
+	const applyGoogleOAuth = useCallback((formData: Record<string, unknown>): Record<string, unknown> => applyGoogleTokens(formData, getNativeQueryParam('tokens'), getNativeQueryParam('state')), [applyGoogleTokens]);
 
 	/**
 	 * Applies Microsoft OAuth callback tokens from URL into form data.
@@ -153,5 +158,5 @@ export function useOAuthCallbacks() {
 		window.history.replaceState({}, document.title, cleanUrl);
 	}, []);
 
-	return { applyOAuthCallbacks, clearSecureParamsFromUrl };
+	return { applyOAuthCallbacks, applyGoogleTokens, clearSecureParamsFromUrl };
 }

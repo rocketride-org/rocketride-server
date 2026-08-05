@@ -16,7 +16,7 @@ Common issues when building and running pipelines, and how to fix them.
   to a valid API token.
 - **Silent insecure downgrade.** Against Cloud, an `http://`/`ws://` (or bare
   `host:port`) URI drops to an unencrypted connection. Use `https://` or
-  `wss://` — see the [WebSocket protocol](/protocols/websocket).
+  `wss://`, see the [WebSocket protocol](/protocols/websocket).
 
 ## Pipeline starts but no output comes back
 
@@ -38,7 +38,7 @@ Common issues when building and running pipelines, and how to fix them.
 
 The output [lane](/concepts/execution-model) of one node must match the input
 lane of the next. Check both ends against the
-[Nodes & Connectors catalog](/nodes) and fix the mismatched `input` connection.
+[Nodes](/nodes) and fix the mismatched `input` connection.
 
 ## Agent pipeline fails to start
 
@@ -54,6 +54,6 @@ and start a long-lived pipeline **once** rather than per request.
 
 ## Related
 
-- [Execution model](/concepts/execution-model) — how lanes and control flow.
-- [Pipeline JSON Reference](/pipeline-reference) — every field of a `.pipe`.
-- [Glossary](/glossary) — terms used across the docs.
+- [Execution model](/concepts/execution-model): how lanes and control flow.
+- [Pipeline JSON Reference](/pipeline-reference): every field of a `.pipe`.
+- [Glossary](/glossary): terms used across the docs.

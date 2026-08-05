@@ -1,0 +1,10 @@
+authlib
+grpcio<=1.81.1
+grpcio-health-checking<=1.81.1
+grpcio-tools<=1.81.1
+httpx
+pydantic
+requests
+validators
+weaviate-client
+numpy

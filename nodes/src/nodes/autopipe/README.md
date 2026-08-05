@@ -1,38 +1,63 @@
----
-title: Parse/Process/Embed
-date: 2026-04-08
-sidebar_position: 1
----
+# autopipe
 
-<head>
-  <title>Parse/Process/Embed - RocketRide Documentation</title>
-</head>
-
-:::note
-This is an **internal node**. It is wired automatically by the pipeline engine — most users will not add it manually.
-:::
+An internal RocketRide meta-node ("Parse/Process/Embed") that assembles the document parse, preprocess, embed, and store filter stack at pipeline build time.
 
 ## What it does
 
-Meta-node that dynamically assembles a processing stack at pipeline build time based on the current operation mode. Rather than processing data itself, it inspects the task configuration and inserts the appropriate filter nodes automatically.
+This is an internal node: it is wired automatically by the pipeline engine, and most users will not add it manually.
 
-**Lanes:** none
+Rather than processing data itself, autopipe inspects the task configuration during `beginGlobal` and inserts the appropriate filter nodes (parser, OCR, indexer, preprocessor, embedding, vector store) into the pipeline. Which filters get inserted depends on the engine's current operation mode (`CONFIG`, `SOURCE_INDEX`, `INDEX`, `INSTANCE`, or `TRANSFORM`) and on which sub-configurations are present.
+
+The node registers as a `filter` with class type `other` and capability `internal`. It defines no lanes of its own; all data flows through the filters it inserts.
+
+---
 
 ## What gets inserted
 
-| Mode                     | Filters inserted                                                                                   |
-| ------------------------ | -------------------------------------------------------------------------------------------------- |
-| `INDEX`                  | vector store → indexer                                                                             |
-| `INSTANCE`               | parse → _(OCR if enabled)_ → _(indexer if enabled)_ → _(preprocessor)_ → _(embedding)_ → _(store)_ |
-| `TRANSFORM`              | parse → _(OCR if enabled)_ → _(preprocessor)_ → _(embedding)_ → _(store)_                          |
-| `CONFIG`, `SOURCE_INDEX` | nothing                                                                                            |
+| Mode | Filters inserted |
+| ---- | ---------------- |
+| `INDEX` | vector store _(if `store` configured)_ → indexer |
+| `INSTANCE` | parse → _(OCR if enabled)_ → _(indexer if enabled)_ → _(preprocessor)_ → _(embedding)_ → _(store)_ |
+| `TRANSFORM` | parse → _(OCR if enabled)_ → _(preprocessor)_ → _(embedding)_ → _(store)_ |
+| `CONFIG`, `SOURCE_INDEX` | nothing |
+
+Filter instances are inserted with fixed ids: `parse_1`, `ocr_1`, `indexer_1`, `preprocessor_1`, `embedding_1`, `vector_1`.
+
+The OCR and indexer toggles are not autopipe config fields. They are read from the `include` entries of the task configuration (`service` section for instance tasks, `source` section for transform tasks). A filter is enabled when any include entry sets the corresponding key (`ocr` or `index`) to true. The indexer is never inserted for transform tasks.
+
+Where autopipe reads its own configuration also depends on the mode: for `INSTANCE` and `INDEX` tasks it comes from the `autopipe` key of the task configuration; for `TRANSFORM` tasks it comes from the `autopipe` key of the service config `parameters`.
+
+---
 
 ## Configuration
 
-| Field     | Description                                                            |
-| --------- | ---------------------------------------------------------------------- |
-| Remote    | Remote processing target                                               |
-| Embedding | Embedding model to use _(default: MiniLM via `embedding_transformer`)_ |
-| Store     | Vector store to write to _(default: Qdrant local)_                     |
+Each field is a multi-provider sub-configuration (`provider` key plus a provider-named config block). The pipe shape exposes `remote`, `embedding`, and `store`; the transform shape exposes only `remote` and `embedding`.
 
-Preprocessor defaults to LangChain with the default chunking profile.
+| Field | Default | Description |
+| ----- | ------- | ----------- |
+| `remote` | `remote` provider, `local` profile | Remote processing target (see note below) |
+| `preprocessor` | `preprocessor_langchain`, `default` profile | Text chunking before embedding |
+| `embedding` | `embedding_transformer`, `miniLM` profile | Embedding model used to vectorize chunks |
+| `store` | `qdrant`, `local` profile (collection `ROCKETRIDE`, `localhost:6333`) | Vector store the embeddings are written to |
+
+Defaults come from the `default` preconfig profile in `services.json`. The preprocessor, embedding, and store filters are each only inserted when the corresponding key is present in the resolved autopipe configuration.
+
+---
+
+## Remote processing
+
+The implementation distinguishes local and remote filter placement, and the default profile carries a `remote` sub-configuration (host, port, apikey, `mode: local`). However, the remote-pipeline assembly path is currently commented out in `IGlobal.endGlobal` and the remote queue is never dispatched: all inserted filters run locally regardless of the `remote` setting.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+_No configuration fields._
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/autopipe)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

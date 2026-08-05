@@ -30,6 +30,15 @@
 /** Ambient declaration for the `d3` data visualization library. */
 declare module 'd3';
 
+/**
+ * Ambient declarations for Fontsource self-hosted font packages. These are
+ * imported for their side effects only (they inject @font-face CSS), so an
+ * empty module shape is sufficient. Covers both the variable-font
+ * (`@fontsource-variable/*`) and static-weight (`@fontsource/*`) scopes.
+ */
+declare module '@fontsource-variable/*';
+declare module '@fontsource/*';
+
 /** Allows importing `.css` files as side-effect modules (handled by the bundler). */
 declare module '*.css' {}
 

@@ -41,12 +41,17 @@ import { useFlowProject } from '../../../context/FlowProjectContext';
  * Displays "Authenticated" when client credentials and refresh token are
  * present, and shows an error color when required auth tokens are missing.
  */
-export default function LoginWithMicrosoftButton<T = unknown, S extends StrictRJSFSchema = RJSFSchema, F extends FormContextType = never>({ ...props }: IconButtonProps<T, S, F>) {
+export default function LoginWithMicrosoftButton<T = unknown, S extends StrictRJSFSchema = RJSFSchema, F extends FormContextType = never>({
+	...props
+}: // The canvas passes its RJSF formContext (formValues, nodeId, provider, ...)
+// down to widget buttons; @rjsf's IconButtonProps does not model it, so the
+// props type is widened with the extra optional member instead of casting.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+IconButtonProps<T, S, F> & { formContext?: Record<string, any> }) {
 	const { t } = useTranslation();
 	const { oauth2RootUrl, onOpenLink } = useFlowProject();
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const formContext = (props as unknown as { formContext?: Record<string, any> }).formContext;
+	const formContext = props.formContext;
 	const formValues = formContext?.formValues ?? {};
 	const nodeId = formContext?.nodeId;
 	// Serialize form data for the OAuth redirect so the server can restore node state on callback
@@ -84,11 +89,17 @@ export default function LoginWithMicrosoftButton<T = unknown, S extends StrictRJ
 	// Microsoft auth requires all three: clientId, clientSecret, and refreshToken to be considered authenticated
 	const authenticated = formValues?.parameters?.clientId?.length && formValues?.parameters?.clientSecret?.length && formValues?.parameters?.refreshToken?.length;
 
-	const text = authenticated ? t('addSource.formStep.authenticated') : t('addSource.formStep.loginWithMicrosoftButton');
+	// i18n is not initialized in every host (e.g. the VS Code webview); fall back
+	// to a literal when t() echoes the key back so the button never shows a raw key.
+	const label = (key: string, fallback: string): string => {
+		const value = t(key) as string;
+		return value && value !== key ? value : fallback;
+	};
+	const text = authenticated ? label('addSource.formStep.authenticated', 'Authenticated') : label('addSource.formStep.loginWithMicrosoftButton', 'Login with Microsoft');
 
 	return (
 		<Box sx={{ mt: 1, pl: 6.2, pr: 5.4 }}>
-			<Button startIcon={<MicrosoftIcon />} onClick={handleHybridSignIn} {...props} sx={{ width: 1 }} color={color} variant="outlined" disabled={authenticated}>
+			<Button startIcon={<MicrosoftIcon />} onClick={handleHybridSignIn} {...props} sx={{ width: 1, textTransform: 'none' }} color={color} variant="outlined" disabled={authenticated}>
 				{text}
 			</Button>
 		</Box>

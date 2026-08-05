@@ -39,6 +39,14 @@ static application::Opt ExecPython{"--python"};
 
 //-------------------------------------------------------------------------
 /// @details
+///		Optional path to a directory that contains a `local_nodes` folder,
+///		e.g. --node_path=/work. The directory is added to sys.path so the
+///		nodes import under the local_nodes.<node> package.
+//-------------------------------------------------------------------------
+static application::Opt NodePath{"--node_path"};
+
+//-------------------------------------------------------------------------
+/// @details
 ///		This holds the generated configuration which will be active while
 ///		the python interpreter is active
 //-------------------------------------------------------------------------
@@ -147,6 +155,21 @@ Error setPaths() {
         if (paths.empty()) {
             LOG(Python, "Python production path:", root);
             paths.push_back(root);
+        }
+
+        // If --node_path=<dir> holds a `local_nodes` folder, put <dir> on
+        // sys.path so its nodes import as local_nodes.<node> (like nodes/src
+        // for the built-in `nodes` package).
+        if (NodePath) {
+            auto searchDir = _cast<file::Path>(*NodePath);
+            auto localDir = searchDir / "local_nodes";
+            if (file::exists(localDir) && file::isDir(localDir)) {
+                LOG(Python, "Python local node path:", localDir);
+                paths.push_back(searchDir);
+            } else {
+                LOG(Python, "Warning: no local_nodes directory under --node_path:",
+                    searchDir);
+            }
         }
 
         // Access Python's sys.path

@@ -32,18 +32,46 @@ const MAX_DOCS = 64;
 interface TraceDocument {
 	objectName: string;
 	completed: boolean;
+	/** The document's begin-event continuum seq — its permanent identity. */
+	beginSeq?: number;
 	rows: TraceRow[];
+}
+
+/**
+ * An open (entered, not-yet-left) frame awaiting its leave event.
+ *
+ * Reentrant agent sub-invocations (e.g. an agent calling qdrant->transformer
+ * mid-run) share one pipelineId and interleave across threads, so enter/leave
+ * do not arrive in strict LIFO order. We therefore match a leave to an open
+ * frame by the component identity carried on the event, rather than by stack
+ * position, and only flag a frame as "missing leave event" if it is still open
+ * when the pipeline ends.
+ */
+interface PendingFrame {
+	row: TraceRow;
+	component: string;
+	/** Index of `row` within its document's rows array — rows are append-only until 'end', so this stays valid and lets leave/end close a frame in O(1). */
+	index: number;
 }
 
 // =============================================================================
 // Hook
 // =============================================================================
 
-export function useTraceState(traceEvents: TraceEvent[]): {
+export function useTraceState(
+	traceEvents: TraceEvent[],
+	resetKey?: string | number,
+): {
 	rows: TraceRow[];
 	clearTrace: () => void;
 } {
 	const [rows, setRows] = useState<TraceRow[]>([]);
+
+	// Fold-identity key: when it changes (a different track's events are now
+	// being fed), the fold restarts from scratch BEFORE processing — a
+	// shrink-check alone cannot catch switching to a LONGER foreign array,
+	// which would splice two runs' folds together.
+	const resetKeyRef = useRef(resetKey);
 
 	// =========================================================================
 	// Internal refs -- mutable bookkeeping that does not trigger re-renders
@@ -58,8 +86,8 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 	/** Maps pipeline slot (pipelineId) to the active docId */
 	const slotBindingsRef = useRef<Map<number, number>>(new Map());
 
-	/** Per-pipeline pending call stack used to pair enter/leave events */
-	const pendingStacksRef = useRef<Map<number, TraceRow[]>>(new Map());
+	/** Per-pipeline set of open (entered, not-yet-left) frames used to pair enter/leave events */
+	const pendingStacksRef = useRef<Map<number, PendingFrame[]>>(new Map());
 
 	/** Monotonically increasing row ID counter */
 	const rowCounterRef = useRef<number>(0);
@@ -110,10 +138,25 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 	// =========================================================================
 
 	useEffect(() => {
-		const start = processedCountRef.current;
+		// Fold-identity change (new track): full reset, then fall through so
+		// the new array is processed from index 0 in this same pass.
+		if (resetKeyRef.current !== resetKey) {
+			resetKeyRef.current = resetKey;
+			documentsRef.current.clear();
+			docOrderRef.current = [];
+			slotBindingsRef.current.clear();
+			pendingStacksRef.current.clear();
+			rowCounterRef.current = 0;
+			nextDocIdRef.current = 0;
+			processedCountRef.current = 0;
+			setRows([]);
+		}
+
+		let start = processedCountRef.current;
 		const end = traceEvents.length;
 
-		// Handle reset: if events array shrank (host cleared), reset all state
+		// Shrunken input (host cleared / backward seek within a track): reset,
+		// then fall through and refold the whole array in this same pass.
 		if (end < start) {
 			documentsRef.current.clear();
 			docOrderRef.current = [];
@@ -123,15 +166,19 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 			nextDocIdRef.current = 0;
 			processedCountRef.current = 0;
 			setRows([]);
-			return;
+			start = 0;
 		}
 
 		if (start >= end) return; // nothing new
 
 		for (let i = start; i < end; i++) {
 			const event = traceEvents[i];
-			const { pipelineId, op, pipes, trace, source: eventSource } = event;
+			const { pipelineId, op, pipes, trace, source: eventSource, component } = event;
 			const lane = trace.lane || op;
+			// Row timestamps come from the server-stamped emission time
+			// (epoch seconds -> ms). Never the local wall clock: the same
+			// fold must produce identical rows live and on run-log replay.
+			const eventMs = event.eventTime * 1000;
 
 			switch (op) {
 				case 'begin': {
@@ -140,6 +187,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					documentsRef.current.set(docId, {
 						objectName,
 						completed: false,
+						...(event.seq !== undefined ? { beginSeq: event.seq } : {}),
 						rows: [],
 					});
 					docOrderRef.current.push(docId);
@@ -158,67 +206,33 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					const stack = pendingStacksRef.current.get(pipelineId);
 					if (!stack) break;
 
-					// Expected parent chain for this enter:
-					//   pipes = [base, parent..., self]
-					//   parent chain = pipes[1..length-1]  (skip the base/objectName)
-					// The current stack should equal that parent chain.
-					const parentChain = pipes.slice(1, pipes.length - 1);
-
-					// Align the stack to parentChain.
-					// 1. Pop frames that don't match (missed leaves) — mark as orphans.
-					// 2. Push synthetic frames for missing parents (missed enters).
-					while (stack.length > parentChain.length || (stack.length > 0 && stack[stack.length - 1].filterName !== parentChain[stack.length - 1])) {
-						const orphan = stack.pop();
-						if (!orphan) break;
-						const idx = doc.rows.findIndex((r) => r.id === orphan.id);
-						if (idx !== -1) {
-							doc.rows[idx] = {
-								...doc.rows[idx],
-								result: 'error',
-								error: 'missing leave event',
-								endTimestamp: Date.now(),
-							};
-						}
-					}
-
-					// Push synthetic frames for any parents we missed enters for.
-					while (stack.length < parentChain.length) {
-						const missingName = parentChain[stack.length];
-						const synthetic: TraceRow = {
-							id: rowCounterRef.current++,
-							docId,
-							completed: false,
-							lane,
-							filterName: missingName,
-							depth: stack.length,
-							timestamp: Date.now(),
-							objectName: doc.objectName,
-							source: eventSource,
-							error: 'missing enter event',
-							result: 'error',
-						};
-						doc.rows.push(synthetic);
-						stack.push(synthetic);
-					}
-
+					// pipes = [base, parent..., self]; depth comes straight from this event,
+					// so nesting renders correctly regardless of interleaving. We do NOT pop
+					// "orphans" or synthesize missing parents here — under reentrancy the
+					// stack legitimately holds concurrently-open frames, and forcing strict
+					// LIFO here is exactly what produced spurious "missing leave event" errors
+					// and inflated counts. Genuine orphans are flagged only at 'end'.
 					const filterName = pipes[pipes.length - 1] || '';
 					const depth = Math.max(0, pipes.length - 2);
 
 					const row: TraceRow = {
 						id: rowCounterRef.current++,
 						docId,
+						...(doc.beginSeq !== undefined ? { beginSeq: doc.beginSeq } : {}),
 						completed: false,
 						lane,
 						filterName,
 						depth,
 						entryData: trace.data,
-						timestamp: Date.now(),
+						timestamp: eventMs,
 						objectName: doc.objectName,
 						source: eventSource,
 					};
 
-					doc.rows.push(row);
-					stack.push(row);
+					const rowIndex = doc.rows.push(row) - 1;
+					// Fall back to the frame's own name (pipes tail) if the engine did not
+					// send `component` (older engine) so matching still works.
+					stack.push({ row, component: component ?? filterName, index: rowIndex });
 					break;
 				}
 
@@ -231,54 +245,35 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 					const stack = pendingStacksRef.current.get(pipelineId);
 					if (!stack || stack.length === 0) break;
 
-					// Expected parent chain for this leave:
-					//   pipes = [base, parent...]  (the leaving frame's parent path)
-					// The leaving frame's path is parentChain + [leavingFrame.filterName]
-					// So stack length should be parentChain.length + 1 and the
-					// top frame's filterName + parents should match.
-					const parentChain = pipes.slice(1);
-
-					// Pop orphans until top matches expected: stack length === parentChain.length + 1
-					// AND every frame in stack matches parentChain prefix.
-					while (stack.length > parentChain.length + 1) {
-						const orphan = stack.pop();
-						if (!orphan) break;
-						const idx = doc.rows.findIndex((r) => r.id === orphan.id);
-						if (idx !== -1) {
-							doc.rows[idx] = {
-								...doc.rows[idx],
-								result: 'error',
-								error: 'missing leave event',
-								endTimestamp: Date.now(),
-							};
-						}
-					}
-
-					// Validate the parent chain matches the stack below the top frame
-					let aligned = stack.length === parentChain.length + 1;
-					if (aligned) {
-						for (let p = 0; p < parentChain.length; p++) {
-							if (stack[p].filterName !== parentChain[p]) {
-								aligned = false;
+					// Match this leave to the most-recent still-open frame with the same
+					// component identity, instead of assuming it is the top of a strict LIFO
+					// stack (reentrant sub-invocations interleave).
+					let matchIdx = -1;
+					if (component != null) {
+						for (let s = stack.length - 1; s >= 0; s--) {
+							if (stack[s].component === component) {
+								matchIdx = s;
 								break;
 							}
 						}
 					}
+					// No open frame matches (desync, or an engine that sent no component): skip
+					// this leave rather than stamp its result/error onto an unrelated span. The
+					// frame stays open and is correctly flagged "missing leave event" at 'end'.
+					if (matchIdx === -1) break;
 
-					if (!aligned) break; // can't safely match — skip this leave
-
-					const pending = stack.pop();
-					if (pending) {
-						const idx = doc.rows.findIndex((r) => r.id === pending.id);
-						if (idx !== -1) {
-							doc.rows[idx] = {
-								...doc.rows[idx],
-								exitData: trace.data,
-								result: trace.result,
-								error: trace.error,
-								endTimestamp: Date.now(),
-							};
-						}
+					const [pending] = stack.splice(matchIdx, 1);
+					// O(1): rows are append-only until 'end', so the stored index still points
+					// at this frame's row. Guard with the id in case that ever changes.
+					const idx = pending.index;
+					if (doc.rows[idx]?.id === pending.row.id) {
+						doc.rows[idx] = {
+							...doc.rows[idx],
+							exitData: trace.data,
+							result: trace.result,
+							error: trace.error,
+							endTimestamp: eventMs,
+						};
 					}
 					break;
 				}
@@ -289,17 +284,37 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 						const doc = documentsRef.current.get(docId);
 						if (doc) {
 							doc.completed = true;
+
+							// Any frame still open when the pipeline ends genuinely never
+							// received a leave — this is the ONLY place a "missing leave
+							// event" is real (transient interleaving is resolved by then).
+							const openFrames = pendingStacksRef.current.get(pipelineId);
+							if (openFrames) {
+								for (const frame of openFrames) {
+									const idx = doc.rows.findIndex((r) => r.id === frame.row.id);
+									if (idx !== -1 && doc.rows[idx].endTimestamp == null) {
+										doc.rows[idx] = {
+											...doc.rows[idx],
+											result: 'error',
+											error: 'missing leave event',
+											endTimestamp: eventMs,
+										};
+									}
+								}
+							}
+
 							const result = (event as any).pipelineResult as Record<string, unknown> | undefined;
 							if (result && Object.keys(result).length > 0) {
 								const resultRow: TraceRow = {
 									id: rowCounterRef.current++,
 									docId,
+									...(doc.beginSeq !== undefined ? { beginSeq: doc.beginSeq } : {}),
 									completed: true,
 									lane: '__result__',
 									filterName: '',
 									depth: 0,
-									timestamp: Date.now(),
-									endTimestamp: Date.now(),
+									timestamp: eventMs,
+									endTimestamp: eventMs,
 									objectName: doc.objectName,
 									source: eventSource,
 									pipelineResult: result,
@@ -318,7 +333,7 @@ export function useTraceState(traceEvents: TraceEvent[]): {
 
 		processedCountRef.current = end;
 		flush();
-	}, [traceEvents, flush]);
+	}, [traceEvents, flush, resetKey]);
 
 	// =========================================================================
 	// clearTrace — callable by the host to manually reset

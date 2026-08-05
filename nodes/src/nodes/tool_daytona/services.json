@@ -67,7 +67,7 @@
 		"tool_daytona.auto_stop_minutes": {
 			"type": "integer",
 			"title": "Auto-stop (minutes)",
-			"description": "Sandbox stops (and, being ephemeral, deletes itself) after this many minutes of inactivity — the cost safety net if cleanup is missed.",
+			"description": "Sandbox stops (and, being ephemeral, deletes itself) after this many minutes of inactivity: the cost safety net if cleanup is missed.",
 			"default": 5,
 			"minimum": 1,
 			"maximum": 120

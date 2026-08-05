@@ -22,6 +22,8 @@
 // =============================================================================
 
 import { ThemeProps, withTheme } from '@rjsf/core';
+import type { FormProps } from '@rjsf/core';
+import type { ComponentType } from 'react';
 import { englishStringTranslator, replaceStringParameters, TranslatableString } from '@rjsf/utils';
 
 import BaseInputTemplate from './base-input-template/BaseInputTemplate';
@@ -128,4 +130,7 @@ export const translate = (stringToTranslate: TranslatableString, params?: string
  * The themed RJSF Form component with all custom MUI templates and widgets applied.
  * Use this as the base Form component for rendering JSON Schema-driven forms throughout the application.
  */
-export default withTheme(ThemeObject);
+// Annotated explicitly so the emitted declaration file does not depend on
+// inferred types from transitive packages (TS2742 portability).
+const ThemedForm: ComponentType<FormProps> = withTheme(ThemeObject);
+export default ThemedForm;

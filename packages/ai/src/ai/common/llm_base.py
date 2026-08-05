@@ -1,10 +1,11 @@
 # Copyright (c) 2026 Aparavi Software AG
 
 import inspect
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from rocketlib import IInstanceBase, invoke_function, warning
 from ai.common.schema import Question, Answer
+from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 
 
 class LLMBase(IInstanceBase):
@@ -20,21 +21,30 @@ class LLMBase(IInstanceBase):
         on_chunk: Optional[Callable[[str], None]] = None,
         on_finish: Optional[Callable[[Optional[str]], None]] = None,
         on_reasoning_chunk: Optional[Callable[[str], None]] = None,
+        stop: Optional[List[str]] = None,
     ) -> Answer:
         chat = self.IGlobal._chat
-        # Legacy drivers override chat(self, question) without streaming callbacks.
+        # Publish the stop sequences on the per-call contextvar so ChatBase's model sinks
+        # forward them to the provider API. A contextvar (not a chat() kwarg) leaves the
+        # many chat()/_chat() provider overrides untouched. Reset in finally so a stop from
+        # one request never bleeds into the next on a reused chat instance.
+        token = STOP_SEQUENCES_VAR.set(stop or None)
         try:
-            accepts_stream = 'on_chunk' in inspect.signature(chat.chat).parameters
-        except (TypeError, ValueError):
-            accepts_stream = True
-        if not accepts_stream:
-            return chat.chat(question)
-        return chat.chat(
-            question,
-            on_chunk=on_chunk,
-            on_finish=on_finish,
-            on_reasoning_chunk=on_reasoning_chunk,
-        )
+            # Legacy drivers override chat(self, question) without streaming callbacks.
+            try:
+                accepts_stream = 'on_chunk' in inspect.signature(chat.chat).parameters
+            except (TypeError, ValueError):
+                accepts_stream = True
+            if not accepts_stream:
+                return chat.chat(question)
+            return chat.chat(
+                question,
+                on_chunk=on_chunk,
+                on_finish=on_finish,
+                on_reasoning_chunk=on_reasoning_chunk,
+            )
+        finally:
+            STOP_SEQUENCES_VAR.reset(token)
 
     def writeQuestions(self, question: Question):
         # Stream the model's reasoning live, one line at a time, on the chat-ui
@@ -102,4 +112,4 @@ class LLMBase(IInstanceBase):
 
     @invoke_function
     def ask(self, param):
-        return self._question(param.question)
+        return self._question(param.question, stop=getattr(param, 'stop', None))

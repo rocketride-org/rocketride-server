@@ -1,0 +1,47 @@
+{
+	"title": "Google Sheets",
+	"protocol": "tool_sheets://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_google_workspace.sheets",
+	"prefix": "sheets",
+	"icon": "sheets.svg",
+	"documentation": "https://docs.rocketride.org",
+	"description": ["Exposes Google Sheets operations as agent tools.", "Read, write, append, and clear cell values; create spreadsheets; add, delete, duplicate, and copy sheets; and run arbitrary batchUpdate requests (formatting, charts, conditional formatting).", "Authenticates via a Google service account or user OAuth."],
+	"tile": ["Google Sheets (${parameters.sheets.access})"],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Google Sheets",
+				"authType": "service",
+				"serviceKey": "",
+				"adminEmail": "",
+				"userToken": "",
+				"access": "write"
+			}
+		}
+	},
+	"fields": {
+		"sheets.access": {
+			"type": "string",
+			"title": "Access level",
+			"description": "Sheets scopes to request. readonly: read values and metadata only. write: full read/write (create, update, append, clear, and structure changes such as add/delete/duplicate sheet).",
+			"default": "write",
+			"enum": [
+				["readonly", "Read-only"],
+				["write", "Read/write"]
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Google Sheets",
+			"properties": ["type", "google.authType", "sheets.access"]
+		}
+	]
+}

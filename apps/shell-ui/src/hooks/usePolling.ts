@@ -55,19 +55,36 @@ import { useShellConnection } from '../connection/ConnectionContext';
  * usePolling(fetchDashboard, 3000);
  * ```
  */
+/** Options for {@link usePolling}. */
+export interface IUsePollingOptions {
+	/**
+	 * Connection gate for the interval.
+	 * - 'shell' (default): poll only while the shell's global connection is up —
+	 *   right for anything fetched through the shell's RocketRide client.
+	 * - 'none': poll unconditionally — for apps that talk to their own sockets
+	 *   (e.g. models-ui's model-server telemetry, which runs unauthenticated
+	 *   and must keep ticking while the shell is disconnected).
+	 */
+	gate?: 'shell' | 'none';
+}
+
 export function usePolling(
 	fetcher: () => void | Promise<void>,
 	interval: number,
+	options?: IUsePollingOptions,
 ): void {
 	const { isConnected } = useShellConnection();
 	const fetcherRef = useRef(fetcher);
 	fetcherRef.current = fetcher;
 
-	useEffect(() => {
-		// Only poll while connected
-		if (!isConnected) return;
+	// Resolve the gate: ungated pollers tick regardless of the shell connection.
+	const gated = (options?.gate ?? 'shell') === 'shell';
 
-		// Fetch immediately on connect
+	useEffect(() => {
+		// Only poll while connected, unless the caller opted out of the gate.
+		if (gated && !isConnected) return;
+
+		// Fetch immediately on (re)start
 		fetcherRef.current();
 
 		// Set up the interval
@@ -76,5 +93,5 @@ export function usePolling(
 		}, interval);
 
 		return () => clearInterval(id);
-	}, [isConnected, interval]);
+	}, [isConnected, interval, gated]);
 }

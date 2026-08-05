@@ -40,7 +40,7 @@ const status = await client.getTaskStatus(token);
 
 ## **Returns**
 
-- **Type**: `TASK_STATUS` — a dictionary/object with comprehensive status fields
+- **Type**: `TASK_STATUS`, a dictionary/object with comprehensive status fields
 
 ### Key Fields
 
@@ -69,6 +69,12 @@ const status = await client.getTaskStatus(token);
 | `metrics` | `TASK_METRICS` | CPU, memory, and GPU utilization |
 | `tokens` | `TASK_TOKENS` | Token usage for billing |
 | `pipeflow` | `TASK_STATUS_FLOW` | Pipeline component execution flow |
+| `componentStats` | `dict[str, TASK_STATUS_COMPONENT_STAT]` | Per-component run analytics (see below) |
+| `slowestDocs` | `list[TASK_STATUS_SLOWEST_DOC]` | Slowest completions this run, slowest first (top 10) |
+| `completionSeconds` | `float` | Total seconds spent across all completions this run |
+| `idleSeconds` | `float` | Total seconds the pipe sat unused between completions this run (includes the still-open stretch, server-extended at each status publish) |
+| `idleLongestSeconds` | `float` | Longest single unused stretch between completions this run |
+| `idleLongestAt` | `float` | Epoch when the longest unused stretch began (0 while none is recorded) |
 
 ### Metrics Fields (`metrics`)
 
@@ -89,6 +95,28 @@ const status = await client.getTaskStatus(token);
 | `cpu_memory` | `float` | Cumulative CPU memory tokens |
 | `gpu_memory` | `float` | Cumulative GPU memory tokens |
 | `total` | `float` | Total cumulative tokens |
+
+### Run Analytics Fields
+
+Populated only when pipeline tracing is enabled — the server accumulates them
+while deriving flow events, so they are exact at any point in the run.
+
+Per-component stats (`componentStats`, keyed by component name):
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `calls` | `int` | Completed enter/leave passes through the component |
+| `totalSeconds` | `float` | Total seconds spent inside the component |
+| `maxSeconds` | `float` | Longest single pass in seconds |
+
+Slowest completions (`slowestDocs`, slowest first, capped at 10):
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | Completion (object) name, truncated to 200 chars |
+| `elapsed` | `float` | Seconds from pipeline begin to end for this completion |
+| `beginTime` | `float` | Begin timestamp (Unix time) |
+| `beginSeq` | `int \| None` | Continuum seq of the begin event — the trace identity |
 
 ## **Usage Examples**
 
@@ -153,12 +181,12 @@ console.log('Pipeline complete!');
 
 | State | Value | Description |
 | --- | --- | --- |
-| `NONE` | `0` | Initial state — no resources allocated |
+| `NONE` | `0` | Initial state: no resources allocated |
 | `STARTING` | `1` | Resource allocation and subprocess preparation |
 | `INITIALIZING` | `2` | Subprocess initialization and service startup |
-| `RUNNING` | `3` | Operational — actively processing requests |
+| `RUNNING` | `3` | Operational: actively processing requests |
 | `STOPPING` | `4` | Graceful shutdown in progress |
-| `COMPLETED` | `5` | Finished successfully — resources cleaned up |
+| `COMPLETED` | `5` | Finished successfully: resources cleaned up |
 | `CANCELLED` | `6` | Terminated before completion |
 
 ### State Transitions

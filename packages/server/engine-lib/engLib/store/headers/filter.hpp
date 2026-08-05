@@ -126,7 +126,7 @@ public:
     // Source mode (only available when ENDPOINT_MODE::SOURCE)
     //		These functions are called by a source mode driver to send
     //		data to the target the eventual target. They will call
-    //		down through the source chain, eventualy end up in bottom
+    //		down through the source chain, eventually end up in bottom
     //		which will forward them to the top of the target
     //-----------------------------------------------------------------
     virtual uint32_t getThreadCount(uint32_t currentThreadCount) const noexcept;
@@ -158,6 +158,8 @@ public:
                             const Utf16View &text) noexcept;
     virtual Error sendWords(ServicePipe &target,
                             const WordVector &textWords) noexcept;
+    virtual Error sendJson(ServicePipe &target,
+                           const json::Value &jsonData) noexcept;
     virtual Error sendAudio(ServicePipe &target, const AVI_ACTION action,
                             Text &mimeType,
                             const pybind11::bytes &streamData) noexcept;
@@ -204,6 +206,9 @@ public:
     };
     virtual Error writeWords(const WordVector &textWords) noexcept {
         return binder.writeWords(textWords);
+    }
+    virtual Error writeJson(const json::Value &jsonData) noexcept {
+        return binder.writeJson(jsonData);
     }
     virtual Error writeAudio(const AVI_ACTION action, Text &mimeType,
                              const pybind11::bytes &streamData) noexcept {
@@ -272,6 +277,7 @@ public:
     virtual void cb_sendTagData(py::object &data) noexcept(false);
     virtual void cb_sendText(const std::u16string &text) noexcept(false);
     virtual void cb_sendTable(const std::u16string &text) noexcept(false);
+    virtual void cb_sendJson(python::IJson json) noexcept(false);
     virtual void cb_sendAudio(
         const AVI_ACTION action, Text &mimeType,
         const pybind11::bytes &streamData) noexcept(false);
@@ -328,6 +334,7 @@ public:
     virtual void cb_writeText(const std::u16string &text) noexcept(false);
     virtual void cb_writeTable(const std::u16string &text) noexcept(false);
     virtual void cb_writeWords(const WordVector &textWords) noexcept(false);
+    virtual void cb_writeJson(python::IJson json) noexcept(false);
     virtual void cb_writeAudio(
         const AVI_ACTION action, Text &mimeType,
         const pybind11::bytes &streamData) noexcept(false);
@@ -411,6 +418,17 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
+    ///		Per-object stream_index counters for the stream descriptor
+    ///		(stream_descriptor.hpp); reset in open(). Plain (non-atomic) is
+    ///		safe: an instance is owned by one thread for its open->close
+    ///		lifecycle (pooled via `busy`).
+    //-----------------------------------------------------------------
+    uint32_t videoStreamIndex = 0;
+    uint32_t audioStreamIndex = 0;
+    uint32_t imageStreamIndex = 0;
+
+    //-----------------------------------------------------------------
+    /// @details
     ///		The currently opened entry from Python code to keep
     ///		a python reference and avoid it being garbage collected
     //-----------------------------------------------------------------
@@ -481,7 +499,7 @@ protected:
 
     //-----------------------------------------------------------------
     /// @details
-    ///		The collected metdata
+    ///		The collected metadata
     //-----------------------------------------------------------------
     json::Value m_metadata;
 

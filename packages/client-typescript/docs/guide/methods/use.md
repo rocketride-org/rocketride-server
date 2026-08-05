@@ -16,7 +16,7 @@ date: 2025-07-29
 
 ## **Overview**
 
-The `use()` method starts a RocketRide pipeline for processing data. Pipelines define how data is processed — they can analyze text, extract information, perform AI operations, transform data formats, and more. You can start pipelines from JSON configuration files or from pipeline configuration objects.
+The `use()` method starts a RocketRide pipeline for processing data. Pipelines define how data is processed: they can analyze text, extract information, perform AI operations, transform data formats, and more. You can start pipelines from JSON configuration files or from pipeline configuration objects.
 
 The method returns a **token** that you use for all subsequent operations on that pipeline (sending data, checking status, terminating).
 
@@ -26,7 +26,7 @@ The method returns a **token** that you use for all subsequent operations on tha
 
 ```python
 result = await client.use(
-    filepath="pipeline.json",   # or pipeline={...}
+    filepath='pipeline.json',  # or pipeline={...}
     token=None,
     source=None,
     threads=None,
@@ -71,7 +71,7 @@ const result = await client.use({
 - **Type**: `Dict[str, Any]` (Python) / `Record<string, unknown> & { token: string }` (TypeScript)
 - **Description**: Object containing the task `token` and other pipeline startup metadata
 
-The returned `token` is required for all subsequent operations — sending data, checking status, and terminating the pipeline.
+The returned `token` is required for all subsequent operations: sending data, checking status, and terminating the pipeline.
 
 ## **Usage Examples**
 
@@ -133,10 +133,13 @@ config = {
     'source': 'webhook_1',
     'components': [
         {'id': 'webhook_1', 'provider': 'webhook', 'config': {}},
-        {'id': 'llm_1', 'provider': 'llm_openai', 'config': {'model': 'gpt-4'},
-         'input': [{'from': 'webhook_1', 'lane': 'output'}]},
-        {'id': 'response_1', 'provider': 'response', 'config': {},
-         'input': [{'from': 'llm_1', 'lane': 'answer'}]},
+        {
+            'id': 'llm_1',
+            'provider': 'llm_openai',
+            'config': {'model': 'gpt-4'},
+            'input': [{'from': 'webhook_1', 'lane': 'output'}],
+        },
+        {'id': 'response_1', 'provider': 'response', 'config': {}, 'input': [{'from': 'llm_1', 'lane': 'answer'}]},
     ],
 }
 result = await client.use(pipeline=config)

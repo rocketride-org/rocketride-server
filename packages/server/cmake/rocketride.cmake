@@ -51,7 +51,6 @@ function(rocketride_set_common_target_options target)
         set(TARGET_FILE_DIR $<TARGET_FILE_DIR:${target}>)
         set(TARGET_NAME $<TARGET_FILE_NAME:${target}>)
         set(TARGET_DEBUG_FILE ${TARGET_FILE_DIR}/${TARGET_NAME}.debug)
-        set(TARGET_DEBUG_SYMS_FILE ${TARGET_FILE_DIR}/${TARGET_NAME}.symbols)
         get_target_property(target_type ${target} TYPE)
 
         if(target_type STREQUAL "EXECUTABLE")
@@ -74,19 +73,33 @@ function(rocketride_set_common_target_options target)
                 endif()
             endif()
 
-            # On Linux release builds, retain the Breakpad symbols
-            if(ROCKETRIDE_PLAT_LIN AND "${CMAKE_BUILD_TYPE}" MATCHES "Release")
-                set(breakpad_bin_dump_syms "${VCPKG_INSTALLED_TRIPLET_DIR}/bin/dump_syms")
-                if(NOT EXISTS ${breakpad_bin_dump_syms})
-                    message(FATAL_ERROR "Breakpad's dump_syms tool not found at expected path: ${breakpad_bin_dump_syms}")
+            # Emit Breakpad-format symbols for offline minidump symbolication,
+            # using modern Mozilla dump_syms (DWARF-5 capable). Non-fatal if the
+            # tool is absent OR the dump fails, so Release builds still work
+            # without symbols. Override the path with -DROCKETRIDE_DUMP_SYMS=/path.
+            if("${CMAKE_BUILD_TYPE}" MATCHES "Release" OR "${CMAKE_BUILD_TYPE}" MATCHES "Sanitize")
+                find_program(ROCKETRIDE_DUMP_SYMS dump_syms)
+                if(ROCKETRIDE_DUMP_SYMS)
+                    set(TARGET_SYMBOLS_DIR ${TARGET_FILE_DIR}/symbols)
+                    if(ROCKETRIDE_PLAT_MAC)
+                        # No .gnu_debuglink on mac: feed dump_syms the DWARF inside the
+                        # dSYM bundle, or the .sym carries public symbols and no lines.
+                        set(DUMP_SYMS_INPUT ${TARGET_DEBUG_FILE}/Contents/Resources/DWARF/${TARGET_NAME})
+                    else()
+                        # Binary only: dump_syms follows .gnu_debuglink for one .sym with the
+                        # real debug-id (adding the .debug arg emits a spurious zero-id module).
+                        set(DUMP_SYMS_INPUT ${TARGET_FILE})
+                    endif()
+                    # A failing dump warns and continues (|| echo) so it never breaks the build.
+                    add_custom_command(TARGET ${target} POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E make_directory ${TARGET_SYMBOLS_DIR}
+                        COMMAND sh -c "\"$0\" --inlines \"$1\" --store \"$2\" >/dev/null || echo 'WARNING: dump_syms failed for ${TARGET_NAME}; continuing without symbols' >&2" ${ROCKETRIDE_DUMP_SYMS} ${DUMP_SYMS_INPUT} ${TARGET_SYMBOLS_DIR}
+                        COMMENT "Dumping symbols from ${TARGET_NAME} to ${TARGET_SYMBOLS_DIR}"
+                        VERBATIM
+                    )
+                else()
+                    rocketride_msg("dump_syms not found; skipping symbol generation for ${TARGET_NAME}")
                 endif()
-
-                rocketride_msg("Breakpad's dump_syms tool found at ${breakpad_bin_dump_syms}")
-                add_custom_command(TARGET ${target} POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E env bash -c "${breakpad_bin_dump_syms} ${TARGET_DEBUG_FILE} > ${TARGET_DEBUG_SYMS_FILE}"
-                    COMMENT "Dumping Breakpad symbols from ${TARGET_NAME}(${TARGET_DEBUG_SYMS_FILE})"
-                    VERBATIM
-                )
             endif()
         endif()
     endif()

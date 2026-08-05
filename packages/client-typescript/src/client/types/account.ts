@@ -112,6 +112,12 @@ export interface MemberRecord {
 
 	/** Membership status (e.g. "active" or "pending"). */
 	status: string;
+
+	/** ISO timestamp of when the membership was created, or null. */
+	createdAt?: string | null;
+
+	/** Teams the member belongs to (id + display name pairs). */
+	teams?: Array<{ id: string; name: string }>;
 }
 
 // =============================================================================
@@ -161,6 +167,9 @@ export interface TeamMemberRecord {
 
 	/** Array of permission strings this user holds within the team. */
 	permissions: string[];
+
+	/** ISO timestamp of when the user joined the team, or null. */
+	createdAt?: string | null;
 }
 
 // =============================================================================
@@ -236,6 +245,12 @@ export interface InviteMemberParams {
 
 	/** Organization-level role to assign (e.g. "admin" or "member"). */
 	role: string;
+
+	/**
+	 * Optional team assignments to create when the invite is accepted.
+	 * Each entry specifies a team ID and the permissions to grant.
+	 */
+	teamAssignments?: Array<{ teamId: string; permissions: string[] }>;
 }
 
 /** Parameters for adding or updating a team member. */

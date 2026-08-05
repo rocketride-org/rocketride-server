@@ -1,0 +1,205 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Text To Speech (OpenAI)",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tts_openai://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["audio"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying
+	//		engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate - if
+	//		not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		The path is the executable/script code. Shared with the ElevenLabs
+	//		registration: both cloud TTS vendors run the same engine code in
+	//		nodes/cloud_tts and are dispatched by logicalType at runtime.
+	//
+	"path": "nodes.cloud_tts",
+	//
+	// Required:
+	//		The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "tts_openai",
+	//
+	// Optional:
+	//		Description of this driver
+	//
+	"description": ["Converts incoming text into speech using the OpenAI text-to-speech API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "Model and voice lists are maintained manually; the API key falls back to the OPENAI_API_KEY environment variable when blank."],
+	//
+	// Optional:
+	//	  The icon to display in the UI for this node
+	//
+	"icon": "openai.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"text": ["audio"],
+		"documents": ["audio"],
+		"questions": ["audio"],
+		"answers": ["audio"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself. One profile per model (maintained manually).
+	//
+	"preconfig": {
+		// Define the values that will be merged into any profile configuration
+		// specified, unless the profile is 'absolute'
+		"default": "gpt-4o-mini-tts",
+		// Defines profiles used with the "profile": key. model + voice live here so
+		// Config.getNodeConfig merges them under the selected profile.
+		"profiles": {
+			"gpt-4o-mini-tts": {
+				"title": "GPT-4o mini TTS - Fast, steerable, multilingual",
+				"model": "gpt-4o-mini-tts",
+				"voice": "alloy",
+				"apikey": ""
+			},
+			"tts-1": {
+				"title": "TTS-1          - Low latency, standard quality",
+				"model": "tts-1",
+				"voice": "alloy",
+				"apikey": ""
+			},
+			"tts-1-hd": {
+				"title": "TTS-1 HD       - Higher quality, slower",
+				"model": "tts-1-hd",
+				"voice": "alloy",
+				"apikey": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions - these define fields only for the
+	//		current service. You may specify them here, or directly
+	//		in the shape
+	//
+	"fields": {
+		// ── Form objects (one per model profile; api key + voice per profile) ──
+		// voice MUST live inside the form-object so it is merged under the selected
+		// profile; in the top-level shape it would be silently dropped by getNodeConfig.
+		"tts_openai.gpt-4o-mini-tts": {
+			"object": "gpt-4o-mini-tts",
+			"properties": ["llm.cloud.apikey", "tts_openai.voice"]
+		},
+		"tts_openai.tts-1": {
+			"object": "tts-1",
+			"properties": ["llm.cloud.apikey", "tts_openai.voice"]
+		},
+		"tts_openai.tts-1-hd": {
+			"object": "tts-1-hd",
+			"properties": ["llm.cloud.apikey", "tts_openai.voice"]
+		},
+		// ── Voice (static; not model-derived, so not synced) ───────────────────
+		"tts_openai.voice": {
+			"type": "string",
+			"title": "Voice",
+			"description": "OpenAI TTS voice. The newer voices (marin, cedar) require a GPT-4o TTS model.",
+			"default": "alloy",
+			"enum": [
+				["alloy", "Alloy"],
+				["ash", "Ash"],
+				["ballad", "Ballad"],
+				["coral", "Coral"],
+				["echo", "Echo"],
+				["fable", "Fable"],
+				["onyx", "Onyx"],
+				["nova", "Nova"],
+				["sage", "Sage"],
+				["shimmer", "Shimmer"],
+				["verse", "Verse"],
+				["marin", "Marin"],
+				["cedar", "Cedar"]
+			]
+		},
+		// ── Profile selector (drives conditional form rendering) ───────────────
+		"tts_openai.profile": {
+			"title": "Model",
+			"description": "OpenAI TTS model",
+			"type": "string",
+			"default": "gpt-4o-mini-tts",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "gpt-4o-mini-tts",
+					"properties": ["tts_openai.gpt-4o-mini-tts"]
+				},
+				{
+					"value": "tts-1",
+					"properties": ["tts_openai.tts-1"]
+				},
+				{
+					"value": "tts-1-hd",
+					"properties": ["tts_openai.tts-1-hd"]
+				}
+			]
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) of the service. Either source or target
+	//		may be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "OpenAI Text To Speech",
+			"properties": ["tts_openai.profile"]
+		}
+	],
+	//
+	// Optional:
+	//		Test configuration for automated node testing
+	//
+	"test": [
+		{
+			// No audio mock exists, so this runs only when a real key is present
+			// (ROCKETRIDE_TTS_OPENAI_KEY) and is skipped in CI otherwise.
+			"requires": ["ROCKETRIDE_TTS_OPENAI_KEY"],
+			"avoidMocks": true,
+			"profiles": ["gpt-4o-mini-tts"],
+			"outputs": ["audio"],
+			"cases": [
+				{
+					"name": "OpenAI TTS returns audio",
+					"text": "Hello from RocketRide",
+					"expect": {
+						"audio": {
+							"notEmpty": true
+						}
+					}
+				}
+			]
+		}
+	]
+}

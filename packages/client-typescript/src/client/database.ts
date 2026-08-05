@@ -26,13 +26,34 @@
  * Database API namespace for the RocketRide TypeScript SDK.
  *
  * Exposes `client.database.query(...)` for issuing raw SQL or Cypher directly
- * against a database pipeline, bypassing the LLM translation layer that the
- * default `client.chat(...)` flow uses.
+ * against a database pipeline node via the `execute` tool function, bypassing
+ * the LLM translation layer that the default `client.chat(...)` flow uses.
  */
 
 import type { RocketRideClient } from './client.js';
-import type { PIPELINE_RESULT } from './types/index.js';
-import { Question, QuestionType } from './schema/Question.js';
+import { createSequelize } from './database/sequelize/create-sequelize.js';
+import type { SequelizeConstructor } from './database/sequelize/create-sequelize.js';
+
+// =============================================================================
+// DATABASE-LIKE INTERFACE (structural subset used by the pg shim)
+// =============================================================================
+
+/**
+ * Structural interface satisfied by `DatabaseApi` (and test doubles) for the
+ * Sequelize pg-compatible shim.  Only the four methods the shim needs are
+ * required, so the interface remains stable across future `DatabaseApi`
+ * additions without forcing shim changes.
+ */
+export interface DatabaseLike {
+	/** Execute a raw SQL statement. */
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
+	/** Begin a database transaction. */
+	beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>;
+	/** Commit an open transaction. */
+	commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>;
+	/** Roll back an open transaction. */
+	rollback(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }>;
+}
 
 // =============================================================================
 // DIALECT ENUM
@@ -66,23 +87,22 @@ export class DatabaseApi {
 	constructor(private readonly client: RocketRideClient) {}
 
 	/**
-	 * Execute a raw SQL or Cypher statement against a database pipeline.
+	 * Execute a raw SQL or Cypher statement against a database pipeline node.
 	 *
-	 * Sends a Question with `type=QuestionType.EXECUTE` so the database node
-	 * treats `sql` as the literal statement to run — no LLM call, no
-	 * `is_sql_safe` / `_is_cypher_safe` gating.
+	 * Invokes the `execute` tool function on the target database node,
+	 * bypassing LLM translation and SQL safety checks.
 	 *
 	 * @param options.token - Pipeline token for authentication and resource access.
 	 * @param options.sql - Raw SQL or Cypher statement to execute.
-	 * @param options.onSSE - Optional streaming callback (matches `chat`).
-	 * @returns The pipeline response. The `answers` lane carries a JSON-encoded
-	 *   payload of shape `{"rows": [...], "affected_rows": N}`.
+	 * @param options.nodeId - Target database node ID.  When empty the call
+	 *   broadcasts to all tool-lane nodes; the first database node handles it.
+	 * @param options.sessionId - Optional transaction session ID returned by
+	 *   `beginTransaction`.  When provided the statement runs within that session.
+	 * @param options.params - Optional positional parameters bound to the statement
+	 *   (e.g. `[1, 'foo']` for `$1`, `$2` placeholders).
+	 * @returns Object with `rows` (array of row objects) and `affected_rows` (number).
 	 */
-	async query(options: {
-		token: string;
-		sql: string;
-		onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
-	}): Promise<PIPELINE_RESULT> {
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
 		}
@@ -90,49 +110,125 @@ export class DatabaseApi {
 			throw new Error('sql must be a non-empty string');
 		}
 
-		const question = new Question({ type: QuestionType.EXECUTE });
-		question.addQuestion(options.sql);
-		return this.client.chat({ token: options.token, question, onSSE: options.onSSE });
+		const input: Record<string, unknown> = { sql: options.sql };
+		if (options.sessionId) input.session_id = options.sessionId;
+		if (options.params) input.params = options.params;
+
+		return this.client.tool({
+			token: options.token,
+			tool: 'execute',
+			nodeId: options.nodeId,
+			input,
+		});
 	}
 
 	/**
-	 * Discover the underlying database engine for a pipeline.
+	 * Begin a database transaction on a pipeline node.
 	 *
-	 * Sends a `Question(type=DIALECT)`; the database node replies on the
-	 * `answers` lane with `{"dialect": "<engine>"}`. Use this to branch on
-	 * dialect-specific SQL or to assert you're not pointed at the wrong kind
-	 * of database (e.g. Neo4j when you expected Postgres).
+	 * Returns a `session_id` that must be threaded through subsequent
+	 * `query`, `commit`, and `rollback` calls to keep them within the
+	 * same transaction.
 	 *
 	 * @param options.token - Pipeline token for authentication and resource access.
-	 * @returns The dialect reported by the node.
-	 * @throws If `token` is empty, the pipeline returns no answer, or the
-	 *   response is not a recognized dialect.
+	 * @param options.nodeId - Target database node ID.
+	 * @returns Object containing the `session_id` string for the new transaction.
 	 */
-	async dialect(options: { token: string }): Promise<DatabaseDialect> {
+	async beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }> {
+		if (typeof options.token !== 'string' || options.token.trim() === '') {
+			throw new Error('token must be a non-empty string');
+		}
+		return this.client.tool({ token: options.token, tool: 'begin', nodeId: options.nodeId, input: {} });
+	}
+
+	/**
+	 * Commit an open transaction session, making all its changes permanent.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access.
+	 * @param options.sessionId - Transaction session ID returned by `beginTransaction`.
+	 * @param options.nodeId - Target database node ID.
+	 * @returns Object with `ok: true` on success.
+	 */
+	async commit(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }> {
+		if (typeof options.token !== 'string' || options.token.trim() === '') {
+			throw new Error('token must be a non-empty string');
+		}
+		if (!options.sessionId) throw new Error('sessionId must be a non-empty string');
+		return this.client.tool({
+			token: options.token,
+			tool: 'commit',
+			nodeId: options.nodeId,
+			input: { session_id: options.sessionId },
+		});
+	}
+
+	/**
+	 * Roll back an open transaction session, discarding all its changes.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access.
+	 * @param options.sessionId - Transaction session ID returned by `beginTransaction`.
+	 * @param options.nodeId - Target database node ID.
+	 * @returns Object with `ok: true` on success.
+	 */
+	async rollback(options: { token: string; sessionId: string; nodeId?: string }): Promise<{ ok: boolean }> {
+		if (typeof options.token !== 'string' || options.token.trim() === '') {
+			throw new Error('token must be a non-empty string');
+		}
+		if (!options.sessionId) throw new Error('sessionId must be a non-empty string');
+		return this.client.tool({
+			token: options.token,
+			tool: 'rollback',
+			nodeId: options.nodeId,
+			input: { session_id: options.sessionId },
+		});
+	}
+
+	/**
+	 * Discover the underlying database engine for a pipeline node.
+	 *
+	 * Invokes the `dialect` tool function on the target database node.
+	 *
+	 * @param options.token - Pipeline token for authentication and resource access.
+	 * @param options.nodeId - Target database node ID.  When empty the call
+	 *   broadcasts to all tool-lane nodes; the first database node handles it.
+	 * @returns The dialect reported by the node.
+	 * @throws If `token` is empty or the response is not a recognized dialect.
+	 */
+	async dialect(options: { token: string; nodeId?: string }): Promise<DatabaseDialect> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
 		}
 
-		const question = new Question({ type: QuestionType.DIALECT });
-		question.addQuestion('dialect');
-		const result = await this.client.chat({ token: options.token, question });
-
-		const answers = (result as { answers?: string[] })?.answers;
-		if (!answers || answers.length === 0) {
-			throw new Error('Pipeline returned no dialect answer; is the endpoint a database node?');
-		}
-
-		let payload: { dialect?: string };
-		try {
-			payload = JSON.parse(answers[0]);
-		} catch {
-			throw new Error(`Unexpected dialect response from pipeline: ${answers[0]}`);
-		}
+		const result = await this.client.tool<{ dialect?: string }>({
+			token: options.token,
+			tool: 'dialect',
+			nodeId: options.nodeId,
+		});
 
 		const known = Object.values(DatabaseDialect) as string[];
-		if (!payload.dialect || !known.includes(payload.dialect)) {
-			throw new Error(`Unexpected dialect response from pipeline: ${answers[0]}`);
+		if (!result?.dialect || !known.includes(result.dialect)) {
+			throw new Error(`Unexpected dialect response from pipeline: ${JSON.stringify(result)}`);
 		}
-		return payload.dialect as DatabaseDialect;
+		return result.dialect as DatabaseDialect;
+	}
+
+	/**
+	 * Build a Sequelize ORM instance that transports its SQL over this RocketRide
+	 * pipe (via `query`/`beginTransaction`/`commit`/`rollback`) instead of a TCP socket.
+	 *
+	 * Passes `this` as the `DatabaseLike` transport — TypeScript confirms structural
+	 * compatibility at compile time.
+	 *
+	 * The `sequelize` package is a peer dependency, not a hard dependency: it pulls
+	 * in Node built-ins (`util`, `debug`) that cannot be bundled for browser targets.
+	 * Callers must import `Sequelize` themselves and pass the class in.
+	 *
+	 * @param options.Sequelize - The `Sequelize` class (`import { Sequelize } from 'sequelize'`).
+	 * @param options.token - Pipeline token for authentication.
+	 * @param options.nodeId - Target database node id (pins transactions to one node).
+	 * @param options.sequelizeOptions - Extra Sequelize options merged over the defaults.
+	 * @returns A configured `Sequelize` instance ready for model definition and queries.
+	 */
+	sequelize(options: { Sequelize: SequelizeConstructor; token: string; nodeId?: string; sequelizeOptions?: import('sequelize').Options }): import('sequelize').Sequelize {
+		return createSequelize({ Sequelize: options.Sequelize, db: this, token: options.token, nodeId: options.nodeId, sequelizeOptions: options.sequelizeOptions });
 	}
 }

@@ -19,7 +19,7 @@ When the RocketRide VS Code extension is installed, it populates a `.rocketride/
 └── docs/                    # Documentation files (these files)
 ```
 
-**IMPORTANT:** Always read `.rocketride/services-catalog.json` for the current list of available components. The catalog is the single source of truth — it is generated from the connected server and may contain components not listed in this document.
+**IMPORTANT:** Always read `.rocketride/services-catalog.json` for the current list of available components. The catalog is the single source of truth: it is generated from the connected server and may contain components not listed in this document.
 
 > **See also:** [`docs/README-nodes.md`](../README-nodes.md) is the node catalog
 > grouped by category, with each node's lanes and the wire-vs-bind rule.
@@ -49,10 +49,10 @@ Each entry in `services-catalog.json` has this structure:
 
 **Key fields:**
 
-- `name` — the `provider` value you use in pipeline files
-- `classType` — component category: source, data, text, image, audio, video, embedding, llm, store, database, tool, agent, memory, infrastructure, target, preprocessor
-- `lanes` — the definitive reference for data flow. Each key is an input lane; its value array lists the output lanes produced. An empty array `[]` means the component consumes data with no lane output (e.g., storage, response). Source components use `_source` as the input lane key
-- `invoke` — (optional) defines what control-plane connections the component requires or accepts. Each key is a `classType` (e.g., `llm`, `tool`, `memory`) with `min`/`max` constraints and a description. Components with `invoke` need corresponding entries in the `control` array of the pipeline definition
+- `name`: the `provider` value you use in pipeline files
+- `classType`: component category: source, data, text, image, audio, video, embedding, llm, store, database, tool, agent, memory, infrastructure, target, preprocessor
+- `lanes`: the definitive reference for data flow. Each key is an input lane; its value array lists the output lanes produced. An empty array `[]` means the component consumes data with no lane output (e.g., storage, response). Source components use `_source` as the input lane key
+- `invoke`: (optional) defines what control-plane connections the component requires or accepts. Each key is a `classType` (e.g., `llm`, `tool`, `memory`) with `min`/`max` constraints and a description. Components with `invoke` need corresponding entries in the `control` array of the pipeline definition
 
 ### Reading Component Schemas
 
@@ -64,16 +64,16 @@ For detailed configuration (profiles, required fields, defaults), read the schem
 
 Each schema file contains:
 
-- `description` — full component description
-- `classType` — component categories
-- `lanes` — input/output lane mappings (same as catalog)
-- `invoke` — control-plane connection requirements (same as catalog, if applicable)
-- `Pipe.schema` — JSON Schema for the component's `config` object, including:
+- `description`: full component description
+- `classType`: component categories
+- `lanes`: input/output lane mappings (same as catalog)
+- `invoke`: control-plane connection requirements (same as catalog, if applicable)
+- `Pipe.schema`: JSON Schema for the component's `config` object, including:
   - Profile definitions (`dependencies.profile.oneOf`)
   - Required fields
   - Default values
   - Field descriptions and types
-- `documentation` — link to external documentation (if available)
+- `documentation`: link to external documentation (if available)
 
 **Example:** To find what profiles `llm_openai` supports:
 
@@ -98,11 +98,11 @@ Pipelines are directed acyclic graphs (DAGs) of components connected by typed da
 }
 ```
 
-- `components` — array of component objects. **Must be the first field.**
-- `project_id` — unique GUID per pipeline file. Must be a literal UUID, not a variable. Goes at the bottom.
-- `viewport` — editor pan/zoom state. Goes at the bottom. Use `{ "x": 0, "y": 0, "zoom": 1 }` as default.
-- `version` — pipeline format version. Always `1`. Goes at the bottom.
-- `source` — optional. ID of the entry-point component. Managed automatically by the VS Code extension.
+- `components`: array of component objects. **Must be the first field.**
+- `project_id`: unique GUID per pipeline file. Must be a literal UUID, not a variable. Goes at the bottom.
+- `viewport`: editor pan/zoom state. Goes at the bottom. Use `{ "x": 0, "y": 0, "zoom": 1 }` as default.
+- `version`: pipeline format version. Always `1`. Goes at the bottom.
+- `source`: optional. ID of the entry-point component. Managed automatically by the VS Code extension.
 
 ### Component Structure
 
@@ -121,11 +121,11 @@ Pipelines are directed acyclic graphs (DAGs) of components connected by typed da
 }
 ```
 
-- `id` — unique within the pipeline. Pattern: `<provider>_<n>` (e.g., `chat_1`, `qdrant_1`, `llm_openai_1`)
-- `provider` — exact key from the services catalog (`name` field)
-- `config` — component-specific configuration (see Config Patterns below)
-- `input` — array of lane connections. Source nodes have no `input`
-- `ui` — (optional) visual layout for the graphic pipeline designer. See UI Layout below
+- `id`: unique within the pipeline. Pattern: `<provider>_<n>` (e.g., `chat_1`, `qdrant_1`, `llm_openai_1`)
+- `provider`: exact key from the services catalog (`name` field)
+- `config`: component-specific configuration (see Config Patterns below)
+- `input`: array of lane connections. Source nodes have no `input`
+- `ui`: (optional) visual layout for the graphic pipeline designer. See UI Layout below
 
 ### Multiple Pipelines
 
@@ -156,8 +156,8 @@ Lanes are typed data channels that connect components. A connection is valid ONL
 1. **Type Compatibility**: The output lane from one component must match the input lane of the next
 2. **Multiple Inputs**: A component can accept multiple inputs from different components
 3. **Multiple Outputs**: One component's output can feed multiple downstream components
-4. **Empty output `[]`**: Means the component consumes data with no lane output (storage, response) — these are valid terminal nodes
-5. **If lane types don't match, you need a converter node.** For example, `image` can't go directly to `questions` — you need `accessibility_describe` (image -> text), then `question` (text -> questions). Consult the catalog to find nodes that accept your source lane type and produce your target lane type.
+4. **Empty output `[]`**: Means the component consumes data with no lane output (storage, response), these are valid terminal nodes
+5. **If lane types don't match, you need a converter node.** For example, `image` can't go directly to `questions`: you need `accessibility_describe` (image -> text), then `question` (text -> questions). Consult the catalog to find nodes that accept your source lane type and produce your target lane type.
 
 ---
 
@@ -165,7 +165,7 @@ Lanes are typed data channels that connect components. A connection is valid ONL
 
 ### Source Components
 
-Source components are pipeline entry points (classType `source`). They have no `input` array — they produce data. Read the catalog to find all available sources and what lanes they produce.
+Source components are pipeline entry points (classType `source`). They have no `input` array: they produce data. Read the catalog to find all available sources and what lanes they produce.
 
 **Critical Distinction:**
 
@@ -174,7 +174,7 @@ Source components are pipeline entry points (classType `source`). They have no `
 
 ### Response Components
 
-Response components (classType `infrastructure`) send processed data back to the requesting client. Each response component handles a **specific lane type** — use the one that matches the output lane of your pipeline (e.g., `response_answers` for answers from an LLM, `response_text` for extracted text).
+Response components (classType `infrastructure`) send processed data back to the requesting client. Each response component handles a **specific lane type**: use the one that matches the output lane of your pipeline (e.g., `response_answers` for answers from an LLM, `response_text` for extracted text).
 
 ```json
 {
@@ -187,7 +187,7 @@ Response components (classType `infrastructure`) send processed data back to the
 
 The `laneName` in config determines the key name in the JSON response returned to the client.
 
-**When NOT to use response nodes:** Ingestion pipelines (webhook -> process -> store) do NOT need a response node — the data flows into the vector DB and stops there. The store node is the terminal node. Only add a response node when results need to be returned to the client.
+**When NOT to use response nodes:** Ingestion pipelines (webhook -> process -> store) do NOT need a response node: the data flows into the vector DB and stops there. The store node is the terminal node. Only add a response node when results need to be returned to the client.
 
 ### The Prompt Node (Context Merging)
 
@@ -212,21 +212,21 @@ Use the `prompt` node when you need to merge multiple data sources or add custom
 
 This is useful in RAG pipelines where you want control over how retrieved documents are combined with the user's question before sending to an LLM.
 
-### Embeddings — Required Before Any Store
+### Embeddings: Required Before Any Store
 
 **Vector stores cannot accept data without embedding vectors.** You must always place an embedding component before a store in your pipeline. The embedding component adds vector representations to the data so the store can index and search it.
 
 - **Documents:** Run through an embedding component (e.g., `embedding_transformer`, `embedding_openai`) which takes `documents` in and outputs `documents` with vectors added
-- **Questions:** Run through the same embedding component — it takes `questions` in and outputs `questions` with vectors added, enabling similarity search against stored documents
+- **Questions:** Run through the same embedding component: it takes `questions` in and outputs `questions` with vectors added, enabling similarity search against stored documents
 - **Images:** Use `embedding_image` which takes `image` or `documents` containing images and outputs `documents` with image vectors
 
-**Correct — embedding before store:**
+**Correct: embedding before store:**
 
 ```text
 webhook → parse → preprocessor → embedding_transformer → qdrant
 ```
 
-**Wrong — no embedding, store has no vectors to work with:**
+**Wrong: no embedding, store has no vectors to work with:**
 
 ```text
 webhook → parse → preprocessor → qdrant   ← WILL NOT WORK
@@ -244,14 +244,14 @@ The embedding model used for ingestion and the one used for search **must be the
 
 All vector database components (classType `store`) follow a dual-mode pattern visible in their `lanes`:
 
-- **Store mode** (`documents` input → `[]` output): Stores embedded documents, no output — terminal node
+- **Store mode** (`documents` input → `[]` output): Stores embedded documents, no output, terminal node
 - **Search mode** (`questions` input → `[documents, answers, questions]` output): Retrieves similar documents
 
 ---
 
 ## Control Connections (invoke / control)
 
-Some components require control-plane connections — typically an LLM, tools, or memory. The catalog's `invoke` field describes these requirements with `min`/`max` constraints.
+Some components require control-plane connections: typically an LLM, tools, or memory. The catalog's `invoke` field describes these requirements with `min`/`max` constraints.
 
 **CRITICAL: The `control` array goes on the CONTROLLED node, NOT on the invoking component.** The LLM/tool/memory node declares which component invokes it via `control`, with `from` pointing to the invoker. The agent (or other invoking component) itself has NO `control` array.
 
@@ -289,7 +289,7 @@ Some components require control-plane connections — typically an LLM, tools, o
 }
 ```
 
-A single LLM/tool/memory node can be shared by multiple invokers — just add multiple entries in its `control` array:
+A single LLM/tool/memory node can be shared by multiple invokers: just add multiple entries in its `control` array:
 
 ```json
 {
@@ -303,7 +303,7 @@ A single LLM/tool/memory node can be shared by multiple invokers — just add mu
 }
 ```
 
-This applies to agents, but also to non-agent components like `summarization`, `extract_data`, `dictionary`, `db_postgres`, and `tool_chartjs` — any component whose catalog entry has an `invoke` field.
+This applies to agents, but also to non-agent components like `summarization`, `extract_data`, `dictionary`, `db_postgres`, and `tool_chartjs`: any component whose catalog entry has an `invoke` field.
 
 ### Memory Requirements by Agent Type
 
@@ -313,7 +313,7 @@ This applies to agents, but also to non-agent components like `summarization`, `
 | `agent_crewai`     | Required (min 1)     | Not supported            | Optional |
 | `agent_langchain`  | Required (min 1)     | Not supported            | Optional |
 
-Only `agent_rocketride` supports a `memory_internal` control connection. `agent_crewai` and `agent_langchain` do not have a memory port — do not wire memory to them.
+Only `agent_rocketride` supports a `memory_internal` control connection. `agent_crewai` and `agent_langchain` do not have a memory port, do not wire memory to them.
 
 ### Multi-Agent Pipelines
 
@@ -333,11 +333,11 @@ An agent can invoke another agent as a tool. The sub-agent declares `control: [{
    LLM_2   Memory_2
 ```
 
-Agent_2 has no `input` lanes — it is invoked as a tool by Agent_1. LLM_2 and Memory_2 have `control` pointing to Agent_2.
+Agent_2 has no `input` lanes: it is invoked as a tool by Agent_1. LLM_2 and Memory_2 have `control` pointing to Agent_2.
 
 ### Tool Components
 
-Tool components (classType `tool`) have empty `lanes` (`{}`). They are not connected via data lanes — they are invoked by agents at runtime. The tool declares which agent controls it via the `control` array with `"classType": "tool"`.
+Tool components (classType `tool`) have empty `lanes` (`{}`). They are not connected via data lanes: they are invoked by agents at runtime. The tool declares which agent controls it via the `control` array with `"classType": "tool"`.
 
 ---
 
@@ -353,7 +353,7 @@ Source node config must include `hideForm`, `mode`, `parameters`, and `type`:
 
 Replace `"chat"` with the actual provider name (`"webhook"`, `"dropper"`, etc.).
 
-### LLM Nodes — Profile-Based
+### LLM Nodes: Profile-Based
 
 The `profile` field selects the model. API keys nest under the profile key. Include `"parameters": {}`. Read the schema file for available profiles.
 
@@ -365,13 +365,13 @@ The `profile` field selects the model. API keys nest under the profile key. Incl
 }
 ```
 
-### Embedding Nodes — Profile-Based
+### Embedding Nodes: Profile-Based
 
 ```json
 "config": { "profile": "miniLM", "parameters": {} }
 ```
 
-### Vector DB Nodes — Profile-Based
+### Vector DB Nodes: Profile-Based
 
 ```json
 "config": {
@@ -399,7 +399,7 @@ The `instructions` array defines the system prompt:
 
 ### Agent Nodes
 
-Agent config is flat — `instructions` and `max_waves` go directly in `config`, plus `"parameters": {}`:
+Agent config is flat: `instructions` and `max_waves` go directly in `config`, plus `"parameters": {}`:
 
 ```json
 "config": { "instructions": ["You are a research assistant."], "max_waves": 10, "parameters": {} }
@@ -451,7 +451,7 @@ Only variables prefixed with `ROCKETRIDE_` are substituted. Unknown variables ar
 
 ## UI Layout (Optional)
 
-The `ui` field is optional and is used by the graphic pipeline designer. When building pipelines programmatically, include `ui` with a `position` so the visual editor renders the pipeline with a clean layout — **do not leave all nodes at `x:0, y:0`**.
+The `ui` field is optional and is used by the graphic pipeline designer. When building pipelines programmatically, include `ui` with a `position` so the visual editor renders the pipeline with a clean layout, **do not leave all nodes at `x:0, y:0`**.
 
 ```json
 "ui": {
@@ -475,7 +475,7 @@ The `ui` field is optional and is used by the graphic pipeline designer. When bu
 - **Control-plane nodes go below their invoker:** LLM, tool, and memory nodes sit ~160px below the agent that controls them
 - **Multi-agent tiers:** Sub-agents and their dependencies form vertical tiers below the parent agent
 
-### Layout Example — Simple Agent Pipeline
+### Layout Example: Simple Agent Pipeline
 
 ```text
 x:  20        240         460
@@ -494,7 +494,7 @@ x:  20        240         460
 { "id": "memory_internal_1", "ui": { "position": { "x": 340, "y": 360 }, "measured": { "width": 150, "height": 66 } } }
 ```
 
-### Layout Example — Parallel Agent Fan-Out
+### Layout Example: Parallel Agent Fan-Out
 
 For multiple agents reading from the same chat source, stack them vertically with ~160px spacing, then converge into a single response node:
 
@@ -651,13 +651,13 @@ questions → agent_rocketride_1 → answers
 
 **Video ingestion + chat query (two pipelines, shared collection):**
 
-Pipeline 1 — Ingestion (no response node):
+Pipeline 1: Ingestion (no response node):
 
 ```text
 dropper → video → frame_grabber → [images] → accessibility_describe → [text] → preprocessor_langchain → [documents] → embedding_openai → [documents] → qdrant (collection: "scenes")
 ```
 
-Pipeline 2 — Query:
+Pipeline 2: Query:
 
 ```text
 chat → [questions] → embedding_openai → [questions] → qdrant (collection: "scenes") → [prompt] → llm_openai → [answers] → response_answers

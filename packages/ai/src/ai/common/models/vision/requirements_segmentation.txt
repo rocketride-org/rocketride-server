@@ -1,0 +1,6 @@
+# contract-check: skip-install  reason: pycocotools build + Mask2Former weights; PR lane skips, nightly --install-all verifies.
+# Segmentation-specific extras, installed after the shared requirements_vision.txt base.
+# pycocotools: RLE encode (loader) — the node lists it too for client-side decode/restore.
+accelerate
+pycocotools
+scipy

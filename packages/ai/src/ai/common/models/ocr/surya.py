@@ -27,6 +27,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ai.web.metrics import metrics
+from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
 from .utils import preprocess_image_transparency
 
@@ -39,9 +40,11 @@ class SuryaLoader(BaseLoader):
     LOADER_TYPE: str = 'surya'
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_surya.txt')
 
-    _DEFAULTS = {
-        'languages': ['en'],
-    }
+    # Surya 0.17+ recognition is multilingual and auto-detecting, so `languages` has no
+    # effect on the loaded weights and must not split model identity. The facade stops
+    # sending it (see _init_proxy); excluding it here also keeps identity stable when an
+    # older client still passes it in loader_options.
+    _SERVER_PARAMS = BaseLoader._SERVER_PARAMS | {'languages'}
 
     @staticmethod
     def load(
@@ -58,6 +61,13 @@ class SuryaLoader(BaseLoader):
         - FoundationPredictor: Base foundation model
         - DetectionPredictor: Text line detection
         - RecognitionPredictor: Text recognition (requires FoundationPredictor)
+
+        Note:
+            `languages` is accepted for backwards compatibility but has no effect.
+            Surya 0.17+ recognition is multilingual and auto-detecting: the predictors
+            above are constructed without it and `inference()` never reads it. It is
+            reported in metadata for visibility only, and is deliberately excluded from
+            model identity so that differing language lists share one loaded copy.
         """
         SuryaLoader._ensure_dependencies()
 
@@ -237,7 +247,15 @@ class Surya:
         output_fields: Optional[List[str]] = None,
         **kwargs,
     ):
-        """Initialize Surya with specified languages."""
+        """Initialize Surya.
+
+        Args:
+            languages: Accepted for backwards compatibility, but has no effect —
+                Surya 0.17+ recognition is multilingual and auto-detecting. It does
+                not affect model identity, so instances differing only in `languages`
+                share a single copy on the model server.
+            output_fields: Fields to extract from each result.
+        """
         self.languages = languages or ['en']
         self.output_fields = output_fields or ['$text', '$boxes']
         self._kwargs = kwargs
@@ -258,13 +276,19 @@ class Surya:
         )
 
     def _init_proxy(self, server_addr: str) -> None:
-        """Initialize proxy to model server."""
+        """Initialize proxy to model server.
+
+        `languages` is not sent because it has no effect on the loaded model (see
+        SuryaLoader.load). Identity stability does not depend on that omission: the
+        guarantee is `_SERVER_PARAMS`, which excludes `languages` from the hash even
+        when a caller does send it, so one copy of the ~3GB weights is shared across
+        every language list.
+        """
         self._client = ModelClient(server_addr)
         self._client.load_model(
             model_name='surya',
             model_type='surya',
             loader_options={
-                'languages': self.languages,
                 **self._kwargs,
             },
         )
@@ -305,14 +329,15 @@ class Surya:
         results = SuryaLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
         t_post = (time.perf_counter() - t0) * 1000
 
-        # Report all perf counters — same shape as model server response
+        # Report all perf counters — same keys as model server response
+        inference_sec = (t_pre + t_gpu + t_post) / 1000.0
         metrics.add_time(
             {
-                'preprocess': t_pre,
-                'gpu': t_gpu,
-                'postprocess': t_post,
-                'queue_wait': 0,
-                'latency': t_pre + t_gpu + t_post,
+                'gpu_preprocess': t_pre,
+                'gpu_compute': t_gpu,
+                'gpu_postprocess': t_post,
+                'gpu_queue_wait': 0,
+                'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
 

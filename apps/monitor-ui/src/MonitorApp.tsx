@@ -24,26 +24,27 @@
 // MONITOR APP — Main client area component
 // =============================================================================
 //
-// Polls the server dashboard endpoint every 3 seconds and renders the shared
-// MonitorView component. Subscribes to shell:event for real-time activity.
-//
-// Pattern matches rocket-ui's MonitorPage.tsx.
+// Renders the shared MonitorView, sourcing the 3s dashboard snapshot and live
+// activity feed from the shared useDashboardData hook (shell-ui), and binding
+// the paged list fetchers to the shell client so the Connections and Tasks
+// grids run server-side (REMOTE mode). Pattern matches rocket-ui's
+// MonitorPage.tsx.
 // =============================================================================
 
-import React, { useEffect, useCallback, useState, useRef } from 'react';
+import React, { useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell-ui';
-import { useShellConnection, ConnectionManager, getClient } from 'shell-ui';
+import { useShellConnection, useDashboardData, usePolling } from 'shell-ui';
 import { commonStyles } from 'shared/themes/styles';
-import { MonitorView, parseActivityEvent } from 'shared';
-import type { DashboardResponse, ActivityEvent } from 'shared';
+import { MonitorView } from 'shared';
+import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse } from 'shared';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-/** Dashboard polling interval in milliseconds. */
-const POLL_INTERVAL = 3000;
+/** Grid refresh cadence (ms) — matches the dashboard hook's 3s poll. */
+const GRID_POLL_INTERVAL_MS = 3000;
 
 // =============================================================================
 // STYLES
@@ -63,66 +64,59 @@ const styles = {
 /**
  * Server Monitor app — client area.
  *
- * Polls the `getDashboard()` API every 3 seconds and subscribes to live
- * server events for the activity feed. Renders the shared MonitorView
- * component with the latest data.
+ * Sources the dashboard snapshot and activity feed from the shared
+ * useDashboardData hook (shell-ui), which polls `getDashboard()` every 3
+ * seconds and subscribes to live server events through the shell client.
+ * Renders the shared MonitorView with the latest data, plus the paged list
+ * fetchers bound to the shell client: the Connections and Tasks grids page,
+ * sort, filter, and search server-side, and this host polls their combined
+ * refetch every 3 seconds (the admin views' grid pattern).
  */
 const MonitorApp: React.FC<ShellAppProps> = (_props) => {
-	const { isConnected } = useShellConnection();
-	const [data, setData] = useState<DashboardResponse | null>(null);
-	const [events, setEvents] = useState<ActivityEvent[]>([]);
-	const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+	const { client, isConnected } = useShellConnection();
 
-	// =========================================================================
-	// DASHBOARD FETCH
-	// =========================================================================
+	// Shared 3s dashboard snapshot + activity feed (module-level singleton hook,
+	// so data survives view switches without re-fetching).
+	const { data, events, refresh } = useDashboardData();
 
-	/** Fetch the latest dashboard snapshot from the server. */
-	const fetchDashboard = useCallback(async () => {
-		const client = getClient();
-		if (!client || !client.isConnected()) return;
-		try {
-			const dashboard = await client.getDashboard();
-			if (dashboard?.overview) {
-				setData(dashboard);
-			}
-		} catch (err) {
-			console.warn('[MonitorApp] Dashboard fetch failed:', err);
-		}
+	/**
+	 * Paged connections fetcher for the shared Connections grid (REMOTE mode).
+	 *
+	 * @param req - Paging / sort / filter / search arguments from the grid.
+	 * @returns The standard list envelope from the server.
+	 */
+	const listConnections = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardConnection>> => {
+		// No client yet (shell still connecting): an empty page — the
+		// connection-gated poll refetches as soon as the shell comes up.
+		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return client.listConnections(req);
+	}, [client]);
+
+	/**
+	 * Paged tasks fetcher for the shared Tasks grid (REMOTE mode).
+	 *
+	 * @param req - Paging / sort / filter / search arguments from the grid.
+	 * @returns The standard list envelope from the server.
+	 */
+	const listTasks = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
+		// Same shell-connecting guard as listConnections.
+		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return client.listTasks(req);
+	}, [client]);
+
+	// Combined remote-grid refetch handed up by MonitorView; polled at the
+	// same 3s cadence as the dashboard snapshot so the current page of each
+	// grid silently refreshes (no page reset).
+	const refetchRef = useRef<() => void>(() => {});
+	/** Stores MonitorView's combined refetch trigger. */
+	const handleRefetchReady = useCallback((refetch: () => void) => {
+		refetchRef.current = refetch;
 	}, []);
-
-	// =========================================================================
-	// POLLING WHILE CONNECTED
-	// =========================================================================
-
-	useEffect(() => {
-		if (!isConnected) {
-			if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-			return;
-		}
-
-		// Initial fetch, then poll at interval
-		fetchDashboard();
-		intervalRef.current = setInterval(fetchDashboard, POLL_INTERVAL);
-
-		return () => {
-			if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
-		};
-	}, [isConnected, fetchDashboard]);
-
-	// =========================================================================
-	// SERVER EVENT SUBSCRIPTION
-	// =========================================================================
-
-	useEffect(() => {
-		const unsub = ConnectionManager.getInstance().on('shell:event', ({ event }) => {
-			const parsed = parseActivityEvent(event);
-			if (parsed) {
-				setEvents((prev) => [parsed, ...prev].slice(0, 200));
-			}
-		});
-		return unsub;
+	/** Poll tick: silently re-request the current page of the remote grids. */
+	const pollGrids = useCallback(() => {
+		refetchRef.current();
 	}, []);
+	usePolling(pollGrids, GRID_POLL_INTERVAL_MS);
 
 	// =========================================================================
 	// RENDER
@@ -134,7 +128,10 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 				data={data}
 				events={events}
 				isConnected={isConnected}
-				onRefresh={fetchDashboard}
+				onRefresh={refresh}
+				listConnections={listConnections}
+				listTasks={listTasks}
+				onRefetchReady={handleRefetchReady}
 			/>
 		</div>
 	);

@@ -34,7 +34,8 @@
 				"advanced_mode": false,
 				"instructions": [],
 				"agent_description": "",
-				"system_prompt": ""
+				"system_prompt": "",
+				"require_tool_call": false
 			}
 		}
 	},
@@ -44,7 +45,7 @@
 			"title": "Agent description",
 			"default": "",
 			"optional": true,
-			"description": "What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly.",
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
 			"ui": {
 				"ui:widget": "textarea"
 			}
@@ -68,6 +69,12 @@
 				"format": "textarea"
 			}
 		},
+		"require_tool_call": {
+			"type": "boolean",
+			"title": "Require tool call",
+			"default": false,
+			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
+		},
 		"advanced_mode": {
 			"type": "boolean",
 			"title": "Advanced Mode",
@@ -90,7 +97,7 @@
 		},
 		"agent_deepagent.default": {
 			"object": "default",
-			"properties": ["advanced_mode"]
+			"properties": ["advanced_mode", "require_tool_call"]
 		}
 	},
 	"shape": [

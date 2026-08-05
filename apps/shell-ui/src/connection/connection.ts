@@ -103,6 +103,49 @@ type Handler<T = unknown> = (payload: T) => void;
 /** Handler type for wildcard listeners (debug panel). */
 type WildcardHandler = (event: string, payload: unknown) => void;
 
+/**
+ * Runtime type guard narrowing an untyped DAP event body to a ConnectResult.
+ *
+ * The `apaext_account` push event carries a full ConnectResult payload, but
+ * the transport types every event body as an untyped record. Confirming the
+ * identifying fields (`userId`, `userToken`) are present lets us emit the
+ * typed `shell:accountUpdate` event without an unsafe cast.
+ *
+ * @param body - The raw event body from a DAP message, or undefined.
+ * @returns True when `body` carries the ConnectResult identity fields.
+ */
+function isConnectResult(body: unknown): body is ConnectResult {
+	// Presence alone is not enough — { userId: undefined } must not pass, so
+	// both identity fields are checked to actually be strings.
+	return (
+		typeof body === 'object' &&
+		body !== null &&
+		typeof (body as Record<string, unknown>).userId === 'string' &&
+		typeof (body as Record<string, unknown>).userToken === 'string'
+	);
+}
+
+/**
+ * Normalizes caller-supplied env metadata to the string map the SDK expects.
+ *
+ * `InitOptions.env` is the frozen `Record<string, unknown>` shape, while
+ * `RocketRideClientConfig.env` copies values verbatim as strings — so strings
+ * pass through, primitives (number / boolean) are stringified, and anything
+ * else (objects, functions, null, undefined) is dropped rather than cast.
+ *
+ * @param env - Raw env metadata from InitOptions, or undefined.
+ * @returns A string-valued env map, or undefined when none was given.
+ */
+function normalizeEnv(env: Record<string, unknown> | undefined): Record<string, string> | undefined {
+	if (!env) return undefined;
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env)) {
+		if (typeof value === 'string') out[key] = value;
+		else if (typeof value === 'number' || typeof value === 'boolean') out[key] = String(value);
+	}
+	return out;
+}
+
 // =============================================================================
 // CONNECTION MANAGER CLASS
 // =============================================================================
@@ -131,14 +174,28 @@ export class ConnectionManager implements IConnectionManager {
 	// SINGLETON
 	// =========================================================================
 
-	private static instance: ConnectionManager;
+	/**
+	 * Global key for the singleton. A plain `private static instance` is NOT a
+	 * true singleton under Module Federation: a remote (e.g. home-ui) that loads
+	 * a duplicated copy of the shell-ui module gets its own class object with its
+	 * own static field, so its emit() lands on a different instance than the one
+	 * the Shell host registered listeners on — events vanish silently. Anchoring
+	 * the instance on globalThis makes getInstance() return the same object
+	 * regardless of how many module copies exist in the page.
+	 */
+	private static readonly GLOBAL_KEY = Symbol.for('rocketride.connectionManager');
 
 	/** Returns the singleton ConnectionManager instance. */
 	public static getInstance(): ConnectionManager {
-		if (!ConnectionManager.instance) {
-			ConnectionManager.instance = new ConnectionManager();
+		// Read/write the instance under a registry symbol on globalThis. Reflect
+		// accepts symbol keys and returns `any`, so we avoid an unsafe cast of
+		// globalThis (which has no symbol index signature) just to index it.
+		let instance: ConnectionManager | undefined = Reflect.get(globalThis, ConnectionManager.GLOBAL_KEY);
+		if (!instance) {
+			instance = new ConnectionManager();
+			Reflect.set(globalThis, ConnectionManager.GLOBAL_KEY, instance);
 		}
-		return ConnectionManager.instance;
+		return instance;
 	}
 
 	private constructor() {}
@@ -182,6 +239,22 @@ export class ConnectionManager implements IConnectionManager {
 	private wildcardListeners = new Set<WildcardHandler>();
 	private debugLog: DebugLogEntry[] = [];
 
+	/**
+	 * User-intent control events that must not be silently dropped if emitted
+	 * while no listener is registered (e.g. the Shell listener is mid-remount, or
+	 * a remote emits before the host's listener useEffect has run). These are
+	 * buffered (latest payload wins) and replayed to the first matching handler
+	 * that registers via on(). Status/lifecycle events are intentionally NOT
+	 * replayable — replaying a stale 'shell:disconnected' would be wrong.
+	 */
+	private static readonly REPLAYABLE_EVENTS = new Set<string>([
+		'shell:loginRequest',
+		'shell:subscribe',
+	]);
+
+	/** Latest buffered payload per replayable event, awaiting a listener. */
+	private pendingEvents = new Map<string, unknown>();
+
 	// =========================================================================
 	// INITIALIZATION
 	// =========================================================================
@@ -213,14 +286,17 @@ export class ConnectionManager implements IConnectionManager {
 			uri: this.serverUri,
 			clientName: options?.clientName || DEFAULT_CLIENT_NAME,
 			persist: true,
-			env: options?.env,
+			// The caller-facing option type is the frozen Record<string, unknown>;
+			// normalize to the string map the SDK copies verbatim instead of casting.
+			env: normalizeEnv(options?.env),
 
 			// Fired for every push event received from the server over WebSocket
 			onEvent: async (message) => {
 				// Transform apaext_account into shell:accountUpdate to avoid
-				// duplicate handling downstream
-				if (message.event === 'apaext_account' && message.body) {
-					this.emit('shell:accountUpdate', message.body as ConnectResult);
+				// duplicate handling downstream. The guard narrows the untyped
+				// push body to a ConnectResult without a cast.
+				if (message.event === 'apaext_account' && isConnectResult(message.body)) {
+					this.emit('shell:accountUpdate', message.body);
 					return;
 				}
 				// Broadcast all other server events
@@ -285,7 +361,15 @@ export class ConnectionManager implements IConnectionManager {
 		// so the button works again without a manual page refresh.
 		if (typeof window !== 'undefined') {
 			window.addEventListener('pageshow', (e) => {
-				if ((e as PageTransitionEvent).persisted) this.oauthStarted = false;
+				if ((e as PageTransitionEvent).persisted) {
+					this.oauthStarted = false;
+					// Back from Zitadel without signing in: if still unauthenticated,
+					// drop any pending app so a later refresh can't re-seed the auth
+					// gate and bounce the user back to login. Guard on token — a
+					// signed-in user's last-active-app restore reuses rr:appId via
+					// persistActiveApp, so it must survive for them.
+					if (!this.loadToken()) this.clearPendingAppId();
+				}
 			});
 		}
 	}
@@ -325,8 +409,9 @@ export class ConnectionManager implements IConnectionManager {
 	 * Delegates to the auth provider's ``signIn()`` method. Falls back to
 	 * the legacy PKCE flow if no auth provider is configured.
 	 *
-	 * @param register - If true, requests Zitadel's sign-up form (prompt=create)
-	 *                   instead of the default sign-in form.
+	 * @param register - Retained for compatibility; no longer changes the
+	 *                   destination. All flows land on Zitadel's login page
+	 *                   (prompt=login), which offers a Register link.
 	 */
 	public async startOAuth(register?: boolean): Promise<void> {
 		// One-shot: a redirect is coming; never start a second authorize in the
@@ -423,8 +508,9 @@ export class ConnectionManager implements IConnectionManager {
 						this.clearToken();
 					}
 				}
-				// No usable token — restart auth only for session-locked apps.
-				if (sessionAppId) { await this.startOAuth(); return null; }
+				// No usable token — render unauthenticated and let the shell's
+				// auth gate decide (see the session-locked branch below for why
+				// bootstrap never starts a login flow itself).
 				return null;
 			}
 
@@ -440,14 +526,22 @@ export class ConnectionManager implements IConnectionManager {
 					const result = await this.client.login(token);
 					return await this.finishConnect(result, sessionAppId, config);
 				} catch {
-					// Token expired or invalid — clear and restart OAuth
+					// Token expired or invalid — clear it and fall through to the
+					// unauthenticated render below.
 					this.clearToken();
-					await this.startOAuth();
-					return null;
 				}
 			}
-			// No token — redirect to OAuth
-			await this.startOAuth();
+			// Unauthenticated session-locked visit: bootstrap deliberately does
+			// NOT start a login flow. The shell's auth gate (ShellLayout) emits
+			// shell:loginRequest only when the app EXISTS in the manifest and
+			// requires auth, and the Shell handler dispatches edition-aware
+			// (saas -> Zitadel OAuth, OSS -> the in-shell API-key screen).
+			// Starting OAuth here bounced anonymous visitors to Zitadel even
+			// for app ids this server does not have (which now render the
+			// App-not-found panel instead) and even on OSS, which has no
+			// Zitadel at all. NOTE: if pre-auth manifest filtering by
+			// permission ever lands, hidden-but-real apps will need a probe
+			// signal here to still reach the login flow.
 			return null;
 		}
 
@@ -469,7 +563,13 @@ export class ConnectionManager implements IConnectionManager {
 			}
 		}
 
-		// No token — show shell unauthenticated (transport is attached, public APIs work)
+		// No code, no session lock, no token — an unauthenticated home load. If a
+		// pending app survived an abandoned OAuth round-trip (user pressed Back from
+		// the Zitadel login instead of signing in), drop it now. Otherwise Shell
+		// re-seeds startupAppId from it and the ShellLayout auth gate re-fires
+		// shell:loginRequest → startOAuth, bouncing the user straight back to Zitadel.
+		this.clearPendingAppId();
+		// Show shell unauthenticated (transport is attached, public APIs work)
 		return null;
 	}
 
@@ -647,6 +747,9 @@ export class ConnectionManager implements IConnectionManager {
 		this.clearToken();
 		this.clearSessionAppId();
 		this.accountInfo = undefined;
+		// Drop any buffered user-intent events so a stale shell:subscribe /
+		// shell:loginRequest can't replay into the next session.
+		this.pendingEvents.clear();
 
 		// Emit logout before disconnecting so listeners can clean up
 		this.emit('shell:logout', {});
@@ -662,6 +765,7 @@ export class ConnectionManager implements IConnectionManager {
 		await this.disconnect();
 		this.listeners.clear();
 		this.wildcardListeners.clear();
+		this.pendingEvents.clear();
 		this.debugLog.length = 0;
 	}
 
@@ -770,6 +874,13 @@ export class ConnectionManager implements IConnectionManager {
 		try { return sessionStorage.getItem(SS_PENDING_APP_ID) ?? ''; } catch { return ''; }
 	}
 
+	/** Clear the pending app ID. Called when an OAuth round-trip is abandoned
+	 *  (user pressed Back from Zitadel) so the stale target can't re-seed the
+	 *  auth gate on the next load and bounce them straight back to login. */
+	public clearPendingAppId(): void {
+		try { sessionStorage.removeItem(SS_PENDING_APP_ID); } catch { /* storage unavailable */ }
+	}
+
 	/** Save pending app ID (for retrieval after OAuth callback). */
 	public setPendingAppId(id: string): void {
 		try { sessionStorage.setItem(SS_PENDING_APP_ID, id); } catch (e) {
@@ -856,9 +967,10 @@ export class ConnectionManager implements IConnectionManager {
 		// Push into debug log
 		this.logDebug(event as string, payload);
 
-		// Dispatch to registered handlers via microtask
+		// Dispatch to registered handlers via microtask. An unsubscribed handler
+		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
-		if (handlers) {
+		if (handlers && handlers.size > 0) {
 			Promise.resolve().then(() => {
 				for (const fn of handlers) {
 					try {
@@ -868,6 +980,18 @@ export class ConnectionManager implements IConnectionManager {
 					}
 				}
 			});
+			return;
+		}
+
+		// No live listener. For user-intent control events, buffer the payload so
+		// it can be replayed to the next listener that registers (see on()).
+		// Without this, a click whose listener isn't yet/no-longer mounted is
+		// silently swallowed — the prod "Get Started does nothing" symptom.
+		if (ConnectionManager.REPLAYABLE_EVENTS.has(event as string)) {
+			this.pendingEvents.set(event as string, payload);
+			console.warn(
+				`[ConnectionManager] '${event as string}' emitted with no listener — buffered for replay.`,
+			);
 		}
 	}
 
@@ -886,6 +1010,29 @@ export class ConnectionManager implements IConnectionManager {
 		if (!this.listeners.has(key)) this.listeners.set(key, new Set());
 		const set = this.listeners.get(key)!;
 		set.add(handler as Handler);
+
+		// Replay a buffered user-intent event to a fresh listener (see emit()).
+		// Deferred to a microtask AND dispatched to the LIVE listener set at that
+		// time — not the captured handler — because under React StrictMode
+		// (mount→cleanup→mount) or any remount the registering handler may
+		// unsubscribe before the microtask runs. The buffered payload is consumed
+		// only once a live listener actually receives it, so the intent is never
+		// lost to a dead handler.
+		if (this.pendingEvents.has(key)) {
+			Promise.resolve().then(() => {
+				const live = this.listeners.get(key);
+				if (!this.pendingEvents.has(key) || !live || live.size === 0) return;
+				const payload = this.pendingEvents.get(key);
+				this.pendingEvents.delete(key);
+				for (const fn of live) {
+					try {
+						fn(payload);
+					} catch (err) {
+						console.error(`[ConnectionManager] Replay handler for '${key}' threw:`, err);
+					}
+				}
+			});
+		}
 
 		// Warn if a single event has too many listeners — likely a leak
 		if (set.size > 25) {

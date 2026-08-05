@@ -1,0 +1,50 @@
+# robots.txt for docs.rocketride.org
+# Explicitly welcomes AI crawlers + declares sitemap.
+#
+# WARNING, if you are about to add a rule here:
+#   Per RFC 9309 a crawler obeys only the ONE most specific User-agent group
+#   that matches it, and ignores every other group -- including `*`. Each bot
+#   named below therefore reads its own two lines and never sees the `*` group
+#   at all. A `Disallow:` added to `*` alone would bind Googlebot but NOT
+#   GPTBot, ClaudeBot, PerplexityBot, or anything else named here. That failure
+#   is silent: robots.txt has no linting and no CI check. Any rule intended for
+#   everyone must be repeated in every group below.
+#
+# The named groups are kept because they state the intent -- we welcome AI
+# crawlers -- in a form a human can read. Behaviourally they are identical
+# today to the `*` group on its own, which already allows everything.
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: *
+Allow: /
+
+Sitemap: https://docs.rocketride.org/sitemap.xml

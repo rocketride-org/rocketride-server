@@ -28,7 +28,7 @@ import GoogleIcon from '@mui/icons-material/Google';
 import { FormContextType, IconButtonProps, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 import { useTranslation } from 'react-i18next';
 import { useCallback, useEffect, useMemo } from 'react';
-import { useFlow } from '../../../hooks/useFlowContext';
+import { useFlowProject } from '../../../context/FlowProjectContext';
 import '../google-api-types';
 
 // =============================================================================
@@ -42,20 +42,28 @@ import '../google-api-types';
  * configuration. Displays an "Authenticated" label when a user token is already
  * present, and shows an error color when required auth tokens are missing.
  */
-export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFSchema = RJSFSchema, F extends FormContextType = never>({ ...props }: IconButtonProps<T, S, F>) {
+export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFSchema = RJSFSchema, F extends FormContextType = never>({
+	...props
+}: // The canvas passes its RJSF formContext (formValues, nodeId, provider, ...)
+// down to widget buttons; @rjsf's IconButtonProps does not model it, so the
+// props type is widened with the extra optional member instead of casting.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+IconButtonProps<T, S, F> & { formContext?: Record<string, any> }) {
 	const { t } = useTranslation();
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const { saveChanges, selectedNode, oauth2RootUrl, onOpenLink } = useFlow() as any;
+	const { oauth2RootUrl, oauthReturnUrl, onOpenExternal } = useFlowProject();
 
-	// Serialize the current form data for the OAuth redirect so the server can restore state on callback
-	const serviceParam = JSON.stringify(selectedNode?.data?.formData || {});
-	const nodeId = selectedNode?.id || '';
+	const formContext = props.formContext;
+	const formValues = formContext?.formValues ?? {};
+	const nodeId = formContext?.nodeId;
+	// Serialize the current form data for the OAuth redirect so the server can
+	// restore state on callback. Credential fields are stripped at any depth:
+	// the URL lands in browser history and broker logs, so existing tokens must
+	// never ride along.
+	const CREDENTIAL_KEYS = ['accessToken', 'refreshToken', 'userToken', 'idToken', 'tokenExpiry'];
+	const serviceParam = JSON.stringify(formValues, (key, value) => (CREDENTIAL_KEYS.includes(key) ? undefined : value));
 
 	const handleHybridSignIn = useCallback(async () => {
-		// Persist any unsaved form changes before navigating away to the OAuth flow
-		await saveChanges();
-
 		if (!oauth2RootUrl) return;
 
 		// Build the OAuth redirect URL with all context needed to resume after authentication
@@ -64,68 +72,100 @@ export default function LoginWithGoogleButton<T = unknown, S extends StrictRJSFS
 		url.searchParams.set('node_id', nodeId ?? '');
 
 		// Include the service name if available, so the OAuth callback knows which service this is for
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		if ((props as any).formContext?.formData?.name) {
-			url.searchParams.set(
-				'name',
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				(props as any).formContext.formData.name
-			);
+		if (formContext?.formData?.name) {
+			url.searchParams.set('name', formContext.formData.name);
 		}
 
-		// Default to 'user' auth type for personal Google OAuth (as opposed to service account)
-		const authType = selectedNode?.data?.formData?.parameters?.authType || 'user';
-		url.searchParams.set('type', authType);
+		// "Login with Google" is personal OAuth by definition; service accounts
+		// use an uploaded key, never this flow. The broker echoes the type back
+		// in `state`, which switches the node's authType to 'user' on success.
+		url.searchParams.set('type', 'user');
 
-		// Pass the current URL so the OAuth callback can redirect back here after completion
-		url.searchParams.set('baseURL', window.location.href);
+		// Tell the broker where to return tokens. Web hosts redirect back to the
+		// current page; hosts that can't receive a web redirect (VS Code) supply
+		// a deep link via oauthReturnUrl that they intercept out-of-band.
+		url.searchParams.set('baseURL', oauthReturnUrl || window.location.href);
+
+		// Pass the selected tier's scopes explicitly, keyed by the node's
+		// provider — the broker grants identity plus exactly the requested
+		// scopes (least privilege), or its legacy default consent when no
+		// scope param is sent. Maps mirror the per-service AccessSpecs in
+		// core/google_access.py. An unknown provider or tier sends no scope
+		// param rather than guessing another service's scopes.
+		const _G = 'https://www.googleapis.com/auth';
+		const SERVICE_TIER_SCOPES: Record<string, Record<string, string[]>> = {
+			tool_gmail: {
+				readonly: [`${_G}/gmail.readonly`],
+				modify: [`${_G}/gmail.modify`],
+				send: [`${_G}/gmail.modify`, `${_G}/gmail.send`],
+				settings: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`],
+				settings_sharing: [`${_G}/gmail.modify`, `${_G}/gmail.settings.basic`, `${_G}/gmail.settings.sharing`],
+				full: ['https://mail.google.com/'],
+			},
+		};
+		const provider = formContext?.provider as string | undefined;
+		const accessTier = (formValues.access ?? formValues.parameters?.access) as string | undefined;
+		const tierScopes = provider && accessTier ? SERVICE_TIER_SCOPES[provider]?.[accessTier] : undefined;
+		if (tierScopes?.length) {
+			url.searchParams.set('scope', tierScopes.join(' '));
+		}
 
 		const targetUrl = url.toString();
-		// Use onOpenLink callback for embedded hosts (e.g., VSCode), otherwise do a full-page redirect
-		if (onOpenLink) onOpenLink(targetUrl);
+		// VS Code (onOpenExternal) opens the system browser — Google's consent
+		// screen refuses to render in an embedded iframe — and delivers tokens
+		// back via pendingOAuthTokens. Web hosts do a full-page redirect.
+		if (onOpenExternal) onOpenExternal(targetUrl);
 		else window.location.href = targetUrl;
 
-		// eslint-disable-next-line react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any
-	}, [(props as any).formContext, serviceParam, nodeId, selectedNode, oauth2RootUrl, onOpenLink]);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [formContext, formValues, serviceParam, nodeId, oauth2RootUrl, oauthReturnUrl, onOpenExternal]);
 
 	// Show the button in error color if any OAuth-related token is missing from validation errors
 	const color = useMemo(() => {
-		for (const error of selectedNode?.data?.formDataErrors ?? []) if (['accessToken', 'refreshToken', 'userToken'].includes(error.params.missingProperty)) return 'error';
+		for (const error of formContext?.formDataErrors ?? []) if (['accessToken', 'refreshToken', 'userToken'].includes(error.params?.missingProperty)) return 'error';
 		return 'primary';
-	}, [selectedNode?.data?.formDataErrors]);
+	}, [formContext?.formDataErrors]);
 
-	// Check if user is already authenticated by looking for a userToken in either nested or flat location
-	const authenticated = selectedNode?.data?.formData?.parameters?.google?.userToken?.length || selectedNode?.data?.formData?.parameters?.userToken?.length;
+	// Check if user is already authenticated. Flat node schemas (tool_gmail)
+	// keep userToken at the config root; the parameters.* locations are legacy.
+	const authenticated = formValues?.userToken?.length || formValues?.parameters?.google?.userToken?.length || formValues?.parameters?.userToken?.length;
 
-	const text = authenticated
-		? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-			t('addSource.formStep.authenticated' as any)
-		: // eslint-disable-next-line @typescript-eslint/no-explicit-any
-			t('addSource.formStep.loginWithGoogleButton' as any);
+	// i18n is not initialized in every host (e.g. the VS Code webview). When a key
+	// doesn't resolve, t() returns the key itself — fall back to a literal so the
+	// button never shows a raw key.
+	const label = (key: string, fallback: string): string => {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const value = t(key as any) as string;
+		return value && value !== key ? value : fallback;
+	};
+	const text = authenticated ? label('addSource.formStep.authenticated', 'Authenticated') : label('addSource.formStep.loginWithGoogleButton', 'Login with Google');
 
 	// Whenever the selected node's formData changes, publish the latest user token to a global
 	// marker so GoogleDrivePickerWidget can detect when a fresh token is available after OAuth.
 	// This effect does NOT open the picker - it only signals token availability.
 	useEffect(() => {
-		if (!selectedNode) {
-			return;
-		}
-
-		const formData = selectedNode?.data?.formData || {};
-		// Look for the user token in both possible locations (nested under google or flat)
-		const savedUserToken = formData.parameters?.google?.userToken || formData.parameters?.userToken;
+		// Look for the user token in all possible locations (config root first, then legacy nested)
+		const savedUserToken = formValues.userToken || formValues.parameters?.google?.userToken || formValues.parameters?.userToken;
+		const pickerWindow = window as typeof window & { __googlePickerLastToken?: string };
 
 		if (!savedUserToken) {
+			// Switching to an unauthenticated node must not leave the previous
+			// node's token readable by the picker.
+			delete pickerWindow.__googlePickerLastToken;
 			return;
 		}
 
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		(window as any).__googlePickerLastToken = savedUserToken;
-	}, [selectedNode]);
+		pickerWindow.__googlePickerLastToken = savedUserToken;
+		return () => {
+			if (pickerWindow.__googlePickerLastToken === savedUserToken) {
+				delete pickerWindow.__googlePickerLastToken;
+			}
+		};
+	}, [formValues]);
 
 	return (
 		<Box sx={{ mt: 1, pl: 6.2, pr: 5.4 }}>
-			<Button startIcon={<GoogleIcon />} onClick={handleHybridSignIn} {...props} sx={{ width: 1 }} color={color} variant="outlined" disabled={authenticated}>
+			<Button startIcon={<GoogleIcon />} onClick={handleHybridSignIn} {...props} sx={{ width: 1, textTransform: 'none' }} color={color} variant="outlined" disabled={authenticated}>
 				{text}
 			</Button>
 		</Box>

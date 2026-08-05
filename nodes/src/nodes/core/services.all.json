@@ -2,6 +2,7 @@
 	//
 	// Handle the all. - combines services into a single selectable type
 	//
+	"description": ["A combined configuration that bundles a preprocessor, embedding model, vector store, and LLM into a single selectable unit."],
 	"fields": {
 		"all.preprocessor": {
 			"title": "Preprocessor",

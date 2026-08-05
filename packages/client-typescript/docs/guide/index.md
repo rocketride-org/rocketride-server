@@ -15,7 +15,7 @@ title: TypeScript
 <p align="center">
   <a href="https://www.npmjs.com/package/rocketride"><img src="https://img.shields.io/npm/v/rocketride?color=222223&label=NPM" alt="npm" /></a>
   <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub" /></a>
-  <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://discord.gg/PMXrtenMsY"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord" /></a>
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License" /></a>
 </p>
 
@@ -74,6 +74,7 @@ You build your `.pipe` - and you run it against the fastest AI runtime available
 - **File upload** - `sendFiles()` with progress; streaming with `pipe()`
 - **Connection lifecycle** - Optional persist mode, reconnection, and callbacks (`onConnected`, `onDisconnected`, `onConnectError`)
 - **Full TypeScript support** - Complete type definitions
+- **Telemetry reporting** - The shared loose `report()` core via `rocketride/analytics`; each app owns its own event taxonomy ([Analytics / Telemetry Reporting](/develop/typescript/analytics))
 
 ---
 
@@ -140,6 +141,7 @@ await client.connect();
 | `disconnect`          | `disconnect(): Promise<void>`                                                  | -         | Closes the connection and cancels any pending reconnection. Call when the user explicitly disconnects or the app is shutting down.                                                                                                                                                                                                                                                      |
 | `isConnected`         | `isConnected(): boolean`                                                       | `boolean` | Whether the client is currently connected. Use before calling `use()` or `send()` to avoid confusing errors.                                                                                                                                                                                                                                                                            |
 | `setConnectionParams` | `setConnectionParams(options: { uri?: string; auth?: string }): Promise<void>` | -         | Updates server URI and/or auth at runtime. If currently connected, disconnects and reconnects with the new params (in persist mode, reconnection is scheduled; otherwise reconnects once). Use when the user changes server or credentials without creating a new client.                                                                                                               |
+| `setEnv`              | `setEnv(env: Record<string, string>): void`                                    | -         | Replaces the client's env dictionary (seeded from `config.env` or, in Node, `process.env`). `use()`/`validate()` read it to build the `ROCKETRIDE_*` substitution env sent with the pipeline; `attach()` also consults `ROCKETRIDE_APIKEY` from it when no explicit credential is given. Mirrors the Python SDK's `set_env`.                                                            |
 
 **How to use:** For one-off scripts, call `connect()` once, do your work, then `disconnect()`. For UIs, use `persist: true` and rely on the client to reconnect; only call `disconnect()` when the user logs out or you are done with the client. The client supports `await using` (Symbol.asyncDispose) for automatic disconnect when exiting scope.
 
@@ -208,6 +210,77 @@ const pipe = await client.pipe(token, { name: 'data.json' }, 'application/json')
 await pipe.open();
 for (const chunk of chunks) await pipe.write(new TextEncoder().encode(chunk));
 const result = await pipe.close();
+```
+
+### Store (file access)
+
+Read, write, and manage files in your account's server-side store. All paths are **relative** to the store root (e.g. `'docs/readme.md'`); absolute-like paths (starting with `/` or `\`) are rejected. Binary I/O uses an explicit handle lifecycle (`fsOpen` → `fsRead` / `fsWrite` → `fsClose`, 4 MB chunks); for most cases prefer the string/JSON convenience wrappers.
+
+**Handle I/O (low-level binary)**
+
+| Method    | Signature                                                                        | Returns                                 | Description                                                                        |
+| --------- | -------------------------------------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
+| `fsOpen`  | `fsOpen(path: string, mode?: 'r' \| 'w'): Promise<{ handle: string; size?: number }>` | `Promise<{ handle; size? }>`     | Open a handle (`mode` default `'r'`). Read mode also returns `size`.              |
+| `fsRead`  | `fsRead(handle: string, offset?: number, length?: number): Promise<Uint8Array>`  | `Promise<Uint8Array>`                   | Read up to `length` bytes (default 4 MB) from `offset`. Empty array = EOF.         |
+| `fsWrite` | `fsWrite(handle: string, data: Uint8Array): Promise<number>`                     | `Promise<number>`                       | Write raw bytes to a write handle. Resolves to the number of bytes written.       |
+| `fsClose` | `fsClose(handle: string, mode: 'r' \| 'w'): Promise<void>`                        | `Promise<void>`                         | Close a handle. `mode` must match the mode passed to `fsOpen`.                    |
+
+**Convenience wrappers** (open/read/write/close handled internally)
+
+| Method          | Signature                                             | Returns             | Description                               |
+| --------------- | ---------------------------------------------------- | ------------------- | ----------------------------------------- |
+| `fsReadString`  | `fsReadString(path: string): Promise<string>`         | `Promise<string>`   | Read an entire file as a UTF-8 string.    |
+| `fsWriteString` | `fsWriteString(path: string, text: string): Promise<void>` | `Promise<void>` | Write a UTF-8 string to a file (overwrites). |
+| `fsReadJson`    | `fsReadJson<T = any>(path: string): Promise<T>`       | `Promise<T>`        | Read and parse a JSON file.               |
+| `fsWriteJson`   | `fsWriteJson(path: string, obj: any): Promise<void>`  | `Promise<void>`     | Serialize an object to JSON and write it. |
+
+**Directory & metadata**
+
+| Method       | Signature                                                                                                        | Returns                                       | Description                                                                                  |
+| ------------ | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `fsListDir`  | `fsListDir(path?: string): Promise<{ entries: Array<{ name; type: 'file' \| 'dir'; size?; modified? }>; count }>` | `Promise<{ entries; count }>`                | List immediate children (default: store root).                                              |
+| `fsStat`     | `fsStat(path: string): Promise<{ exists: boolean; type?: 'file' \| 'dir'; size?; modified? }>`                    | `Promise<{ exists; type?; size?; modified? }>` | File/dir metadata (`size`/`modified` for files only).                                        |
+| `fsMkdir`    | `fsMkdir(path: string): Promise<void>`                                                                          | `Promise<void>`                               | Create a directory.                                                                         |
+| `fsRmdir`    | `fsRmdir(path: string, recursive?: boolean): Promise<void>`                                                     | `Promise<void>`                               | Remove a directory. `recursive` (default `false`) deletes contents.                         |
+| `fsRename`   | `fsRename(oldPath: string, newPath: string): Promise<void>`                                                     | `Promise<void>`                               | Rename or move a file/directory (copy+delete on object stores; recursive for directories).  |
+| `fsDelete`   | `fsDelete(path: string): Promise<void>`                                                                         | `Promise<void>`                               | Delete a file.                                                                              |
+
+**Direct URL**
+
+| Method     | Signature                                                     | Returns           | Description                                                                                                                                                                                                                        |
+| ---------- | ------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fsGetUrl` | `fsGetUrl(path: string, expiresIn?: number, downloadName?: string): Promise<string>` | `Promise<string>` | Time-limited HTTP(S) URL for direct browser access. Cloud backends (S3/Azure) return a presigned/SAS URL; the local filesystem backend returns a JWT-signed `/task/fetch` URL. Served **inline** by default (use as an `<img>`/`<video>`/`<audio>` source). Pass `downloadName` to force a download with that filename via `Content-Disposition: attachment` — the only reliable way to set the download filename for cross-origin cloud URLs (where the `<a download>` attribute is ignored). `expiresIn` is in seconds (default 3600). |
+
+**Examples:**
+
+```typescript
+// Strings and JSON (wrappers manage the handle for you)
+await client.fsWriteString('notes/todo.txt', 'buy milk');
+const text = await client.fsReadString('notes/todo.txt');
+await client.fsWriteJson('config/app.json', { debug: true });
+const cfg = await client.fsReadJson<{ debug: boolean }>('config/app.json');
+
+// Browse and inspect
+const { entries } = await client.fsListDir('reports');
+for (const e of entries) console.log(e.name, e.type);
+
+// Streaming binary upload via a write handle (4 MB chunks)
+const { handle } = await client.fsOpen('uploads/video.mp4', 'w');
+try {
+	const chunkSize = 4 * 1024 * 1024;
+	for (let offset = 0; offset < file.size; offset += chunkSize) {
+		const chunk = new Uint8Array(await file.slice(offset, offset + chunkSize).arrayBuffer());
+		await client.fsWrite(handle, chunk);
+	}
+} finally {
+	await client.fsClose(handle, 'w');
+}
+
+// Inline URL for streaming in a browser (<video>/<img> src)
+const streamUrl = await client.fsGetUrl('uploads/video.mp4', 600);
+
+// Force a download with a friendly filename (works cross-origin on S3/Azure too)
+const downloadUrl = await client.fsGetUrl('uploads/video.mp4', undefined, 'my video.mp4');
 ```
 
 ### Events
@@ -475,7 +548,7 @@ await client.disconnect();
 
 - [Documentation](https://docs.rocketride.org/)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
-- [Discord](https://discord.gg/9hr3tdZmEG)
+- [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
 
 ## License

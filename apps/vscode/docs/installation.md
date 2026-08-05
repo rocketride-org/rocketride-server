@@ -15,10 +15,10 @@ sidebar_position: 2
 
 On first launch, the extension shows a **Welcome** page to guide you through setup:
 
-1. **Choose a connection mode** — Cloud, on-premises, or local.
-2. **Enter your server URL** — For on-premises or local mode (default: `http://localhost:5565`).
-3. **Enter your API key** — Your RocketRide authentication token. This is stored securely in VS Code's secret storage.
-4. **Click Connect** — The extension tests the connection and shows status in the status bar.
+1. **Choose a connection mode**: Cloud, on-premises, or local.
+2. **Enter your server URL**: For on-premises or local mode (default: `http://localhost:5565`).
+3. **Enter your API key**: Your RocketRide authentication token. This is stored securely in VS Code's secret storage.
+4. **Click Connect**: The extension tests the connection and shows status in the status bar.
 
 After initial setup, the extension auto-connects on startup.
 
@@ -30,7 +30,7 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.connectionMode` | — | Connection mode: `cloud`, `onprem`, or `local` |
+| `rocketride.connectionMode` | - | Connection mode: `cloud`, `onprem`, or `local` |
 | `rocketride.hostUrl` | `http://localhost:5565` | RocketRide server URL |
 | `rocketride.deployment.hostUrl` | `https://cloud.rocketride.ai` | Cloud deployment API URL |
 
@@ -40,19 +40,20 @@ Open VS Code settings (`Ctrl+,` / `Cmd+,`) and search for `rocketride` to config
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.defaultPipelinePath` | — | Default directory for new pipeline files |
-| `rocketride.pipelineRestartBehavior` | — | Restart behavior: `auto`, `manual`, or `prompt` |
+| `rocketride.defaultPipelinePath` | - | Default directory for new pipeline files |
+| `rocketride.pipelineRestartBehavior` | - | Restart behavior: `auto`, `manual`, or `prompt` |
+| `rocketride.taskArguments` | - | Additional command-line arguments passed to each pipeline task |
+| `rocketride.pipelineDebugOutput` | `false` | Enable full debug output for pipeline tasks (`--trace=debugOut`) |
 
 ### Local Engine
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `rocketride.local.engineVersion` | `latest` | Engine version: `latest`, `prerelease`, or a specific tag |
-| `rocketride.engineArgs` | — | Additional startup arguments for the local engine |
 
 ### Integrations
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `rocketride.integrations.copilot` | — | Enable GitHub Copilot integration for pipeline development |
-| `rocketride.integrations.cursor` | — | Enable Cursor IDE integration |
+| `rocketride.integrations.copilot` | - | Enable GitHub Copilot integration for pipeline development |
+| `rocketride.integrations.cursor` | - | Enable Cursor IDE integration |

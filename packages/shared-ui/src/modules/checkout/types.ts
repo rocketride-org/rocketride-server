@@ -42,45 +42,112 @@ export interface PlanAction {
 /**
  * A single plan card shown in the CheckoutModal plan picker.
  *
- * Plans come from Stripe via the server's ``prices`` subcommand.
- * The ``action`` field (from Stripe price metadata) determines what
- * happens when the user clicks the card — checkout or navigate away.
+ * Mirrors the ``app_prices`` DB row shape returned by ``_price_to_dict``.
+ * The UI reads display fields from ``metadata`` (description, action, order, etc.).
  */
 export interface CheckoutPlan {
+	/** Internal price UUID. */
+	id: string;
+
+	/** App identifier. */
+	appId: string;
+
 	/** Stripe price_* identifier. Passed to the checkout session creation. */
-	priceId: string;
+	stripePriceId: string;
 
-	/** Human-readable label shown in the plan selector (e.g. "Monthly", "Annual"). */
-	label: string;
+	/** Human-readable tier label (e.g. "Starter", "Pro", "3,700 tokens"). */
+	nickname: string;
 
-	/** Billing interval — used for the toggle and to group plans. Empty or 'one_time' for non-recurring. */
+	/** Price in smallest currency unit (e.g. cents for USD). */
+	amountCents: number;
+
+	/** ISO 4217 currency code. */
+	currency: string;
+
+	/** Billing interval: "month", "year", or "one_time". */
 	interval: 'month' | 'year' | 'one_time' | '';
 
-	/** Display price string (e.g. "$29 / mo", "$276 / yr", "Free", "Custom"). */
-	amount: string;
+	/** Full plan metadata from the app manifest (description, action, order, kind, credits, labels, seats, features, etc.). */
+	metadata?: Record<string, any> | null;
 
-	/** Feature description lines from Stripe price metadata, displayed on the plan card. */
-	description?: string[] | null;
+	/** Whether the price is active. */
+	isActive: boolean;
 
-	/**
-	 * Alternative click action. When present, clicking the card opens
-	 * a link or mailto instead of proceeding to Stripe checkout.
-	 * Plans without an action go through the normal checkout flow.
-	 */
-	action?: PlanAction | null;
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
+}
 
-	/**
-	 * Sort order for card positioning.  Lower values appear first.
-	 * Spaced 100 apart by convention (Free=100, Starter=200, …, Enterprise=900).
-	 * Defaults to 500 when not set in Stripe metadata.
-	 */
-	order?: number;
+// =============================================================================
+// PROMO CODES
+// =============================================================================
 
-	/** Credit grants config from Stripe price metadata, or null. */
-	credits?: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
+/**
+ * UI-local result of validating a promo code via the host callback.
+ *
+ * Mirrors the SDK's `PromoValidation` response shape. A grant/hackathon
+ * code is recognisable by `appId` + `creditsGranted`; a discount-only code
+ * has neither and applies to whichever plan is selected.
+ */
+export interface PromoValidation {
+	/** Whether the code resolved to an active Stripe promotion code. */
+	valid: boolean;
 
-	/** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
-	creditLabels?: Record<string, string> | null;
+	/** Human-readable failure reason when `valid` is false. */
+	reason?: string;
+
+	/** Canonical code string as stored in Stripe. */
+	code?: string;
+
+	/** Human-readable description, e.g. "25% off for 3 months". */
+	description?: string;
+
+	/** Percentage discount (e.g. 25 or 100), if percent-based. */
+	percentOff?: number | null;
+
+	/** Fixed discount in cents, if amount-based. */
+	amountOffCents?: number | null;
+
+	/** ISO currency for `amountOffCents`. */
+	currency?: string | null;
+
+	/** Coupon duration: 'once' | 'repeating' | 'forever'. */
+	duration?: string | null;
+
+	/** Months the discount repeats for (duration === 'repeating'). */
+	durationInMonths?: number | null;
+
+	/** Credits granted on redemption ({resource: amount}) — grant codes only. */
+	creditsGranted?: Record<string, number> | null;
+
+	/** Target app for a grant code — presence marks a hackathon/grant code. */
+	appId?: string | null;
+
+	/** List price in cents of the plan passed as priceId (if any). */
+	amountCents?: number;
+
+	/** First-invoice price in cents after the discount (if priceId given). */
+	discountedAmountCents?: number;
+}
+
+/**
+ * UI-local result of redeeming a credit-grant code via the host callback.
+ * Mirrors the SDK's `PromoRedemption` response shape.
+ */
+export interface PromoRedemption {
+	/** True when the redemption succeeded. */
+	redeemed: boolean;
+
+	/** 'subscribed' = new $0 subscription; 'credits_only' = already subscribed. */
+	mode: 'subscribed' | 'credits_only';
+
+	/** App the code targets. */
+	appId: string;
+
+	/** Subscription status after redemption (e.g. 'active'). */
+	status?: string;
+
+	/** Credits granted ({resource: amount}). */
+	credits: Record<string, number>;
 }
 
 // =============================================================================
@@ -88,12 +155,39 @@ export interface CheckoutPlan {
 // =============================================================================
 
 /**
+ * Promo-code callbacks — both or neither.
+ *
+ * The modal's grant-code path needs `onRedeemPromoCode` whenever
+ * `onValidatePromoCode` resolves a hackathon code, so providing only one
+ * of the pair is a misconfiguration; this union makes it a compile-time
+ * error instead of a silent wrong-path fallback.
+ */
+export type CheckoutModalPromoProps =
+	| {
+		/**
+		 * Resolves a promo code without side effects. Providing the pair
+		 * renders a Promo Code box under the plan cards.
+		 */
+		onValidatePromoCode: (code: string, priceId?: string) => Promise<PromoValidation>;
+
+		/**
+		 * Redeems a credit-grant (hackathon) code — $0 subscription plus
+		 * immediate credits, no plan selection or payment step.
+		 */
+		onRedeemPromoCode: (code: string) => Promise<PromoRedemption>;
+	}
+	| {
+		onValidatePromoCode?: undefined;
+		onRedeemPromoCode?: undefined;
+	};
+
+/**
  * Props for the host-agnostic CheckoutModal component.
  *
  * All server communication is delegated to the host via callbacks —
  * the component never imports the SDK or any transport layer directly.
  */
-export interface CheckoutModalProps {
+export interface CheckoutModalBaseProps {
 	/** Display name of the app being subscribed to (e.g. "RocketRide"). */
 	appName: string;
 
@@ -103,14 +197,34 @@ export interface CheckoutModalProps {
 	/** Stripe publishable key (pk_test_* or pk_live_*). */
 	stripePublishableKey: string;
 
+	/**
+	 * When set, the modal skips the plan-picker step and goes straight to the
+	 * payment step for this plan (creating the subscription immediately). Omit
+	 * (the default) to show the picker first. Only the web pricing page sets
+	 * this; the in-app and VS Code extension flows leave it undefined and keep
+	 * the pick-a-plan → Continue UX.
+	 */
+	preselectedPlan?: CheckoutPlan;
+
+	/**
+	 * Discount code (already validated on the pricing page) to apply to a
+	 * preselected-plan checkout. Seeds the applied promo so the auto-advanced
+	 * payment step shows and charges the discounted amount.
+	 */
+	preselectedPromo?: PromoValidation | null;
+
 	/** Fetches available subscription plans from the server. */
 	onFetchPlans: () => Promise<CheckoutPlan[]>;
 
 	/**
 	 * Creates a Stripe subscription on the server and returns the
 	 * client secret needed by Stripe Elements to confirm the payment.
+	 *
+	 * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
+	 * promotion code) — the subscription is already active and the payment
+	 * step is skipped entirely.
 	 */
-	onCreateCheckout: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onCreateCheckout: (priceId: string, promotionCode?: string) => Promise<{ clientSecret: string | null; subscriptionId: string; status?: string }>;
 
 	/**
 	 * Notifies the server that payment was confirmed client-side.
@@ -123,4 +237,15 @@ export interface CheckoutModalProps {
 
 	/** Called when the user dismisses the modal without completing checkout. */
 	onClose: () => void;
+
+	/**
+	 * Overrides how a plan's action CTA (Free → link, Enterprise → mailto) is
+	 * opened. The browser default (window.open / mailto) works in the SaaS web
+	 * app; the VS Code extension passes a handler that routes through the host,
+	 * since webview navigation is sandboxed.
+	 */
+	onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }
+
+/** Full CheckoutModal props: base props plus the paired promo callbacks. */
+export type CheckoutModalProps = CheckoutModalBaseProps & CheckoutModalPromoProps;

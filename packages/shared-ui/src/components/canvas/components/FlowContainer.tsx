@@ -35,7 +35,7 @@
 import { ReactElement, ReactNode } from 'react';
 import { ReactFlowProvider } from '@xyflow/react';
 
-import { IProject, IValidateResponse, ITaskStatus } from '../types';
+import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from '../types';
 
 import { FlowProvider } from '../context/FlowProvider';
 
@@ -74,8 +74,8 @@ export interface IFlowContainerProps {
 	/** Map of connector provider to display title. */
 	inventoryConnectorTitleMap?: Record<string, string>;
 
-	/** Validates the pipeline. */
-	handleValidatePipeline?: (pipeline: IProject) => Promise<IValidateResponse>;
+	/** Validates a full pipeline or a single component. */
+	handleValidatePipeline?: (pipeline: IValidatePipelinePayload) => Promise<IValidateResponse>;
 
 	/** Called when pipeline content changes (dirty tracking). */
 	onContentChanged?: (project: IProject) => void;
@@ -89,14 +89,20 @@ export interface IFlowContainerProps {
 	/** Host-provided redo callback. */
 	onRedo?: () => void;
 
+	/** OAuth broker return URL for hosts that intercept a deep link (e.g. VS Code). */
+	oauthReturnUrl?: string;
+
+	/** Opens an external URL in the host's system browser to start an OAuth login. */
+	onOpenExternal?: (url: string) => void;
+
+	/** OAuth tokens delivered out-of-band by the host (e.g. VS Code deep-link callback). */
+	pendingOAuthTokens?: { tokens: string; state: string };
+
+	/** Clears `pendingOAuthTokens` once a config panel has consumed them. */
+	clearPendingOAuthTokens?: () => void;
+
 	/** Opens a URL in the host browser. */
 	onOpenLink?: (url: string, displayName?: string) => void;
-
-	/** Host-provided preference reader. */
-	getPreference?: (key: string) => unknown;
-
-	/** Host-provided preference writer. */
-	setPreference?: (key: string, value: unknown) => void;
 
 	/** Register panel actions with the host (e.g. for guided tour). */
 	onRegisterPanelActions?: (actions: Record<string, unknown>) => void;
@@ -136,6 +142,7 @@ export interface IFlowContainerProps {
 	onSave?: () => void;
 	onExport?: () => void;
 
+
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
 
@@ -153,12 +160,48 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, getPreference, setPreference, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
-			<div style={{ position: 'relative', width: '100%', height: '100%' }} key={`${project.project_id ?? 'new'}-${project.name}`}>
-				<FlowProvider project={project} projectId={project.project_id ?? ''} isReadonly={isReadonly} taskStatuses={taskStatuses} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} servicesJson={servicesJson} servicesJsonError={servicesJsonError} inventory={inventory} inventoryConnectorTitleMap={inventoryConnectorTitleMap} handleValidatePipeline={handleValidatePipeline} onContentChanged={onContentChanged} onViewportChange={onViewportChange} onUndo={onUndo} onRedo={onRedo} oauth2RootUrl={oauth2RootUrl} onOpenLink={onOpenLink} getPreference={getPreference} setPreference={setPreference} googlePickerDeveloperKey={googlePickerDeveloperKey} googlePickerClientId={googlePickerClientId} onRunPipeline={onRunPipeline} onStopPipeline={onStopPipeline} onOpenStatus={onOpenStatus} serverHost={serverHost} isConnected={isConnected} isSubscribed={isSubscribed} initialViewport={initialViewport} isDirty={isDirty} isNew={isNew} onSave={onSave} onExport={onExport} envKeys={envKeys}>
+			<div style={{ position: 'relative', width: '100%', height: '100%' }} key={`${project.project_id ?? 'new'}-${(project as { name?: string }).name}`}>
+				<FlowProvider
+					project={project}
+					projectId={project.project_id ?? ''}
+					isReadonly={isReadonly}
+					taskStatuses={taskStatuses}
+					componentPipeCounts={componentPipeCounts}
+					totalPipes={totalPipes}
+					servicesJson={servicesJson}
+					servicesJsonError={servicesJsonError}
+					inventory={inventory}
+					inventoryConnectorTitleMap={inventoryConnectorTitleMap}
+					handleValidatePipeline={handleValidatePipeline}
+					onContentChanged={onContentChanged}
+					onViewportChange={onViewportChange}
+					onUndo={onUndo}
+					onRedo={onRedo}
+					oauth2RootUrl={oauth2RootUrl}
+					oauthReturnUrl={oauthReturnUrl}
+					onOpenExternal={onOpenExternal}
+					pendingOAuthTokens={pendingOAuthTokens}
+					clearPendingOAuthTokens={clearPendingOAuthTokens}
+					onOpenLink={onOpenLink}
+					googlePickerDeveloperKey={googlePickerDeveloperKey}
+					googlePickerClientId={googlePickerClientId}
+					onRunPipeline={onRunPipeline}
+					onStopPipeline={onStopPipeline}
+					onOpenStatus={onOpenStatus}
+					serverHost={serverHost}
+					isConnected={isConnected}
+					isSubscribed={isSubscribed}
+					initialViewport={initialViewport}
+					isDirty={isDirty}
+					isNew={isNew}
+					onSave={onSave}
+					onExport={onExport}
+					envKeys={envKeys}
+				>
 					{children}
 				</FlowProvider>
 			</div>

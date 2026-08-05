@@ -287,6 +287,14 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
         for (auto &[id, comp] : comps) {
             for (auto &input : comp.inputs) {
                 for (auto &output : comp.outputs) {
+                    // Unregistered provider (e.g. a debug-only node in a release
+                    // build) — error instead of dereferencing a null def.
+                    if (!comp.def)
+                        return APERR(Ec::InvalidParam, "Component", id,
+                                     "references a provider with no registered "
+                                     "service definition; it is unavailable in "
+                                     "this engine build (e.g. a debug-only node)");
+
                     if (!comp.def->serviceDefinition["lanes"].isMember(
                             input->name))
                         return APERR(Ec::InvalidParam, "Component", id,
@@ -338,10 +346,17 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
             return false;
         };
 
-        // Mark the source component as visited
+        // Mark the source component as visited, INCLUDING its
+        // control-attached components — a control edge is wiring exactly
+        // like a lane (lane targets get the same treatment in the DFS
+        // above), and an invoke-capable source (the 'tools' endpoint) has
+        // members with no data lanes at all. Keeps the reported chain in
+        // agreement with what generatePipelineStack actually instantiates.
         for (auto &[_, comp] : comps) {
             if (comp.id == sourceId) {
                 comp.visited = true;
+                for (auto *controlComp : comp.controls)
+                    controlComp->visited = true;
                 break;
             }
         }
@@ -525,6 +540,18 @@ Error PipelineConfig::upgradeComponent(json::Value &component,
 
             component["provider"] = provider;
             if (config.isMember("type")) config["type"] = provider;
+        }
+    }
+
+    // Graph nodes were renamed when they moved onto the graph base class, so
+    // pipelines saved with the old provider still resolve to the new service.
+    if (version < 2) {
+        if (provider == "tool_falkordb") {
+            component["provider"] = "graph_falkordb";
+            if (config.isMember("type")) config["type"] = "graph_falkordb";
+        } else if (provider == "db_neo4j") {
+            component["provider"] = "graph_neo4j";
+            if (config.isMember("type")) config["type"] = "graph_neo4j";
         }
     }
 

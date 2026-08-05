@@ -50,7 +50,7 @@ export function initials(name: string, email: string): string {
  * @returns A CSS hex color string.
  */
 export function avatarColor(seed: string): string {
-	const colors = ['#f7901f', '#3794ff', '#a78bfa', '#34d399', '#f59e0b', '#ec4899', '#14b8a6'];
+	const colors = ['#4a6fa5', '#6b7b8d', '#5b7a6e', '#7c6d82', '#5c798f', '#6e7f6b', '#8a7968'];
 	// Polynomial rolling hash — keeps the result in unsigned 32-bit range via >>> 0.
 	let h = 0;
 	for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
@@ -58,15 +58,35 @@ export function avatarColor(seed: string): string {
 }
 
 /**
+ * Parses a wire datetime string per the platform contract: server datetimes
+ * are UTC, but the wire carries them ZONE-LESS ('2026-07-16T19:40:45') and
+ * JavaScript parses a zone-less datetime as LOCAL — silently skewing every
+ * timestamp by the viewer's zone offset. Zone-less strings are stamped 'Z'
+ * before parsing; strings that already carry a zone pass through.
+ *
+ * @param iso - An ISO 8601 wire string.
+ * @returns The parsed Date (UTC instant).
+ */
+export function parseWireDate(iso: string): Date {
+	const trimmed = iso.trim();
+	// Already zoned (Z or ±hh:mm offset)? Parse verbatim.
+	if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) return new Date(trimmed);
+	// Zone-less datetime: normalize the separator and stamp UTC.
+	if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(trimmed)) return new Date(`${trimmed.replace(' ', 'T')}Z`);
+	return new Date(trimmed);
+}
+
+/**
  * Converts an ISO timestamp (or null) into a human-readable relative time
- * string such as "Just now", "5m ago", "3h ago", or "2d ago".
+ * string such as "Just now", "5m ago", "3h ago", or "2d ago". Parses through
+ * {@link parseWireDate}, so zone-less UTC wire values read correctly.
  *
  * @param iso - An ISO 8601 date string, or null / undefined for never.
  * @returns A concise relative time string.
  */
 export function relativeTime(iso: string | null): string {
 	if (!iso) return 'Never';
-	const diff = Date.now() - new Date(iso).getTime();
+	const diff = Date.now() - parseWireDate(iso).getTime();
 	const m = Math.floor(diff / 60000);
 	if (m < 1) return 'Just now';
 	if (m < 60) return `${m}m ago`;
@@ -258,18 +278,14 @@ export const RowIcon: React.FC<{ children: React.ReactNode }> = ({ children }) =
  * footer action row. Uses commonStyles.modalOverlay for the backdrop.
  *
  * @param title    - Text shown in the modal header.
- * @param onClose  - Called when the user clicks the close button or the backdrop.
+ * @param onClose  - Called when the user clicks the close button.
  * @param footer   - Action buttons rendered in the modal footer.
  * @param children - Body content rendered inside the modal.
  */
 export const Modal: React.FC<{ title: string; onClose: () => void; footer: React.ReactNode; children: React.ReactNode }> = ({ title, onClose, footer, children }) => (
-	<div
-		style={commonStyles.modalOverlay}
-		onClick={(e) => {
-			// Clicking the outer overlay (but not the card itself) dismisses the modal.
-			if (e.target === e.currentTarget) onClose();
-		}}
-	>
+	/* Backdrop is inert: dismissal is deliberate-only (close button / footer
+	   actions) per the 2026-07-08 design decision — outside clicks must NOT close. */
+	<div style={commonStyles.modalOverlay}>
 		<div style={commonStyles.modalDialog}>
 			<div style={commonStyles.modalHeader}>
 				<span style={{ fontSize: 14, fontWeight: 700, color: 'var(--rr-text-primary)' }}>{title}</span>

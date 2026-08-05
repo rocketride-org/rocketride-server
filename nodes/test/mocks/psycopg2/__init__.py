@@ -154,7 +154,7 @@ class MockCursor:
 
         # Apply LIMIT
         limit = self._extract_limit(query, params)
-        if limit:
+        if limit is not None:
             results = results[:limit]
 
         self._results = results
@@ -331,7 +331,7 @@ class MockCursor:
         """Check if data matches filter parameters."""
         # Check isDeleted
         is_deleted = data.get('isdeleted', False)
-        if False in params and is_deleted:
+        if any(p is False for p in params) and is_deleted:
             return False
         return True
 

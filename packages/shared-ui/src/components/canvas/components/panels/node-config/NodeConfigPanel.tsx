@@ -22,10 +22,16 @@
 // =============================================================================
 
 /**
- * NodeConfigPanel — Side panel for editing a node's configuration.
+ * NodeConfigPanel — a node's configuration editor, a {@link DetailPanel} record
+ * panel that opens directly in its FORM (there is no read-only inspect mode: a
+ * node's identity IS its configuration). `contained` anchors it to the canvas
+ * surface; the footer follows the record-panel contract — [Save] MATERIALIZES on
+ * the first change to the left of a stationary [Cancel], a dirty exit
+ * (Cancel / X / Escape) raises the stock discard confirm, and the panel is
+ * undismissable while a validate is in flight.
  *
- * Sections:
- *   1. **Details** — Node name.
+ * Body:
+ *   1. **Details** — node name (or, for annotations, content + colours).
  *   2. **Configuration** — RJSF form from the service's Pipe schema.
  *
  * On save:
@@ -37,141 +43,117 @@
  * tokens are applied on panel open via useOAuthCallbacks.
  */
 
-import { ReactElement, useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import { ReactElement, useRef, useState, useEffect, useMemo, useCallback, CSSProperties } from 'react';
 import { RJSFValidationError } from '@rjsf/utils';
 import Form from '@rjsf/core';
 import validator from '@rjsf/validator-ajv8';
 
-import { TextField } from '@mui/material';
 import { IFormData } from '../../../types';
 import { IServiceSchema } from '../../../types';
 import ThemedForm, { translate } from '../../rjsf-widgets/theme';
 import { getSecuredFormData, removeRequired, setUiSchemaProperty } from '../../../util/rjsf';
+import { Icon } from '../../../util/Icon';
 
 import { useFlowGraph } from '../../../context/FlowGraphContext';
+import type { FlowNode } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
 import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
-import { INode, IService, IServiceCatalog, IProject, PIPELINE_SCHEMA_VERSION } from '../../../types';
+import { IService, IServiceCatalog, IValidatePipelinePayload, PIPELINE_SCHEMA_VERSION } from '../../../types';
 import { getComponentFromNode } from '../../../util/graph';
 
 import { IAuthTokensRef, persistTokensFromFormData, mergeAuthTokensIntoFormData, persistOAuthTokensAndSave } from './authTokenHelpers';
 import { useOAuthCallbacks } from './useOAuthCallbacks';
+import { DetailPanel } from '../../../../detail-panel/DetailPanel';
+import { Button } from '../../../../button/Button';
+import { Banner } from '../../../../banner/Banner';
+import { ConfirmDialog } from '../../../../modal/ConfirmDialog';
 import { commonStyles } from '../../../../../themes/styles';
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 800;
-const DEFAULT_WIDTH = 400;
+/** Initial drawer width; the stock resize handle takes it from here. */
+const PANEL_WIDTH = 460;
+
+/** Workspace-preference key the drawer width is remembered under. */
+const WIDTH_PERSIST_KEY = 'panelDetailConfigWidth';
 
 // =============================================================================
 // Styles
 // =============================================================================
 
 const styles = {
-	backdrop: {
-		position: 'absolute' as const,
-		inset: 0,
-		zIndex: 29,
-	},
-	container: {
-		position: 'absolute' as const,
-		top: 0,
-		right: 0,
-		bottom: 0,
-		display: 'flex',
-		zIndex: 30,
-		pointerEvents: 'auto' as const,
-	},
-	panel: {
-		position: 'relative' as const,
-		flex: 1,
-		display: 'flex',
-		flexDirection: 'column' as const,
-		overflow: 'hidden',
-		backgroundColor: 'var(--rr-bg-widget)',
-		color: 'var(--rr-fg-widget)',
-		fontFamily: 'var(--rr-font-family-widget)',
-		fontSize: 'var(--rr-font-size-widget)',
-	},
-	header: {
+	// Service-icon avatar filling the DetailPanel's 42px round slot.
+	avatar: {
+		width: '100%',
+		height: '100%',
 		display: 'flex',
 		alignItems: 'center',
-		justifyContent: 'space-between',
-		height: '36px',
-		padding: '0 8px 0 12px',
-		backgroundColor: 'var(--rr-bg-widget-header)',
-		borderBottom: '1px solid var(--rr-border)',
-		flexShrink: 0,
-	},
-	headerTitle: commonStyles.labelUppercase,
-	closeButton: {
-		background: 'none',
-		border: 'none',
-		color: 'inherit',
-		cursor: 'pointer',
-		padding: '4px',
-		fontSize: '16px',
-		lineHeight: 1,
-		opacity: 0.7,
-	},
-	body: {
-		flex: 1,
+		justifyContent: 'center',
+		background: 'var(--rr-bg-surface-alt)',
+	} as CSSProperties,
+
+	avatarIcon: {
+		width: 22,
+		height: 22,
+	} as CSSProperties,
+
+	// Spacing wrapper for the in-panel error Banner at the top of the body.
+	bannerWrap: {
+		marginBottom: 12,
+	} as CSSProperties,
+
+	// One labelled field block.
+	field: {
+		marginBottom: 14,
+	} as CSSProperties,
+
+	fieldLabel: {
+		...commonStyles.labelUppercase,
+		display: 'block',
+		marginBottom: 5,
+	} as CSSProperties,
+
+	// Annotation content textarea (grows vertically only).
+	textarea: {
+		...commonStyles.inputField,
+		minHeight: 90,
+		resize: 'vertical',
+	} as CSSProperties,
+
+	// Annotation colour-picker row.
+	colorRow: {
 		display: 'flex',
-		flexDirection: 'column' as const,
-		overflow: 'hidden',
-		padding: '12px',
-	},
-	scrollArea: {
-		flex: 1,
-		overflowY: 'auto' as const,
-		overflowX: 'hidden' as const,
-		minHeight: 0,
-		paddingTop: '8px',
-	},
-	footer: { flexShrink: 0, paddingTop: '8px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '10px' },
-	footerHint: { fontSize: '11px', color: 'var(--rr-text-disabled)', marginRight: 'auto' },
-	errorBox: {
+		gap: 16,
+		alignItems: 'flex-end',
+	} as CSSProperties,
+
+	colorInput: {
 		width: '100%',
-		padding: '10px 14px',
-		marginBottom: '8px',
-		fontSize: '12px',
-		borderRadius: '4px',
-		boxSizing: 'border-box' as const,
-		wordBreak: 'break-word' as const,
-		overflowWrap: 'anywhere' as const,
-		backgroundColor: 'var(--vscode-inputValidation-errorBackground, rgba(244, 67, 54, 0.1))',
-		color: 'var(--vscode-inputValidation-errorForeground, #f44336)',
-		border: '1px solid var(--vscode-inputValidation-errorBorder, #f44336)',
-	},
-	resizeHitArea: {
-		position: 'absolute' as const,
-		left: 0,
-		top: 0,
-		width: 6,
-		height: '100%',
-		cursor: 'col-resize',
-		zIndex: 11,
-	},
-	resizeLine: {
-		position: 'absolute' as const,
-		left: 0,
-		top: 0,
-		width: 4,
-		height: '100%',
-		background: 'var(--rr-sash-hover)',
-	},
+		height: 32,
+		border: '1px solid var(--rr-border-input)',
+		borderRadius: 5,
+		cursor: 'pointer',
+		padding: 0,
+		background: 'var(--rr-bg-input)',
+	} as CSSProperties,
+
+	// Env-var autocomplete hint under the form.
+	envHint: {
+		...commonStyles.textMuted,
+		marginTop: 12,
+	} as CSSProperties,
 };
 
 // =============================================================================
 // Props
 // =============================================================================
 
+/** Props for {@link NodeConfigPanel}. */
 interface INodeConfigPanelProps {
-	/** The node being edited. */
-	node: INode;
+	/** The live ReactFlow node being edited. */
+	node: FlowNode;
 	/** Close the panel. */
 	onClose: () => void;
 }
@@ -180,6 +162,12 @@ interface INodeConfigPanelProps {
 // Component
 // =============================================================================
 
+/**
+ * Renders the node configuration drawer.
+ *
+ * @param props - {@link INodeConfigPanelProps}.
+ * @returns The DetailPanel drawer element.
+ */
 export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps): ReactElement {
 	const formRef = useRef<Form | null>(null);
 
@@ -188,8 +176,10 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 
 	// --- Context ------------------------------------------------------------
 	const { updateNode, onContentUpdated } = useFlowGraph();
-	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId, envKeys = [] } = useFlowProject();
-	const { getPreference, setPreference, isLocked } = useFlowPreferences();
+	const { servicesJson, handleValidatePipeline, currentProject: _currentProject, googlePickerDeveloperKey, googlePickerClientId, pendingOAuthTokens, clearPendingOAuthTokens, envKeys = [] } = useFlowProject();
+	// The drawer width rides the shared PrefsContext (provided by the canvas) via
+	// DetailPanel's persistKey — the same workspace store, no per-panel adapter.
+	const { isLocked } = useFlowPreferences();
 
 	// --- Annotation detection -----------------------------------------------
 	const isAnnotation = node.data.provider === 'annotation';
@@ -198,7 +188,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const service: IService | undefined = (servicesJson as IServiceCatalog)?.[node.data.provider];
 
 	// --- OAuth callback helpers (context-free) ------------------------------
-	const { applyOAuthCallbacks, clearSecureParamsFromUrl } = useOAuthCallbacks();
+	const { applyOAuthCallbacks, applyGoogleTokens, clearSecureParamsFromUrl } = useOAuthCallbacks();
 
 	// --- Schema from the service catalog ------------------------------------
 	const schema = useMemo((): IServiceSchema | undefined => {
@@ -216,6 +206,9 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 	const [isDirty, setIsDirty] = useState(false);
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [validationError, setValidationError] = useState<string | null>(null);
+	// Footer-Cancel discard confirm (the DetailPanel guards X / Escape itself;
+	// the footer Cancel routes through this local gate per the standard).
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
 
 	// --- Annotation-specific state ------------------------------------------
 	const [annotationContent, setAnnotationContent] = useState(() => {
@@ -267,6 +260,42 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [node.id]);
 
+	// --- Apply OAuth tokens delivered out-of-band by the host (VS Code) ------
+	// Web hosts return tokens in the page URL (handled above); VS Code can't
+	// receive a web redirect, so the host intercepts the broker's deep link and
+	// pushes the tokens down via `pendingOAuthTokens`. Apply them to the node
+	// that started the login, then clear so they aren't re-applied.
+	useEffect(() => {
+		if (!pendingOAuthTokens) return;
+		const { tokens, state } = pendingOAuthTokens;
+
+		// Brokers echo the originating node_id in `state`; ignore tokens meant
+		// for another node. Malformed state falls through to the open panel.
+		let targetNodeId: string | undefined;
+		try {
+			targetNodeId = (JSON.parse(state || '{}') as { node_id?: string }).node_id;
+		} catch {
+			/* malformed state */
+		}
+		if (targetNodeId && targetNodeId !== node.id) return;
+
+		// updateNode silently no-ops on a locked graph — surface it and keep
+		// the tokens pending; unlocking re-runs this effect and applies them.
+		if (isLocked) {
+			setValidationError('The canvas is locked — unlock it to apply the Google sign-in tokens.');
+			return;
+		}
+		setValidationError(null);
+
+		const enrichedConfig = applyGoogleTokens(node.data.config ?? {}, tokens, state);
+		persistTokensFromFormData(enrichedConfig, persistedAuthTokens);
+		setFormValues(enrichedConfig);
+		persistOAuthTokensAndSave(node.id, enrichedConfig, updateNode, onContentUpdated).catch((err) => console.error('Error persisting OAuth tokens:', err));
+
+		clearPendingOAuthTokens?.();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [pendingOAuthTokens, node.id, isLocked]);
+
 	// --- RJSF change handler ------------------------------------------------
 	const onChange = useCallback(
 		({ formData }: Partial<{ formData: IFormData }>) => {
@@ -310,7 +339,7 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 					return error;
 				});
 		},
-		[formValues],
+		[formValues]
 	);
 
 	// --- Save: details only (no schema) ------------------------------------
@@ -354,13 +383,14 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 					name: name || undefined,
 				});
 
-				// Server-side validation
+				// Server-side validation — a single-component payload (the
+				// validate endpoint accepts it alongside a full pipeline).
 				if (handleValidatePipeline && updatedNode) {
-					const component = getComponentFromNode(updatedNode as INode);
-					const payload = {
+					const component = getComponentFromNode(updatedNode);
+					const payload: IValidatePipelinePayload = {
 						version: PIPELINE_SCHEMA_VERSION,
 						component,
-					} as unknown as IProject;
+					};
 
 					const resp = await handleValidatePipeline(payload);
 
@@ -398,196 +428,194 @@ export default function NodeConfigPanel({ node, onClose }: INodeConfigPanelProps
 		[node.id, node.data.config, name, updateNode, handleValidatePipeline, clearSecureParamsFromUrl, onContentUpdated, onClose]
 	);
 
-	// --- Resize logic -------------------------------------------------------
-	const storedWidth = (getPreference?.('configPanelWidth') as number) ?? DEFAULT_WIDTH;
-	const [width, setWidth] = useState(storedWidth);
-	const [isResizing, setIsResizing] = useState(false);
-	const [handleHover, setHandleHover] = useState(false);
-	const resizeStartRef = useRef({ x: 0, width: 0 });
+	// --- Save / Cancel routing ----------------------------------------------
 
-	const onResizeMouseDown = useCallback(
-		(e: React.MouseEvent) => {
-			e.preventDefault();
-			setIsResizing(true);
-			resizeStartRef.current = { x: e.clientX, width };
-			document.body.style.cursor = 'col-resize';
-			document.body.style.userSelect = 'none';
-			document.querySelectorAll('iframe').forEach((f) => {
-				(f as HTMLIFrameElement).style.pointerEvents = 'none';
-			});
-		},
-		[width]
-	);
+	/** Footer [Save]: submit the RJSF form when there is a schema, else write details. */
+	const handleSaveClick = useCallback(() => {
+		if (schema) {
+			formRef.current?.submit();
+		} else {
+			handleSaveDetailsOnly();
+		}
+	}, [schema, handleSaveDetailsOnly]);
 
-	useEffect(() => {
-		if (!isResizing) return;
-		const onMove = (e: MouseEvent) => {
-			const delta = resizeStartRef.current.x - e.clientX;
-			setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, resizeStartRef.current.width + delta)));
-		};
-		const onUp = () => {
-			setIsResizing(false);
-			setPreference?.('configPanelWidth', width);
-			document.body.style.cursor = '';
-			document.body.style.userSelect = '';
-			document.querySelectorAll('iframe').forEach((f) => {
-				(f as HTMLIFrameElement).style.pointerEvents = '';
-			});
-		};
-		window.addEventListener('mousemove', onMove);
-		window.addEventListener('mouseup', onUp);
-		document.addEventListener('mouseleave', onUp);
-		return () => {
-			window.removeEventListener('mousemove', onMove);
-			window.removeEventListener('mouseup', onUp);
-			document.removeEventListener('mouseleave', onUp);
-		};
-	}, [isResizing, width, setPreference]);
+	/** Footer [Cancel]: discard-confirm when dirty (the standard's ban on silent discard), else close. */
+	const handleCancelClick = useCallback(() => {
+		if (isDirty) setConfirmDiscard(true);
+		else onClose();
+	}, [isDirty, onClose]);
 
 	// --- Render -------------------------------------------------------------
 
 	const title = isAnnotation ? 'Note' : (service?.title ?? node.data.provider);
-	const disableSave = !isDirty || isSubmitting || isLocked;
+	const saveDisabled = isSubmitting || isLocked;
 
 	return (
 		<>
-			<div style={styles.backdrop} onClick={onClose} />
-			<div className="nopan nodrag" style={{ ...styles.container, width: `${width}px` }}>
-				{/* Resize handle */}
-				<div style={styles.resizeHitArea} onMouseDown={onResizeMouseDown} onMouseEnter={() => setHandleHover(true)} onMouseLeave={() => setHandleHover(false)}>
-					{(handleHover || isResizing) && <div style={styles.resizeLine} />}
-				</div>
-
-				<div style={styles.panel}>
-					{/* Header */}
-					<div style={styles.header}>
-						<span style={styles.headerTitle}>{title}</span>
-						<button style={styles.closeButton} onClick={onClose} title="Close">
-							✕
-						</button>
+			<DetailPanel
+				open
+				contained
+				onClose={onClose}
+				title={title}
+				subtitle={isAnnotation ? undefined : node.data.provider}
+				avatar={!isAnnotation && service?.icon ? <div style={styles.avatar}><Icon name={service.icon} style={styles.avatarIcon} /></div> : undefined}
+				editing
+				dirty={isDirty}
+				busy={isSubmitting}
+				onExitMode={onClose}
+				width={PANEL_WIDTH}
+				persistKey={WIDTH_PERSIST_KEY}
+				footer={
+					<>
+						{/* [Save] materializes on the first change, left of the stationary [Cancel]. */}
+						{isDirty && (
+							<Button variant="primary" small disabled={saveDisabled} onClick={handleSaveClick}>
+								{isSubmitting ? 'Validating…' : 'Save'}
+							</Button>
+						)}
+						<Button variant="ghost" small disabled={isSubmitting} onClick={handleCancelClick}>
+							Cancel
+						</Button>
+					</>
+				}
+			>
+				{/* In-panel error surface (interaction standard): a stock Banner at the top of the body. */}
+				{validationError && (
+					<div style={styles.bannerWrap}>
+						<Banner variant="error">{validationError}</Banner>
 					</div>
+				)}
 
-					{/* Body */}
-					<div style={styles.body}>
-						<div style={styles.scrollArea}>
-							{/* Node name field */}
-							{!isAnnotation && (
-								<TextField
-									label="Node Name"
-									value={name}
+				{/* Node name field */}
+				{!isAnnotation && (
+					<div style={styles.field}>
+						<label style={styles.fieldLabel} htmlFor="rr-node-name">
+							Node Name
+						</label>
+						<input
+							id="rr-node-name"
+							style={commonStyles.inputField}
+							value={name}
+							placeholder={service?.title}
+							onChange={(e) => {
+								setName(e.target.value);
+								setIsDirty(true);
+							}}
+							data-rr-autofocus="true"
+						/>
+					</div>
+				)}
+
+				{/* Annotation-specific fields */}
+				{isAnnotation && (
+					<>
+						<div style={styles.field}>
+							<label style={styles.fieldLabel} htmlFor="rr-note-content">
+								Content (Markdown)
+							</label>
+							<textarea
+								id="rr-note-content"
+								style={styles.textarea}
+								value={annotationContent}
+								placeholder="Enter markdown content..."
+								onChange={(e) => {
+									setAnnotationContent(e.target.value);
+									setIsDirty(true);
+								}}
+								data-rr-autofocus="true"
+							/>
+						</div>
+						<div style={styles.colorRow}>
+							<div style={{ flex: 1 }}>
+								<label style={styles.fieldLabel} htmlFor="rr-note-bg">
+									Background
+								</label>
+								<input
+									id="rr-note-bg"
+									type="color"
+									value={bgColor}
+									style={styles.colorInput}
 									onChange={(e) => {
-										setName(e.target.value);
+										setBgColor(e.target.value);
 										setIsDirty(true);
 									}}
-									placeholder={service?.title}
-									size="small"
-									fullWidth
-									sx={{ mb: 2 }}
 								/>
-							)}
-
-							{/* Annotation-specific fields */}
-							{isAnnotation && (
-								<div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
-									<TextField
-										label="Content (Markdown)"
-										value={annotationContent}
-										onChange={(e) => {
-											setAnnotationContent(e.target.value);
-											setIsDirty(true);
-										}}
-										placeholder="Enter markdown content..."
-										size="small"
-										fullWidth
-										multiline
-										minRows={4}
-										maxRows={12}
-									/>
-									<div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-										<div style={{ flex: 1 }}>
-											<label style={{ display: 'block', fontSize: '11px', marginBottom: '4px', opacity: 0.7 }}>Background</label>
-											<input
-												type="color"
-												value={bgColor}
-												onChange={(e) => {
-													setBgColor(e.target.value);
-													setIsDirty(true);
-												}}
-												style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', padding: 0 }}
-											/>
-										</div>
-										<div style={{ flex: 1 }}>
-											<label style={{ display: 'block', fontSize: '11px', marginBottom: '4px', opacity: 0.7 }}>Text Color</label>
-											<input
-												type="color"
-												value={fgColor}
-												onChange={(e) => {
-													setFgColor(e.target.value);
-													setIsDirty(true);
-												}}
-												style={{ width: '100%', height: 32, border: 'none', cursor: 'pointer', padding: 0 }}
-											/>
-										</div>
-									</div>
-								</div>
-							)}
-
-							{/* Configuration form (RJSF) */}
-							{schema && (
-								<ThemedForm
-									key={node.id}
-									ref={formRef}
-									schema={_schema}
-									uiSchema={{
-										..._uiSchema,
-										'ui:options': {
-											...(typeof (_uiSchema ?? {})['ui:options'] === 'object' ? (_uiSchema ?? {})['ui:options'] : {}),
-											hideRootTitle: true,
-										},
-										'ui:submitButtonOptions': { norender: true },
+							</div>
+							<div style={{ flex: 1 }}>
+								<label style={styles.fieldLabel} htmlFor="rr-note-fg">
+									Text Color
+								</label>
+								<input
+									id="rr-note-fg"
+									type="color"
+									value={fgColor}
+									style={styles.colorInput}
+									onChange={(e) => {
+										setFgColor(e.target.value);
+										setIsDirty(true);
 									}}
-									formData={formValues}
-									formContext={{
-										formValues,
-										hideFor: formValues.parameters?.authType,
-										googlePickerDeveloperKey,
-										googlePickerClientId,
-										nodeId: node.id,
-										formDataErrors: node.data.formDataErrors,
-										envKeys,
-									}}
-									disabled={false}
-									validator={validator}
-									transformErrors={transformErrors}
-									onError={onError}
-									onSubmit={onSubmit}
-									onChange={onChange}
-									translateString={translate}
 								/>
-							)}
+							</div>
 						</div>
+					</>
+				)}
 
-						{/* Footer */}
-						<div style={styles.footer}>
-							{validationError && <div style={styles.errorBox}>{validationError}</div>}
-							{envKeys.length > 0 && <span style={styles.footerHint}>Type $&#123; in a field to pick from your variables</span>}
-							<button
-								style={{ ...commonStyles.buttonPrimary, ...(disableSave ? commonStyles.buttonDisabled : {}) }}
-								disabled={disableSave}
-								onClick={() => {
-									if (schema) {
-										formRef.current?.submit();
-									} else {
-										handleSaveDetailsOnly();
-									}
-								}}
-							>
-								{isSubmitting ? 'Validating...' : 'Save'}
-							</button>
-						</div>
-					</div>
-				</div>
-			</div>
+				{/* Configuration form (RJSF) */}
+				{schema && (
+					<ThemedForm
+						key={node.id}
+						ref={formRef}
+						schema={_schema}
+						uiSchema={{
+							..._uiSchema,
+							'ui:options': {
+								...(typeof (_uiSchema ?? {})['ui:options'] === 'object' ? (_uiSchema ?? {})['ui:options'] : {}),
+								hideRootTitle: true,
+							},
+							'ui:submitButtonOptions': { norender: true },
+						}}
+						formData={formValues}
+						formContext={{
+							formValues,
+							compactDescriptions: _uiSchema?.['ui:options']?.compactDescriptions === true,
+							hideFor: formValues.parameters?.authType,
+							googlePickerDeveloperKey,
+							googlePickerClientId,
+							nodeId: node.id,
+							provider: node.data.provider,
+							formDataErrors: node.data.formDataErrors,
+							envKeys,
+						}}
+						disabled={false}
+						validator={validator}
+						transformErrors={transformErrors}
+						onError={onError}
+						onSubmit={onSubmit}
+						onChange={onChange}
+						translateString={translate}
+					/>
+				)}
+
+				{/* Env-var autocomplete hint. */}
+				{envKeys.length > 0 && <div style={styles.envHint}>Type $&#123; in a field to pick from your variables</div>}
+			</DetailPanel>
+
+			{/* Footer-Cancel discard confirm (stock dialog, same copy as the
+			    DetailPanel's own X / Escape guard). */}
+			{confirmDiscard && (
+				<ConfirmDialog
+					title="Discard changes?"
+					message="Your unsaved changes will be lost."
+					confirmLabel="Discard"
+					cancelLabel="Keep Editing"
+					destructive
+					onConfirm={() => {
+						setConfirmDiscard(false);
+						onClose();
+					}}
+					onCancel={() => setConfirmDiscard(false)}
+				/>
+			)}
 		</>
 	);
 }

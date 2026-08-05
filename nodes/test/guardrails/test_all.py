@@ -58,15 +58,21 @@ _ENGINE_PATH = os.path.join(_GUARDRAILS_DIR, 'guardrails_engine.py')
 
 def _load_engine_module():
     """Load guardrails_engine.py as a standalone module."""
-    # Stub rocketlib so the module can be loaded without the runtime
-    if 'rocketlib' not in sys.modules:
-        _rocketlib_stub = types.ModuleType('rocketlib')
-        _rocketlib_stub.warning = lambda msg, *a, **kw: None
-        sys.modules['rocketlib'] = _rocketlib_stub
+    # Stub rocketlib only while loading; restore so it never leaks to sibling tests.
+    _saved_rl = sys.modules.get('rocketlib')
+    _rocketlib_stub = types.ModuleType('rocketlib')
+    _rocketlib_stub.warning = lambda msg, *a, **kw: None
+    sys.modules['rocketlib'] = _rocketlib_stub
     spec = importlib.util.spec_from_file_location('guardrails_engine', _ENGINE_PATH)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    try:
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        if _saved_rl is not None:
+            sys.modules['rocketlib'] = _saved_rl
+        else:
+            sys.modules.pop('rocketlib', None)
 
 
 _engine_mod = _load_engine_module()
@@ -367,6 +373,26 @@ class TestPIILeak:
         engine = _make_engine()
         result = engine.check_pii_leak('The weather is nice today. No personal data here.')
         assert result['passed']
+
+    def test_email_rejects_pipe_in_tld(self):
+        """A pipe '|' must not be accepted as a TLD character (issue #1370).
+
+        The TLD char class was [A-Z|a-z], which matched a literal '|'. With the
+        old pattern, pipe-containing non-emails that end in a word char (so the
+        trailing \\b still holds) — e.g. 'user@example.c|m' or 'a@b.c|d' — were
+        wrongly flagged as PII.
+        """
+        engine = _make_engine()
+        for text in ('Contact user@example.c|m please.', 'See a@b.c|d here.'):
+            result = engine.check_pii_leak(text)
+            assert result['passed'], f'Pipe in TLD must not be detected as email: {text!r}'
+
+    def test_valid_email_with_two_letter_tld_still_detected(self):
+        """Guard against over-fixing: real emails must still be detected."""
+        engine = _make_engine()
+        result = engine.check_pii_leak('Ping me at jane@example.io today.')
+        assert not result['passed']
+        assert 'email' in result['details']
 
     def test_ssn_rejects_invalid_prefix(self):
         """SSN regex should reject prefixes starting with 000, 666, or 9xx."""

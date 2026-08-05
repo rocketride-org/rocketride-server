@@ -54,7 +54,7 @@ const result = await client.send(token, data, objinfo?, mimetype?);
 
 ### Returns
 
-- **Type**: `PIPELINE_RESULT` — dictionary containing the pipeline's processing output
+- **Type**: `PIPELINE_RESULT`, dictionary containing the pipeline's processing output
 
 ### Examples
 
@@ -71,6 +71,7 @@ async with RocketRideClient(auth='your-api-key') as client:
 
     # Send JSON data
     import json
+
     response = await client.send(
         token,
         json.dumps({'name': 'John', 'age': 30}),
@@ -130,9 +131,9 @@ const results = await client.sendFiles(files, token);
 | `token` | `str` | Yes | Pipeline task token |
 
 Each file entry can be:
-- `"path/to/file.pdf"` — just a file path
-- `("path/to/file.pdf", {"category": "doc"})` — file path with metadata
-- `("path/to/file.pdf", {"name": "doc"}, "application/pdf")` — file path with metadata and MIME type
+- `"path/to/file.pdf"`: just a file path
+- `("path/to/file.pdf", {"category": "doc"})`: file path with metadata
+- `("path/to/file.pdf", {"name": "doc"}, "application/pdf")`: file path with metadata and MIME type
 
 **TypeScript:**
 
@@ -143,7 +144,7 @@ Each file entry can be:
 
 ### Returns
 
-- **Type**: `UPLOAD_RESULT[]` — array of upload results, one per file
+- **Type**: `UPLOAD_RESULT[]`, array of upload results, one per file
 
 Each result contains:
 
@@ -172,9 +173,9 @@ async with RocketRideClient(auth='your-api-key') as client:
 
     for r in results:
         if r['action'] == 'complete':
-            print(f"Uploaded {r['filepath']} in {r['upload_time']:.2f}s")
+            print(f'Uploaded {r["filepath"]} in {r["upload_time"]:.2f}s')
         else:
-            print(f"Failed {r['filepath']}: {r['error']}")
+            print(f'Failed {r["filepath"]}: {r["error"]}')
 
     # With metadata and MIME types
     files = [
@@ -202,7 +203,8 @@ async def handle_events(event):
         body = event['body']
         if body['action'] == 'write':
             pct = (body['bytes_sent'] / body['file_size']) * 100
-            print(f"{body['filepath']}: {pct:.1f}%")
+            print(f'{body["filepath"]}: {pct:.1f}%')
+
 
 client = RocketRideClient(auth='your-api-key', on_event=handle_events)
 ```
@@ -276,7 +278,7 @@ const result = await pipe.close();
 
 ## **Response Format**
 
-Both `send()` and `DataPipe.close()` return a `PIPELINE_RESULT` — the output from the pipeline's processing. The exact structure depends on your pipeline configuration, but it typically includes fields like:
+Both `send()` and `DataPipe.close()` return a `PIPELINE_RESULT`: the output from the pipeline's processing. The exact structure depends on your pipeline configuration, but it typically includes fields like:
 
 ```json
 {

@@ -64,6 +64,26 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer, TASK_CONTROL
 
 
+def owner_key(owner_id: str, project_id: str, source: str) -> str:
+    """
+    Build the owner-scoped monitor subscription key for a run.
+
+    Monitor keys are ALWAYS owner-scoped — there is no unscoped project
+    key: a deploy run's owner is its team, a dev run's owner is its user,
+    so two teams' deploys, two users' dev runs, and a dev-vs-deploy pair
+    of the same pipeline all land on distinct keys and never alias.
+
+    Args:
+        owner_id (str): The run's owner — teamId for deploy, userId for dev
+        project_id (str): Project identity of the run
+        source (str): Source component id of the run
+
+    Returns:
+        str: The subscription key ``p.{ownerId}.{projectId}.{source}``
+    """
+    return f'p.{owner_id}.{project_id}.{source}'
+
+
 class MonitorCommands(DAPConn):
     """
     DAP-based event monitoring and subscription manager for task events.
@@ -109,13 +129,43 @@ class MonitorCommands(DAPConn):
         # Format: "apikey:token" -> EVENT_TYPE mapping
         self._monitors: Dict[str, EVENT_TYPE] = {}
 
-    async def send_server_event(self, event_type: EVENT_TYPE, event: Dict[str, Any], user_id: str = None) -> None:
-        """Send a server-level event if this connection is subscribed via the '*' wildcard."""
+    async def send_server_event(
+        self,
+        event_type: EVENT_TYPE,
+        event: Dict[str, Any],
+        user_id: str = None,
+        org_id: str = None,
+    ) -> None:
+        """
+        Send a server-level event if this connection is subscribed via the '*' wildcard.
+
+        Filtering order (each check short-circuits if it fails):
+        1. Connection must have '*' in its monitor subscriptions
+        2. The event_type bitmask must match the subscription
+        3. If org_id is specified, connection's primary org must match
+        4. If user_id is specified, connection's userId must match
+
+        Args:
+            event_type: Event type bitmask (e.g. EVENT_TYPE.DASHBOARD, EVENT_TYPE.BILLING).
+            event: DAP event payload with 'event' and 'body' keys.
+            user_id: Optional user scope -- only deliver to this user.
+            org_id: Optional org scope -- only deliver to connections in this org.
+        """
+        # Step 1: must be subscribed to wildcard
         if '*' not in self._monitors:
             return
+        # Step 2: bitmask must match
         if not (event_type & self._monitors['*']):
             return
-        # Tenant scoping: if the event carries a user_id, only deliver to matching accounts.
+        # Step 3: org scoping
+        if org_id is not None and hasattr(self, '_account_info') and self._account_info:
+            conn_org = ''
+            if hasattr(self._account_info, 'organization') and self._account_info.organization:
+                org = self._account_info.organization
+                conn_org = org.get('id', '') if isinstance(org, dict) else getattr(org, 'id', '')
+            if conn_org != org_id:
+                return
+        # Step 4: user scoping
         if user_id is not None and hasattr(self, '_account_info') and self._account_info:
             if self._account_info.userId != user_id:
                 return
@@ -167,12 +217,12 @@ class MonitorCommands(DAPConn):
             evt_name = event.get('event', 'unknown')
             body = event.get('body', None)
 
-            # Send the event to the subscribed client using DAP protocol
-            await self.send_event(
-                evt_name,
-                id=control.id,
-                body=body,
-            )
+            # Send the event to the subscribed client using plain DAP. The
+            # continuum stamps (eventTime + logSeq) ride INSIDE the shared
+            # body, stamped once by the task — every monitor sees the SAME
+            # stamps the run log recorded, and the DAP envelope stays pure
+            # protocol (each connection mints its own header seq).
+            await self.send_event(evt_name, id=control.id, body=body)
 
         # Get the task by token
         control = self._server.get_task_control(token)
@@ -188,8 +238,10 @@ class MonitorCommands(DAPConn):
         if not resolve_task_permissions(self._account_info, control.teamId):
             return
 
-        # Build the base project-scoped key
-        project_key = f'p.{control.project_id}.{control.source}'
+        # Build the base owner-scoped key: events land on the key of the
+        # run's OWNER (team for deploy, user for dev), so a dev run and a
+        # deploy run of the same pipeline never alias in the keyspace.
+        project_key = owner_key(control.owner_id, control.project_id, control.source)
 
         # Gather all matching subscription keys and merge their preferences
         # so each subscriber receives the event at most once.
@@ -206,8 +258,9 @@ class MonitorCommands(DAPConn):
         if project_key in self._monitors:
             merged_preference |= self._monitors[project_key]
 
-        # Project-wildcard check (all sources within a project: p.{projectId}.*)
-        project_wildcard_key = f'p.{control.project_id}.*'
+        # Project-wildcard check (all sources of the owner's project:
+        # p.{ownerId}.{projectId}.*)
+        project_wildcard_key = f'p.{control.owner_id}.{control.project_id}.*'
         if project_wildcard_key != project_key and project_wildcard_key in self._monitors:
             merged_preference |= self._monitors[project_wildcard_key]
 
@@ -312,6 +365,15 @@ class MonitorCommands(DAPConn):
                                 'name': status.name,
                                 'projectId': target.project_id,
                                 'source': target.source,
+                                # Identity stamps (parity with the per-event
+                                # _forward_task_event stamp): clients attribute
+                                # deploy runs to DEPLOYMENTS, never ad-hoc.
+                                # Read from the CONTROL — the previous getattr
+                                # fallbacks targeted fields that never existed
+                                # on TASK_CONTROL, so every row reported a dev
+                                # run with no team.
+                                'runKind': target.run_kind,
+                                'teamId': target.teamId if target.run_kind == 'deploy' else '',
                             }
                         )
 
@@ -336,6 +398,7 @@ class MonitorCommands(DAPConn):
         source: str = None,
         pipe_id: int = None,
         type: EVENT_TYPE = EVENT_TYPE.NONE,
+        team_id: str = '',
     ) -> Dict[str, Any]:
         """
         Configure event monitoring subscription for a specific task.
@@ -344,9 +407,20 @@ class MonitorCommands(DAPConn):
         for a given task. This allows clients to dynamically control which events
         they receive from specific tasks.
 
+        Subscription keys are owner-scoped (see :func:`owner_key`). The
+        scope IS the kind: ``team_id`` set addresses the team's deploy run;
+        absent, the caller's own dev runs. A project/source subscription
+        therefore only ever receives the caller's own dev events — a
+        teammate's dev run is watchable only via its task token.
+
         Args:
             token (str): Unique identifier for the task to monitor
+            project_id (str): Project scope (with source, instead of token)
+            source (str): Source scope; '*' subscribes all sources
+            pipe_id (int): Optional pipe narrowing
             type (EVENT_TYPE): Subscription bits
+            team_id (str): Owner team — subscribe to that team's deploy run;
+                empty subscribes the caller's own dev runs
 
         Returns:
             Dict[str, Any]: Status information about the subscription change
@@ -381,21 +455,25 @@ class MonitorCommands(DAPConn):
             if not resolve_task_permissions(self._account_info, control.teamId):
                 raise PermissionError('Access denied: no permissions for this task')
 
-            # Use the project key so subscribe/unsubscribe by token or project_id/source use the same key
-            event_key = f'p.{control.project_id}.{control.source}'
+            # Build the key from the resolved run's OWNER so subscribe and
+            # delivery agree regardless of how the subscription was addressed
+            event_key = owner_key(control.owner_id, control.project_id, control.source)
             event_id = control.id
             filter_name = control.id
 
         # If project/source we specified
         elif project_id and source:
-            # Get the project key
-            event_key = f'p.{project_id}.{source}'
+            # Resolve the requested scope's owner: the named team's deploy
+            # run, or (no team) the CALLER's own dev runs. The key is
+            # derivable without the control so subscribe-before-launch works.
+            owner_id = team_id if team_id else self._account_info.userId
+            event_key = owner_key(owner_id, project_id, source)
 
             # If is ok if the task doesn't exist at this point in time...
             try:
-                # Get the task (ownership check inside)
+                # Get the task (owner scoping + permission check inside)
                 control = self._server.get_task_control_by_project(
-                    project_id, source, self._account_info, require='task.monitor'
+                    project_id, source, self._account_info, require='task.monitor', team_id=team_id
                 )
 
                 # The task is running, we can fill it in
@@ -537,10 +615,14 @@ class MonitorCommands(DAPConn):
         # Parse monitoring configuration from request arguments
         args = request.get('arguments', {})
 
-        # Get the project_id/source/pipeId if specified
+        # Get the project_id/source/pipeId if specified. Optional teamId
+        # selects the scope: present = that team's deploy run, absent = the
+        # caller's own dev runs (the scope IS the kind — there is no
+        # run-kind argument on the wire).
         project_id = args.get('projectId', None)
         source = args.get('source', None)
         pipe_id = args.get('pipeId', None)
+        team_id = args.get('teamId') or ''
 
         # Determine the desired event subscription level
         types = args.get('types', None)
@@ -567,6 +649,7 @@ class MonitorCommands(DAPConn):
             source=source,
             pipe_id=pipe_id,
             type=event_type,
+            team_id=team_id,
         )
 
         # Acknowledge successful subscription setup

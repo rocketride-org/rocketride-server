@@ -1,6 +1,6 @@
 # Pre-commit Hooks
 
-This repo uses [Lefthook](https://github.com/evilmartians/lefthook) to run lint and format checks before every commit. Hooks run automatically — no manual setup needed beyond `pnpm install`.
+This repo uses [Lefthook](https://github.com/evilmartians/lefthook) to run lint and format checks before every commit. Hooks run automatically, no manual setup needed beyond `pnpm install`.
 
 ## Setup
 
@@ -22,7 +22,7 @@ When you `git commit`, Lefthook runs these checks **sequentially** on staged fil
 
 > **Note:** ESLint and Prettier hooks are temporarily disabled in lefthook and will be re-enabled later alongside CI workflow integration.
 
-All checks run in **check mode only** — they report errors but do not auto-fix. Fix issues manually before committing.
+All checks run in **check mode only**: they report errors but do not auto-fix. Fix issues manually before committing.
 
 ## Fixing failures
 
@@ -51,7 +51,7 @@ git commit
 git commit --no-verify
 ```
 
-Use sparingly — CI will still catch these issues on the PR.
+Use sparingly, CI will still catch these issues on the PR.
 
 ## Local overrides
 

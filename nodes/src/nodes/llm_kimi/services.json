@@ -84,26 +84,32 @@
 				"title": "Kimi K2.6",
 				"model": "kimi-k2.6",
 				"modelSource": "manual",
-				"modelTotalTokens": 262144,
-				"modelOutputTokens": 16384,
+				"modelTotalTokens": 262144, // sync_models.config.json
+				"modelOutputTokens": 16384, // sync_models.config.json
 				"serverbase": "https://api.moonshot.ai/v1",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"kimi-k2-5": {
 				"title": "Kimi K2.5",
 				"model": "kimi-k2.5",
 				"modelSource": "manual",
-				"modelTotalTokens": 262144,
-				"modelOutputTokens": 16384,
+				"modelTotalTokens": 262144, // sync_models.config.json
+				"modelOutputTokens": 16384, // sync_models.config.json
 				"serverbase": "https://api.moonshot.ai/v1",
-				"apikey": ""
+				"apikey": "",
+				"capabilities": {
+					"reasoning": true
+				}
 			},
 			"moonshot-v1-8k": {
 				"title": "Moonshot v1 8K",
 				"model": "moonshot-v1-8k",
 				"modelSource": "manual",
-				"modelTotalTokens": 8192,
-				"modelOutputTokens": 4096,
+				"modelTotalTokens": 8192, // manual
+				"modelOutputTokens": 4096, // manual
 				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
@@ -111,8 +117,8 @@
 				"title": "Moonshot v1 32K",
 				"model": "moonshot-v1-32k",
 				"modelSource": "manual",
-				"modelTotalTokens": 32768,
-				"modelOutputTokens": 4096,
+				"modelTotalTokens": 32768, // manual
+				"modelOutputTokens": 4096, // manual
 				"serverbase": "https://api.moonshot.ai/v1",
 				"apikey": ""
 			},
@@ -120,9 +126,69 @@
 				"title": "Moonshot v1 128K",
 				"model": "moonshot-v1-128k",
 				"modelSource": "manual",
-				"modelTotalTokens": 131072,
-				"modelOutputTokens": 4096,
+				"modelTotalTokens": 131072, // manual
+				"modelOutputTokens": 4096, // manual
 				"serverbase": "https://api.moonshot.ai/v1",
+				"apikey": ""
+			},
+			"kimi-k2": {
+				"title": "MoonshotAI: Kimi K2 0711",
+				"model": "kimi-k2",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 131072, // openrouter
+				"modelOutputTokens": 100352, // openrouter
+				"apikey": ""
+			},
+			"kimi-k2-0905": {
+				"title": "MoonshotAI: Kimi K2 0905",
+				"model": "kimi-k2-0905",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 100352, // openrouter
+				"apikey": ""
+			},
+			"kimi-k2-7-code": {
+				"title": "MoonshotAI: Kimi K2.7 Code",
+				"model": "kimi-k2.7-code",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 262144, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"kimi-k2-thinking": {
+				"title": "MoonshotAI: Kimi K2 Thinking",
+				"model": "kimi-k2-thinking",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 262144, // openrouter
+				"modelOutputTokens": 100352, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"kimi-latest": {
+				"title": "MoonshotAI Kimi Latest",
+				"model": "kimi-latest",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 131072, // litellm
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"kimi-k3": {
+				"title": "MoonshotAI: Kimi K3",
+				"model": "kimi-k3",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 1048576, // openrouter
+				"modelOutputTokens": 4096, // default
+				"capabilities": {
+					"reasoning": true
+				},
 				"apikey": ""
 			}
 		}
@@ -141,51 +207,156 @@
 		},
 		"kimi.kimi-k2-6": {
 			"object": "kimi-k2-6",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"kimi.kimi-k2-5": {
 			"object": "kimi-k2-5",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"kimi.moonshot-v1-8k": {
 			"object": "moonshot-v1-8k",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"kimi.moonshot-v1-32k": {
 			"object": "moonshot-v1-32k",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"kimi.moonshot-v1-128k": {
 			"object": "moonshot-v1-128k",
-			"properties": ["llm.cloud.apikey", "llm.cloud.modelSource"]
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
 		},
 		"kimi.profile": {
 			"title": "Model",
 			"description": "Kimi (Moonshot) LLM model",
 			"type": "string",
 			"default": "kimi-k2-6",
-			"enum": ["*>preconfig.profiles.*.title"],
+			"enum": [
+				"*>preconfig.profiles.*.title"
+			],
 			"conditional": [
 				{
 					"value": "kimi-k2-6",
-					"properties": ["kimi.kimi-k2-6"]
+					"properties": [
+						"kimi.kimi-k2-6"
+					]
 				},
 				{
 					"value": "kimi-k2-5",
-					"properties": ["kimi.kimi-k2-5"]
+					"properties": [
+						"kimi.kimi-k2-5"
+					]
 				},
 				{
 					"value": "moonshot-v1-8k",
-					"properties": ["kimi.moonshot-v1-8k"]
+					"properties": [
+						"kimi.moonshot-v1-8k"
+					]
 				},
 				{
 					"value": "moonshot-v1-32k",
-					"properties": ["kimi.moonshot-v1-32k"]
+					"properties": [
+						"kimi.moonshot-v1-32k"
+					]
 				},
 				{
 					"value": "moonshot-v1-128k",
-					"properties": ["kimi.moonshot-v1-128k"]
+					"properties": [
+						"kimi.moonshot-v1-128k"
+					]
+				},
+				{
+					"value": "kimi-k2",
+					"properties": [
+						"kimi.kimi-k2"
+					]
+				},
+				{
+					"value": "kimi-k2-0905",
+					"properties": [
+						"kimi.kimi-k2-0905"
+					]
+				},
+				{
+					"value": "kimi-k2-7-code",
+					"properties": [
+						"kimi.kimi-k2-7-code"
+					]
+				},
+				{
+					"value": "kimi-k2-thinking",
+					"properties": [
+						"kimi.kimi-k2-thinking"
+					]
+				},
+				{
+					"value": "kimi-latest",
+					"properties": [
+						"kimi.kimi-latest"
+					]
+				},
+				{
+					"value": "kimi-k3",
+					"properties": [
+						"kimi.kimi-k3"
+					]
 				}
+			]
+		},
+		"kimi.kimi-k2": {
+			"object": "kimi-k2",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"kimi.kimi-k2-0905": {
+			"object": "kimi-k2-0905",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"kimi.kimi-k2-7-code": {
+			"object": "kimi-k2-7-code",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"kimi.kimi-k2-thinking": {
+			"object": "kimi-k2-thinking",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"kimi.kimi-latest": {
+			"object": "kimi-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"kimi.kimi-k3": {
+			"object": "kimi-k3",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
 			]
 		}
 	},

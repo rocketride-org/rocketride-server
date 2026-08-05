@@ -1,6 +1,6 @@
-# contract-check: skip-install  reason: ~50 MB on top of the transformers baseline for an opt-in vision-embedding loader. PR lane skips; nightly --install-all installs and verifies.
-# Vision (CLIP / ViT) image embedding
-# torch via ai.common.torch
-
-transformers
+# contract-check: skip-install  reason: ~50 MB on top of the transformers baseline; PR lane skips, nightly --install-all verifies.
+# Shared base for all vision-family loaders (CLIP/ViT, depth, detection, ...).
+# Per-model extras live in requirements_<x>.txt (installed after this base).
+# torch via ai.common.torch; numpy is a base engine dep (not declared).
+transformers==4.53.3
 Pillow

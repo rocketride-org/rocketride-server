@@ -18,7 +18,7 @@ After the pipeline starts, the Project Log displays the chat URL and public auth
 
 | Lane in | Lane out    | Description                                               |
 | ------- | ----------- | --------------------------------------------------------- |
-| —       | `questions` | Each message submitted via the chat UI becomes a question |
+| -       | `questions` | Each message submitted via the chat UI becomes a question |
 
 ## Configuration
 

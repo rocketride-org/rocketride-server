@@ -29,10 +29,10 @@ By default only **Agent Description** and **Instructions** are shown. Toggle **A
 
 | Field             | Description                                                          |
 | ----------------- | -------------------------------------------------------------------- |
-| Agent Description | What this agent does — used by parent agents to select and invoke it |
+| Agent Description | What this agent does, used by parent agents to select and invoke it  |
 | Instructions      | Extra guidance appended to the agent's backstory                     |
 
-**Advanced Mode — Agent:**
+**Advanced Mode (Agent):**
 
 | Field     | Default     | Maps to                |
 | --------- | ----------- | ---------------------- |
@@ -40,7 +40,7 @@ By default only **Agent Description** and **Instructions** are shown. Toggle **A
 | Goal      | built-in    | `Agent(goal=...)`      |
 | Backstory | built-in    | `Agent(backstory=...)` |
 
-**Advanced Mode — Task:**
+**Advanced Mode (Task):**
 
 | Field           | Default             | Maps to                     |
 | --------------- | ------------------- | --------------------------- |
@@ -49,4 +49,4 @@ By default only **Agent Description** and **Instructions** are shown. Toggle **A
 
 ## Multi-agent workflows
 
-For hierarchical multi-agent orchestration, use the `CrewAI Manager` node with one or more `CrewAI Subagent` nodes instead. A `CrewAI Agent` node cannot be used as a sub-agent under a Manager — that role is filled by `CrewAI Subagent`.
+For hierarchical multi-agent orchestration, use the `CrewAI Manager` node with one or more `CrewAI Subagent` nodes instead. A `CrewAI Agent` node cannot be used as a sub-agent under a Manager, that role is filled by `CrewAI Subagent`.

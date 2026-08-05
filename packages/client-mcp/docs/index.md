@@ -17,7 +17,7 @@ title: "MCP Server"
 <p align="center">
   <a href="https://pypi.org/project/rocketride-mcp/"><img src="https://img.shields.io/pypi/v/rocketride-mcp?color=222223&label=PyPI" alt="PyPI" /></a>
   <a href="https://github.com/rocketride-org/rocketride-server"><img src="https://img.shields.io/github/stars/rocketride-org/rocketride-server?style=flat&color=238636&label=GitHub&logo=github&logoColor=white" alt="GitHub" /></a>
-  <a href="https://discord.gg/9hr3tdZmEG"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord" /></a>
+  <a href="https://discord.gg/PMXrtenMsY"><img src="https://img.shields.io/badge/Discord-Join-370b7a?logo=discord&logoColor=white" alt="Discord" /></a>
   <a href="https://github.com/rocketride-org/rocketride-server/blob/develop/LICENSE"><img src="https://img.shields.io/badge/License-MIT-41b6e6" alt="MIT License" /></a>
 </p>
 
@@ -59,6 +59,76 @@ using a visual drag-and-drop canvas or code-first with TypeScript and Python SDK
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open-source, OSI-compliant
+
+## How pipelines become tools
+
+Every pipeline you start in RocketRide is automatically registered as an MCP
+tool by the server — no extra configuration required.
+
+When you start a pipeline (via the VS Code extension, the CLI, or an SDK), the
+engine assigns it a **task token**. The MCP server discovers all running tasks
+for your API key and exposes each one as a callable tool. The tool name is
+derived from the pipeline name; the tool schema is derived from the pipeline's
+input lanes.
+
+```
+You start a pipeline          →  engine assigns a task token
+                                    ↓
+rocketride-mcp discovers it   →  registers it as an MCP tool
+                                    ↓
+Claude calls the tool         →  MCP server forwards the request to the pipeline
+                                    ↓
+Pipeline processes it         →  result streamed back to Claude
+```
+
+Stop the pipeline and the tool disappears from the next tool-list refresh.
+Start a new pipeline and it appears automatically.
+
+## Worked example
+
+**1. Start the MCP server** (if not already running via a client config):
+
+```bash
+export ROCKETRIDE_URI=ws://localhost:5565
+export ROCKETRIDE_AUTH=your-api-key
+rocketride-mcp
+```
+
+**2. Start a pipeline** — for example, a simple chat pipeline (`chat.pipe`):
+
+```json
+{
+  "nodes": [
+    { "id": "source_1", "provider": "webhook" },
+    {
+      "id": "llm_1", "provider": "llm_openai",
+      "config": { "profile": "openai-4o-mini", "apikey": "${OPENAI_API_KEY}" },
+      "input": [{ "lane": "questions", "from": "source_1" }]
+    },
+    { "id": "target_1", "provider": "response",
+      "input": [{ "lane": "answers", "from": "llm_1" }] }
+  ]
+}
+```
+
+```bash
+rocketride start --pipeline ./chat.pipe
+```
+
+**3. Ask Claude to use it.** Open Claude Desktop (configured with the
+`mcpServers` block above) and type:
+
+> Use the RocketRide pipeline to answer: what is the boiling point of water?
+
+Claude discovers the tool, calls it with the question, and returns the answer
+streamed from your pipeline.
+
+**4. Inspect resources** — Claude can also list your pipelines and check server
+status using MCP resources:
+
+> Show me the available RocketRide pipelines.
+
+This reads `rocketride://pipelines` and returns the list of running tasks.
 
 ## Installation
 
@@ -163,15 +233,15 @@ In Claude Desktop or any MCP-compatible client, resources are listed automatical
 
 ```python
 # Example: read the pipeline list resource
-result = await session.read_resource("rocketride://pipelines")
+result = await session.read_resource('rocketride://pipelines')
 # Returns: {"pipelines": [{"name": "my-pipeline", "description": "..."}, ...]}
 
 # Example: check server status
-result = await session.read_resource("rocketride://status")
+result = await session.read_resource('rocketride://status')
 # Returns: {"connected": true, "pipeline_count": 3, "pipelines": ["pipe-a", "pipe-b", "pipe-c"]}
 
 # Example: list available node types
-result = await session.read_resource("rocketride://nodes")
+result = await session.read_resource('rocketride://nodes')
 # Returns: {"nodes": [{"name": "llm_openai", "type": "processor"}, ...]}
 ```
 
@@ -240,10 +310,9 @@ This generates the message: _"Evaluate the output quality of the RocketRide pipe
 prompts = await session.list_prompts()
 
 # Get a rendered prompt
-result = await session.get_prompt("analyze-document", arguments={
-    "pipeline": "my-pipeline",
-    "query": "Summarize the key findings"
-})
+result = await session.get_prompt(
+    'analyze-document', arguments={'pipeline': 'my-pipeline', 'query': 'Summarize the key findings'}
+)
 # result.messages[0].content.text contains the rendered message
 ```
 
@@ -275,7 +344,7 @@ Set these environment variables (required; no config file is used):
 
 - [Documentation](https://docs.rocketride.org/)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
-- [Discord](https://discord.gg/9hr3tdZmEG)
+- [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)
 
 ## License

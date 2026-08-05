@@ -21,9 +21,17 @@
 # SOFTWARE.
 # =============================================================================
 
+import base64
 from rocketlib import AVI_ACTION, Entry, IInstanceBase, warning
 from ai.common.schema import Doc, DocMetadata
 from ai.common.image import ImageProcessor
+from ai.common.avi.descriptor import (
+    descriptor_from_payload,
+    attach_source,
+    image_source_layer,
+    forward_enriched_image,
+    inherited_or_derived_name,
+)
 from .IGlobal import IGlobal
 
 
@@ -49,6 +57,7 @@ class IInstance(IInstanceBase):
         """
         self.chunkId = 0  # Initialize chunk counter
         self.image_data = None  # Reset accumulated raw image data buffer
+        self._source_descriptor = None  # Stream descriptor from the image BEGIN
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """
@@ -70,6 +79,8 @@ class IInstance(IInstanceBase):
         """
         # Handle the start of image data streaming
         if action == AVI_ACTION.BEGIN:
+            # BEGIN carries the stream descriptor (source provenance), not image bytes.
+            self._source_descriptor = descriptor_from_payload(buffer)
             self.image_data = bytearray()  # Initialize buffer to accumulate chunks
             return self.preventDefault()  # Signal to prevent further default handling
 
@@ -100,14 +111,18 @@ class IInstance(IInstanceBase):
                     isDeleted=False,
                 )
 
+                # Provenance chain: attach_source nests the frame's own source (the
+                # video) under the frame layer. Keep the input frame's name.
+                attach_source(metadata, self._source_descriptor)
+                name = self._output_name()
+                if name:
+                    metadata.name = name
+
                 # Create the document object with the image data and metadata
                 doc = Doc(type='Image', page_content=image_str, metadata=metadata)
 
-                # Wrap the single document in a list as expected by downstream handlers
-                documents = [doc]
-
                 # Emit the document(s) for further processing in the pipeline
-                self.instance.writeDocuments(documents)
+                self.instance.writeDocuments([doc])
 
                 # Reset image data after processing is complete
                 self.image_data = b''
@@ -117,16 +132,31 @@ class IInstance(IInstanceBase):
                 # Convert thumbnail image to raw PNG bytes
                 image_bytes = ImageProcessor.get_bytes(thumbnail)
 
-                # Write the image data in three steps to the image listener
-                self.instance.writeImage(AVI_ACTION.BEGIN, mimeType)
-                self.instance.writeImage(AVI_ACTION.WRITE, mimeType, image_bytes)
-                self.instance.writeImage(AVI_ACTION.END, mimeType)
+                # Enriched BEGIN carries the nested source chain + name. Bytes are always
+                # PNG (get_bytes), so emit 'image/png', not the incoming mime.
+                forward_enriched_image(
+                    self.instance,
+                    self._source_descriptor,
+                    'image/png',
+                    image_bytes,
+                    width=thumbnail.width,
+                    height=thumbnail.height,
+                )
 
             # Clear the image data to free memory
             self.image_data = None
 
             # Indicate that we have fully handled the image stream
             return self.preventDefault()
+
+    def _output_name(self):
+        """The thumbnail's name: keep the input frame's name (it represents the same
+        frame), falling back to the source stem for un-chained raw-image inputs.
+
+        Returns:
+            str: The name, or None when no source name is available.
+        """
+        return inherited_or_derived_name(self._source_descriptor, ext='png')
 
     def writeDocuments(self, documents: list[Doc]):
         """
@@ -155,6 +185,18 @@ class IInstance(IInstanceBase):
                 warning(f'Thumbnail: failed to process chunk {doc.metadata.chunkId}: {e}')
                 continue
 
-            self.instance.writeDocuments([Doc(type='Image', page_content=thumbnail_base64, metadata=doc.metadata)])
+            # Re-derive provenance on a copy (don't mutate the input). A frame Doc doesn't
+            # self-describe, so synthesize its media layer from the decoded frame so it
+            # matches the image lane, and nest the frame's existing source (the video).
+            new_md = doc.metadata.model_copy()
+            new_md.source = image_source_layer(
+                size=len(base64.b64decode(doc.page_content)),
+                width=image.width,
+                height=image.height,
+                stream_index=getattr(doc.metadata, 'chunkId', None),
+                name=getattr(doc.metadata, 'name', None),
+                prior_source=getattr(doc.metadata, 'source', None),
+            )
+            self.instance.writeDocuments([Doc(type='Image', page_content=thumbnail_base64, metadata=new_md)])
 
         self.preventDefault()

@@ -34,7 +34,7 @@
  *   - Applies navigation mode (pan vs lasso-select) and lock state
  */
 
-import { ReactElement, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ReactFlow, Background, SelectionMode, useReactFlow } from '@xyflow/react';
 import { Settings } from 'lucide-react';
 import '@xyflow/react/dist/style.css';
@@ -69,6 +69,7 @@ import TidyIcon from '../../../assets/icons/TidyIcon';
 
 import { INodeType } from '../types';
 import { useFlowProject } from '../context/FlowProjectContext';
+import { usePrefs } from '../../../contexts/PrefsContext';
 import { isInVSCode } from '../../../themes/vscode';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
@@ -202,16 +203,19 @@ export default function Canvas(): ReactElement {
 	// --- Graph state from context ------------------------------------------
 	const { canvasRef, nodes, edges, nodeMap, setNodes, onNodesChange, onEdgesChange, onEdgeConnect, onNodesDelete, onDragOver, onDrop, onNodeDragStop, isValidConnection, editingNodeId, setEditingNodeId, addNode, onContentUpdated, isFlowReady, configSnackbar, setConfigSnackbar } = useFlowGraph();
 
-	// --- Preferences from context ------------------------------------------
-	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout, getPreference, setPreference } = useFlowPreferences();
+	// --- Canvas state from context -----------------------------------------
+	const { navigationMode, setNavigationMode, isReadonly, isLocked, toggleLock, projectLayout } = useFlowPreferences();
 
-	// --- Floating toolbar position (persisted via workspace state) ----------
-	const toolbarPosition = getPreference('toolbarPosition') as IToolbarPosition | undefined;
+	// The one shared prefs accessor — the same getPref/setPref every app uses.
+	const { getPref, setPref } = usePrefs();
+
+	// --- Floating toolbar position (persisted via workspace prefs) ----------
+	const toolbarPosition = getPref('toolbarPosition') as IToolbarPosition | undefined;
 	const handleToolbarPositionChange = useCallback(
 		(pos: IToolbarPosition) => {
-			setPreference('toolbarPosition', pos);
+			setPref('toolbarPosition', pos);
 		},
-		[setPreference]
+		[setPref]
 	);
 
 	const { onUndo, onRedo, onViewportChange, isDirty, isNew, onSave, onExport, initialViewport } = useFlowProject();
@@ -290,6 +294,16 @@ export default function Canvas(): ReactElement {
 	// --- Compute ReactFlow props from navigation mode and lock state --------
 	const editable = !isLocked;
 	const isPanMode = navigationMode === NavigationMode.DRAG;
+
+	// Stable snapGrid reference. `projectLayout` can be rebuilt with a fresh
+	// snapGridSize array even when the values are unchanged; passing that array
+	// straight to <ReactFlow> makes StoreUpdater re-sync the store every render →
+	// "Maximum update depth exceeded". Memoizing on the actual numbers keeps the
+	// array reference stable until a value really changes.
+	const snapGrid = useMemo<[number, number]>(
+		() => (projectLayout.snapGridSize as [number, number] | undefined) ?? DEFAULT_SNAP_GRID,
+		[projectLayout.snapGridSize?.[0], projectLayout.snapGridSize?.[1]]
+	);
 
 	// --- Annotation shortcut -----------------------------------------------
 	const addAnnotation = useCallback(() => {
@@ -411,7 +425,9 @@ export default function Canvas(): ReactElement {
 	);
 
 	return (
-		<div ref={canvasRef} style={{ width: '100%', height: '100%', position: 'relative' }}>
+		// `overflow: hidden` makes this the clip/anchor surface for the `contained`
+		// DetailPanel drawers (Add Node, node config) that slide in over the graph.
+		<div ref={canvasRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
 			<FloatingToolbar position={toolbarPosition} onPositionChange={handleToolbarPositionChange}>
 				{canvasToolbar}
 			</FloatingToolbar>
@@ -447,7 +463,7 @@ export default function Canvas(): ReactElement {
 				defaultViewport={DEFAULT_VIEWPORT}
 				proOptions={PRO_OPTIONS}
 				snapToGrid={projectLayout.snapToGrid ?? true}
-				snapGrid={projectLayout.snapGridSize ?? DEFAULT_SNAP_GRID}
+				snapGrid={snapGrid}
 			>
 				<Background color="var(--rr-text-disabled)" gap={20} style={{ backgroundColor: 'var(--rr-bg-default)' }} />
 			</ReactFlow>
@@ -462,7 +478,7 @@ export default function Canvas(): ReactElement {
 			{showCreatePanel && <CreateNodePanel onClose={() => setShowCreatePanel(false)} />}
 
 			{/* Node config panel — slides in from the right */}
-			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode as unknown as import('../types').INode} onClose={() => setEditingNodeId(undefined)} />}
+			{showConfigPanel && editingNode && <NodeConfigPanel node={editingNode} onClose={() => setEditingNodeId(undefined)} />}
 			{/* Configuration reminder after template instantiation */}
 			{configSnackbar !== null && (
 				<div

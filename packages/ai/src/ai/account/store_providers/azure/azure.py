@@ -233,12 +233,12 @@ class AzureBlobStore(IStore):
                 properties = await asyncio.to_thread(blob_client.get_blob_properties)
                 current_etag = properties.etag.strip('"')
 
-                # expected_version is REQUIRED for delete operations
-                if expected_version is None:
-                    raise StorageError(f'Expected version is required when deleting file: {filename}')
-
-                # Verify version matches
-                if current_etag != expected_version:
+                # Optimistic-concurrency check only when a version is supplied.
+                # With no version we fall through to an unconditional delete,
+                # matching the filesystem/memory backends so deleting your own
+                # file always works (cloud backends previously rejected this,
+                # breaking deletes in prod while local worked).
+                if expected_version is not None and current_etag != expected_version:
                     raise VersionMismatchError(
                         filename=filename,
                         expected_version=expected_version,
@@ -515,6 +515,70 @@ class AzureBlobStore(IStore):
         await asyncio.to_thread(blob_client.stage_block, block_id=block_id, data=data)
         context['block_ids'].append(block_id)
         context['block_counter'] += 1
+
+    # =========================================================================
+    # URL Generation
+    # =========================================================================
+
+    async def get_url(
+        self, filename: str, expires_in: int = 3600, content_disposition: Optional[str] = None
+    ) -> str | None:
+        """
+        Generate a SAS URL for direct browser access to an Azure blob.
+
+        Args:
+            filename: Relative store path.
+            expires_in: URL validity in seconds.
+            content_disposition: Optional ``Content-Disposition`` header value
+                (e.g. ``attachment; filename="report.pdf"``). Signed into the
+                SAS so it survives cross-origin, where the browser
+                ``<a download>`` hint is ignored.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        blob_name = self._get_blob_name(filename)
+        try:
+            from azure.storage.blob import generate_blob_sas, BlobSasPermissions
+
+            # Extract account name and key for SAS generation
+            account_name = self._account_name
+            account_key = self._account_key
+
+            if not account_name or not account_key:
+                # If using connection string, parse account name and key from it
+                if self._connection_string:
+                    parts = dict(p.split('=', 1) for p in self._connection_string.split(';') if '=' in p)
+                    account_name = parts.get('AccountName')
+                    account_key = parts.get('AccountKey')
+
+            if not account_name or not account_key:
+                return None  # Cannot generate SAS without credentials
+
+            sas_token = generate_blob_sas(
+                account_name=account_name,
+                container_name=self._container,
+                blob_name=blob_name,
+                account_key=account_key,
+                permission=BlobSasPermissions(read=True),
+                expiry=datetime.now(timezone.utc) + timedelta(seconds=expires_in),
+                content_disposition=content_disposition,
+            )
+
+            # Derive the base URL from the actual blob client rather than a
+            # hardcoded host. This yields the correct scheme/host (custom,
+            # sovereign, or Azurite endpoints from the connection string) and a
+            # properly URL-encoded blob path, then append the SAS query string.
+            client = self._get_client()
+            blob_client = client.get_blob_client(
+                container=self._container,
+                blob=blob_name,
+            )
+            blob_url = f'{blob_client.url}?{sas_token}'
+            return blob_url
+        except ImportError:
+            raise StorageError('Azure SDK not installed. Install with: pip install azure-storage-blob')
+        except Exception as e:
+            raise StorageError(f'Failed to generate SAS URL: {e}') from e
 
     # =========================================================================
     # Private Methods

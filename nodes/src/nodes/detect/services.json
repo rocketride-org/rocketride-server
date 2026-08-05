@@ -1,0 +1,132 @@
+{
+	"title": "Object Detection",
+	"protocol": "detect://",
+	"classType": ["image"],
+	"capabilities": ["gpu", "experimental"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.detect",
+	"prefix": "detect",
+	"description": ["Per-frame object detection. RF-DETR (Apache-2.0, default) is a fast closed-set detector over 80 COCO classes (person, car, dog, etc.). MM-Grounding-DINO (Apache-2.0/BSD-3) is the open-vocab option: type a prompt to detect anything. ", "Image in, bounding boxes + labels + centroids out. ", "Use as a fast per-frame gate before heavier models. For pixel masks use Segmentation."],
+	"icon": "detect.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Model: ${parameters.detect.profile}", "Prompt: ${parameters.detect.prompt}"],
+	"lanes": {
+		"image": ["text", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to run detection on.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Annotated image as raw stream - pipe to any node accepting image input."
+				},
+				{
+					"lane": "text",
+					"description": "JSON array of detections: [{label, score, box, centroid}]."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "rfdetr",
+		"profiles": {
+			"rfdetr": {
+				"title": "RF-DETR — Common Objects (COCO, 80 classes, default)",
+				"engine": "rfdetr",
+				"model": "PekingU/rtdetr_r50vd",
+				"threshold": 0.3,
+				"prompt": ""
+			},
+			"mmgdino": {
+				"title": "MM-Grounding-DINO — Open-Vocabulary (any prompt)",
+				"engine": "mmgdino",
+				"model": "IDEA-Research/grounding-dino-tiny",
+				"threshold": 0.3,
+				"prompt": ""
+			}
+		}
+	},
+	"fields": {
+		"detect.threshold": {
+			"type": "number",
+			"title": "Confidence threshold",
+			"description": "Minimum confidence score (0.0–1.0) to include a detection",
+			"default": 0.3,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"detect.prompt": {
+			"type": "string",
+			"format": "textarea",
+			"title": "Detection prompt",
+			"description": "Example: \"person . car . dog\" (period or comma-separated list) or \"red car\" / \"person in a hat\" (described object). Returns all matching regions. Matches objects and attributes — not spatial relationships, so \"the car on the left\" returns all cars, not just the left one.",
+			"optional": false,
+			"minLength": 1
+		},
+		"detect.profile": {
+			"title": "Model",
+			"type": "string",
+			"default": "rfdetr",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{ "value": "rfdetr", "properties": ["detect.threshold"] },
+				{ "value": "mmgdino", "properties": ["detect.prompt", "detect.threshold"] }
+			]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Object Detection",
+			"properties": ["detect.profile"]
+		}
+	],
+	"test": {
+		"profiles": ["rfdetr"],
+		"outputs": ["text"],
+		"timeout": 180,
+		"cases": [
+			{
+				"name": "Detect a person in a portrait",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "person" }
+				}
+			}
+		]
+	},
+	"fulltest": [
+		{
+			"profiles": ["rfdetr"],
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "RF-DETR detects a person in a portrait",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true, "contains": "person" }
+					}
+				}
+			]
+		},
+		{
+			"profiles": ["mmgdino"],
+			"config": { "detect.prompt": "person . face" },
+			"outputs": ["text"],
+			"timeout": 180,
+			"cases": [
+				{
+					"name": "Grounding-DINO detects its prompt classes",
+					"image": "images/einstein.jpg",
+					"expect": {
+						"text": { "notEmpty": true }
+					}
+				}
+			]
+		}
+	]
+}

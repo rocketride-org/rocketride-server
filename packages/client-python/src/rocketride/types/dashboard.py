@@ -64,6 +64,10 @@ class DASHBOARD_CONNECTION(TypedDict, total=False):
     messagesOut: int  # Total messages sent to this client
     authenticated: bool  # Whether the connection has completed auth
     clientId: str  # AccountInfo.clientid (account identifier)
+    userId: Optional[str]  # Stable user identifier resolved server-side (None until authenticated)
+    userName: Optional[str]  # User display name — displayName falling back to email (None when unauthenticated)
+    orgId: Optional[str]  # Organization id (None when unauthenticated or without org membership)
+    orgName: Optional[str]  # Organization display name (None when unauthenticated or without org membership)
     apikey: str  # Masked API key (first 4 + last 4 chars)
     clientInfo: Dict[str, str]  # Client name/version from auth handshake
     monitors: List[DASHBOARD_MONITOR]  # Active monitor subscriptions with flags
@@ -102,6 +106,54 @@ class DASHBOARD_RESPONSE(TypedDict):
     overview: DASHBOARD_OVERVIEW
     connections: List[DASHBOARD_CONNECTION]
     tasks: List[DASHBOARD_TASK]
+
+
+# ============================================================================
+# Paginated List Commands (rrext_list_connections / rrext_list_tasks)
+# ============================================================================
+
+
+class LIST_SORT_SPEC(TypedDict):
+    """One sort instruction for a list command: a row key and a direction."""
+
+    field: str  # The row key to sort by (e.g. 'startTime', 'connectedAt')
+    dir: Literal['asc', 'desc']  # Sort direction
+
+
+class LIST_PAGE_REQUEST(TypedDict, total=False):
+    """
+    Request arguments shared by the rrext_list_* commands (platform list-API
+    convention). Keys are the wire argument names — page_size stays
+    snake_case so a caller forwards {page, page_size, sort, filters, search}
+    verbatim.
+    """
+
+    page: int  # 1-based page number (default 1)
+    page_size: int  # Rows per page (server-clamped 1..100, default 50)
+    search: str  # Free text matched case-insensitively over the searchable keys
+    sort: List[LIST_SORT_SPEC]  # Sort instructions, most significant first
+    # Flat {key: value} filters: a string means contains (strings) or coerced
+    # equality (booleans/numbers); an array means set membership. Range bounds
+    # ride as separate string entries under '<field>__gte' / '<field>__lte'.
+    filters: Dict[str, Union[str, List[str]]]
+
+
+class LIST_CONNECTIONS_RESPONSE(TypedDict):
+    """Standard list envelope returned by the rrext_list_connections command."""
+
+    rows: List[DASHBOARD_CONNECTION]  # The rows of the requested page
+    total: int  # Total row count after search/filters, across all pages
+    page: int  # The (clamped) 1-based page that was returned
+    pageSize: int  # The (clamped) page size that was applied
+
+
+class LIST_TASKS_RESPONSE(TypedDict):
+    """Standard list envelope returned by the rrext_list_tasks command."""
+
+    rows: List[DASHBOARD_TASK]  # The rows of the requested page
+    total: int  # Total row count after search/filters, across all pages
+    page: int  # The (clamped) 1-based page that was returned
+    pageSize: int  # The (clamped) page size that was applied
 
 
 # ============================================================================

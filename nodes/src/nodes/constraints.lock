@@ -1,0 +1,1686 @@
+absl-py==2.4.0
+    # via mediapipe
+accelerate==1.14.0
+    # via
+    #   -r nodes/src/nodes/embedding_image/requirements.txt
+    #   -r nodes/src/nodes/embedding_video/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+addict==2.4.0
+    # via misaki
+aiofiles==24.1.0
+    # via
+    #   crewai
+    #   daytona
+aiohappyeyeballs==2.6.2
+    # via aiohttp
+aiohttp==3.14.1
+    # via
+    #   -r nodes/src/nodes/telegram/requirements.txt
+    #   aiohttp-retry
+    #   daytona-api-client-async
+    #   daytona-toolbox-api-client-async
+    #   firecrawl-py
+    #   instructor
+    #   kubernetes
+    #   langchain-xai
+    #   llama-index-core
+aiohttp-retry==2.9.1
+    # via
+    #   daytona-api-client-async
+    #   daytona-toolbox-api-client-async
+aiosignal==1.4.0
+    # via aiohttp
+aiosqlite==0.21.0
+    # via
+    #   crewai
+    #   llama-index-core
+annotated-doc==0.0.4
+    # via
+    #   fastapi
+    #   typer
+annotated-types==0.7.0
+    # via pydantic
+anthropic==0.113.0
+    # via
+    #   -r nodes/src/nodes/llm_anthropic/requirements.txt
+    #   langchain-anthropic
+anyio==4.14.1
+    # via
+    #   anthropic
+    #   google-genai
+    #   httpx
+    #   landingai-ade
+    #   langsmith
+    #   llama-cloud
+    #   mcp
+    #   openai
+    #   reductoai
+    #   sse-starlette
+    #   starlette
+    #   watchfiles
+apify-client==3.0.4
+    # via -r nodes/src/nodes/tool_apify/requirements.txt
+appdirs==1.4.4
+    # via
+    #   crewai
+    #   crewai-cli
+    #   crewai-core
+astrapy==2.2.1
+    # via -r nodes/src/nodes/astra_db/requirements.txt
+asttokens==3.0.1
+    # via stack-data
+asynch==0.2.5
+    # via clickhouse-sqlalchemy
+attrs==26.1.0
+    # via
+    #   aiohttp
+    #   jsonschema
+    #   phonemizer-fork
+    #   referencing
+authlib==1.7.2
+    # via
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   weaviate-client
+av==17.1.0
+    # via
+    #   -r nodes/src/nodes/audio_transcribe/requirements.txt
+    #   faster-whisper
+babel==2.18.0
+    # via csvw
+backoff==2.2.1
+    # via posthog
+banks==2.4.4
+    # via llama-index-core
+bcrypt==5.0.0
+    # via chromadb
+beautifulsoup4==4.15.0
+    # via img2table
+blis==1.3.3
+    # via thinc
+boto3==1.43.36
+    # via
+    #   -r nodes/src/nodes/llm_bedrock/requirements.txt
+    #   langchain-aws
+botocore==1.43.36
+    # via
+    #   -r nodes/src/nodes/llm_bedrock/requirements.txt
+    #   boto3
+    #   s3transfer
+bracex==2.7
+    # via wcmatch
+build==1.5.0
+    # via chromadb
+cachetools==7.1.4
+    # via pymilvus
+catalogue==2.0.10
+    # via
+    #   spacy
+    #   srsly
+    #   thinc
+cel-python==0.5.0
+    # via crewai
+certifi==2026.6.17
+    # via
+    #   -r nodes/src/nodes/requirements.txt
+    #   crewai-cli
+    #   elastic-transport
+    #   httpcore
+    #   httpx
+    #   kubernetes
+    #   mediapipe
+    #   opensearch-py
+    #   requests
+cffi==2.0.0
+    # via
+    #   -r nodes/src/nodes/text_output/requirements.txt
+    #   cryptography
+    #   pygit2
+    #   sounddevice
+    #   soundfile
+charset-normalizer==3.4.7
+    # via
+    #   -r nodes/src/nodes/requirements.txt
+    #   pdfminer-six
+    #   requests
+chromadb==1.1.1
+    # via crewai
+chromadb-client==1.5.9
+    # via -r nodes/src/nodes/chroma/requirements.txt
+ciso8601==2.3.3
+    # via asynch
+click==8.4.2
+    # via
+    #   crewai
+    #   crewai-cli
+    #   huggingface-hub
+    #   llama-parse
+    #   nltk
+    #   typer
+    #   uvicorn
+clickhouse-driver==0.2.9
+    # via
+    #   -r nodes/src/nodes/db_clickhouse/requirements.txt
+    #   clickhouse-sqlalchemy
+clickhouse-sqlalchemy==0.3.2
+    # via -r nodes/src/nodes/db_clickhouse/requirements.txt
+cloudpathlib==0.24.0
+    # via weasel
+cohere==6.1.0
+    # via -r nodes/src/nodes/rerank_cohere/requirements.txt
+colorama==0.4.6
+    # via
+    #   apify-client
+    #   build
+    #   click
+    #   griffecli
+    #   ipython
+    #   loguru
+    #   tqdm
+    #   uvicorn
+    #   wasabi
+coloredlogs==15.0.1
+    # via
+    #   onnxruntime
+    #   onnxruntime-gpu
+confection==1.3.3
+    # via
+    #   spacy
+    #   thinc
+    #   weasel
+contourpy==1.3.3
+    # via matplotlib
+crewai==1.15.1
+    # via -r nodes/src/nodes/agent_crewai/requirements.txt
+crewai-cli==1.15.1
+    # via crewai
+crewai-core==1.15.1
+    # via
+    #   crewai
+    #   crewai-cli
+cryptography==46.0.7
+    # via
+    #   -r nodes/src/nodes/db_mysql/requirements.txt
+    #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/text_output/requirements.txt
+    #   authlib
+    #   crewai-cli
+    #   crewai-core
+    #   google-auth
+    #   joserfc
+    #   pdfminer-six
+    #   pyjwt
+    #   pyspnego
+    #   smbprotocol
+csvw==4.0.0
+    # via segments
+ctranslate2==4.8.0
+    # via
+    #   -r nodes/src/nodes/audio_transcribe/requirements.txt
+    #   faster-whisper
+cuda-bindings==12.9.4 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+cuda-pathfinder==1.5.5 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via cuda-bindings
+curated-tokenizers==0.0.9
+    # via spacy-curated-transformers
+curated-transformers==0.1.1
+    # via spacy-curated-transformers
+cycler==0.12.1
+    # via matplotlib
+cymem==2.0.13
+    # via
+    #   preshed
+    #   spacy
+    #   thinc
+cython==3.2.6
+    # via -r nodes/src/nodes/requirements.txt
+dataclasses-json==0.2.5
+    # via llama-index-core
+daytona==0.140.0
+    # via -r nodes/src/nodes/tool_daytona/requirements.txt
+daytona-api-client==0.140.0
+    # via daytona
+daytona-api-client-async==0.140.0
+    # via daytona
+daytona-toolbox-api-client==0.140.0
+    # via daytona
+daytona-toolbox-api-client-async==0.140.0
+    # via daytona
+decorator==5.3.1
+    # via ipython
+deepagents==0.6.12
+    # via -r nodes/src/nodes/agent_deepagent/requirements.txt
+deprecated==1.3.1
+    # via
+    #   banks
+    #   daytona
+    #   llama-index-core
+    #   llama-index-instrumentation
+deprecation==2.1.0
+    # via
+    #   astrapy
+    #   lancedb
+    #   weaviate-client
+dirtyjson==1.0.8
+    # via llama-index-core
+distro==1.9.0
+    # via
+    #   anthropic
+    #   google-genai
+    #   landingai-ade
+    #   langsmith
+    #   llama-cloud
+    #   openai
+    #   posthog
+    #   reductoai
+dlinfo==2.0.0
+    # via phonemizer-fork
+dnspython==2.8.0
+    # via
+    #   -r nodes/src/nodes/atlas/requirements.txt
+    #   email-validator
+    #   pymongo
+docopt==0.6.2
+    # via num2words
+docstring-parser==0.18.0
+    # via
+    #   anthropic
+    #   instructor
+durationpy==0.10
+    # via kubernetes
+elastic-transport==8.17.1
+    # via elasticsearch
+elasticsearch==8.19.3
+    # via -r nodes/src/nodes/index_search/requirements.txt
+email-validator==2.3.0
+    # via pydantic
+environs==14.6.0
+    # via
+    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   daytona
+espeakng-loader==0.2.4
+    # via misaki
+et-xmlfile==2.0.0
+    # via openpyxl
+eval-type-backport==0.4.0
+    # via mistralai
+events==0.5
+    # via opensearch-py
+executing==2.2.1
+    # via stack-data
+faiss-cpu==1.14.3 ; sys_platform != 'win32'
+    # via milvus-lite
+falkordb==1.6.1
+    # via -r nodes/src/nodes/tool_falkordb/requirements.txt
+fastapi==0.138.2
+    # via
+    #   -r nodes/src/nodes/remote/requirements.txt
+    #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/telegram/requirements.txt
+fastavro==1.12.2
+    # via cohere
+faster-whisper==1.2.1
+    # via -r nodes/src/nodes/audio_transcribe/requirements.txt
+filelock==3.29.4
+    # via
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   huggingface-hub
+    #   torch
+filetype==1.2.0
+    # via
+    #   banks
+    #   langchain-google-genai
+    #   llama-index-core
+firecrawl-py==4.30.4
+    # via -r nodes/src/nodes/tool_firecrawl/requirements.txt
+flatbuffers==25.12.19
+    # via
+    #   mediapipe
+    #   onnxruntime
+    #   onnxruntime-gpu
+fonttools==4.63.0
+    # via matplotlib
+frozenlist==1.8.0
+    # via
+    #   aiohttp
+    #   aiosignal
+fsspec==2026.6.0
+    # via
+    #   huggingface-hub
+    #   llama-index-core
+    #   torch
+gliner==0.2.24 ; python_full_version >= '3.14'
+    # via -r nodes/src/nodes/anonymize/requirements.txt
+gliner==0.2.27 ; python_full_version < '3.14'
+    # via -r nodes/src/nodes/anonymize/requirements.txt
+google-api-core==2.31.0
+    # via -r nodes/src/nodes/llm_gemini/requirements.txt
+google-auth==2.55.1
+    # via
+    #   -r nodes/src/nodes/llm_gemini/requirements.txt
+    #   google-api-core
+    #   google-genai
+google-genai==2.10.0
+    # via
+    #   -r nodes/src/nodes/accessibility_describe/requirements.txt
+    #   -r nodes/src/nodes/llm_gemini/requirements.txt
+    #   -r nodes/src/nodes/llm_vision_gemini/requirements.txt
+    #   langchain-google-genai
+google-re2==1.1.20251105
+    # via cel-python
+googleapis-common-protos==1.75.0
+    # via
+    #   -r nodes/src/nodes/llm_gemini/requirements.txt
+    #   google-api-core
+    #   opentelemetry-exporter-otlp-proto-grpc
+    #   opentelemetry-exporter-otlp-proto-http
+greenlet==3.5.3
+    # via sqlalchemy
+griffe==2.1.0
+    # via banks
+griffecli==2.1.0
+    # via griffe
+griffelib==2.1.0
+    # via
+    #   griffe
+    #   griffecli
+grpcio==1.81.1
+    # via
+    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   chromadb
+    #   grpcio-health-checking
+    #   grpcio-tools
+    #   milvus-lite
+    #   opensearch-protobufs
+    #   opentelemetry-exporter-otlp-proto-grpc
+    #   pymilvus
+    #   qdrant-client
+    #   weaviate-client
+grpcio-health-checking==1.81.1
+    # via
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   weaviate-client
+grpcio-tools==1.81.1
+    # via
+    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+h11==0.16.0
+    # via
+    #   astrapy
+    #   httpcore
+    #   uvicorn
+h2==4.3.0
+    # via httpx
+hf-xet==1.5.1 ; platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+    # via huggingface-hub
+hpack==4.2.0
+    # via h2
+httpcore==1.0.9
+    # via httpx
+httptools==0.8.0
+    # via uvicorn
+httpx==0.28.1
+    # via
+    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   anthropic
+    #   astrapy
+    #   chromadb
+    #   chromadb-client
+    #   cohere
+    #   crewai
+    #   crewai-cli
+    #   crewai-core
+    #   daytona
+    #   firecrawl-py
+    #   google-genai
+    #   huggingface-hub
+    #   landingai-ade
+    #   langgraph-sdk
+    #   langsmith
+    #   llama-cloud
+    #   llama-index-core
+    #   mcp
+    #   mistralai
+    #   openai
+    #   pinecone
+    #   qdrant-client
+    #   reductoai
+    #   twelvelabs
+    #   weasel
+    #   weaviate-client
+httpx-sse==0.4.3
+    # via mcp
+huggingface-hub==1.21.0
+    # via
+    #   -r nodes/src/nodes/audio_transcribe/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   accelerate
+    #   faster-whisper
+    #   gliner
+    #   kokoro
+    #   tokenizers
+    #   transformers
+humanfriendly==10.0
+    # via coloredlogs
+hyperframe==6.1.0
+    # via h2
+idna==3.18
+    # via
+    #   -r nodes/src/nodes/requirements.txt
+    #   anyio
+    #   email-validator
+    #   httpx
+    #   requests
+    #   yarl
+imageio-ffmpeg==0.6.0
+    # via -r nodes/src/nodes/audio_player/requirements.txt
+img2table==2.0.0
+    # via -r nodes/src/nodes/ocr/requirements.txt
+impit==0.13.1
+    # via apify-client
+importlib-resources==7.1.0
+    # via chromadb
+instructor==1.15.4
+    # via crewai
+invoke==2.2.1
+    # via mistralai
+ipython==9.15.0
+    # via astrapy
+ipython-pygments-lexers==1.1.1
+    # via ipython
+isodate==0.7.2
+    # via csvw
+jedi==0.20.0
+    # via ipython
+jinja2==3.1.6
+    # via
+    #   banks
+    #   instructor
+    #   spacy
+    #   torch
+jiter==0.14.0
+    # via
+    #   anthropic
+    #   instructor
+    #   openai
+jmespath==1.1.0
+    # via
+    #   -r nodes/src/nodes/agent_rocketride/requirements.txt
+    #   boto3
+    #   botocore
+    #   cel-python
+joblib==1.5.3
+    # via
+    #   nltk
+    #   phonemizer-fork
+joserfc==1.7.2
+    # via authlib
+json-repair==0.25.3
+    # via crewai
+json5==0.10.0
+    # via crewai
+jsonpatch==1.33
+    # via langchain-core
+jsonpointer==3.1.1
+    # via jsonpatch
+jsonref==1.1.0
+    # via crewai
+jsonschema==4.26.0
+    # via
+    #   chromadb
+    #   chromadb-client
+    #   csvw
+    #   mcp
+    #   mistral-common
+jsonschema-specifications==2025.9.1
+    # via jsonschema
+kiwisolver==1.5.0
+    # via matplotlib
+kokoro==0.9.4
+    # via -r nodes/src/nodes/audio_tts/requirements.txt
+kubernetes==36.0.2
+    # via chromadb
+lance-namespace==0.8.6
+    # via lancedb
+lance-namespace-urllib3-client==0.8.6
+    # via lance-namespace
+lancedb==0.30.0
+    # via crewai
+landingai-ade==1.12.0
+    # via -r nodes/src/nodes/landing_ai/requirements.txt
+langchain==1.3.11
+    # via
+    #   -r nodes/src/nodes/agent_deepagent/requirements.txt
+    #   -r nodes/src/nodes/agent_langchain/requirements.txt
+    #   -r nodes/src/nodes/llm_anthropic/requirements.txt
+    #   -r nodes/src/nodes/llm_baidu_qianfan/requirements.txt
+    #   -r nodes/src/nodes/llm_bedrock/requirements.txt
+    #   -r nodes/src/nodes/llm_deepseek/requirements.txt
+    #   -r nodes/src/nodes/llm_gmi_cloud/requirements.txt
+    #   -r nodes/src/nodes/llm_kimi/requirements.txt
+    #   -r nodes/src/nodes/llm_minimax/requirements.txt
+    #   -r nodes/src/nodes/llm_ollama/requirements.txt
+    #   -r nodes/src/nodes/llm_openai/requirements.txt
+    #   -r nodes/src/nodes/llm_openai_api/requirements.txt
+    #   -r nodes/src/nodes/llm_perplexity/requirements.txt
+    #   -r nodes/src/nodes/llm_qwen/requirements.txt
+    #   -r nodes/src/nodes/llm_vision_ollama/requirements.txt
+    #   -r nodes/src/nodes/llm_xai/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_llm/requirements.txt
+    #   -r nodes/src/nodes/summarization/requirements.txt
+    #   deepagents
+langchain-anthropic==1.4.8
+    # via
+    #   -r nodes/src/nodes/llm_anthropic/requirements.txt
+    #   deepagents
+langchain-aws==1.6.1
+    # via -r nodes/src/nodes/llm_bedrock/requirements.txt
+langchain-core==1.4.8
+    # via
+    #   -r nodes/src/nodes/agent_deepagent/requirements.txt
+    #   -r nodes/src/nodes/agent_langchain/requirements.txt
+    #   -r nodes/src/nodes/llm_anthropic/requirements.txt
+    #   -r nodes/src/nodes/llm_baidu_qianfan/requirements.txt
+    #   -r nodes/src/nodes/llm_bedrock/requirements.txt
+    #   -r nodes/src/nodes/llm_deepseek/requirements.txt
+    #   -r nodes/src/nodes/llm_gmi_cloud/requirements.txt
+    #   -r nodes/src/nodes/llm_kimi/requirements.txt
+    #   -r nodes/src/nodes/llm_minimax/requirements.txt
+    #   -r nodes/src/nodes/llm_ollama/requirements.txt
+    #   -r nodes/src/nodes/llm_openai/requirements.txt
+    #   -r nodes/src/nodes/llm_openai_api/requirements.txt
+    #   -r nodes/src/nodes/llm_perplexity/requirements.txt
+    #   -r nodes/src/nodes/llm_qwen/requirements.txt
+    #   -r nodes/src/nodes/llm_vision_ollama/requirements.txt
+    #   -r nodes/src/nodes/llm_xai/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_llm/requirements.txt
+    #   deepagents
+    #   langchain
+    #   langchain-anthropic
+    #   langchain-aws
+    #   langchain-google-genai
+    #   langchain-openai
+    #   langchain-text-splitters
+    #   langchain-xai
+    #   langgraph
+    #   langgraph-checkpoint
+    #   langgraph-prebuilt
+    #   langgraph-sdk
+langchain-google-genai==4.2.6
+    # via deepagents
+langchain-openai==1.3.3
+    # via
+    #   -r nodes/src/nodes/embedding_openai/requirements.txt
+    #   -r nodes/src/nodes/llm_baidu_qianfan/requirements.txt
+    #   -r nodes/src/nodes/llm_deepseek/requirements.txt
+    #   -r nodes/src/nodes/llm_gmi_cloud/requirements.txt
+    #   -r nodes/src/nodes/llm_kimi/requirements.txt
+    #   -r nodes/src/nodes/llm_minimax/requirements.txt
+    #   -r nodes/src/nodes/llm_ollama/requirements.txt
+    #   -r nodes/src/nodes/llm_openai/requirements.txt
+    #   -r nodes/src/nodes/llm_openai_api/requirements.txt
+    #   -r nodes/src/nodes/llm_perplexity/requirements.txt
+    #   -r nodes/src/nodes/llm_qwen/requirements.txt
+    #   -r nodes/src/nodes/llm_vision_ollama/requirements.txt
+    #   langchain-xai
+langchain-protocol==0.0.18
+    # via
+    #   langchain-core
+    #   langgraph-sdk
+langchain-text-splitters==1.1.2
+    # via -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+langchain-xai==1.2.2
+    # via -r nodes/src/nodes/llm_xai/requirements.txt
+langgraph==1.2.6
+    # via langchain
+langgraph-checkpoint==4.1.1
+    # via
+    #   langgraph
+    #   langgraph-prebuilt
+langgraph-prebuilt==1.1.0
+    # via langgraph
+langgraph-sdk==0.4.2
+    # via langgraph
+langsmith==0.9.3
+    # via
+    #   deepagents
+    #   langchain-core
+language-tags==1.3.1
+    # via csvw
+lark==1.3.1
+    # via cel-python
+leb128==1.0.9
+    # via asynch
+linkify-it-py==2.1.0
+    # via markdown-it-py
+llama-cloud==2.9.1
+    # via -r nodes/src/nodes/llamaparse/requirements.txt
+llama-index-core==0.14.23
+    # via
+    #   -r nodes/src/nodes/agent_llamaindex/requirements.txt
+    #   -r nodes/src/nodes/llamaparse/requirements.txt
+    #   llama-parse
+llama-index-instrumentation==0.5.0
+    # via llama-index-workflows
+llama-index-workflows==2.22.1
+    # via llama-index-core
+llama-parse==0.5.20
+    # via -r nodes/src/nodes/llamaparse/requirements.txt
+loguru==0.7.3
+    # via kokoro
+lz4==4.4.5
+    # via asynch
+markdown-it-py==4.2.0
+    # via
+    #   mdit-py-plugins
+    #   rich
+    #   textual
+markupsafe==3.0.3
+    # via jinja2
+marshmallow==4.3.0
+    # via
+    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   dataclasses-json
+    #   environs
+    #   marshmallow-enum
+marshmallow-enum==1.5.1
+    # via dataclasses-json
+matplotlib==3.11.0
+    # via mediapipe
+matplotlib-inline==0.2.2
+    # via ipython
+mcp==1.26.0
+    # via crewai
+mdit-py-plugins==0.6.1
+    # via textual
+mdurl==0.1.2
+    # via markdown-it-py
+mediapipe==0.10.35
+    # via -r nodes/src/nodes/face_detection/requirements.txt
+milvus-lite==3.0 ; sys_platform != 'win32'
+    # via -r nodes/src/nodes/milvus/requirements.txt
+misaki==0.9.4
+    # via kokoro
+mistral-common==1.11.5
+    # via
+    #   -r nodes/src/nodes/llm_mistral/requirements.txt
+    #   -r nodes/src/nodes/llm_vision_mistral/requirements.txt
+mistralai==1.12.4
+    # via
+    #   -r nodes/src/nodes/llm_mistral/requirements.txt
+    #   -r nodes/src/nodes/llm_vision_mistral/requirements.txt
+mmh3==5.2.1
+    # via chromadb
+more-itertools==11.1.0
+    # via apify-client
+mpmath==1.3.0
+    # via sympy
+msgspec==0.21.1
+    # via pinecone
+multidict==6.7.1
+    # via
+    #   aiohttp
+    #   yarl
+multipart==1.3.1
+    # via daytona
+murmurhash==1.0.15
+    # via
+    #   preshed
+    #   spacy
+    #   thinc
+mypy-extensions==1.1.0
+    # via typing-inspect
+neo4j==6.2.0
+    # via -r nodes/src/nodes/db_neo4j/requirements.txt
+nest-asyncio==1.6.0
+    # via
+    #   -r nodes/src/nodes/remote/requirements.txt
+    #   firecrawl-py
+    #   llama-index-core
+networkx==3.6.1
+    # via
+    #   llama-index-core
+    #   torch
+nltk==3.9.4
+    # via llama-index-core
+num2words==0.5.14
+    # via misaki
+numpy==2.3.5 ; python_full_version < '3.13'
+    # via
+    #   -r nodes/src/nodes/audio_tts/requirements.txt
+    #   -r nodes/src/nodes/embedding_transformer/requirements.txt
+    #   -r nodes/src/nodes/face_detection/requirements.txt
+    #   -r nodes/src/nodes/index_search/requirements.txt
+    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   -r nodes/src/nodes/ocr/requirements.txt
+    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   accelerate
+    #   blis
+    #   chromadb
+    #   chromadb-client
+    #   contourpy
+    #   ctranslate2
+    #   faiss-cpu
+    #   img2table
+    #   kokoro
+    #   lancedb
+    #   langchain-aws
+    #   llama-index-core
+    #   matplotlib
+    #   mediapipe
+    #   milvus-lite
+    #   mistral-common
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   opencv-contrib-python
+    #   pandas
+    #   pgvector
+    #   pycocotools
+    #   qdrant-client
+    #   soundfile
+    #   spacy
+    #   thinc
+    #   transformers
+numpy==2.5.0 ; python_full_version >= '3.13'
+    # via
+    #   -r nodes/src/nodes/audio_tts/requirements.txt
+    #   -r nodes/src/nodes/embedding_transformer/requirements.txt
+    #   -r nodes/src/nodes/face_detection/requirements.txt
+    #   -r nodes/src/nodes/index_search/requirements.txt
+    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   -r nodes/src/nodes/ocr/requirements.txt
+    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   accelerate
+    #   blis
+    #   chromadb
+    #   chromadb-client
+    #   contourpy
+    #   ctranslate2
+    #   faiss-cpu
+    #   img2table
+    #   kokoro
+    #   lancedb
+    #   langchain-aws
+    #   llama-index-core
+    #   matplotlib
+    #   mediapipe
+    #   milvus-lite
+    #   mistral-common
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   opencv-contrib-python
+    #   pandas
+    #   pgvector
+    #   pycocotools
+    #   qdrant-client
+    #   soundfile
+    #   spacy
+    #   thinc
+    #   transformers
+nvidia-cublas-cu12==12.8.4.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   nvidia-cudnn-cu12
+    #   nvidia-cusolver-cu12
+    #   torch
+nvidia-cuda-cupti-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-cuda-nvrtc-cu12==12.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-cuda-runtime-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-cudnn-cu12==9.10.2.21 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-cufft-cu12==11.3.3.83 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-cufile-cu12==1.13.1.3 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-curand-cu12==10.3.9.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-cusolver-cu12==11.7.3.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-cusparse-cu12==12.5.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   nvidia-cusolver-cu12
+    #   torch
+nvidia-cusparselt-cu12==0.7.1 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-nccl-cu12==2.27.5 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-nvjitlink-cu12==12.8.93 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via
+    #   nvidia-cufft-cu12
+    #   nvidia-cusolver-cu12
+    #   nvidia-cusparse-cu12
+    #   torch
+nvidia-nvshmem-cu12==3.4.5 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+nvidia-nvtx-cu12==12.8.90 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+oauthlib==3.3.1
+    # via requests-oauthlib
+obstore==0.8.2
+    # via daytona
+onnxruntime==1.20.1
+    # via
+    #   -r nodes/src/nodes/anonymize/requirements.txt
+    #   -r nodes/src/nodes/audio_transcribe/requirements.txt
+    #   chromadb
+    #   faster-whisper
+    #   gliner
+onnxruntime-gpu==1.20.1 ; sys_platform != 'darwin'
+    # via
+    #   -r nodes/src/nodes/anonymize/requirements.txt
+    #   -r nodes/src/nodes/audio_transcribe/requirements.txt
+openai==2.44.0
+    # via
+    #   -r nodes/src/nodes/embedding_openai/requirements.txt
+    #   -r nodes/src/nodes/llm_baidu_qianfan/requirements.txt
+    #   -r nodes/src/nodes/llm_deepseek/requirements.txt
+    #   -r nodes/src/nodes/llm_gmi_cloud/requirements.txt
+    #   -r nodes/src/nodes/llm_kimi/requirements.txt
+    #   -r nodes/src/nodes/llm_minimax/requirements.txt
+    #   -r nodes/src/nodes/llm_openai/requirements.txt
+    #   -r nodes/src/nodes/llm_openai_api/requirements.txt
+    #   -r nodes/src/nodes/llm_perplexity/requirements.txt
+    #   -r nodes/src/nodes/llm_qwen/requirements.txt
+    #   -r nodes/src/nodes/llm_vision_openai/requirements.txt
+    #   crewai
+    #   instructor
+    #   langchain-openai
+opencv-contrib-python==4.13.0.92
+    # via
+    #   img2table
+    #   mediapipe
+openpyxl==3.1.5
+    # via crewai
+opensearch-protobufs==1.2.0
+    # via opensearch-py
+opensearch-py==3.2.0
+    # via -r nodes/src/nodes/index_search/requirements.txt
+opentelemetry-api==1.42.1
+    # via
+    #   chromadb
+    #   chromadb-client
+    #   crewai
+    #   crewai-core
+    #   mistralai
+    #   opentelemetry-exporter-otlp-proto-grpc
+    #   opentelemetry-exporter-otlp-proto-http
+    #   opentelemetry-sdk
+    #   opentelemetry-semantic-conventions
+opentelemetry-exporter-otlp-proto-common==1.42.1
+    # via
+    #   opentelemetry-exporter-otlp-proto-grpc
+    #   opentelemetry-exporter-otlp-proto-http
+opentelemetry-exporter-otlp-proto-grpc==1.42.1
+    # via
+    #   chromadb
+    #   chromadb-client
+opentelemetry-exporter-otlp-proto-http==1.42.1
+    # via
+    #   crewai
+    #   crewai-core
+    #   mistralai
+opentelemetry-proto==1.42.1
+    # via
+    #   opentelemetry-exporter-otlp-proto-common
+    #   opentelemetry-exporter-otlp-proto-grpc
+    #   opentelemetry-exporter-otlp-proto-http
+opentelemetry-sdk==1.42.1
+    # via
+    #   chromadb
+    #   chromadb-client
+    #   crewai
+    #   crewai-core
+    #   mistralai
+    #   opentelemetry-exporter-otlp-proto-grpc
+    #   opentelemetry-exporter-otlp-proto-http
+opentelemetry-semantic-conventions==0.63b1
+    # via opentelemetry-sdk
+orjson==3.11.9
+    # via
+    #   chromadb
+    #   chromadb-client
+    #   langgraph-sdk
+    #   langsmith
+    #   pinecone
+    #   pymilvus
+ormsgpack==1.12.2
+    # via langgraph-checkpoint
+overrides==7.7.0
+    # via
+    #   chromadb
+    #   chromadb-client
+packaging==26.2
+    # via
+    #   accelerate
+    #   build
+    #   crewai-cli
+    #   crewai-core
+    #   deprecation
+    #   faiss-cpu
+    #   huggingface-hub
+    #   lancedb
+    #   langchain-core
+    #   langsmith
+    #   matplotlib
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   spacy
+    #   thinc
+    #   transformers
+    #   weasel
+pandas==3.0.3
+    # via
+    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   pymilvus
+parso==0.8.7
+    # via jedi
+pdfminer-six==20260107
+    # via pdfplumber
+pdfplumber==0.11.10
+    # via crewai
+pendulum==3.2.0
+    # via cel-python
+pexpect==4.9.0 ; sys_platform != 'emscripten' and sys_platform != 'win32'
+    # via ipython
+pgvector==0.4.2
+    # via -r nodes/src/nodes/vectordb_postgres/requirements.txt
+phonemizer-fork==3.3.2
+    # via misaki
+pillow==12.2.0
+    # via
+    #   -r nodes/src/nodes/face_detection/requirements.txt
+    #   -r nodes/src/nodes/image_cleanup/requirements.txt
+    #   -r nodes/src/nodes/ocr/requirements.txt
+    #   llama-index-core
+    #   matplotlib
+    #   mistral-common
+    #   pdfplumber
+pinecone==9.1.0
+    # via -r nodes/src/nodes/pinecone/requirements.txt
+pinecone-plugin-assistant==3.0.3
+    # via -r nodes/src/nodes/pinecone/requirements.txt
+pinecone-plugin-interface==0.0.7
+    # via -r nodes/src/nodes/pinecone/requirements.txt
+platformdirs==4.10.0
+    # via
+    #   banks
+    #   llama-index-core
+    #   textual
+portalocker==2.7.0
+    # via
+    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   crewai
+    #   crewai-core
+    #   qdrant-client
+posthog==5.4.0
+    # via chromadb
+preshed==3.0.13
+    # via
+    #   spacy
+    #   thinc
+prompt-toolkit==3.0.52
+    # via ipython
+propcache==0.5.2
+    # via
+    #   aiohttp
+    #   yarl
+proto-plus==1.28.0
+    # via
+    #   -r nodes/src/nodes/llm_gemini/requirements.txt
+    #   google-api-core
+protobuf==6.33.6
+    # via
+    #   -r nodes/src/nodes/llm_gemini/requirements.txt
+    #   -r nodes/src/nodes/milvus/requirements.txt
+    #   google-api-core
+    #   googleapis-common-protos
+    #   grpcio-health-checking
+    #   grpcio-tools
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   opensearch-protobufs
+    #   opentelemetry-proto
+    #   proto-plus
+    #   pymilvus
+    #   qdrant-client
+psutil==7.2.2
+    # via
+    #   accelerate
+    #   ipython
+psycopg2-binary==2.9.12
+    # via
+    #   -r nodes/src/nodes/db_postgres/requirements.txt
+    #   -r nodes/src/nodes/vectordb_postgres/requirements.txt
+ptyprocess==0.7.0 ; sys_platform != 'emscripten' and sys_platform != 'win32'
+    # via pexpect
+pure-eval==0.2.3
+    # via stack-data
+pyarrow==24.0.0
+    # via
+    #   lancedb
+    #   milvus-lite
+pyasn1==0.6.3
+    # via pyasn1-modules
+pyasn1-modules==0.4.2
+    # via google-auth
+pybase64==1.4.3
+    # via
+    #   chromadb
+    #   chromadb-client
+pycocotools==2.0.11
+    # via -r nodes/src/nodes/detect_segment/requirements.txt
+pycountry==26.2.16
+    # via pydantic-extra-types
+pycparser==3.0
+    # via
+    #   -r nodes/src/nodes/text_output/requirements.txt
+    #   cffi
+pydantic==2.12.5
+    # via
+    #   -r nodes/src/nodes/agent_deepagent/requirements.txt
+    #   -r nodes/src/nodes/atlas/requirements.txt
+    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   anthropic
+    #   apify-client
+    #   banks
+    #   chromadb
+    #   chromadb-client
+    #   cohere
+    #   crewai
+    #   crewai-cli
+    #   crewai-core
+    #   daytona
+    #   daytona-api-client
+    #   daytona-api-client-async
+    #   daytona-toolbox-api-client
+    #   daytona-toolbox-api-client-async
+    #   fastapi
+    #   firecrawl-py
+    #   google-genai
+    #   instructor
+    #   lance-namespace-urllib3-client
+    #   lancedb
+    #   landingai-ade
+    #   langchain
+    #   langchain-anthropic
+    #   langchain-aws
+    #   langchain-core
+    #   langchain-google-genai
+    #   langgraph
+    #   langsmith
+    #   llama-cloud
+    #   llama-index-core
+    #   llama-index-instrumentation
+    #   llama-index-workflows
+    #   llama-parse
+    #   mcp
+    #   mistral-common
+    #   mistralai
+    #   openai
+    #   pydantic-extra-types
+    #   pydantic-settings
+    #   qdrant-client
+    #   reductoai
+    #   spacy
+    #   thinc
+    #   twelvelabs
+    #   weasel
+    #   weaviate-client
+pydantic-core==2.41.5
+    # via
+    #   cohere
+    #   instructor
+    #   pydantic
+    #   twelvelabs
+pydantic-extra-types==2.11.1
+    # via mistral-common
+pydantic-settings==2.10.1
+    # via
+    #   chromadb-client
+    #   crewai
+    #   crewai-cli
+    #   mcp
+pygit2==1.19.3
+    # via -r nodes/src/nodes/tool_git/requirements.txt
+pygments==2.20.0
+    # via
+    #   ipython
+    #   ipython-pygments-lexers
+    #   rich
+    #   textual
+pyjwt==2.13.0
+    # via
+    #   crewai
+    #   crewai-cli
+    #   crewai-core
+    #   mcp
+pymilvus==3.0.0
+    # via -r nodes/src/nodes/milvus/requirements.txt
+pymongo==4.17.0
+    # via
+    #   -r nodes/src/nodes/atlas/requirements.txt
+    #   astrapy
+pymysql==1.2.0
+    # via -r nodes/src/nodes/db_mysql/requirements.txt
+pyparsing==3.3.2
+    # via
+    #   matplotlib
+    #   rdflib
+pypdfium2==5.11.0
+    # via
+    #   img2table
+    #   pdfplumber
+pypika==0.51.1
+    # via chromadb
+pyproject-hooks==1.2.0
+    # via build
+pyreadline3==3.5.6 ; sys_platform == 'win32'
+    # via humanfriendly
+pyspnego==0.12.1
+    # via
+    #   -r nodes/src/nodes/text_output/requirements.txt
+    #   smbprotocol
+python-dateutil==2.9.0.post0
+    # via
+    #   botocore
+    #   csvw
+    #   daytona-api-client
+    #   daytona-api-client-async
+    #   daytona-toolbox-api-client
+    #   daytona-toolbox-api-client-async
+    #   elasticsearch
+    #   falkordb
+    #   kubernetes
+    #   lance-namespace-urllib3-client
+    #   matplotlib
+    #   mistralai
+    #   opensearch-py
+    #   pandas
+    #   pendulum
+    #   posthog
+python-dotenv==1.2.2
+    # via
+    #   crewai
+    #   crewai-cli
+    #   environs
+    #   firecrawl-py
+    #   pydantic-settings
+    #   pymilvus
+    #   uvicorn
+python-multipart==0.0.32
+    # via mcp
+pytz==2026.2
+    # via
+    #   asynch
+    #   clickhouse-driver
+    #   neo4j
+pywin32==312 ; sys_platform == 'win32'
+    # via
+    #   -r nodes/src/nodes/requirements.txt
+    #   mcp
+    #   portalocker
+pyyaml==6.0.3
+    # via
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   accelerate
+    #   cel-python
+    #   chromadb
+    #   chromadb-client
+    #   crewai
+    #   ctranslate2
+    #   huggingface-hub
+    #   kubernetes
+    #   langchain-core
+    #   llama-index-core
+    #   mistralai
+    #   transformers
+    #   uvicorn
+qdrant-client==1.18.0
+    # via -r nodes/src/nodes/qdrant/requirements.txt
+rdflib==7.6.0
+    # via csvw
+redis==7.4.1
+    # via
+    #   -r nodes/src/nodes/memory_persistent/requirements.txt
+    #   -r nodes/src/nodes/tool_falkordb/requirements.txt
+    #   falkordb
+reductoai==0.22.0
+    # via -r nodes/src/nodes/reducto/requirements.txt
+referencing==0.37.0
+    # via
+    #   jsonschema
+    #   jsonschema-specifications
+regex==2026.1.15
+    # via
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   crewai
+    #   curated-tokenizers
+    #   misaki
+    #   nltk
+    #   segments
+    #   tiktoken
+    #   transformers
+requests==2.34.2
+    # via
+    #   -r nodes/src/nodes/requirements.txt
+    #   -r nodes/src/nodes/search_exa/requirements.txt
+    #   -r nodes/src/nodes/telegram/requirements.txt
+    #   -r nodes/src/nodes/tool_bland_ai/requirements.txt
+    #   -r nodes/src/nodes/tool_deepl/requirements.txt
+    #   -r nodes/src/nodes/tool_exa_search/requirements.txt
+    #   -r nodes/src/nodes/tool_github/requirements.txt
+    #   -r nodes/src/nodes/tool_mem0/requirements.txt
+    #   -r nodes/src/nodes/tool_tavily/requirements.txt
+    #   -r nodes/src/nodes/tool_v0/requirements.txt
+    #   -r nodes/src/nodes/tool_xtrace_memory/requirements.txt
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   clickhouse-sqlalchemy
+    #   cohere
+    #   firecrawl-py
+    #   google-api-core
+    #   google-auth
+    #   google-genai
+    #   instructor
+    #   kubernetes
+    #   langchain-xai
+    #   langsmith
+    #   llama-index-core
+    #   mistral-common
+    #   opensearch-py
+    #   opentelemetry-exporter-otlp-proto-http
+    #   pinecone-plugin-assistant
+    #   posthog
+    #   pymilvus
+    #   requests-oauthlib
+    #   requests-toolbelt
+    #   spacy
+    #   tiktoken
+requests-oauthlib==2.0.0
+    # via kubernetes
+requests-toolbelt==1.0.0
+    # via langsmith
+rfc3986==1.5.0
+    # via csvw
+rich==14.3.4
+    # via
+    #   chromadb
+    #   crewai-cli
+    #   crewai-core
+    #   instructor
+    #   textual
+    #   typer
+rpds-py==2026.5.1
+    # via
+    #   jsonschema
+    #   referencing
+s3transfer==0.19.0
+    # via boto3
+safetensors==0.8.0
+    # via
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   -r nodes/src/nodes/requirements.txt
+    #   accelerate
+    #   transformers
+segments==2.4.0
+    # via phonemizer-fork
+sentencepiece==0.2.1
+    # via
+    #   gliner
+    #   mistral-common
+setuptools==82.0.1
+    # via
+    #   ctranslate2
+    #   grpcio-tools
+    #   llama-index-core
+    #   pymilvus
+    #   spacy
+    #   thinc
+    #   torch
+shellingham==1.5.4
+    # via typer
+six==1.17.0
+    # via
+    #   kubernetes
+    #   posthog
+    #   python-dateutil
+smart-open==8.0.0
+    # via weasel
+smbprotocol==1.16.1
+    # via -r nodes/src/nodes/text_output/requirements.txt
+sniffio==1.3.1
+    # via
+    #   anthropic
+    #   google-genai
+    #   landingai-ade
+    #   langsmith
+    #   llama-cloud
+    #   openai
+    #   reductoai
+sounddevice==0.5.5
+    # via
+    #   -r nodes/src/nodes/audio_player/requirements.txt
+    #   mediapipe
+soundfile==0.14.0
+    # via -r nodes/src/nodes/audio_tts/requirements.txt
+soupsieve==2.8.4
+    # via beautifulsoup4
+spacy==3.8.14
+    # via misaki
+spacy-curated-transformers==0.3.1
+    # via misaki
+spacy-legacy==3.0.12
+    # via spacy
+spacy-loggers==1.0.5
+    # via spacy
+sqlalchemy==2.0.51
+    # via
+    #   clickhouse-sqlalchemy
+    #   llama-index-core
+srsly==2.5.3
+    # via
+    #   spacy
+    #   thinc
+    #   weasel
+sse-starlette==3.4.5
+    # via mcp
+sspilib==0.5.0
+    # via
+    #   -r nodes/src/nodes/text_output/requirements.txt
+    #   pyspnego
+stack-data==0.6.3
+    # via ipython
+starlette==1.3.1
+    # via
+    #   fastapi
+    #   mcp
+    #   sse-starlette
+sympy==1.14.0
+    # via
+    #   onnxruntime
+    #   onnxruntime-gpu
+    #   torch
+tenacity==9.1.4
+    # via
+    #   -r nodes/src/nodes/tool_mem0/requirements.txt
+    #   -r nodes/src/nodes/tool_xtrace_memory/requirements.txt
+    #   chromadb
+    #   chromadb-client
+    #   google-genai
+    #   instructor
+    #   langchain-core
+    #   llama-index-core
+termcolor==3.3.0
+    # via csvw
+textual==8.2.7
+    # via crewai-cli
+thinc==8.3.13
+    # via spacy
+tiktoken==0.13.0
+    # via
+    #   langchain-openai
+    #   llama-index-core
+    #   mistral-common
+tinytag==2.2.1
+    # via llama-index-core
+tokenizers==0.22.2
+    # via
+    #   -r nodes/src/nodes/audio_transcribe/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   chromadb
+    #   cohere
+    #   crewai
+    #   faster-whisper
+    #   transformers
+toml==0.10.2
+    # via
+    #   astrapy
+    #   daytona
+tomli==2.0.2
+    # via
+    #   crewai
+    #   crewai-cli
+    #   crewai-core
+tomli-w==1.1.0
+    # via
+    #   crewai
+    #   crewai-cli
+torch==2.10.0
+    # via
+    #   accelerate
+    #   curated-transformers
+    #   gliner
+    #   kokoro
+    #   spacy-curated-transformers
+tqdm==4.68.3
+    # via
+    #   -r nodes/src/nodes/audio_transcribe/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   chromadb
+    #   faster-whisper
+    #   gliner
+    #   huggingface-hub
+    #   lancedb
+    #   llama-index-core
+    #   nltk
+    #   openai
+    #   spacy
+    #   transformers
+traitlets==5.15.1
+    # via
+    #   ipython
+    #   matplotlib-inline
+transformers==5.6.2 ; python_full_version < '3.14'
+    # via
+    #   -r nodes/src/nodes/embedding_image/requirements.txt
+    #   -r nodes/src/nodes/embedding_video/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   gliner
+    #   kokoro
+transformers==5.12.1 ; python_full_version >= '3.14'
+    # via
+    #   -r nodes/src/nodes/embedding_image/requirements.txt
+    #   -r nodes/src/nodes/embedding_video/requirements.txt
+    #   -r nodes/src/nodes/preprocessor_langchain/requirements.txt
+    #   gliner
+    #   kokoro
+tree-sitter==0.25.2
+    # via -r nodes/src/nodes/preprocessor_code/requirements.txt
+tree-sitter-c==0.24.2
+    # via -r nodes/src/nodes/preprocessor_code/requirements.txt
+tree-sitter-cpp==0.23.4
+    # via -r nodes/src/nodes/preprocessor_code/requirements.txt
+tree-sitter-javascript==0.25.0
+    # via -r nodes/src/nodes/preprocessor_code/requirements.txt
+tree-sitter-python==0.25.0
+    # via -r nodes/src/nodes/preprocessor_code/requirements.txt
+tree-sitter-typescript==0.23.2
+    # via -r nodes/src/nodes/preprocessor_code/requirements.txt
+triton==3.6.0 ; platform_machine == 'x86_64' and sys_platform == 'linux'
+    # via torch
+twelvelabs==1.2.8
+    # via -r nodes/src/nodes/twelvelabs/requirements.txt
+typer==0.25.1
+    # via
+    #   chromadb
+    #   huggingface-hub
+    #   instructor
+    #   spacy
+    #   transformers
+    #   weasel
+types-requests==2.33.0.20260518
+    # via cohere
+typing-extensions==4.15.0
+    # via
+    #   aiohttp
+    #   aiosignal
+    #   aiosqlite
+    #   anthropic
+    #   anyio
+    #   astrapy
+    #   beautifulsoup4
+    #   chromadb
+    #   chromadb-client
+    #   cohere
+    #   daytona-api-client
+    #   daytona-api-client-async
+    #   daytona-toolbox-api-client
+    #   daytona-toolbox-api-client-async
+    #   elasticsearch
+    #   fastapi
+    #   google-genai
+    #   grpcio
+    #   huggingface-hub
+    #   lance-namespace-urllib3-client
+    #   landingai-ade
+    #   langchain-core
+    #   langchain-protocol
+    #   langsmith
+    #   llama-cloud
+    #   llama-index-core
+    #   llama-index-workflows
+    #   mcp
+    #   mistral-common
+    #   obstore
+    #   openai
+    #   opentelemetry-api
+    #   opentelemetry-exporter-otlp-proto-grpc
+    #   opentelemetry-exporter-otlp-proto-http
+    #   opentelemetry-sdk
+    #   opentelemetry-semantic-conventions
+    #   phonemizer-fork
+    #   pydantic
+    #   pydantic-core
+    #   pydantic-extra-types
+    #   reductoai
+    #   referencing
+    #   soundfile
+    #   sqlalchemy
+    #   starlette
+    #   textual
+    #   torch
+    #   twelvelabs
+    #   typing-inspect
+    #   typing-inspection
+typing-inspect==0.9.0
+    # via
+    #   dataclasses-json
+    #   llama-index-core
+typing-inspection==0.4.2
+    # via
+    #   fastapi
+    #   mcp
+    #   mistralai
+    #   pydantic
+    #   pydantic-settings
+tzdata==2026.2
+    # via
+    #   pandas
+    #   pendulum
+    #   tzlocal
+tzlocal==5.4.4
+    # via
+    #   asynch
+    #   clickhouse-driver
+uc-micro-py==2.0.0
+    # via linkify-it-py
+ujson==5.13.0
+    # via -r nodes/src/nodes/milvus/requirements.txt
+uritemplate==4.2.0
+    # via csvw
+urllib3==2.7.0
+    # via
+    #   -r nodes/src/nodes/atlas/requirements.txt
+    #   -r nodes/src/nodes/qdrant/requirements.txt
+    #   -r nodes/src/nodes/requirements.txt
+    #   botocore
+    #   daytona-api-client
+    #   daytona-api-client-async
+    #   daytona-toolbox-api-client
+    #   daytona-toolbox-api-client-async
+    #   elastic-transport
+    #   kubernetes
+    #   lance-namespace-urllib3-client
+    #   opensearch-py
+    #   qdrant-client
+    #   requests
+    #   types-requests
+uuid-utils==0.16.2
+    # via
+    #   langchain-core
+    #   langsmith
+uuid6==2025.0.1
+    # via astrapy
+uv==0.11.25
+    # via crewai-cli
+uvicorn==0.49.0
+    # via
+    #   -r nodes/src/nodes/requirements.txt
+    #   chromadb
+    #   mcp
+uvloop==0.22.1 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'
+    # via uvicorn
+validators==0.35.0
+    # via
+    #   -r nodes/src/nodes/weaviate/requirements.txt
+    #   weaviate-client
+versioneer==0.29
+    # via -r nodes/src/nodes/requirements.txt
+wasabi==1.1.3
+    # via
+    #   spacy
+    #   thinc
+    #   weasel
+watchfiles==1.2.0
+    # via uvicorn
+wcmatch==10.1
+    # via deepagents
+wcwidth==0.8.2
+    # via prompt-toolkit
+weasel==1.0.0
+    # via spacy
+weaviate-client==4.16.2
+    # via -r nodes/src/nodes/weaviate/requirements.txt
+websocket-client==1.9.0
+    # via kubernetes
+websockets==15.0.1
+    # via
+    #   -r nodes/src/nodes/remote/requirements.txt
+    #   daytona
+    #   firecrawl-py
+    #   google-genai
+    #   langgraph-sdk
+    #   langsmith
+    #   uvicorn
+win32-setctime==1.2.0 ; sys_platform == 'win32'
+    # via loguru
+wrapt==2.2.2
+    # via
+    #   deprecated
+    #   llama-index-core
+    #   smart-open
+xlsxwriter==3.2.9
+    # via img2table
+xxhash==3.8.0
+    # via
+    #   langgraph
+    #   langsmith
+yarl==1.24.2
+    # via aiohttp
+zstandard==0.25.0
+    # via langsmith
+zstd==1.5.7.3
+    # via asynch

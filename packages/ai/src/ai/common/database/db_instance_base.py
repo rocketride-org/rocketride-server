@@ -74,8 +74,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     def _db_dialect(self) -> str:
         """Return the machine-readable dialect identifier (e.g. 'mysql', 'postgres').
 
-        Surfaced to SDK callers via ``QuestionType.DIALECT`` so applications can
-        branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
+        Surfaced to SDK callers via the ``dialect`` tool function so applications
+        can branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
         """
 
     # ------------------------------------------------------------------
@@ -246,6 +246,132 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return {'error': 'Generated query contains unsafe SQL', 'sql': sql_query, 'valid': False}
         else:
             return {'answer': sql_query, 'valid': False}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['sql'],
+            'properties': {
+                'sql': {'type': 'string', 'description': 'Raw SQL statement to execute.'},
+                'session_id': {'type': 'string', 'description': 'Optional transaction session id from begin.'},
+                'params': {'type': 'array', 'description': 'Optional positional bind values for $1..$n.'},
+            },
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'rows': {'type': 'array', 'items': {'type': 'object'}},
+                'affected_rows': {'type': 'integer'},
+            },
+        },
+        description=lambda self: (
+            f'Execute a raw SQL statement against this {self._db_display_name()} database. '
+            f'Bypasses LLM translation and SQL safety checks.'
+        ),
+    )
+    def execute(self, args):
+        """Execute a raw SQL statement against this database."""
+        if not isinstance(args, dict):
+            raise ValueError('Tool input must be a JSON object')
+        sql = args.get('sql')
+        if not sql or not isinstance(sql, str) or not sql.strip():
+            raise ValueError('"sql" is required and must be a non-empty string')
+
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+
+        session_id = args.get('session_id')
+        params = args.get('params')
+        if session_id:
+            try:
+                result = self.IGlobal.tx_registry.execute(session_id, sql.strip(), params)
+            except KeyError:
+                raise ValueError(f'unknown or expired transaction session: {session_id}')
+            except Exception:
+                # A failed session-bound execute (e.g. max_execute_rows overflow)
+                # would otherwise leave the connection pinned until idle-reaping,
+                # with the aborted statement still committable; roll the session
+                # back to release it and discard the statement, then re-raise.
+                try:
+                    self.IGlobal.tx_registry.rollback(session_id)
+                except KeyError:
+                    pass
+                raise
+        else:
+            result = self._executeRawQuery(sql.strip(), params)
+            if result is None:
+                raise RuntimeError('SQL execution failed (check server logs for details)')
+
+        rows = [self._sanitize_row(row) for row in result['rows']]
+        return {'rows': rows, 'affected_rows': result['affected_rows']}
+
+    @tool_function(
+        input_schema={'type': 'object', 'properties': {}},
+        output_schema={'type': 'object', 'properties': {'session_id': {'type': 'string'}}},
+        description=lambda self: (
+            f'Begin a transaction on this {self._db_display_name()} database; returns a session_id.'
+        ),
+    )
+    def begin(self, args):
+        """Begin a transaction and return a session_id."""
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+        return {'session_id': self.IGlobal.tx_registry.begin()}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['session_id'],
+            'properties': {'session_id': {'type': 'string'}},
+        },
+        output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
+        description=lambda self: 'Commit an open transaction session.',
+    )
+    def commit(self, args):
+        """Commit an open transaction session."""
+        return self._finishTx(args, commit=True)
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['session_id'],
+            'properties': {'session_id': {'type': 'string'}},
+        },
+        output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
+        description=lambda self: 'Roll back an open transaction session.',
+    )
+    def rollback(self, args):
+        """Roll back an open transaction session."""
+        return self._finishTx(args, commit=False)
+
+    def _finishTx(self, args, *, commit: bool):
+        """Shared commit/rollback implementation enforcing the allow_execute gate."""
+        if not isinstance(args, dict) or not args.get('session_id'):
+            raise ValueError('"session_id" is required')
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+        try:
+            (self.IGlobal.tx_registry.commit if commit else self.IGlobal.tx_registry.rollback)(args['session_id'])
+        except KeyError:
+            raise ValueError(f'unknown or expired transaction session: {args["session_id"]}')
+        return {'ok': True}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {},
+        },
+        output_schema={
+            'type': 'object',
+            'properties': {
+                'dialect': {'type': 'string', 'description': 'Database engine identifier.'},
+            },
+        },
+        description='Return the database engine dialect (e.g. postgres, mysql, neo4j).',
+    )
+    def dialect(self, args):
+        """Return the database engine dialect."""
+        return {'dialect': self._db_dialect()}
 
     # ------------------------------------------------------------------
     # Sanitization helpers
@@ -436,34 +562,32 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             error(f'Error executing SQL query: {e}')
             return None
 
-    def _executeRawQuery(self, query: str) -> dict | None:
+    def _executeRawQuery(self, query: str, params: list | None = None) -> dict | None:
         """Execute a raw SQL statement (read or write) without LLM or safety gating.
 
         Uses ``engine.begin()`` so writes auto-commit. Returns
-        ``{'rows': [...], 'affected_rows': N}`` on success or ``None`` on error
-        (logged via ``error()`` to match the ``_executeSQLQuery`` precedent).
+        ``{'rows': [...], 'affected_rows': N}`` on success, or ``None`` on a
+        SQLAlchemy error (logged via ``error()``). A ``max_execute_rows``
+        overflow raises ``RuntimeError`` from *inside* the transaction so
+        ``engine.begin()`` rolls back — otherwise a write (e.g. ``INSERT ...
+        RETURNING``) would commit even though ``execute()`` reports failure.
 
         SELECT results are bounded by ``IGlobal.max_execute_rows`` to keep a
-        large query from exhausting worker memory. ``rowcount`` is normalized
-        to a non-negative int — some dialects return -1 when unknown.
+        large query from exhausting worker memory.
         """
+        from ai.common.database.tx_registry import shape_execute_result, to_sqlalchemy_text
+
         try:
             with self.IGlobal.engine.begin() as conn:
-                result = conn.execute(text(query))
-                if result.returns_rows:
-                    max_rows = self.IGlobal.max_execute_rows
-                    rows = result.fetchmany(max_rows + 1)
-                    if len(rows) > max_rows:
-                        error(f'EXECUTE query exceeded max_execute_rows={max_rows}')
-                        return None
-                    column_names = result.keys()
-                    return {
-                        'rows': [dict(zip(column_names, row)) for row in rows],
-                        'affected_rows': 0,
-                    }
-                rowcount = result.rowcount
-                affected = rowcount if isinstance(rowcount, int) and rowcount >= 0 else 0
-                return {'rows': [], 'affected_rows': affected}
+                clause, binds = to_sqlalchemy_text(query, params)
+                result = conn.execute(clause, binds)
+                shaped = shape_execute_result(result, self.IGlobal.max_execute_rows)
+                if shaped is None:
+                    # Raise inside the transaction so it rolls back; returning
+                    # None here would let an overflowing write commit anyway.
+                    error(f'EXECUTE query exceeded max_execute_rows={self.IGlobal.max_execute_rows}')
+                    raise RuntimeError(f'EXECUTE query exceeded max_execute_rows={self.IGlobal.max_execute_rows}')
+                return shaped
 
         except SQLAlchemyError as e:
             error(f'Error executing raw SQL query: {e}')
@@ -504,46 +628,6 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return
 
         lanes = self.instance.getListeners()
-
-        # DIALECT: dialect-discovery request — emit {'dialect': '...'} on the
-        # answers lane so the SDK can branch on the engine. No gate needed:
-        # the value is metadata, not data, and the node already exposed itself
-        # by being connected.
-        if question.type == QuestionType.DIALECT:
-            if 'answers' in lanes:
-                answer = Answer()
-                answer.setAnswer(json.dumps({'dialect': self._db_dialect()}))
-                self.instance.writeAnswers(answer)
-            return
-
-        # EXECUTE: caller passes raw SQL; bypass LLM translation + safety check.
-        if question.type == QuestionType.EXECUTE:
-            if not self.IGlobal.allow_execute:
-                warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
-                return
-            try:
-                execute_result = self._executeRawQuery(question_text)
-                if execute_result is None:
-                    return
-
-                rows = [self._sanitize_row(row) for row in execute_result['rows']]
-                affected = execute_result['affected_rows']
-                payload = {'rows': rows, 'affected_rows': affected}
-                markdown = self._formatResultAsMarkdown(rows) if rows else None
-
-                if 'text' in lanes:
-                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
-
-                if 'table' in lanes and rows:
-                    self.instance.writeTable(markdown)
-
-                if 'answers' in lanes:
-                    answer = Answer()
-                    answer.setAnswer(json.dumps(payload, default=str))
-                    self.instance.writeAnswers(answer)
-            except Exception as e:
-                error(f'Error handling execute question: {e}')
-            return
 
         try:
             # Ask the LLM to translate the natural-language question into SQL.

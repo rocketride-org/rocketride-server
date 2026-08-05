@@ -31,7 +31,7 @@
  */
 
 import type { RocketRideClient } from './client.js';
-import type { BillingDetail, StripePlan, CreditBalance, CreditPack } from './types/billing.js';
+import type { BillingDetail, AppPrice, CreditBalance, CreditPack, PromoRedemption, PromoValidation, TransactionsResult, UsageRollup } from './types/billing.js';
 
 // =============================================================================
 // BILLING API CLASS
@@ -72,9 +72,9 @@ export class BillingApi {
 	 * changes in the Stripe dashboard are reflected immediately.
 	 *
 	 * @param appId - App identifier (e.g. "rocketride.pipeBuilder").
-	 * @returns Array of StripePlan objects ready for display.
+	 * @returns Array of AppPrice rows from the local database.
 	 */
-	async getProductPrices(appId: string): Promise<StripePlan[]> {
+	async getProductPrices(appId: string): Promise<AppPrice[]> {
 		const body = await this.client.call('rrext_account_billing', { subcommand: 'prices', appId });
 		return body.plans ?? [];
 	}
@@ -85,17 +85,68 @@ export class BillingApi {
 	 * The returned client_secret is passed to `stripe.confirmPayment()` to
 	 * complete the checkout without a browser redirect to Stripe.
 	 *
-	 * @param orgId   - Organisation UUID to subscribe.
-	 * @param appId   - App being subscribed (e.g. "brandi").
-	 * @param priceId - Stripe price_* identifier for the plan.
-	 * @returns Object with client_secret for Stripe Elements and subscription_id.
+	 * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
+	 * promotion code) — the subscription is already active and no payment
+	 * step is needed.
+	 *
+	 * @param orgId         - Organisation UUID to subscribe.
+	 * @param appId         - App being subscribed (e.g. "brandi").
+	 * @param priceId       - Stripe price_* identifier for the plan.
+	 * @param promotionCode - Optional promo code to apply (validated server-side).
+	 * @returns Object with client_secret (or null), subscription_id, and status.
 	 */
-	async createCheckoutSession(orgId: string, appId: string, priceId: string): Promise<{ clientSecret: string; subscriptionId: string }> {
-		return this.client.call<{ clientSecret: string; subscriptionId: string }>('rrext_account_billing', {
+	async createCheckoutSession(orgId: string, appId: string, priceId: string, promotionCode?: string): Promise<{ clientSecret: string | null; subscriptionId: string; status: string }> {
+		return this.client.call<{ clientSecret: string | null; subscriptionId: string; status: string }>('rrext_account_billing', {
 			subcommand: 'subscribe',
 			orgId,
 			appId,
 			priceId,
+			...(promotionCode ? { promotionCode } : {}),
+		});
+	}
+
+	/**
+	 * Resolves a promo code without side effects.
+	 *
+	 * An unknown or expired code returns `{ valid: false, reason }` — it never
+	 * throws. Pass `priceId` to also get the discounted first-invoice amount
+	 * for the selected plan.
+	 *
+	 * @param orgId   - Organisation UUID (context only — validation is global).
+	 * @param code    - Customer-facing code string (case-insensitive).
+	 * @param priceId - Optional plan to compute `discountedAmountCents` against.
+	 * @returns Promo validation result.
+	 */
+	async validatePromoCode(orgId: string, code: string, priceId?: string): Promise<PromoValidation> {
+		return this.client.call<PromoValidation>('rrext_account_billing', {
+			subcommand: 'promo_validate',
+			orgId,
+			code,
+			...(priceId ? { priceId } : {}),
+		});
+	}
+
+	/**
+	 * Redeems a credit-grant (hackathon) code for the caller's org.
+	 *
+	 * Creates a $0 subscription for the app named in the code's metadata (no
+	 * payment method required) and grants the metadata-defined credits
+	 * immediately. If the org is already subscribed to the app, only the
+	 * credits are granted (`mode: 'credits_only'`). Discount-only codes are
+	 * rejected — those are applied during checkout instead.
+	 *
+	 * Any authenticated org member may redeem; the server derives the org
+	 * from the caller's own membership.
+	 *
+	 * @param orgId - Organisation UUID (context only — server uses the caller's org).
+	 * @param code  - Customer-facing code string (case-insensitive).
+	 * @returns Redemption result with mode and granted credits.
+	 */
+	async redeemPromoCode(orgId: string, code: string): Promise<PromoRedemption> {
+		return this.client.call<PromoRedemption>('rrext_account_billing', {
+			subcommand: 'promo_redeem',
+			orgId,
+			code,
 		});
 	}
 
@@ -132,6 +183,58 @@ export class BillingApi {
 		});
 	}
 
+	/**
+	 * Upgrades (or downgrades) an existing subscription to a different plan.
+	 *
+	 * The server swaps the Stripe subscription item to the new price and
+	 * handles proration automatically. The local database row is updated
+	 * before the response is returned.
+	 *
+	 * @param orgId      - Organisation UUID that owns the subscription.
+	 * @param appId      - App whose plan is changing (e.g. "rocketride.pipeBuilder").
+	 * @param newPriceId - Stripe price_* identifier for the target plan.
+	 * @returns Object with status, new plan details, and subscription ID.
+	 */
+	async upgradeSubscription(orgId: string, appId: string, newPriceId: string): Promise<{
+		status: string;
+		subscriptionId: string;
+		newPriceId: string;
+		planNickname: string | null;
+		unitAmount: number | null;
+		billingInterval: string | null;
+	}> {
+		return this.client.call('rrext_account_billing', {
+			subcommand: 'upgrade',
+			orgId,
+			appId,
+			newPriceId,
+		});
+	}
+
+	// =========================================================================
+	// TOP-UP PURCHASE
+	// =========================================================================
+
+	/**
+	 * Purchases a top-up pack by charging the customer's card on file.
+	 *
+	 * On success, credits are applied to the ledger immediately (no webhook
+	 * needed). If the card requires 3D Secure, returns a ``clientSecret``
+	 * for the UI to handle inline.
+	 *
+	 * @param orgId   - Organisation UUID.
+	 * @param priceId - Stripe price_* identifier for the top-up plan.
+	 * @returns Object with ``status`` ('succeeded' or 'requires_action') and
+	 *          optionally ``clientSecret`` for 3DS.
+	 */
+	async purchaseTopup(orgId: string, priceId: string): Promise<{ status: string; clientSecret?: string }> {
+		return this.client.call<{ status: string; clientSecret?: string }>('rrext_account_billing', {
+			subcommand: 'purchase_topup',
+			orgId,
+			priceId,
+		});
+	}
+
 	// =========================================================================
 	// COMPUTE CREDITS WALLET
 	// =========================================================================
@@ -162,6 +265,87 @@ export class BillingApi {
 		const body = await this.client.call('rrext_account_billing', { subcommand: 'credits_packs' });
 		return body.packs ?? [];
 	}
+
+	// =========================================================================
+	// TRANSACTIONS & USAGE
+	// =========================================================================
+
+	/**
+	 * Fetches paginated transaction detail from the credit ledger.
+	 *
+	 * Sort / filters / search follow the platform list-API convention: sorters
+	 * name camelCase row keys; filter values are a string (type-driven match)
+	 * or an array (set membership), with `field__gte` / `field__lte` string
+	 * entries for ranges; search matches case-insensitively across the
+	 * ledger's string columns. Unknown keys are dropped server-side, and the
+	 * caller's org/scope restriction always applies first.
+	 *
+	 * @param orgId    - Organisation UUID.
+	 * @param options  - Pagination, scope, and list-convention query options.
+	 * @returns Paginated transaction result.
+	 */
+	async getTransactions(
+		orgId: string,
+		options: {
+			scope?: 'org' | 'team' | 'user';
+			scopeId?: string;
+			page?: number;
+			pageSize?: number;
+			since?: string;
+			sort?: { field: string; dir: 'asc' | 'desc' }[];
+			filters?: Record<string, string | string[]>;
+			search?: string;
+		} = {},
+	): Promise<TransactionsResult> {
+		return this.client.call<TransactionsResult>('rrext_account_billing', {
+			subcommand: 'transactions',
+			orgId,
+			...options,
+		});
+	}
+
+	/**
+	 * Fetches distinct values of one ledger column (org-scoped server-side)
+	 * for the transaction grid's enum checklist filters.
+	 *
+	 * @param orgId - Organisation UUID.
+	 * @param field - camelCase wire key (e.g. 'type', 'resource').
+	 * @returns Sorted distinct values ([] for unknown/excluded fields).
+	 */
+	async getTransactionDistinct(orgId: string, field: string): Promise<(string | number | boolean)[]> {
+		const body = await this.client.call('rrext_account_billing', {
+			subcommand: 'transactions_distinct',
+			orgId,
+			field,
+		});
+		return body.values ?? [];
+	}
+
+	/**
+	 * Fetches per-user consumption rollup for an org.
+	 *
+	 * @param orgId - Organisation UUID.
+	 * @returns Array of usage rollup rows ordered by total consumption descending.
+	 */
+	async getUsageByUser(orgId: string): Promise<UsageRollup[]> {
+		const body = await this.client.call('rrext_account_billing', { subcommand: 'usage_by_user', orgId });
+		return body.usage ?? [];
+	}
+
+	/**
+	 * Fetches per-team consumption rollup for an org.
+	 *
+	 * @param orgId - Organisation UUID.
+	 * @returns Array of usage rollup rows ordered by total consumption descending.
+	 */
+	async getUsageByTeam(orgId: string): Promise<UsageRollup[]> {
+		const body = await this.client.call('rrext_account_billing', { subcommand: 'usage_by_team', orgId });
+		return body.usage ?? [];
+	}
+
+	// =========================================================================
+	// CREDIT PACK CHECKOUT
+	// =========================================================================
 
 	/**
 	 * Creates a one-off Stripe Checkout session for a credit pack purchase

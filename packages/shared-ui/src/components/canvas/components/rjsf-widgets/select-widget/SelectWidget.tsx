@@ -26,6 +26,8 @@ import MenuItem from '@mui/material/MenuItem';
 import TextField, { TextFieldProps } from '@mui/material/TextField';
 import { ariaDescribedByIds, enumOptionsIndexForValue, enumOptionsValueForIndex, labelValue, FormContextType, RJSFSchema, StrictRJSFSchema, WidgetProps } from '@rjsf/utils';
 
+import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
+
 // =============================================================================
 // Component
 // =============================================================================
@@ -71,6 +73,16 @@ export default function SelectWidget<
 }: WidgetProps<T, S, F>) {
 	const { enumOptions, enumDisabled, emptyValue: optEmptyVal } = options;
 
+	// Prefer description from uiSchema options, falling back to the JSON Schema description
+	const description = options.description ?? schema.description;
+	const compactDescriptions = formContext?.compactDescriptions === true;
+
+	// Resolve the label once so we can preserve an absent/hidden result: MUI's
+	// notch/hide-label behavior relies on `label` being nullish, so only wrap it in
+	// FieldLabelWithInfo when a label is actually present.
+	const resolvedLabel = labelValue(label || undefined, hideLabel, undefined);
+	const displayLabel = resolvedLabel == null || !compactDescriptions ? resolvedLabel : <FieldLabelWithInfo label={resolvedLabel} description={description} fieldTitle={label} />;
+
 	// Default to single-select if multiple is not explicitly set
 	multiple = typeof multiple === 'undefined' ? false : !!multiple;
 
@@ -109,7 +121,7 @@ export default function SelectWidget<
 					minHeight: '1.4375em',
 				},
 			}}
-			label={labelValue(label || undefined, hideLabel, undefined)}
+			label={displayLabel}
 			value={!isEmpty && typeof selectedIndexes !== 'undefined' ? selectedIndexes : emptyValue}
 			required={required}
 			disabled={disabled || readonly}
@@ -130,6 +142,14 @@ export default function SelectWidget<
 				input: {
 					...(textFieldProps as TextFieldProps).slotProps?.input,
 					title: selectedOptionLabel ?? undefined,
+					...(compactDescriptions
+						? {
+								// Pass the plain resolved label (not the rich `displayLabel`) to the outlined
+								// input so its aria-hidden NotchedOutline legend never wraps the tabbable info
+								// tooltip trigger, which would otherwise create a phantom keyboard focus stop.
+								label: resolvedLabel ?? undefined,
+							}
+						: {}),
 				},
 			}}
 			SelectProps={{

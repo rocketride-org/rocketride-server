@@ -34,7 +34,8 @@
 				"task_description": "",
 				"goal": "",
 				"backstory": "",
-				"expected_output": ""
+				"expected_output": "",
+				"require_tool_call": false
 			}
 		}
 	},
@@ -44,7 +45,7 @@
 			"title": "Agent description",
 			"default": "",
 			"optional": true,
-			"description": "What does this agent do? Describe its purpose and capabilities — this helps parent agents select and invoke it correctly.",
+			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly.",
 			"ui": {
 				"ui:widget": "textarea"
 			}
@@ -57,6 +58,12 @@
 				"type": "string",
 				"format": "textarea"
 			}
+		},
+		"require_tool_call": {
+			"type": "boolean",
+			"title": "Require tool call",
+			"default": false,
+			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
 		"advanced_mode": {
 			"type": "boolean",
@@ -112,17 +119,13 @@
 			"format": "textarea",
 			"title": "Expected Output",
 			"description": "Description of the expected output format. Maps to CrewAI Task(expected_output=...)."
-		},
-		"agent_crewai.default": {
-			"object": "default",
-			"properties": ["agent_description", "instructions", "advanced_mode"]
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "CrewAI Agent",
-			"properties": ["agent_crewai.default"]
+			"properties": ["agent_description", "instructions", "require_tool_call", "advanced_mode"]
 		}
 	]
 }

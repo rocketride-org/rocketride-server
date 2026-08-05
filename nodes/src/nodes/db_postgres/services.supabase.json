@@ -34,7 +34,7 @@
 	"node": "python",
 	//
 	// Optional:
-	//		Reuses the PostgreSQL implementation — Supabase is managed Postgres,
+	//		Reuses the PostgreSQL implementation, Supabase is managed Postgres,
 	//		so this is a branded preset, not a separate node (no duplicated code).
 	//
 	"path": "nodes.db_postgres",
@@ -106,7 +106,7 @@
 			"type": "string",
 			"title": "User",
 			"default": "postgres",
-			"description": "Database user. For the pooler (recommended) it MUST include your project ref: postgres.<project-ref> — without the .<project-ref> suffix the pooler returns 'no tenant identifier'. For the direct connection it is just: postgres"
+			"description": "Database user. For the pooler (recommended) it MUST include your project ref: postgres.<project-ref>, without the .<project-ref> suffix the pooler returns 'no tenant identifier'. For the direct connection it is just: postgres"
 		},
 		"postgresdb.password": {
 			"type": "string",
@@ -135,7 +135,7 @@
 			"type": "string",
 			"title": "Database description",
 			"default": "",
-			"description": "What is this database used for? Describe its content and purpose — this helps the LLM generate more accurate queries.",
+			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
 			"ui": {
 				"ui:widget": "textarea"
 			}

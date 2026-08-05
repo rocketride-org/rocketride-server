@@ -5,7 +5,9 @@
 import type { ThemeTokens } from './tokens';
 
 /** Last-applied tokens — used by readTheme() instead of fragile DOM iteration. */
-let _cachedTokens: ThemeTokens = {};
+// Starts empty and is populated on the first applyTheme() call; cast because
+// ThemeTokens requires every --rr-* member and none are set until a theme loads.
+let _cachedTokens: ThemeTokens = {} as ThemeTokens;
 
 /**
  * Apply a theme by setting all --rr-* CSS custom properties on :root.

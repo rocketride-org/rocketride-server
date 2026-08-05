@@ -153,6 +153,21 @@ export const resolveDefaultFormData = (_id: string, schema: Record<string, unkno
 };
 
 /**
+ * Display-only aliases for inventory category keys. Some `classType` tags are
+ * invoke-channel connection contracts rather than standalone node categories, so
+ * the Add Node picker should not give them their own section. `deepagent` is the
+ * classType a `Deep Agent Subagent` carries so it can be wired into a Deep Agent
+ * orchestrator's `deepagent` invoke channel (the picker's invoke matching gates on
+ * `classType.includes(channelKey)`), so the tag must stay on the node. Aliasing it
+ * onto the `agent` display bucket lists the subagent under AGENT alongside Deep
+ * Agent instead of rendering an orphan single-item DEEPAGENT category, without
+ * touching the node's real `classType` (so invoke wiring is unaffected).
+ */
+const CATEGORY_DISPLAY_ALIASES: Record<string, string> = {
+	deepagent: 'agent',
+};
+
+/**
  * Builds the node inventory from the service catalog. Groups services
  * by their `classType` (e.g., source, llm, database) into categorized buckets,
  * resolves icon paths, applies capability filters (excluding NoSaas services),
@@ -169,6 +184,7 @@ export const buildInventory = (forms: Record<string, IService> = {}) => {
 		embedding: {},
 		llm: {},
 		database: {},
+		graph: {},
 		filter: {},
 		image: {},
 		preprocessor: {},
@@ -194,7 +210,11 @@ export const buildInventory = (forms: Record<string, IService> = {}) => {
 		const classTypes = Array.isArray(value.classType) ? value.classType : [value.classType];
 
 		for (const classType of classTypes) {
-			const services = classType in _inventory ? _inventory[classType] : {};
+			// Group under the display alias when one exists (e.g. deepagent -> agent),
+			// otherwise under the classType itself. Keeps invoke-only classTypes from
+			// spawning their own orphan category in the picker.
+			const displayType = CATEGORY_DISPLAY_ALIASES[classType] ?? classType;
+			const services = displayType in _inventory ? _inventory[displayType] : {};
 
 			// `value.icon` is the raw icon identifier from the service JSON
 			// (e.g. "openai.svg"). It is passed straight to the <Icon> component
@@ -205,7 +225,7 @@ export const buildInventory = (forms: Record<string, IService> = {}) => {
 			};
 
 			services[key] = _value;
-			_inventory[classType] = services;
+			_inventory[displayType] = services;
 		}
 	}
 
@@ -240,6 +260,8 @@ export const sanitizeAndParseHtmlToReact = (text?: string): string | ReactNode =
 						</a>
 					);
 				}
+				// Non-anchor nodes are left untouched by returning undefined.
+				return undefined;
 			},
 		};
 

@@ -105,8 +105,8 @@ def load_pipeline_config(pipeline_file: str) -> Dict[str, Any]:
             if json5:
                 try:
                     return json5.loads(content)
-                except json5.JSONError as e:
-                    raise ValueError(f'Invalid JSON5 format in {pipeline_file}: {e}')
+                except ValueError as e:
+                    raise ValueError(f'Invalid JSON5 format in {pipeline_file}: {e}') from e
             else:
                 try:
                     return json.loads(content)

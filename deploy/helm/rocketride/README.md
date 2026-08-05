@@ -6,7 +6,7 @@ Production-ready Helm chart for deploying the RocketRide data processing engine 
 
 - Kubernetes 1.25+
 - Helm 3.10+
-- An external PostgreSQL instance (or deploy one separately — see `examples/`)
+- An external PostgreSQL instance (or deploy one separately, see `examples/`)
 
 ## Quick Start
 
@@ -53,7 +53,7 @@ Key parameters:
 
 ## Managing Secrets
 
-**Development** — set `engine.secrets` in your values file:
+**Development**: set `engine.secrets` in your values file:
 
 ```yaml
 engine:
@@ -62,7 +62,7 @@ engine:
     POSTGRES_PASSWORD: 'my-password'
 ```
 
-**Production (recommended)** — use `engine.existingSecret` to reference a Secret you manage externally (Vault, AWS Secrets Manager, Sealed Secrets, etc.):
+**Production (recommended)**: use `engine.existingSecret` to reference a Secret you manage externally (Vault, AWS Secrets Manager, Sealed Secrets, etc.):
 
 ```yaml
 engine:

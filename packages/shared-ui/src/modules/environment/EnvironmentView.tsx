@@ -12,8 +12,9 @@
  * client calls in shell-ui, postMessage bridge in VS Code).
  *
  * Rendering modes:
- *   - Single slot: no tab bar, renders scope cards directly
- *   - Multiple slots: TabPanel with a pill per slot (e.g. Development / Deployment)
+ *   - Single slot: no tab strip, renders scope cards directly
+ *   - Multiple slots: TabControl strip with a tab per slot
+ *     (e.g. Development / Deployment)
  *   - Per slot: OSS server → single "Server" card; SaaS → Org/Team/User cards
  *   - Disconnected slot → empty-state message
  */
@@ -21,7 +22,10 @@
 import React, { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { TabPanel } from '../../components/tab-panel/TabPanel';
-import type { ITabPanelTab, ITabPanelPanel } from '../../components/tab-panel/TabPanel';
+import { TabControl } from '../../components/tab-control/TabControl';
+import { ContentHeader } from '../../components/content-header/ContentHeader';
+import type { ITabPanelPanel } from '../../components/tab-panel/TabPanel';
+import type { ViewMenu } from '../../types/viewMenu';
 import { commonStyles } from '../../themes/styles';
 import { EnvScopeCard } from '../account/components/EnvironmentPanel';
 
@@ -86,15 +90,27 @@ const styles = {
 		...commonStyles.columnFill,
 	} as CSSProperties,
 
-	/** Content area when inside a TabPanel. */
+	/** Content area when below the TabControl strip (multi-slot mode). */
 	content: {
 		...commonStyles.tabContent,
 	} as CSSProperties,
 
-	/** Content area in single-slot mode (no TabPanel / no pill bar). */
+	/** Content area in single-slot mode (no tab strip). */
 	contentSingle: {
 		...commonStyles.tabContent,
 		paddingTop: 30,
+	} as CSSProperties,
+
+	/**
+	 * Fills the space below the top TabControl strip; TabPanel's
+	 * 100%-height wrapper resolves against this definite flex box.
+	 */
+	pageBody: {
+		display: 'flex',
+		flexDirection: 'column',
+		flex: 1,
+		minWidth: 0,
+		minHeight: 0,
 	} as CSSProperties,
 
 	/** Empty-state message shown when a slot is not connected. */
@@ -146,10 +162,7 @@ const SlotPanel: React.FC<{
 	requiredKeys?: string[];
 }> = ({ slot, single, envs, onLoadEnv, onSaveEnv, requiredKeys }) => {
 	/** Builds a cache key for an env dict entry. */
-	const envKey = useCallback(
-		(scope: string, scopeId?: string) => `${slot.id}:${scope}:${scopeId ?? ''}`,
-		[slot.id]
-	);
+	const envKey = useCallback((scope: string, scopeId?: string) => `${slot.id}:${scope}:${scopeId ?? ''}`, [slot.id]);
 
 	const contentStyle = single ? styles.contentSingle : styles.content;
 
@@ -172,7 +185,9 @@ const SlotPanel: React.FC<{
 					label="Server"
 					env={envs[envKey('user')]}
 					onRequestLoad={() => onLoadEnv(slot.id, 'user')}
-					onSave={async (env) => { await onSaveEnv(slot.id, 'user', env); }}
+					onSave={async (env) => {
+						await onSaveEnv(slot.id, 'user', env);
+					}}
 					requiredKeys={requiredKeys}
 				/>
 			</div>
@@ -188,7 +203,9 @@ const SlotPanel: React.FC<{
 					label="Organization"
 					env={envs[envKey('org', slot.orgId)]}
 					onRequestLoad={() => onLoadEnv(slot.id, 'org', slot.orgId)}
-					onSave={async (env) => { await onSaveEnv(slot.id, 'org', env, slot.orgId); }}
+					onSave={async (env) => {
+						await onSaveEnv(slot.id, 'org', env, slot.orgId);
+					}}
 				/>
 			)}
 
@@ -198,7 +215,9 @@ const SlotPanel: React.FC<{
 					label="Team"
 					env={envs[envKey('team', slot.teamId)]}
 					onRequestLoad={() => onLoadEnv(slot.id, 'team', slot.teamId)}
-					onSave={async (env) => { await onSaveEnv(slot.id, 'team', env, slot.teamId); }}
+					onSave={async (env) => {
+						await onSaveEnv(slot.id, 'team', env, slot.teamId);
+					}}
 				/>
 			)}
 
@@ -207,7 +226,9 @@ const SlotPanel: React.FC<{
 				label="User"
 				env={envs[envKey('user')]}
 				onRequestLoad={() => onLoadEnv(slot.id, 'user')}
-				onSave={async (env) => { await onSaveEnv(slot.id, 'user', env); }}
+				onSave={async (env) => {
+					await onSaveEnv(slot.id, 'user', env);
+				}}
 				requiredKeys={requiredKeys}
 			/>
 		</div>
@@ -223,39 +244,25 @@ const SlotPanel: React.FC<{
  *
  * Renders env scope cards for one or more connection slots. When there
  * is a single slot, cards render directly. When there are multiple
- * slots, a TabPanel provides a pill bar to switch between them.
+ * slots, a TabControl strip switches between them.
  *
  * @param props - Environment view configuration and callbacks.
  */
-const EnvironmentView: React.FC<EnvironmentViewProps> = ({
-	slots,
-	envs,
-	onLoadEnv,
-	onSaveEnv,
-	requiredKeys,
-	error,
-}) => {
+const EnvironmentView: React.FC<EnvironmentViewProps> = ({ slots, envs, onLoadEnv, onSaveEnv, requiredKeys, error }) => {
 	// ── Tab state (only used when multiple slots) ───────────────────────
 	const [activeTab, setActiveTab] = useState(slots[0]?.id ?? '');
 
 	const isSingle = slots.length <= 1;
 
-	// ── Build tab definitions ──────────────────────────────────────────
-	const tabs: ITabPanelTab[] = slots.map((s) => ({ id: s.id, label: s.label }));
+	// ── ViewMenu (multi-slot only; single/empty slot has no sub-views) ──
+	// Only the multi-slot layout renders a TabControl strip; single-slot
+	// renders cards directly with no strip.
+	const viewMenu: ViewMenu | null = isSingle ? null : { entries: slots.map((s) => ({ id: s.id, label: s.label })) };
 
 	const panels: Record<string, ITabPanelPanel> = {};
 	for (const slot of slots) {
 		panels[slot.id] = {
-			content: (
-				<SlotPanel
-					slot={slot}
-					single={isSingle}
-					envs={envs}
-					onLoadEnv={onLoadEnv}
-					onSaveEnv={onSaveEnv}
-					requiredKeys={requiredKeys}
-				/>
-			),
+			content: <SlotPanel slot={slot} single={isSingle} envs={envs} onLoadEnv={onLoadEnv} onSaveEnv={onSaveEnv} requiredKeys={requiredKeys} />,
 		};
 	}
 
@@ -263,37 +270,34 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({
 	if (slots.length === 0) {
 		return (
 			<div style={styles.container}>
+				<ContentHeader title="Environment Variables" subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade — a user variable overrides the same key on the team, which overrides the organization." />
 				{error && <div style={styles.errorBanner}>{error}</div>}
-				<div style={{ padding: 16, color: 'var(--rr-text-secondary)', fontFamily: 'var(--rr-font-family)' }}>
-					No connection slots available.
-				</div>
+				<div style={{ padding: '16px 24px', color: 'var(--rr-text-secondary)', fontFamily: 'var(--rr-font-family)' }}>No connection slots available.</div>
 			</div>
 		);
 	}
 
 	return (
 		<div style={styles.container}>
+			{/* Page strip — connection-slot tabs (multi-slot only). Rendered FIRST:
+			    the TabControl contract puts the strip at the very top of the
+			    view, above any ContentHeader. */}
+			{viewMenu && <TabControl menu={viewMenu} activeId={activeTab} onSelect={setActiveTab} />}
+
+			{/* Page heading — what this page is and how the scopes interact. */}
+			<ContentHeader title="Environment Variables" subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade — a user variable overrides the same key on the team, which overrides the organization." />
+
 			{/* Page-level error banner */}
 			{error && <div style={styles.errorBanner}>{error}</div>}
 
 			{isSingle ? (
-				// ── Single slot — no tab bar ────────────────────────────────
-				<SlotPanel
-					slot={slots[0]}
-					single
-					envs={envs}
-					onLoadEnv={onLoadEnv}
-					onSaveEnv={onSaveEnv}
-					requiredKeys={requiredKeys}
-				/>
+				// ── Single slot — no tab strip ──────────────────────────────
+				<SlotPanel slot={slots[0]} single envs={envs} onLoadEnv={onLoadEnv} onSaveEnv={onSaveEnv} requiredKeys={requiredKeys} />
 			) : (
-				// ── Multiple slots — tab bar ────────────────────────────────
-				<TabPanel
-					tabs={tabs}
-					activeTab={activeTab}
-					onTabChange={setActiveTab}
-					panels={panels}
-				/>
+				// ── Multiple slots — bodies fill the space below the strip ──
+				<div style={styles.pageBody}>
+					<TabPanel panels={panels} activeId={activeTab} />
+				</div>
 			)}
 		</div>
 	);

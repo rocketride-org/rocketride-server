@@ -21,15 +21,19 @@
 // SOFTWARE.
 
 // =============================================================================
-// API KEY LOGIN — simple credential form for OSS mode
+// API KEY LOGIN — credential form for OSS mode
 // =============================================================================
 //
-// Rendered when server capabilities include 'oss' instead of the Zitadel
-// OAuth2 flow used in SaaS mode. The user enters their ROCKETRIDE_APIKEY
-// and the shell connects directly.
+// Rendered when server capabilities do NOT include 'saas' — OSS servers have
+// no Zitadel; the shell connects directly with the server's ROCKETRIDE_APIKEY.
+// Built from the stock library (InputField / Button / Banner / RocketRideMark):
+// masked key input with a reveal toggle, an explicit blank-key affordance (the
+// primary button says so), the target server for context, and an error banner
+// on a failed connect.
 // =============================================================================
 
-import React, { useState, useCallback, type CSSProperties } from 'react';
+import { useState, useCallback, KeyboardEvent, CSSProperties } from 'react';
+import { Banner, Button, InputField, RocketRideMark, BxShow, BxHide } from 'shared';
 
 // =============================================================================
 // STYLES
@@ -40,60 +44,111 @@ const styles = {
 	container: {
 		display: 'flex',
 		height: '100vh',
-		flexDirection: 'column' as const,
+		flexDirection: 'column',
 		alignItems: 'center',
 		justifyContent: 'center',
-		gap: 16,
 		fontFamily: 'var(--rr-font-family)',
-	},
-	/** Title text. */
+		background: 'var(--rr-bg-default)',
+	} as CSSProperties,
+
+	/** The centered card panel holding the form. */
+	panel: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'center',
+		gap: 14,
+		width: 380,
+		padding: '36px 36px 28px',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 10,
+		background: 'var(--rr-bg-secondary)',
+	} as CSSProperties,
+
+	/** Product mark above the title. */
+	mark: {
+		width: 44,
+		height: 44,
+	} as CSSProperties,
+
 	title: {
-		fontSize: 18,
-		fontWeight: 600,
+		margin: 0,
+		fontSize: 20,
+		fontWeight: 700,
 		color: 'var(--rr-text-primary)',
-	},
-	/** Subtitle / instructions. */
-	subtitle: {
-		fontSize: 13,
+	} as CSSProperties,
+
+	/** The server this form will connect to — context, not decoration. */
+	server: {
+		fontSize: 12.5,
 		color: 'var(--rr-text-secondary)',
-		maxWidth: 320,
-		textAlign: 'center' as const,
-	},
-	/** Form wrapper — column layout with gap. */
+		fontFamily: 'var(--rr-font-family-mono, monospace)',
+		padding: '3px 10px',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 999,
+		background: 'var(--rr-bg-default)',
+	} as CSSProperties,
+
+	/** Form column — input, hint, actions. */
 	form: {
 		display: 'flex',
-		flexDirection: 'column' as const,
-		gap: 12,
-		width: 300,
-	},
-	/** Text input field. */
+		flexDirection: 'column',
+		gap: 10,
+		width: '100%',
+		marginTop: 8,
+	} as CSSProperties,
+
+	/** Wrapper positioning the reveal toggle inside the input. */
+	inputWrap: {
+		position: 'relative',
+		width: '100%',
+	} as CSSProperties,
+
+	/** The key input — monospace, with room for the reveal toggle. */
 	input: {
-		padding: '8px 12px',
-		fontSize: 14,
-		border: '1px solid var(--rr-border)',
-		borderRadius: 4,
-		backgroundColor: 'var(--rr-bg-secondary)',
-		color: 'var(--rr-text-primary)',
-		outline: 'none',
+		width: '100%',
+		boxSizing: 'border-box',
+		paddingRight: 38,
 		fontFamily: 'var(--rr-font-family-mono, monospace)',
-	},
-	/** Submit button. */
-	button: {
-		padding: '8px 16px',
-		fontSize: 14,
-		fontWeight: 500,
+	} as CSSProperties,
+
+	/** Reveal / mask toggle riding inside the input's right edge. */
+	reveal: {
+		position: 'absolute',
+		right: 6,
+		top: '50%',
+		transform: 'translateY(-50%)',
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		width: 26,
+		height: 26,
+		padding: 0,
 		border: 'none',
-		borderRadius: 4,
-		backgroundColor: 'var(--rr-accent)',
-		color: '#fff',
+		background: 'none',
 		cursor: 'pointer',
-	},
-	/** Error message. */
-	error: {
-		fontSize: 13,
-		color: 'var(--rr-color-error, #e53e3e)',
-		textAlign: 'center' as const,
-	},
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** Helper line under the input — the blank-key rule, spelled out. */
+	hint: {
+		fontSize: 12,
+		lineHeight: 1.5,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** Action row — primary grows, Cancel stays natural width. */
+	actions: {
+		display: 'flex',
+		gap: 8,
+		marginTop: 4,
+	} as CSSProperties,
+
+	/** Grow wrapper for the primary button (stock Button has no width prop). */
+	grow: {
+		flex: 1,
+		display: 'flex',
+		flexDirection: 'column',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -116,73 +171,118 @@ export interface ApiKeyLoginProps {
 // =============================================================================
 
 /**
- * Simple API key login form for OSS mode.
+ * API key login form for OSS mode.
  *
- * Renders a centered card with a text input for the ROCKETRIDE_APIKEY
- * and a Connect button. On submit, calls `onSubmit` with the entered key.
- * Shows an error message if connection fails.
+ * A centered card with the product mark, the target server, a masked key
+ * input with a reveal toggle, and a primary action whose label makes the
+ * optional-key rule explicit ("Connect without a key" while the field is
+ * blank). On submit, calls `onSubmit` with the trimmed key; a failed connect
+ * renders a stock error Banner.
  *
- * @param props - Component props.
+ * @param props - {@link ApiKeyLoginProps}.
+ * @returns The login screen element.
  */
 export function ApiKeyLogin({ onSubmit, onCancel, appName = 'RocketRide', initialError = null }: ApiKeyLoginProps) {
-	// Local state for the input value, loading indicator, and error message
+	// Local state: the key text, reveal toggle, in-flight flag, error message.
 	const [apiKey, setApiKey] = useState('');
+	const [revealed, setRevealed] = useState(false);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(initialError);
 
-	/** Handle form submission — connect with the entered API key. */
-	const handleSubmit = useCallback(async (e: React.FormEvent) => {
-		e.preventDefault();
+	// Blank submits are valid — the primary label says exactly what will happen.
+	const trimmedKey = apiKey.trim();
+	const primaryLabel = loading ? 'Connecting...' : trimmedKey ? 'Connect' : 'Connect without a key';
 
-		// Trim whitespace — empty string is valid (server may allow open access)
-		const key = apiKey.trim();
-
+	/** Connect with the entered (possibly blank) key. */
+	const handleSubmit = useCallback(async () => {
+		if (loading) return;
 		setLoading(true);
 		setError(null);
-
 		try {
-			await onSubmit(key);
+			await onSubmit(apiKey.trim());
 		} catch (err) {
-			// Show the error message from the server or a generic fallback
-			const message = err instanceof Error ? err.message : 'Connection failed';
-			setError(message);
-		} finally {
+			// Show the server's message, or a generic fallback.
+			setError(err instanceof Error ? err.message : 'Connection failed');
 			setLoading(false);
 		}
-	}, [apiKey, onSubmit]);
+		// On success the shell unmounts this screen — no state to reset.
+	}, [apiKey, loading, onSubmit]);
+
+	// Enter submits (the stock Button renders type="button", so the implicit
+	// form submission path does not apply here).
+	const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			handleSubmit();
+		}
+	};
 
 	return (
 		<div style={styles.container}>
-			<div style={styles.title}>{appName}</div>
-			<div style={styles.subtitle}>
-				Enter your API key to connect, or leave blank if the
-				server does not require one.
-			</div>
+			<div style={styles.panel}>
+				{/* Product mark + name. */}
+				<RocketRideMark bodyColor="var(--rr-text-primary)" style={styles.mark} />
+				<h1 style={styles.title}>{appName}</h1>
 
-			<form onSubmit={handleSubmit} style={styles.form}>
-				<input
-					type="password"
-					value={apiKey}
-					onChange={(e) => setApiKey(e.target.value)}
-					placeholder="API Key (optional)"
-					style={styles.input}
-					autoFocus
-					disabled={loading}
-				/>
-				<div style={{ display: 'flex', gap: 8 }}>
-					<button type="submit" style={{ ...styles.button, flex: 1 }} disabled={loading}>
-						{loading ? 'Connecting...' : 'Connect'}
-					</button>
-					{onCancel && (
-						<button type="button" onClick={onCancel} disabled={loading}
-							style={{ ...styles.button, flex: 0, backgroundColor: 'var(--rr-bg-tertiary, #666)', color: 'var(--rr-text-primary)' }}>
-							Cancel
+				{/* The server this form connects to — so a wrong-port/wrong-host
+				    mistake is visible before typing anything. */}
+				<div style={styles.server}>{window.location.host}</div>
+
+				<div style={styles.form}>
+					{/* Key input with reveal toggle. */}
+					<div style={styles.inputWrap}>
+						<InputField
+							type={revealed ? 'text' : 'password'}
+							value={apiKey}
+							onChange={(e) => setApiKey(e.target.value)}
+							onKeyDown={handleKeyDown}
+							placeholder="API key"
+							aria-label="API key"
+							style={styles.input}
+							autoFocus
+							disabled={loading}
+							spellCheck={false}
+							autoComplete="off"
+						/>
+						<button
+							type="button"
+							style={styles.reveal}
+							onClick={() => setRevealed((v) => !v)}
+							disabled={loading}
+							// State exposed for assistive tech; the icon shows the ACTION
+							// (eye = reveal, slashed eye = mask again).
+							aria-label={revealed ? 'Hide API key' : 'Show API key'}
+							aria-pressed={revealed}
+							title={revealed ? 'Hide API key' : 'Show API key'}
+						>
+							{revealed ? <BxHide size={17} /> : <BxShow size={17} />}
 						</button>
-					)}
-				</div>
-			</form>
+					</div>
 
-			{error && <div style={styles.error}>{error}</div>}
+					{/* The blank-key rule, spelled out next to the field it governs. */}
+					<div style={styles.hint}>
+						The key is whatever the server&apos;s <code>ROCKETRIDE_APIKEY</code> setting holds.
+						If the server does not require one, leave the field blank.
+					</div>
+
+					{/* Failed connect — stock error banner (announced via its live region). */}
+					{error && <Banner variant="error">{error}</Banner>}
+
+					{/* Actions: primary connect (label reflects the blank-key rule) + Cancel. */}
+					<div style={styles.actions}>
+						<div style={styles.grow}>
+							<Button variant="primary" disabled={loading} onClick={handleSubmit}>
+								{primaryLabel}
+							</Button>
+						</div>
+						{onCancel && (
+							<Button variant="secondary" disabled={loading} onClick={onCancel}>
+								Cancel
+							</Button>
+						)}
+					</div>
+				</div>
+			</div>
 		</div>
 	);
 }

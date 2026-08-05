@@ -1,0 +1,115 @@
+{
+	"title": "Face Detection",
+	"protocol": "face_detection://",
+	"classType": ["image"],
+	"capabilities": ["experimental", "debug"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.face_detection",
+	"prefix": "face_detection",
+	"description": [
+		"Per-frame face detection using MediaPipe BlazeFace (Apache-2.0). ",
+		"Emits axis-aligned bounding boxes and (optionally) 6 coarse alignment-grade ",
+		"keypoints per face: right_eye, left_eye, nose_tip, mouth_center, right_ear_tragion, ",
+		"left_ear_tragion. ",
+		"Use as a fast face-presence gate or for face-aware framing. For object detection on arbitrary ",
+		"classes use the Object Detection node. ",
+		"Runtime: MediaPipe Tasks Python runs on CPU/XNNPACK regardless of the declared device ",
+		"(GPU delegate is Linux-only and not enabled here)."
+	],
+	"icon": "face-detection.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": [
+		"Model: ${parameters.face_detection.profile}",
+		"Threshold: ${parameters.face_detection.threshold}"
+	],
+	"lanes": {
+		"image": ["text", "image"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to run face detection on.",
+			"output": [
+				{
+					"lane": "image",
+					"description": "Annotated image as raw stream - pipe to any node accepting image input."
+				},
+				{
+					"lane": "text",
+					"description": "JSON array of face detections: [{label: 'face', score, box, centroid, landmarks?}]."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "short",
+		"profiles": {
+			"short": {
+				"title": "BlazeFace Short-Range",
+				"profile": "short",
+				"threshold": 0.5,
+				"emit_landmarks": true
+			}
+		}
+	},
+	"fields": {
+		"face_detection.profile": {
+			"title": "Model",
+			"type": "string",
+			"default": "short",
+			"enum": ["*>preconfig.profiles.*.title"]
+		},
+		"face_detection.threshold": {
+			"type": "number",
+			"title": "Confidence threshold",
+			"description": "Minimum detection confidence (0.0-1.0). Default 0.5 - higher than object detect to suppress false faces on textured backgrounds.",
+			"default": 0.5,
+			"minimum": 0.0,
+			"maximum": 1.0
+		},
+		"face_detection.emit_landmarks": {
+			"type": "boolean",
+			"title": "Emit 6 alignment keypoints",
+			"description": "Include coarse 6-point keypoints per face (eyes, nose, mouth, ear tragions) for face-aware framing and alignment.",
+			"default": true
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Face Detection",
+			"properties": ["face_detection.profile", "face_detection.threshold", "face_detection.emit_landmarks"]
+		}
+	],
+	"test": {
+		"profiles": ["short"],
+		"requiresLibs": { "Linux": ["libGLESv2.so.2", "libEGL.so.1"] },
+		"outputs": ["text"],
+		"timeout": 60,
+		"cases": [
+			{
+				"name": "Detect a face in a portrait photo",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "face" }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["short"],
+		"requiresLibs": { "Linux": ["libGLESv2.so.2", "libEGL.so.1"] },
+		"outputs": ["text"],
+		"timeout": 60,
+		"cases": [
+			{
+				"name": "Detect a face in a portrait photo",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true, "contains": "face" }
+				}
+			}
+		]
+	}
+}

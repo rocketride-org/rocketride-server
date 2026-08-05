@@ -42,6 +42,9 @@ export interface BillingDetail {
 	/** App identifier matching AppManifestEntry.id (e.g. "brandi"). */
 	appId: string;
 
+	/** Resolved app display name (e.g. "Pipe Builder"). */
+	appName?: string;
+
 	/** Stripe sub_* subscription identifier. */
 	stripeSubscriptionId: string;
 
@@ -73,7 +76,7 @@ export interface BillingDetail {
 	credits: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
 
 	/** Display templates for credit resource types (e.g. ``{amount} minutes of Audio``), or null. */
-	creditLabels: Record<string, string> | null;
+	labels: Record<string, string> | null;
 }
 
 /**
@@ -96,63 +99,64 @@ export interface PlanAction {
 }
 
 /**
- * Stripe plan/price row for a given product, returned by the `prices`
- * subcommand. Used in the checkout plan picker.
+ * App pricing tier row from the ``app_prices`` table.
+ * Returned by the ``prices`` subcommand. Used in the checkout plan picker.
  */
-export interface StripePlan {
+export interface AppPrice {
+	/** Internal price UUID. */
+	id: string;
+
+	/** App identifier. */
+	appId: string;
+
 	/** Stripe price_* identifier. */
-	priceId: string;
+	stripePriceId: string;
 
-	/** Human-readable label shown in the plan selector (e.g. "Starter", "Pro"). */
-	label: string;
+	/** Human-readable tier label (e.g. "Starter", "Pro", "3,700 tokens"). */
+	nickname: string;
 
-	/** Display price string (e.g. "$29 / mo", "$290 / yr", "Free", "Custom"). */
-	amount: string;
+	/** Price in smallest currency unit (e.g. cents for USD). */
+	amountCents: number;
 
-	/** Price in USD cents. */
-	cents: number;
-
-	/** ISO currency code. */
+	/** ISO 4217 currency code. */
 	currency: string;
 
-	/** Billing interval: "month", "year", "one_time", or empty for non-recurring plans. */
+	/** Billing interval: "month", "year", or "one_time". */
 	interval: 'month' | 'year' | 'one_time' | '';
 
-	/** Feature description lines from Stripe price metadata, or null. */
-	description?: string[] | null;
+	/** Full plan metadata from the app manifest (description, action, order, kind, credits, labels, seats, features, etc.). */
+	metadata?: Record<string, any> | null;
 
-	/** Alternative click action (link/mailto). Null means normal checkout. */
-	action?: PlanAction | null;
+	/** Whether the price is active. */
+	isActive: boolean;
 
-	/** Sort order for card positioning. Lower values appear first. Defaults to 500. */
-	order?: number;
-
-	/** Credit grants config from Stripe price metadata, or null. */
-	credits?: { initial?: Record<string, number>; recurring?: Record<string, number> } | null;
-
-	/** Display templates for credit resource types, or null. */
-	labels?: Record<string, string> | null;
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
 }
+
+/** @deprecated Use {@link AppPrice} instead. */
+export type StripePlan = AppPrice;
 
 // =============================================================================
 // COMPUTE CREDITS TYPES
 // =============================================================================
 
 /**
- * Multi-resource credit balance for an organisation's wallet.
+ * Net credit balance for an organisation, grouped by resource.
  * Returned by the `credits_balance` subcommand.
  *
- * Each field is a dict keyed by resource type (e.g. ``{ tokens: 4200, video: 80 }``).
+ * Balance is computed from ``SUM(amount) GROUP BY resource`` on the credit
+ * ledger.  Positive = net credit remaining, negative = overspent.
  */
 export interface CreditBalance {
-	/** Current unspent balances per resource type. */
+	/** Net balance per resource type (positive = remaining, negative = overspent). */
 	balances: Record<string, number>;
 
-	/** Total purchased per resource type — useful for ledger display. */
-	lifetimePurchased: Record<string, number>;
+	/** Total credits granted (purchased/credited) per resource. */
+	granted: Record<string, number>;
 
-	/** Total consumed per resource type — useful for ledger display. */
-	lifetimeConsumed: Record<string, number>;
+	/** Total credits consumed (debited) per resource. */
+	consumed: Record<string, number>;
 
 	/**
 	 * Human-readable display templates per resource type, from Stripe price metadata.
@@ -160,6 +164,153 @@ export interface CreditBalance {
 	 * Falls back to the raw resource key when a label is not configured.
 	 */
 	labels: Record<string, string>;
+}
+
+// =============================================================================
+// TRANSACTION TYPES
+// =============================================================================
+
+/**
+ * A single ledger transaction row returned by the `transactions` subcommand.
+ */
+export interface LedgerTransaction {
+	/** Auto-increment row ID. */
+	id: number;
+
+	/** Transaction type: purchase, usage, credit, refund, etc. */
+	type: string;
+
+	/** Resource type (e.g. cpu_utilization, gpu_memory, tokens). */
+	resource: string;
+
+	/** Signed amount: positive for credits, negative for debits. */
+	amount: number;
+
+	/** Namespaced idempotency key (e.g. task:abc123:cpu_utilization, stripe:cs_xxx:tokens). */
+	idempotencyKey: string;
+
+	/** User who triggered the transaction, or null for system events. */
+	userId: string | null;
+
+	/** Resolved display name of the triggering user, or null. */
+	userName?: string | null;
+
+	/** Team context, or null. */
+	teamId: string | null;
+
+	/** Resolved display name of the team context, or null. */
+	teamName?: string | null;
+
+	/** Human-readable context (pipeline name, source, pack_id, etc.). */
+	context: Record<string, any> | null;
+
+	/** Line-item detail (e.g. gpu_memory, cpu_utilization). */
+	description: string | null;
+
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
+}
+
+/**
+ * Paginated result from the `transactions` subcommand.
+ */
+export interface TransactionsResult {
+	/** Transaction rows for the current page. */
+	transactions: LedgerTransaction[];
+
+	/** Total matching rows (for pagination). */
+	total: number;
+
+	/** Current page number (1-based). */
+	page: number;
+
+	/** Rows per page. */
+	pageSize: number;
+}
+
+/**
+ * Per-user or per-team consumption rollup row returned by usage_by_user / usage_by_team.
+ */
+export interface UsageRollup {
+	/** User or team ID (or '__none__' for unattributed). */
+	id: string;
+
+	/** Resolved display name of the user or team, or null when unresolvable. */
+	name?: string | null;
+
+	/** Consumption per resource type (absolute values — always positive). */
+	credits: Record<string, number>;
+}
+
+/**
+ * Result of resolving a promo code via `promo_validate`.
+ *
+ * `valid: false` carries a human-readable `reason`. A grant/hackathon code
+ * is recognisable by `appId` + `creditsGranted`; a discount-only code has
+ * neither and applies to whichever plan is selected at checkout.
+ */
+export interface PromoValidation {
+	/** Whether the code resolved to an active Stripe promotion code. */
+	valid: boolean;
+
+	/** Human-readable failure reason when `valid` is false. */
+	reason?: string;
+
+	/** Canonical code string as stored in Stripe. */
+	code?: string;
+
+	/** Stripe promo_* identifier (informational — never sent back). */
+	promotionCodeId?: string;
+
+	/** Human-readable description, e.g. "25% off for 3 months". */
+	description?: string;
+
+	/** Percentage discount (e.g. 25 or 100), if percent-based. */
+	percentOff?: number | null;
+
+	/** Fixed discount in cents, if amount-based. */
+	amountOffCents?: number | null;
+
+	/** ISO currency for `amountOffCents`. */
+	currency?: string | null;
+
+	/** Coupon duration: 'once' | 'repeating' | 'forever'. */
+	duration?: string | null;
+
+	/** Months the discount repeats for (duration === 'repeating'). */
+	durationInMonths?: number | null;
+
+	/** Credits granted on redemption ({resource: amount}) — grant codes only. */
+	creditsGranted?: Record<string, number> | null;
+
+	/** Target app for a grant code (e.g. "rocketride.pipeBuilder"). */
+	appId?: string | null;
+
+	/** List price in cents of the plan passed as priceId (if any). */
+	amountCents?: number;
+
+	/** First-invoice price in cents after the discount (if priceId given). */
+	discountedAmountCents?: number;
+}
+
+/**
+ * Result of redeeming a credit-grant code via `promo_redeem`.
+ */
+export interface PromoRedemption {
+	/** True when the redemption succeeded. */
+	redeemed: boolean;
+
+	/** 'subscribed' = new $0 subscription created; 'credits_only' = org was already subscribed. */
+	mode: 'subscribed' | 'credits_only';
+
+	/** App the code targets. */
+	appId: string;
+
+	/** Subscription status after redemption (e.g. 'active'). */
+	status?: string;
+
+	/** Credits granted ({resource: amount}). */
+	credits: Record<string, number>;
 }
 
 /**

@@ -490,6 +490,21 @@ void IServiceFilterInstance::cb_writeWords(
     }
 }
 
+void IServiceFilterInstance::cb_writeJson(
+    python::IJson json) noexcept(false) {
+    // Check to make sure target mode
+    if (endpoint->config.endpointMode != ENDPOINT_MODE::TARGET)
+        throw APERR(Ec::InvalidParam,
+                    "You must be in target mode to use writeJson");
+
+    // Unlock python and send it along
+    _block() {
+        engine::python::UnlockPython unlock;
+
+        if (auto ccode = binder.writeJson(*json.getJsonValue())) throw ccode;
+    }
+}
+
 void IServiceFilterInstance::cb_writeAudio(
     const AVI_ACTION action, Text &mimeType,
     const pybind11::bytes &streamData) noexcept(false) {

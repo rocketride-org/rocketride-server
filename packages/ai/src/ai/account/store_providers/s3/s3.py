@@ -245,12 +245,12 @@ class S3Store(IStore):
                 head_response = await asyncio.to_thread(client.head_object, Bucket=self._bucket, Key=key)
                 current_etag = head_response.get('ETag', '').strip('"')
 
-                # expected_version is REQUIRED for delete operations
-                if expected_version is None:
-                    raise StorageError(f'Expected version is required when deleting file: {filename}')
-
-                # Verify version matches
-                if current_etag != expected_version:
+                # Optimistic-concurrency check only when a version is supplied.
+                # With no version we fall through to an unconditional delete,
+                # matching the filesystem/memory backends so deleting your own
+                # file always works (cloud backends previously rejected this,
+                # breaking deletes in prod while local worked).
+                if expected_version is not None and current_etag != expected_version:
                     raise VersionMismatchError(
                         filename=filename,
                         expected_version=expected_version,
@@ -557,6 +557,39 @@ class S3Store(IStore):
         error_str = str(e)
         class_name = type(e).__name__
         return 'NoSuchKey' in error_str or 'NoSuchKey' in class_name or 'NotFound' in error_str or '404' in error_str
+
+    # =========================================================================
+    # URL Generation
+    # =========================================================================
+
+    async def get_url(
+        self, filename: str, expires_in: int = 3600, content_disposition: Optional[str] = None
+    ) -> str | None:
+        """
+        Generate a presigned S3 URL for direct browser access.
+
+        Args:
+            filename: Relative store path.
+            expires_in: URL validity in seconds.
+            content_disposition: Optional ``Content-Disposition`` header value
+                (e.g. ``attachment; filename="report.pdf"``). Baked into the
+                presigned URL via ``ResponseContentDisposition`` so it survives
+                cross-origin, where the browser ``<a download>`` hint is ignored.
+        """
+        key = self._get_key(filename)
+        try:
+            client = self._get_client()
+            params = {'Bucket': self._bucket, 'Key': key}
+            if content_disposition:
+                params['ResponseContentDisposition'] = content_disposition
+            url = client.generate_presigned_url(
+                'get_object',
+                Params=params,
+                ExpiresIn=expires_in,
+            )
+            return url
+        except Exception as e:
+            raise StorageError(f'Failed to generate presigned URL: {e}') from e
 
     # =========================================================================
     # Private Methods

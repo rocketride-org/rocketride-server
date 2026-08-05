@@ -108,26 +108,61 @@ export interface WorkspacePrefs {
 }
 
 // =============================================================================
-// APP SETTING DEFINITION
+// SETTING SCHEMA — VSCode contributes.configuration compatible
 // =============================================================================
 
+/** Value types a setting may hold — mirrors the JSON primitive types. */
+export type SettingValue = string | number | boolean;
+
 /**
- * Declares a single runtime configuration setting that an app requires.
+ * JSON-Schema-style declaration of a single setting.
  *
- * Declared in the app's `package.json` under `appManifest.settings` so the
- * shell can render the Settings page without loading the app bundle.
+ * The shape is 100% format-compatible with a property entry in the VSCode
+ * extension specification's `contributes.configuration` section.  RocketRide
+ * editor extensions use the JSON-Schema `format` keyword
+ * ('rocketride.envkey', 'rocketride.service').
+ *
+ * Display labels DERIVE from the setting key, VSCode-style — there is no
+ * label field ('pipelineTraceLevel' renders as "Pipeline Trace Level").
  */
-export interface AppSettingDefinition {
-	/** Key name — also used as the ShellApiConfig key. */
-	key: string;
-	/** Human-readable label shown in the settings UI. */
-	label: string;
-	/** Optional description shown below the field. */
+export interface SettingSchema {
+	/** JSON type of the value. Drives the rendered control. */
+	type: 'string' | 'number' | 'integer' | 'boolean';
+	/** Default value when the user has not set this key (schema-only; never stored). */
+	default?: SettingValue;
+	/** Plain-text description shown below the setting label. */
 	description?: string;
-	/** Default value when the user has not configured this setting. */
-	default?: string;
-	/** If true and no value is set, the shell highlights this as missing. */
+	/** Markdown variant of the description. */
+	markdownDescription?: string;
+	/** Fixed value choices — renders as a dropdown. */
+	enum?: Array<string | number>;
+	/** Per-choice descriptions aligned with `enum`. */
+	enumDescriptions?: string[];
+	/** Ordering hint within the section (lower renders first). */
+	order?: number;
+	/** RocketRide editor extension: 'rocketride.envkey' | 'rocketride.service'. */
+	format?: string;
+	/** Service classType filter — only used with format 'rocketride.service'. */
+	classType?: string;
+	/** Extension keyword: highlight the setting as required when unset. */
 	required?: boolean;
+	/** Extension keyword: placeholder text for empty string inputs. */
+	placeholder?: string;
+}
+
+/**
+ * An app's settings contribution — the exact `contributes.configuration`
+ * shape from the VSCode extension manifest specification.
+ *
+ * Declared in the app's `package.json` under
+ * `appManifest.contributes.configuration`.  Keys are dotted and prefixed
+ * with the app id (e.g. 'rocketride.pipeBuilder.pipelineTraceLevel').
+ */
+export interface AppConfiguration {
+	/** Section title shown in the settings page nav (defaults to the app name). */
+	title?: string;
+	/** Setting declarations keyed by full dotted setting key. */
+	properties: Record<string, SettingSchema>;
 }
 
 // =============================================================================
@@ -157,8 +192,8 @@ export interface AppManifestEntry {
 	readme?: string;
 	/** Categories for filtering/grouping in the app store. */
 	categories?: string[];
-	/** Settings required by this app. */
-	settings?: AppSettingDefinition[];
+	/** The app's settings contribution (VSCode contributes.configuration shape). */
+	configuration?: AppConfiguration;
 	/** When false, the app runs without authentication. Default: true. */
 	authenticated?: boolean;
 	/** When false, the status bar is hidden for this app. Default: true. */
@@ -296,10 +331,19 @@ export interface IWorkspaceContext {
 	appManifest: AppManifestEntry[];
 	/** Fully loaded AppDescriptors, keyed by appId. */
 	loadedApps: Record<string, AppDescriptor>;
-	/** Persisted settings keyed by setting key. */
-	settings: Record<string, string>;
-	/** Persist a single setting value. */
-	updateSetting: (key: string, value: string) => void;
+	/**
+	 * EFFECTIVE settings keyed by dotted setting key — every declared default
+	 * overlaid with the user's stored overrides, so reading a setting is a
+	 * plain lookup (no fallback needed at call sites).  Each value keeps its
+	 * declared JSON type (string | number | boolean).
+	 */
+	settings: Record<string, SettingValue>;
+	/**
+	 * Persist a single setting value.  Writing a value equal to the schema
+	 * default deletes the override (settings.json stores deltas only);
+	 * undefined resets to default explicitly.
+	 */
+	updateSetting: (key: string, value: SettingValue | undefined) => void;
 	/** Update the active app's workspace preferences. */
 	updatePrefs: (patch: Partial<WorkspacePrefs>) => void;
 	/** @deprecated Use `updatePrefs` for prefs, `connectionManager.emit('shell:switchApp')` for app switches. */
@@ -422,6 +466,34 @@ export interface DocumentsState {
  * }
  * ```
  */
+/**
+ * Plan payload for the `shell:subscribe` event. Mirrors the `AppPrice` row from
+ * the `app_prices` table (see the client billing types) so the preselected-plan
+ * checkout flow is type-checked end to end rather than passing an opaque value.
+ */
+export interface CheckoutPlan {
+	/** Internal price UUID. */
+	id: string;
+	/** App identifier. */
+	appId: string;
+	/** Stripe price_* identifier. */
+	stripePriceId: string;
+	/** Human-readable tier label (e.g. "Starter", "Pro"). */
+	nickname: string;
+	/** Price in smallest currency unit (e.g. cents for USD). */
+	amountCents: number;
+	/** ISO 4217 currency code. */
+	currency: string;
+	/** Billing interval. */
+	interval: 'month' | 'year' | 'one_time' | '';
+	/** Full plan metadata (description, action, order, kind, credits, etc.). */
+	metadata?: Record<string, unknown> | null;
+	/** Whether the price is active. */
+	isActive: boolean;
+	/** ISO 8601 creation timestamp. */
+	createdAt: string | null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface ShellEventMap {
 	'shell:connected': Record<string, never>;
@@ -431,7 +503,7 @@ export interface ShellEventMap {
 	'shell:loginRequest': { appId?: string };
 	'shell:logoutRequest': Record<string, never>;
 	'shell:switchApp': { appId: string };
-	'shell:subscribe': { app: AppManifestEntry };
+	'shell:subscribe': { app: AppManifestEntry; plan?: CheckoutPlan };
 	'shell:myApps': Record<string, never>;
 	'shell:accountUpdate': ConnectResult;
 	'shell:sidebarCollapsing': Record<string, never>;

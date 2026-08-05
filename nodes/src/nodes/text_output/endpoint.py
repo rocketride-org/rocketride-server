@@ -23,8 +23,6 @@
 
 import errno
 import re
-import smbclient
-from smbprotocol.exceptions import SMBOSError
 from threading import Lock
 from typing import Any
 from zlib import crc32
@@ -105,6 +103,9 @@ class Endpoint:
         Raise:
             An exception if connection failed.
         """
+        import smbclient
+        from smbprotocol.exceptions import SMBOSError
+
         # Setup user name and password
         if self.username and self.password:
             smbclient.ClientConfig(username=self.username, password=self.password)
@@ -232,6 +233,8 @@ class Endpoint:
     username = property(lambda self: self.endpoint.parameters.get('username'))
     password = property(lambda self: self.endpoint.parameters.get('password'))
     anonymize = property(lambda self: self.endpoint.parameters.get('anonymize', False))
+    anonymize_char = property(lambda self: self.endpoint.parameters.get('anonymizeChar', '\u2588'))
+    anonymize_all = property(lambda self: self.endpoint.parameters.get('anonymizeAll', False))
     store_path = property(lambda self: self.endpoint.parameters.get('storePath'))
 
     settings_changed: bool = property(lambda self: self._settings_changed())

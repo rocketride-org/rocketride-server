@@ -21,12 +21,15 @@
 # SOFTWARE.
 # =============================================================================
 
-import os
-from rocketlib import IInstanceBase
-from ai.common.schema import Doc, Question, Answer
-from ai.common.image import ImageProcessor
-from rocketlib import AVI_ACTION, Entry, debug
 from typing import List
+import os
+import base64
+
+from rocketlib import IInstanceBase, IJson
+from ai.common.schema import Doc, Question, Answer
+from ai.common.avi.descriptor import descriptor_from_payload, source_media_detail
+from rocketlib import AVI_ACTION, Entry
+
 from .IGlobal import IGlobal
 
 
@@ -34,7 +37,12 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     text: str = ''
-    image = bytearray()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Per-lane buffers + descriptors; per-instance, not class-level mutables (shared).
+        self._media_buffers = {}
+        self._media_descriptors = {}
 
     def _getkey(self, type: str):
         # Allow the key to be overriden by
@@ -76,7 +84,9 @@ class IInstance(IInstanceBase):
             object (Entry): The object to initialize processing for.
         """
         self.text = ''  # Reset the text buffer
-        self.image = bytearray()
+        # Per-lane media buffers + descriptors; each lane's BEGIN (re)initializes its entry.
+        self._media_buffers = {}
+        self._media_descriptors = {}
 
     def close(self):
         """
@@ -154,6 +164,17 @@ class IInstance(IInstanceBase):
         # Add the table
         self.instance.currentObject.response[key].append(table)
 
+    def writeJson(self, data: IJson):
+        # Get the key to write to (official lane name is "json")
+        key = self._getkey('json')
+
+        # If it isn't there, create it
+        if key not in self.instance.currentObject.response:
+            self.instance.currentObject.response[key] = []
+
+        # Add the json
+        self.instance.currentObject.response[key].append(IJson.toDict(data))
+
     def writeDocuments(self, documents: List[Doc]):
         # Get the key to write to
         key = self._getkey('documents')
@@ -191,72 +212,50 @@ class IInstance(IInstanceBase):
         else:
             self.instance.currentObject.response[key].append(answer.getText())
 
-    def writeAudio(self, aviAction: int, mimeType: str, data: bytes):
-        # Get the key to write to
-        key = self._getkey('audio')
+    def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
+        """Shared handler for the image/audio/video stream lanes.
 
-        # If it isn't there, create it
-        if key not in self.instance.currentObject.response:
-            self.instance.currentObject.response[key] = []
+        All three multimedia lanes behave identically: accumulate the stream across
+        BEGIN/WRITE/END and emit a single entry ``{mime_type, <lane>, metadata}`` where
+        ``<lane>`` is the base64 payload (key ``'image'``/``'audio'``/``'video'``) and
+        ``metadata`` is the stream descriptor parsed from the BEGIN payload (present only
+        when one arrived). Per-lane buffers keep concurrent streams isolated.
 
-        # Create the tracking info
-        info = {
-            'url': self.instance.currentObject.url,
-            'aviAction': str(aviAction),
-            'mimeType': mimeType,
-            'size': len(data),
-        }
-
-        # Add the documents
-        self.instance.currentObject.response[key].append(info)
-
-    def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
-        # Get the key to write to
-        key = self._getkey('video')
-
-        # If it isn't there, create it
-        if key not in self.instance.currentObject.response:
-            self.instance.currentObject.response[key] = []
-
-        # Create the tracking info
-        info = {
-            'url': self.instance.currentObject.url,
-            'aviAction': str(aviAction),
-            'mimeType': mimeType,
-            'size': len(data),
-        }
-
-        # Add the documents
-        self.instance.currentObject.response[key].append(info)
-
-    def writeImage(self, action: int, mimeType: str, buffer: bytes):
-        # Handle AVI_BEGIN action
+        Args:
+            lane (str): The media lane — ``'image'``, ``'audio'`` or ``'video'``.
+            action (int): The AVI stream action (BEGIN/WRITE/END).
+            mimeType (str): The media MIME type.
+            data (bytes): The BEGIN descriptor payload, or a WRITE data chunk.
+        """
         if action == AVI_ACTION.BEGIN:
-            self.image = bytearray()
+            # BEGIN carries the stream descriptor, not media bytes.
+            self._media_buffers[lane] = bytearray()
+            self._media_descriptors[lane] = descriptor_from_payload(data)
 
-        # Handle AVI_WRITE action (appending chunks of the image)
         elif action == AVI_ACTION.WRITE:
-            self.image += buffer  # Append the chunk to the existing image data
+            self._media_buffers[lane] += data
 
-        # Handle AVI_END action (finalizing the image processing)
         elif action == AVI_ACTION.END:
-            # Get the key to write to
-            key = self._getkey('image')
+            key = self._getkey(lane)
 
-            # If it isn't there, create it
             if key not in self.instance.currentObject.response:
                 self.instance.currentObject.response[key] = []
 
-            # Load the image
-            image = ImageProcessor.load_image_from_bytes(self.image)
-            if image is None:
-                debug('Invalid image data provided')
+            payload = base64.b64encode(self._media_buffers.get(lane, bytearray())).decode('utf-8')
+            self._media_buffers[lane] = bytearray()
 
-            # Convert to base64
-            image_str = ImageProcessor.get_base64(image)
+            # source_media_detail() strips the identity/security backlink from the response.
+            entry = {'mime_type': mimeType, lane: payload}
+            detail = source_media_detail(self._media_descriptors.get(lane))
+            if detail:
+                entry['metadata'] = detail
+            self.instance.currentObject.response[key].append(entry)
 
-            # Release the image
-            self.image = bytearray()
+    def writeAudio(self, aviAction: int, mimeType: str, data: bytes):
+        self._write_media('audio', aviAction, mimeType, data)
 
-            # Add the image
-            self.instance.currentObject.response[key].append({'mime_type': mimeType, 'image': image_str})
+    def writeVideo(self, aviAction: int, mimeType: str, data: bytes):
+        self._write_media('video', aviAction, mimeType, data)
+
+    def writeImage(self, action: int, mimeType: str, buffer: bytes):
+        self._write_media('image', action, mimeType, buffer)

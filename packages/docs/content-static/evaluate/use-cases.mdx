@@ -32,9 +32,9 @@ Click the RocketRide
 (<ThemedImage alt="RocketRide" className="rr-inline-icon" sources={{ light: '/img/rocketride-icon-colored.svg', dark: '/img/rocketride-icon-white.svg' }} />)
 icon in your IDE sidebar, then choose how to run the runtime:
 
-- **Local (recommended)** — pulls the server straight into your IDE, no extra setup.
-- **On-premises** — run on your own hardware via Docker or build from source.
-- **RocketRide Cloud** — managed hosting (coming soon).
+- **Local (recommended)**: pulls the server straight into your IDE, no extra setup.
+- **On-premises**: run on your own hardware via Docker or build from source.
+- **RocketRide Cloud**: managed hosting.
 
 ### 3. Create a pipeline file
 
@@ -46,8 +46,8 @@ visually.
 
 Every pipeline starts with a **source node**:
 
-1. Add a **Chat** source node — an interactive conversational interface.
-2. Add an **LLM** node — pick a provider (OpenAI, Anthropic, Google, …) and set your API key.
+1. Add a **Chat** source node: an interactive conversational interface.
+2. Add an **LLM** node: pick a provider (OpenAI, Anthropic, Google, …) and set your API key.
 3. Connect the Chat source's output lane to the LLM's input lane.
 
 The result is a `Chat → LLM` pipeline; the LLM's response routes back to the chat interface
@@ -60,14 +60,14 @@ from the **Connection Manager** panel. Open the chat interface, send a message, 
 the LLM respond in real time. Use the Connection Manager to trace call trees, token usage,
 and memory consumption.
 
-Save the `.pipe` file — you'll run it from code in the next walkthrough.
+Save the `.pipe` file, you'll run it from code in the next walkthrough.
 
 ## Integrate a pipeline with an SDK {#integrate-a-pipeline-with-an-sdk}
 
 Once you have a `.pipe` file, run it from your own application with the
 [Python](/develop/python) or [TypeScript](/develop/typescript) SDK. Both connect to a
-running engine — a local server (`ws://localhost:5565`) or RocketRide Cloud
-(`https://cloud.rocketride.ai`) — start the pipeline with `use()`, stream data with
+running engine, a local server (`ws://localhost:5565`) or RocketRide Cloud
+(`https://cloud.rocketride.ai`), start the pipeline with `use()`, stream data with
 `send()`, and stop it with `terminate()`.
 
 ### Python
@@ -118,6 +118,6 @@ pipes, events, and persist-mode reconnection.
 ## More use cases
 
 Browse the [**awesome-rocketride**](https://github.com/rocketride-org/awesome-rocketride)
-list for real-world pipelines — RAG over your docs, document extraction (OCR/NER), PII
-anonymization, multi-provider LLM routing, and agent workflows — plus starter templates you
+list for real-world pipelines (RAG over your docs, document extraction (OCR/NER), PII
+anonymization, multi-provider LLM routing, and agent workflows), plus starter templates you
 can clone and run.

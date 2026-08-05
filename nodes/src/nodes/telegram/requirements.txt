@@ -1,3 +1,3 @@
-aiohttp>=3.13.5
+aiohttp>=3.14.1
 requests
 fastapi

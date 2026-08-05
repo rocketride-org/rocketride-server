@@ -11,7 +11,7 @@
 
 import React, { useState } from 'react';
 
-export const PopupRow: React.FC<{ children: React.ReactNode; onClick?: () => void }> = ({ children, onClick }) => {
+export const PopupRow: React.FC<{ children: React.ReactNode; onClick?: (e: React.MouseEvent<HTMLDivElement>) => void }> = ({ children, onClick }) => {
 	const [hovered, setHovered] = useState(false);
 	return (
 		<div

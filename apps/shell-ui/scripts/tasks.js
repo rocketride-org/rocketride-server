@@ -146,7 +146,7 @@ function makeCopyAction() {
 // MODULE DEFINITION
 // =============================================================================
 
-module.exports = {
+const shellUiModule = {
 	name: 'shell-ui',
 	description: 'Shell Host Application',
 
@@ -196,3 +196,89 @@ module.exports = {
 		},
 	],
 };
+
+// =============================================================================
+// SHELL CONTRACT MODULE — `shell:*` action namespace
+// =============================================================================
+//
+// Registered as its own module so `./builder shell:freeze` resolves (the
+// builder derives the module name from the text before the colon). The registry
+// accepts an array of modules from one tasks.js file.
+// =============================================================================
+
+const shellContractModule = {
+	name: 'shell',
+	description: 'Shell API contract',
+
+	actions: [
+		// Internal leaf actions (no description — not shown in builder --help).
+		// Both public composites below chain `client-typescript:build` ahead of
+		// these: the freeze script's tsc pre-check type-checks shared-ui, whose
+		// `rocketride` imports resolve to the SDK's dist/types — a build artifact
+		// that fresh clones and CI runners do not have yet.
+		{
+			name: 'shell:freeze-run',
+			action: () => ({
+				run: async (ctx, task) => {
+					const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+					const args = [script];
+					// Back-compat: `shell:freeze --check` still runs CI mode.
+					if (ctx.options.check) args.push('--check');
+					await execCommand('node', args, { task, cwd: APP_ROOT });
+				},
+			}),
+		},
+		{
+			name: 'shell:check-run',
+			action: () => ({
+				run: async (ctx, task) => {
+					const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+					await execCommand('node', [script, '--check'], { task, cwd: APP_ROOT });
+				},
+			}),
+		},
+		{
+			name: 'shell:regen-run',
+			action: () => ({
+				run: async (ctx, task) => {
+					const script = path.join(APP_ROOT, 'scripts', 'freeze-shell-api.js');
+					await execCommand('node', [script, '--regen'], { task, cwd: APP_ROOT });
+				},
+			}),
+		},
+		{
+			// Freeze the shell-api contract: bundle src/api.ts into the next
+			// packages/shell-api/versions/vN and regenerate the conformance file.
+			name: 'shell:freeze',
+			action: () => ({
+				description: 'Freeze the shell-api contract',
+				steps: ['client-typescript:build', 'shell:freeze-run'],
+			}),
+		},
+		{
+			// CI mode: verify the live surface has not drifted from the newest
+			// frozen version, without writing anything. Nonzero exit on drift.
+			// The preferred spelling — replaces `shell:freeze --check`.
+			name: 'shell:check',
+			action: () => ({
+				description: 'Check the shell-api contract is current (no write)',
+				steps: ['client-typescript:build', 'shell:check-run'],
+			}),
+		},
+		{
+			// RESET to a fresh v0: drops every frozen version and re-mints v0
+			// from the CURRENT live surface (pre-1.0 policy — intentional
+			// breaking changes collapse the contract history). CI pairs this
+			// with `git diff --exit-code` on the generated files: a committed
+			// contract that disagrees with the live surface — including a
+			// hand-edited floor or version file — fails the diff.
+			name: 'shell:regen',
+			action: () => ({
+				description: 'Recreate the v0 shell-api freeze from the live surface (contract reset)',
+				steps: ['client-typescript:build', 'shell:regen-run'],
+			}),
+		},
+	],
+};
+
+module.exports = [shellUiModule, shellContractModule];

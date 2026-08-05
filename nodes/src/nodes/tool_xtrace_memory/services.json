@@ -130,7 +130,7 @@
 			"type": "boolean",
 			"optional": true,
 			"title": "Advanced settings",
-			"description": "Show advanced options. The defaults work for most cases — leave off for a simple setup.",
+			"description": "Show advanced options. The defaults work for most cases, leave off for a simple setup.",
 			"default": false,
 			"enum": [
 				[true, "Yes"],
@@ -220,7 +220,7 @@
 	//
 	// Optional:
 	//		Test configuration for automated node testing. Credentials are
-	//		placeholders — config validation is tested here, not live API calls.
+	//		placeholders, config validation is tested here, not live API calls.
 	//
 	"test": {
 		"profiles": ["default"],

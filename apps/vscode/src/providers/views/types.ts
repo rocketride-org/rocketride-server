@@ -12,35 +12,93 @@
 
 import type { ViewState, TaskStatus } from 'shared/modules/project';
 import type { DashboardResponse } from 'shared/modules/server';
+import type { PromoRedemption, PromoValidation } from 'shared/modules/checkout';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from 'rocketride';
+import type { DeployLifecycleHostToWebview, DeployLifecycleWebviewToHost, DeploymentHostToWebview, DeploymentWebviewToHost } from './deployTypes';
+import type { LogSessionHostToWebview, LogSessionWebviewToHost } from './logTypes';
 
 // =============================================================================
 // PROJECT EDITOR PROTOCOL
 // =============================================================================
 
 /** All messages the extension host can send to the ProjectWebview. */
-export type ProjectHostToWebview = { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; isReadonly?: boolean; envKeys?: string[] } | { type: 'project:update'; project: any } | { type: 'project:services'; services: Record<string, any> } | { type: 'project:validateResponse'; requestId: number; result: any; error?: string } | { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean } | { type: 'project:initialState'; state: ViewState } | { type: 'project:initialPrefs'; prefs: Record<string, unknown> } | { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:viewActivated'; viewId: string } | { type: 'shell:event'; event: unknown }
-	| { type: 'project:envKeysUpdate'; envKeys: string[] };
+export type ProjectHostToWebview =
+	| { type: 'project:load'; project: any; viewState: ViewState; prefs: Record<string, unknown>; services: Record<string, any>; isConnected: boolean; isSubscribed?: boolean; statuses?: Record<string, TaskStatus>; serverHost?: string; oauthReturnUrl?: string; isReadonly?: boolean; envKeys?: string[] }
+	| { type: 'project:oauthTokens'; tokens: string; state: string }
+	| { type: 'project:update'; project: any }
+	| { type: 'project:services'; services: Record<string, any> }
+	| { type: 'project:validateResponse'; requestId: number; result: any; error?: string }
+	| { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean }
+	| { type: 'project:initialState'; state: ViewState }
+	| { type: 'project:initialPrefs'; prefs: Record<string, unknown> }
+	| { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean }
+	| { type: 'shell:themeChange'; tokens: Record<string, string> }
+	| { type: 'shell:connectionChange'; isConnected: boolean }
+	| { type: 'shell:viewActivated'; viewId: string }
+	| { type: 'shell:event'; event: unknown }
+	| { type: 'project:envKeysUpdate'; envKeys: string[] }
+	// Deploy lifecycle pushes for the DEPLOY page (see deployTypes.ts).
+	| DeployLifecycleHostToWebview
+	// Deployment record drawer pushes (the drawer lives in this webview).
+	| DeploymentHostToWebview
+	// Run-log session replies/pushes (the DVR bridge).
+	| LogSessionHostToWebview;
 
 /** All messages the ProjectWebview can send to the extension host. */
-export type ProjectWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'project:contentChanged'; project: any } | { type: 'project:validate'; requestId: number; pipeline: any } | { type: 'project:requestSave' } | { type: 'project:viewStateChange'; viewState: ViewState } | { type: 'project:prefsChange'; prefs: Record<string, unknown> } | { type: 'project:openLink'; url: string; displayName?: string } | { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string } | { type: 'status:missingEnvVars'; keys: string[] } | { type: 'trace:clear' };
+export type ProjectWebviewToHost =
+	| { type: 'view:ready' }
+	| { type: 'view:initialized' }
+	| { type: 'project:contentChanged'; project: any }
+	| { type: 'project:validate'; requestId: number; pipeline: any }
+	| { type: 'project:requestSave' }
+	| { type: 'project:viewStateChange'; viewState: ViewState }
+	| { type: 'project:prefsChange'; prefs: Record<string, unknown> }
+	| { type: 'project:openLink'; url: string; displayName?: string; browser?: boolean }
+	| { type: 'project:openExternal'; url: string }
+	| { type: 'status:pipelineAction'; action: 'run' | 'stop' | 'restart'; source?: string }
+	| { type: 'status:missingEnvVars'; keys: string[] }
+	| { type: 'trace:clear' }
+	// Deploy lifecycle requests from the DEPLOY page (see deployTypes.ts).
+	| DeployLifecycleWebviewToHost
+	// Deployment record drawer requests.
+	| DeploymentWebviewToHost
+	// Run-log session requests (the DVR bridge).
+	| LogSessionWebviewToHost;
 
 // =============================================================================
 // SERVER MONITOR PROTOCOL
 // =============================================================================
 
 /** All messages the extension host can send to the MonitorWebview. */
-export type MonitorHostToWebview = { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean } | { type: 'shell:themeChange'; tokens: Record<string, string> } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'shell:event'; event: unknown } | { type: 'monitor:dashboard'; data: DashboardResponse };
+export type MonitorHostToWebview =
+	| { type: 'shell:init'; theme: Record<string, string>; isConnected: boolean }
+	| { type: 'shell:themeChange'; tokens: Record<string, string> }
+	| { type: 'shell:connectionChange'; isConnected: boolean }
+	| { type: 'shell:event'; event: unknown }
+	| { type: 'monitor:dashboard'; data: DashboardResponse }
+	// Grid config channel seed: the stored per-table layout map (tableId ->
+	// { persistence type -> blob }) from the extension's workspaceState, sent
+	// with the view:ready reply BEFORE the first dashboard snapshot so the
+	// webview bridge cache is primed before any grid reads its layout.
+	| { type: 'grid:config:init'; layouts: Record<string, Record<string, unknown>> };
 
 /** All messages the MonitorWebview can send to the extension host. */
-export type MonitorWebviewToHost = { type: 'view:ready' } | { type: 'view:initialized' } | { type: 'monitor:refresh' };
+export type MonitorWebviewToHost =
+	| { type: 'view:ready' }
+	| { type: 'view:initialized' }
+	| { type: 'monitor:refresh' }
+	// Grid config channel writes: persist / drop one table's layout blobs in
+	// the extension's workspaceState (blobType is the Tabulator persistence
+	// type — 'sort' | 'columns' | 'page' | the RR-private 'display'/'format').
+	| { type: 'grid:config:set'; tableId: string; blobType: string; blob: unknown }
+	| { type: 'grid:config:clear'; tableId: string };
 
 // =============================================================================
 // ACCOUNT PAGE PROTOCOL
 // =============================================================================
 
 /** All messages the extension host can send to the AccountWebview. */
-export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:accountUpdate' } | { type: 'account:error'; error: string };
+export type AccountHostToWebview = { type: 'account:init'; isConnected: boolean; profile: ConnectResult | null; org: OrgDetail | null; members: MemberRecord[]; teams: TeamRecord[]; keys: ApiKeyRecord[] } | { type: 'shell:connectionChange'; isConnected: boolean } | { type: 'account:profile'; profile: ConnectResult | null } | { type: 'account:keys'; keys: ApiKeyRecord[] } | { type: 'account:org'; org: OrgDetail | null } | { type: 'account:members'; members: MemberRecord[] } | { type: 'account:teams'; teams: TeamRecord[] } | { type: 'account:teamDetail'; teamDetail: TeamDetail | null } | { type: 'account:keyCreated'; key: string } | { type: 'account:accountUpdate' } | { type: 'account:error'; error: string } | { type: 'checkout:validatePromoResult'; result: PromoValidation | null; error: string | null } | { type: 'checkout:redeemPromoResult'; result: PromoRedemption | null; error: string | null };
 
 /** All messages the AccountWebview can send to the extension host. */
 export type AccountWebviewToHost =
@@ -61,7 +119,9 @@ export type AccountWebviewToHost =
 	| { type: 'account:addTeamMember'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:editPerms'; params: { teamId: string; userId: string; permissions: string[] } }
 	| { type: 'account:removeTeamMember'; params: { teamId: string; userId: string } }
-	| { type: 'account:sectionChange'; section: string };
+	| { type: 'account:sectionChange'; section: string }
+	| { type: 'checkout:validatePromo'; code: string; priceId?: string }
+	| { type: 'checkout:redeemPromo'; code: string };
 
 // =============================================================================
 // ENVIRONMENT PAGE PROTOCOL
@@ -70,3 +130,15 @@ export type AccountWebviewToHost =
 // Re-export from standalone file so extension-host imports don't drag in
 // the `shared/modules/*` dependencies above.
 export type { EnvironmentSlotState, EnvironmentHostToWebview, EnvironmentWebviewToHost } from './environmentTypes';
+
+// =============================================================================
+// DEPLOY SURFACES PROTOCOL
+// =============================================================================
+
+// Re-export from standalone file so the extension host can import the deploy
+// protocol + view-model DTOs without the `shared/modules/*` dependencies.
+export type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO, SchedulePreviewResultDTO, DeployLifecycleHostToWebview, DeployLifecycleWebviewToHost, DeploymentLoadPayload, DeploymentHostToWebview, DeploymentWebviewToHost } from './deployTypes';
+
+// Re-export from standalone file so the extension host can import the
+// run-log session protocol without the `shared/modules/*` dependencies.
+export type { LogSessionHostToWebview, LogSessionWebviewToHost } from './logTypes';

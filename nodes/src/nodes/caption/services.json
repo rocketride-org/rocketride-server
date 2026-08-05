@@ -1,0 +1,91 @@
+{
+	"title": "Caption",
+	"protocol": "caption://",
+	"classType": ["image"],
+	"capabilities": ["gpu", "experimental", "debug"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.caption",
+	"prefix": "caption",
+	"description": ["Generates a natural-language caption for an image using Florence-2 Base (MIT). ", "Three caption granularities are exposed: short, detailed, and more detailed. ", "Runs locally on CPU, Apple Silicon (MPS), and CUDA with no API key required. ", "For object detection use Object Detection. For text reading use OCR."],
+	"icon": "caption.svg",
+	"documentation": "https://docs.rocketride.org",
+	"tile": ["Task: ${parameters.caption.task}"],
+	"lanes": {
+		"image": ["text"]
+	},
+	"input": [
+		{
+			"lane": "image",
+			"description": "AVI image stream to caption.",
+			"output": [
+				{
+					"lane": "text",
+					"description": "Caption string."
+				}
+			]
+		}
+	],
+	"preconfig": {
+		"default": "florence-base",
+		"profiles": {
+			"florence-base": {
+				"title": "Florence-2 Base",
+				"model": "microsoft/Florence-2-base",
+				"revision": "5ca5edf5bd017b9919c05d08aebef5e4c7ac3bac",
+				"task": "caption"
+			}
+		}
+	},
+	"fields": {
+		"caption.task": {
+			"title": "Granularity",
+			"description": "How detailed the caption should be.",
+			"type": "string",
+			"default": "caption",
+			"enum": ["caption", "detailed_caption", "more_detailed_caption"],
+			"enumNames": ["Short", "Detailed", "More detailed"]
+		},
+		"caption.profile": {
+			"title": "Model",
+			"type": "string",
+			"default": "florence-base",
+			"enum": ["*>preconfig.profiles.*.title"]
+		}
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Caption",
+			"properties": ["caption.profile", "caption.task"]
+		}
+	],
+	"test": {
+		"profiles": ["florence-base"],
+		"outputs": ["text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Caption image",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true }
+				}
+			}
+		]
+	},
+	"fulltest": {
+		"profiles": ["florence-base"],
+		"outputs": ["text"],
+		"timeout": 120,
+		"cases": [
+			{
+				"name": "Caption image",
+				"image": "images/einstein.jpg",
+				"expect": {
+					"text": { "notEmpty": true }
+				}
+			}
+		]
+	}
+}

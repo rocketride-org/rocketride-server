@@ -17,7 +17,7 @@ date: 2025-07-29
 
 The `validate()` method checks a pipeline configuration for structural correctness before executing it. It verifies component compatibility, connection integrity, and resolves the execution chain. This is useful for catching configuration errors early, before starting a pipeline.
 
-Authentication is **not required** for validation — the endpoint is public.
+Authentication is **not required** for validation: the endpoint is public.
 
 ## **Method Signature**
 
@@ -66,10 +66,18 @@ async with RocketRideClient(auth='your-api-key') as client:
         'source': 'webhook_1',
         'components': [
             {'id': 'webhook_1', 'provider': 'webhook', 'config': {}},
-            {'id': 'processor_1', 'provider': 'ai_chat', 'config': {'model': 'gpt-4'},
-             'input': [{'from': 'webhook_1', 'lane': 'output'}]},
-            {'id': 'response_1', 'provider': 'response', 'config': {},
-             'input': [{'from': 'processor_1', 'lane': 'answer'}]},
+            {
+                'id': 'processor_1',
+                'provider': 'ai_chat',
+                'config': {'model': 'gpt-4'},
+                'input': [{'from': 'webhook_1', 'lane': 'output'}],
+            },
+            {
+                'id': 'response_1',
+                'provider': 'response',
+                'config': {},
+                'input': [{'from': 'processor_1', 'lane': 'answer'}],
+            },
         ],
     }
 

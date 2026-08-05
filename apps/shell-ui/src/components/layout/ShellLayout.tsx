@@ -38,17 +38,47 @@ import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { useWorkspace } from '../../workspace/WorkspaceContext';
+import { PrefsProvider } from 'shared';
 import { ConnectionManager } from '../../connection/connection';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
-import { getCommonKeys, resolveSettingsForApp } from '../../views/settings/settingsUtils';
 import { AppErrorBoundary } from './AppErrorBoundary';
 import { OverlayManager, useOverlay } from './OverlayManager';
+import { HostChromeProvider } from './HostChromeContext';
 import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import type { ShellConfig } from '../../workspace/types';
 import { commonStyles } from 'shared/themes/styles';
+
+// =============================================================================
+// APP-LOAD ERROR CLASSIFICATION
+// =============================================================================
+
+/**
+ * Translate a raw app-load error into a user-facing explanation. The raw
+ * text (module-federation / webpack internals) remains available behind the
+ * error view's "Show Details" button for debugging.
+ *
+ * @param raw - The raw error message recorded by WorkspaceContext.
+ * @param name - Display name of the app that failed.
+ * @returns Plain-language explanation of the failure.
+ */
+function friendlyLoadError(raw: string, name: string): string {
+	// Shared-module negotiation failures — and the TDZ artifact a failed first
+	// attempt leaves behind — mean the bundle was built against a different
+	// platform build than the one now serving it.
+	if (/RUNTIME-012|shared module|shareKey|before initialization/i.test(raw)) {
+		return `${name} was built for a different version of the platform and needs to be rebuilt or redeployed.`;
+	}
+	// Network-shaped failures: missing bundle, unreachable server, timeout.
+	if (/failed to load within|failed to fetch|load(ing)? script|ChunkLoadError|404/i.test(raw)) {
+		return `${name} isn't installed on this server, or its files are unreachable.`;
+	}
+	// WorkspaceContext's own validation messages are already human-readable.
+	if (/missing its UI|requires shell API/i.test(raw)) return raw;
+	return `${name} failed to start.`;
+}
 
 // =============================================================================
 // STYLES
@@ -112,7 +142,59 @@ const styles = {
 		...commonStyles.buttonPrimary,
 		padding: '8px 20px',
 		fontWeight: 600,
+	} as CSSProperties,
+	appLoadErrorButtonSecondary: {
+		padding: '8px 20px',
+		fontWeight: 600,
+		fontSize: 13,
+		borderRadius: 6,
+		border: '1px solid var(--rr-border)',
+		backgroundColor: 'transparent',
+		color: 'var(--rr-text-secondary)',
+		cursor: 'pointer',
+		fontFamily: 'var(--rr-font-family)',
+	} as CSSProperties,
+	appLoadErrorActions: {
+		display: 'flex',
+		gap: 10,
 		marginTop: 8,
+	} as CSSProperties,
+	/** Backdrop for the load-failure modal shown over the active app. */
+	loadFailureBackdrop: {
+		...commonStyles.modalOverlay,
+		zIndex: 1200,
+	} as CSSProperties,
+	/** Dialog card for the load-failure modal. */
+	loadFailureDialog: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'center',
+		gap: 16,
+		padding: '28px 32px',
+		maxWidth: 620,
+		borderRadius: 12,
+		border: '1px solid var(--rr-border)',
+		backgroundColor: 'var(--rr-bg-paper)',
+		boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
+		fontFamily: 'var(--rr-font-family)',
+		textAlign: 'center' as const,
+	} as CSSProperties,
+	/** Raw error text panel behind the "Show Details" button. */
+	appLoadErrorDetails: {
+		margin: 0,
+		maxWidth: 640,
+		maxHeight: 240,
+		overflow: 'auto',
+		padding: '12px 14px',
+		borderRadius: 8,
+		border: '1px solid var(--rr-border)',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
+		color: 'var(--rr-text-secondary)',
+		fontSize: 12,
+		fontFamily: 'var(--rr-font-mono, monospace)',
+		textAlign: 'left' as const,
+		whiteSpace: 'pre-wrap' as const,
+		wordBreak: 'break-word' as const,
 	} as CSSProperties,
 	overlayContainer: {
 		position: 'relative',
@@ -157,22 +239,59 @@ export interface ShellLayoutProps {
 export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	config, isConnected, statusMessage, hideAppSwitcher, defaultAppId,
 }) => {
-	const { loaded, seeded, appLoading, prefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp } = useWorkspace();
+	const { loaded, seeded, appLoading, prefs, updatePrefs, activeAppId, loadedApps, settings, appManifest, appLoadErrors, retryApp, loadFailure, dismissLoadFailure } = useWorkspace();
 
-	// --- Merge API config: build-time -> setting defaults -> user settings ----
-	const mergedApiConfig = useMemo(() => {
-		// Collect default values from all app settings declarations
-		const settingDefaults = appManifest.reduce<Record<string, string>>((acc, app) => {
-			for (const s of app.settings ?? []) {
-				if (s.default !== undefined && !(s.key in acc)) acc[s.key] = s.default;
-			}
-			return acc;
-		}, {});
-		const base = { ...config.apiConfig, ...settingDefaults, ...settings };
-		// Resolve per-app overrides for the active app
-		const commonKeys = getCommonKeys(appManifest);
-		return resolveSettingsForApp(base, activeAppId, commonKeys);
-	}, [config.apiConfig, appManifest, settings, activeAppId]);
+	// The ONE workspace-prefs accessor (getPref/setPref) handed to every app and
+	// overlay the shell renders — the same API the canvas uses via ProjectView.
+	// Reads/writes the active app's prefs bag; updatePrefs persists it.
+	const prefsApi = useMemo(
+		() => ({
+			getPref: (key: string): unknown => prefs[key],
+			setPref: (key: string, value: unknown): void => updatePrefs({ [key]: value }),
+		}),
+		[prefs, updatePrefs],
+	);
+
+	// Technical-details panel on the app-load error view; collapses whenever
+	// the active app changes so a stale trace never shows for a new app.
+	const [showErrorDetails, setShowErrorDetails] = useState(false);
+	useEffect(() => { setShowErrorDetails(false); }, [activeAppId]);
+
+	// Load-failure modal's own details toggle (the page view and the modal can
+	// coexist), reset whenever a new failure arrives.
+	const [showModalDetails, setShowModalDetails] = useState(false);
+	useEffect(() => { setShowModalDetails(false); }, [loadFailure]);
+
+	/**
+	 * Retry from the load-failure modal: re-attempts the load (retryApp tears
+	 * down the failed container first); on success closes the modal and
+	 * completes the switch the user originally asked for.
+	 */
+	const handleModalRetry = async () => {
+		if (!loadFailure) return;
+		const ok = await retryApp(loadFailure.appId);
+		if (ok) {
+			dismissLoadFailure();
+			ConnectionManager.getInstance().emit('shell:switchApp', { appId: loadFailure.appId });
+		}
+	};
+
+	// --- Merge API config: build-time config + effective settings -------------
+	// `settings` from useWorkspace() is already the EFFECTIVE map (declared
+	// defaults overlaid with the user's overrides via the settings registry),
+	// so no per-key default collection or per-app override resolution is needed
+	// here. ShellApiConfig is an env-style string map handed to remote apps, so
+	// typed setting values (number/boolean) are coerced to strings at this
+	// boundary — the one place the two representations meet.
+	const mergedApiConfig = useMemo(
+		() => ({
+			...config.apiConfig,
+			...Object.fromEntries(
+				Object.entries(settings).map(([key, value]) => [key, String(value)]),
+			),
+		}),
+		[config.apiConfig, settings],
+	);
 
 	// --- Active app descriptor (undefined while loading) ---------------------
 	const activeApp = loadedApps[activeAppId];
@@ -219,11 +338,26 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	// --- Auth gate: auto-trigger login for authenticated apps ----------------
 	const activeManifest = appManifest.find((m) => m.id === activeAppId);
 	const authGateTriggeredRef = useRef<string | null>(null);
+	const prevIdentityRef = useRef(identity);
+	const suppressGateRef = useRef(false);
 
 	useEffect(() => {
+		// Detect a logout transition (had an identity, now none). On logout the
+		// shell switches the active app back to home via shell:switchApp, but that
+		// event is delivered on a microtask, so the workspace's activeAppId flips a
+		// tick AFTER identity clears. During that gap the check below would see
+		// "no identity + auth-required app still active" and fire shell:loginRequest
+		// → startOAuth, bouncing a signing-out user to the Zitadel login screen
+		// instead of leaving them on the logged-out home. Suppress the gate from the
+		// moment identity drops until the active app settles back on the default.
+		const wasLoggedIn = !!prevIdentityRef.current;
+		prevIdentityRef.current = identity;
+		if (wasLoggedIn && !identity) suppressGateRef.current = true;
+		if (identity || activeAppId === defaultAppId) suppressGateRef.current = false;
+
 		// Only gate when the manifest is loaded and explicitly requires auth.
 		// Skip for the default app (home/hello) — it must always be accessible.
-		if (!identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
+		if (!suppressGateRef.current && !identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
 			if (authGateTriggeredRef.current === activeAppId) return;
 			authGateTriggeredRef.current = activeAppId;
 			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId });
@@ -242,9 +376,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	useEffect(() => {
 		// When a logged-in user navigates to an app they haven't subscribed to,
 		// open the checkout flow automatically. Skip the default app (always accessible).
-		if (subGateActive) {
+		if (subGateActive && activeManifest) {
 			if (subGateTriggeredRef.current === activeAppId) return;
 			subGateTriggeredRef.current = activeAppId;
+			// AppManifestEntry structurally satisfies the minimal ShellAppEntry
+			// contract, so it is passed directly.
 			ConnectionManager.getInstance().emit('shell:subscribe', { app: activeManifest });
 		} else {
 			subGateTriggeredRef.current = null;
@@ -255,7 +391,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 	if (!loaded && !seeded) return null;
 
 	// --- Derived layout info -------------------------------------------------
-	const hasSidebar = !!activeApp?.components?.Sidebar;
+	// The sidebar is always mounted (inside HostChromeProvider) and self-hides
+	// when it has no content: a legacy `components.Sidebar` or app-registered
+	// sidebar content. Apps with neither render no sidebar and the client area
+	// spans full width — exactly as before, when the sidebar was gated on
+	// `components.Sidebar` here.
 	const appName = activeApp?.branding?.appName ?? config.apps[0]?.name ?? 'RocketRide';
 	// Only show the status bar once the app has actually loaded. During the app-load gap the
 	// client area shows the boot rocket (LoadingScreen); rendering the StatusBar there made it
@@ -265,26 +405,25 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 
 	// --- Render --------------------------------------------------------------
 	return (
+		<PrefsProvider value={prefsApi}>
 		<ShellApiConfigProvider config={mergedApiConfig}>
+		<HostChromeProvider>
 		<OverlayManager>
 		<div style={styles.shell}>
 			{/* Main row: Sidebar | Client Area | Debug Panel */}
 			<div style={styles.main}>
-				{/* Sidebar zone */}
-				{hasSidebar && (
-					<SidebarWithOverlay
-						themeConfig={config.themeConfig}
-						account={config.account}
-						hideAppSwitcher={hideAppSwitcher}
-					/>
-				)}
+				{/* Sidebar zone — always mounted; self-hides when it has no content. */}
+				<SidebarWithOverlay
+					themeConfig={config.themeConfig}
+					account={config.account}
+					hideAppSwitcher={hideAppSwitcher}
+					isSaas={(config.capabilities ?? []).includes('saas')}
+				/>
 
 				{/* Client area */}
 				<div style={styles.overlayContainer}>
 					<div style={styles.clientArea}>
-						{subGateActive ? (
-							<div style={styles.appLoading}>Subscription required</div>
-						) : activeApp?.components?.App ? (
+						{activeApp?.components?.App ? (
 							<AppErrorBoundary key={activeAppId} appName={appName}>
 								<activeApp.components.App
 									isConnected={isConnected}
@@ -294,12 +433,45 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 						) : appLoadErrors[activeAppId] ? (
 							<div style={styles.appLoadError}>
 								<div style={styles.appLoadErrorTitle}>Could not load {activeManifest?.name ?? activeAppId}</div>
+								{/* Plain-language explanation; raw error lives behind Show Details */}
 								<div style={styles.appLoadErrorMessage} role="alert">
-									{appLoadErrors[activeAppId]}
+									{friendlyLoadError(appLoadErrors[activeAppId], activeManifest?.name ?? activeAppId)}
 								</div>
-								<button type="button" style={styles.appLoadErrorButton} onClick={() => retryApp(activeAppId)}>
-									Retry
-								</button>
+								<div style={styles.appLoadErrorActions}>
+									{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
+									<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
+										Go to Home
+									</button>
+									<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => retryApp(activeAppId)}>
+										Try Again
+									</button>
+									<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => setShowErrorDetails((v) => !v)}>
+										{showErrorDetails ? 'Hide Details' : 'Show Details'}
+									</button>
+								</div>
+								{/* Raw loader error, verbatim — for debugging (user-requested) */}
+								{showErrorDetails && (
+									<pre style={styles.appLoadErrorDetails}>{appLoadErrors[activeAppId]}</pre>
+								)}
+							</div>
+						) : (loaded || seeded) && appManifest.length > 0 && !activeManifest ? (
+							// The active app id is not in this server's manifest — e.g. a
+							// stale per-tab session id left by a different shell flavour on
+							// the same origin, or an app that was renamed/removed. Say so
+							// explicitly with an exit; never strand the user on the splash
+							// (loadDescriptor returns false silently for unknown ids).
+							<div style={styles.appLoadError}>
+								<div style={styles.appLoadErrorTitle}>App not found</div>
+								<div style={styles.appLoadErrorMessage} role="alert">
+									This server has no app with the id &quot;{activeAppId}&quot;. It may have been
+									renamed, removed, or belong to a different RocketRide deployment.
+								</div>
+								<div style={styles.appLoadErrorActions}>
+									{/* Home is the guaranteed exit — $HOME resolves to the platform default */}
+									<button type="button" style={styles.appLoadErrorButton} onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: '$HOME' })}>
+										Go to Home
+									</button>
+								</div>
 							</div>
 						) : appLoading || !activeApp ? (
 							// Same bobbing rocket as the boot LoadingScreen and home-ui's
@@ -310,6 +482,38 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 						) : null}
 					</div>
 				</div>
+
+				{/* Load-failure modal — a switch-to-app failed while the current app
+				    stayed on screen; shown over it instead of a page takeover. */}
+				{loadFailure && (
+					/* Backdrop is inert like every shell dialog (OverlayManager is the
+					   source of truth for the no-backdrop-dismiss rule); the footer
+					   Close button is the dismiss control. */
+					<div style={styles.loadFailureBackdrop}>
+						<div style={styles.loadFailureDialog} role="dialog" aria-modal="true">
+							<div style={styles.appLoadErrorTitle}>Could not load {loadFailure.name}</div>
+							{/* Plain-language explanation; raw error behind Show Details */}
+							<div style={styles.appLoadErrorMessage} role="alert">
+								{friendlyLoadError(appLoadErrors[loadFailure.appId] ?? '', loadFailure.name)}
+							</div>
+							<div style={styles.appLoadErrorActions}>
+								<button type="button" style={styles.appLoadErrorButton} onClick={dismissLoadFailure}>
+									Close
+								</button>
+								<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={handleModalRetry}>
+									Try Again
+								</button>
+								<button type="button" style={styles.appLoadErrorButtonSecondary} onClick={() => setShowModalDetails((v) => !v)}>
+									{showModalDetails ? 'Hide Details' : 'Show Details'}
+								</button>
+							</div>
+							{/* Raw loader error, verbatim — for debugging */}
+							{showModalDetails && (
+								<pre style={styles.appLoadErrorDetails}>{appLoadErrors[loadFailure.appId]}</pre>
+							)}
+						</div>
+					</div>
+				)}
 
 				{/* Debug panel (ALT+D) */}
 				{debugOpen && (
@@ -329,7 +533,9 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 			)}
 		</div>
 		</OverlayManager>
+		</HostChromeProvider>
 		</ShellApiConfigProvider>
+		</PrefsProvider>
 	);
 };
 
@@ -345,13 +551,16 @@ const SidebarWithOverlay: React.FC<{
 	themeConfig: ShellConfig['themeConfig'];
 	account: ShellConfig['account'];
 	hideAppSwitcher?: boolean;
-}> = ({ themeConfig, account, hideAppSwitcher }) => {
+	/** Server-probed edition flag ('saas' capability) — gates SaaS-only menu items. */
+	isSaas?: boolean;
+}> = ({ themeConfig, account, hideAppSwitcher, isSaas }) => {
 	const onOverlay = useOverlay();
 	return (
 		<Sidebar
 			themeConfig={themeConfig}
 			account={account}
 			hideAppSwitcher={hideAppSwitcher}
+			isSaas={isSaas}
 			onOverlay={onOverlay}
 		/>
 	);

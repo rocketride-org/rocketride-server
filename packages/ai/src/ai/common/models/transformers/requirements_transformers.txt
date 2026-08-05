@@ -1,4 +1,4 @@
 # Requirements for Transformers loader
 # Direct imports only
 
-transformers
+transformers==4.53.3

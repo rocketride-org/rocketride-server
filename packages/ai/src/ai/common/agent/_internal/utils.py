@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Union
 
-from ai.common.utils import safe_str  # re-imported so the helpers below can use it
+from ai.common.utils import flatten_content_blocks, safe_str  # re-imported so the helpers below can use it
 
 
 def new_run_id() -> str:
@@ -53,6 +53,21 @@ def messages_to_transcript(messages: Union[str, List[Dict[str, str]]]) -> str:
     return '\n'.join(parts)
 
 
+def _as_text(value: Any) -> str:
+    """Stringify a response payload, flattening provider content blocks.
+
+    A list here is Anthropic-style typed blocks, not text. ``safe_str`` on it
+    yields the blocks' repr, which for an agent is actively harmful: the ReAct
+    parser reads the model's output back with a greedy ``Action Input: (.*)``,
+    so the serialized wrapper's trailing ``", "type": "text"}]`` lands inside the
+    tool arguments and every declared field then reports as missing.
+    """
+    if isinstance(value, list):
+        text, _reasoning, _sig_only = flatten_content_blocks(value)
+        return text
+    return safe_str(value)
+
+
 def extract_text(result: Any) -> str:
     """
     Extract response text from common engine return shapes.
@@ -61,25 +76,34 @@ def extract_text(result: Any) -> str:
     - objects with `getText()`
     - objects with `getJson()` that include `answer`/`content`/`text`
     - any other object via `str(...)`
+
+    Provider content blocks are flattened to their visible text wherever they
+    appear; reasoning blocks are dropped, since callers want the answer.
     """
     try:
         if hasattr(result, 'getText') and callable(getattr(result, 'getText')):
-            return (safe_str(result.getText()) or '').strip()
+            return (_as_text(result.getText()) or '').strip()
         if hasattr(result, 'getJson') and callable(getattr(result, 'getJson')):
             data = result.getJson()
             if isinstance(data, dict):
                 for k in ('answer', 'content', 'text'):
                     if k in data and data[k] is not None:
-                        return safe_str(data[k]).strip()
-            return safe_str(data).strip()
-        return safe_str(result).strip()
+                        return _as_text(data[k]).strip()
+            return _as_text(data).strip()
+        return _as_text(result).strip()
     except Exception:
         return safe_str(result).strip()
 
 
 def truncate_at_stop_words(text: str, stop_words: Any) -> str:
     """
-    Truncate `text` at the first occurrence of any stop word.
+    Truncate `text` at the first exact occurrence of any stop word.
+
+    This is the backstop behind API-level `stop_sequences` (now primary): the provider
+    already stops generating at the marker, so this only trims a fabricated ReAct tail on
+    the rare miss. Matching is exact and case-sensitive on purpose — a fuzzy/anchored
+    match would over-truncate legitimate answers that merely contain the marker text
+    (e.g. "My key observation: ...").
 
     Args:
         text: Model output text.

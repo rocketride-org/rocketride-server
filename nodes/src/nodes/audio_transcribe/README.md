@@ -1,38 +1,99 @@
----
-title: 'Transcribe - RocketRide Documentation'
-date: 2026-04-08
-sidebar_position: 1
----
+# audio_transcribe
+
+A RocketRide audio filter node that transcribes spoken audio or video to text using OpenAI Whisper.
 
 ## What it does
 
-Transcribes audio or video to text using [OpenAI Whisper](https://github.com/openai/whisper). Buffers incoming audio in 60-second chunks, runs Whisper with built-in VAD, and emits complete sentences to the `text` lane.
+Receives an audio or video stream, extracts the audio track as 16 kHz mono PCM, buffers it in 60-second chunks (forced flush at 120 seconds), and runs Whisper with built-in voice activity detection (VAD). Segments are merged until they end in terminal punctuation (`.`, `?`, `!`), so output arrives as whole sentences, each carrying the timestamp of its first segment.
 
-**Lanes:** `audio` → `text`, `video` → `text`
+Uses `ai.common.models.Whisper`: transcription routes to the model server when the engine is started with `--modelserver`, otherwise it runs locally via `faster-whisper`. No API key is required either way. Whisper is invoked with `beam_size=5` and `vad_filter=True`, and transcription calls are serialized through a global lock so a single loaded model is shared safely across instances.
 
-Runs locally via `faster-whisper` — no API key required. Routes to a model server automatically if `--modelserver` is set.
+Models are downloaded from HuggingFace on first use. GPU is used automatically when available (`compute_type` defaults to `float16`).
+
+---
 
 ## Configuration
 
-| Field               | Default | Description                                                                              |
-| ------------------- | ------- | ---------------------------------------------------------------------------------------- |
-| Model               | `base`  | Whisper model size (see table below)                                                     |
-| `silence_threshold` | `0.25`  | VAD probability threshold — speech below this confidence is treated as silence (0.0–1.0) |
-| `min_seconds`       | `240`   | Minimum audio (seconds) buffered before looking for a split point                        |
-| `max_seconds`       | `300`   | Maximum audio (seconds) to buffer before forcing transcription                           |
+### Lanes
+
+| Input lane | Output lane | Behaviour |
+|------------|-------------|-----------|
+| `audio`    | `text`      | Transcribed sentences, one per segment |
+| `video`    | `text`      | Audio track is extracted from the video and transcribed |
+
+When a `documents` listener is attached, the node also emits one document per merged sentence with `chunkId` (sequential per stream, reset on each new stream) and `time_stamp` (seconds from stream start) in the document metadata, plus `metadata.source` (the source audio's media detail — `source_mime`, `duration`, `sample_rate`, …) and `metadata.name` = `<audio-stem>.segment<N>.txt` when the input carried a stream descriptor.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | Default "base". The Whisper model to use for transcription |
+| `silence_threshold` | number | Default 0.25. The silence threshold to detect silence in speech (in seconds) |
+| `min_seconds` | number | Default 240. The minimum seconds of audio to process in a batch and looking for silence |
+| `max_seconds` | number | Default 300. The maximum seconds of audio to buffer to process |
+| `vad_level` | number | Default 1. The VAD level to use for silence detection (0-3) |
+| `profile` | string | Default "default".  |
+
+### VAD levels
+
+| Level | Behaviour |
+|-------|-----------|
+| `0`   | Most permissive: detects the most audio as speech (risk: includes noise) |
+| `1`   | Slightly more aggressive: skips minor background noise (default) |
+| `2`   | Balanced: moderate filtering of non-speech |
+| `3`   | Most aggressive: filters aggressively, may cut off quiet or short speech |
+
+---
 
 ## Models
 
-| Model    | Notes                          |
-| -------- | ------------------------------ |
-| Tiny     | Fastest, least accurate        |
-| Base     | Fast, low accuracy _(default)_ |
-| Small    | Medium speed and accuracy      |
-| Medium   | Slower, high accuracy          |
-| Large v3 | Slowest, highest accuracy      |
+| Model      | Notes |
+|------------|-------|
+| `tiny`     | Fastest, least accurate |
+| `base`     | Fast, low accuracy (default) |
+| `small`    | Medium speed and accuracy |
+| `medium`   | Slower, high accuracy |
+| `large-v3` | Slowest, highest accuracy |
 
-Models are downloaded from HuggingFace on first use. GPU is used automatically when available (`float16`).
+---
+
+## Profiles
+
+The node ships one profile per model size (`tiny`, `base`, `small`, `medium`, `large-v3`) plus `default`, which is an alias for `base`. Every profile uses the same defaults: `language: en`, `silence_threshold: 0.25`, `min_seconds: 240`, `max_seconds: 300`, `vad_level: 1`. Only the model differs between profiles.
+
+---
 
 ## Language
 
-Defaults to English (`en`). Change the `language` config value to transcribe other languages — any language supported by Whisper is accepted.
+Defaults to English (`en`). Change the `language` config value to transcribe other languages. Any language supported by Whisper is accepted.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `transcribe.max_seconds` | `number` | **Maximum Seconds**<br/>The maximum seconds of audio to buffer to process | `300` |
+| `transcribe.min_seconds` | `number` | **Minimum Seconds**<br/>The minimum seconds of audio to process in a batch and looking for silence | `240` |
+| `transcribe.model` | `string` | **Model**<br/>The Whisper model to use for transcription | `"base"` |
+| `transcribe.profile` | `string` |  | `"default"` |
+| `transcribe.silence_threshold` | `number` | **Silence Threshold**<br/>The silence threshold to detect silence in speech (in seconds) | `0.25` |
+| `transcribe.vad_level` | `number` | **VAD Level**<br/>The VAD level to use for silence detection (0-3) | `1` |
+
+## Dependencies
+
+- `faster-whisper`
+- `ctranslate2`
+- `av`
+- `tokenizers`
+- `huggingface-hub`
+- `tqdm`
+- `onnxruntime`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/audio_transcribe)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -27,6 +27,7 @@
 import React from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell-ui';
+import heroSrc from './hello-world.webp';
 
 // =============================================================================
 // STYLES
@@ -54,19 +55,14 @@ const styles = {
 		fontSize: 16,
 		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
-	status: {
-		fontSize: 13,
-		color: 'var(--rr-text-tertiary, #888)',
-		marginTop: 24,
+	hero: {
+		width: 520,
+		maxWidth: '90%',
+		height: 'auto',
+		borderRadius: 12,
+		border: '1px solid var(--rr-border)',
+		boxShadow: '0 8px 32px var(--rr-shadow-widget)',
 	} as CSSProperties,
-	dot: (connected: boolean): CSSProperties => ({
-		display: 'inline-block',
-		width: 8,
-		height: 8,
-		borderRadius: '50%',
-		backgroundColor: connected ? 'var(--rr-color-success, #22c55e)' : 'var(--rr-color-error, #ef4444)',
-		marginRight: 6,
-	}),
 };
 
 // =============================================================================
@@ -74,24 +70,24 @@ const styles = {
 // =============================================================================
 
 /**
- * Hello World demo app — renders a centered greeting with connection status.
+ * Hello World demo app — renders a centered greeting.
  *
- * @param props.isConnected - Whether the RocketRide WebSocket is connected.
- * @param props.identity    - Authenticated user identity, or null.
+ * @param props.identity - Authenticated user identity, or null.
  */
-const HelloApp: React.FC<ShellAppProps> = ({ isConnected, identity }) => {
+const HelloApp: React.FC<ShellAppProps> = ({ identity }) => {
 	return (
 		<div style={styles.container}>
+			<img
+				src={heroSrc}
+				alt="An astronaut waving by a campfire on the moon, with Earth rising in the sky"
+				style={styles.hero}
+			/>
 			<div style={styles.title}>Hello World!</div>
 			<div style={styles.subtitle}>
 				{identity
 					? `Welcome, ${identity.displayName ?? 'user'}!`
 					: 'Not authenticated — running as a public app.'
 				}
-			</div>
-			<div style={styles.status}>
-				<span style={styles.dot(isConnected)} />
-				{isConnected ? 'Connected to RocketRide' : 'Not connected'}
 			</div>
 		</div>
 	);

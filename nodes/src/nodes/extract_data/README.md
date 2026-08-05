@@ -1,44 +1,80 @@
----
-title: Data Extractor
-date: 2026-04-08
-sidebar_position: 1
----
+# extract_data
 
-<head>
-  <title>Data Extractor - RocketRide Documentation</title>
-</head>
+A RocketRide filter node that uses an LLM to pull a user-defined set of structured fields out of unstructured text or tables.
 
 ## What it does
 
-Reads text or tables and uses an LLM to extract a structured set of fields you define. Results are accumulated across all chunks of a document — the `documents` lane emits one document per extracted row, while the `answers` lane emits the full consolidated table as a single answer.
+Reads incoming text or table chunks and, for each chunk, builds a prompt listing every configured column name, type, and optional default value, then calls the connected LLM (with `expectJson: true`) to extract values. The model is instructed to infer values even when column names don't appear verbatim in the source, and to always return a JSON array (empty if nothing is found). After the first chunk, the running table is passed back as context so subsequent chunks merge into it: duplicates are combined and empty fields are filled in from newer chunks.
 
-**Lanes:**
+Intermediate LLM answers are intercepted by the node (via `preventDefault`) and never passed downstream. Only the final consolidated result is emitted when the object closes. Fields with an empty column name or type are skipped at pipeline start with a warning and excluded from all extraction.
 
-| Lane in | Lane out    | Description                                                      |
-| ------- | ----------- | ---------------------------------------------------------------- |
-| `text`  | `answers`   | Extract fields from text, emit as JSON                           |
-| `text`  | `documents` | Extract fields from text, emit one document per row              |
-| `table` | `answers`   | Extract/transform fields from a table, emit as JSON              |
-| `table` | `documents` | Extract/transform fields from a table, emit one document per row |
+No third-party Python dependencies (requirements.txt is empty).
+
+---
 
 ## Connections
 
-| Connection | Required | Description                      |
-| ---------- | -------- | -------------------------------- |
-| `llm`      | yes      | LLM used to extract field values |
+| Connection | Required    | Description                      |
+| ---------- | ----------- | -------------------------------- |
+| `llm`      | yes (min 1) | LLM used to extract field values |
+
+---
 
 ## Configuration
 
-Define the fields to extract. For each field:
+### Lanes
 
-| Field         | Description                                   |
-| ------------- | --------------------------------------------- |
-| Column        | Output field name                             |
-| Type          | Expected data type (see below)                |
-| Default Value | Fallback if the field is not found (optional) |
+| Lane in     | Lane out    | Description                                                          |
+| ----------- | ----------- | ------------------------------------------------------------------- |
+| `text`      | `answers`   | Extract fields from text, emit as JSON                              |
+| `text`      | `documents` | Extract fields from text, emit one document per row                 |
+| `table`     | `answers`   | Extract/transform fields from a table, emit as JSON                 |
+| `table`     | `documents` | Extract/transform fields from a table, emit one document per row    |
+| `documents` | `answers`   | Extract fields from a document's content, emit as JSON              |
+| `documents` | `documents` | Extract fields from a document's content, emit one document per row |
 
-**Supported types:** Text, Number, Integer, Date, Time, DateTime, Timestamp, Binary, JSON, HTML, URL, Email, Phone, IPv4, IPv6, UUID, GUID
+The `documents` input lane lets a `documents`-producing node (e.g. a preprocessor or an embeddings node) feed extraction directly, without an intermediate conversion to text.
+
+On close, the `answers` lane (if connected) receives one JSON answer containing the full table. The `documents` lane (if connected) receives one document per extracted row, with the row serialized as JSON in the document content.
+
+### Fields
+
+The node takes a list of fields to extract (`fields`, 1-32 entries). Each entry has:
+
+| Field | Type | Description |
+|---|---|---|
+| `column` | string | Default "column". Name of column |
+| `type` | string | Default "text".  |
+| `defval` | string | Default empty.  |
+| `fields` | array |  |
+| `profile` | string | Default "default".  |
+
+**Supported types:** `text` (Text), `decimal` (Number), `int` (Integer), `date` (Date), `time` (Time), `datetime` (DateTime), `timestamp` (Timestamp), `binary` (Binary), `json` (JSON), `html` (HTML), `url` (URL), `email` (Email), `phone` (Phone), `ipv4` (IPv4), `ipv6` (IPv6), `uuid` (UUID), `guid` (GUID)
+
+A single configuration profile exists (`default`); it carries the field list above. The profile selector field (`extract.profile`) is hidden in the UI.
+
+---
 
 ## Behaviour
 
-The LLM infers field values even when the source text doesn't use the exact column names — it reasons about what each column likely contains. Multiple chunks are merged progressively, filling in any gaps from earlier chunks, before the final result is emitted.
+The LLM infers field values even when the source text does not use the exact column names: it reasons about what each column likely contains based on document context. Multiple chunks are merged progressively, filling in any gaps from earlier chunks, before the final result is emitted. The accumulated table is reset for every new object, so extraction state never leaks between objects in the pipeline.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `extract.column` | `string` | **Column**<br/>Name of column | `"column"` |
+| `extract.defval` | `string` | **Default Value** | `""` |
+| `extract.fields` | `array` |  |  |
+| `extract.profile` | `string` |  | `"default"` |
+| `extract.type` | `string` | **Type** | `"text"` |
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/extract_data)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

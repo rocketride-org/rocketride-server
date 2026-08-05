@@ -49,6 +49,7 @@ function buildDefine() {
 		'process.env.REACT_APP_GOOGLE_PICKER_DEVELOPER_KEY': JSON.stringify(
 			process.env.REACT_APP_GOOGLE_PICKER_DEVELOPER_KEY || ''
 		),
+		'process.env.REACT_APP_OAUTH_ROOT_URL': JSON.stringify(process.env.REACT_APP_OAUTH_ROOT_URL || ''),
 	};
 }
 

@@ -42,13 +42,17 @@ const S = {
 		color: 'var(--rr-text-primary)',
 		overflow: 'hidden',
 	} as CSSProperties,
+	// No top border: the Explorer is often the first/only sidebar section (the
+	// File Explorer app, the vscode Pipelines panel), where a top border drew a
+	// stray line under the shell app label. Design-owner decision 2026-07-08:
+	// remove it entirely; where the Explorer follows another section (rocket-ui's
+	// SidebarMenu) the separation is carried by spacing.
 	sectionHeader: {
 		display: 'flex',
 		alignItems: 'center',
 		gap: 0,
 		padding: '6px 12px 4px',
 		flexShrink: 0,
-		borderTop: '1px solid var(--rr-border)',
 	} as CSSProperties,
 	sectionLabel: {
 		...commonStyles.labelUppercase,
@@ -87,7 +91,6 @@ const S = {
 		flex: 1,
 		minWidth: 0,
 	} as CSSProperties,
-	spacer: { flex: 1 } as CSSProperties,
 	dot: (color: string): CSSProperties => ({
 		width: 8,
 		height: 8,
@@ -135,6 +138,26 @@ const S = {
 		padding: '4px 0',
 		boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
 		minWidth: 120,
+	} as CSSProperties,
+	submenu: {
+		position: 'absolute' as const,
+		right: 15,
+		top: '100%',
+		zIndex: 101,
+		background: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 6,
+		padding: '4px 0',
+		boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+		minWidth: 160,
+	} as CSSProperties,
+	submenuTrigger: {
+		position: 'relative' as const,
+	} as CSSProperties,
+	submenuArrow: {
+		marginLeft: 'auto',
+		fontSize: 10,
+		opacity: 0.6,
 	} as CSSProperties,
 	popupRow: {
 		display: 'flex',
@@ -323,7 +346,7 @@ function childTooltip(child: { id: string; name: string; provider?: string }, ta
  * sources, or any app-specific concepts.  The hosting container provides
  * entries, statuses, and callbacks.
  */
-export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, fileActions, onRefresh }) => {
+export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses = new Map(), isConnected, showChildActions = true, activeFilePath, onOpenFile, onFileManage, onChildAction, fileActions, onRefresh, onMove, onUpload }) => {
 	const [viewMode, setViewMode] = useState<'tree' | 'flat'>('tree');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
 	const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
@@ -331,9 +354,16 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 	const [hoveredAction, setHoveredAction] = useState<string | null>(null);
 	const [selectedPath, setSelectedPath] = useState<string>(activeFilePath ?? '');
 	const [menuPath, setMenuPath] = useState<string | null>(null);
+	const [submenuId, setSubmenuId] = useState<string | null>(null);
 	const [renamePath, setRenamePath] = useState<string | null>(null);
 	const [renameValue, setRenameValue] = useState('');
 	const [createState, setCreateState] = useState<{ type: 'file' | 'folder'; parentDir: string; name: string } | null>(null);
+
+	// Drag-drop state
+	const [dragPath, setDragPath] = useState<string | null>(null);
+	const [dropTarget, setDropTarget] = useState<string | null>(null);
+	const canDrag = !!onMove;
+	const canDrop = !!onMove || !!onUpload;
 
 	const menuRef = useRef<HTMLDivElement>(null);
 	const hasFileManage = !!onFileManage;
@@ -473,6 +503,54 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 	const hoverBg = (id: string): CSSProperties => (hoveredRow === id ? { background: HOVER_BG } : {});
 	const actionHoverBg = (id: string): CSSProperties => (hoveredAction === id ? { background: 'var(--rr-bg-toolbar-hover)' } : {});
 
+	// --- Drag-drop handlers ---------------------------------------------------
+
+	const handleDragStart = useCallback((e: React.DragEvent, path: string) => {
+		setDragPath(path);
+		e.dataTransfer.effectAllowed = 'move';
+		e.dataTransfer.setData('text/plain', path);
+	}, []);
+
+	const handleDragOver = useCallback((e: React.DragEvent, dirPath: string) => {
+		e.preventDefault();
+		e.stopPropagation();
+		e.dataTransfer.dropEffect = dragPath ? 'move' : 'copy';
+		// Don't allow dropping onto self or own descendant
+		if (dragPath && (dragPath === dirPath || dirPath.startsWith(dragPath + '/'))) return;
+		setDropTarget(dirPath);
+	}, [dragPath]);
+
+	const handleDragLeave = useCallback((e: React.DragEvent) => {
+		e.stopPropagation();
+		setDropTarget(null);
+	}, []);
+
+	const handleDrop = useCallback((e: React.DragEvent, dirPath: string) => {
+		e.preventDefault();
+		e.stopPropagation();
+		setDropTarget(null);
+		setDragPath(null);
+
+		// OS file drop
+		if (e.dataTransfer.files.length > 0 && onUpload) {
+			onUpload(Array.from(e.dataTransfer.files), dirPath);
+			return;
+		}
+
+		// Internal move
+		const sourcePath = e.dataTransfer.getData('text/plain');
+		if (sourcePath && onMove && sourcePath !== dirPath) {
+			// Prevent moving a directory into itself or its own descendant
+			if (dirPath === sourcePath || dirPath.startsWith(sourcePath + '/')) return;
+			onMove(sourcePath, dirPath);
+		}
+	}, [onMove, onUpload]);
+
+	const handleDragEnd = useCallback(() => {
+		setDragPath(null);
+		setDropTarget(null);
+	}, []);
+
 	// --- Render tree recursively ----------------------------------------------
 
 	const renderChildren = useCallback(
@@ -494,13 +572,19 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 					nodes.push(
 						<div
 							key={rowKey}
-							style={{ ...S.row, paddingLeft: indent, ...hoverBg(rowKey), ...(isSelected ? { background: 'var(--rr-bg-list-active)', color: 'var(--rr-fg-list-active)' } : {}) }}
+							style={{ ...S.row, paddingLeft: indent, ...hoverBg(rowKey), ...(isSelected ? { background: 'var(--rr-bg-list-active)', color: 'var(--rr-fg-list-active)' } : {}), ...(dropTarget === dir.path ? { outline: '2px solid var(--rr-brand)', outlineOffset: -2 } : {}) }}
 							onMouseEnter={() => setHoveredRow(rowKey)}
 							onMouseLeave={() => setHoveredRow(null)}
 							onClick={() => {
 								toggleDir(dir.path);
 								if (hasFileManage) setSelectedPath(dir.path);
 							}}
+							draggable={canDrag}
+							onDragStart={(e) => handleDragStart(e, dir.path)}
+							onDragOver={(e) => handleDragOver(e, dir.path)}
+							onDragLeave={handleDragLeave}
+							onDrop={(e) => handleDrop(e, dir.path)}
+							onDragEnd={handleDragEnd}
 						>
 							{isExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} />}
 							<BxFolderOpen size={16} color="var(--rr-text-secondary)" />
@@ -520,9 +604,8 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							) : (
 								<span style={S.rowName}>{dir.name}</span>
 							)}
-							<span style={S.spacer} />
 							{dirDot && <div style={S.dot(dirDot)} />}
-							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
+							{hasFileManage && (hoveredRow === rowKey || menuPath === dir.path) && !isRenaming && (
 								<button
 									style={S.menuBtn}
 									onClick={(e) => {
@@ -567,7 +650,6 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 				} else {
 					// ── File row ──────────────────────────────────────────────
 					const file = child as ExplorerEntry;
-					const name = fileName(file.path);
 					const displayName = getDisplayName(file.path);
 					const hasChildren = (file.children?.length ?? 0) > 0;
 					const isFileExpanded = expandedFiles.has(file.path);
@@ -589,6 +671,9 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 								if (hasFileManage) setSelectedPath(file.path);
 							}}
 							title={file.path}
+							draggable={canDrag}
+							onDragStart={(e) => handleDragStart(e, file.path)}
+							onDragEnd={handleDragEnd}
 						>
 							{hasChildren ? isFileExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} /> : <span style={{ width: 14 }} />}
 							<BxFile size={16} color="var(--rr-text-secondary)" />
@@ -608,14 +693,13 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 							) : (
 								<span style={S.rowName}>{displayName}</span>
 							)}
-							<span style={S.spacer} />
 							{dotColor && <div style={S.dot(dotColor)} />}
-							{hasFileManage && hoveredRow === rowKey && !isRenaming && (
+							{hasFileManage && (hoveredRow === rowKey || menuPath === file.path) && !isRenaming && (
 								<button
 									style={{ ...S.menuBtn, ...(isFileSelected ? { color: 'var(--rr-fg-list-active)' } : {}) }}
 									onClick={(e) => {
 										e.stopPropagation();
-										setMenuPath(menuPath === file.path ? null : file.path);
+										setMenuPath(menuPath === file.path ? null : file.path); setSubmenuId(null);
 									}}
 								>
 									<BxDotsHorizontal size={16} />
@@ -646,21 +730,71 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 									>
 										<BxTrash size={16} /> Delete
 									</button>
-									{fileActions?.map((a) => (
-										<button
-											key={a.id}
-											style={S.popupRow}
-											onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
-											onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
-											onClick={(e) => {
-												e.stopPropagation();
-												setMenuPath(null);
-												a.onSelect(file.path);
-											}}
-										>
-											{a.icon} {a.label}
-										</button>
-									))}
+									{fileActions?.map((a) => {
+										const children = typeof a.children === 'function' ? a.children(file.path) : a.children;
+										return children ? (
+											<div
+												key={a.id}
+												style={S.submenuTrigger}
+												onMouseEnter={() => setSubmenuId(a.id)}
+												onMouseLeave={() => setSubmenuId(null)}
+												onFocus={() => setSubmenuId(a.id)}
+												onBlur={(e) => {
+													if (!e.currentTarget.contains(e.relatedTarget as Node)) setSubmenuId(null);
+												}}
+											>
+												<button
+													style={S.popupRow}
+													role="menuitem"
+													aria-haspopup="true"
+													aria-expanded={submenuId === a.id}
+													tabIndex={0}
+													onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+													onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+													onClick={(e) => {
+														e.stopPropagation();
+														setSubmenuId(submenuId === a.id ? null : a.id);
+													}}
+												>
+													{a.icon} {a.label} <span style={S.submenuArrow}>&#x25B8;</span>
+												</button>
+												{submenuId === a.id && (
+													<div style={S.submenu}>
+														{children.map((ch) => (
+															<button
+																key={ch.id}
+																style={S.popupRow}
+																onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+																onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+																onClick={(e) => {
+																	e.stopPropagation();
+																	setMenuPath(null);
+																	setSubmenuId(null);
+																	ch.onSelect?.(file.path);
+																}}
+															>
+																{ch.icon} {ch.label}
+															</button>
+														))}
+													</div>
+												)}
+											</div>
+										) : (
+											<button
+												key={a.id}
+												style={S.popupRow}
+												onMouseEnter={(e) => ((e.target as HTMLElement).style.background = HOVER_BG)}
+												onMouseLeave={(e) => ((e.target as HTMLElement).style.background = 'none')}
+												onClick={(e) => {
+													e.stopPropagation();
+													setMenuPath(null);
+													a.onSelect?.(file.path);
+												}}
+											>
+												{a.icon} {a.label}
+											</button>
+										);
+									})}
 								</div>
 							)}
 						</div>
@@ -682,7 +816,6 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 									<span style={S.rowName}>{ch.name}</span>
 									{errCount > 0 && <span style={S.badge('var(--rr-color-error)')}>&#10006; {errCount}</span>}
 									{warnCount > 0 && <span style={S.badge('var(--rr-color-warning)')}>&#9888; {warnCount}</span>}
-									<span style={S.spacer} />
 									{hoveredRow === chRowKey && isConnected && showChildActions && onChildAction && file.documentId && (
 										<button
 											style={S.actionBtn(chRunning ? 'var(--rr-color-error)' : 'var(--rr-color-success)')}
@@ -692,7 +825,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 												onChildAction(chRunning ? 'stop' : 'run', file.path, ch.id, file.documentId);
 											}}
 										>
-											{chRunning ? <BxStop size={14} /> : <BxPlay size={14} />}
+											{chRunning ? <BxStop size={16} /> : <BxPlay size={16} />}
 										</button>
 									)}
 								</div>
@@ -726,7 +859,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 
 			return nodes;
 		},
-		[getChildren, expandedDirs, expandedFiles, hoveredRow, statuses, isConnected, showChildActions, onOpenFile, onFileManage, onChildAction, toggleDir, toggleFile, entries, hasFileManage, selectedPath, menuPath, renamePath, renameValue, confirmRename, cancelRename, startRename, createState, confirmCreate, cancelCreate, getDisplayName, config.createPlaceholder]
+		[getChildren, expandedDirs, expandedFiles, hoveredRow, statuses, isConnected, showChildActions, onOpenFile, onFileManage, onChildAction, toggleDir, toggleFile, entries, hasFileManage, selectedPath, menuPath, renamePath, renameValue, confirmRename, cancelRename, startRename, createState, confirmCreate, cancelCreate, getDisplayName, config.createPlaceholder, canDrag, handleDragStart, handleDragOver, handleDragLeave, handleDrop, handleDragEnd, dropTarget]
 	);
 
 	// --- Render ---------------------------------------------------------------
@@ -773,7 +906,12 @@ export const Explorer: React.FC<IExplorerProps> = ({ vfs, config, entries, statu
 			{/* When the tree is empty we still need to render the inline create
 			    input if the user just clicked +File / +Folder at the root, since
 			    that input lives inside renderChildren(). */}
-			<div style={S.treeList}>
+			<div
+				style={{ ...S.treeList, ...(dropTarget === '' ? { outline: '2px solid var(--rr-brand)', outlineOffset: -2 } : {}) }}
+				onDragOver={canDrop ? (e) => handleDragOver(e, '') : undefined}
+				onDragLeave={canDrop ? handleDragLeave : undefined}
+				onDrop={canDrop ? (e) => handleDrop(e, '') : undefined}
+			>
 				{entries.length === 0 && !(createState && createState.parentDir === '') && (
 					<div style={S.emptyState}>{config.emptyMessage ?? 'No files'}</div>
 				)}

@@ -147,6 +147,71 @@ async function getVsEnvironment() {
 	return vsEnvCache;
 }
 
+// Invoking user's home — resolve SUDO_USER so a sudo build finds the toolchain the
+// installer placed in the real user's home, not /root.
+function invokingHome() {
+	const su = process.env.SUDO_USER;
+	if (su && su !== 'root') {
+		try {
+			const line = require('fs').readFileSync('/etc/passwd', 'utf8').split('\n').find((l) => l.startsWith(`${su}:`));
+			if (line && line.split(':')[5]) return line.split(':')[5];
+		} catch { /* fall back to os.homedir() */ }
+	}
+	return os.homedir();
+}
+
+// LLVM toolchain env overlay (Fedora fallback in ~/toolchains/llvm-18), or null.
+async function llvmToolchainOverlay() {
+	if (!isLinux()) return null;
+	const root = path.join(invokingHome(), 'toolchains', 'llvm-18');
+	if (!(await exists(path.join(root, 'bin', 'clang++')))) return null;
+	const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-gnu`;
+	const joinp = (...p) => p.filter(Boolean).join(path.delimiter);
+	return {
+		LLVM18: root,
+		PATH: joinp(path.join(root, 'bin'), process.env.PATH),
+		CC: path.join(root, 'bin', 'clang'),
+		CXX: path.join(root, 'bin', 'clang++'),
+		LD_LIBRARY_PATH: joinp(path.join(root, 'lib-compat'), path.join(root, 'lib', triple), process.env.LD_LIBRARY_PATH),
+	};
+}
+
+let llvmOverlayLogged = false;
+let dumpSymsWarned = false;
+
+// Always warn (once) if dump_syms isn't on the build PATH — shipped builds get no symbols.
+async function warnIfNoDumpSyms(env) {
+	if (isWindows() || dumpSymsWarned) return;
+	for (const d of (env.PATH || '').split(path.delimiter)) {
+		if (d && (await exists(path.join(d, 'dump_syms')))) return;
+	}
+	dumpSymsWarned = true;
+	console.warn('WARNING: dump_syms not found — crash symbols will NOT be generated (run with --autoinstall to fetch it).');
+}
+
+// Build-tool env: VS env on Windows; on Linux the LLVM overlay (tarball) + ~/toolchains/bin.
+async function getBuildBaseEnv(task) {
+	if (isWindows()) return await getVsEnvironment();
+	const overlay = await llvmToolchainOverlay();
+	const toolsBin = path.join(invokingHome(), 'toolchains', 'bin');
+	const hasTools = await exists(toolsBin);
+	const env = { ...process.env, ...(overlay || {}) };
+	if (hasTools) env.PATH = [toolsBin, env.PATH].filter(Boolean).join(path.delimiter);
+	// System-clang case (no tarball overlay): point vcpkg's compiler detection at
+	// clang, not the distro default cc (gcc).
+	if (isLinux() && !overlay) { env.CC = env.CC || 'clang'; env.CXX = env.CXX || 'clang++'; }
+	if (!llvmOverlayLogged && (overlay || hasTools)) {
+		const bits = [];
+		if (overlay) bits.push(`LLVM ${overlay.LLVM18}`);
+		if (hasTools) bits.push(`tools ${toolsBin}`);
+		const msg = `Using local build env (${bits.join(', ')})`;
+		if (task) task.output = msg; else console.log(msg);
+		llvmOverlayLogged = true;
+	}
+	await warnIfNoDumpSyms(env);
+	return env;
+}
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -392,7 +457,80 @@ async function copyClangRuntimeLibs(options = {}) {
 		return { copied: true, version: 'system' };
 	}
 
-	return { copied: false, reason: 'No clang runtime libs found' };
+	// Fedora / RHEL-family: clang's libc++ (package libcxx) and libunwind
+	// (llvm-libunwind) land in /usr/lib64, not the Debian multiarch dir.
+	const fedoraLib = '/usr/lib64';
+	const fedoraLibcpp = path.join(fedoraLib, 'libc++.so.1');
+
+	if (await exists(fedoraLibcpp)) {
+		await copyFile(fedoraLibcpp, path.join(destLib, 'libc++.so.1'));
+
+		const fedoraLibcppabi = path.join(fedoraLib, 'libc++abi.so.1');
+		if (await exists(fedoraLibcppabi)) {
+			await copyFile(fedoraLibcppabi, path.join(destLib, 'libc++abi.so.1'));
+		}
+
+		for (const unwindPath of [path.join(fedoraLib, 'libunwind.so.1'), path.join(fedoraLib, 'libunwind.so.8')]) {
+			if (await exists(unwindPath)) {
+				await copyFile(unwindPath, path.join(destLib, 'libunwind.so.1'));
+				break;
+			}
+		}
+
+		return { copied: true, version: 'fedora' };
+	}
+
+	// LLVM tarball (~/toolchains/llvm-18): the RHEL/EL leg builds with this
+	// toolchain and has no distro libc++ to stage from the dirs above (EL ships
+	// none, and compiler-unix.sh drops the Fedora-only libcxx packages there).
+	// Copy the tarball's own libc++/libc++abi/libunwind — they match the ABI the
+	// engine was built against. The runtime .so lives either in the per-target
+	// dir (lib/<triple>, modern per-target-runtime layout) or flat in lib/, so
+	// try both.
+	const tarballRoot = path.join(invokingHome(), 'toolchains', 'llvm-18');
+	const triple = `${process.arch === 'arm64' ? 'aarch64' : 'x86_64'}-unknown-linux-gnu`;
+	const tarballDirs = [path.join(tarballRoot, 'lib', triple), path.join(tarballRoot, 'lib')];
+	for (const dir of tarballDirs) {
+		const libcpp = path.join(dir, 'libc++.so.1');
+		if (!(await exists(libcpp))) continue;
+
+		await copyFile(libcpp, path.join(destLib, 'libc++.so.1'));
+		for (const name of ['libc++abi.so.1', 'libunwind.so.1']) {
+			const src = path.join(dir, name);
+			if (await exists(src)) await copyFile(src, path.join(destLib, name));
+		}
+		return { copied: true, version: 'llvm-tarball' };
+	}
+
+	return { copied: false, reason: `No clang runtime libs found (checked ${tarballDirs.join(', ')})` };
+}
+
+// vcpkg rewrites the rpath of every installed ELF with `patchelf --set-rpath`,
+// which always emits a DT_RUNPATH. RUNPATH is not consulted when resolving a
+// dependency's OWN dependencies, so crashpad_handler's RUNPATH found the staged
+// libc++/libc++abi but not the libunwind.so.1 they in turn need — the loader fell
+// back to the system paths for that one. Distros that ship a libunwind (Ubuntu,
+// Fedora) hid the bug; EL10 ships none, so the handler died at exec with
+// "libunwind.so.1: cannot open shared object file", crashpad captured nothing, and
+// the crash never produced a minidump. DT_RPATH *is* inherited by transitive
+// lookups (it is what engine/aptest already use), so convert the handler over.
+async function forceRpath(elfFile) {
+	// vcpkg acquires patchelf itself to run that fixup, so on Linux it is always in
+	// the build tree; fall back to a system one for a dist tree built elsewhere.
+	const [vcpkgPatchelf] = await glob('downloads/tools/patchelf/*/bin/patchelf', { cwd: VCPKG_DIR, absolute: true });
+	const patchelf = vcpkgPatchelf ?? 'patchelf';
+	const name = path.basename(elfFile);
+
+	try {
+		const printed = await execCommand(patchelf, ['--print-rpath', elfFile], { silent: true, collect: true });
+		const rpath = printed.trim();
+		if (!rpath) return { patched: false, reason: `${name} has no rpath to convert` };
+
+		await execCommand(patchelf, ['--force-rpath', '--set-rpath', rpath, elfFile], { silent: true, collect: true });
+		return { patched: true, rpath };
+	} catch (err) {
+		return { patched: false, reason: `patchelf failed on ${name}: ${err.message}` };
+	}
 }
 
 // =============================================================================
@@ -529,6 +667,7 @@ function makeSetupToolsAction(options = {}) {
 		run: async (ctx, task) => {
 			await runCompilerSetup({
 				autoinstall: options.autoinstall,
+				systemCompiler: options.systemCompiler,
 				verbose: options.verbose,
 				onOutput: (line) => {
 					task.output = line;
@@ -566,6 +705,15 @@ function makeConfigureServerAction(options = {}) {
 
 			const cmakeArgs = ['cmake', '-B', BUILD_ROOT, '-S', SERVER_DIR, ...generator, '-DCMAKE_BUILD_TYPE=Release', `-DCMAKE_TOOLCHAIN_FILE=${vcpkgToolchain}`, `-DVCPKG_TARGET_TRIPLET=${triplet}`, `-DVCPKG_HOST_TRIPLET=${triplet}`, `-DVCPKG_OVERLAY_PORTS=${overlayPorts}`, `-DVCPKG_OVERLAY_TRIPLETS=${overlayTriplets}`];
 
+			// Opt-in (CI / small-disk hosts): drop each port's buildtree + package
+			// staging right after it builds so peak disk stays low across the whole
+			// from-source build. Without it, the final link accumulates every port's
+			// scratch and can run out of disk on a small runner ("final link failed:
+			// No space left"). Off by default so local rebuilds keep their buildtrees.
+			if (process.env.VCPKG_CLEAN_AFTER_BUILD === '1') {
+				cmakeArgs.push('-DVCPKG_INSTALL_OPTIONS=--clean-buildtrees-after-build;--clean-packages-after-build');
+			}
+
 			if (options.batchSize) {
 				cmakeArgs.push(`-DROCKETRIDE_UNITY_BATCH_SIZE:STRING=${options.batchSize}`);
 			}
@@ -582,7 +730,7 @@ function makeConfigureServerAction(options = {}) {
 				cmakeArgs.push(`-DROCKETRIDE_BUILD_STAMP:STRING=${options.buildStamp}`);
 			}
 
-			const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
+			const baseEnv = await getBuildBaseEnv(task);
 			const env = {
 				...baseEnv,
 				VCPKG_ROOT: path.join(BUILD_ROOT, 'vcpkg'), // Help vcpkg find itself faster
@@ -645,6 +793,31 @@ function makeSetupRuntimeLibsAction(options = {}) {
 			}
 			const result = await copyClangRuntimeLibs(options);
 			task.output = result.copied ? `Synced clang-${result.version} runtime libs` : result.reason;
+			// A silent no-op here breaks the tests later (engine can't load libc++);
+			// warn loudly with the reason so the failure is diagnosable from the log.
+			if (!result.copied) console.warn(`WARNING: no clang runtime libs staged — ${result.reason}`);
+
+			// crashpad_handler is a vcpkg tool copied next to the engine. Unlike the
+			// engine/aptest (rpath $ORIGIN/lib), vcpkg gives it rpath $ORIGIN, so it
+			// looks for libc++ in dist/server itself, not dist/server/lib. Mirror the
+			// staged libs beside it so it starts on distros without a system libc++
+			// (RHEL/EL). Same files the engine already loads from ./lib — a small dup,
+			// not a second toolchain.
+			if (result.copied) {
+				for (const name of ['libc++.so.1', 'libc++abi.so.1', 'libunwind.so.1']) {
+					const src = path.join(DIST_DIR, 'lib', name);
+					if (await exists(src)) await copyFile(src, path.join(DIST_DIR, name));
+				}
+			}
+
+			// vcpkg leaves the handler with a DT_RUNPATH, which the loader does not
+			// apply to libc++abi's own libunwind.so.1 — fatal on distros without a
+			// system libunwind (RHEL/EL). Convert it to a DT_RPATH, which is.
+			const handler = path.join(DIST_DIR, 'crashpad_handler');
+			if (await exists(handler)) {
+				const rpath = await forceRpath(handler);
+				if (!rpath.patched) console.warn(`WARNING: crashpad_handler rpath not converted — ${rpath.reason}`);
+			}
 		},
 	};
 }
@@ -678,7 +851,7 @@ function makeCompileEngineAction(options = {}) {
 				ctx.serverSourceHash = await contentHash(SERVER_DIR);
 			}
 
-			const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
+			const baseEnv = await getBuildBaseEnv(task);
 			const env = {
 				...baseEnv,
 				VCPKG_ROOT: path.join(BUILD_ROOT, 'vcpkg'),
@@ -700,6 +873,22 @@ function makeCompileEngineAction(options = {}) {
 
 			if (isWindows()) {
 				await syncFile(path.join(BUILD_ROOT, 'apps', 'engine', 'engine.pdb'), path.join(DIST_DIR, 'engine.pdb'));
+			} else {
+				// crashpad_handler must ship next to the engine (runtime finds it via
+				// execDir()). Windows keeps its native MiniDumpWriteDump path.
+				const vcpkgInstalled = await getVcpkgInstalledDir(options);
+				const handlerSrc = path.join(vcpkgInstalled, 'tools', 'crashpad_handler');
+				if (await exists(handlerSrc)) {
+					await syncFile(handlerSrc, path.join(DIST_DIR, 'crashpad_handler'), { package: true });
+				} else {
+					task.output = 'Warning: crashpad_handler not found in vcpkg tools; crash handling will be disabled at runtime';
+				}
+
+				// Retain generated symbols (if dump_syms ran) for later symbolication.
+				const symbolsSrc = path.join(BUILD_ROOT, 'apps', 'engine', 'symbols');
+				if (await exists(symbolsSrc)) {
+					await syncDir(symbolsSrc, path.join(DIST_DIR, 'symbols'), { mirror: false, package: true });
+				}
 			}
 
 			// Save content hash after successful compilation
@@ -733,7 +922,7 @@ function makeCompileTestsAction(options = {}) {
 				ctx._testSrcHash = combinedHash;
 			}
 
-			const baseEnv = isWindows() ? await getVsEnvironment() : process.env;
+			const baseEnv = await getBuildBaseEnv(task);
 			const env = {
 				...baseEnv,
 				VCPKG_ROOT: path.join(BUILD_ROOT, 'vcpkg'),
@@ -765,12 +954,11 @@ function makeInstallPipAction() {
 		run: async (ctx, task) => {
 			const enginePath = path.join(DIST_DIR, 'engine');
 
-            // Bootstrap pip, then install all build, test, and runtime dependencies.
-            // uv is left for depends.py at runtime; the builder just uses pip.
-            // State key version bumped to force re-run when deps change.
-            const pipInstalled = await getState('server.pipInstalledV8');
+            // Bootstrap the Python toolchain only (pip + wheel/setuptools/uv). Test and runtime
+            // deps install later via server:setup-test-deps — through depends() so they respect
+            // the merged constraints; that step runs after nodes:sync/ai:sync.
+            const pipInstalled = await getState('server.pipInstalledV11');
             if (!pipInstalled) {
-                // Bootstrap pip
                 // Add the engine's Scripts/bin dir to PATH so pip doesn't warn about it
                 const scriptsDir = path.join(DIST_DIR, process.platform === 'win32' ? 'Scripts' : 'bin');
                 const pipEnv = { ...process.env, PATH: [scriptsDir, process.env.PATH].filter(Boolean).join(path.delimiter) };
@@ -778,27 +966,16 @@ function makeInstallPipAction() {
                 task.output = 'Bootstrapping pip...';
                 await execCommand(enginePath, ['-m', 'ensurepip', '--default-pip'], { task, cwd: DIST_DIR, env: pipEnv });
 
-                const pipInstall = (...deps) => execCommand(enginePath, [
-                    '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', ...deps,
-                ], { task, cwd: DIST_DIR, env: pipEnv });
-
                 task.output = 'Installing build tools...';
-                await pipInstall('setuptools>=75', 'wheel', 'build', 'uv');
+                // wheel/setuptools/uv through depends.bootstrap() so their versions come from one
+                // place (depends.py _BOOTSTRAP_TOOL_VERSIONS), not hardcoded here.
+                await execCommand(enginePath, ['-c', 'import depends; depends.bootstrap()'], { task, cwd: DIST_DIR, env: pipEnv });
+                // `build` (PEP 517 frontend) is build-only; bootstrap doesn't install it.
+                await execCommand(enginePath, ['-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', 'build'], { task, cwd: DIST_DIR, env: pipEnv });
 
-                task.output = 'Installing test and runtime dependencies...';
-                await pipInstall(
-                    // Test framework
-                    'pytest', 'pytest-asyncio', 'pytest-timeout', 'pytest-xdist',
-                    // Runtime deps needed by client-python tests and AI modules
-                    'pydantic', 'python-dotenv',
-                    // MCP client tests
-                    'mcp>=1.2.0',
-                    // Model server
-                    'huggingface_hub[hf_xet]',
-                );
-                await setState('server.pipInstalledV8', true);
+                await setState('server.pipInstalledV11', true);
             } else {
-                task.output = 'Build and test deps already installed (skipped)';
+                task.output = 'Build tools already installed (skipped)';
             }
 
 			const preinstall = ctx.options && ctx.options.pytestPreinstall;
@@ -814,6 +991,24 @@ function makeInstallPipAction() {
 	};
 }
 
+// Install the build/test harness deps (pytest, huggingface_hub, ...) through depends()
+// rather than a direct pip install, so they resolve under the same merged constraints
+// as everything else — the pydantic/cryptography pins in the node/ai requirements apply
+// here too, so nothing floats to 'latest' that a later install would downgrade. Runs
+// after nodes:sync/ai:sync so those requirement files are in the dist for the constraint
+// compile; depends() is idempotent (dry-run skips already-satisfied installs).
+function makeSetupTestDepsAction() {
+	return {
+		description: 'Install build/test deps via depends',
+		run: async (ctx, task) => {
+			const enginePath = path.join(DIST_DIR, 'engine');
+			const buildReq = path.join(SERVER_DIR, 'build-requirements.txt');
+			task.output = 'Installing test/runtime deps via depends...';
+			await execCommand(enginePath, ['-c', `from depends import depends; depends(${JSON.stringify(buildReq)})`], { task, cwd: DIST_DIR });
+		},
+	};
+}
+
 function makeCopyTestDataAction() {
 	return {
 		run: async (ctx, task) => {
@@ -824,10 +1019,10 @@ function makeCopyTestDataAction() {
 			const destDatasets = path.join(DIST_DIR, 'datasets');
 			await mkdir(destDatasets);
 
-			// Sync from each subdirectory (images, documents, audio, video, text, misc)
+			// Sync from each subdirectory (images, documents, audio, video, text, misc, ...)
 			// to flatten into a single datasets folder for C++ tests
 			let stats = {};
-			const subdirs = ['images', 'documents', 'audio', 'video', 'text', 'misc'];
+			const subdirs = ['images', 'documents', 'audio', 'video', 'text', 'misc', 'contracts'];
 			for (const subdir of subdirs) {
 				const src = path.join(testdataDir, subdir);
 				if (await exists(src)) {
@@ -919,6 +1114,9 @@ function makeBuildAction() {
 			// the engine was downloaded or compiled — the prebuilt binary doesn't
 			// include these modules, and they must match the current repo checkout.
 			parallel(['nodes:sync', 'ai:sync', 'client-python:sync-source'], 'Sync modules'),
+			// After sync, the node/ai requirement files are in the dist, so depends()
+			// has the full constraint set — install the test/runtime deps through it.
+			'server:setup-test-deps',
 		],
 	};
 }
@@ -1123,6 +1321,7 @@ module.exports = {
 		{ name: 'server:compile-engine', action: makeCompileEngineAction },
 		{ name: 'server:compile-tests', action: makeCompileTestsAction },
 		{ name: 'server:setup-pip', action: makeInstallPipAction },
+		{ name: 'server:setup-test-deps', action: makeSetupTestDepsAction },
 		{ name: 'server:copy-test-data', action: makeCopyTestDataAction },
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },

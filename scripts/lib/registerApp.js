@@ -49,6 +49,38 @@ const BUILD_APPS_JSON = path.join(BUILD_ROOT, 'apps.json');
 const DIST_APPS_JSON  = path.join(DIST_ROOT, 'server', 'static', 'apps.json');
 const APPS_BASE       = process.env.APPS_BASE_URL ?? 'apps';
 
+// Single source of truth for the shell contract version (freeze auto-writes it).
+const APIVER_TS = path.join(__dirname, '..', '..', 'apps', 'shell-ui', 'src', 'apiver.ts');
+
+// Memoized across calls: apiver.ts is process-global and does not change during
+// a build run, so it is read and parsed once (including a memoized null). This
+// also guarantees every app registered in one run is stamped with an identical
+// version even if the file were somehow rewritten mid-build. `undefined` = not
+// yet read; a number or `null` = the settled result.
+let _shellApiVersionCache;
+
+/**
+ * Reads the current shell-api contract version from shell-ui's apiver.ts. Every
+ * app is built against the current shell, so we stamp this onto its apps.json
+ * entry — recording, across all registered apps, the lowest version still in use
+ * so obsolete frozen versions can be pruned safely. The result is cached after
+ * the first call. Returns null if unparseable (registration still proceeds
+ * without the field).
+ *
+ * @returns {number|null} The shell-api version, or null.
+ */
+function readShellApiVersion() {
+	// Return the memoized result (including a memoized null) after the first read.
+	if (_shellApiVersionCache !== undefined) return _shellApiVersionCache;
+	try {
+		const m = /SHELL_API_VERSION\s*=\s*(\d+)/.exec(fs.readFileSync(APIVER_TS, 'utf-8'));
+		_shellApiVersionCache = m ? parseInt(m[1], 10) : null;
+	} catch {
+		_shellApiVersionCache = null;
+	}
+	return _shellApiVersionCache;
+}
+
 // =============================================================================
 // HELPERS
 // =============================================================================
@@ -141,6 +173,9 @@ function registerApp(appRoot) {
 			// Derive moduleId from appId
 			const moduleId = appManifest.moduleId ?? toModuleId(appManifest.id);
 
+			// The shell contract version this app was built against.
+			const shellApiVersion = readShellApiVersion();
+
 			// Resolve app mode — default based on stripeProductId presence
 			const mode = appManifest.mode
 				?? (appManifest.stripeProductId ? 'subscription' : 'free');
@@ -155,6 +190,41 @@ function registerApp(appRoot) {
 					+ 'Must be "free", "subscription", or "paywall".'
 				);
 			}
+
+			// Validate the app's settings contribution — the VSCode
+			// contributes.configuration shape: { title?, properties: { <key>: schema } }.
+			// Keys must be dotted and prefixed with the app id so they are globally
+			// unique, and every schema needs a valid JSON type.
+			const configuration = appManifest.contributes?.configuration ?? null;
+			if (configuration) {
+				if (typeof configuration !== 'object' || Array.isArray(configuration)
+					|| typeof configuration.properties !== 'object' || Array.isArray(configuration.properties)) {
+					throw new Error(
+						`App "${appManifest.id}" has an invalid contributes.configuration. `
+						+ 'Expected { title?, properties: { "<appId>.<setting>": { type, ... } } }.'
+					);
+				}
+				const validTypes = ['string', 'number', 'integer', 'boolean'];
+				for (const [key, schema] of Object.entries(configuration.properties)) {
+					if (!key.startsWith(`${appManifest.id}.`)) {
+						throw new Error(
+							`App "${appManifest.id}" setting "${key}" must be prefixed with the app id `
+							+ `("${appManifest.id}.<settingName>") so setting keys are globally unique.`
+						);
+					}
+					if (!schema || !validTypes.includes(schema.type)) {
+						throw new Error(
+							`App "${appManifest.id}" setting "${key}" has invalid type `
+							+ `"${schema && schema.type}". Must be one of: ${validTypes.join(', ')}.`
+						);
+					}
+				}
+			}
+
+			// Warnings accumulate here and surface joined with the final success
+			// line — task.output holds a single value, so direct assignments
+			// earlier in the run would be silently overwritten by later ones.
+			const warnings = [];
 
 			// Resolve shells — optional array of compatible shells
 			const shells = appManifest.shells ?? null;
@@ -179,7 +249,7 @@ function registerApp(appRoot) {
 					fs.copyFileSync(iconSrc, path.join(buildDir, 'icon.svg'));
 					icon = `/${APPS_BASE}/${dirName}/icon.svg`;
 				} catch {
-					task.output = `Warning: icon not found at ${appManifest.icon}`;
+					warnings.push(`Warning: icon not found at ${appManifest.icon}`);
 				}
 			}
 
@@ -191,8 +261,21 @@ function registerApp(appRoot) {
 					fs.mkdirSync(buildDir, { recursive: true });
 					fs.copyFileSync(readmeSrc, path.join(buildDir, 'README.md'));
 					readme = `/${APPS_BASE}/${dirName}/README.md`;
+
+					// Copy sibling assets/ directory if it exists (images referenced by the README)
+					const assetsSrc = path.join(path.dirname(readmeSrc), 'assets');
+					const assetsDst = path.join(buildDir, 'assets');
+					if (fs.existsSync(assetsSrc) && fs.statSync(assetsSrc).isDirectory()) {
+						fs.mkdirSync(assetsDst, { recursive: true });
+						for (const file of fs.readdirSync(assetsSrc)) {
+							const srcFile = path.join(assetsSrc, file);
+							if (fs.statSync(srcFile).isFile()) {
+								fs.copyFileSync(srcFile, path.join(assetsDst, file));
+							}
+						}
+					}
 				} catch {
-					task.output = `Warning: readme not found at ${appManifest.readme}`;
+					warnings.push(`Warning: readme not found at ${appManifest.readme}`);
 				}
 			}
 
@@ -206,8 +289,11 @@ function registerApp(appRoot) {
 				readme,
 				icon,
 				categories:    appManifest.categories ?? [],
-				settings:      appManifest.settings ?? [],
+				// Settings contribution (VSCode contributes.configuration shape)
+				...(configuration ? { configuration } : {}),
 				entry:         `/${APPS_BASE}/${dirName}/remoteEntry.js`,
+				// Shell contract version this app was built against (for prune analysis).
+				...(shellApiVersion !== null ? { shellApiVersion } : {}),
 				// App monetization mode
 				mode,
 				// Shell compatibility filter (omitted = all shells)
@@ -241,7 +327,9 @@ function registerApp(appRoot) {
 			// Register apps.json for packaging so it's included in release archives
 			await setState(['package', DIST_APPS_JSON], ['static/apps.json']);
 
-			task.output = `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`;
+			// Success line last; accumulated warnings surface above it instead of
+			// being clobbered by it.
+			task.output = [...warnings, `Registered "${appEntry.name}" (${appEntry.id}) → ${appEntry.entry}`].join('\n');
 		},
 	};
 }

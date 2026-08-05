@@ -416,12 +416,26 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 	// Report modal
 	const [showReportModal, setShowReportModal] = useState(false);
 
+	// Escape closes the report modal (matching the shell modal pattern); the
+	// backdrop stays inert per the deliberate-dismissal policy.
+	useEffect(() => {
+		if (!showReportModal) return;
+		const onKeyDown = (e: KeyboardEvent): void => {
+			if (e.key === 'Escape') setShowReportModal(false);
+		};
+		document.addEventListener('keydown', onKeyDown);
+		return () => document.removeEventListener('keydown', onKeyDown);
+	}, [showReportModal]);
+
 	// Polling refs
 	const statusIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 	const tasksIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
 	// Guard against stale async responses when target changes mid-flight
 	const fetchIdRef = useRef<number>(0);
+
+	// Guard so an existing server-side report is rehydrated at most once per target
+	const rehydratedTargetRef = useRef<string | null | undefined>(undefined);
 
 	// =========================================================================
 	// STATUS POLLING
@@ -545,6 +559,22 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [showSystemCalls]);
+
+	// Rehydrate an existing report when this view mounts (or re-mounts) without
+	// local data — e.g. after the tab is split, which mounts fresh ProfilerView
+	// instances. Report DATA lives only in local state and is otherwise populated
+	// solely by the live Stop flow, so a fresh instance shows "No profiling data
+	// available" even though the server still holds a report (status.has_report
+	// stays true because it is server-backed). Fetch it once per target.
+	useEffect(() => {
+		if (!isConnected) { rehydratedTargetRef.current = undefined; return; }
+		if (status?.active === true) return;   // a live session owns the data
+		if (!status?.has_report) return;       // nothing on the server to rehydrate
+		if (treeData?.tree != null) return;    // already have data locally
+		if (rehydratedTargetRef.current === target) return; // already attempted for this target
+		rehydratedTargetRef.current = target;
+		fetchReport();
+	}, [isConnected, status?.active, status?.has_report, target, treeData, fetchReport]);
 
 	// =========================================================================
 	// ROOT CHANGE HANDLER
@@ -832,21 +862,19 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 			{/* Report modal */}
 			{showReportModal && (
-				<div
-					style={styles.modalBackdrop}
-					onClick={() => setShowReportModal(false)}
-				>
-					<div
-						style={styles.modalDialog}
-						onClick={(e) => e.stopPropagation()}
-					>
+				/* Backdrop is inert: dismissal is deliberate-only (close button) per
+				   the 2026-07-08 design decision — clicking outside must NOT close. */
+				<div style={styles.modalBackdrop}>
+					<div style={styles.modalDialog}>
 						<div style={styles.modalHeader}>
 							<h3 style={{ margin: 0, fontSize: 14 }}>Raw Profile Report</h3>
+							{/* Top-right close button. */}
 							<button
 								style={styles.button}
 								onClick={() => setShowReportModal(false)}
+								aria-label="Close"
 							>
-								Close
+								✕
 							</button>
 						</div>
 						<div style={styles.modalBody}>

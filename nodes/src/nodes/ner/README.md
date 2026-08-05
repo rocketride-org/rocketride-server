@@ -1,46 +1,83 @@
----
-title: Named Entity Recognition
-date: 2026-04-08
-sidebar_position: 1
----
+# ner
 
-<head>
-  <title>Named Entity Recognition - RocketRide Documentation</title>
-</head>
+A RocketRide text-processing node that identifies and extracts named entities from text and documents using HuggingFace transformer models.
 
 ## What it does
 
-Extracts named entities (people, organizations, locations, dates, etc.) from text using HuggingFace transformer models. Entities are added to document metadata for downstream filtering, search, and analysis. Runs locally — GPU-capable.
+Runs a HuggingFace token-classification (NER) pipeline over everything flowing through the node and attaches the recognized entities to document metadata for downstream filtering, search, and analysis.
 
-**Lanes:**
+Uses the transformers pipeline via the RocketRide model server (`ai.common.models.transformers`): the pipeline automatically uses the model server when available and falls back to local execution otherwise, so the node has no local Python dependencies of its own. The node is GPU-capable and registers as a `filter` with class type `text`.
 
-| Lane in     | Lane out    | Description                                             |
-| ----------- | ----------- | ------------------------------------------------------- |
-| `text`      | `text`      | Extract entities, pass original text through            |
-| `documents` | `documents` | Extract entities, enrich documents with entity metadata |
+The model is loaded once per pipeline run (in the global context) and shared across all instances. Entities below the configured confidence threshold (default `0.9`) are discarded. If entity extraction fails on a piece of text, the error is logged and an empty entity list is returned; the pipeline keeps running and the original content still passes through.
+
+Each extracted entity carries: `entity_group` (type such as PER, ORG, LOC), `word` (the entity text), `score` (confidence), and `start` / `end` (character offsets).
+
+---
 
 ## Configuration
 
-| Field                | Description                                                                            |
-| -------------------- | -------------------------------------------------------------------------------------- |
-| Model                | NER model to use (see profiles below)                                                  |
-| Aggregation strategy | How to combine word pieces into entities (`simple`, `first`, `average`, `max`, `none`) |
-| Minimum confidence   | Confidence threshold for entity filtering (0.0–1.0, default `0.9`)                     |
-| Store in metadata    | Add extracted entities to document metadata (default on)                               |
+### Lanes
+
+| Lane in     | Lane out    | Description                                                                |
+|-------------|-------------|----------------------------------------------------------------------------|
+| `text`      | `text`      | Extract entities, pass the original text through unchanged                 |
+| `documents` | `documents` | Extract entities from each document's content and enrich document metadata |
+
+On the `documents` lane, when **Store in metadata** is on (the default), each document copy gains:
+
+- `entities_<type>`: one key per entity type, lowercased (e.g. `entities_per`, `entities_org`, `entities_loc`), holding a deduplicated, sorted list of entity texts
+- `entities_count`: total number of entities found in the document
+
+The original documents are never mutated; enriched copies are written downstream.
+
+### Fields
+
+The node is configured by picking a model **profile** (see below). The `custom` profile additionally exposes the model name field.
+
+| Field | Type | Description |
+|---|---|---|
+| `model` | string | HuggingFace model to use for NER |
+| `aggregation_strategy` | string | Default "simple". How to combine word pieces into entities |
+| `min_confidence` | number | Default 0.9. Minimum confidence score (0.0-1.0) for entity detection |
+| `store_in_metadata` | boolean | Default true. Add extracted entities to document metadata fields |
+| `profile` | string | Default "bertLarge". NER model configuration |
+
+If no model is configured, the recognizer falls back to `dbmdz/bert-large-cased-finetuned-conll03-english`.
+
+---
 
 ## Profiles
 
-| Profile                          | Model                                               | Notes                                               |
-| -------------------------------- | --------------------------------------------------- | --------------------------------------------------- |
-| BERT Large (English) _(default)_ | `dbmdz/bert-large-cased-finetuned-conll03-english`  | High accuracy for English                           |
-| BERT Base (English)              | `dslim/bert-base-NER`                               | Balanced performance                                |
-| DistilBERT (Multilingual)        | `Davlan/distilbert-base-multilingual-cased-ner-hrl` | Multilingual — 100+ languages, fast and lightweight |
-| XLM-RoBERTa (Multilingual)       | `Davlan/xlm-roberta-base-ner-hrl`                   | 100+ languages                                      |
-| DistilBERT NER (English)         | `dslim/distilbert-NER`                              | Lightweight, fast English NER                       |
-| DeBERTa v3 (English)             | `dslim/distilbert-NER`                              | State-of-the-art accuracy                           |
-| BioBERT (Biomedical)             | `dmis-lab/biobert-base-cased-v1.1`                  | Medical/scientific entities                         |
-| Custom                           | _(user-specified)_                                  | Any compatible HuggingFace NER model                |
+The default profile is **bertLarge**.
 
-## Upstream docs
+| Profile key  | Title                                                  | Model                                               | Notes                               |
+|--------------|--------------------------------------------------------|-----------------------------------------------------|-------------------------------------|
+| `bertLarge`  | BERT Large (English) - high accuracy for English text  | `dbmdz/bert-large-cased-finetuned-conll03-english`  | Default                             |
+| `bertBase`   | BERT Base (English) - balanced performance             | `dslim/bert-base-NER`                               |                                     |
+| `distilbert` | DistilBERT (English) - fast and lightweight            | `Davlan/distilbert-base-multilingual-cased-ner-hrl` | Multilingual model despite the title |
+| `xlmRoberta` | XLM-RoBERTa (Multilingual) - supports 100+ languages  | `Davlan/xlm-roberta-base-ner-hrl`                   |                                     |
+| `deberta`    | DeBERTa v3 (English) - state-of-the-art accuracy      | `dslim/distilbert-NER`                              | Currently maps to DistilBERT NER    |
+| `biomedical` | BioBERT (Biomedical) - medical/scientific entities     | `dmis-lab/biobert-base-cased-v1.1`                  | `min_confidence` defaults to `0.85` |
+| `custom`     | Custom model                                           | (user-specified)                                    | Any compatible HuggingFace NER model |
 
-- [HuggingFace token classification models](https://huggingface.co/models?pipeline_tag=token-classification)
+All profiles use `aggregation_strategy: simple` and `min_confidence: 0.9` unless noted above; both can be overridden in the node config.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `ner.aggregation_strategy` | `string` | **Entity aggregation strategy**<br/>How to combine word pieces into entities | `"simple"` |
+| `ner.min_confidence` | `number` | **Minimum confidence threshold**<br/>Minimum confidence score (0.0-1.0) for entity detection | `0.9` |
+| `ner.model` | `string` | **Model name**<br/>HuggingFace model to use for NER |  |
+| `ner.profile` | `string` | **Model**<br/>NER model configuration | `"bertLarge"` |
+| `ner.store_in_metadata` | `boolean` | **Store entities in document metadata**<br/>Add extracted entities to document metadata fields | `true` |
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/ner)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

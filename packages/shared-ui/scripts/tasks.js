@@ -25,11 +25,9 @@
  * shared-ui package tasks.
  *
  * Exposes:
- *   shared-ui:test — runs node:test against scripts/. Covers the build-time
- *                    helpers (currently the auto-currentcolor svgo plugin).
- *                    Test files are co-located with their subject as
- *                    `<name>.test.mjs`; Node's test runner discovers them
- *                    automatically.
+ *   shared-ui:test — runs node:test against script helpers and TSX component
+ *                    smoke tests. Test files are co-located with their subject
+ *                    and discovered recursively.
  *
  * Consumers of shared-ui (vscode:build, shell-ui:build, ...) should list
  * `shared-ui:test` among their steps so a build cannot succeed when the
@@ -42,26 +40,23 @@ const { execCommand } = require('../../../scripts/lib');
 // packages/shared-ui (one level up from this file)
 const APP_ROOT = path.join(__dirname, '..');
 const SCRIPTS_DIR = path.join(APP_ROOT, 'scripts');
+const SRC_DIR = path.join(APP_ROOT, 'src');
 
 function makeTestAction() {
 	return {
 		description: 'Testing shared-ui',
 		run: async (ctx, task) => {
 			// Pass explicit paths: `scripts` arg breaks on Node 26, `*.test.mjs` glob breaks on Node 20.
-			const testFiles = (await readdir(SCRIPTS_DIR))
-				.filter((f) => f.endsWith('.test.mjs'))
-				.map((f) => path.join('scripts', f));
+			const scriptTests = (await readdir(SCRIPTS_DIR)).filter((f) => f.endsWith('.test.mjs')).map((f) => path.join('scripts', f));
+			const componentTests = (await readdir(SRC_DIR, { recursive: true })).filter((f) => f.endsWith('.test.tsx')).map((f) => path.join('src', f));
+			const testFiles = [...scriptTests, ...componentTests];
 
 			if (testFiles.length === 0) {
-				task.output = 'No test files found under scripts/';
+				task.output = 'No shared-ui test files found';
 				return;
 			}
 
-			await execCommand(
-				'node',
-				['--test', '--test-reporter=spec', ...testFiles],
-				{ task, cwd: APP_ROOT },
-			);
+			await execCommand('node', ['--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
 		},
 	};
 }
@@ -69,7 +64,5 @@ function makeTestAction() {
 module.exports = {
 	name: 'shared-ui',
 	description: 'RocketRide shared-ui package',
-	actions: [
-		{ name: 'shared-ui:test', action: makeTestAction },
-	],
+	actions: [{ name: 'shared-ui:test', action: makeTestAction }],
 };

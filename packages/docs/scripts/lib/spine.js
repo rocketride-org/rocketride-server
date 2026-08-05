@@ -33,24 +33,49 @@ const SPINE = [
 		items: [
 			{ id: 'concepts/pipelines', label: 'Pipelines' },
 			{ id: 'concepts/runtime-engine', label: 'Runtime & Engine' },
-			{ id: 'concepts/nodes-connectors', label: 'Nodes & Connectors' },
+			{ id: 'concepts/nodes', label: 'Nodes' },
 			{ id: 'concepts/agents-tools-skills', label: 'Agents & Tools' },
-			{ id: 'concepts/execution-model', label: 'Execution Model' }
+			{ id: 'concepts/execution-model', label: 'Execution Model' },
+			{ id: 'concepts/error-handling', label: 'Error Handling' },
+			{ id: 'concepts/performance', label: 'Performance' },
+			{ id: 'concepts/security-model', label: 'Security Model' },
+			{ id: 'concepts/advanced-agents', label: 'Advanced Agents' },
+			{ id: 'concepts/best-practices', label: 'Best Practices' }
+		]
+	},
+	{
+		label: 'Examples',
+		items: [
+			{ id: 'examples/rag-pipeline', label: 'RAG Pipeline' },
+			{ id: 'examples/webhook-pipeline', label: 'Webhook Pipeline' },
+			{ id: 'examples/document-extraction', label: 'Document Extraction' }
 		]
 	},
 	{
 		label: 'Protocols',
 		items: [
 			{ id: 'protocols/websocket', label: 'WebSocket', mount: true },
+			{ id: 'protocols/websocket/observability', label: 'Observability' },
 			{ id: 'protocols/mcp', label: 'MCP', mount: true }
 		]
 	},
 	{ label: 'Nodes', autogen: NODES_DIR },
 	{
+		label: 'Integrations',
+		items: [
+			{ id: 'integrations/anthropic', label: 'Anthropic' },
+			{ id: 'integrations/aparavi-aql', label: 'Aparavi AQL' },
+			{ id: 'integrations/firecrawl', label: 'Firecrawl' },
+			{ id: 'integrations/neo4j', label: 'Neo4j' },
+			{ id: 'integrations/postgres', label: 'PostgreSQL' },
+			{ id: 'integrations/qdrant', label: 'Qdrant' }
+		]
+	},
+	{
 		label: 'Develop',
 		items: [
-			{ id: 'develop/typescript', label: 'TypeScript SDK', mount: true },
-			{ id: 'develop/python', label: 'Python SDK', mount: true }
+			{ id: 'develop/typescript', label: 'TypeScript', mount: true },
+			{ id: 'develop/python', label: 'Python', mount: true }
 		]
 	},
 	{
@@ -147,7 +172,9 @@ function toSidebar() {
 		if (node.items) {
 			return { type: 'category', label: node.label, items: node.items.map(render) };
 		}
-		return node.id;
+		// Leaf: honor the spine label so it (not the mounted doc's front matter)
+		// drives the sidebar entry — the spine is the single source of truth.
+		return node.label ? { type: 'doc', id: node.id, label: node.label } : node.id;
 	}
 	return { docsSidebar: SPINE.map(render) };
 }

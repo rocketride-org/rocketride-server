@@ -1,60 +1,114 @@
----
-title: Bland AI
-date: 2026-04-08
-sidebar_position: 1
----
+# tool_bland_ai
+
+A RocketRide tool node that lets an AI agent make and manage AI-powered phone calls via Bland AI.
 
 ## What it does
 
-Gives agents the ability to make and manage AI-powered phone calls via the Bland AI API. Useful for automating outbound calls — scheduling, surveys, follow-ups, or any task that requires a voice interaction.
+Gives an agent the ability to place outbound voice calls and work with the results. The
+agent can initiate a call with instructions for the Bland AI voice agent, retrieve the
+call's status, transcript, recording URL, duration, and summary, and run post-call AI
+analysis against a goal and a set of questions. Useful for automating outbound calls:
+scheduling, surveys, follow-ups, or any task that requires a voice interaction.
 
-## Tools
+Talks to the Bland AI REST API (`https://api.bland.ai/v1`) over HTTPS using **requests**.
+Calls are placed with the `base` model, `wait_for_greeting: true`, and temperature `0.7`.
 
-| Tool                 | Description                                              |
-| -------------------- | -------------------------------------------------------- |
-| `bland.make_call`    | Initiate an outbound AI phone call                       |
-| `bland.get_call`     | Retrieve call status, transcript, recording, and summary |
-| `bland.analyze_call` | Run post-call AI analysis against a set of questions     |
+A Bland AI API key is **required**: the node refuses to start without one. Recording
+(default **on**) and language (default **en**) are set in the node config and apply to
+every call; the agent cannot override them per call.
 
-### bland.make_call
-
-| Parameter        | Required | Description                             |
-| ---------------- | -------- | --------------------------------------- |
-| `phone_number`   | yes      | E.164 format (e.g. `+15551234567`)      |
-| `task`           | yes      | Instructions for the AI during the call |
-| `first_sentence` | no       | Opening line spoken by the AI           |
-| `voice`          | no       | Override the default voice              |
-| `max_duration`   | no       | Override the default max call length    |
-| `webhook`        | no       | URL to receive call events              |
-
-Returns a `call_id` for use with `get_call` and `analyze_call`.
-
-### bland.get_call
-
-| Parameter             | Required | Description                                    |
-| --------------------- | -------- | ---------------------------------------------- |
-| `call_id`             | yes      | ID returned by `make_call`                     |
-| `wait_for_completion` | no       | Poll until the call finishes (up to 5 minutes) |
-
-### bland.analyze_call
-
-| Parameter   | Required | Description                                            |
-| ----------- | -------- | ------------------------------------------------------ |
-| `call_id`   | yes      | ID returned by `make_call`                             |
-| `goal`      | no       | Context about the call's purpose                       |
-| `questions` | no       | Array of `[question, expected_type]` pairs to evaluate |
+---
 
 ## Configuration
 
-| Field          | Description                                                               |
-| -------------- | ------------------------------------------------------------------------- |
-| API Key        | Bland AI API key (`org_xxx`)                                              |
-| Tool Namespace | Prefix for tool names (default: `bland`)                                  |
-| Voice          | Default AI voice: June, Josh, Nat, Paige, Derek, Florian (default: June)  |
-| Max Duration   | Default max call length in minutes (default: 5)                           |
-| Record         | Record calls by default (default: on)                                     |
-| Language       | Default call language: `en`, `es`, `fr`, `de`, `zh`, `ja` (default: `en`) |
+
+| Field | Type | Description |
+|---|---|---|
+| `serverName` | string | Default "bland". Namespace prefix for the tools: <serverName>.make_call, <serverName>.get_call, <serverName>.analyze_call |
+| `apikey` | string | Default empty. Bland AI API key (org_xxx). Get one at https://www.bland.ai |
+| `voice` | string | Default "June". Default AI voice for calls |
+| `maxDuration` | integer | Default 5. Maximum call length in minutes (positive integer) |
+| `record` | boolean | Default true.  |
+| `language` | string | Default "en".  |
+
+
+The node has no lanes: it is invoked purely as an agent tool.
+
+---
+
+## Available tools
+
+Tool names are prefixed with the configured `serverName` (default `bland`).
+
+### bland.make_call
+
+Initiate an outbound AI phone call. Returns a `call_id` for use with `get_call` and
+`analyze_call`.
+
+| Parameter        | Required | Description                                              |
+|------------------|----------|----------------------------------------------------------|
+| `phone_number`   | yes      | Phone number in E.164 format (e.g. `+14155551234`)       |
+| `task`           | yes      | Instructions for the AI voice agent: what to say, ask, and accomplish |
+| `first_sentence` | no       | Opening sentence spoken by the agent                     |
+| `voice`          | no       | Voice ID; overrides the configured default               |
+| `max_duration`   | no       | Max call length in minutes (positive integer); overrides the configured default |
+| `webhook`        | no       | URL to receive call results when the call ends, **must be HTTPS**, otherwise the call is rejected |
+
+### bland.get_call
+
+Get full details for a call: status, transcript, recording URL, duration, and summary.
+
+| Parameter             | Required | Description                                            |
+|-----------------------|----------|--------------------------------------------------------|
+| `call_id`             | yes      | The call ID returned by `make_call`                    |
+| `wait_for_completion` | no       | Default `false`. If `true`, polls every 10 seconds until the call completes, up to 5 minutes, recommended in pipelines to avoid manual polling. Raises a timeout error if the call has not completed in time. |
+
+### bland.analyze_call
+
+Run AI analysis on a completed call to extract structured insights from the transcript.
+
+| Parameter   | Required | Description                                                       |
+|-------------|----------|-------------------------------------------------------------------|
+| `call_id`   | yes      | The call ID to analyze                                            |
+| `goal`      | no       | Overall purpose of the call, used as analysis context (default: `"Analyze the phone call"`) |
+| `questions` | no       | Array of `[question, expected_type]` pairs. Defaults to three string questions: the caller's mood, key information discussed, and action items. |
+
+---
+
+## Authentication
+
+Set `apikey` to a Bland AI API key (`org_xxx`), available from https://www.bland.ai.
+The key is sent in the `authorization` header on every request. If the key is missing
+the node fails at startup with `Bland AI API key not configured`, and any tool
+invocation reports that the driver is not initialized.
+
+---
 
 ## Upstream docs
 
 - [Bland AI documentation](https://docs.bland.ai)
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `bland_ai.apikey` | `string` | **API Key**<br/>Bland AI API key (org_xxx). Get one at https://www.bland.ai | `""` |
+| `bland_ai.language` | `string` | **Language** | `"en"` |
+| `bland_ai.maxDuration` | `integer` | **Max Call Duration (minutes)**<br/>Maximum call length in minutes (positive integer) | `5` |
+| `bland_ai.record` | `boolean` | **Record Calls** | `true` |
+| `bland_ai.serverName` | `string` | **Server name**<br/>Namespace prefix for the tools: <serverName>.make_call, <serverName>.get_call, <serverName>.analyze_call | `"bland"` |
+| `bland_ai.voice` | `string` | **Default Voice**<br/>Default AI voice for calls | `"June"` |
+
+## Dependencies
+
+- `requests`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_bland_ai)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -1,23 +1,85 @@
-# Audio TTS Node (`audio_tts`) — Kokoro (RR-411 phase 1)
+# audio_tts
 
-Text-to-speech node using **Kokoro-82M** only. Additional engines (Piper, Bark, cloud) land in follow-up PRs.
+A RocketRide pipe node that converts incoming text into spoken audio using the Kokoro-82M text-to-speech engine.
 
-## Behavior (aligned with reference branch for `engine: kokoro`)
+## What it does
 
-- **Input:** `text` lane
-- **Output:** `audio` lane — WAV bytes via `writeAudio` (BEGIN / WRITE / END) with MIME `audio/wav`
-- **Local:** `kokoro.KPipeline`, spaCy `en_core_web_sm` via `ensure_spacy_en_model()`
-- **`--modelserver`:** `ModelClient` + `KokoroLoader` on the server
+Takes text arriving on any of its input lanes, synthesizes it with Kokoro-82M (`hexgrad/Kokoro-82M`), and emits the result on the **audio** lane as WAV bytes (MIME `audio/wav`) via the `writeAudio` BEGIN / WRITE / END sequence. Locally generated audio is mono, 16-bit, 24 kHz; synthesis speed is fixed at 1.
+
+The node runs in one of two modes, chosen automatically at startup:
+
+- **Local**: when no model server is configured, the node installs its own requirements (`numpy`, `kokoro`, `soundfile`) at runtime and constructs a `kokoro.KPipeline` in-process. The spaCy `en_core_web_sm` model (needed by Kokoro's misaki G2P) is downloaded and installed automatically, matched to the installed spaCy version.
+- **Model server (`--modelserver`)**: when a model server address is available, the node connects a `ModelClient` and loads the `kokoro` loader on the server instead. The heavy local dependencies are skipped entirely; audio comes back base64-encoded over the inference command.
+
+Audio is written to a temporary WAV file during synthesis and deleted as soon as the bytes have been streamed, including on error, so no orphan files are left on disk. Empty or whitespace-only input is silently skipped and produces no output. Startup fails with `Kokoro: choose a voice from the list` if no voice is configured.
+
+---
 
 ## Configuration
 
-- Profile **`kokoro`** — `kokoro_voice` dropdown in `services.json`
-- Language code is the **first character** of the voice id (`af_*` → `a`, etc.), same as reference
+### Lanes
 
-## Dependencies
+All four input lanes produce output on the **audio** lane.
 
-See `requirements.txt`: `numpy`, `kokoro`, `soundfile`.
+| Input lane  | What gets synthesized                                                                                                   |
+|-------------|-------------------------------------------------------------------------------------------------------------------------|
+| `text`      | The raw text, as-is.                                                                                                    |
+| `documents` | The `page_content` of each document, joined with newlines. Documents of type `Image`, `Audio`, or `Video` are skipped. |
+| `questions` | The text of every question, joined with spaces.                                                                         |
+| `answers`   | The answer text (via `getText()`).                                                                                      |
+
+### Fields
+
+The node has a single profile, **`kokoro`** (the default), selected by the `profile` field.
+
+| Field | Type | Description |
+|---|---|---|
+| `kokoro_voice` | string | Default "af_heart". Kokoro voice. The language is derived automatically from the voice prefix (af_/am_ → American, bf_/bm_ → British, ef_/em_ → Spanish, etc.). |
+| `profile` | string | Default "kokoro".  |
+
+### Voices and language
+
+The language is derived automatically from the **first character** of the voice id (`af_*` / `am_*` is American English, `bf_*` / `bm_*` is British English, `ef_*` / `em_*` is Spanish, and so on). Available voice families:
+
+| Prefix        | Language         | Examples                                    |
+|---------------|------------------|---------------------------------------------|
+| `af_` / `am_` | American English | `af_heart` (default), `af_bella`, `am_adam` |
+| `bf_` / `bm_` | British English  | `bf_emma`, `bm_george`, `bm_fable`          |
+| `jf_` / `jm_` | Japanese         | `jf_alpha`, `jm_kumo`                       |
+| `zf_` / `zm_` | Mandarin         | `zf_xiaoxiao`, `zm_yunxi`                   |
+| `ef_` / `em_` | Spanish          | `ef_dora`, `em_alex`                        |
+| `ff_`         | French           | `ff_siwis`                                  |
+| `hf_` / `hm_` | Hindi            | `hf_alpha`, `hm_omega`                      |
+| `if_` / `im_` | Italian          | `if_sara`, `im_nicola`                      |
+| `pf_` / `pm_` | Portuguese       | `pf_dora`, `pm_alex`                        |
+
+The full list of voice ids is defined in `services.json`.
+
+---
 
 ## Troubleshooting (`Exception: 1` / wasabi)
 
-If misaki/spaCy initialization fails, see the full multi-engine README on the reference branch; this node uses the same `spacy_en_model` helper as reference.
+If misaki/spaCy initialization fails (for example `Exception: 1` or a missing `wasabi` dependency), ensure the spaCy English model is installed: this node downloads `en_core_web_sm` automatically from the official spaCy GitHub release wheel, matched to the installed spaCy version. Verify that `numpy`, `kokoro`, and `soundfile` from `requirements.txt` are installed, and that the model download was not blocked by network restrictions.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `audio_tts.kokoro_voice` | `string` | **Voice**<br/>Kokoro voice. The language is derived automatically from the voice prefix (af_/am_ → American, bf_/bm_ → British, ef_/em_ → Spanish, etc.). | `"af_heart"` |
+| `audio_tts.profile` | `string` | **TTS profile** | `"kokoro"` |
+
+## Dependencies
+
+- `numpy`
+- `kokoro` `>=0.9.4`
+- `soundfile` `>=0.13.1`
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/audio_tts)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

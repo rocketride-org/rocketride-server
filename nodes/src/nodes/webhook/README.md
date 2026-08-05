@@ -1,22 +1,90 @@
 # webhook
 
-Let external input reach a pipeline over HTTP. Three variants — Chat, Dropper, and Web Hook — all served from a single FastAPI endpoint.
+A RocketRide source node that lets external input reach a pipeline over HTTP: three variants (Webhook, Chat, and Dropper) served by a single shared implementation.
 
 ## What it does
 
-It's a `source` node: it stands up its own HTTP endpoint (host/port supplied by the engine) and forwards incoming data into the attached pipeline. The three variants share the same code (`nodes.webhook`) but differ by protocol and by the surface they expose:
+Exposes an HTTP endpoint and forwards incoming data into the attached pipeline. All three variants are `source` nodes registered as endpoints and share the same code (`nodes.webhook`); they differ only in protocol and in the surface they expose:
 
-- **Chat** (`chat://`) — serves a web-based chat UI. Users type questions in the browser, which flow through the pipeline. Output lane: `questions`.
-- **Dropper** (`dropper://`) — serves a web-based file-drop UI. Users drop files for ingestion and processing. Output lane: `tags`.
-- **Web Hook** (`webhook://`) — a raw HTTP intake (also used for the RocketRide DataToolchain / ADS flow). External systems POST documents, media, or data for the pipeline to process. Output lanes: `tags`, `text`, `audio`, `video`, `image`, `questions`.
+- **Webhook** (`webhook://`): a raw HTTP intake. External tools, scripts, or services POST documents, media, or data to the URL, triggering the pipeline to process the uploaded content. The same endpoint also backs the RocketRide DataToolchain (`adtoolchain`) flow.
+- **Chat** (`chat://`): serves a web-based chat UI. Users open the chat URL in a browser and type questions; each submission flows through the pipeline and results are returned in the chat window.
+- **Dropper** (`dropper://`): serves a web-based drag-and-drop file upload UI. Users drop files onto the page; each upload is sent through the pipeline, and results are displayed in the browser across JSON, text, table, and image tabs.
 
-Each variant uses `_source` as its internal input and emits to the lanes listed above. On startup the node publishes its interface URL, a public authorization key, and a private token so callers know how to reach it.
+The server is a **FastAPI / Uvicorn** wrapper (`ai.web.WebServer`), but the node no longer creates it. One shared server is started per pipeline subprocess by `ai/node.py`, bound to the address the engine passes on the command line (`--data_host`, `--data_port`). That server loads the `data` module, which registers a `/task/data` websocket as the data plane between the public endpoint and the pipeline; the node simply registers its target endpoint on it.
+
+Because the shared server only exists when `node.py` is the process entry point and `--data_port` is supplied — which is what the task manager does for every pipeline subprocess — a pipeline sourced by this node cannot run outside that path. If the shared server is missing, the node fails immediately with an error saying so rather than a `NoneType` attribute error.
+
+The node keeps running until the pipeline is stopped; the source task completes only when the process shuts down.
+
+After the pipeline starts, the Project Log displays a stable, pipe-specific interface URL, the public authorization key, and the private token, so callers know how to reach the endpoint. The URL forms are `{host}/chat/{project_id}/{source}?auth={public_auth}`, `{host}/dropper/{project_id}/{source}?auth={public_auth}`, and `{host}/webhook/{project_id}/{source}`. The legacy `/chat`, `/dropper`, `/webhook`, and `/task/data` URLs continue to work for existing integrations.
+
+---
 
 ## Configuration
 
-The node creates its endpoint from the host and port passed in by the engine (`--data_host`, `--data_port`, defaulting to `localhost:5567`). There are no per-variant config fields beyond the standard source parameters.
+### Lanes
 
-| Field          | Default | Description                                                        |
-| -------------- | ------- | ------------------------------------------------------------------ |
-| `source.mode`  | —       | Standard pipeline source mode.                                     |
-| `parameters`   | *(empty)* | Source parameters object; no variant-specific options are defined. |
+Each variant takes the internal `_source` input and emits to its declared output lanes:
+
+| Variant  | Lane in | Lanes out                                            |
+| -------- | ------- | ---------------------------------------------------- |
+| Webhook  | -       | `tags`, `text`, `json`, `audio`, `video`, `image`, `questions` |
+| Chat     | -       | `questions`                                          |
+| Dropper  | -       | `tags`                                               |
+
+- **Webhook**: data received from the HTTP request, routed by content type.
+- **Chat**: each message submitted via the chat UI becomes a question.
+- **Dropper**: each uploaded file enters the pipeline for processing.
+
+None. There are no node-specific config fields, the shape exposes only the standard source properties (`source.mode` and an empty `parameters` object), and the single `default` profile is empty. The endpoint URL, public authorization key, and private token are generated automatically when the pipeline starts.
+
+---
+
+## Startup status
+
+When the server is up, the node emits a ready status to the monitor. Because this is the source component, the message also means every downstream component (embedding, LLM, etc.) has already been initialized:
+
+| Variant  | Status message                                          |
+| -------- | ------------------------------------------------------- |
+| Webhook  | `Webhook ready - system is ready to accept requests`    |
+| Chat     | `Chat ready - system is ready to accept questions`      |
+| Dropper  | `Dropper ready - system is ready to process files`      |
+
+---
+
+## Authentication
+
+Two credentials are published to the Project Log on startup:
+
+- **Public authorization key**: passed by clients reaching the public interface (e.g. the `auth` query parameter on the chat URL).
+- **Private token**: the private credential for the endpoint.
+
+Both are generated per pipeline; there is nothing to configure on the node.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+### Chat (`services.chat.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `Pipe.source.parameters` |  |  |  |
+
+### Dropper (`services.dropper.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `Pipe.source.parameters` |  |  |  |
+
+### Webhook (`services.webhook.json`)
+
+_No configuration fields._
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/webhook)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

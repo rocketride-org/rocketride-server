@@ -68,6 +68,7 @@
 	"lanes": {
 		"text": [],
 		"table": [],
+		"json": [],
 		"documents": [],
 		"questions": [],
 		"answers": [],
@@ -104,6 +105,7 @@
 				["audio", "Audio"],
 				["documents", "Documents"],
 				["image", "Image"],
+				["json", "JSON"],
 				["questions", "Questions"],
 				["table", "Table"],
 				["text", "Text"],

@@ -1,28 +1,45 @@
----
-title: Python
-date: 2026-04-08
-sidebar_position: 1
----
+# tool_python
 
-<head>
-  <title>Python - RocketRide Documentation</title>
-</head>
+A RocketRide tool node that lets an AI agent execute Python code in a restricted in-process sandbox.
 
 ## What it does
 
-Gives agents the ability to execute Python code in a sandboxed environment. Useful for data manipulation, calculations, formatting, and any logic the agent needs to run directly rather than describe.
+Gives an agent the ability to run Python scripts directly: for data manipulation, calculations, formatting, and any logic the agent needs to execute rather than describe. The node exposes a single tool, `python.execute`, which takes source code, runs it, and returns captured stdout, error tracebacks, an exit code, and an optional structured result.
 
-## Tools
+Uses **RestrictedPython**: code is compiled with `compile_restricted`, which injects runtime guards against attribute/item access escapes, and runs against `safe_builtins` with dangerous builtins removed. Imports are gated by an allowlist: only a default set of safe, pure-computation stdlib modules (plus any extras you configure) can be imported; everything else raises `ImportError`. With the default allowlist there is no network, filesystem, or subprocess access.
 
-| Tool             | Description                                   |
-| ---------------- | --------------------------------------------- |
-| `python.execute` | Execute a Python script and return its output |
+Execution is bounded by a timeout (**20 seconds by default**, configurable up to 1200) and output is truncated to 50 KB. The node has no lanes: it is attached to an agent as a tool.
 
-### python.execute
+---
 
-| Parameter | Required | Description                   |
-| --------- | -------- | ----------------------------- |
-| `code`    | yes      | Python source code to execute |
+## Configuration
+
+
+| Field | Type | Description |
+|---|---|---|
+| `serverName` | string | Default "python". Namespace prefix for the tool: <serverName>.execute |
+| `moduleName` | string | Default empty.  |
+| `timeout` | integer | Default 20. Maximum seconds a script may run before it is killed. Useful for long-running operations like network scans. Default is 20s, max is 1200s. |
+| `allowedModules` | array | Modules the agent is allowed to import, in addition to the built-in defaults (math, json, re, collections, datetime, etc.). |
+
+
+The node has a single preconfig profile (`default`), which sets `serverName` to `python`.
+
+If `timeout` is left unset (or is not a valid integer), the sandbox default of 20 seconds applies.
+
+---
+
+## Available tools
+
+### `execute`
+
+Execute a Python script and return its output. The tool description shown to the agent is generated dynamically and includes the effective timeout and the full list of allowed imports.
+
+
+| Tool | Description |
+|---|---|---|
+| `execute` | Execute Python code in a sandboxed environment. |
+
 
 **Response:**
 
@@ -36,20 +53,48 @@ Gives agents the ability to execute Python code in a sandboxed environment. Usef
 }
 ```
 
-`exit_code` is `0` on success, `1` on exception, `-1` on timeout. If the script assigns a value to a variable named `result`, it is returned in the `result` field.
+- `exit_code` is `0` on success, `1` on exception (or blocked compilation), `-1` on timeout.
+- `stdout` is the captured `print()` output; `stderr` carries the traceback if the script raised.
+- If the script assigns a value to a variable named `result`, it is returned in the `result` field. JSON-compatible values (`str`, `int`, `float`, `bool`, `list`, `dict`, `None`) are returned as-is; anything else is returned as its `repr()`.
+- `stdout` and `stderr` are each truncated to 50 KB, keeping the head and tail with a truncation marker in between.
+- `SystemExit` is handled: `sys.exit()` / `sys.exit(n)` sets the exit code instead of crashing the tool.
 
-## Configuration
-
-| Field           | Description                                            |
-| --------------- | ------------------------------------------------------ |
-| Tool Namespace  | Prefix for the tool name (default: `python`)           |
-| Timeout         | Max execution time in seconds (default: 20, max: 1200) |
-| Allowed Modules | Additional modules to allow beyond the defaults        |
+---
 
 ## Sandbox
 
-Code runs in a restricted in-process sandbox using RestrictedPython. Network access, filesystem access, and subprocess execution are not available. Only the following modules are importable by default:
+Code runs in a restricted in-process sandbox built on **RestrictedPython**:
+
+1. **Restricted compilation**: `compile_restricted` transforms the AST to inject runtime guard calls that prevent attribute/item access escapes. Code that violates the compilation policy is rejected with `exit_code: 1`.
+2. **Safe builtins**: RestrictedPython's `safe_builtins` replaces the full `__builtins__`. A curated set of everyday data-work builtins is added back (`dict`, `list`, `set`, `enumerate`, `map`, `filter`, `max`, `min`, `sum`, `print`, `type`, and similar).
+3. **Allowlist-only imports**: a gated `__import__` permits only allowlisted modules (matched on the top-level package name). Everything else raises `ImportError` listing the allowed modules.
+4. **Timeout enforcement**: the script runs in a daemon thread; if it exceeds the timeout the call returns with `timed_out: true` and `exit_code: -1`.
+
+### Default allowed modules
 
 `math`, `cmath`, `decimal`, `fractions`, `statistics`, `random`, `string`, `textwrap`, `re`, `json`, `csv`, `collections`, `itertools`, `functools`, `operator`, `copy`, `dataclasses`, `enum`, `typing`, `datetime`, `time`, `calendar`, `base64`, `hashlib`, `hmac`, `struct`, `difflib`, `pprint`, `bisect`, `heapq`, `array`, `numbers`, `unicodedata`
 
-Additional modules can be whitelisted in configuration.
+### Extra allowed modules and auto-install
+
+Modules added via `allowedModules` are merged with the defaults. If an extra allowlisted module is imported but not installed, the node **auto-installs it via pip** (60-second install timeout) and retries the import.
+
+Note that whitelisting extra modules widens the sandbox accordingly, allowing a package like `requests` grants the agent network access through that package. Only the default allowlist guarantees no filesystem, network, or subprocess access.
+
+---
+
+<!-- ROCKETRIDE:GENERATED:PARAMS START -->
+<!-- Generated by nodes:docs-generate. Do not edit by hand. -->
+
+## Schema
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `tool_python.allowedModules` | `array` | **Additional Allowed Modules**<br/>Modules the agent is allowed to import, in addition to the built-in defaults (math, json, re, collections, datetime, etc.). |  |
+| `tool_python.moduleName` | `string` | **Module name** | `""` |
+| `tool_python.serverName` | `string` | **Server name**<br/>Namespace prefix for the tool: <serverName>.execute | `"python"` |
+| `tool_python.timeout` | `integer` | **Execution timeout (seconds)**<br/>Maximum seconds a script may run before it is killed. Useful for long-running operations like network scans. Default is 20s, max is 1200s. | `20` |
+
+## Source
+
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/tool_python)
+<!-- ROCKETRIDE:GENERATED:PARAMS END -->

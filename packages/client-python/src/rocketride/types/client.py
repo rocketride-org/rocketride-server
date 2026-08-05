@@ -241,7 +241,10 @@ class AppManifestEntry(TypedDict, total=False):
         description (str): Short description.
         icon (str): URL path to the app's icon.
         categories (list[str]): Category tags for filtering.
-        settings (list): App-specific setting definitions.
+        configuration (dict): Settings contribution in the VSCode
+            ``contributes.configuration`` shape ({title, properties}). Preserved
+            through ConnectResult so permission-gated desktop apps (which never
+            appear in the public probe) still deliver their settings schema.
         entry (str): URL to the app's MF remote entry file.
         version (str): Semver version string.
         ownerType (str): Visibility scope — "public", "org", "team", or "user".
@@ -262,7 +265,7 @@ class AppManifestEntry(TypedDict, total=False):
     description: str
     icon: str
     categories: list[str]
-    settings: list
+    configuration: dict[str, Any]
     entry: str
     version: str
     ownerType: str
@@ -296,8 +299,9 @@ class ConnectResult(TypedDict, total=False):
         phoneNumberVerified (bool): True when the phone number has been verified.
         locale (str): BCP-47 locale tag (e.g. "en-US").
         defaultTeam (str): ID of the team selected as the default context.
-        organizations (list[OrgInfo]): All organisations the user belongs to.
+        organization (OrgInfo | None): The organisation the user belongs to, or None.
         apps (list[AppManifestEntry]): Apps on the user's desktop — full manifest entries with subscription status.
+        serverVersion (str): Version string of the server that handled the handshake; newer servers only.
         waitlisted (bool): True when authenticated but not yet granted full app access.
     """
 
@@ -313,8 +317,9 @@ class ConnectResult(TypedDict, total=False):
     phoneNumberVerified: bool
     locale: str
     defaultTeam: str
-    organizations: list[OrgInfo]
+    organization: OrgInfo
     capabilities: list[str]
+    serverVersion: str
     sysPermissions: list[str]
     credits: dict
     apps: list[AppManifestEntry]

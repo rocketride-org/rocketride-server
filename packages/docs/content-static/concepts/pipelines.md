@@ -15,15 +15,15 @@ Each node in the graph is a **component** with a unique `id` and a `provider`
 that determines its behaviour (for example `webhook`, `response`, or an LLM
 provider). Provider-specific settings live in the component's `config`.
 
-See the [Nodes & Connectors](/nodes) catalog for every available provider.
+See the [Nodes](/nodes) catalog for every available provider.
 
 ## Data lanes vs. invoke connections
 
 Components are wired together two ways:
 
-- **Data lanes** — a typed channel (e.g. `questions` → `answers`) carrying data
+- **Data lanes**: a typed channel (e.g. `questions` → `answers`) carrying data
   from one component to the next. Declared as input connections.
-- **Invoke (control) connections** — a component calls another by class type
+- **Invoke (control) connections**: a component calls another by class type
   (e.g. an agent invoking an `llm`), rather than streaming data through a lane.
 
 ## The `.pipe` JSON shape
@@ -45,6 +45,6 @@ reference is generated from the schema source and published at
 
 ## Next steps
 
-- [Quickstart](/quickstart) — run your first pipeline.
-- [Pipeline JSON reference](/pipeline-reference) — every field.
-- [Nodes & Connectors](/nodes) — the component catalog.
+- [Quickstart](/quickstart): run your first pipeline.
+- [Pipeline JSON reference](/pipeline-reference): every field.
+- [Nodes](/nodes): the component catalog.

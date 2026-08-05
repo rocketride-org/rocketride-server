@@ -125,8 +125,14 @@ export enum EVENT_TYPE {
 	/** Server-level events - connection added/removed, for admin dashboards */
 	DASHBOARD = 1 << 7,
 
+	/** Billing ledger events - credit/debit updates, scoped by org */
+	BILLING = 1 << 8,
+
+	/** Deployment change events - pointer/state/schedule/run mutations, scoped by org */
+	DEPLOY = 1 << 9,
+
 	/** Convenience combination - ALL events except NONE for comprehensive monitoring */
-	ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD,
+	ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD | BILLING | DEPLOY,
 }
 
 /**

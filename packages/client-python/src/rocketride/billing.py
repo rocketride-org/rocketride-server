@@ -38,10 +38,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .types.billing import (
+    AppPrice,
     BillingDetail,
     CreditBalance,
     CreditPack,
-    StripePlan,
+    PromoRedemption,
+    PromoValidation,
+    TransactionsResult,
+    UsageRollup,
 )
 
 if TYPE_CHECKING:
@@ -83,7 +87,7 @@ class BillingApi:
         body = await self._client.call('rrext_account_billing', subcommand='list', orgId=org_id)
         return body.get('subscriptions', [])
 
-    async def get_product_prices(self, app_id: str) -> list[StripePlan]:
+    async def get_product_prices(self, app_id: str) -> list[AppPrice]:
         """
         Fetch the active subscription plans (prices) for an app.
 
@@ -96,7 +100,7 @@ class BillingApi:
             app_id: App identifier (e.g. "rocketride.pipeBuilder").
 
         Returns:
-            Array of StripePlan objects ready for display.
+            Array of AppPrice rows from the local database.
         """
         body = await self._client.call('rrext_account_billing', subcommand='prices', appId=app_id)
         return body.get('plans', [])
@@ -106,6 +110,7 @@ class BillingApi:
         org_id: str,
         app_id: str,
         price_id: str,
+        promotion_code: str | None = None,
     ) -> dict:
         """
         Create a Stripe subscription and return the Stripe Elements client_secret.
@@ -113,20 +118,84 @@ class BillingApi:
         The returned ``clientSecret`` is passed to ``stripe.confirmPayment()`` to
         complete the checkout without a browser redirect to Stripe.
 
+        ``clientSecret`` is None when the first invoice is $0 (e.g. a 100%-off
+        promotion code) — the subscription is already active and no payment
+        step is needed.
+
         Args:
             org_id: Organisation UUID to subscribe.
             app_id: App being subscribed (e.g. "brandi").
             price_id: Stripe price_* identifier for the plan.
+            promotion_code: Optional promo code to apply (validated server-side).
 
         Returns:
-            Dict with ``clientSecret`` for Stripe Elements and ``subscriptionId``.
+            Dict with ``clientSecret`` (or None), ``subscriptionId``, and ``status``.
+        """
+        kwargs: dict = {
+            'subcommand': 'subscribe',
+            'orgId': org_id,
+            'appId': app_id,
+            'priceId': price_id,
+        }
+        if promotion_code:
+            kwargs['promotionCode'] = promotion_code
+        return await self._client.call('rrext_account_billing', **kwargs)
+
+    async def validate_promo_code(
+        self,
+        org_id: str,
+        code: str,
+        price_id: str | None = None,
+    ) -> PromoValidation:
+        """
+        Resolve a promo code without side effects.
+
+        An unknown or expired code returns ``{'valid': False, 'reason': ...}``
+        — it never raises. Pass ``price_id`` to also get the discounted
+        first-invoice amount for the selected plan.
+
+        Args:
+            org_id: Organisation UUID (context only — validation is global).
+            code: Customer-facing code string (case-insensitive).
+            price_id: Optional plan to compute ``discountedAmountCents`` against.
+
+        Returns:
+            Promo validation result.
+        """
+        kwargs: dict = {
+            'subcommand': 'promo_validate',
+            'orgId': org_id,
+            'code': code,
+        }
+        if price_id:
+            kwargs['priceId'] = price_id
+        return await self._client.call('rrext_account_billing', **kwargs)
+
+    async def redeem_promo_code(self, org_id: str, code: str) -> PromoRedemption:
+        """
+        Redeem a credit-grant (hackathon) code for the caller's org.
+
+        Creates a $0 subscription for the app named in the code's metadata
+        (no payment method required) and grants the metadata-defined credits
+        immediately. If the org is already subscribed to the app, only the
+        credits are granted (``mode: 'credits_only'``). Discount-only codes
+        are rejected — those are applied during checkout instead.
+
+        Any authenticated org member may redeem; the server derives the org
+        from the caller's own membership.
+
+        Args:
+            org_id: Organisation UUID (context only — server uses the caller's org).
+            code: Customer-facing code string (case-insensitive).
+
+        Returns:
+            Redemption result with mode and granted credits.
         """
         return await self._client.call(
             'rrext_account_billing',
-            subcommand='subscribe',
+            subcommand='promo_redeem',
             orgId=org_id,
-            appId=app_id,
-            priceId=price_id,
+            code=code,
         )
 
     async def create_portal_session(self, org_id: str, return_url: str) -> dict:
@@ -168,6 +237,61 @@ class BillingApi:
             appId=app_id,
         )
 
+    async def upgrade_subscription(
+        self,
+        org_id: str,
+        app_id: str,
+        new_price_id: str,
+    ) -> dict:
+        """
+        Upgrade (or downgrade) an existing subscription to a different plan.
+
+        The server swaps the Stripe subscription item to the new price and
+        handles proration automatically. The local database row is updated
+        before the response is returned.
+
+        Args:
+            org_id: Organisation UUID that owns the subscription.
+            app_id: App whose plan is changing.
+            new_price_id: Stripe price_* identifier for the target plan.
+
+        Returns:
+            Dict with ``status``, ``subscriptionId``, ``newPriceId``,
+            ``planNickname``, ``unitAmount``, ``billingInterval``.
+        """
+        return await self._client.call(
+            'rrext_account_billing',
+            subcommand='upgrade',
+            orgId=org_id,
+            appId=app_id,
+            newPriceId=new_price_id,
+        )
+
+    # =========================================================================
+    # TOP-UP PURCHASE
+    # =========================================================================
+
+    async def purchase_topup(self, org_id: str, price_id: str) -> dict:
+        """
+        Purchase a top-up pack by charging the customer's card on file.
+
+        On success, credits are applied to the ledger immediately.
+
+        Args:
+            org_id: Organisation UUID.
+            price_id: Stripe price_* identifier for the top-up plan.
+
+        Returns:
+            Dict with ``status`` ('succeeded' or 'requires_action') and
+            optionally ``clientSecret`` for 3DS.
+        """
+        return await self._client.call(
+            'rrext_account_billing',
+            subcommand='purchase_topup',
+            orgId=org_id,
+            priceId=price_id,
+        )
+
     # =========================================================================
     # COMPUTE CREDITS WALLET
     # =========================================================================
@@ -203,6 +327,116 @@ class BillingApi:
         """
         body = await self._client.call('rrext_account_billing', subcommand='credits_packs')
         return body.get('packs', [])
+
+    # =========================================================================
+    # TRANSACTIONS & USAGE
+    # =========================================================================
+
+    async def get_transactions(
+        self,
+        org_id: str,
+        scope: str = 'org',
+        scope_id: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+        since: str | None = None,
+        sort: list[dict] | None = None,
+        filters: dict | None = None,
+        search: str | None = None,
+    ) -> TransactionsResult:
+        """
+        Fetch paginated transaction detail from the credit ledger.
+
+        Sort / filters / search follow the platform list-API convention:
+        sorters name camelCase row keys; filter values are a string
+        (type-driven match) or a list (set membership), with
+        ``field__gte`` / ``field__lte`` string entries for ranges; search
+        matches case-insensitively across the ledger's string columns.
+        Unknown keys are dropped server-side, and the caller's org/scope
+        restriction always applies first.
+
+        Args:
+            org_id: Organisation UUID.
+            scope: ``org``, ``team``, or ``user``.
+            scope_id: Team or user ID when scope is not ``org``.
+            page: 1-based page number.
+            page_size: Rows per page (max 100).
+            since: ISO datetime string -- only return rows at or after this time.
+            sort: ``[{'field': wire key, 'dir': 'asc'|'desc'}]`` or None.
+            filters: ``{wire key: str | list}`` per the list convention.
+            search: Free-text term over the ledger's string columns.
+
+        Returns:
+            Paginated transaction result.
+        """
+        kwargs: dict = {
+            'subcommand': 'transactions',
+            'orgId': org_id,
+            'scope': scope,
+            'page': page,
+            'pageSize': page_size,
+        }
+        if scope_id:
+            kwargs['scopeId'] = scope_id
+        if since:
+            kwargs['since'] = since
+        if sort:
+            kwargs['sort'] = sort
+        if filters:
+            kwargs['filters'] = filters
+        if search:
+            kwargs['search'] = search
+        return await self._client.call('rrext_account_billing', **kwargs)
+
+    async def get_transaction_distinct(self, org_id: str, field: str) -> list:
+        """
+        Fetch distinct values of one ledger column (org-scoped server-side)
+        for checklist-style filters.
+
+        Args:
+            org_id: Organisation UUID.
+            field: camelCase wire key (e.g. ``type``, ``resource``).
+
+        Returns:
+            Sorted distinct values ([] for unknown/excluded fields).
+        """
+        body = await self._client.call(
+            'rrext_account_billing',
+            subcommand='transactions_distinct',
+            orgId=org_id,
+            field=field,
+        )
+        return body.get('values', []) if isinstance(body, dict) else []
+
+    async def get_usage_by_user(self, org_id: str) -> list[UsageRollup]:
+        """
+        Fetch per-user consumption rollup for an org.
+
+        Args:
+            org_id: Organisation UUID.
+
+        Returns:
+            List of usage rollup rows ordered by total consumption descending.
+        """
+        body = await self._client.call('rrext_account_billing', subcommand='usage_by_user', orgId=org_id)
+        return body.get('usage', [])
+
+    async def get_usage_by_team(self, org_id: str) -> list[UsageRollup]:
+        """
+        Fetch per-team consumption rollup for an org.
+
+        Args:
+            org_id: Organisation UUID.
+
+        Returns:
+            List of usage rollup rows ordered by total consumption descending.
+        """
+        body = await self._client.call('rrext_account_billing', subcommand='usage_by_team', orgId=org_id)
+        return body.get('usage', [])
+
+    # =========================================================================
+    # CREDIT PACK CHECKOUT
+    # =========================================================================
 
     async def create_credit_checkout(
         self,

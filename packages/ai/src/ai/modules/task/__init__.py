@@ -2,6 +2,9 @@ import os
 from typing import Dict, Any
 from ai.web import WebServer
 from .task_server import TaskServer
+from .task_scheduler import TaskScheduler
+from .run_log import sweep_spool_root
+from .fetch import handle_fetch
 from depends import depends
 
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
@@ -22,15 +25,30 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         - PUT `/pipe/process`: Calls `pipe_Process` to handle pipe processing requests.
 
     """
+    # Run-log startup hygiene: delete stale spool directories from any
+    # previous process. Recovery is store-side only, so leftover spool state
+    # is never salvaged — this just prevents disk leaks on hosts whose
+    # filesystem (unlike a replaced K8s container) survives restarts.
+    sweep_spool_root()
+
     # Create the TaskServer instance
     task_server = TaskServer(server=server, config=config)
 
     # Store task server in server state for access by other modules if needed
     server.app.state.task = task_server
 
-    # Cancel scheduler and background tasks on server shutdown so the process
-    # exits cleanly within the graceful-shutdown window (no force-kill needed).
-    server._user_shutdown = task_server.shutdown
+    scheduler = TaskScheduler(task_server)
+    server.app.state.scheduler = scheduler
+    scheduler.start()
+
+    async def _shutdown() -> None:
+        await scheduler.shutdown()
+        await task_server.shutdown()
+
+    server._user_shutdown = _shutdown
 
     # Register our routes - authentication handled in listen() before accepting
     server.add_socket('/task/service', task_server.listen, public=True)
+
+    # Presigned file fetch — public route because auth is in the JWT token
+    server.add_route('/task/fetch', handle_fetch, ['GET'], public=True)

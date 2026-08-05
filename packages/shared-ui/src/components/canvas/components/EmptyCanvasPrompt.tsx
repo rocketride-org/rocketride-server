@@ -71,7 +71,7 @@ const styles = {
 		width: '100%',
 		fontFamily: 'var(--rr-font-family-widget)',
 		color: 'var(--rr-fg-widget)',
-		userSelect: 'none',
+		userSelect: 'none' as const,
 	},
 	heading: {
 		margin: '0 0 4px 0',

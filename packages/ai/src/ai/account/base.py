@@ -98,6 +98,25 @@ class AccountBase(ABC):
     # CONCRETE DEFAULTS — no-op in OSS; SaaS overrides all three
     # =========================================================================
 
+    def get_billing_rates(self) -> dict[str, float]:
+        """
+        Return billing rates (metric_key -> tokens_per_unit).
+
+        OSS default: empty dict (no billing).
+        SaaS override: returns the cached rates loaded from the
+        metrics_conversions DB table.
+        """
+        return {}
+
+    async def reload_billing_rates(self) -> dict[str, float]:
+        """
+        Reload billing rates from the DB.
+
+        OSS default: no-op, returns empty dict.
+        SaaS override: reloads from the metrics_conversions table.
+        """
+        return {}
+
     async def get_merged_env(self, user_id: str, org_id: str, team_id: str | None) -> dict[str, str]:
         """
         Build the merged ROCKETRIDE_* environment for a user.
@@ -153,7 +172,7 @@ class AccountBase(ABC):
 
         Args:
             user_id:       Internal user ID from the ConnectResult.
-            organizations: List of org dicts with nested teams (from ConnectResult).
+            organizations: List containing the user's single org dict with nested teams.
 
         Returns:
             List of app manifest dicts.
@@ -184,6 +203,381 @@ class AccountBase(ABC):
             org_id:        UUID of the organisation this event pertains to, or None.
         """
         pass
+
+    # =========================================================================
+    # BILLING — no-op in OSS; SaaS overrides with real ledger writes
+    # =========================================================================
+
+    async def apply_credit(
+        self,
+        org_id: str,
+        type: str,
+        resource: str,
+        amount: float,
+        idempotency_key: str,
+        user_id: str | None = None,
+        team_id: str | None = None,
+        context: dict | None = None,
+    ) -> bool:
+        """
+        Add credits to an org's ledger.
+
+        OSS default is a no-op returning False.  The SaaS implementation
+        INSERTs a positive-amount row into ``credit_ledger``.
+
+        Args:
+            org_id:          Organisation to credit.
+            type:            Transaction type (``purchase``, ``credit``, ``refund``, etc.).
+            resource:        Resource being credited (``tokens``, ``video``, etc.).
+            amount:          Positive amount to credit.
+            idempotency_key: Namespaced dedup key (e.g. ``stripe:cs_xxx:tokens``).
+            user_id:         Optional actor who initiated the credit.
+            team_id:         Optional team context.
+            context:         Optional audit metadata.
+
+        Returns:
+            True on first apply, False on duplicate or no-op.
+        """
+        return False
+
+    async def apply_debit(
+        self,
+        org_id: str,
+        user_id: str,
+        team_id: str | None,
+        resource: str,
+        amount: float,
+        idempotency_key: str,
+        context: dict,
+        description: str | None = None,
+    ) -> bool:
+        """
+        Debit an org's ledger (UPSERT for task usage).
+
+        OSS default is a no-op returning False.  The SaaS implementation
+        UPSERTs a negative-amount row into ``credit_ledger``.
+
+        The caller passes a **positive** amount; the implementation negates
+        it internally.
+
+        Args:
+            org_id:          Organisation to debit.
+            user_id:         User whose task triggered the burn (required for attribution).
+            team_id:         Team the task belongs to (None when task has no team scope).
+            resource:        Billing bucket (e.g. tokens, video, audio).
+            amount:          Positive amount to debit (negated internally).
+            idempotency_key: Namespaced dedup key (e.g. ``task:abc123:gpu_memory``).
+            context:         Human-readable audit context — pipeline name, source, etc.
+            description:     Line-item detail (e.g. gpu_memory, cpu_utilization).
+
+        Returns:
+            True on success, False on duplicate or no-op.
+        """
+        return False
+
+    async def get_credit_balance(self, org_id: str) -> dict:
+        """
+        Get the net credit balance for an org, grouped by resource.
+
+        OSS default returns empty balances.  The SaaS implementation
+        queries ``SELECT resource, SUM(amount) GROUP BY resource``.
+
+        Args:
+            org_id: Organisation to query.
+
+        Returns:
+            ``{'balances': {resource: float, ...}}``
+        """
+        return {'balances': {}}
+
+    async def get_transactions(
+        self,
+        org_id: str,
+        scope: str = 'org',
+        scope_id: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+        since: str | None = None,
+    ) -> dict:
+        """
+        Paginated transaction detail for an org, optionally scoped to a team or user.
+
+        OSS default returns empty results.  The SaaS implementation queries
+        the ``credit_ledger`` table with pagination and scope filtering.
+
+        Args:
+            org_id:    Organisation to query.
+            scope:     ``org``, ``team``, or ``user``.
+            scope_id:  Team or user ID when scope is not ``org``.
+            page:      1-based page number.
+            page_size: Rows per page (max 100).
+            since:     ISO datetime string — only return rows at or after this time.
+
+        Returns:
+            ``{'transactions': [...], 'total': int, 'page': int, 'pageSize': int}``
+        """
+        return {'transactions': [], 'total': 0, 'page': page, 'pageSize': page_size}
+
+    # =========================================================================
+    # CLOUD DATABASE — env-gated broker call; raises when unconfigured
+    # =========================================================================
+
+    async def resolve_db_dsn(self, client_id: str) -> str:
+        """
+        Resolve the per-tenant database DSN for the RocketRide cloud DB nodes.
+
+        The ``rocketride_sql`` / ``rocketride_vector`` / ``rocketride_graph``
+        nodes take no connection configuration.  Instead of reading
+        host/user/password, they resolve a ready connection string for the
+        caller's own provisioned cloud database, keyed by the authenticated
+        ``client_id`` (``userId``).  One database per tenant backs all three.
+
+        Default implementation (both editions): call the data-core provisioner
+        configured via server-side environment —
+
+            ROCKETRIDE_DB_BROKER_URL    the /provision endpoint URL
+            ROCKETRIDE_DB_BROKER_TOKEN  its Bearer token (from ASM/k8s; never
+                                        hardcoded)
+
+        ``POST {url} {"tenant_id": client_id}`` -> ``{"database", "role",
+        "dsn", "created"}`` (only ``dsn`` is read here).
+        The endpoint is idempotent (same tenant -> same DSN; the per-tenant
+        password is derived, not stored), so this method is safe to call on
+        every task start with no caching or persistence on this side.
+
+        When the environment is not configured (the open-source default), this
+        raises: the cloud databases require a RocketRide cloud deployment.
+        A SaaS overlay may still override this method entirely.
+
+        Args:
+            client_id: The authenticated connection identity (``userId``).
+                Passed verbatim as the broker's ``tenant_id`` (the provisioner
+                owns slugging/hashing it into a database name).
+
+        Returns:
+            A libpq/SQLAlchemy-compatible PostgreSQL DSN for the tenant DB
+            (e.g. ``postgresql://role:pass@pooler:5432/t_<slug>?sslmode=require``).
+
+        Raises:
+            NotImplementedError: broker environment not configured.
+            RuntimeError: the broker rejected the request or returned no DSN.
+        """
+        broker_url = os.environ.get('ROCKETRIDE_DB_BROKER_URL', '').strip()
+        broker_token = os.environ.get('ROCKETRIDE_DB_BROKER_TOKEN', '').strip()
+        if not broker_url or not broker_token:
+            raise NotImplementedError('RocketRide cloud DB nodes require signing into RocketRide cloud')
+        if not client_id or not client_id.strip():
+            raise ValueError('resolve_db_dsn requires a non-empty client_id')
+        self._check_broker_url(broker_url)
+
+        import asyncio
+
+        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, client_id.strip())
+
+    @staticmethod
+    def _check_broker_url(url: str) -> None:
+        """Refuse to send the broker token over anything but HTTPS.
+
+        The token can resolve ANY tenant's DSN, so a deployment typo like an
+        ``http://`` broker URL must fail loudly, not silently ship the token
+        (and every returned DSN) in cleartext. Plain http is allowed only for
+        localhost — the local dev/test rig runs the provisioner there.
+        """
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(url)
+            scheme, host = parsed.scheme.lower(), parsed.hostname
+        except ValueError:
+            scheme, host = '', None
+        if scheme == 'https':
+            return
+        if scheme == 'http' and host in ('localhost', '127.0.0.1', '::1'):
+            return
+        raise RuntimeError(
+            f'ROCKETRIDE_DB_BROKER_URL must use https (got {scheme or "no"} scheme): '
+            'the broker token must never travel unencrypted; plain http is allowed only for localhost'
+        )
+
+    @staticmethod
+    def _call_db_broker(url: str, token: str, tenant_id: str) -> str:
+        """Blocking POST to the provisioner; runs in a worker thread.
+
+        Stdlib-only on purpose: the account layer has no async-HTTP dependency,
+        and one small request per task start does not justify adding one.
+        """
+        import json
+        import urllib.error
+        import urllib.request
+
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({'tenant_id': tenant_id}).encode('utf-8'),
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            },
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                body = json.loads(response.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            # 4xx = unknown/invalid tenant per the broker contract; 5xx = broker fault.
+            raise RuntimeError(f'DB broker rejected provision for this account (HTTP {e.code})') from e
+        except Exception as e:
+            raise RuntimeError(f'DB broker unreachable: {e}') from e
+
+        dsn = body.get('dsn') if isinstance(body, dict) else None
+        if not dsn or not isinstance(dsn, str):
+            raise RuntimeError('DB broker response did not include a DSN')
+        return AccountBase._pin_dsn_tls(dsn)
+
+    @staticmethod
+    def _pin_dsn_tls(dsn: str) -> str:
+        """Validate the broker's DSN and guarantee it carries an sslmode.
+
+        The broker contract sends ``sslmode=require``; this pins that
+        guarantee client-side so a broker regression cannot silently
+        downgrade every tenant connection to cleartext.
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(dsn)
+        if parsed.scheme.lower() not in ('postgres', 'postgresql'):
+            raise RuntimeError(f'DB broker returned a non-PostgreSQL DSN (scheme {parsed.scheme!r})')
+        if 'sslmode' in parse_qs(parsed.query):
+            return dsn
+        separator = '&' if parsed.query else '?'
+        return f'{dsn}{separator}sslmode=require'
+
+    # =========================================================================
+    # DEPLOYMENTS — the teams-as-environments interface.
+    #
+    # PUBLISH creates an immutable artifact version in the ORG registry;
+    # DEPLOY points a TEAM at a version (promotion and rollback are the same
+    # pointer move); every action is audited (who/what/when, denormalized so
+    # it survives user deletion); removal is soft.
+    #
+    # The OSS defaults below delegate to the file-backed backend
+    # (deployment_backend.py). The SaaS implementation overrides them with
+    # DB-backed tables while REUSING the same artifact files — callers
+    # (cmd_deploy, the scheduler, UIs) never branch on edition.
+    #
+    # Permission checks do NOT live here: the command layer verifies team
+    # permissions before calling (the same division of labor as the run-log
+    # domain API over its system tree).
+    # =========================================================================
+
+    # Cache slot for the lazily-created OSS file backend — declared here so
+    # the attribute is part of the documented class state.
+    _deployments_backend = None
+
+    def _deployment_backend(self):
+        """The lazily-created file backend used by the OSS defaults."""
+        if self._deployments_backend is None:
+            from .deployment_backend import FileDeploymentBackend
+            from .store import Store
+
+            self._deployments_backend = FileDeploymentBackend(Store.instance().raw_store())
+        return self._deployments_backend
+
+    async def deployments_publish(
+        self, org_id: str, project_id: str, pipeline: dict, actor: dict, comment: str = ''
+    ) -> dict:
+        """Snapshot ``pipeline`` as the next immutable registry version.
+
+        Returns the new registry entry (version, sha256, publishedBy, ...).
+        """
+        return await self._deployment_backend().publish(org_id, project_id, pipeline, actor, comment)
+
+    async def deployments_deploy(self, org_id: str, team_id: str, project_id: str, version: int, actor: dict) -> dict:
+        """Point ``team_id`` at registry ``version`` (promotion/rollback)."""
+        return await self._deployment_backend().deploy(org_id, team_id, project_id, version, actor)
+
+    async def deployments_set_state(self, org_id: str, team_id: str, project_id: str, state: str, actor: dict) -> dict:
+        """Enable/disable/error/soft-remove a team deployment."""
+        return await self._deployment_backend().set_state(org_id, team_id, project_id, state, actor)
+
+    async def deployments_schedule_set(
+        self,
+        org_id: str,
+        team_id: str,
+        project_id: str,
+        source_id: str,
+        cron: 'str | None',
+        actor: dict,
+        ttl: 'int | None' = None,
+    ) -> dict:
+        """Set (or clear with cron=None) one source's schedule.
+
+        The paused flag is untouched (preserved on edit, False on create) —
+        ``deployments_schedule_set_paused`` owns it.
+        """
+        return await self._deployment_backend().schedule_set(org_id, team_id, project_id, source_id, cron, actor, ttl)
+
+    async def deployments_source_config_set(
+        self,
+        org_id: str,
+        team_id: str,
+        project_id: str,
+        source_id: str,
+        trace_level: 'str | None',
+        debug_out: bool,
+        actor: dict,
+    ) -> dict:
+        """Set one source's execution settings (trace level + debug output)."""
+        return await self._deployment_backend().source_config_set(
+            org_id, team_id, project_id, source_id, trace_level, debug_out, actor
+        )
+
+    async def deployments_schedule_set_paused(
+        self, org_id: str, team_id: str, project_id: str, source_id: str, paused: bool, actor: dict
+    ) -> dict:
+        """Pause or resume one source's schedule, preserving cron/ttl."""
+        return await self._deployment_backend().schedule_set_paused(
+            org_id, team_id, project_id, source_id, paused, actor
+        )
+
+    async def deployments_mark_run(self, org_id: str, team_id: str, project_id: str, source_id: str) -> None:
+        """Stamp lastRunAt after the scheduler fires a source (best-effort)."""
+        await self._deployment_backend().mark_run(org_id, team_id, project_id, source_id)
+
+    async def deployments_list(self, org_id: str, team_id: str) -> list:
+        """All non-removed deployments of one team, joined with registry info."""
+        return await self._deployment_backend().list_team(org_id, team_id)
+
+    async def deployments_get(self, org_id: str, team_id: str, project_id: str) -> 'dict | None':
+        """One team deployment (joined with registry info), or None."""
+        return await self._deployment_backend().get(org_id, team_id, project_id)
+
+    async def deployments_versions(self, org_id: str, project_id: str) -> list:
+        """The registry entries for a project, newest first (version strip)."""
+        return await self._deployment_backend().versions(org_id, project_id)
+
+    async def deployments_history(
+        self, org_id: str, project_id: str, team_id: 'str | None' = None, list_args: 'dict | None' = None
+    ) -> dict:
+        """The audit trail as a list-API envelope, newest (seq) first.
+
+        ``list_args`` is the standard list-API argument set (page/page_size/
+        search/filters/sort). Paging lives in the BACKEND because history is
+        unbounded by design (append-only enterprise audit): the SaaS backend
+        pages in SQL rather than materializing the whole trail.
+        """
+        return await self._deployment_backend().history(org_id, project_id, team_id, list_args)
+
+    async def deployments_artifact(self, org_id: str, project_id: str, version: int) -> dict:
+        """Load one artifact version, sha256-verified against the registry."""
+        return await self._deployment_backend().artifact(org_id, project_id, version)
+
+    def deployments_iter_enabled(self):
+        """Async-generate every ENABLED team deployment (the scheduler feed)."""
+        return self._deployment_backend().iter_enabled()
+
+    # =========================================================================
+    # DAP COMMAND DISPATCH — SaaS overrides all three
+    # =========================================================================
 
     async def handle_account(self, conn, request):
         """

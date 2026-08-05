@@ -21,8 +21,21 @@
 # SOFTWARE.
 # =============================================================================
 
+import os
+
 from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    pass
+    def beginGlobal(self):
+        """Install the node's runtime requirements before any IEndpoint runs.
+
+        Heavy deps (``aiohttp``) are imported lazily inside the methods that
+        use them so this hook has a chance to install them first. Calling
+        ``depends()`` at module top of ``IEndpoint.py`` doesn't work because
+        Python evaluates top-level imports before any function body.
+        """
+        from depends import depends  # type: ignore
+
+        requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+        depends(requirements)

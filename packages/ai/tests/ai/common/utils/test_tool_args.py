@@ -9,6 +9,8 @@ Unit tests for the tool-input helpers in ``ai.common.utils.tool_args``:
 * ``normalize_tool_input`` — envelope-strip / input-coercion.
 * ``require_str`` / ``require_int`` / ``require_bool`` — argument validators.
 * ``optional_str`` / ``optional_int`` / ``optional_bool`` — optional variants.
+* ``int_arg`` / ``require_str_list`` / ``optional_str_list`` — clamping int and
+  string-list readers shared by the Google Workspace services.
 * ``validate_tool_input_schema`` — unknown-key rejection.
 
 These were previously copy-pasted across tool nodes (tool_github,
@@ -26,14 +28,17 @@ from __future__ import annotations
 import pytest
 
 from ai.common.utils import (
+    int_arg,
     normalize_tool_input,
     optional_bool,
     optional_int,
     optional_str,
+    optional_str_list,
     require_bool,
     require_dict,
     require_int,
     require_str,
+    require_str_list,
     validate_tool_input_schema,
 )
 
@@ -808,3 +813,97 @@ class TestValidateToolInputSchema:
         }
         validate_tool_input_schema(self._BRANCH_LIST, {'remote': True})
         assert self._BRANCH_LIST == schema_snapshot
+
+
+class TestIntArg:
+    """int_arg — the clamping page-size reader (canonical ex-drive behaviour)."""
+
+    def test_absent_uses_default(self):
+        assert int_arg({}, 'maxResults', default=25, lo=1, hi=500) == 25
+
+    def test_none_uses_default(self):
+        assert int_arg({'maxResults': None}, 'maxResults', default=25, lo=1, hi=500) == 25
+
+    def test_explicit_zero_clamps_up_not_defaults(self):
+        # `args.get(key) or default` would turn 0 into 25; int_arg must clamp to lo.
+        assert int_arg({'maxResults': 0}, 'maxResults', default=25, lo=1, hi=500) == 1
+
+    def test_clamps_above_hi(self):
+        assert int_arg({'maxResults': 9999}, 'maxResults', default=25, lo=1, hi=500) == 500
+
+    def test_in_range_passes_through(self):
+        assert int_arg({'maxResults': 42}, 'maxResults', default=25, lo=1, hi=500) == 42
+
+    def test_bool_rejected_not_coerced(self):
+        # Regression for the gmail/drive _int_arg drift: int(True) == 1 must not happen.
+        with pytest.raises(ValueError, match='"maxResults" must be an integer'):
+            int_arg({'maxResults': True}, 'maxResults', default=25, lo=1, hi=500)
+
+    def test_float_rejected_not_truncated(self):
+        with pytest.raises(ValueError, match='"maxResults" must be an integer'):
+            int_arg({'maxResults': 3.9}, 'maxResults', default=25, lo=1, hi=500)
+
+    def test_numeric_string_rejected_unlike_require_int(self):
+        # Deliberate divergence from require_int: no string coercion for
+        # schema-declared integer knobs.
+        with pytest.raises(ValueError, match='"maxResults" must be an integer'):
+            int_arg({'maxResults': '5'}, 'maxResults', default=25, lo=1, hi=500)
+
+    def test_tool_name_prefixes_error(self):
+        with pytest.raises(ValueError, match='message_list: "maxResults" must be an integer'):
+            int_arg({'maxResults': 'x'}, 'maxResults', default=25, lo=1, hi=500, tool_name='message_list')
+
+
+class TestRequireStrList:
+    def test_valid_list_returned_as_is(self):
+        assert require_str_list({'ranges': ['A1:B2', 'C3']}, 'ranges') == ['A1:B2', 'C3']
+
+    def test_missing_rejected(self):
+        with pytest.raises(ValueError, match='"ranges" must be a non-empty list'):
+            require_str_list({}, 'ranges')
+
+    def test_empty_list_rejected(self):
+        with pytest.raises(ValueError, match='"ranges" must be a non-empty list'):
+            require_str_list({'ranges': []}, 'ranges')
+
+    def test_non_list_rejected(self):
+        with pytest.raises(ValueError, match='"ranges" must be a non-empty list'):
+            require_str_list({'ranges': 'A1:B2'}, 'ranges')
+
+    def test_blank_element_rejected(self):
+        with pytest.raises(ValueError, match='"ranges" must contain only non-empty strings'):
+            require_str_list({'ranges': ['A1', '  ']}, 'ranges')
+
+    def test_non_string_element_rejected(self):
+        with pytest.raises(ValueError, match='"ranges" must contain only non-empty strings'):
+            require_str_list({'ranges': ['A1', 7]}, 'ranges')
+
+    def test_tool_name_prefixes_error(self):
+        with pytest.raises(ValueError, match='values_batch_get: "ranges" must be a non-empty list'):
+            require_str_list({}, 'ranges', tool_name='values_batch_get')
+
+    def test_elements_not_stripped(self):
+        # Mirrors optional_str's leave-the-value-alone convention.
+        assert require_str_list({'ids': [' a ']}, 'ids') == [' a ']
+
+
+class TestOptionalStrList:
+    def test_absent_returns_default(self):
+        assert optional_str_list({}, 'parents') is None
+        assert optional_str_list({}, 'parents', default=['root']) == ['root']
+
+    def test_none_returns_default(self):
+        assert optional_str_list({'parents': None}, 'parents') is None
+
+    def test_valid_list_returned(self):
+        assert optional_str_list({'parents': ['id1']}, 'parents') == ['id1']
+
+    def test_present_invalid_rejected(self):
+        with pytest.raises(ValueError, match='"parents" must be a non-empty list'):
+            optional_str_list({'parents': []}, 'parents')
+        with pytest.raises(ValueError, match='"parents" must contain only non-empty strings'):
+            optional_str_list({'parents': ['ok', '']}, 'parents')
+
+    def test_tool_name_prefixes_error(self):
+        with pytest.raises(ValueError, match='file_move: "addParents" must be a non-empty list'):
+            optional_str_list({'addParents': 'x'}, 'addParents', tool_name='file_move')

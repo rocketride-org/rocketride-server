@@ -7,17 +7,22 @@
  * RunButton — Play/stop button that slides out from the left edge of source nodes.
  *
  * Four visual states:
- *   - **Run Pipeline** (idle): accent-colored play icon; clicking saves + runs the pipeline.
- *   - **Stop** (running): red stop icon; clicking aborts the pipeline.
+ *   - **Run Pipeline** (idle): green filled play triangle; clicking saves + runs the pipeline.
+ *   - **Stop** (running): red filled stop square; clicking aborts the pipeline.
  *   - **Stopping...** (stop pending): disabled spinning icon while pipeline is stopping.
  *   - **Pending** (run pending): spinning icon while waiting for state change.
+ *
+ * The glyphs are the shared BoxIcons (BxPlay / BxStop / BxRefresh), so the canvas
+ * run control matches the Explorer sidebar's run/stop buttons exactly — filled
+ * triangle in --rr-color-success, filled square in --rr-color-error (design-owner
+ * decision 2026-07-08: canvas and sidebar run controls share one style).
  *
  * On hover the button slides further left and expands to reveal its label.
  * Includes debounce guards to prevent double-clicks.
  */
 
 import React, { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { Play, Square, RefreshCw } from 'lucide-react';
+import { BxPlay, BxStop, BxRefresh } from '../../../../../../components/BoxIcon';
 import PadlockIcon from '../../../../../../assets/icons/PadlockIcon';
 import { useFlowProject } from '../../../../context/FlowProjectContext';
 import { useFlowGraph } from '../../../../context/FlowGraphContext';
@@ -125,7 +130,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 					}}
 				>
 					<span style={styles.button}>
-						<RefreshCw size={16} style={{ ...styles.icon, color: 'var(--rr-color-warning)' }} className="rotate" />
+						<BxRefresh size={16} color="var(--rr-color-warning)" style={styles.icon} className="rotate" />
 					</span>
 				</div>
 			);
@@ -141,7 +146,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				}}
 			>
 				<span style={styles.button}>
-					<Square size={12} style={{ ...styles.icon, color: 'var(--rr-color-error)', strokeWidth: 2.5 }} />
+					<BxStop size={16} color="var(--rr-color-error)" style={styles.icon} />
 				</span>
 			</div>
 		);
@@ -160,9 +165,9 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 				title="Subscription required"
 			>
 				<span style={{ ...styles.button, position: 'relative' as const }}>
-					<Play size={16} style={{ ...styles.icon, color: 'var(--rr-text-disabled)' }} />
-					<span style={{ position: 'absolute' as const, top: -5, right: -5 }}>
-						<PadlockIcon size={10} />
+					<BxPlay size={16} color="var(--rr-text-disabled)" style={styles.icon} />
+					<span style={{ position: 'absolute' as const, top: -8, right: -8 }}>
+						<PadlockIcon size={24} />
 					</span>
 				</span>
 			</div>
@@ -179,7 +184,7 @@ export default function RunButton({ nodeId }: IRunButtonProps): ReactElement {
 			}}
 		>
 			<span style={styles.button}>
-				<Play size={16} style={{ ...styles.icon, color: 'var(--rr-accent)' }} />
+				<BxPlay size={16} color="var(--rr-color-success)" style={styles.icon} />
 			</span>
 		</div>
 	);

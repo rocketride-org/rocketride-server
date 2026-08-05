@@ -24,21 +24,17 @@
 Database API namespace for the RocketRide Python SDK.
 
 Exposes ``client.database.query(...)`` for issuing raw SQL or Cypher directly
-against a database pipeline, bypassing the LLM translation layer that the
-default ``client.chat(...)`` flow uses.
+against a database pipeline node via the ``execute`` tool function, bypassing
+the LLM translation layer that the default ``client.chat(...)`` flow uses.
 
 Usage:
-    rows = await client.database.query(token=t, sql='SELECT 1 AS one')
+    result = await client.database.query(token=t, sql='SELECT 1 AS one')
 """
 
 from __future__ import annotations
 
-import json
 from enum import Enum
-from typing import TYPE_CHECKING, Optional
-
-from .schema.question import Question, QuestionType
-from .types.data import PIPELINE_RESULT
+from typing import TYPE_CHECKING, Any, Dict
 
 if TYPE_CHECKING:
     from .client import RocketRideClient
@@ -75,68 +71,189 @@ class DatabaseApi:
         *,
         token: str,
         sql: str,
-        on_sse: Optional[object] = None,
-    ) -> PIPELINE_RESULT:
+        node_id: str = '',
+        session_id: str = '',
+        params: list | None = None,
+    ) -> Dict[str, Any]:
         """
-        Execute a raw SQL or Cypher statement against a database pipeline.
+        Execute a raw SQL or Cypher statement against a database pipeline node.
 
-        Sends a Question with ``type=QuestionType.EXECUTE`` so the database
-        node treats ``sql`` as the literal statement to run -- no LLM call,
-        no ``is_sql_safe`` / ``_is_cypher_safe`` gating.
+        Invokes the ``execute`` tool function on the target database node,
+        bypassing LLM translation and SQL safety checks.
 
         Args:
             token: Pipeline token for authentication and resource access.
             sql: Raw SQL or Cypher statement to execute.
-            on_sse: Optional callback for streaming events (matches ``chat``).
+            node_id: Target database node ID.  When empty the call broadcasts
+                to all tool-lane nodes; the first database node handles it.
+            session_id: Optional transaction session ID returned by
+                ``begin_transaction``.  When provided the statement runs within
+                that transaction.
+            params: Optional positional parameters bound to the statement
+                (e.g. ``[1, 'foo']`` for ``$1``, ``$2`` placeholders).
 
         Returns:
-            PIPELINE_RESULT: The pipeline response. The ``answers`` lane carries
-            a JSON-encoded payload of shape ``{"rows": [...], "affected_rows": N}``.
+            Dict with ``rows`` (list of row dicts) and ``affected_rows`` (int).
 
         Raises:
             ValueError: If ``token`` or ``sql`` is empty or whitespace-only.
+            RuntimeError: If the server signals failure.
         """
         if not isinstance(token, str) or not token.strip():
             raise ValueError('token must be a non-empty string')
         if not isinstance(sql, str) or not sql.strip():
             raise ValueError('sql must be a non-empty string')
 
-        question = Question(type=QuestionType.EXECUTE)
-        question.addQuestion(sql)
-        return await self._client.chat(token=token, question=question, on_sse=on_sse)
+        input_: Dict[str, Any] = {'sql': sql}
+        if session_id:
+            input_['session_id'] = session_id
+        if params:
+            input_['params'] = params
 
-    async def dialect(self, *, token: str) -> DatabaseDialect:
+        return await self._client.tool(
+            token=token,
+            tool='execute',
+            node_id=node_id,
+            input=input_,
+        )
+
+    async def begin_transaction(
+        self,
+        *,
+        token: str,
+        node_id: str = '',
+    ) -> Dict[str, Any]:
         """
-        Discover the underlying database engine for a pipeline.
+        Begin a database transaction on a pipeline node.
 
-        Sends a ``Question(type=DIALECT)``; the database node replies on the
-        ``answers`` lane with ``{"dialect": "<engine>"}``. Use this to branch
-        on dialect-specific SQL or to assert you're not pointed at the wrong
-        kind of database (e.g. Neo4j when you expected Postgres).
+        Returns a ``session_id`` that must be threaded through subsequent
+        ``query``, ``commit``, and ``rollback`` calls to keep them within
+        the same transaction.
 
         Args:
             token: Pipeline token for authentication and resource access.
+            node_id: Target database node ID.  When empty the call broadcasts
+                to all tool-lane nodes; the first database node handles it.
+
+        Returns:
+            Dict containing the ``session_id`` string for the new transaction.
+
+        Raises:
+            ValueError: If ``token`` is empty or whitespace-only.
+            RuntimeError: If the server signals failure.
+        """
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError('token must be a non-empty string')
+
+        return await self._client.tool(
+            token=token,
+            tool='begin',
+            node_id=node_id,
+            input={},
+        )
+
+    async def commit(
+        self,
+        *,
+        token: str,
+        session_id: str,
+        node_id: str = '',
+    ) -> Dict[str, Any]:
+        """
+        Commit an open transaction session, making all its changes permanent.
+
+        Args:
+            token: Pipeline token for authentication and resource access.
+            session_id: Transaction session ID returned by ``begin_transaction``.
+            node_id: Target database node ID.  When empty the call broadcasts
+                to all tool-lane nodes; the first database node handles it.
+
+        Returns:
+            Dict with ``ok: True`` on success.
+
+        Raises:
+            ValueError: If ``token`` or ``session_id`` is empty or
+                whitespace-only.
+            RuntimeError: If the server signals failure.
+        """
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError('token must be a non-empty string')
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError('session_id must be a non-empty string')
+
+        return await self._client.tool(
+            token=token,
+            tool='commit',
+            node_id=node_id,
+            input={'session_id': session_id},
+        )
+
+    async def rollback(
+        self,
+        *,
+        token: str,
+        session_id: str,
+        node_id: str = '',
+    ) -> Dict[str, Any]:
+        """
+        Roll back an open transaction session, discarding all its changes.
+
+        Args:
+            token: Pipeline token for authentication and resource access.
+            session_id: Transaction session ID returned by ``begin_transaction``.
+            node_id: Target database node ID.  When empty the call broadcasts
+                to all tool-lane nodes; the first database node handles it.
+
+        Returns:
+            Dict with ``ok: True`` on success.
+
+        Raises:
+            ValueError: If ``token`` or ``session_id`` is empty or
+                whitespace-only.
+            RuntimeError: If the server signals failure.
+        """
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError('token must be a non-empty string')
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError('session_id must be a non-empty string')
+
+        return await self._client.tool(
+            token=token,
+            tool='rollback',
+            node_id=node_id,
+            input={'session_id': session_id},
+        )
+
+    async def dialect(self, *, token: str, node_id: str = '') -> DatabaseDialect:
+        """
+        Discover the underlying database engine for a pipeline node.
+
+        Invokes the ``dialect`` tool function on the target database node.
+
+        Args:
+            token: Pipeline token for authentication and resource access.
+            node_id: Target database node ID.  When empty the call broadcasts
+                to all tool-lane nodes; the first database node handles it.
 
         Returns:
             DatabaseDialect: The dialect reported by the node.
 
         Raises:
-            ValueError: If ``token`` is empty/whitespace, the pipeline returns
-                no answer, or the response is not a recognized dialect.
+            ValueError: If ``token`` is empty/whitespace or the response is not
+                a recognized dialect.
+            RuntimeError: If the server signals failure.
         """
         if not isinstance(token, str) or not token.strip():
             raise ValueError('token must be a non-empty string')
 
-        question = Question(type=QuestionType.DIALECT)
-        question.addQuestion('dialect')
-        result = await self._client.chat(token=token, question=question)
+        result = await self._client.tool(
+            token=token,
+            tool='dialect',
+            node_id=node_id,
+        )
 
-        answers = result.get('answers') if isinstance(result, dict) else None
-        if not answers:
-            raise ValueError('Pipeline returned no dialect answer; is the endpoint a database node?')
+        dialect_str = result.get('dialect') if isinstance(result, dict) else None
+        if not dialect_str:
+            raise ValueError('Pipeline returned no dialect; is the endpoint a database node?')
 
-        try:
-            payload = json.loads(answers[0])
-            return DatabaseDialect(payload['dialect'])
-        except (TypeError, KeyError, ValueError, json.JSONDecodeError) as e:
-            raise ValueError(f'Unexpected dialect response from pipeline: {answers[0]!r}') from e
+        return DatabaseDialect(dialect_str)

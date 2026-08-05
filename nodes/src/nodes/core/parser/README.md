@@ -12,6 +12,8 @@ sidebar_position: 1
 
 Extracts structured content from a wide variety of document types. The Parser automatically identifies embedded content and routes it to the appropriate output lane, making text, tables, images, audio, and video accessible for downstream processing.
 
+> **⚠️ Provenance limitation — not for audit-grade extraction.** Output is flattened to Markdown: page boundaries, bbox/polygon coordinates, and the table-HTML cell grid are dropped, so cell-level provenance and coordinate-based review cannot be reconstructed. Do not use this node where every value must trace back to its exact source cell (e.g. financial-table / regulatory extraction). For structure-preserving parsing that retains table HTML plus page and coordinate data, use the **`datalab_parse`** node instead.
+
 **Lanes:**
 
 | Lane in | Lane out | Description             |

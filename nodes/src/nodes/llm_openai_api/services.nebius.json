@@ -31,7 +31,7 @@
 	"node": "python",
 	//
 	// Optional:
-	//		Reuses the generic OpenAI-compatible client — this is a branded preset,
+	//		Reuses the generic OpenAI-compatible client, this is a branded preset,
 	//		not a separate node (no duplicated Python).
 	//
 	"path": "nodes.llm_openai_api",
