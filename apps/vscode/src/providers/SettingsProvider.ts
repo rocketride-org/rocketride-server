@@ -41,6 +41,7 @@ import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isValidHostUrl } from '../shared/util/hostUrl';
+import { WORKSPACE_SETTINGS_LOCATIONS } from '../shared/util/workspaceOverride';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
 
 /** Shown when a Direct Connect Host URL is missing or unusable. */
@@ -361,12 +362,12 @@ export class SettingsProvider {
 			await vscode.workspace.getConfiguration('rocketride').update('welcomeDismissed', true, vscode.ConfigurationTarget.Global);
 
 			// Step 2: Confirm save to the user immediately — don't wait for engine ops.
-			// If any saved key is masked by a conflicting value in this workspace's
-			// .vscode/settings.json, the Global write won't take effect here, so warn
-			// instead of reporting a misleading success (RR-1257).
+			// If any saved key is masked by a conflicting workspace or workspace-folder
+			// value, the Global write won't take effect here, so warn instead of
+			// reporting a misleading success (RR-1257).
 			if (shadowedKeys.length > 0) {
 				const isOne = shadowedKeys.length === 1;
-				this.showMessage(webview, 'warning', `Saved to your user settings, but ${shadowedKeys.join(', ')} ${isOne ? 'is' : 'are'} overridden by this workspace's .vscode/settings.json and won't take effect here. Edit the workspace settings to change ${isOne ? 'it' : 'them'} for this project.`, 'save');
+				this.showMessage(webview, 'warning', `Saved to your user settings, but ${shadowedKeys.join(', ')} ${isOne ? 'is' : 'are'} overridden by workspace settings and won't take effect here. Change ${isOne ? 'it' : 'them'} where this workspace sets ${isOne ? 'it' : 'them'} — ${WORKSPACE_SETTINGS_LOCATIONS}.`, 'save');
 			} else {
 				this.showMessage(webview, 'success', 'Settings saved successfully!', 'save');
 			}

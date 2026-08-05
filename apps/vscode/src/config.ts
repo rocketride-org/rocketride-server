@@ -442,10 +442,11 @@ export class ConfigManager {
 	 * one would persist a workspace-pinned value into the user's Global settings.
 	 *
 	 * @returns `shadowedKeys` — the keys whose Global write is masked by a
-	 *   conflicting value in the workspace's `.vscode/settings.json` (any folder
-	 *   of a multi-root workspace), so the change will not take effect in this
-	 *   window. The caller surfaces this to the user instead of a misleading
-	 *   "saved" confirmation.
+	 *   conflicting workspace or workspace-folder value, so the change will not
+	 *   take effect in this window. The masking value lives in the workspace's
+	 *   `.code-workspace` file or in a folder's `.vscode/settings.json`,
+	 *   depending on which scope set it. The caller surfaces this to the user
+	 *   instead of a misleading "saved" confirmation.
 	 */
 	public async applyAllSettings(s: SettingsSnapshot): Promise<{ shadowedKeys: string[] }> {
 		if (!this.context) {

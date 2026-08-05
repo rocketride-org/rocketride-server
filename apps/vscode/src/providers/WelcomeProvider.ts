@@ -39,6 +39,7 @@ import { ConfigManager, SettingsSnapshot } from '../config';
 import { getConnectionManager, getEngineRegistry } from '../extension';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isValidHostUrl } from '../shared/util/hostUrl';
+import { WORKSPACE_SETTINGS_LOCATIONS } from '../shared/util/workspaceOverride';
 
 const DISMISSED_KEY = 'welcomeDismissed';
 
@@ -247,7 +248,7 @@ export class WelcomeProvider {
 			// vanish with it — report shadowed keys as a window notification instead.
 			if (shadowedKeys.length > 0) {
 				const isOne = shadowedKeys.length === 1;
-				void vscode.window.showWarningMessage(`Saved to your user settings, but ${shadowedKeys.join(', ')} ${isOne ? 'is' : 'are'} overridden by this workspace's .vscode/settings.json and won't take effect here.`);
+				void vscode.window.showWarningMessage(`Saved to your user settings, but ${shadowedKeys.join(', ')} ${isOne ? 'is' : 'are'} overridden by workspace settings and won't take effect here. Change ${isOne ? 'it' : 'them'} in ${WORKSPACE_SETTINGS_LOCATIONS}.`);
 			}
 
 			// Step 2: Persist dismissal so the welcome page doesn't re-open on next activation

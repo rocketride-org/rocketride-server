@@ -34,6 +34,16 @@ export interface WorkspaceInspection<T> {
 	workspaceFolderValue?: T;
 }
 
+/**
+ * Where a workspace-level override can live, for user-facing messages.
+ *
+ * A single-folder workspace only has `.vscode/settings.json`, but a multi-root
+ * workspace resolves `workspaceValue` from its `.code-workspace` file and
+ * `workspaceFolderValue` from each folder — naming only one would send the user
+ * to a file that does not hold the value.
+ */
+export const WORKSPACE_SETTINGS_LOCATIONS = "the workspace's .code-workspace file, or a folder's .vscode/settings.json";
+
 /** Structural equality good enough for config values (primitives + string[]). */
 function valuesEqual(a: unknown, b: unknown): boolean {
 	if (a === b) {
@@ -50,10 +60,11 @@ function valuesEqual(a: unknown, b: unknown): boolean {
  * Whether a setting we are about to write to the user (Global) target is
  * shadowed by a *conflicting* workspace-level value.
  *
- * VS Code resolves a key as WorkspaceFolder > Workspace > Global, so when the
- * open workspace's `.vscode/settings.json` sets the same key to a different
- * value, the Global write succeeds but the effective (read-back) value does not
- * change — the UI appears to revert and user settings silently diverge.
+ * VS Code resolves a key as WorkspaceFolder > Workspace > Global, so when either
+ * workspace scope sets the same key to a different value, the Global write
+ * succeeds but the effective (read-back) value does not change — the UI appears
+ * to revert and user settings silently diverge. See
+ * {@link WORKSPACE_SETTINGS_LOCATIONS} for where those scopes live on disk.
  *
  * Returns true only when a workspace/workspace-folder value exists AND differs
  * from `desired`; an override that already matches what we are saving causes no
