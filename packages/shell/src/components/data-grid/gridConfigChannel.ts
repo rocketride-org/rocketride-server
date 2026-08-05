@@ -7,7 +7,7 @@
  * Grid config channel — host-agnostic persistence for DataGrid layouts.
  *
  * The DataGrid's per-user customizations (Tabulator's sort/columns/page blobs
- * plus the platform's display/format blobs) need a store, but shared-ui must
+ * plus the platform's display/format blobs) need a store, but shared must
  * not import shell, and grids also render inside hosts with no workspace
  * at all (the VSCode webview). This channel decouples them: grids speak a
  * tiny message protocol, and WHATEVER host is present answers it —

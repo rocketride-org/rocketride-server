@@ -33,7 +33,7 @@
 //   inside the sidebar's scrolling slot (below the fixed header, above the
 //   fixed footer). The slot renders even while the sidebar is collapsed to
 //   its icon rail; components inside the node read the collapsed flag via
-//   shared-ui's useSidebarCollapsed() and decide their own collapsed form.
+//   shared's useSidebarCollapsed() and decide their own collapsed form.
 //
 //   Status-bar content — a ReactNode declared via useStatusBarContent(),
 //   mounted inside the shell StatusBar's app slot (between the connection
@@ -192,7 +192,7 @@ export function useHostChromeState(): HostChromeState {
  * renders no sidebar and the client area spans full width.
  *
  * Collapse contract: the node stays mounted while the sidebar is collapsed to
- * its icon rail. Components inside it read shared-ui's `useSidebarCollapsed()`
+ * its icon rail. Components inside it read shared's `useSidebarCollapsed()`
  * and choose their collapsed form (SidebarMenu iconifies; free-form content
  * typically returns null).
  *

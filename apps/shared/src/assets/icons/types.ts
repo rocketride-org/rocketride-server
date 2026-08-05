@@ -22,7 +22,7 @@
 // =============================================================================
 
 /**
- * Common props shared by all custom SVG icon components in the shared-ui icon library.
+ * Common props shared by all custom SVG icon components in the shared icon library.
  * Provides a consistent API for controlling the appearance and layout of icons
  * across the application, including color, dimensions, and opacity.
  *

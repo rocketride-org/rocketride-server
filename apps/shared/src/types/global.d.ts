@@ -24,7 +24,7 @@
 /**
  * Ambient module declarations for third-party libraries and asset imports.
  * These declarations allow TypeScript to understand non-TS imports (images, SVGs, etc.)
- * and untyped npm packages used throughout the shared-ui package.
+ * and untyped npm packages used throughout the shared package.
  */
 
 /** Ambient declaration for the `d3` data visualization library. */
@@ -43,7 +43,7 @@ declare module '*.css' {}
 
 /**
  * SVG imports default to React components via SVGR (see
- * `packages/shared-ui/build/rsbuild-plugin-icons.mjs`). The
+ * `packages/shared/build/rsbuild-plugin-icons.mjs`). The
  * `auto-currentcolor` svgo plugin auto-rewrites monochrome SVGs to use
  * `currentColor` so they inherit the theme color when rendered inline.
  */

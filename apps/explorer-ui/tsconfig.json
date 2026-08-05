@@ -13,12 +13,6 @@
     "paths": {
       "shared/*": [
         "../shared/src/*"
-      ],
-      "shell": [
-        "../../.rocketride/shell/shell.d.ts"
-      ],
-      "shell/client": [
-        "../../.rocketride/shell/client.d.ts"
       ]
     }
   },

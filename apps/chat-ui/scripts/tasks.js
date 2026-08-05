@@ -41,7 +41,7 @@ const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'chat');
 // Build inputs: own src + MF host + shared package + package.json
 const SRC_DIR       = path.join(APP_ROOT, 'src');
 const SHELL_UI_SRC  = path.join(PROJECT_ROOT, 'apps', 'shell', 'src');
-const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
+const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared', 'src');
 const PKG_JSON      = path.join(APP_ROOT, 'package.json');
 const BUILD_HASH_KEY = 'chat-ui.buildHash';
 

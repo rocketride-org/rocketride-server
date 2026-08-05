@@ -158,10 +158,10 @@ export default tseslint.config(
 		},
 	},
 
-	// shared-ui (the static library): imports the surface from 'shell' (Form 1)
+	// shared (the static library): imports the surface from 'shell' (Form 1)
 	// and non-surface stock internals via the in-tree path form.
 	{
-		files: ['packages/shared-ui/**/*.{ts,tsx,mts}'],
+		files: ['packages/shared/**/*.{ts,tsx,mts}'],
 		rules: {
 			'no-restricted-imports': ['error', {
 				paths: [

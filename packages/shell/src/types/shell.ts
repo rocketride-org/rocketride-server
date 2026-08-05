@@ -105,7 +105,7 @@ export interface ShellConnectionEventMap {
 	 * Cloud-ui may emit a simpler version or omit it entirely.
 	 *
 	 * Both shell and VSCode now share the ConnectionStatus type from
-	 * shared-ui/types/connection.ts.
+	 * shared/types/connection.ts.
 	 */
 	'shell:statusChange': ConnectionStatus;
 
@@ -149,7 +149,7 @@ export interface ShellConnectionEventMap {
 	 * previous list entirely.
 	 *
 	 * The `apps` array contains server app entries. Typed as a minimal
-	 * interface to avoid importing shell's AppManifestEntry into shared-ui.
+	 * interface to avoid importing shell's AppManifestEntry into shared.
 	 * Hosts cast to their concrete AppManifestEntry type.
 	 */
 	'shell:appsUpdated': { apps: ShellAppEntry[] };

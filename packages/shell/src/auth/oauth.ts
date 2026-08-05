@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * OAuth configuration for the shared-ui social-login buttons.
+ * OAuth configuration for the shared social-login buttons.
  *
  * User-OAuth (Google/Microsoft/Slack) is brokered by a RocketRide-hosted
  * function — NOT by the local engine. Self-hosters never register their own
@@ -13,7 +13,7 @@
  * social-button widgets and `useOAuthCallbacks` for the consuming flow.
  *
  * The value is inlined at build time from `REACT_APP_OAUTH_ROOT_URL`: every
- * bundler that consumes shared-ui `define`s it to a string literal (see
+ * bundler that consumes shared `define`s it to a string literal (see
  * `rslib.config.ts` and `apps/vscode/rsbuild.config.mjs`), so no `process`
  * reference survives into the webview bundle. An empty/unset value falls back
  * to the production broker URL.

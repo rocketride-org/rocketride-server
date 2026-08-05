@@ -69,7 +69,7 @@ const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) =
 /**
  * RocketRide sidebar container.
  *
- * Uses shared-ui's SidebarView which internally composes the Explorer
+ * Uses shared's SidebarView which internally composes the Explorer
  * file tree component.  Builds pipeline-specific data (entries with
  * sources, active tasks) and provides callbacks for all actions, and
  * renders the resulting node — RocketApp passes this component as its

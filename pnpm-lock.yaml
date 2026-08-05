@@ -176,9 +176,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
-      rocketride:
-        specifier: workspace:*
-        version: link:../../packages/client-typescript
+      shell:
+        specifier: file:../../.rocketride/shell/shell.tgz
+        version: file:.rocketride/shell/shell.tgz(node-fetch@2.7.0(encoding@0.1.13))
       web-vitals:
         specifier: ^5.2.0
         version: 5.2.0
@@ -264,9 +264,9 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
-      rocketride:
-        specifier: workspace:*
-        version: link:../../packages/client-typescript
+      shell:
+        specifier: file:../../.rocketride/shell/shell.tgz
+        version: file:.rocketride/shell/shell.tgz(node-fetch@2.7.0(encoding@0.1.13))
       web-vitals:
         specifier: ^5.2.0
         version: 5.2.0
@@ -10582,8 +10582,10 @@ packages:
     engines: {node: '>= 0.4'}
 
   shell@file:.rocketride/shell/shell.tgz:
-    resolution: {integrity: sha512-o2g+AQGfa1vAQTRhg5qoQMvt805PksUihx3+wKxdhWaReUVDUfvijO94MymUDCPnxv+b93MoJw29AJkgu8kFWw==, tarball: file:.rocketride/shell/shell.tgz}
+    resolution: {integrity: sha512-nT14EeNvqni62OT53E/bf+CJZO5dRArUk+9yQtL+pTHvtH7Rj1mw8X+ax9EQfcw4v0ShIdc2PcidlcLB3NG8RQ==, tarball: file:.rocketride/shell/shell.tgz}
     version: 1.2.0
+    bundledDependencies:
+      - rocketride
 
   side-channel-list@1.0.0:
     resolution: {integrity: sha512-FCLHtRD/gnpCiCHEiJLOwdmFP+wzCmDEkc9y7NsYxeF4u7Btsn1ZuwgwJGxImImHicJArLP4R0yX4c2KCrMrTA==}

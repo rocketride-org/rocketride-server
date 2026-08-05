@@ -23,7 +23,7 @@
 
 /**
  * Unit tests for the pure extraction/resolution helpers of
- * `generate-gallery-tokens.mjs` (node:test, run via shared-ui:test).
+ * `generate-gallery-tokens.mjs` (node:test, run via shared:test).
  */
 
 import assert from 'node:assert/strict';

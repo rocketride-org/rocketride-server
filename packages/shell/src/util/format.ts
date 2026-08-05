@@ -7,7 +7,7 @@
  * Shared value formatters — human-readable byte sizes, dates, and durations.
  *
  * Consolidated for reuse across apps (ported from the per-app formatter copies).
- * Pure functions with no dependencies; safe to import anywhere in shared-ui.
+ * Pure functions with no dependencies; safe to import anywhere in shared.
  */
 
 // =============================================================================

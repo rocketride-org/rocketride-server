@@ -107,7 +107,6 @@ function packageJson(v: TemplateVars): string {
 				typecheck: 'tsc --noEmit',
 			},
 			dependencies: {
-				rocketride: '^1.0.0',
 				react: '^18.2.0',
 				'react-dom': '^18.2.0',
 			},
@@ -134,7 +133,7 @@ function packageJson(v: TemplateVars): string {
 /**
  * rsbuild.config.ts — the standalone MF remote shape from
  * docs/README-apps.md: moduleId derived from appManifest.id in-config, the
- * src/index.ts async boundary as the entry, rocketride/app-sdk shared.
+ * src/index.ts async boundary as the entry, shell shared.
  */
 function rsbuildConfig(v: TemplateVars): string {
 	return `${TS_HEADER}
@@ -159,11 +158,10 @@ export default defineConfig(() => ({
 			shared: {
 				react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 				'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
-				'rocketride/app-sdk': { singleton: true, requiredVersion: false },
 				// Platform modules are CONSUMED from the shell's share scope at
 				// runtime, never bundled (import: false): the app repo needs no
 				// platform checkout to build — editor types come from the
-				// vendored types/rocketride-shell/ (tsconfig paths).
+				// installed shell package (the workspace's vendored shell.tgz).
 				'shell': { singleton: true, requiredVersion: false, import: false },
 				// react-refresh/runtime is deliberately NOT shared: the app's
 				// own copy late-attaches to the devtools hook the dev-flavor
@@ -213,39 +211,13 @@ function tsconfigJson(): string {
 				strict: true,
 				skipLibCheck: true,
 				noEmit: true,
-				// Platform types come from the VENDORED bundle the App Builder
-				// maintains (types/rocketride-shell/) — the modules themselves
-				// arrive from the shell's share scope at runtime, so nothing
-				// platform-side is ever installed or checked out.
-				paths: {
-					shell: ['./types/rocketride-shell/shell.d.ts'],
-				},
+				// Platform types resolve from the INSTALLED shell package (the
+				// workspace's vendored .rocketride/shell/shell.tgz, wired as the
+				// app's "shell" dependency) — the modules themselves arrive from
+				// the shell's share scope at runtime, so nothing platform-side
+				// is ever checked out or copied into the app.
 			},
-			include: ['src', 'types'],
-		},
-		null,
-		2,
-	)}\n`;
-}
-
-/** .vscode/launch.json — F5 opens the preview in a real browser (D2). */
-function launchJson(v: TemplateVars): string {
-	return `${JSON.stringify(
-		{
-			version: '0.2.0',
-			configurations: [
-				{
-					name: `Debug ${v.appName}`,
-					type: 'msedge',
-					request: 'launch',
-					url: v.previewUrl,
-					webRoot: '${workspaceFolder}',
-					sourceMapPathOverrides: {
-						'webpack:///./*': '${workspaceFolder}/*',
-						'webpack:///*': '*',
-					},
-				},
-			],
+			include: ['src'],
 		},
 		null,
 		2,
@@ -261,7 +233,7 @@ function appDescriptor(v: TemplateVars): string {
  * declares its layout inside with <AppLayout>.
  */
 
-import type { AppDescriptor } from 'rocketride/app-sdk';
+import type { AppDescriptor } from 'shell';
 import App from './App';
 
 const descriptor: AppDescriptor = {
@@ -367,7 +339,7 @@ function blankApp(v: TemplateVars, o: FrameOptions): string {
  */
 
 import React from 'react';
-import type { ShellAppProps } from 'rocketride/app-sdk';
+import type { ShellAppProps } from 'shell';
 ${shellImports(o)}
 
 // =============================================================================
@@ -492,32 +464,6 @@ export function renderTemplate(name: TemplateName, vars: TemplateVars, frame: Fr
 		{ path: `${vars.appId.split('.').pop()}.rrapp`, content: `${JSON.stringify({ id: vars.appId }, null, 2)}\n` },
 		{ path: 'rsbuild.config.ts', content: rsbuildConfig(vars) },
 		{ path: 'tsconfig.json', content: tsconfigJson() },
-		{ path: '.vscode/launch.json', content: launchJson(vars) },
-		{
-			path: '.gitignore',
-			content: [
-				'# Dependencies',
-				'node_modules/',
-				'',
-				'# Build output',
-				'dist/',
-				'',
-				'# Vendored platform types — tooling-owned: the App Builder refreshes',
-				'# them from the connected server on every open (do not commit)',
-				'types/rocketride-shell/',
-				'',
-				'# Logs and OS noise',
-				'*.log',
-				'.DS_Store',
-				'Thumbs.db',
-				'',
-			].join('\n'),
-		},
-		// Workspace boundary: app folders often land inside an enclosing pnpm
-		// workspace (a monorepo checkout, a dist tree). This marks the app as
-		// its OWN workspace root so `pnpm install` resolves here instead of
-		// walking up — the app always gets a local node_modules.
-		{ path: 'pnpm-workspace.yaml', content: "packages:\n  - '.'\n" },
 		{ path: 'src/index.ts', content: asyncBoundary() },
 		{ path: 'src/AppDescriptor.ts', content: appDescriptor(vars) },
 		{ path: 'src/App.tsx', content: name === 'Dashboard' ? dashboardApp(vars, frame) : blankApp(vars, frame) },

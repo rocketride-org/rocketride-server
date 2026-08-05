@@ -21,11 +21,11 @@
 // SOFTWARE.
 
 // =============================================================================
-// DOC EXPLORER — re-exports Explorer from shared-ui for shell apps
+// DOC EXPLORER — re-exports Explorer from shared for shell apps
 // =============================================================================
 //
 // Thin re-export so shell apps can import DocExplorer via 'shell'
-// without directly depending on shared-ui's module paths.
+// without directly depending on shared's module paths.
 // =============================================================================
 
 export { Explorer as DocExplorer } from '../../modules/explorer';

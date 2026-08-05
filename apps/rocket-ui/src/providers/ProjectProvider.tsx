@@ -811,9 +811,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 
 	// --- Render --------------------------------------------------------------
 
-	// Workspace-prefs accessor for shared-ui persistence (DetailPanel widths
+	// Workspace-prefs accessor for shared persistence (DetailPanel widths
 	// via persistKey). The shell mounts its own PrefsProvider, but this app
-	// bundles shared-ui by SUBPATH (its own module instances), so the shell's
+	// bundles shared by SUBPATH (its own module instances), so the shell's
 	// context object never reaches these components — the provider must be
 	// mounted from the SAME bundled instance, here.
 	const prefsApi = useMemo(

@@ -27,7 +27,7 @@
 /**
  * The component gallery's public surface, re-exported through the appdev
  * module barrel (`shared/modules/appdev`) - like the rest of appdev it is
- * deliberately NOT on the shared-ui main barrel, so the gallery costs
+ * deliberately NOT on the shared main barrel, so the gallery costs
  * nothing on the shell's eager `shared` singleton.
  */
 

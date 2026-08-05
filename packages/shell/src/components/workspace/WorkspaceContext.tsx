@@ -263,7 +263,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	}, [settingsRegistry, writeSettingOverride]);
 
 	// ── Grid config channel bridge (web host) ──────────────────────────────
-	// Answers shared-ui DataGrid persistence over the document CustomEvent
+	// Answers shared DataGrid persistence over the document CustomEvent
 	// channel from THIS app's workspace prefs (`prefs.tableLayouts`). The
 	// bridge is what lets shared components persist layouts WITHOUT importing
 	// shell: grids dispatch, the active app's provider answers. `get` must

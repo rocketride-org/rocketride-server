@@ -8,7 +8,7 @@
  *
  * Combines the former PageEditorProvider (canvas editing, file I/O, undo/redo)
  * and StatusProvider (status, trace, flow monitoring) into a single provider
- * that renders the shared-ui ProjectView component.
+ * that renders the shared ProjectView component.
  *
  * Uses the ProjectViewIncoming / ProjectViewOutgoing message protocol to
  * communicate with the Project webview.

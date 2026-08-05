@@ -65,13 +65,14 @@ const IS_PLATFORM_REPO = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shel
 // =============================================================================
 
 /**
- * Returns all registered *-ui module names except shared-ui (the shell is
- * its own module, not a -ui name).
+ * Returns all registered *-ui module names — the remote apps. The shared
+ * source library ('shared') and the shell are their own modules outside
+ * the -ui namespace, so the suffix alone selects the remotes.
  * Called at action execution time (after discovery), so both OSS and
  * overlay apps are visible in the registry.
  */
 function getRemoteUiModules() {
-	return registry.names().filter(n => n.endsWith('-ui') && n !== 'shared-ui');
+	return registry.names().filter(n => n.endsWith('-ui'));
 }
 
 // =============================================================================
@@ -148,20 +149,20 @@ const clientVendorModule = {
 			// build is always this explicit step.
 			name: 'client:update',
 			action: () => ({
-				description: 'Refresh .rocketride/shell from a server (--shell=<url>)',
+				description: 'Refresh .rocketride/shell/shell.tgz from a server (--shell=<url>)',
 				run: async (ctx, task) => {
 					const { vendorShell } = require('./lib/vendor-shell');
-					// step: fetch + swap-extract, routing progress into the
-					// task display; skip the lib's own install...
-					const version = await vendorShell(PROJECT_ROOT, ctx.options.shell, {
+					// step: fetch the canonical tarball, routing progress into
+					// the task display; skip the lib's own install...
+					const tgzPath = await vendorShell(PROJECT_ROOT, ctx.options.shell, {
 						install: false,
 						log: (msg) => { task.output = msg; },
 					});
 					// step: ...and relink through execCommand instead, so
 					// pnpm's output stays inside the task UI
-					task.output = `shell v${version} vendored — relinking workspace (pnpm install)...`;
+					task.output = `shell package vendored -> ${tgzPath} — relinking workspace (pnpm install)...`;
 					await execCommand('pnpm', ['install'], { task, cwd: PROJECT_ROOT });
-					task.output = `shell v${version} vendored and workspace relinked`;
+					task.output = 'shell package vendored and workspace relinked';
 				},
 			}),
 		},
