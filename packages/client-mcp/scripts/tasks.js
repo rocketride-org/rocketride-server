@@ -216,9 +216,6 @@ module.exports = {
     name: 'client-mcp',
     description: 'MCP Client (Model Context Protocol)',
 
-    // Co-located docs gathered by docs:gather.
-    docs: [{ source: 'docs', mount: 'protocols/mcp' }],
-
     actions: [
         // Internal actions
         { name: 'client-mcp:copy-readme', action: makeCopyReadmeAction },

@@ -328,7 +328,6 @@ module.exports = {
 
 	// Co-located docs mounts gathered by docs:gather.
 	docs: [
-		{ source: 'docs/guide', mount: 'develop/typescript' },
 		{ source: 'docs/reference/pipeline', mount: 'pipeline-reference' }
 	],
 

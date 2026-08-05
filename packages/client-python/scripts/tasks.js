@@ -232,9 +232,6 @@ module.exports = {
 	name: 'client-python',
 	description: 'Python Client SDK',
 
-	// Co-located docs gathered by docs:gather.
-	docs: [{ source: 'docs', mount: 'develop/python' }],
-
 	actions: [
 		// Internal actions
 		{ name: 'client-python:copy-readme', action: makeCopyReadmeAction },

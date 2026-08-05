@@ -254,9 +254,6 @@ module.exports = {
 	name: 'vscode',
 	description: 'RocketRide VSCode Extension',
 
-	// Co-located docs gathered by docs:gather.
-	docs: [{ source: 'docs', mount: 'ide-extensions/vscode' }],
-
 	actions: [
 		// Internal actions
 		{ name: 'vscode:copy-readme', action: makeCopyReadmeAction },

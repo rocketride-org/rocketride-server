@@ -1,9 +1,13 @@
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { pageDescription, stampLastUpdate } = require('../../scripts/lib/gather.js');
+const { pageDescription, stampLastUpdate, gather } = require('../../scripts/lib/gather.js');
 
 describe('pageDescription', () => {
 	it('prefers a front-matter description when the page declares one', () => {
@@ -95,5 +99,47 @@ describe('stampLastUpdate', () => {
 		const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(out)[1];
 		assert.match(fm, /last_update/);
 		assert.match(fm, /title: Hi/);
+	});
+});
+
+// gather() itself is exercised end-to-end (not stubbed) against a temp
+// project, mirroring llms.test.mjs's temp-project pattern. discoverContributors()
+// reads the real (in-process) module registry, but docs:test runs this file via
+// a fresh `node --test` subprocess that never calls registry.discover(), so the
+// registry is empty here and only the DOCS_ROOT_MOUNTS contributors we're adding
+// are exercised — the test stays isolated from the real repo's package mounts.
+describe('gather — top-level docs/ root mounts', () => {
+	let root;
+	let projectRoot;
+	let contentDir;
+	let manifest;
+
+	before(async () => {
+		root = await mkdtemp(path.join(os.tmpdir(), 'rr-gather-'));
+		projectRoot = path.join(root, 'project');
+		contentDir = path.join(root, 'content');
+		const staticDir = path.join(root, 'static');
+		await mkdir(path.join(projectRoot, 'docs/clients/typescript'), { recursive: true });
+		await writeFile(path.join(projectRoot, 'docs/clients/typescript/index.md'), '# TypeScript SDK\n\nThe TypeScript client library.\n');
+		await writeFile(path.join(projectRoot, 'docs/clients/typescript/readme.md'), '# Package README\n\nExport source for docs:export, never a site page.\n');
+		manifest = await gather({ projectRoot, contentStaticDir: path.join(root, 'no-such-static-dir'), contentDir, staticDir });
+	});
+
+	after(async () => {
+		await rm(root, { recursive: true, force: true });
+	});
+
+	it('stages a page for the develop/typescript mount sourced from index.md', async () => {
+		const staged = await readFile(path.join(contentDir, 'develop', 'typescript.md'), 'utf8');
+		assert.match(staged, /The TypeScript client library\./);
+		const entry = manifest.find((m) => m.id === 'develop/typescript');
+		assert.ok(entry, 'manifest entry for develop/typescript');
+		assert.equal(entry.route, '/develop/typescript');
+	});
+
+	it('stages no page or route for readme.md', () => {
+		assert.equal(existsSync(path.join(contentDir, 'develop', 'typescript', 'readme.md')), false);
+		const entry = manifest.find((m) => m.source && m.source.endsWith('readme.md'));
+		assert.equal(entry, undefined, 'no manifest entry sourced from readme.md');
 	});
 });

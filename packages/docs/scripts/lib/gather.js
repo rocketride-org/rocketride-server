@@ -23,6 +23,16 @@ const { allDocIds, docTitles, isValidMount, mountSlots, NODES_DIR } = require('.
 const NODES_GLOB = 'nodes/src/nodes/*/README.md';
 const GENERATED_START = '<!-- ROCKETRIDE:GENERATED:PARAMS START -->';
 const DOCS_GLOB = '{nodes,packages,apps}/**/docs/**/*.{md,mdx}';
+// Top-level docs/ tree mounts (docs consolidation): source dir -> spine slot.
+// readme.md files inside these roots are package-README export sources
+// (docs:export), never site pages.
+const DOCS_ROOT_MOUNTS = [
+	{ source: 'docs/clients/typescript', mount: 'develop/typescript' },
+	{ source: 'docs/clients/python', mount: 'develop/python' },
+	{ source: 'docs/clients/vscode', mount: 'ide-extensions/vscode' },
+	{ source: 'docs/mcp', mount: 'protocols/mcp' },
+	{ source: 'docs/internal/engine-protocol', mount: 'protocols/websocket' },
+];
 // Node sources and node tests are excluded from the package-mount pass: node
 // markdown is the nodes contributor's domain (staged when the node's top-level
 // README carries the generated markers, and not otherwise), and a node
@@ -543,9 +553,15 @@ async function gather({ projectRoot, contentStaticDir, contentDir, staticDir, mo
 		manifest.push({ id: route, route: `/${route}`, title: label, mdSibling: `/${route}.md`, source: srcAbs, node: name, category: cat.label, categoryOrder: cat.position, description });
 	}
 
-	// 3. Declared per-package mounts.
-	const contributors = discoverContributors();
-	const allDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
+	// 3. Declared per-package mounts, plus the central top-level docs/ tree mounts
+	//    (DOCS_ROOT_MOUNTS). readme.md files under a root mount are skipped — they
+	//    are future package-README export sources (docs:export), never site pages.
+	const contributors = discoverContributors().concat(
+		DOCS_ROOT_MOUNTS.map((m) => ({ sourceDir: path.join(projectRoot, m.source), mount: m.mount, module: 'docs' }))
+	);
+	const packageDocsFiles = await glob(DOCS_GLOB, { cwd: projectRoot, nodir: true, ignore: IGNORE });
+	const rootDocsFiles = await glob('docs/{clients,mcp,internal/engine-protocol}/**/*.{md,mdx}', { cwd: projectRoot, nodir: true, ignore: ['**/readme.md'] });
+	const allDocsFiles = [...packageDocsFiles, ...rootDocsFiles];
 	for (const rel of allDocsFiles) {
 		const abs = path.join(projectRoot, rel);
 		const owner = contributors.find((c) => `${abs}${path.sep}`.startsWith(`${c.sourceDir}${path.sep}`));
