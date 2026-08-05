@@ -40,7 +40,7 @@ Edit `.env` and fill in the values relevant to your setup (API keys, model endpo
 
 ## Building
 
-The project uses a unified build system. See [README-builder.md](../README-builder.md) for full details.
+The project uses a unified build system. See [README-builder.md](builder.md) for full details.
 
 ```bash
 # Show all available commands
@@ -107,13 +107,13 @@ For VS Code extension development details, see [README-vscode.md](../README-vsco
 ./builder client-mcp:test
 ```
 
-For information on writing and running node-level tests, see [README-node-testing.md](../README-node-testing.md).
+For information on writing and running node-level tests, see [README-node-testing.md](node-testing.md).
 
 ## Further Reading
 
-- [Build System](../README-builder.md) -- declarative build system reference
-- [Engine Reference](../README-engine.md) -- C++ engine architecture, CLI options, task types
-- [Pipeline Nodes](../README-nodes.md) -- writing and extending pipeline nodes
+- [Build System](builder.md) -- declarative build system reference
+- [Engine Reference](engine.md) -- C++ engine architecture, CLI options, task types
+- [Pipeline Nodes](nodes.md) -- writing and extending pipeline nodes
 - [VS Code Extension](../README-vscode.md) -- extension development
-- [Pre-commit Hooks](../README-pre-commit-hooks.md) -- code quality automation
+- [Pre-commit Hooks](pre-commit-hooks.md) -- code quality automation
 - [Contributing Guide](../../CONTRIBUTING.md) -- contribution workflow and code style

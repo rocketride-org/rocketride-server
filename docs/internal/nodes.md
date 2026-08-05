@@ -12,7 +12,7 @@ rather than directories.
 
 > This catalog is compiled by hand from the `services*.json` definitions on `develop`
 > (118 node directories → 148 services). For node testing, see
-> [README-node-testing.md](README-node-testing.md).
+> [README-node-testing.md](node-testing.md).
 
 ---
 
@@ -323,7 +323,7 @@ standalone catalog nodes.
 
 5. Add `requirements.txt` for dependencies.
 6. Optionally add a `test` section to `services.json` for automated testing (see
-   [README-node-testing.md](README-node-testing.md)).
+   [README-node-testing.md](node-testing.md)).
 
 ---
 

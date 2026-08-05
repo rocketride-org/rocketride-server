@@ -374,7 +374,7 @@ confirms the full loop end to end: `crashpad_handler` wrote the dump, the next r
 swept it into place, and LLDB symbolized it back to the exact source line.
 
 Full details (reading the base, symbol stores, Windows/WinDbg) are in
-[crash-reporting.md](../packages/server/docs/crash-reporting.md).
+[crash-reporting.md](engine-protocol/crash-reporting.md).
 
 ---
 

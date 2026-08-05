@@ -14,8 +14,8 @@ are **JSONC**: `//` comments and trailing commas are allowed, so they cannot be
 read with a strict JSON parser.
 
 > For the catalog of all nodes and how they wire together, see
-> [README-nodes.md](README-nodes.md). For testing, see
-> [README-node-testing.md](README-node-testing.md).
+> [README-nodes.md](nodes.md). For testing, see
+> [README-node-testing.md](node-testing.md).
 
 ---
 
@@ -55,7 +55,7 @@ Two nodes are wire-compatible when an upstream **output** type matches a
 downstream **input** type. Nodes with **no `lanes`** (most `tool` nodes) do not
 flow data, they **bind to an agent's tool channel** instead. The full lane-type
 ontology and the wire-vs-bind rule live in
-[README-nodes.md → How nodes connect](README-nodes.md#how-nodes-connect).
+[README-nodes.md → How nodes connect](nodes.md#how-nodes-connect).
 
 ---
 
