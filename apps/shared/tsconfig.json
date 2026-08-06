@@ -1,0 +1,38 @@
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"lib": [
+			"dom",
+			"dom.iterable",
+			"esnext"
+		],
+		"allowJs": true,
+		"skipLibCheck": true,
+		"types": [],
+		"strict": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"resolveJsonModule": true,
+		"isolatedModules": true,
+		"jsx": "react-jsx",
+		"paths": {
+			"shell": ["./types/rocketride-shell/shell.d.ts"],
+			"rocketride": ["./types/rocketride-shell/shell.d.ts"],
+			"shared/*": [
+				"./src/*"
+			]
+		}
+	},
+	"include": [
+		"**/*.ts",
+		"**/*.tsx",
+		"**/*.d.ts"
+	],
+	"exclude": [
+		"node_modules",
+		"**/*.test.ts",
+		"**/*.test.tsx"
+	]
+}
