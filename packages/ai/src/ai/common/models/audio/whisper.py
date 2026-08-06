@@ -55,6 +55,9 @@ class WhisperLoader(BaseLoader):
         an identical copy of the weights per language. `compute_type` stays — precision
         genuinely changes the loaded weights.
 
+        `beam_size`, `vad_filter` and `vad_parameters` are excluded for the same reason —
+        all three are decode-time (#1809).
+
     Performance Note:
         - Typical throughput: ~8-15 req/s depending on model size and audio length
     """
@@ -70,6 +73,13 @@ class WhisperLoader(BaseLoader):
     # `language` is not here — it is a per-request decode hint, not a load param.
     _DEFAULTS = {
         'compute_type': 'float16',
+    }
+
+    # Merged under a caller's vad_parameters. Unlike _DEFAULTS, never reaches identity.
+    _VAD_DEFAULTS = {
+        'threshold': 0.5,
+        'min_silence_duration_ms': 500,
+        'speech_pad_ms': 400,
     }
 
     # Cached result of GPU compatibility probe (None = not yet tested)
@@ -344,6 +354,11 @@ class WhisperLoader(BaseLoader):
         metadata: Optional[Dict] = None,
         stream: Optional[Any] = None,
         language: Optional[str] = None,
+        beam_size: int = 5,
+        # Upstream defaults this to False; True is ours. Flipping it turns VAD off for
+        # every existing caller.
+        vad_filter: bool = True,
+        vad_parameters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Run Whisper transcription.
@@ -358,6 +373,12 @@ class WhisperLoader(BaseLoader):
             language: Per-request decode language. Falls back to the value carried on
                 preprocessed/the bundle, so callers that do not pass it keep the
                 previous load-time behaviour.
+            beam_size: Per-request beam size.
+            vad_filter: Per-request VAD toggle.
+            vad_parameters: Merged over _VAD_DEFAULTS rather than replacing them, so
+                setting one key leaves the others at our defaults. A nested None means
+                "unset"; 0 is a real value. Mapping only — unlike upstream, not a
+                VadOptions.
 
         Returns:
             List of transcription results with segments
@@ -374,6 +395,13 @@ class WhisperLoader(BaseLoader):
         # Per-request language wins; fall back to whatever the model was loaded with.
         if language is None:
             language = preprocessed.get('language', models.get('language', 'en'))
+
+        # Merge, not replace: setting only `threshold` must keep our 500ms min-silence
+        # instead of inheriting upstream's 2000ms. `is None`, not truthiness — 0 is real.
+        vad_options = {
+            **WhisperLoader._VAD_DEFAULTS,
+            **{k: v for k, v in (vad_parameters or {}).items() if v is not None},
+        }
 
         # Get lock for this model instance (faster-whisper is NOT thread-safe)
         model_lock = WhisperLoader._get_model_lock(id(whisper_model))
@@ -394,13 +422,9 @@ class WhisperLoader(BaseLoader):
                     segments_gen, info = whisper_model.transcribe(
                         audio,
                         language=language,
-                        beam_size=5,
-                        vad_filter=True,
-                        vad_parameters={
-                            'threshold': 0.5,
-                            'min_silence_duration_ms': 500,
-                            'speech_pad_ms': 400,
-                        },
+                        beam_size=beam_size,
+                        vad_filter=vad_filter,
+                        vad_parameters=vad_options,
                     )
 
                     # Convert generator to list and build result
@@ -653,7 +677,8 @@ class Whisper:
             audio: Raw PCM int16 bytes (16kHz mono)
             beam_size: Beam size for decoding
             vad_filter: Enable voice activity detection (Silero VAD)
-            vad_parameters: VAD parameters dict
+            vad_parameters: VAD settings, merged over WhisperLoader._VAD_DEFAULTS rather
+                than replacing them. Mapping only; a VadOptions is not accepted.
             language: Override the instance's default decode language for this call
             **kwargs: Additional transcription arguments
 
@@ -673,9 +698,17 @@ class Whisper:
             return self._transcribe_remote(audio, beam_size, vad_filter, vad_parameters, language, **kwargs)
         else:
             # Local mode — time each phase
-            return self._transcribe_local(audio, language, **kwargs)
+            return self._transcribe_local(audio, beam_size, vad_filter, vad_parameters, language, **kwargs)
 
-    def _transcribe_local(self, audio: bytes, language: str, **kwargs) -> Dict[str, Any]:
+    def _transcribe_local(
+        self,
+        audio: bytes,
+        beam_size: int,
+        vad_filter: bool,
+        vad_parameters: Optional[Dict[str, Any]],
+        language: str,
+        **kwargs,
+    ) -> Dict[str, Any]:
         """Execute local transcription with perf timing."""
         # Preprocess phase — convert raw PCM bytes to model input format
         t0 = time.perf_counter()
@@ -684,7 +717,15 @@ class Whisper:
 
         # GPU inference phase — run transcription model
         t0 = time.perf_counter()
-        raw_output = WhisperLoader.inference(self._model, preprocessed, self._metadata, language=language)
+        raw_output = WhisperLoader.inference(
+            self._model,
+            preprocessed,
+            self._metadata,
+            language=language,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
+            vad_parameters=vad_parameters,
+        )
         t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract requested output fields
