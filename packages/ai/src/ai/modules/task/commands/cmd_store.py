@@ -40,6 +40,16 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer
 
 
+class _CapExceeded(ValueError):
+    """fs_read_many total-payload cap violation — fails the whole request.
+
+    Distinct from ValueError so per-path validation errors (traversal,
+    reserved segments, malformed ids) stay per-entry data instead of
+    aborting the batch; subclassing ValueError keeps upstream DAP error
+    conversion unchanged.
+    """
+
+
 # =============================================================================
 # STORE COMMANDS MIXIN
 # =============================================================================
@@ -233,6 +243,12 @@ class StoreCommands(DAPConn):
         blobs: list = []
         total = 0
         for path in paths:
+            # Reject malformed elements up front, without echoing the raw
+            # value into the store layer or the response body.
+            if not isinstance(path, str) or not path:
+                blobs.append(b'')
+                entries.append({'path': str(path), 'size': 0, 'ok': False, 'error': 'path must be a non-empty string'})
+                continue
             # Each entry succeeds or fails alone (missing files are data,
             # not errors); authorization runs inside every open_read.
             try:
@@ -241,6 +257,11 @@ class StoreCommands(DAPConn):
                 try:
                     # Whole-file read in chunk-sized steps
                     size = int(info.get('size', 0))
+                    # Budget check BEFORE buffering: never allocate a file
+                    # the cap cannot admit ('while offset < size' bounds the
+                    # read, so the opened size is the allocation bound).
+                    if total + size > budget:
+                        raise _CapExceeded('fs_read_many caps at 32 MiB total payload — re-batch with fewer paths')
                     buf = bytearray()
                     offset = 0
                     while offset < size:
@@ -254,10 +275,10 @@ class StoreCommands(DAPConn):
 
                 total += len(buf)
                 if total > budget:
-                    raise ValueError('fs_read_many caps at 32 MiB total payload — re-batch with fewer paths')
+                    raise _CapExceeded('fs_read_many caps at 32 MiB total payload — re-batch with fewer paths')
                 blobs.append(bytes(buf))
                 entries.append({'path': path, 'size': len(buf), 'ok': True})
-            except ValueError:
+            except _CapExceeded:
                 # Cap violations abort the whole request (see docstring)
                 raise
             except Exception as exc:

@@ -40,6 +40,40 @@ from fastapi import Request
 from fastapi.responses import FileResponse, JSONResponse
 
 
+def _decode_fetch_claim(token: str):
+    """
+    Decode and generation-gate a fetch capability token.
+
+    Returns:
+        ``(payload, None)`` on success or ``(None, error_response)`` on
+        failure. Both fetch routes MUST validate through this helper so the
+        decode options and the claim-generation gate can never diverge.
+
+    The generation gate runs before anything else is read: `v` says how to
+    interpret the rest of the payload. A v1 claim (pre-#1686) holds a WIRE
+    path; served under today's meaning it would be a store-root-relative
+    physical path into another user's tree — see FETCH_CLAIM_VERSION.
+    """
+    signing_key = os.environ.get('RR_SIGNING_KEY', '')
+    if not signing_key:
+        return None, JSONResponse({'error': 'Server signing key not configured'}, status_code=500)
+
+    try:
+        # Require the `exp` claim so a signed token without an expiration is
+        # rejected rather than treated as non-expiring.
+        payload = jwt.decode(token, signing_key, algorithms=['HS256'], options={'require': ['exp']})
+    except jwt.ExpiredSignatureError:
+        return None, JSONResponse({'error': 'Token expired'}, status_code=401)
+    except jwt.InvalidTokenError as e:
+        return None, JSONResponse({'error': f'Invalid token: {e}'}, status_code=401)
+
+    from ai.account.file_store import FETCH_CLAIM_VERSION  # deferred: Account singleton
+
+    if payload.get('v') != FETCH_CLAIM_VERSION:
+        return None, JSONResponse({'error': 'Token format no longer supported'}, status_code=401)
+    return payload, None
+
+
 async def handle_fetch(request: Request):
     """
     Serve a file from the filesystem store, authenticated via JWT query param.
@@ -58,27 +92,9 @@ async def handle_fetch(request: Request):
     if not token:
         return JSONResponse({'error': 'Missing token parameter'}, status_code=401)
 
-    signing_key = os.environ.get('RR_SIGNING_KEY', '')
-    if not signing_key:
-        return JSONResponse({'error': 'Server signing key not configured'}, status_code=500)
-
-    try:
-        # Require the `exp` claim so a signed token without an expiration is
-        # rejected rather than treated as non-expiring.
-        payload = jwt.decode(token, signing_key, algorithms=['HS256'], options={'require': ['exp']})
-    except jwt.ExpiredSignatureError:
-        return JSONResponse({'error': 'Token expired'}, status_code=401)
-    except jwt.InvalidTokenError as e:
-        return JSONResponse({'error': f'Invalid token: {e}'}, status_code=401)
-
-    # Gate on generation before reading anything else: `v` says how to
-    # interpret the rest of the payload. A v1 claim (pre-#1686) holds a WIRE
-    # path; served under today's meaning it would be a store-root-relative
-    # physical path into another user's tree — see FETCH_CLAIM_VERSION.
-    from ai.account.file_store import FETCH_CLAIM_VERSION  # deferred: Account singleton
-
-    if payload.get('v') != FETCH_CLAIM_VERSION:
-        return JSONResponse({'error': 'Token format no longer supported'}, status_code=401)
+    payload, error = _decode_fetch_claim(token)
+    if error is not None:
+        return error
 
     user_id = payload.get('sub')
     path = payload.get('path')
@@ -155,22 +171,9 @@ async def handle_fetch_dir(request: Request):
     if not token or not subpath:
         return JSONResponse({'error': 'Missing token or path'}, status_code=401)
 
-    signing_key = os.environ.get('RR_SIGNING_KEY', '')
-    if not signing_key:
-        return JSONResponse({'error': 'Server signing key not configured'}, status_code=500)
-
-    try:
-        payload = jwt.decode(token, signing_key, algorithms=['HS256'], options={'require': ['exp']})
-    except jwt.ExpiredSignatureError:
-        return JSONResponse({'error': 'Token expired'}, status_code=401)
-    except jwt.InvalidTokenError as e:
-        return JSONResponse({'error': f'Invalid token: {e}'}, status_code=401)
-
-    # Same generation gate as handle_fetch: `v` states what the claim MEANS.
-    from ai.account.file_store import FETCH_CLAIM_VERSION  # deferred: Account singleton
-
-    if payload.get('v') != FETCH_CLAIM_VERSION:
-        return JSONResponse({'error': 'Token format no longer supported'}, status_code=401)
+    payload, error = _decode_fetch_claim(token)
+    if error is not None:
+        return error
 
     dir_claim = payload.get('dir')
     if not payload.get('sub') or not dir_claim or not isinstance(dir_claim, str):

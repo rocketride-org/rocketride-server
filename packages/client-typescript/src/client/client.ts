@@ -2326,18 +2326,26 @@ export class RocketRideClient extends DAPClient {
 		const entries = ((response as any).body?.entries ?? []) as Array<{ path: string; size: number; ok: boolean; error?: string }>;
 		const frame = ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0);
 
-		// Decode the length-prefixed frame in entry order
+		// Decode the length-prefixed frame in entry order. Every entry (failed
+		// ones included) contributes one blob, so a short frame is corruption —
+		// fail loudly, never return wrong bytes.
 		const results: Array<{ path: string; ok: boolean; data?: Uint8Array; error?: string }> = [];
 		let offset = 0;
 		for (const entry of entries) {
-			let data: Uint8Array | undefined;
-			if (offset + 4 <= frame.length) {
-				const len = (frame[offset] << 24) | (frame[offset + 1] << 16) | (frame[offset + 2] << 8) | frame[offset + 3];
-				offset += 4;
-				data = frame.slice(offset, offset + len);
-				offset += len;
+			if (offset + 4 > frame.length) {
+				throw new Error('fs_read_many frame truncated (missing length prefix)');
 			}
-			results.push(entry.ok ? { path: entry.path, ok: true, data: data ?? new Uint8Array(0) } : { path: entry.path, ok: false, error: entry.error });
+			const len = ((frame[offset] << 24) | (frame[offset + 1] << 16) | (frame[offset + 2] << 8) | frame[offset + 3]) >>> 0;
+			offset += 4;
+			if (offset + len > frame.length) {
+				throw new Error('fs_read_many frame truncated (payload shorter than its length prefix)');
+			}
+			const data = frame.slice(offset, offset + len);
+			offset += len;
+			results.push(entry.ok ? { path: entry.path, ok: true, data } : { path: entry.path, ok: false, error: entry.error });
+		}
+		if (offset !== frame.length) {
+			throw new Error(`fs_read_many frame has ${frame.length - offset} trailing bytes`);
 		}
 		return results;
 	}
