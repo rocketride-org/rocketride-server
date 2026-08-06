@@ -28,6 +28,7 @@
 import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { isShadowedByAnyScope, isUnchanged } from './shared/util/workspaceOverride';
+import { createSerialQueue, SerialQueue } from './shared/util/serialQueue';
 
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 
@@ -124,6 +125,8 @@ export class ConfigManager {
 	private disposables: vscode.Disposable[] = [];
 	/** While true, config-change listeners are suppressed (inside applyAllSettings). */
 	private isBatchApplying: boolean = false;
+	/** Serializes applyAllSettings() so overlapping saves cannot interleave. */
+	private readonly applyQueue: SerialQueue = createSerialQueue();
 
 	/** Default per-group config. */
 	private static readonly DEFAULT_GROUP: ConnectionGroupConfig = {
@@ -427,12 +430,20 @@ export class ConfigManager {
 	// =========================================================================
 
 	/**
-	 * Writes every setting from the Settings UI in one transaction.
+	 * Writes every setting from the Settings UI as one batch.
 	 *
 	 * 1. Suppresses all intermediate config-change listeners so no
 	 *    connection manager reacts to half-written state.
 	 * 2. Persists VS Code settings and secure-storage keys.
 	 * 3. Refreshes the in-memory cache once from the final state.
+	 *
+	 * "Batch" means the writes are isolated from listeners, not that they roll
+	 * back: VS Code persists each `update()` as it completes, so a failure part
+	 * way through leaves the earlier keys written. The cache is refreshed on that
+	 * path too, so callers still observe the true persisted state.
+	 *
+	 * Calls are serialized — a second save waits for the first to finish rather
+	 * than clearing the batch flag out from under it.
 	 *
 	 * The caller is responsible for explicitly driving connection transitions
 	 * after this method returns (the normal debounced handlers are suppressed).
@@ -449,6 +460,14 @@ export class ConfigManager {
 	 *   instead of a misleading "saved" confirmation.
 	 */
 	public async applyAllSettings(s: SettingsSnapshot): Promise<{ shadowedKeys: string[] }> {
+		// `isBatchApplying` is a single flag, so two overlapping saves — the
+		// Settings page and the Welcome page both call this — would let whichever
+		// finishes first un-suppress the listeners while the other is still
+		// writing, which is exactly the half-written state the flag exists to hide.
+		return this.applyQueue(() => this.applyAllSettingsBatch(s));
+	}
+
+	private async applyAllSettingsBatch(s: SettingsSnapshot): Promise<{ shadowedKeys: string[] }> {
 		if (!this.context) {
 			throw new Error('ConfigManager not initialized with context');
 		}

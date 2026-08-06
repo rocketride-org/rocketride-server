@@ -32,6 +32,12 @@
 const HAS_SCHEME = /^[a-zA-Z]+:\/\//;
 
 /**
+ * Accepted-input examples for "this Host URL is unusable" messages. Shared so
+ * every entry point quotes the same formats as {@link isValidHostUrl} accepts.
+ */
+export const HOST_URL_EXAMPLES = 'localhost:5565 or https://engine.example.com';
+
+/**
  * Whether a user-entered Direct Connect host URL can form a usable HTTP(S) URL.
  *
  * Deliberately permissive: `normalizeUri()` accepts bare hosts (`localhost`,

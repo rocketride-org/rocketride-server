@@ -40,12 +40,9 @@ import { AgentManager } from '../agents/agent-manager';
 import { DeployManager } from '../connection/deploy-manager';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
 import { isSubscribed } from '../shared/util/subscriptionGate';
-import { isValidHostUrl } from '../shared/util/hostUrl';
+import { isValidHostUrl, HOST_URL_EXAMPLES } from '../shared/util/hostUrl';
 import { WORKSPACE_SETTINGS_LOCATIONS } from '../shared/util/workspaceOverride';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
-
-/** Shown when a Direct Connect Host URL is missing or unusable. */
-const HOST_URL_EXAMPLES = 'localhost:5565 or https://engine.example.com';
 
 export class SettingsProvider {
 	private disposables: vscode.Disposable[] = [];
@@ -328,10 +325,10 @@ export class SettingsProvider {
 	}
 
 	/**
-	 * Saves all settings atomically, then reconciles engines.
+	 * Saves all settings in one batch, then reconciles engines.
 	 *
 	 * Flow:
-	 *   1. ConfigManager.applyAllSettings() — writes everything atomically.
+	 *   1. ConfigManager.applyAllSettings() — writes everything in one batch.
 	 *   2. Cancel debounced config-change handlers on CMs (prevents race).
 	 *   3. Reconcile engines — checksums detect config changes, restarts
 	 *      affected engines, CMs reconnect with fresh credentials.
@@ -353,7 +350,7 @@ export class SettingsProvider {
 				return;
 			}
 
-			// Step 1: Write everything atomically — ConfigManager suppresses all
+			// Step 1: Write everything in one batch — ConfigManager suppresses all
 			// intermediate config-change listeners during the batch so no CM reacts
 			// to half-written state (e.g., new API key without new host URL).
 			const { shadowedKeys } = await this.configManager.applyAllSettings(snapshot);

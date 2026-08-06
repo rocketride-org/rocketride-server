@@ -38,7 +38,7 @@ import * as vscode from 'vscode';
 import { ConfigManager, SettingsSnapshot } from '../config';
 import { getConnectionManager, getEngineRegistry } from '../extension';
 import { ConnectionMessageHandler } from './shared/connection-message-handler';
-import { isValidHostUrl } from '../shared/util/hostUrl';
+import { isValidHostUrl, HOST_URL_EXAMPLES } from '../shared/util/hostUrl';
 import { WORKSPACE_SETTINGS_LOCATIONS } from '../shared/util/workspaceOverride';
 
 const DISMISSED_KEY = 'welcomeDismissed';
@@ -235,13 +235,13 @@ export class WelcomeProvider {
 					this.panel?.webview.postMessage({
 						type: 'showMessage',
 						level: 'error',
-						message: `Enter a valid Host URL for the ${group} Direct Connect connection — for example localhost:5565 or https://engine.example.com.`,
+						message: `Enter a valid Host URL for the ${group} Direct Connect connection — for example ${HOST_URL_EXAMPLES}.`,
 					});
 					return;
 				}
 			}
 
-			// Step 1: Atomic write — suppresses config-change listeners during the batch
+			// Step 1: Batched write — suppresses config-change listeners while writing
 			const { shadowedKeys } = await this.configManager.applyAllSettings(snapshot);
 
 			// The panel closes at the end of this method, so a webview banner would
