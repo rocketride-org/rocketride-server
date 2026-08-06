@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+import { safeSessionStorage } from './safeStorage';
+
 // =============================================================================
 // PKCE — Client-side OAuth PKCE utilities
 // Browser-only (uses crypto.subtle and fetch).
@@ -114,7 +116,7 @@ export async function generatePkce(): Promise<PkceChallenge> {
 
     // Persist the verifier in sessionStorage so it survives the browser
     // redirect to the Zitadel authorization endpoint and back.
-    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    safeSessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
 
     return { verifier, challenge };
 }
@@ -132,7 +134,7 @@ export function getStoredVerifier(): string | null {
     // Read the previously stored verifier from sessionStorage.
     // Returns null if the key does not exist (e.g., the tab was closed
     // between the initial navigation and the redirect callback).
-    return sessionStorage.getItem(PKCE_VERIFIER_KEY);
+    return safeSessionStorage.getItem(PKCE_VERIFIER_KEY);
 }
 
 /**
@@ -143,7 +145,7 @@ export function getStoredVerifier(): string | null {
  */
 export function clearStoredVerifier(): void {
     // Remove the verifier entry from sessionStorage so it cannot be reused.
-    sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+    safeSessionStorage.removeItem(PKCE_VERIFIER_KEY);
 }
 
 // =============================================================================
