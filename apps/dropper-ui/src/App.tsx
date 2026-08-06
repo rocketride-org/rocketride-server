@@ -71,7 +71,7 @@ const App: React.FC = () => {
 		if (token) {
 			window.history.replaceState({}, '', window.location.pathname);
 		} else if (!isVSCode) {
-			token = sessionStorage.getItem('auth') || '';
+			try { token = sessionStorage.getItem('auth') || ''; } catch { token = ''; }
 		}
 		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
@@ -94,12 +94,13 @@ const App: React.FC = () => {
 		});
 
 		if (!isVSCode) {
-			sessionStorage.setItem('auth', token);
+			try { sessionStorage.setItem('auth', token); } catch {}
 		}
 		setAuthToken(token);
 
 		if (isVSCode) {
 			const handleVSCodeData = (event: MessageEvent) => {
+				if (event.source !== window.parent) return;
 				const message = event.data;
 				if (message.type === 'vscodeData' && message.theme) {
 					setVscodeState({

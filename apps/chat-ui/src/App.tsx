@@ -99,7 +99,7 @@ const App: React.FC = () => {
 			window.history.replaceState({}, '', window.location.pathname);
 		} else if (!isVSCode) {
 			// Fall back to session storage (skip in VSCode webview - shared storage would mix auth across tabs)
-			token = sessionStorage.getItem('auth') || '';
+			try { token = sessionStorage.getItem('auth') || ''; } catch { token = ''; }
 		}
 		if (!token && API_CONFIG.devMode && API_CONFIG.ROCKETRIDE_APIKEY) {
 			token = API_CONFIG.ROCKETRIDE_APIKEY;
@@ -126,7 +126,7 @@ const App: React.FC = () => {
 
 		// Save the token in session storage (skip in VSCode) and our state
 		if (!isVSCode) {
-			sessionStorage.setItem('auth', token);
+			try { sessionStorage.setItem('auth', token); } catch {}
 		}
 		setAuthToken(token);
 
@@ -134,6 +134,7 @@ const App: React.FC = () => {
 		if (isVSCode) {
 			// Listen for combined host and theme data from parent
 			const handleVSCodeData = (event: MessageEvent) => {
+				if (event.source !== window.parent) return;
 				const message = event.data;
 
 				if (message.type === 'vscodeData') {

@@ -114,7 +114,7 @@ export async function generatePkce(): Promise<PkceChallenge> {
 
     // Persist the verifier in sessionStorage so it survives the browser
     // redirect to the Zitadel authorization endpoint and back.
-    sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
+    try { sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier); } catch {}
 
     return { verifier, challenge };
 }
@@ -132,7 +132,7 @@ export function getStoredVerifier(): string | null {
     // Read the previously stored verifier from sessionStorage.
     // Returns null if the key does not exist (e.g., the tab was closed
     // between the initial navigation and the redirect callback).
-    return sessionStorage.getItem(PKCE_VERIFIER_KEY);
+    try { return sessionStorage.getItem(PKCE_VERIFIER_KEY); } catch { return null; }
 }
 
 /**
@@ -143,7 +143,7 @@ export function getStoredVerifier(): string | null {
  */
 export function clearStoredVerifier(): void {
     // Remove the verifier entry from sessionStorage so it cannot be reused.
-    sessionStorage.removeItem(PKCE_VERIFIER_KEY);
+    try { sessionStorage.removeItem(PKCE_VERIFIER_KEY); } catch {}
 }
 
 // =============================================================================
