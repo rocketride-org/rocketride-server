@@ -37,7 +37,7 @@ export const statusBarEntry: IGalleryEntry = {
 	docNote: 'Never mount it and never build a per-app status strip. Per-item state belongs in the view as a StatusBadge; view-level messages are a Banner. An app REACTS to the same global state via useShellConnection() - e.g. disabling actions while offline instead of inventing a second status UI.',
 	code: `// Apps never render the StatusBar - the shell wires it from the global
 // connection state. An app REACTS to the same state via the shell hook:
-import { useShellConnection } from 'shell-ui';
+import { useShellConnection } from 'shell';
 import { Button } from 'shared';
 
 function RunControls() {

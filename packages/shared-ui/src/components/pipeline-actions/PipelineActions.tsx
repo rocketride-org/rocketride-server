@@ -18,7 +18,7 @@
 
 import React, { ReactElement, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Button } from '../button/Button';
+import { Button } from 'shell';
 import EndpointInfoModal from './EndpointInfoModal';
 
 // =============================================================================

@@ -54,7 +54,7 @@ Not all modules support all commands. Run `./builder --help` for the full list.
 | `profiler-ui` | Profiler web interface | build, clean |
 | `server` | C++ engine (downloads pre-built first, or compile from source) | build, compile, clean, test, build-all, clean-all, configure-cmake, package |
 | `shared-ui` | Shared UI component library | build, clean |
-| `shell-ui` | Shell micro-frontend host | build, clean, dev |
+| `shell` | Shell micro-frontend host | build, clean, dev |
 | `tika` | Java document parser | build, clean |
 | `vcpkg` | C++ package manager (auto-installed for server build) | build, clean |
 | `vscode` | VSCode extension | build, compile, clean |

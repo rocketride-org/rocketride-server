@@ -17,7 +17,7 @@
 import React, { type CSSProperties } from 'react';
 import type { ChatMessage } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { Banner } from '../../../components/banner/Banner';
+import { Banner } from 'shell';
 
 // =============================================================================
 // STYLES
@@ -141,7 +141,7 @@ const styles = {
 // COMPONENT
 // =============================================================================
 
-interface MessageBubbleProps {
+export interface MessageBubbleProps {
 	message: ChatMessage;
 }
 

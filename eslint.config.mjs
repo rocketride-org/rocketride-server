@@ -113,6 +113,68 @@ export default tseslint.config(
 		},
 	},
 
+	// =========================================================================
+	// SHELL-UNIFICATION IMPORT CONTRACT
+	// =========================================================================
+	// Two legal import forms, declared by the specifier itself:
+	//   Form 1 - bare 'shell':      runtime-bound platform surface (barrel-only)
+	//   Form 2 - 'shared/<group>':  statically bundled library (deep specs only)
+	// The bare 'shared' root barrel and the old 'shell' name do not exist.
+	{
+		files: ['**/*.{ts,tsx,mts}'],
+		rules: {
+			'no-restricted-imports': ['error', {
+				paths: [
+					{ name: 'shared', message: "The shared root barrel is retired. Surface symbols come from 'shell'; library components use deep 'shared/<group>' specs." },
+					{ name: 'shell', message: "Renamed: import from 'shell'." },
+				],
+				patterns: [
+					{ group: ['shell/*'], message: "The shell surface is barrel-only: import the name from 'shell'." },
+					{ group: ['shell/*'], message: "Renamed: import from 'shell'." },
+				],
+			}],
+		},
+	},
+	// The shell package itself and the vscode extension: NO 'shell' barrel.
+	// Inside the shell it is a boot-order hazard (self-import resolves through
+	// the MF share scope before the factory registers); in vscode no shell
+	// runtime exists - components are statically bundled, so the barrel would
+	// be semantically false. Both use relative imports / deep shared specs.
+	{
+		files: ['packages/shell/**/*.{ts,tsx,mts}', 'apps/vscode/**/*.{ts,tsx,mts}'],
+		rules: {
+			'no-restricted-imports': ['error', {
+				paths: [
+					{ name: 'shell', message: "No 'shell' barrel here: use relative imports (shell package) or deep 'shared/<group>' specs (vscode)." },
+					{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
+					{ name: 'shell', message: "Renamed package: use relative imports or deep 'shared/<group>' specs." },
+				],
+				patterns: [
+					// The in-tree STATIC path form is legal here: bundled component copies are
+					// bundled copies (no shell runtime in vscode; no self-barrel in shell).
+					{ group: ['shell/*', '!shell/src/*'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>); everything else is relative (in-package) or the barrel (elsewhere)." },
+				],
+			}],
+		},
+	},
+
+	// shared-ui (the static library): imports the surface from 'shell' (Form 1)
+	// and non-surface stock internals via the in-tree path form.
+	{
+		files: ['packages/shared-ui/**/*.{ts,tsx,mts}'],
+		rules: {
+			'no-restricted-imports': ['error', {
+				paths: [
+					{ name: 'shared', message: "The shared root barrel is retired: use relative imports inside the library." },
+					{ name: 'shell', message: "Renamed: import from 'shell'." },
+				],
+				patterns: [
+					{ group: ['shell/*', '!shell/src/*'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>)." },
+				],
+			}],
+		},
+	},
+
 	// Prettier compatibility (must be last)
 	prettierConfig
 );

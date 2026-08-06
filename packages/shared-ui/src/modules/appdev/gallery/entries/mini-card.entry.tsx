@@ -27,7 +27,7 @@
 /** Gallery entry for the MiniCard metric tile and its MiniContainer grid row. */
 
 import React from 'react';
-import { MiniCard, MiniContainer } from '../../../../components/mini-card/MiniCard';
+import { MiniCard, MiniContainer } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Maps the colour knob to a semantic token (default = primary text colour). */

@@ -15,14 +15,14 @@
  */
 
 import React, { useState, useCallback, CSSProperties } from 'react';
-import { commonStyles } from '../../themes/styles';
-import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
-import { SidebarMenu } from '../../components/sidebar-menu/SidebarMenu';
-import { StatusBadge } from '../../components/status-badge/StatusBadge';
-import type { StatusVariant } from '../../components/status-badge/StatusBadge';
+import { commonStyles } from 'shell/src/themes/styles';
+import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from 'shell';
+import { SidebarMenu } from 'shell';
+import { StatusBadge } from 'shell';
+import type { StatusVariant } from 'shell';
 import { Explorer, NOOP_VFS } from '../explorer';
 import type { AppListItem, ISidebarViewProps } from './types';
-import type { ViewMenu } from '../../types/viewMenu';
+import type { ViewMenu } from 'shell';
 import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from '../explorer';
 
 // =============================================================================

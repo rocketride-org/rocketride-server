@@ -11,7 +11,7 @@
  * ActivityPanel — the Activity Stream CardDataGrid shared by every
  * server-monitor host (admin-ui, monitor-ui, rocket-ui, the VSCode webview).
  *
- * Always LOCAL mode (data-in, callbacks-out; no shell-ui imports): the host
+ * Always LOCAL mode (data-in, callbacks-out; no shell imports): the host
  * hands down the accumulated activity events, and each new array applies
  * silently in place. The event display derivation ({@link getEventDisplay})
  * is exported for the Overview surfaces, which render the same events in
@@ -25,10 +25,8 @@
 import React, { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import type { CellComponent } from 'tabulator-tables';
-import { Card } from '../../../components/card/Card';
-import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import { badgeEl, mutedEl } from '../../../components/data-grid/defaults';
-import type { CellBadgeVariant, GridColumnDefinition } from '../../../components/data-grid/defaults';
+import { Card, CardDataGrid, badgeEl, mutedEl } from 'shell';
+import type { CellBadgeVariant, GridColumnDefinition } from 'shell';
 import type { ActivityEvent, DashboardEvent, TaskEvent } from '../types';
 import { formatTime } from '../util';
 

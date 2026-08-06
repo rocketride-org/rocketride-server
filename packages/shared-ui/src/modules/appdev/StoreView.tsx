@@ -35,11 +35,11 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button } from '../../components/button/Button';
-import { Card } from '../../components/card/Card';
-import { EmptyState } from '../../components/empty-state/EmptyState';
-import { InputField } from '../../components/input-field/InputField';
-import { StatusBadge } from '../../components/status-badge/StatusBadge';
+import { Button } from 'shell';
+import { Card } from 'shell';
+import { EmptyState } from 'shell';
+import { InputField } from 'shell';
+import { StatusBadge } from 'shell';
 import type { AppSummary, IAppBuilderHost, ListingDraft, PreflightCheck, ReviewTimelineItem } from './types';
 
 // =============================================================================

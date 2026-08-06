@@ -69,8 +69,8 @@ import TidyIcon from '../../../assets/icons/TidyIcon';
 
 import { INodeType } from '../types';
 import { useFlowProject } from '../context/FlowProjectContext';
-import { usePrefs } from '../../../contexts/PrefsContext';
-import { isInVSCode } from '../../../themes/vscode';
+import { usePrefs } from 'shell';
+import { isInVSCode } from 'shell/src/themes/vscode';
 import { useAutoLayout } from '../hooks/useAutoLayout';
 import { useTemplateInstantiator } from '../hooks/useTemplateInstantiator';
 

@@ -37,9 +37,9 @@
 import type { PipelineInputConnection } from 'rocketride';
 
 // Re-export all general types so flow consumers can import from one place
-export type { IProject, IProjectComponent, IComponentUI, IControlConnection, IInputConnection, IPosition, IDimensions, IService, IServiceCatalog, INodeConfig, IValidateResponse, IComponentValidatePayload, IValidatePipelinePayload, IServiceSchema, IToolchainExport, IToolchainState, IForm, IFormData, ITaskStatus, IFlowData } from '../../types/project';
+export type { IProject, IProjectComponent, IComponentUI, IControlConnection, IInputConnection, IPosition, IDimensions, IService, IServiceCatalog, INodeConfig, IValidateResponse, IComponentValidatePayload, IValidatePipelinePayload, IServiceSchema, IToolchainExport, IToolchainState, IForm, IFormData, ITaskStatus, IFlowData } from 'shell/src/types/project';
 
-export { IServiceCapabilities, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../../types/project';
+export { IServiceCapabilities, ITaskState, DEFAULT_TOOLCHAIN_STATE } from 'shell/src/types/project';
 
 /** Pipeline schema version. Must match the server's IServices::VERSION (engine-lib). */
 export const PIPELINE_SCHEMA_VERSION = 1;
@@ -114,7 +114,7 @@ export interface INodeData {
 	description?: string;
 
 	/** User-configured form values. */
-	config: import('../../types/project').INodeConfig;
+	config: import('shell/src/types/project').INodeConfig;
 
 	/** Whether the current config passes validation. */
 	formDataValid?: boolean;
@@ -126,7 +126,7 @@ export interface INodeData {
 	input?: PipelineInputConnection[];
 
 	/** Incoming invoke (control-flow) connections. */
-	control?: import('../../types/project').IControlConnection[];
+	control?: import('shell/src/types/project').IControlConnection[];
 }
 
 /**
@@ -138,10 +138,10 @@ export interface INodeData {
 export interface INode {
 	id: string;
 	type: string;
-	position: import('../../types/project').IPosition;
+	position: import('shell/src/types/project').IPosition;
 	data: INodeData;
 	parentId?: string;
-	measured?: import('../../types/project').IDimensions;
+	measured?: import('shell/src/types/project').IDimensions;
 	selected?: boolean;
 	dragging?: boolean;
 	deletable?: boolean;

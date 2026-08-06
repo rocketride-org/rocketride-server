@@ -27,8 +27,8 @@
 /** Gallery entry for the SidebarMenu vertical menu list (sidebar content). */
 
 import React, { useState } from 'react';
-import { SidebarMenu } from '../../../../components/sidebar-menu/SidebarMenu';
-import type { ViewMenu } from '../../../../types/viewMenu';
+import { SidebarMenu } from 'shell';
+import type { ViewMenu } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a menu with counts and a section, in a sidebar-width box. */

@@ -12,7 +12,7 @@
  * server-monitor overview surface (admin-ui's Dashboard, the Monitor
  * Overview tab in monitor-ui / rocket-ui / the VSCode webview).
  *
- * Always LOCAL mode (data-in, callbacks-out; no shell-ui imports): the host
+ * Always LOCAL mode (data-in, callbacks-out; no shell imports): the host
  * hands down the dashboard snapshot, and each new snapshot applies silently
  * in place (connections first, then running tasks, then the five most recent
  * completed ones). Clicking a client row opens the connection record panel;
@@ -25,11 +25,8 @@
 
 import React, { useMemo, useState } from 'react';
 import type { CellComponent } from 'tabulator-tables';
-import { Button } from '../../../components/button/Button';
-import { Card } from '../../../components/card/Card';
-import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import { badgeEl, monoEl, mutedEl } from '../../../components/data-grid/defaults';
-import type { CellBadgeVariant, GridColumnDefinition } from '../../../components/data-grid/defaults';
+import { Button, Card, CardDataGrid, badgeEl, monoEl, mutedEl } from 'shell';
+import type { CellBadgeVariant, GridColumnDefinition } from 'shell';
 import type { DashboardResponse, DashboardTask } from '../types';
 import { formatNumber, formatTimeAgo, formatUptime } from '../util';
 import { ConnectionRecordPanel } from './ConnectionRecordPanel';

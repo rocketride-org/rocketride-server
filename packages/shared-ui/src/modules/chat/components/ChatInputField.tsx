@@ -8,7 +8,7 @@
  * for future attachments), an auto-growing textarea, and the stock primary Send
  * Button. Enter sends; Shift+Enter inserts a newline. The whole row is disabled
  * (input + Send) when `disabled` is true — callers pass the global connection
- * state; this component never imports shell-ui.
+ * state; this component never imports shell.
  *
  * The textarea (rather than the stock single-line InputField) is required so
  * Shift+Enter can insert a newline; it is styled from the same
@@ -17,8 +17,8 @@
 
 import { CHAT_COLUMN_MAX_WIDTH } from '../types';
 import React, { useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { commonStyles } from '../../../themes/styles';
-import { Button } from '../../../components/button/Button';
+import { commonStyles } from 'shell/src/themes/styles';
+import { Button } from 'shell';
 
 // =============================================================================
 // STYLES
@@ -57,7 +57,7 @@ const styles = {
 // COMPONENT
 // =============================================================================
 
-interface ChatInputFieldProps {
+export interface ChatInputFieldProps {
 	onSend: (text: string) => void;
 	disabled?: boolean;
 	placeholder?: string;

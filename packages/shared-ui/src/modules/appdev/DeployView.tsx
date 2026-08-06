@@ -38,8 +38,8 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { EmptyState } from '../../components/empty-state/EmptyState';
-import { StatusBadge } from '../../components/status-badge/StatusBadge';
+import { EmptyState } from 'shell';
+import { StatusBadge } from 'shell';
 import type { AppSummary, AppVersionInfo, IAppBuilderHost, RungKind, RungPin } from './types';
 
 // =============================================================================

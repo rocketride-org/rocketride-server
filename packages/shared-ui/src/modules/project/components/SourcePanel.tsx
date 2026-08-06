@@ -28,21 +28,21 @@
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { commonStyles } from '../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
 import { PlayBar } from '../../../components/play-bar/PlayBar';
 import type { ITimeSelection } from '../../../components/play-bar/PlayBar';
 import Utilization from '../../../components/utilization/Utilization';
 import { StatusActions, StatusElapsed, StatusHeaderInfo } from '../../../components/status-header/StatusHeader';
-import { Card } from '../../../components/card/Card';
+import { Card } from 'shell';
 import { SourceTokensContent } from '../../../components/tokens/Tokens';
 import { SourceFlowContent } from '../../../components/flow/Flow';
 import Trace from '../../../components/trace/Trace';
 import { TraceDetail } from '../../../components/trace/TraceDetail';
-import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
-import { Button } from '../../../components/button/Button';
+import { DetailPanel } from 'shell';
+import { Button } from 'shell';
 import Errors from '../../../components/errors/Errors';
-import { EmptyState } from '../../../components/empty-state/EmptyState';
+import { EmptyState } from 'shell';
 import PipelineActions from '../../../components/pipeline-actions/PipelineActions';
 
 import { useTaskEvents } from '../hooks/useTaskEvents';

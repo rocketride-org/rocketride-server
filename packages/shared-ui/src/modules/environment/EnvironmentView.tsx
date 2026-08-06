@@ -9,7 +9,7 @@
  * Pure component that receives all data as props and delegates server
  * mutations to async callback props. The host application is responsible
  * for fetching/saving env data via whatever transport it uses (direct
- * client calls in shell-ui, postMessage bridge in VS Code).
+ * client calls in shell, postMessage bridge in VS Code).
  *
  * Rendering modes:
  *   - Single slot: no tab strip, renders scope cards directly
@@ -21,12 +21,9 @@
 
 import React, { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { TabPanel } from '../../components/tab-panel/TabPanel';
-import { TabControl } from '../../components/tab-control/TabControl';
-import { ContentHeader } from '../../components/content-header/ContentHeader';
-import type { ITabPanelPanel } from '../../components/tab-panel/TabPanel';
-import type { ViewMenu } from '../../types/viewMenu';
-import { commonStyles } from '../../themes/styles';
+import { TabPanel, TabControl, ContentHeader } from 'shell';
+import type { ITabPanelPanel, ViewMenu } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import { EnvScopeCard } from '../account/components/EnvironmentPanel';
 
 // =============================================================================

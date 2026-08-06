@@ -16,7 +16,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles } from '../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 
 // =============================================================================
 // HELPERS

@@ -95,6 +95,18 @@ declare module 'shared/assets/*' {
 }
 
 /**
+ * `process.env.*` in these browser-bound sources is NOT the Node global:
+ * rsbuild's `source.define` replaces each referenced key with a string
+ * literal at build time (keys absent from a bundle's define map are left
+ * unreplaced and would fail at runtime — the define maps are the source of
+ * truth for what may be referenced). This types that substitution seam
+ * without @types/node, which would wrongly claim a full Node runtime.
+ */
+declare const process: {
+	readonly env: Record<string, string | undefined>;
+};
+
+/**
  * Webpack 5 / Rspack provide `import.meta.webpackContext` for build-time
  * directory scans (the modern equivalent of `require.context`). The bundler
  * statically replaces the call with a context object whose `.keys()` lists

@@ -36,7 +36,7 @@ export const sidebarFrameEntry: IGalleryEntry = {
 	blurb: 'The shell-owned sidebar container: fixed Header (brand + app label) on top, fixed Footer (user card) at the bottom, and a scrolling app-content slot between them, filled via useSidebarContent. No registered content = no sidebar, full-width client area. 260px expanded, 56px icon rail, drag-resizable.',
 	docNote: 'Header and Footer are the frame - apps never mount, fill, or restyle them; the app fills only the middle slot with stock components (SidebarMenu, Explorer) and custom sections. Collapsed = still mounted: on the icon rail the slot keeps rendering and components read useSidebarCollapsed() to choose their icon form. Memoize the registered node - an inline node re-registers every render.',
 	code: `import { useMemo } from 'react';
-import { useSidebarContent } from 'shell-ui';
+import { useSidebarContent } from 'shell';
 import { SidebarMenu, useSidebarCollapsed } from 'shared';
 
 // A free-form sidebar section that hides itself on the icon rail.

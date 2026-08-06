@@ -27,8 +27,8 @@
 /** Gallery entry for the Section + LabelValue record-body vocabulary. */
 
 import React from 'react';
-import { LabelValue, Section } from '../../../../components/section/Section';
-import { StatusBadge } from '../../../../components/status-badge/StatusBadge';
+import { LabelValue, Section } from 'shell';
+import { StatusBadge } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a Section with LabelValue rows - the DetailPanel body idiom. */

@@ -18,8 +18,8 @@ import { renderFinalSections, resultFieldCount } from './renderers/render_final'
 import type { TraceRow } from '../../modules/project/types';
 import { parseServerEvent } from '../../modules/project/utils';
 import { useTraceState } from '../../modules/project/hooks/useTraceState';
-import { commonStyles } from '../../themes/styles';
-import { EmptyState } from '../empty-state/EmptyState';
+import { commonStyles } from 'shell/src/themes/styles';
+import { EmptyState } from 'shell';
 import { ToggleGroup } from '../toggle-group/ToggleGroup';
 
 // =============================================================================

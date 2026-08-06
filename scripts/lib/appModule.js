@@ -29,7 +29,7 @@
  * definition from a minimal config.
  *
  * Build caching: each app's bundle action fingerprints its own src/,
- * shell-ui/src, shared-ui/src, and package.json.  If nothing changed and
+ * shell/src, shared-ui/src, and package.json.  If nothing changed and
  * build output exists, the bundle step is skipped.  --force bypasses the
  * cache.  When a rebuild IS needed, the build output directory is cleaned
  * first to prevent stale chunks.
@@ -62,7 +62,7 @@ const { registerApp } = require('./registerApp');
 
 // Shared dependency sources — same for every remote app.
 // PROJECT_ROOT is always rocketride-server/, regardless of overlay.
-const SHELL_UI_SRC  = path.join(PROJECT_ROOT, 'apps', 'shell-ui', 'src');
+const SHELL_UI_SRC  = path.join(PROJECT_ROOT, 'packages', 'shell', 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
 
 /**

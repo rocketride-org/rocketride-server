@@ -33,10 +33,10 @@
  */
 
 import React, { useState } from 'react';
-import { Button } from '../../../../components/button/Button';
-import { DetailPanel } from '../../../../components/detail-panel/DetailPanel';
-import { LabelValue, Section } from '../../../../components/section/Section';
-import { StatusBadge } from '../../../../components/status-badge/StatusBadge';
+import { Button } from 'shell';
+import { DetailPanel } from 'shell';
+import { LabelValue, Section } from 'shell';
+import { StatusBadge } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a contained DetailPanel opened from a button on the stage. */

@@ -24,8 +24,8 @@
  */
 
 import React, { useState, useMemo, type CSSProperties } from 'react';
-import { commonStyles } from '../../../themes/styles';
-import { Modal } from '../../../components/modal/Modal';
+import { commonStyles } from 'shell/src/themes/styles';
+import { Modal } from 'shell';
 import { PlanPicker, planAmount } from '../../checkout/PlanPicker';
 import type { CheckoutPlan } from '../../checkout/types';
 

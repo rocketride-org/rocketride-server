@@ -28,16 +28,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { CellComponent } from 'tabulator-tables';
-import { Card } from '../../../components/card/Card';
-import { Button } from '../../../components/button/Button';
+import { Card, Button, MiniCard, MiniContainer, CardDataGrid, mutedEl, DetailPanel, Section, LabelValue } from 'shell';
+import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest, GridColumnDefinition } from 'shell';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
-import { MiniCard, MiniContainer } from '../../../components/mini-card/MiniCard';
-import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
-import { formatDateValue, mutedEl } from '../../../components/data-grid/defaults';
-import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
-import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
-import { Section, LabelValue } from '../../../components/section/Section';
+import { formatDateValue } from 'shell/src/components/data-grid/defaults';
 import type { CreditBalance, LedgerTransaction, TransactionsResult, UsageRollup } from '../types';
 
 // =============================================================================

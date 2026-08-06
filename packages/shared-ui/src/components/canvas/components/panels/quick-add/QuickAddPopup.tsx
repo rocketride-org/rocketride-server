@@ -22,7 +22,7 @@ import { CATEGORY_TITLES } from '../create-node/categoryTitles';
 import { getOutputLaneDisplayValues, renameInvokeType } from '../../../util/helpers';
 import { generateNodeId } from '../../../util';
 import { Icon } from '../../../util/Icon';
-import { commonStyles } from '../../../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 
 // =============================================================================
 // Positioning

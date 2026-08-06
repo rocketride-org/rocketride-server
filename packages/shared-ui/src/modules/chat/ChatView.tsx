@@ -12,11 +12,11 @@
  *
  * Styling uses only predefined --rr-* CSS custom property tokens so the view
  * automatically adapts to every RocketRide theme (light, dark, VS Code, etc.).
- * ChatView never imports shell-ui: the disabled state arrives via `isConnected`.
+ * ChatView never imports shell: the disabled state arrives via `isConnected`.
  */
 
 import React, { type CSSProperties } from 'react';
-import { commonStyles } from '../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 import type { IChatViewProps } from './types';
 import { MessageList } from './components/MessageList';
 import { ChatInputField } from './components/ChatInputField';

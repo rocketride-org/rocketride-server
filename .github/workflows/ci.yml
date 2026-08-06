@@ -242,7 +242,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   #  Shell API contract — fail the PR on an incompatible or un-frozen change to
-  #  shell-ui's public surface. `shell:check` runs the contract tsc pre-check
+  #  the shell's public surface. `shell:check` runs the contract tsc pre-check
   #  (so REMOVING/breaking a frozen member fails via the per-version floors) and
   #  the actionable-drift check (so ADDING an export without `shell:freeze`
   #  fails). A second step regenerates the committed floors from the immutable
@@ -280,13 +280,13 @@ jobs:
       - name: shell contract floors are un-tampered — regen must be a no-op
         # Regenerate the barrels + per-version floors from the immutable frozen
         # versions, then fail on any diff. A nonzero diff means the committed
-        # contract-check.generated.ts (or a shell-api barrel) was hand-edited —
+        # contract-check.generated.ts (or a contract barrel) was hand-edited —
         # e.g. a `_floor_vN` line dropped so a removed export slips past tsc. The
         # SDK/tsc prereqs are already warm from the step above.
         run: |
           node scripts/build.js shell:regen
           git diff --exit-code -- \
-            apps/shell-ui/src/contract-check.generated.ts \
+            packages/shell/src/contract-check.generated.ts \
             packages/shell-api/index.ts \
             packages/shell-api/latest.ts
 

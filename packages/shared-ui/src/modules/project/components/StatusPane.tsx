@@ -21,11 +21,11 @@
  */
 
 import React, { CSSProperties, useMemo } from 'react';
-import { Button } from '../../../components/button/Button';
-import { EmptyState } from '../../../components/empty-state/EmptyState';
-import { MiniCard, MiniContainer } from '../../../components/mini-card/MiniCard';
-import { commonStyles } from '../../../themes/styles';
-import type { ITaskStatus } from '../../../types/project';
+import { Button } from 'shell';
+import { EmptyState } from 'shell';
+import { MiniCard, MiniContainer } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
+import type { ITaskStatus } from 'shell/src/types/project';
 import type { TaskChapter } from '../hooks/useTaskEvents';
 
 // =============================================================================

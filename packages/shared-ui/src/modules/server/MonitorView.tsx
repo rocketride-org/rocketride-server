@@ -25,12 +25,9 @@ import React, { useState, useMemo, useRef, useCallback, useEffect, CSSProperties
 import type { ListPageRequest, ListPageResponse } from 'rocketride';
 import type { DashboardResponse, DashboardConnection, DashboardTask, ActivityEvent } from './types';
 import { OverviewPanel, ConnectionsPanel, TasksPanel, ActivityPanel } from './components';
-import { TabPanel } from '../../components/tab-panel/TabPanel';
-import { ContentHeader } from '../../components/content-header/ContentHeader';
-import { TabControl } from '../../components/tab-control/TabControl';
-import type { ITabPanelPanel } from '../../components/tab-panel/TabPanel';
-import type { ViewMenu } from '../../types/viewMenu';
-import { commonStyles } from '../../themes/styles';
+import { TabPanel, ContentHeader, TabControl } from 'shell';
+import type { ITabPanelPanel, ViewMenu } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 
 // =============================================================================
 // STYLES

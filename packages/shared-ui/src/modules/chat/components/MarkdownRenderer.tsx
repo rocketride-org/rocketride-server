@@ -66,7 +66,7 @@ const S = {
 
 const HTML_WRAPPER = (body: string) => `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{margin:0;padding:16px;font-family:system-ui,sans-serif;}</style></head><body>${body}</body></html>`;
 
-interface MarkdownRendererProps {
+export interface MarkdownRendererProps {
 	content: string;
 }
 

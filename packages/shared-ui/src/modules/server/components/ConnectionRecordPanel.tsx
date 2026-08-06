@@ -9,10 +9,9 @@
 
 import React, { useRef } from 'react';
 import type { CSSProperties } from 'react';
-import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
-import { Section, LabelValue } from '../../../components/section/Section';
+import { DetailPanel, Section, LabelValue } from 'shell';
 import type { DashboardConnection } from '../types';
-import { commonStyles } from '../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 import { formatNumber, formatTime } from '../util';
 
 // =============================================================================

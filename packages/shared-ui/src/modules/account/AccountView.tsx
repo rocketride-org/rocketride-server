@@ -19,16 +19,12 @@
 
 import React, { useMemo, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { TabPanel } from '../../components/tab-panel/TabPanel';
-import { TabControl } from '../../components/tab-control/TabControl';
-import { ContentHeader } from '../../components/content-header/ContentHeader';
-import { commonStyles } from '../../themes/styles';
-import type { ITabPanelPanel } from '../../components/tab-panel/TabPanel';
-import type { ViewMenu } from '../../types/viewMenu';
+import { TabPanel, TabControl, ContentHeader } from 'shell';
+import type { ITabPanelPanel, ViewMenu, IDataGridPageRequest } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from './types';
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
 import type { ActiveTask } from '../billing/components/BillingDashboard';
-import type { IDataGridPageRequest } from '../../components/data-grid/DataGrid';
 import { ProfilePanel } from './components/ProfilePanel';
 // EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';

@@ -36,8 +36,8 @@
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '../button/Button';
-import { useClickOutside } from '../../hooks/useClickOutside';
+import { Button } from 'shell';
+import { useClickOutside } from 'shell';
 import type {
 	TaskChapter,
 	TaskPlayerController,

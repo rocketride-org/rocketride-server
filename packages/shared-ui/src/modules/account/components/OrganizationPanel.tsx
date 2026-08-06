@@ -13,9 +13,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import { commonStyles } from '../../../themes/styles';
-import { Card } from '../../../components/card/Card';
-import { Button } from '../../../components/button/Button';
+import { commonStyles } from 'shell/src/themes/styles';
+import { Card, Button } from 'shell';
 import type { OrgDetail } from '../types';
 import { S } from './shared';
 

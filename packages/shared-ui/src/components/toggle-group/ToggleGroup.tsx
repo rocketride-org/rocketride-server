@@ -25,8 +25,8 @@
  */
 
 import React, { CSSProperties } from 'react';
-import { commonStyles } from '../../themes/styles';
-import { Button } from '../button/Button';
+import { commonStyles } from 'shell/src/themes/styles';
+import { Button } from 'shell';
 
 // =============================================================================
 // TYPES

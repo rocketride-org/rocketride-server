@@ -18,9 +18,9 @@
 
 import React, { useMemo, CSSProperties, ComponentProps } from 'react';
 
-import { DetailPanel } from '../detail-panel/DetailPanel';
+import { DetailPanel } from 'shell';
 import CanvasPanel from '../canvas';
-import { OAUTH_ROOT_URL } from '../../config/oauth';
+import { OAUTH_ROOT_URL } from 'shell/src/auth/oauth';
 import { formatTime } from '../../modules/server/util/formatters';
 import type { DeployVersionCard } from './types';
 

@@ -31,8 +31,8 @@
  */
 
 import React from 'react';
-import { DataGrid } from '../../../../../components/data-grid/DataGrid';
-import type { GridColumnDefinition } from '../../../../../components/data-grid/defaults';
+import { DataGrid } from 'shell';
+import type { GridColumnDefinition } from 'shell';
 import type { IGalleryDemoProps } from '../../galleryTypes';
 
 /** Demo row shape. */

@@ -38,12 +38,12 @@ const registry = require('./lib/registry');
 // =============================================================================
 
 /**
- * Returns all registered *-ui module names except shell-ui.
+ * Returns all registered *-ui module names except shared-ui (shell is its own module, not a -ui name).
  * Called at action execution time (after discovery), so both OSS and
  * overlay apps are visible in the registry.
  */
 function getRemoteUiModules() {
-	return registry.names().filter(n => n.endsWith('-ui') && n !== 'shell-ui' && n !== 'shared-ui');
+	return registry.names().filter(n => n.endsWith('-ui') && n !== 'shared-ui');
 }
 
 // =============================================================================
@@ -62,7 +62,7 @@ module.exports = {
 				description: 'Cleaning ui (all)',
 				steps: [
 					parallel([
-						'shell-ui:clean',
+						'shell:clean',
 						...getRemoteUiModules().map(n => `${n}:clean`),
 					], 'Clean UI apps'),
 				],
@@ -88,7 +88,7 @@ module.exports = {
 			action: () => ({
 				description: 'Build ui (all)',
 				steps: [
-					'shell-ui:build',
+					'shell:build',
 					parallel(
 						getRemoteUiModules().map(n => `${n}:build`),
 						'Build remote apps',

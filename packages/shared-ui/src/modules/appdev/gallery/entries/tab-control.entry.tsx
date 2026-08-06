@@ -31,10 +31,10 @@
  */
 
 import React, { useState } from 'react';
-import { TabControl } from '../../../../components/tab-control/TabControl';
-import { TabPanel } from '../../../../components/tab-panel/TabPanel';
-import { commonStyles } from '../../../../themes/styles';
-import type { ViewMenu } from '../../../../types/viewMenu';
+import { TabControl } from 'shell';
+import { TabPanel } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
+import type { ViewMenu } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** One demo panel body - plain text so the pattern stays the focus. */

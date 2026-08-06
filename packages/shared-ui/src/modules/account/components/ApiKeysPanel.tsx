@@ -33,16 +33,9 @@
 
 import React, { useMemo, useState } from 'react';
 import type { CellComponent } from 'tabulator-tables';
-import { Card } from '../../../components/card/Card';
-import { Button } from '../../../components/button/Button';
-import { Banner } from '../../../components/banner/Banner';
-import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import { autoFormatter } from '../../../components/data-grid/defaults';
-import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
-import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
-import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
-import { Section, LabelValue } from '../../../components/section/Section';
-import { commonStyles } from '../../../themes/styles';
+import { Card, Button, Banner, CardDataGrid, autoFormatter, DetailPanel, ConfirmDialog, Section, LabelValue } from 'shell';
+import type { GridColumnDefinition } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import type { ApiKeyRecord, TeamRecord } from '../types';
 import { S, PermGrid, PermPill, ExpiryOpts, parseWireDate, relativeTime } from './shared';
 
