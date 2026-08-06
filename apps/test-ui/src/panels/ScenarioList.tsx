@@ -28,6 +28,17 @@ const ScenarioList: React.FC<Props> = ({ engine, engineState }) => {
 					onClick={() => {
 						if (!isRunning) engine.runScenario(scenario);
 					}}
+					// Keyboard access: cards act as buttons (Enter/Space = click),
+					// dropped from the tab order while a run is active.
+					role="button"
+					tabIndex={isRunning ? -1 : 0}
+					aria-disabled={isRunning}
+					onKeyDown={(e) => {
+						if (e.key === 'Enter' || e.key === ' ') {
+							e.preventDefault();
+							if (!isRunning) engine.runScenario(scenario);
+						}
+					}}
 				>
 					<div style={styles.scenarioTitle}>{scenario.name}</div>
 					<div style={styles.scenarioDesc}>{scenario.description}</div>

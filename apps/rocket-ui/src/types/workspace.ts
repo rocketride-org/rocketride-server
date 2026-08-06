@@ -4,9 +4,10 @@
 
 import type { PipelineConfig } from 'shell';
 import type { ViewItem } from './tabs';
+import type { ViewState } from 'shared/modules/project';
 
 // Re-export ViewState from shared — single source of truth
-export type { ViewState } from 'shared/modules/project';
+export type { ViewState };
 
 // =============================================================================
 // DOCUMENT STATE
@@ -25,7 +26,7 @@ export interface DocumentState {
 // DOCUMENT LAYOUT (per-document defaults for new views)
 // =============================================================================
 
-export type DocumentLayout = Partial<import('shared').ViewState>;
+export type DocumentLayout = Partial<ViewState>;
 
 // =============================================================================
 // WORKSPACE PREFERENCES

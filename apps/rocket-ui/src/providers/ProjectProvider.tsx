@@ -48,6 +48,7 @@ import { foldProjectDeployRuns } from 'shared/modules/sidebar/taskFold';
 import type { DeploySnapshot, TeamDeployment } from 'shared/components/deploy-panel';
 import type { DeployArtifact } from 'shell';
 import { useDeployments } from '../hooks/useDeployments';
+import { usePipelineTree } from '../hooks/usePipelineTree';
 import { PrefsProvider } from 'shell';
 import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, TraceLevel, ViewState } from 'shared/modules/project';
 import { saveProject, deleteProject, displayName as projectDisplayName } from '../utils/projectStore';
@@ -194,6 +195,11 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	const projectId = pipeline?.project_id ?? '';
 	const filename = uri;
 
+	// Existing pipeline paths (with extension) for the SaveDialog's overwrite
+	// guard — the hook refreshes itself on connect and on project:saved.
+	const { flat: pipelineFlat } = usePipelineTree(client, isConnected);
+	const existingPaths = useMemo(() => pipelineFlat.map((entry) => entry.path), [pipelineFlat]);
+
 	// --- Services fetch -------------------------------------------------------
 
 	useEffect(() => {
@@ -303,6 +309,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId } }));
 			} catch (err) {
 				console.error('[ProjectProvider] Save failed:', err);
+				// Surface the failure — a silent catch leaves the user believing
+				// the document was saved.
+				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
 			}
 		},
 		[client, isConnected, projectId, uri]
@@ -417,6 +426,9 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				await saveProject(client, fileRelPath, pipeline);
 			} catch (err) {
 				console.error('[ProjectProvider] Save-as failed:', err);
+				// Surface the failure — a silent catch leaves the user believing
+				// the document was saved.
+				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
 				return;
 			}
 
@@ -879,7 +891,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 				    workspace prefs. */}
 				{openDeployment && <DeploymentProvider key={`${openDeployment.teamId}:${openDeployment.sourceId ?? ''}:${projectId}`} teamId={openDeployment.teamId} {...(openDeployment.sourceId ? { sourceId: openDeployment.sourceId } : {})} projectId={projectId} onClose={() => setOpenDeployment(null)} onOpenSource={(sourceId: string) => setOpenDeployment({ teamId: openDeployment.teamId, sourceId })} />}
 			</PrefsProvider>
-			{saveDialogOpen && <SaveDialog client={client} isConnected={isConnected} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
+			{saveDialogOpen && <SaveDialog client={client} isConnected={isConnected} existingPaths={existingPaths} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
 			{pendingRun && <ConfirmDialog title="Unsaved Changes" message="The pipeline has unsaved changes. Save before running?" confirmLabel="Save & Run" cancelLabel="Cancel" onConfirm={handleSaveAndRun} onCancel={() => setPendingRun(null)} />}
 			{pipelineError && <ConfirmDialog title="Pipeline Error" message={pipelineError} confirmLabel="OK" onConfirm={() => setPipelineError(null)} onCancel={() => setPipelineError(null)} />}
 		</div>

@@ -35,7 +35,8 @@ import { RocketRideMark } from 'shell';
  * A minimal app. Does not require authentication.
  */
 const HELLO_APP: AppDescriptor = {
-	id: 'rocketride.helloWorld',
+	// Must match world.rrapp + package.json appManifest.id (workspace types contract).
+	id: 'rocketride.world',
 	name: 'Hello World',
 	branding: {
 		appName: 'Hello World',

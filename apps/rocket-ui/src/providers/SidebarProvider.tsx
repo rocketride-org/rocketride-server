@@ -40,7 +40,7 @@ import { BxExport, useSidebarCollapsed } from 'shell';
 import { foldTaskEvent } from 'shared/modules/sidebar/taskFold';
 import type { ProjectEntry, ActiveTaskState, UnknownTask, ConnectionInfo, SidebarMode } from 'shared/modules/sidebar/types';
 import type { TaskLifecycleEvent } from 'shared/modules/sidebar/taskFold';
-import { loadProject, listProjectDir } from '../utils/projectStore';
+import { loadProject, listProjectDir, isPipelineFile, pipelineExtension } from '../utils/projectStore';
 import { downloadJson } from '../utils/downloadFile';
 
 // =============================================================================
@@ -131,7 +131,7 @@ const SidebarProvider: React.FC = () => {
 					if (e.type === 'dir') {
 						out.push({ path, type: 'dir' });
 						out.push(...(await listRecursive(path)));
-					} else if (e.name.endsWith('.pipe') || e.name.endsWith('.pipe.json')) {
+					} else if (isPipelineFile(e.name)) {
 						// Parse pipeline for projectId + sources
 						try {
 							const pipeline = await loadProject(client, path);
@@ -290,10 +290,13 @@ const SidebarProvider: React.FC = () => {
 	 * Handles navigation button clicks.
 	 */
 	const handleNavigate = useCallback((target: string) => {
+		// getDocs() is null until RocketApp creates the Documents singleton.
+		const docs = getDocs();
+		if (!docs) return;
 		if (target === 'new') {
-			getDocs().createDocument(undefined, { project_id: crypto.randomUUID(), components: [] });
+			docs.createDocument(undefined, { project_id: crypto.randomUUID(), components: [] });
 		} else if (target === 'monitor') {
-			getDocs().openStaticDocument('monitor', 'Monitor');
+			docs.openStaticDocument('monitor', 'Monitor');
 		}
 	}, []);
 
@@ -301,7 +304,7 @@ const SidebarProvider: React.FC = () => {
 	 * Opens a file in the Documents singleton.
 	 */
 	const handleOpenFile = useCallback((path: string) => {
-		getDocs().openDocument(path);
+		getDocs()?.openDocument(path);
 	}, []);
 
 	/**
@@ -315,11 +318,12 @@ const SidebarProvider: React.FC = () => {
 				switch (action) {
 					case 'rename': {
 						// `newName` is a bare leaf (e.g. "renamed"); construct a full path
-						// that preserves the parent dir and the `.pipe` extension for files.
+						// that preserves the parent dir and whichever pipeline extension
+						// the file carried (directories carry none).
 						if (!newName) break;
 						const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
-						const isFileRn = path.endsWith('.pipe');
-						const newPath = dir ? `${dir}/${newName}${isFileRn ? '.pipe' : ''}` : `${newName}${isFileRn ? '.pipe' : ''}`;
+						const ext = pipelineExtension(path);
+						const newPath = dir ? `${dir}/${newName}${ext}` : `${newName}${ext}`;
 						if (newPath !== path) {
 							await renameProject(client, path, newPath);
 							// Update open editor tabs: close old, reopen at new path
@@ -342,7 +346,7 @@ const SidebarProvider: React.FC = () => {
 						if (!confirmed) break;
 
 						// Server's fs_delete only handles files; folders need fs_rmdir.
-						const isFile = path.endsWith('.pipe');
+						const isFile = isPipelineFile(path);
 						if (isFile) await deleteProject(client, path);
 						else await rmdirProject(client, path);
 

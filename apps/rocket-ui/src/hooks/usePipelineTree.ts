@@ -64,38 +64,43 @@ export function usePipelineTree(client: RocketRideClient | null, isConnected: bo
 	const [tree, setTree] = useState<TreeNode[]>([]);
 	const [flat, setFlat] = useState<FlatEntry[]>([]);
 	const [loading, setLoading] = useState(false);
-	const cancelRef = useRef(false);
+	// Monotonic load counter: only the newest load may commit — a slower
+	// earlier run must not overwrite a newer run's results.
+	const fetchSeq = useRef(0);
 
 	const refresh = useCallback(() => {
 		if (!client || !isConnected) {
+			// Bump the counter so any in-flight load is invalidated before the clear.
+			fetchSeq.current++;
 			setTree([]);
 			setFlat([]);
 			return;
 		}
 
-		cancelRef.current = false;
+		const mine = ++fetchSeq.current;
 		setLoading(true);
 
 		listRecursive(client, '')
 			.then((nodes) => {
-				if (cancelRef.current) return;
+				if (mine !== fetchSeq.current) return;
 				setTree(nodes);
 				setFlat(collectFlat(nodes, ''));
 			})
 			.catch((err) => {
-				if (cancelRef.current) return;
+				if (mine !== fetchSeq.current) return;
 				console.log('[usePipelineTree] Failed to load pipeline tree:', err);
 				setTree([]);
 				setFlat([]);
 			})
 			.finally(() => {
-				if (!cancelRef.current) setLoading(false);
+				if (mine === fetchSeq.current) setLoading(false);
 			});
 	}, [client, isConnected]);
 
 	useEffect(() => {
 		refresh();
-		return () => { cancelRef.current = true; };
+		// Unmount (or refresh identity change): invalidate any in-flight load.
+		return () => { fetchSeq.current++; };
 	}, [refresh]);
 
 	useEffect(() => {

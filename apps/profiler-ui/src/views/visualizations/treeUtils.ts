@@ -21,35 +21,37 @@
 // SOFTWARE.
 
 // =============================================================================
-// APP DESCRIPTOR — rocket-ui MF remote entry point
+// TREE UTILS — shared profile-tree shaping for the visualisations
+// =============================================================================
+//
+// One implementation of the cutoff prune and depth limit used by both the
+// flame graph and the sunburst chart, so their shaping never drifts apart.
 // =============================================================================
 
-import React from 'react';
-import type { AppDescriptor } from 'shell';
-import RocketApp from './RocketApp';
-// SVGR turns these imports into React components (see assets.d.ts), so they
-// are rendered directly rather than used as <img> URLs.
-import IconDark from 'shared/assets/rocketride/rocketride-dark.svg';
-import IconLight from 'shared/assets/rocketride/rocketride-light.svg';
+import type { ProfileTreeNode } from './types';
 
 /**
- * AppDescriptor for the RocketRide pipeline editor app.
- *
- * Uses the Documents library for multi-document, multi-editor-group support.
+ * Apply cutoff pruning to a tree node.
+ * Returns a new node with children filtered by the cutoff threshold.
+ * Children whose cumtime is less than cutoff * parent.cumtime are removed.
  */
-const ROCKETRIDE_APP: AppDescriptor = {
-	id: 'rocketride.pipeBuilder',
-	name: 'Pipeline Builder',
-	branding: {
-		appName: 'Pipeline Builder',
-		iconDark: React.createElement(IconDark, { style: { width: '100%', height: '100%' } }),
-		iconLight: React.createElement(IconLight, { style: { width: '100%', height: '100%' } }),
-		welcomeTitle: 'Pipeline Builder',
-		welcomeSubtitle: 'Open a project from the Explorer or create a new one to get started.',
-	},
-	// Two-column app: RocketApp's root AppLayout declares the pipelines
-	// Explorer sidebar and the status bar.
-	app: RocketApp,
-};
+export function pruneTree(node: ProfileTreeNode, cutoff: number): ProfileTreeNode {
+	if (cutoff <= 0 || !node.children.length) return node;
+	const threshold = cutoff * node.cumtime;
+	const prunedChildren = node.children
+		.filter((c) => c.cumtime >= threshold)
+		.map((c) => pruneTree(c, cutoff));
+	return { ...node, children: prunedChildren };
+}
 
-export default ROCKETRIDE_APP;
+/**
+ * Limit tree depth to maxDepth levels.
+ * Returns a new tree with children beyond maxDepth removed.
+ */
+export function limitDepth(node: ProfileTreeNode, maxDepth: number, depth: number = 0): ProfileTreeNode {
+	if (depth >= maxDepth) return { ...node, children: [] };
+	return {
+		...node,
+		children: node.children.map((c) => limitDepth(c, maxDepth, depth + 1)),
+	};
+}

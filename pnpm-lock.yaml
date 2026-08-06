@@ -10635,7 +10635,7 @@ packages:
     engines: {node: '>= 0.4'}
 
   shell@file:.rocketride/shell/shell.tgz:
-    resolution: {integrity: sha512-iu1hSX4RwH8fetG2ks8X3PYatfLm3DN2/NruDgMy8OHpoviSreqIpAsvljytIQ/w5Ra89pJXL7S3mc+kC3iHXw==, tarball: file:.rocketride/shell/shell.tgz}
+    resolution: {integrity: sha512-HMG8L/3DrKnZTWoAkftKFY/7jUD+k0qtM7KioMRH8istaAKavT6P89VJXkHJ1ih8g9FxtTnNqZZtzeGXxOagbg==, tarball: file:.rocketride/shell/shell.tgz}
     version: 1.2.0
     bundledDependencies:
       - rocketride

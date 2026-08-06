@@ -76,7 +76,17 @@ const WebviewProvider: React.FC<IWebviewProviderProps> = ({ uri }) => {
 		return <div>Invalid webview URI: {uri}</div>;
 	}
 
-	return <iframe src={url} style={styles.iframe} title={url} allow="clipboard-read; clipboard-write" />;
+	return (
+		<iframe
+			src={url}
+			style={styles.iframe}
+			title={url}
+			// Least-privilege embedding: no top-navigation hijack, and no
+			// clipboard read for arbitrary origins (write-only clipboard).
+			sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"
+			allow="clipboard-write"
+		/>
+	);
 };
 
 export default WebviewProvider;

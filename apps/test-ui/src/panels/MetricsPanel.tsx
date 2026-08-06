@@ -4,7 +4,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
-import type { TestMetrics, ApiTestResult, EngineState } from '../types';
+import type { TestMetrics, EngineState } from '../types';
 import { styles } from '../styles';
 
 function formatNumber(n: number): string {
@@ -88,7 +88,6 @@ const actionStyles = {
 
 interface Props {
 	metrics: TestMetrics;
-	apiResults: ApiTestResult[];
 	worstPing: number;
 	worstPingSnapshot: string;
 	engineState: EngineState;
@@ -100,7 +99,7 @@ interface Props {
 }
 
 const MetricsPanel: React.FC<Props> = ({
-	metrics, apiResults, worstPing, worstPingSnapshot,
+	metrics, worstPing, worstPingSnapshot,
 	engineState, onStart, onAbort, onPause, onResume, onClear,
 }) => {
 	const pct = metrics.targetOps > 0 ? Math.round((metrics.totalOps / metrics.targetOps) * 100) : 0;
@@ -172,7 +171,7 @@ const MetricsPanel: React.FC<Props> = ({
 					{!isRunning ? (
 						<button style={actionStyles.launchBtn} onClick={onStart}>Launch Tests</button>
 					) : (
-						<button style={actionStyles.runningBtn}>Running...</button>
+						<button style={actionStyles.runningBtn} disabled>Running...</button>
 					)}
 					{isRunning && (
 						<>

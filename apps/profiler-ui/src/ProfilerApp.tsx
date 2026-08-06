@@ -128,6 +128,9 @@ const ProfilerApp: React.FC<ShellAppProps> = (_props) => {
 			destroyDocs();
 			setReady(false);
 		};
+	// One-time init gated on `seeded`: re-running on appState/settings churn
+	// would tear down and rebuild the Documents + connection stores.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [seeded]);
 
 	// =========================================================================

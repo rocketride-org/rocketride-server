@@ -711,7 +711,7 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 						))}
 					</div>
 				) : (
-					<p style={styles.subtitle}>
+					<p style={styles.greetingSub}>
 						No apps installed. Build and deploy an app to see it here.
 					</p>
 				)}

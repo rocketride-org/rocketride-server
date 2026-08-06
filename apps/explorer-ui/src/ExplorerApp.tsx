@@ -133,7 +133,7 @@ const styles = {
 // =============================================================================
 
 const ExplorerApp: React.FC<ShellAppProps> = () => {
-	const { client, isConnected } = useShellConnection();
+	const { client } = useShellConnection();
 	const { loaded, appState, updateAppState } = useWorkspace();
 	const [ready, setReady] = useState(false);
 
