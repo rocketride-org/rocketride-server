@@ -4,7 +4,7 @@ title: Python
 ---
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/banner-python.png" alt="RocketRide Python SDK" width="900" />
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/images/banner-python.png" alt="RocketRide Python SDK" width="900" />
 </p>
 
 <p align="center">
@@ -46,7 +46,7 @@ asyncio.run(main())
 Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocketride-org/rocketride-server) or download the extension directly in your IDE.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/images/install.png" alt="Install RocketRide extension" width="600" />
+  <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/images/install.png" alt="Install RocketRide extension" width="600" />
 </p>
 
 ## What is RocketRide?
