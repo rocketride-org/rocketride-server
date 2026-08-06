@@ -332,17 +332,20 @@ class _FakeInstance:
         self.answer_written = answer
 
 
-def test_write_questions_surfaces_explain_error_not_rejected_sql():
+@pytest.mark.parametrize('is_valid_value', [True, 'true'])
+def test_write_questions_surfaces_explain_error_not_rejected_sql(is_valid_value):
     """writeQuestions() must report the EXPLAIN error on text/answer lanes, not the rejected SQL.
 
     Mirrors the get_sql() fix: writeQuestions() has its own separate fallback
     path (db_instance_base.py) that must not regress to emitting the rejected
-    SQL as if it were the LLM's prose answer.
+    SQL as if it were the LLM's prose answer. Parametrized over a real JSON
+    boolean and the string 'true' so a regression in isValid parsing inside
+    this specific caller would also be caught.
     """
     fake_global = _FakeGlobal(explain_error='syntax error near FROM')
     inst = _sql_instance(fake_global)
     inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
-        'isValid': 'true',
+        'isValid': is_valid_value,
         'query': 'SELECT * FROM',
     }
     fake_instance = _FakeInstance(lanes=['text', 'answers'])

@@ -238,7 +238,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         limit = args.get('limit', 250)
         result = self._buildSQLQuery(question, limit=limit)
 
-        is_valid = parse_bool(result.get('isValid'))
+        is_valid = parse_bool(result.get('isValid', False))
         sql_query = result.get('query', '')
 
         if is_valid and sql_query and is_sql_safe(sql_query):
@@ -345,8 +345,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         Calls ``_buildSQLQueryOnce`` to ask the LLM, then runs ``EXPLAIN`` on
         the result.  If EXPLAIN rejects the query the error is fed back to the
         LLM and another attempt is made, up to ``IGlobal.max_validation_attempts``
-        times.  Returns the last LLM response regardless of whether validation
-        ultimately succeeded.
+        times.  Returns the last LLM response if EXPLAIN eventually accepts it;
+        if every attempt is rejected, the result is forced to ``isValid: False``
+        with the last EXPLAIN error carried in ``error``.
         """
         previous_sql: str | None = None
         last_error: str | None = None
@@ -355,7 +356,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         for attempt in range(self.IGlobal.max_validation_attempts):
             result = self._buildSQLQueryOnce(question_text, limit=limit, previous_sql=previous_sql, error=last_error)
 
-            is_valid = parse_bool(result.get('isValid'))
+            is_valid = parse_bool(result.get('isValid', False))
             sql_query = result.get('query', '')
 
             # If the LLM decided the question isn't a DB query, or the safety
@@ -574,7 +575,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             # Ask the LLM to translate the natural-language question into SQL.
             query_json = self._buildSQLQuery(question_text)
-            is_valid_query = parse_bool(query_json.get('isValid'))
+            is_valid_query = parse_bool(query_json.get('isValid', False))
             sql_query = query_json.get('query')
 
             # Execute the query only when the LLM flagged it as valid SQL and
