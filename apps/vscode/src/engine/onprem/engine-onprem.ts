@@ -112,7 +112,7 @@ export class EngineOnprem extends EngineBackend {
 					if (!hostUrl) return { success: false, error: 'Host URL is required' };
 
 					// Dynamic require — avoids bundling the SDK into the webview; only used at runtime
-					const { RocketRideClient } = require('rocketride');
+					const { RocketRideClient } = require('shell/client');
 					const client = new RocketRideClient({ persist: false });
 					await client.connect(apiKey, { uri: hostUrl, timeout: 10000 });
 					const version = client.getServerVersion?.() ?? null;

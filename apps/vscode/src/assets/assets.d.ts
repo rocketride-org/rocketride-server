@@ -18,3 +18,7 @@ declare module '*.png' {
 	const url: string;
 	export default url;
 }
+
+// Side-effect stylesheet imports (theme CSS from the installed shell
+// package and the webview root styles) carry no exports.
+declare module '*.css' {}

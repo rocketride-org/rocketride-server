@@ -116,19 +116,15 @@ function makeBundleAction() {
 			// Fingerprint inputs before building so concurrent edits are detected on the next run.
 			const { changed, hash } = await hasBuildInputChanged(
 				BUILD_HASH_KEY, [SRC_DIR], [PKG_JSON]);
-			// The cache skip must also verify the MATERIALIZED package: on a
-			// fresh clone .rocketride/shell is the pre-install stub (or a
-			// carried-over build state with no local package at all), and
-			// only pack-shell replaces it with the real one — an unchanged
-			// source hash must not strand the workspace on the stub.
-			const localShellReal = (() => {
-				try {
-					const pkg = JSON.parse(require('fs').readFileSync(path.join(APP_ROOT, '..', '..', '.rocketride', 'shell', 'package.json'), 'utf8'));
-					return pkg.version !== '0.0.0-stub';
-				} catch {
-					return false;
-				}
-			})();
+			// The cache skip must also verify the CANONICAL artifact: on a
+			// fresh clone the invoking root's .rocketride/shell/shell.tgz is
+			// the pre-install stub (marked by the shell.tgz.stub file the
+			// bootstrap writes beside it), and only pack-shell replaces it
+			// with the real package — an unchanged source hash must not
+			// strand the workspace on the stub.
+			const rootShell = path.join(path.dirname(DIST_ROOT), '.rocketride', 'shell');
+			const fs = require('fs');
+			const localShellReal = fs.existsSync(path.join(rootShell, 'shell.tgz')) && !fs.existsSync(path.join(rootShell, 'shell.tgz.stub'));
 			if (!ctx.options.force && !changed && (await exists(BUILD_DIR)) && localShellReal) {
 				task.output = 'No changes detected';
 				return;
@@ -147,18 +143,15 @@ function makeBundleAction() {
 			task.output = 'Stitching flavors...';
 			await execCommand('node', [path.join(APP_ROOT, 'scripts', 'stitch-flavors.mjs')], { task, cwd: APP_ROOT });
 
-			// APP TYPES: the shipped type surface for standalone app repos
-			// (frozen shell-api + shared rollup) — vendored into app folders
-			// by the App Builder.
 			// SHELL PACKAGE: the installable shell.tgz (compiled lib + frozen
-			// contract types + token CSS), packed straight into
-			// static/clients/shell/ and served at /client/shell by the
-			// clients module. pack-shell also emits the loose transition
-			// files (shell.d.ts / tokens.css / app-types.json) the current
-			// per-app type vendoring still reads — it replaced the old
-			// generate-app-types script outright.
+			// contract types + token CSS), packed into static/clients/shell/
+			// (served at /client/shell by the clients module) AND emitted to
+			// the invoking root's canonical .rocketride/shell/shell.tgz with
+			// a chained workspace install. Called in-process — the builder
+			// already carries the env (ROCKETRIDE_*_ROOT) it reads.
 			task.output = 'Packing shell.tgz...';
-			await execCommand('node', [path.join(APP_ROOT, 'scripts', 'pack-shell.js')], { task, cwd: APP_ROOT });
+			const { packShell } = require(path.join(APP_ROOT, 'scripts', 'pack-shell.js'));
+			await packShell({ log: (msg) => { task.output = msg; } });
 
 			await saveSourceHash(BUILD_HASH_KEY, hash);
 		},

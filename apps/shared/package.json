@@ -94,7 +94,7 @@
     "@cfworker/json-schema": "^4.1.1",
     "@rsbuild/plugin-svgr": "^2.0.3",
     "lucide-react": "^0.577.0",
-    "shell": "link:../../.rocketride/shell",
+    "shell": "file:../../.rocketride/shell/shell.tgz",
     "tabulator-tables": "~6.5.2"
   }
 }

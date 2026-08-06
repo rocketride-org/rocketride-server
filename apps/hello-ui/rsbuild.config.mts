@@ -43,7 +43,7 @@ export default defineConfig(() => {
 					'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 					// import: false tells MF to NOT bundle a fallback copy —
 					// the host (the shell) always provides these at runtime.
-					// Without this, MF bundles the entire shared-ui tree
+					// Without this, MF bundles the entire shared tree
 					// (fonts, Chart.js, MUI) as a "just in case" fallback.
 					'shell': { singleton: true, requiredVersion: false, import: false },
 					'shell/client': { singleton: true, requiredVersion: false, import: false },
@@ -53,7 +53,7 @@ export default defineConfig(() => {
 		// No resolve aliases — all shared modules (shell, shared, react)
 		// resolve through node_modules (pnpm workspace link) and MF provides
 		// the host's singleton at runtime. This prevents bundling duplicate
-		// fonts/CSS from shared-ui into each remote app.
+		// fonts/CSS from shared into each remote app.
 		resolve: {},
 		// CORS: explicitly allow any origin — the serving host isn't fixed, so no
 		// allowlist is possible; declaring it also stops the MF plugin injecting

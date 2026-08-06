@@ -245,7 +245,7 @@ export default function TemplatePickerDialog({ template, onClose, instantiateTem
 										}}
 										onClick={() => onSelect(slotKey, key)}
 									>
-										<Icon name={service.icon} style={styles.itemIcon} />
+										<Icon name={service.icon} width="18px" height="18px" style={styles.itemIcon} />
 
 										<span style={styles.itemTitle}>{service.title ?? key}</span>
 									</button>

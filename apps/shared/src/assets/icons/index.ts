@@ -39,7 +39,7 @@ import SparklingIcon from './SparklingIcon';
 import PadlockIcon from './PadlockIcon';
 
 /**
- * Barrel export for all custom SVG icon components used throughout the shared-ui library.
+ * Barrel export for all custom SVG icon components used throughout the shared library.
  * These icons represent various file types, UI actions, and visual indicators,
  * providing a centralized import point for consumers of the icon set.
  */

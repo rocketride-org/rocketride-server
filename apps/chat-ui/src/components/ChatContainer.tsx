@@ -23,7 +23,7 @@
  */
 
 import React, { useCallback, useState, useRef } from 'react';
-import { RocketRideClient } from 'rocketride';
+import { RocketRideClient } from 'shell/client';
 import { useRocketRideClient } from '../hooks/useRocketRide';
 import { useChatMessages } from '../hooks/useChatMessages';
 import { ChatHeader } from './ChatHeader';

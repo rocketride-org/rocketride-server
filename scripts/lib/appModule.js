@@ -29,7 +29,7 @@
  * definition from a minimal config.
  *
  * Build caching: each app's bundle action fingerprints its own src/,
- * shell/src, shared-ui/src, and package.json.  If nothing changed and
+ * shell/src, shared/src, and package.json.  If nothing changed and
  * build output exists, the bundle step is skipped.  --force bypasses the
  * cache.  When a rebuild IS needed, the build output directory is cleaned
  * first to prevent stale chunks.
@@ -63,15 +63,16 @@ const { registerApp } = require('./registerApp');
 const registry = require('./registry');
 
 // Shared dependency sources — same for every remote app. Dual-layout:
-// the platform repo carries the shell/shared SOURCE under packages/;
-// standalone app repos carry the shared library at shared/ and the shell
-// prebuilt in .rocketride/shell (vendored via client:update). Missing dirs
-// hash as 'missing', so preferring the platform layout is safe.
+// the platform repo carries the shell SOURCE under packages/ and the
+// shared library at apps/shared; standalone app repos carry the shared
+// library at shared/ and the shell prebuilt in .rocketride/shell
+// (vendored via client:update). Missing dirs hash as 'missing', so
+// preferring the platform layout is safe.
 const SHELL_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shell', 'src'))
 	? path.join(PROJECT_ROOT, 'packages', 'shell', 'src')
 	: path.join(PROJECT_ROOT, '.rocketride', 'shell');
-const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src'))
-	? path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src')
+const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'apps', 'shared', 'src'))
+	? path.join(PROJECT_ROOT, 'apps', 'shared', 'src')
 	: path.join(PROJECT_ROOT, 'shared', 'src');
 
 /**
@@ -150,16 +151,24 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 		{ name: `${name}:register`, action: () => registerApp(appRoot) },
 		{ name: `${name}:copy`,     action: makeCopyAction },
 
-		// Full build: bundle → register → copy. In the platform repo the
-		// TS client SDK compiles first; standalone repos have no
-		// client-typescript module — the SDK arrives prebuilt inside the
-		// vendored shell package. Checked at action-build time (after
-		// discovery), so one canonical step list serves both repos.
+		// Full build: bundle → register → copy. Every app depends on the
+		// shell, so in repos that CARRY the shell module its build runs
+		// first: apps install .rocketride/shell/shell.tgz, and on a fresh
+		// clone that file is the bootstrap STUB until shell:build replaces
+		// it (the chained install relinks every member) — typechecking
+		// against the stub is what "has no exported member 'X'" storms are.
+		// shell:build's own steps already compile the TS client SDK; the
+		// bare SDK step only applies where no shell module exists.
+		// Standalone app repos have neither — the SDK arrives prebuilt
+		// inside the vendored shell package. Checked at action-build time
+		// (after discovery), so one canonical step list serves every repo.
 		{
 			name: `${name}:build`,
 			action: () => {
 				const steps = [];
-				if (registry.getAction('client-typescript:build')) {
+				if (registry.getAction('shell:build')) {
+					steps.push('shell:build');
+				} else if (registry.getAction('client-typescript:build')) {
 					steps.push('client-typescript:build');
 				}
 				steps.push(`${name}:bundle`, `${name}:register`, `${name}:copy`);

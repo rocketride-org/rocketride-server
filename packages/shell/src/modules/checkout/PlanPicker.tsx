@@ -331,7 +331,7 @@ export interface PlanPickerProps {
 	 * Optional per-plan CTA overrides, keyed by ``stripePriceId``. Lets a host
 	 * app render context-aware labels (e.g. "Selected", "Upgrade", "Switch
 	 * plan") and disable a card's CTA — without baking any subscription logic
-	 * into shared-ui (this component ships in the VS Code extension too). A plan
+	 * into shared (this component ships in the VS Code extension too). A plan
 	 * with no entry falls back to ``ctaLabel``. Only used with ``onPlanCta``.
 	 */
 	ctaConfig?: Record<string, { label?: string; disabled?: boolean }>;

@@ -51,7 +51,7 @@ export default defineConfig({
 		define: {
 			'process.env.RR_STRIPE_PUBLISHABLE_KEY': JSON.stringify(env.RR_STRIPE_PUBLISHABLE_KEY || ''),
 			'process.env.ROCKETRIDE_URI': JSON.stringify(env.ROCKETRIDE_URI || 'https://api.rocketride.ai'),
-			// OAuth broker base URL for the social-login buttons (shared-ui OAUTH_ROOT_URL).
+			// OAuth broker base URL for the social-login buttons (shared OAUTH_ROOT_URL).
 			'process.env.REACT_APP_OAUTH_ROOT_URL': JSON.stringify(env.REACT_APP_OAUTH_ROOT_URL || ''),
 		},
 		include: ['./src/**/*'],
@@ -65,6 +65,7 @@ export default defineConfig({
 			'page-account': './src/providers/views/Account/index.tsx',
 			'page-environment': './src/providers/views/Environment/index.tsx',
 			'page-app': './src/providers/views/App/index.tsx',
+			'page-newapp': './src/providers/views/NewApp/index.tsx',
 		},
 	},
 
@@ -78,22 +79,16 @@ export default defineConfig({
 			// shared is a STATIC library the webviews compile from source, so
 			// its whole tree stays reachable via 'shared/<group>' deep specs.
 			shared: path.resolve(__dirname, '../shared/src'),
-			// shell is the CONTRACT, satisfied by the vendored/materialized
-			// shell package ("shell": "link:../../.rocketride/shell") whose
-			// compiled dist the webviews bundle. The barrel and the client
-			// subpath are aliased EXACTLY ($) to the package's runtime dist:
-			// tsconfig 'paths' point the same specifiers at the package's
-			// .d.ts for TYPES, and without these aliases the bundler follows
-			// those paths too and tries to bundle a declaration file (rspack
-			// panics). Deep shell paths carry no alias and still fall through
-			// to the package's exports map, keeping barrel-only enforcement.
+			// shell carries NO alias: it is the INSTALLED platform package
+			// (the workspace's canonical .rocketride/shell/shell.tgz wired as
+			// this app's "shell" dependency), so runtime code and types both
+			// resolve through its exports map like any other node_modules
+			// package — barrel-only enforcement travels with the package.
 			// The SDK's TransportWebSocket has a Node-only dynamic import('ws')
 			// fallback (browsers use the native WebSocket; the branch never
 			// executes in a webview). Stub it so rspack doesn't try to
 			// resolve a Node dependency into a browser bundle.
 			ws: false,
-			'shell/client$': path.resolve(__dirname, '../../.rocketride/shell/dist/client.js'),
-			'shell$': path.resolve(__dirname, '../../.rocketride/shell/dist/index.js'),
 			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
 		},

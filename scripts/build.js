@@ -298,15 +298,16 @@ async function main() {
 	// Standalone app repo = no in-tree shell source.
 	const isStandalone = !fs.existsSync(path.join(ROOT, 'packages', 'shell'));
 
-	// Vendored-shell bootstrap — before the dependency check: apps link
-	// the platform package (link:../../.rocketride/shell), and pnpm needs
-	// the link target to exist with a manifest before install can succeed.
+	// Vendored-shell bootstrap — before the dependency check: apps install
+	// the platform package (file:../../.rocketride/shell/shell.tgz), and
+	// pnpm hard-fails when a file: target is missing, so the tarball must
+	// exist before install can succeed.
 	// Standalone repo: fetch the real package from a server (--shell=<url>
 	// beats ROCKETRIDE_URI beats localhost); refreshing an EXISTING install
 	// stays explicit (builder client:update).
-	// Platform repo: write a placeholder package — the real one is
-	// materialized locally by the first shell:build (pack-shell), and the
-	// link: junction picks the swap up with no reinstall.
+	// Platform repo: pack the placeholder tarball — the real one is emitted
+	// by the first shell:build (pack-shell), whose chained install relinks
+	// every consumer.
 	if (isStandalone) {
 		const { ensureVendoredShell } = require('./lib/vendor-shell');
 		try {
@@ -319,11 +320,10 @@ async function main() {
 	} else {
 		const { ensureShellStub } = require('./lib/vendor-shell');
 		ensureShellStub(ROOT);
-		// Overlay repos (the saas wrapper) carry the same canonical
-		// "shell": "link:../../.rocketride/shell" dependency, satisfied by a
-		// REAL directory at the overlay root: stubbed here for the very first
-		// install, then refreshed with the packaged types by every
-		// shell:build (pack-shell's overlay materialization).
+		// Overlay repos (the saas wrapper) resolve the same canonical
+		// "shell": "file:.rocketride/shell/shell.tgz" override at THEIR
+		// root: stubbed here for the very first install, then replaced by
+		// every shell:build (pack-shell emits to the invoking root).
 		if (options.overlayRoot && path.resolve(options.overlayRoot) !== path.resolve(ROOT)) {
 			ensureShellStub(options.overlayRoot);
 		}

@@ -50,7 +50,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // LOCATIONS
 // =============================================================================
 
-/** packages/shared-ui (one level up from this script). */
+/** packages/shared (one level up from this script). */
 const APP_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The source root every scan path is relative to. */
@@ -309,7 +309,7 @@ export function renderModule(usage) {
 	lines.push(' * transitive commonStyles resolution over `themes/styles.ts`.');
 	lines.push(' *');
 	lines.push(' * Regenerate: `node scripts/generate-gallery-tokens.mjs` (from');
-	lines.push(' * packages/shared-ui). Verify without writing: pass `--check`.');
+	lines.push(' * packages/shared). Verify without writing: pass `--check`.');
 	lines.push(' */');
 	lines.push('');
 	lines.push('/** Token usage for one gallery entry. */');

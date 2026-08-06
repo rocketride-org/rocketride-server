@@ -22,29 +22,30 @@
 // =============================================================================
 
 /**
- * shared-ui package tasks.
+ * shared package tasks.
  *
  * Exposes:
- *   shared-ui:test — runs node:test against script helpers and TSX component
+ *   shared:test — runs node:test against script helpers and TSX component
  *                    smoke tests. Test files are co-located with their subject
  *                    and discovered recursively.
  *
- * Consumers of shared (vscode:build, app builds, ...) should list
- * `shared-ui:test` among their steps so a build cannot succeed when the
- * shared-ui build helpers are broken.
+ * Builds gate on the drift CHECK only (shared:check-gallery-tokens —
+ * silent unless the committed map drifted, then the build fails naming
+ * the remedy). shared:test runs under test targets, never as a build
+ * step: a normal build must not stream unit-test output.
  */
 const path = require('path');
 const { readdir } = require('node:fs/promises');
 const { execCommand } = require('../../../scripts/lib');
 
-// packages/shared-ui (one level up from this file)
+// packages/shared (one level up from this file)
 const APP_ROOT = path.join(__dirname, '..');
 const SCRIPTS_DIR = path.join(APP_ROOT, 'scripts');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 
 function makeTestAction() {
 	return {
-		description: 'Testing shared-ui',
+		description: 'Testing shared',
 		run: async (ctx, task) => {
 			// Pass explicit paths: `scripts` arg breaks on Node 26, `*.test.mjs` glob breaks on Node 20.
 			const scriptTests = (await readdir(SCRIPTS_DIR)).filter((f) => f.endsWith('.test.mjs')).map((f) => path.join('scripts', f));
@@ -52,7 +53,7 @@ function makeTestAction() {
 			const testFiles = [...scriptTests, ...componentTests];
 
 			if (testFiles.length === 0) {
-				task.output = 'No shared-ui test files found';
+				task.output = 'No shared test files found';
 				return;
 			}
 
@@ -85,11 +86,11 @@ function makeGenGalleryTokensAction(check) {
 }
 
 module.exports = {
-	name: 'shared-ui',
-	description: 'RocketRide shared-ui package',
+	name: 'shared',
+	description: 'RocketRide shared source library',
 	actions: [
-		{ name: 'shared-ui:test', action: makeTestAction },
-		{ name: 'shared-ui:gen-gallery-tokens', action: () => makeGenGalleryTokensAction(false) },
-		{ name: 'shared-ui:check-gallery-tokens', action: () => makeGenGalleryTokensAction(true) },
+		{ name: 'shared:test', action: makeTestAction },
+		{ name: 'shared:gen-gallery-tokens', action: () => makeGenGalleryTokensAction(false) },
+		{ name: 'shared:check-gallery-tokens', action: () => makeGenGalleryTokensAction(true) },
 	],
 };

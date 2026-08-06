@@ -8,7 +8,7 @@
  *
  * Combines the former PageEditorProvider (canvas editing, file I/O, undo/redo)
  * and StatusProvider (status, trace, flow monitoring) into a single provider
- * that renders the shared-ui ProjectView component.
+ * that renders the shared ProjectView component.
  *
  * Uses the ProjectViewIncoming / ProjectViewOutgoing message protocol to
  * communicate with the Project webview.
@@ -595,6 +595,23 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
 						const msg = error instanceof Error ? error.message : String(error);
 						this.logger.output(`${icons.error} Pipeline validation failed: ${msg}`);
 						webview.postMessage({ type: 'project:validateResponse', requestId: data.requestId, result: { errors: [], warnings: [] }, error: msg });
+					}
+					break;
+				}
+
+				case 'project:getNodeSchema': {
+					// The bulk services payload is summary-only; the canvas requests
+					// one provider's FULL definition (config schema) on demand and
+					// caches it webview-side, so this fires once per provider.
+					try {
+						const client = this.connectionManager.getClient();
+						if (!client) throw new Error('Not connected to server');
+						const service = await client.getService(data.provider);
+						webview.postMessage({ type: 'project:nodeSchemaResponse', requestId: data.requestId, service });
+					} catch (error) {
+						const msg = error instanceof Error ? error.message : String(error);
+						this.logger.error(`Fetching service definition for '${data.provider}': ${msg}`);
+						webview.postMessage({ type: 'project:nodeSchemaResponse', requestId: data.requestId, error: msg });
 					}
 					break;
 				}

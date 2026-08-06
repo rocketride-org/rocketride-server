@@ -75,6 +75,9 @@ export interface IFlowProviderProps {
 	servicesJson?: Record<string, unknown>;
 	servicesJsonError?: string;
 
+	/** Host function returning the FULL service definition for one provider (see FlowProjectProvider). */
+	getNodeSchema?: (provider: string) => Promise<Record<string, unknown> | undefined>;
+
 	// --- Inventory ---------------------------------------------------------
 	inventory?: Record<string, unknown>;
 	inventoryConnectorTitleMap?: Record<string, string>;
@@ -138,7 +141,7 @@ export interface IFlowProviderProps {
  * </ReactFlowProvider>
  * ```
  */
-export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProviderProps): ReactElement {
+export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProviderProps): ReactElement {
 	return (
 		<FlowPreferencesProvider projectId={projectId} isReadonly={isReadonly}>
 			<FlowProjectProvider
@@ -149,6 +152,7 @@ export function FlowProvider({ children, project, projectId, isReadonly, taskSta
 				totalPipes={totalPipes}
 				servicesJson={servicesJson}
 				servicesJsonError={servicesJsonError}
+				getNodeSchema={getNodeSchema}
 				inventory={inventory}
 				inventoryConnectorTitleMap={inventoryConnectorTitleMap}
 				handleValidatePipeline={handleValidatePipeline}

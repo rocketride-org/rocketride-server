@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * Common style definitions for shared-ui components.
+ * Common style definitions for shared components.
  *
  * All styles use --rr-* CSS custom property tokens so they automatically
  * adapt to light/dark themes and VS Code theme overrides.

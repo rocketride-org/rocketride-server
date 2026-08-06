@@ -68,6 +68,9 @@ export interface IFlowContainerProps {
 	/** Error message if the service catalog failed to load. */
 	servicesJsonError?: string;
 
+	/** Host function returning the FULL service definition for one provider (see FlowProjectProvider). */
+	getNodeSchema?: (provider: string) => Promise<Record<string, unknown> | undefined>;
+
 	/** Connector inventory metadata. */
 	inventory?: Record<string, unknown>;
 
@@ -160,7 +163,7 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
@@ -174,6 +177,7 @@ export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, 
 					totalPipes={totalPipes}
 					servicesJson={servicesJson}
 					servicesJsonError={servicesJsonError}
+					getNodeSchema={getNodeSchema}
 					inventory={inventory}
 					inventoryConnectorTitleMap={inventoryConnectorTitleMap}
 					handleValidatePipeline={handleValidatePipeline}

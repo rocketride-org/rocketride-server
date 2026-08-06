@@ -98,7 +98,7 @@ export const sidebarMenuEntry: IGalleryEntry = {
 	props: [
 		{ name: 'menu', type: 'ViewMenu', dir: 'in', required: true, note: 'The declared menu whose entries render as the vertical list (id, label, count, severity, icon, disabled, children).' },
 		{ name: 'activeId', type: 'string', dir: 'in', required: true, note: 'Id of the currently active entry (drawn as the brand-tinted pill).' },
-		{ name: 'sectionLabel', type: 'string', dir: 'in', note: 'Section label above the menu, e.g. the owning document name.' },
+		{ name: 'sectionLabel', type: 'string', dir: 'in', note: 'Section label above the menu, e.g. the owning document name. The label sits flush at indent 0; rows nest 10px beneath it (flush when no label).' },
 		{ name: 'collapsed', type: 'boolean', dir: 'in', note: 'Icon-rail rendering; when omitted, falls back to the shell-provided useSidebarCollapsed context.' },
 		{ name: 'onSelect', type: '(id: string) => void', dir: 'out', required: true, note: 'Fired with an entry id when the user selects it.' },
 	],

@@ -30,6 +30,7 @@ export type ProjectHostToWebview =
 	| { type: 'project:update'; project: any }
 	| { type: 'project:services'; services: Record<string, any>; icons?: Record<string, string> }
 	| { type: 'project:validateResponse'; requestId: number; result: any; error?: string }
+	| { type: 'project:nodeSchemaResponse'; requestId: number; service?: Record<string, any>; error?: string }
 	| { type: 'project:dirtyState'; isDirty: boolean; isNew: boolean }
 	| { type: 'project:initialState'; state: ViewState }
 	| { type: 'project:initialPrefs'; prefs: Record<string, unknown> }
@@ -50,6 +51,7 @@ export type ProjectWebviewToHost =
 	| ShellWebviewToHost
 	| { type: 'project:contentChanged'; project: any }
 	| { type: 'project:validate'; requestId: number; pipeline: any }
+	| { type: 'project:getNodeSchema'; requestId: number; provider: string }
 	| { type: 'project:requestSave' }
 	| { type: 'project:viewStateChange'; viewState: ViewState }
 	| { type: 'project:prefsChange'; prefs: Record<string, unknown> }

@@ -143,6 +143,10 @@ const ProjectWebview: React.FC = () => {
 	const pendingValidates = useRef<Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>>(new Map());
 	const validateCounter = useRef(0);
 
+	// Pending node-schema requests (request-ID → Promise resolver)
+	const pendingNodeSchemas = useRef<Map<number, { resolve: (v: Record<string, any> | undefined) => void; reject: (e: Error) => void }>>(new Map());
+	const nodeSchemaCounter = useRef(0);
+
 	// --- Messaging ------------------------------------------------------------
 
 	const sendMessageRef = useRef<(msg: ProjectWebviewToHost) => void>(() => {});
@@ -202,6 +206,15 @@ const ProjectWebview: React.FC = () => {
 					pendingValidates.current.delete(msg.requestId);
 					if (msg.error) pending.reject(new Error(msg.error));
 					else pending.resolve(msg.result);
+				}
+				break;
+			}
+			case 'project:nodeSchemaResponse': {
+				const pending = pendingNodeSchemas.current.get(msg.requestId);
+				if (pending) {
+					pendingNodeSchemas.current.delete(msg.requestId);
+					if (msg.error) pending.reject(new Error(msg.error));
+					else pending.resolve(msg.service);
 				}
 				break;
 			}
@@ -455,6 +468,30 @@ const ProjectWebview: React.FC = () => {
 					if (pendingValidates.current.has(requestId)) {
 						pendingValidates.current.get(requestId)!.resolve({ errors: [], warnings: [] });
 						pendingValidates.current.delete(requestId);
+					}
+				}, 15000);
+			});
+		},
+		[sendMessage]
+	);
+
+	/**
+	 * Fetches the FULL definition (config schema) for one service provider
+	 * from the extension host. The bulk services payload is summary-only, so
+	 * the canvas requests definitions on demand and caches them. Rejects on
+	 * host error or timeout so the canvas treats the request as retryable.
+	 */
+	const handleGetNodeSchema = useCallback(
+		async (provider: string): Promise<Record<string, any> | undefined> => {
+			return new Promise((resolve, reject) => {
+				const requestId = ++nodeSchemaCounter.current;
+				pendingNodeSchemas.current.set(requestId, { resolve, reject });
+				sendMessage({ type: 'project:getNodeSchema', requestId, provider });
+				// Timeout: reject after 15s so a lost reply never hangs the canvas
+				setTimeout(() => {
+					if (pendingNodeSchemas.current.has(requestId)) {
+						pendingNodeSchemas.current.delete(requestId);
+						reject(new Error(`Node schema request timed out for '${provider}'`));
 					}
 				}, 15000);
 			});
@@ -768,6 +805,7 @@ const ProjectWebview: React.FC = () => {
 				liveLogEvents={liveLogEvents}
 				onContentChanged={handleContentChanged}
 				onValidate={handleValidate}
+				getNodeSchema={handleGetNodeSchema}
 				onPipelineAction={handlePipelineAction}
 				onViewStateChange={handleViewStateChange}
 				onPrefsChange={handlePrefsChange}

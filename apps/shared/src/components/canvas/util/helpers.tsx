@@ -153,6 +153,22 @@ export const resolveDefaultFormData = (_id: string, schema: Record<string, unkno
 };
 
 /**
+ * True when a service's Pipe section exposes a user-configurable form.
+ * Schemas flagged with `hideForm` (or with no properties at all) render no
+ * config form in the node panel, so their nodes must never be marked as
+ * needing configuration — the user would have nothing to fix.
+ *
+ * @param pipe - The service's Pipe section ({ schema, ui }).
+ * @returns Whether the schema should drive form validation / the red gear.
+ */
+export const hasConfigurableSchema = (pipe?: { schema?: unknown }): boolean => {
+	const properties = (pipe?.schema as { properties?: Record<string, unknown> } | undefined)?.properties;
+	if (!properties) return false;
+	if (properties.hideForm !== undefined) return false;
+	return Object.keys(properties).length > 0;
+};
+
+/**
  * Display-only aliases for inventory category keys. Some `classType` tags are
  * invoke-channel connection contracts rather than standalone node categories, so
  * the Add Node picker should not give them their own section. `deepagent` is the
@@ -193,8 +209,11 @@ export const buildInventory = (forms: Record<string, IService> = {}) => {
 	};
 
 	for (const [key, value] of Object.entries(forms)) {
-		// Skip entries that aren't valid pipeline services (must have a Pipe definition and classType)
-		if (!value.Pipe || !value.classType?.length) continue;
+		// Skip entries that aren't valid pipeline services. The catalog is now
+		// summary-only (config sections like Pipe are fetched on demand), so
+		// classType presence is the whole gate — a Pipe check would drop
+		// every service.
+		if (!value.classType?.length) continue;
 
 		// Use bitwise AND to check the NoSaas capability flag; these services
 		// are excluded from the SaaS UI and should not appear in the node panel.

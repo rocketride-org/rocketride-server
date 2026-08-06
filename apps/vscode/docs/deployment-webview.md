@@ -19,7 +19,7 @@ Conventions shared by both protocols:
   `TeamDeploymentRowDTO`, `TeamDeploymentScheduleDTO`,
   `DeployHistoryRowDTO`, `DeployScheduleRowDTO`, `DeploymentInfoDTO`,
   `SchedulePreviewResultDTO`) mirror
-  `packages/shared-ui/src/components/deploy-panel/types.ts` — the contract
+  `packages/shared/src/components/deploy-panel/types.ts` — the contract
   of record — field-for-field, so the webview hands them to the shared
   `DeployPanel` / `DeploymentView` components unchanged.
 - **Two correlation styles**: MUTATION and RPC-style requests

@@ -11,6 +11,11 @@
  * this module into a shared package (packages/appdev-templates); keep it
  * free of vscode imports.
  *
+ * The generated App.tsx is composed from FrameOptions — sidebar, status
+ * footer, and document tabs each toggle a chrome region of the scaffolded
+ * AppLayout, so the New App wizard's frame checkboxes map 1:1 onto the
+ * emitted code.
+ *
  * Every generated file carries the project MIT header. The MF rsbuild shape
  * mirrors apps/hello-ui exactly: exposes ./AppDescriptor, dts:false,
  * runtime:false, shareStrategy 'loaded-first', react/react-dom eager
@@ -27,6 +32,8 @@ export interface TemplateVars {
 	appId: string;
 	/** Display name, e.g. 'Brand Studio'. */
 	appName: string;
+	/** Publisher slug for appManifest.publisher — the organization developer id, or 'local' when none. */
+	publisher: string;
 	/** MF container name (dots/hyphens → underscores). */
 	moduleId: string;
 	/** Dev-server port for `rsbuild dev`. */
@@ -34,6 +41,19 @@ export interface TemplateVars {
 	/** Preview URL the launch config opens (engine shell + appid + rrdev). */
 	previewUrl: string;
 }
+
+/** Composable frame options — each toggles a chrome region of the scaffolded app. */
+export interface FrameOptions {
+	/** Two-column layout with a navigation sidebar on the left. */
+	sidebar: boolean;
+	/** Status bar across the bottom of the app (AppLayout showStatus). */
+	statusFooter: boolean;
+	/** Document tab strip across the content area (Documents + DocSplitLayout + DocTabs). */
+	docTabs: boolean;
+}
+
+/** Frame used when the caller passes none — matches the pre-options scaffold shape. */
+const DEFAULT_FRAME: FrameOptions = { sidebar: false, statusFooter: true, docTabs: false };
 
 /** One rendered file of a scaffolded app. */
 export interface TemplateFile {
@@ -72,7 +92,7 @@ function packageJson(v: TemplateVars): string {
 			license: 'MIT',
 			appManifest: {
 				id: v.appId,
-				publisher: 'local',
+				publisher: v.publisher,
 				name: v.appName,
 				description: `${v.appName} — a RocketRide app`,
 				categories: ['custom'],
@@ -87,7 +107,6 @@ function packageJson(v: TemplateVars): string {
 				typecheck: 'tsc --noEmit',
 			},
 			dependencies: {
-				rocketride: '^1.0.0',
 				react: '^18.2.0',
 				'react-dom': '^18.2.0',
 			},
@@ -114,7 +133,7 @@ function packageJson(v: TemplateVars): string {
 /**
  * rsbuild.config.ts — the standalone MF remote shape from
  * docs/README-apps.md: moduleId derived from appManifest.id in-config, the
- * src/index.ts async boundary as the entry, rocketride/app-sdk shared.
+ * src/index.ts async boundary as the entry, shell shared.
  */
 function rsbuildConfig(v: TemplateVars): string {
 	return `${TS_HEADER}
@@ -139,11 +158,10 @@ export default defineConfig(() => ({
 			shared: {
 				react: { singleton: true, eager: true, requiredVersion: '^18.2.0' },
 				'react-dom': { singleton: true, eager: true, requiredVersion: '^18.2.0' },
-				'rocketride/app-sdk': { singleton: true, requiredVersion: false },
 				// Platform modules are CONSUMED from the shell's share scope at
 				// runtime, never bundled (import: false): the app repo needs no
 				// platform checkout to build — editor types come from the
-				// vendored types/rocketride-shell/ (tsconfig paths).
+				// installed shell package (the workspace's vendored shell.tgz).
 				'shell': { singleton: true, requiredVersion: false, import: false },
 				// react-refresh/runtime is deliberately NOT shared: the app's
 				// own copy late-attaches to the devtools hook the dev-flavor
@@ -193,39 +211,13 @@ function tsconfigJson(): string {
 				strict: true,
 				skipLibCheck: true,
 				noEmit: true,
-				// Platform types come from the VENDORED bundle the App Builder
-				// maintains (types/rocketride-shell/) — the modules themselves
-				// arrive from the shell's share scope at runtime, so nothing
-				// platform-side is ever installed or checked out.
-				paths: {
-					shell: ['./types/rocketride-shell/shell.d.ts'],
-				},
+				// Platform types resolve from the INSTALLED shell package (the
+				// workspace's vendored .rocketride/shell/shell.tgz, wired as the
+				// app's "shell" dependency) — the modules themselves arrive from
+				// the shell's share scope at runtime, so nothing platform-side
+				// is ever checked out or copied into the app.
 			},
-			include: ['src', 'types'],
-		},
-		null,
-		2,
-	)}\n`;
-}
-
-/** .vscode/launch.json — F5 opens the preview in a real browser (D2). */
-function launchJson(v: TemplateVars): string {
-	return `${JSON.stringify(
-		{
-			version: '0.2.0',
-			configurations: [
-				{
-					name: `Debug ${v.appName}`,
-					type: 'msedge',
-					request: 'launch',
-					url: v.previewUrl,
-					webRoot: '${workspaceFolder}',
-					sourceMapPathOverrides: {
-						'webpack:///./*': '${workspaceFolder}/*',
-						'webpack:///*': '*',
-					},
-				},
-			],
+			include: ['src'],
 		},
 		null,
 		2,
@@ -241,7 +233,7 @@ function appDescriptor(v: TemplateVars): string {
  * declares its layout inside with <AppLayout>.
  */
 
-import type { AppDescriptor } from 'rocketride/app-sdk';
+import type { AppDescriptor } from 'shell';
 import App from './App';
 
 const descriptor: AppDescriptor = {
@@ -256,19 +248,99 @@ export default descriptor;
 }
 
 // =============================================================================
+// FRAME COMPOSITION
+// =============================================================================
+
+/** Named import list for 'shell' — AppLayout plus the docs trio when tabbed. */
+function shellImports(o: FrameOptions): string {
+	// step: only tabbed frames pull the document-model components
+	const names = ['AppLayout'];
+	if (o.docTabs) names.push('Documents', 'DocSplitLayout', 'DocTabs');
+	return `import { ${names.join(', ')} } from 'shell';`;
+}
+
+/** Extra style entries the frame options contribute (nav styles for the sidebar). */
+function frameStyles(o: FrameOptions): string {
+	if (!o.sidebar) return '';
+	return `
+	nav: { padding: '10px 8px' },
+	navItem: { padding: '6px 10px', borderRadius: 6, fontSize: 13, color: 'var(--rr-text-primary)', cursor: 'pointer' },`;
+}
+
+/** The app-owned Documents model section (module scope), when tabbed. */
+function docsModel(o: FrameOptions): string {
+	if (!o.docTabs) return '';
+	return `
+// =============================================================================
+// DOCUMENTS
+// =============================================================================
+
+// The app OWNS its document model — the shell never sees it. No VFS is wired
+// here, so documents are static; pass an IVirtualFileSystem to open real files.
+const docs = new Documents();
+docs.openStaticDocument('welcome', 'Welcome');
+`;
+}
+
+/** The sidebar navigation component, when the two-column frame is on. */
+function sidebarNav(o: FrameOptions): string {
+	if (!o.sidebar) return '';
+	return `
+/** Sidebar navigation — replace the items with your app's sections. */
+const SidebarNav: React.FC = () => (
+	<div style={styles.nav}>
+		<div style={styles.navItem}>Overview</div>
+		<div style={styles.navItem}>Activity</div>
+		<div style={styles.navItem}>Settings</div>
+	</div>
+);
+`;
+}
+
+/**
+ * The App component's JSX — AppLayout with the option-selected props wrapping
+ * either the raw content or the DocSplitLayout/DocTabs pane tree.
+ *
+ * @param o - Frame options driving the composition.
+ * @param content - A single self-closing content element, e.g. '<Content />'.
+ */
+function appJsx(o: FrameOptions, content: string): string {
+	// step: AppLayout props from the frame options
+	const props = [o.sidebar ? ' sidebar={<SidebarNav />}' : '', o.statusFooter ? ' showStatus' : ''].join('');
+	// step: plain frame — content fills the client area directly
+	if (!o.docTabs) {
+		return `	<AppLayout${props}>
+		${content}
+	</AppLayout>`;
+	}
+	// step: tabbed frame — the split tree renders a tab strip per pane
+	return `	<AppLayout${props}>
+		<DocSplitLayout
+			docs={docs}
+			renderPane={(groupId) => (
+				<>
+					<DocTabs docs={docs} groupId={groupId} isActive />
+					${content}
+				</>
+			)}
+		/>
+	</AppLayout>`;
+}
+
+// =============================================================================
 // TEMPLATE BODIES
 // =============================================================================
 
-/** Blank template: a single hello screen. */
-function blankApp(v: TemplateVars): string {
+/** Blank template: a hello screen composed into the selected frame. */
+function blankApp(v: TemplateVars, o: FrameOptions): string {
 	return `${TS_HEADER}
 /**
  * ${v.appName} — root component rendered by the RocketRide shell.
  */
 
 import React from 'react';
-import type { ShellAppProps } from 'rocketride/app-sdk';
-import { AppLayout } from 'shell';
+import type { ShellAppProps } from 'shell';
+${shellImports(o)}
 
 // =============================================================================
 // STYLES
@@ -277,40 +349,43 @@ import { AppLayout } from 'shell';
 const styles: Record<string, React.CSSProperties> = {
 	wrap: { padding: 40, fontFamily: 'var(--rr-font-family, system-ui)' },
 	title: { fontSize: 22, fontWeight: 600, color: 'var(--rr-text-primary)' },
-	sub: { marginTop: 8, fontSize: 13, color: 'var(--rr-text-secondary)' },
+	sub: { marginTop: 8, fontSize: 13, color: 'var(--rr-text-secondary)' },${frameStyles(o)}
 };
-
+${docsModel(o)}
 // =============================================================================
 // COMPONENT
 // =============================================================================
+${sidebarNav(o)}
+/** Client-area content — replace with your app. */
+const Content: React.FC<ShellAppProps> = ({ isConnected, identity }) => (
+	<div style={styles.wrap}>
+		<h1 style={styles.title}>${v.appName}</h1>
+		<p style={styles.sub}>Edit src/App.tsx and save — the preview reloads automatically.</p>
+		<p style={styles.sub}>Connected: {isConnected ? 'yes' : 'no'} · User: {identity?.displayName ?? 'not signed in'}</p>
+	</div>
+);
 
 /**
- * Root view — replace with your app. AppLayout declares the layout:
- * pass \`sidebar\` for a two-column app, \`showStatus\` for the status bar.
+ * Root view — AppLayout declares the frame the wizard selected; recompose
+ * its props (\`sidebar\`, \`showStatus\`) to change it.
  */
-const App: React.FC<ShellAppProps> = ({ isConnected, identity }) => (
-	<AppLayout showStatus>
-		<div style={styles.wrap}>
-			<h1 style={styles.title}>${v.appName}</h1>
-			<p style={styles.sub}>Edit src/App.tsx and save — the preview reloads automatically.</p>
-			<p style={styles.sub}>Connected: {isConnected ? 'yes' : 'no'} · User: {identity?.displayName ?? 'not signed in'}</p>
-		</div>
-	</AppLayout>
+const App: React.FC<ShellAppProps> = (props) => (
+${appJsx(o, '<Content {...props} />')}
 );
 
 export default App;
 `;
 }
 
-/** Dashboard template: stat cards + a bar chart, token-styled. */
-function dashboardApp(v: TemplateVars): string {
+/** Dashboard template: stat cards + a bar chart, token-styled, composed into the selected frame. */
+function dashboardApp(v: TemplateVars, o: FrameOptions): string {
 	return `${TS_HEADER}
 /**
  * ${v.appName} — dashboard root rendered by the RocketRide shell.
  */
 
 import React from 'react';
-import { AppLayout } from 'shell';
+${shellImports(o)}
 
 // =============================================================================
 // STYLES
@@ -326,39 +401,42 @@ const styles: Record<string, React.CSSProperties> = {
 	value: { fontSize: 22, fontWeight: 700, marginTop: 4, color: 'var(--rr-text-primary)' },
 	chart: { border: '1px solid var(--rr-border)', borderRadius: 8, background: 'var(--rr-bg-paper)', padding: 14 },
 	bars: { display: 'flex', alignItems: 'flex-end', gap: 8, height: 96 },
-	bar: { flex: 1, background: 'var(--rr-brand)', opacity: 0.75, borderRadius: '3px 3px 0 0' },
+	bar: { flex: 1, background: 'var(--rr-brand)', opacity: 0.75, borderRadius: '3px 3px 0 0' },${frameStyles(o)}
 };
 
 // Demo series — replace with live data from your pipelines.
 const SERIES = [42, 55, 38, 64, 71, 52, 60, 78, 66, 83, 74, 90];
-
+${docsModel(o)}
 // =============================================================================
 // COMPONENT
 // =============================================================================
-
-/**
- * Dashboard view: three stat cards + a 12-point bar chart. AppLayout
- * declares the layout: pass \`sidebar\` for a two-column app.
- */
-const App: React.FC = () => (
-	<AppLayout showStatus>
-		<div style={styles.wrap}>
-			<div style={styles.title}>${v.appName}</div>
-			<div style={styles.sub}>Live overview</div>
-			<div style={styles.row}>
-				<div style={styles.card}><div style={styles.label}>Items</div><div style={styles.value}>12,408</div></div>
-				<div style={styles.card}><div style={styles.label}>Success</div><div style={styles.value}>96.4%</div></div>
-				<div style={styles.card}><div style={styles.label}>Pending</div><div style={styles.value}>37</div></div>
-			</div>
-			<div style={styles.chart}>
-				<div style={styles.bars}>
-					{SERIES.map((h, i) => (
-						<div key={i} style={{ ...styles.bar, height: \`\${h}%\` }} />
-					))}
-				</div>
+${sidebarNav(o)}
+/** Dashboard content: three stat cards + a 12-point bar chart. */
+const Content: React.FC = () => (
+	<div style={styles.wrap}>
+		<div style={styles.title}>${v.appName}</div>
+		<div style={styles.sub}>Live overview</div>
+		<div style={styles.row}>
+			<div style={styles.card}><div style={styles.label}>Items</div><div style={styles.value}>12,408</div></div>
+			<div style={styles.card}><div style={styles.label}>Success</div><div style={styles.value}>96.4%</div></div>
+			<div style={styles.card}><div style={styles.label}>Pending</div><div style={styles.value}>37</div></div>
+		</div>
+		<div style={styles.chart}>
+			<div style={styles.bars}>
+				{SERIES.map((h, i) => (
+					<div key={i} style={{ ...styles.bar, height: \`\${h}%\` }} />
+				))}
 			</div>
 		</div>
-	</AppLayout>
+	</div>
+);
+
+/**
+ * Root view — AppLayout declares the frame the wizard selected; recompose
+ * its props (\`sidebar\`, \`showStatus\`) to change it.
+ */
+const App: React.FC = () => (
+${appJsx(o, '<Content />')}
 );
 
 export default App;
@@ -374,9 +452,11 @@ export default App;
  *
  * @param name - Template name from TEMPLATE_NAMES.
  * @param vars - Substitution variables.
+ * @param frame - Frame options composing the generated App.tsx; defaults to
+ *                the pre-options shape (status footer only).
  * @returns The files to write into the new app folder.
  */
-export function renderTemplate(name: TemplateName, vars: TemplateVars): TemplateFile[] {
+export function renderTemplate(name: TemplateName, vars: TemplateVars, frame: FrameOptions = DEFAULT_FRAME): TemplateFile[] {
 	const files: TemplateFile[] = [
 		{ path: 'package.json', content: packageJson(vars) },
 		// The app DOCUMENT (.pipe-style): opening this file is opening the
@@ -384,35 +464,9 @@ export function renderTemplate(name: TemplateName, vars: TemplateVars): Template
 		{ path: `${vars.appId.split('.').pop()}.rrapp`, content: `${JSON.stringify({ id: vars.appId }, null, 2)}\n` },
 		{ path: 'rsbuild.config.ts', content: rsbuildConfig(vars) },
 		{ path: 'tsconfig.json', content: tsconfigJson() },
-		{ path: '.vscode/launch.json', content: launchJson(vars) },
-		{
-			path: '.gitignore',
-			content: [
-				'# Dependencies',
-				'node_modules/',
-				'',
-				'# Build output',
-				'dist/',
-				'',
-				'# Vendored platform types — tooling-owned: the App Builder refreshes',
-				'# them from the connected server on every open (do not commit)',
-				'types/rocketride-shell/',
-				'',
-				'# Logs and OS noise',
-				'*.log',
-				'.DS_Store',
-				'Thumbs.db',
-				'',
-			].join('\n'),
-		},
-		// Workspace boundary: app folders often land inside an enclosing pnpm
-		// workspace (a monorepo checkout, a dist tree). This marks the app as
-		// its OWN workspace root so `pnpm install` resolves here instead of
-		// walking up — the app always gets a local node_modules.
-		{ path: 'pnpm-workspace.yaml', content: "packages:\n  - '.'\n" },
 		{ path: 'src/index.ts', content: asyncBoundary() },
 		{ path: 'src/AppDescriptor.ts', content: appDescriptor(vars) },
-		{ path: 'src/App.tsx', content: name === 'Dashboard' ? dashboardApp(vars) : blankApp(vars) },
+		{ path: 'src/App.tsx', content: name === 'Dashboard' ? dashboardApp(vars, frame) : blankApp(vars, frame) },
 	];
 	return files;
 }

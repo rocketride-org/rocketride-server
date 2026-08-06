@@ -5,5 +5,5 @@
 		"noUnusedParameters": false,
 		"noUncheckedSideEffectImports": false
 	},
-	"files": ["../../packages/shared-ui/src/types/global.d.ts"]
+	"files": ["./src/types/global.d.ts"]
 }

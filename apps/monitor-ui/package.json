@@ -24,8 +24,7 @@
     "@module-federation/rsbuild-plugin": "^2.5.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "shared": "file:../shared",
-    "shell": "link:../../.rocketride/shell"
+    "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
     "@rsbuild/core": "~2.0.11",

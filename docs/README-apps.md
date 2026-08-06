@@ -381,7 +381,7 @@ export default defineConfig(() => ({
   ],
   resolve: {
     alias: {
-      shared: path.resolve(__dirname, '../../rocketride-server/packages/shared-ui/src'),
+      shared: path.resolve(__dirname, '../../rocketride-server/packages/shared/src'),
       'shell': path.resolve(__dirname, '../../rocketride-server/apps/shell/src/index.ts'),
     },
   },
@@ -506,7 +506,7 @@ interface ShellBrandingConfig {
 3. Manifest `icon` URL (from `package.json`)
 4. 2-letter monogram fallback
 
-Pre-built theme-aware SVGs are available in `shared-ui/assets/rocketride/`:
+Pre-built theme-aware SVGs are available in `shared/assets/rocketride/`:
 - `rocketride-dark.svg`: light body (`#E0DDF0`) for dark backgrounds
 - `rocketride-light.svg`: dark body (`#1E1A34`) for light backgrounds
 - `rocketride.svg`: `currentColor` body, CSS-controlled

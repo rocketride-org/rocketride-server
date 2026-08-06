@@ -7,7 +7,7 @@
  * Host-side dev/deploy run classification for stamped task-event bodies.
  *
  * The extension HOST bundle has no `shared` alias, so it cannot import
- * shared-ui's `isDevLiveEvent` — this predicate is the host's single copy of
+ * shared's `isDevLiveEvent` — this predicate is the host's single copy of
  * the same runKind test, used by ProjectProvider (status cache) and
  * SidebarProvider (dev status forwarding) so the two cannot drift.
  */

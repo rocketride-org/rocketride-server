@@ -118,6 +118,14 @@ const S = {
 		minHeight: 0,
 		overflowY: 'auto' as const,
 	} as CSSProperties,
+	// App row icon — the app's own icon in the 16px slot the generic
+	// glyph occupies, so rows align either way.
+	appIcon: {
+		width: 16,
+		height: 16,
+		flexShrink: 0,
+		objectFit: 'contain',
+	} as CSSProperties,
 	// Placeholder body for not-yet-built modes (the Explorer empty-state
 	// treatment: centered muted text).
 	comingSoon: {
@@ -338,7 +346,11 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 							    (apps don't expand) + 16px leading icon — so app icons and
 							    names align column-for-column with the pipeline rows. */}
 							<span style={{ width: 14, flexShrink: 0 }} />
-							<BxGridAlt size={16} color="var(--rr-text-secondary)" />
+							{app.iconUrl ? (
+								<img src={app.iconUrl} alt="" style={S.appIcon} />
+							) : (
+								<BxGridAlt size={16} color="var(--rr-text-secondary)" />
+							)}
 							<span style={S.rowName}>{app.name}</span>
 							<span style={S.spacer} />
 							<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>

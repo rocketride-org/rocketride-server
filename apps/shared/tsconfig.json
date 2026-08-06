@@ -18,14 +18,8 @@
 		"isolatedModules": true,
 		"jsx": "react-jsx",
 		"paths": {
-			"shell": [
-				"../../.rocketride/shell/shell.d.ts"
-			],
 			"shared/*": [
 				"./src/*"
-			],
-			"shell/client": [
-				"../../.rocketride/shell/client.d.ts"
 			]
 		}
 	},

@@ -6,7 +6,7 @@
 // by their guards AND survive the render_final wrap, or they drop to the JsonTree
 // fallback — which must, in turn, never emit an unbounded string.
 //
-// Run via `shared-ui:test` (node --import tsx --test), matching the package convention.
+// Run via `shared:test` (node --import tsx --test), matching the package convention.
 // =============================================================================
 
 import assert from 'node:assert/strict';

@@ -25,7 +25,7 @@
 // =============================================================================
 
 /**
- * The App Builder view layer. Deliberately NOT exported from the shared-ui
+ * The App Builder view layer. Deliberately NOT exported from the shared
  * main barrel (the deploy-panel precedent — keep the shared singleton's
  * surface lean); hosts import 'shared/modules/appdev' directly, exactly
  * like 'shared/modules/project'.
@@ -42,7 +42,7 @@ export type { IStoreViewProps } from './StoreView';
 export { LogList, LOG_LIST_CAP } from './LogList';
 export type { ILogListProps, LogListRow } from './LogList';
 export { renderTemplate, TEMPLATE_NAMES } from './templates';
-export type { TemplateFile, TemplateName, TemplateVars } from './templates';
+export type { FrameOptions, TemplateFile, TemplateName, TemplateVars } from './templates';
 export { ComponentGallery, KnobsPanel, GALLERY_ENTRIES, GALLERY_GROUPS } from './gallery';
 export type {
 	GalleryGroup,

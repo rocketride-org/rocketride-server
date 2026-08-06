@@ -39,7 +39,7 @@
  * mutations), so separating it reduces unnecessary re-renders of node components.
  */
 
-import { createContext, ReactElement, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { IProject, IToolchainState, IValidatePipelinePayload, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../types';
 
@@ -90,6 +90,15 @@ export interface IFlowProjectContext {
 
 	/** Error message if the service catalog failed to load. */
 	servicesJsonError?: string;
+
+	/**
+	 * Requests the FULL service definition (config schema) for one provider
+	 * from the host. The result is cached and merged into {@link servicesJson},
+	 * so consumers simply re-read the catalog once the definition lands.
+	 * A no-op when the host provides no `getNodeSchema` callback, when the
+	 * provider is already resolved, or while a fetch is in flight.
+	 */
+	requestNodeSchema: (provider: string) => void;
 
 	// --- Inventory ---------------------------------------------------------
 
@@ -211,6 +220,16 @@ export interface IFlowProjectProviderProps {
 	servicesJson?: Record<string, unknown>;
 	servicesJsonError?: string;
 
+	/**
+	 * Host function returning the FULL service definition (summary plus config
+	 * sections such as `Pipe`) for one provider. The bulk `servicesJson`
+	 * payload is summary-only, so the canvas fetches definitions on demand
+	 * through this and caches them. Reject on transient failure (disconnect,
+	 * timeout) so the request stays retryable; resolve undefined for a
+	 * genuine "no definition" answer.
+	 */
+	getNodeSchema?: (provider: string) => Promise<Record<string, unknown> | undefined>;
+
 	// --- Inventory ---------------------------------------------------------
 	inventory?: Record<string, unknown>;
 	inventoryConnectorTitleMap?: Record<string, string>;
@@ -261,7 +280,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, isConnected, isSubscribed, initialViewport, isDirty, isNew, onSave, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -279,8 +298,61 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 	/** True if any task is neither completed nor cancelled. */
 	const isPipelineRunning = useMemo(() => Object.values(taskStatuses ?? {}).some((status) => status.state !== ITaskState.COMPLETED && status.state !== ITaskState.CANCELLED), [taskStatuses]);
 
-	// Type-narrow the raw servicesJson into our IServiceCatalog
-	const servicesJson = useMemo(() => (rawServicesJson ?? {}) as IServiceCatalog, [rawServicesJson]);
+	// --- Full service definitions (fetched on demand) ----------------------
+
+	// The bulk catalog is summary-only; full definitions (config schemas)
+	// arrive one provider at a time through the host's getNodeSchema and are
+	// cached here until the bulk catalog itself refreshes.
+	const [fullServices, setFullServices] = useState<Record<string, IServiceCatalog[string]>>({});
+
+	// Providers already resolved (even when the host returned no definition)
+	// and providers with an in-flight fetch — both suppress duplicate requests.
+	const fetchedProvidersRef = useRef<Set<string>>(new Set());
+	const pendingSchemaFetchesRef = useRef<Set<string>>(new Set());
+
+	// Ride the host callback in a ref so requestNodeSchema stays identity-stable
+	// even when the host passes a fresh function each render.
+	const getNodeSchemaRef = useRef(getNodeSchema);
+	getNodeSchemaRef.current = getNodeSchema;
+
+	// A new bulk catalog invalidates every cached definition (the server's
+	// services may have changed), so drop the cache and let consumers refetch.
+	useEffect(() => {
+		setFullServices({});
+		fetchedProvidersRef.current.clear();
+	}, [rawServicesJson]);
+
+	/**
+	 * Requests the full service definition for one provider from the host.
+	 * Results merge into the exported catalog; misses are cached too so the
+	 * host is not hammered, while failures stay retryable on the next call.
+	 */
+	const requestNodeSchema = useCallback((provider: string): void => {
+		const fetchSchema = getNodeSchemaRef.current;
+		if (!provider || !fetchSchema) return;
+		if (fetchedProvidersRef.current.has(provider) || pendingSchemaFetchesRef.current.has(provider)) return;
+		pendingSchemaFetchesRef.current.add(provider);
+		fetchSchema(provider)
+			.then((definition) => {
+				// An undefined definition is a valid answer — cache the miss.
+				fetchedProvidersRef.current.add(provider);
+				if (definition) {
+					setFullServices((prev) => ({ ...prev, [provider]: definition as IServiceCatalog[string] }));
+				}
+			})
+			.catch(() => {
+				// Transient failure (disconnect, timeout): stay retryable.
+			})
+			.finally(() => {
+				pendingSchemaFetchesRef.current.delete(provider);
+			});
+	}, []);
+
+	// Type-narrow the raw servicesJson into our IServiceCatalog, folding in
+	// fetched full definitions. A full definition extends its summary, so it
+	// simply replaces the summary entry — the config panel, the red-gear
+	// validation, and add-node defaults all see the schema transparently.
+	const servicesJson = useMemo(() => ({ ...(rawServicesJson ?? {}), ...fullServices }) as IServiceCatalog, [rawServicesJson, fullServices]);
 
 	// --- Context value (memoized to prevent consumer re-renders on unchanged props) ---
 
@@ -296,6 +368,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		totalPipes,
 		servicesJson,
 		servicesJsonError,
+		requestNodeSchema,
 		inventory,
 		inventoryConnectorTitleMap,
 		handleValidatePipeline,
@@ -326,7 +399,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 	}), [
 		currentProject, toolchainState, patchToolchainState, toggleDevMode,
 		isPipelineRunning, isReadonly, taskStatuses, componentPipeCounts, totalPipes,
-		servicesJson, servicesJsonError, inventory, inventoryConnectorTitleMap,
+		servicesJson, servicesJsonError, requestNodeSchema, inventory, inventoryConnectorTitleMap,
 		handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo,
 		oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens,
 		onOpenLink, googlePickerDeveloperKey, googlePickerClientId,

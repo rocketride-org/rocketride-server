@@ -12,7 +12,7 @@
 // no sort, no dedupe — so a view must hand each event over EXACTLY ONCE, oldest
 // first, across repeated `play` calls.
 //
-// Run via `shared-ui:test` (node --import tsx --test), matching the package convention.
+// Run via `shared:test` (node --import tsx --test), matching the package convention.
 // =============================================================================
 
 import assert from 'node:assert/strict';
