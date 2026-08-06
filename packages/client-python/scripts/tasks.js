@@ -47,9 +47,10 @@ const IGNORE = ['**/node_modules/**', '**/__pycache__/**', '**/.pytest_cache/**'
 // Engine (built by server:build; execCommand resolves extension on Windows)
 const ENGINE = path.join(SERVER_DIR, 'engine');
 
-// Canonical README lives in docs/; copy it into the build dir for wheel packaging
-const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
-const README_SRC = path.join(DOCS_DIR, 'README-python-client.md');
+// README is the committed docs:export copy at the package root (maintained by
+// `./builder docs:export`, drift-checked by docs:check); copy it into the
+// build dir for wheel packaging.
+const README_SRC = path.join(PACKAGE_DIR, 'README.md');
 const README_DEST = path.join(BUILD_DIR, 'README.md');
 
 // ============================================================================
