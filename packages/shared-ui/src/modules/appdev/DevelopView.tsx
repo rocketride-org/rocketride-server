@@ -40,7 +40,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Hand, Monitor, RotateCw, Smartphone, Tablet } from 'lucide-react';
+import { Hand, Monitor, RotateCw, Settings, Smartphone, Tablet } from 'lucide-react';
 import { ToggleGroup } from 'shell';
 import { ComponentGallery } from './gallery';
 import { LogList, LOG_LIST_CAP } from './LogList';
@@ -127,7 +127,12 @@ interface PreviewPrefs {
 	zoom: number;
 	presetIdx: Record<PreviewLayout, number>;
 	inheritAuth: boolean;
+	/** Fit mode: the frame tracks the container size (10px margins). */
+	fit: boolean;
 }
+
+/** Breathing room the fitted frame keeps from every container edge. */
+const FIT_MARGIN = 10;
 
 // =============================================================================
 // STYLES
@@ -146,12 +151,17 @@ const styles: Record<string, React.CSSProperties> = {
 		flexShrink: 0,
 	},
 	toolbar: {
-		height: 39,
+		minHeight: 39,
 		background: 'var(--rr-bg-widget)',
 		display: 'flex',
 		alignItems: 'center',
-		padding: '5px 10px 0',
+		// Wrap instead of clip: docked narrow (a skinny editor column), the
+		// clusters break onto extra rows rather than overflowing the pane
+		// into a horizontal scrollbar.
+		flexWrap: 'wrap',
+		padding: '5px 10px 4px',
 		gap: 8,
+		rowGap: 4,
 		flexShrink: 0,
 		fontSize: 12,
 		borderBottom: '1px solid var(--rr-border)',
@@ -161,6 +171,9 @@ const styles: Record<string, React.CSSProperties> = {
 	// floating DEV badge tile, which covered the preview's own top-right UI.
 	devStatus: {
 		flex: 1,
+		// Shrinkable below content size, so the status text truncates before
+		// it forces the control clusters to wrap.
+		minWidth: 0,
 		display: 'flex',
 		alignItems: 'center',
 		gap: 8,
@@ -184,16 +197,6 @@ const styles: Record<string, React.CSSProperties> = {
 		borderColor: 'var(--rr-color-secondary)',
 		color: 'var(--rr-color-secondary)',
 	},
-	inheritAuth: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 5,
-		fontSize: 11.5,
-		color: 'var(--rr-text-secondary)',
-		whiteSpace: 'nowrap',
-		cursor: 'pointer',
-		userSelect: 'none',
-	},
 	inheritAuthBox: {
 		accentColor: 'var(--rr-brand)',
 		cursor: 'pointer',
@@ -202,6 +205,60 @@ const styles: Record<string, React.CSSProperties> = {
 	layoutGroup: {
 		display: 'flex',
 		gap: 2,
+	},
+	// Thin vertical rule between the layout cluster and the zoom cluster.
+	toolbarDivider: {
+		width: 1,
+		height: 18,
+		background: 'var(--rr-border)',
+		flexShrink: 0,
+	},
+	// Grayed-but-visible look for the zoom/hand controls while Fit owns the
+	// frame geometry (disabled attributes carry the behavior).
+	ctlDisabled: {
+		opacity: 0.45,
+		cursor: 'default',
+	},
+	// Anchor for the gear's dropdown, mirroring layoutBtnWrap.
+	gearWrap: {
+		position: 'relative',
+		display: 'inline-flex',
+	},
+	// The gear dropdown — devtools-style overflow menu, right-aligned under
+	// its button. Same visual grammar as resMenu.
+	gearMenu: {
+		position: 'absolute',
+		top: '100%',
+		right: 0,
+		zIndex: 40,
+		minWidth: 180,
+		padding: '6px 0',
+		background: 'var(--rr-bg-paper)',
+		border: '1px solid var(--rr-border)',
+		borderRadius: 4,
+		boxShadow: '0 4px 14px rgba(0,0,0,0.18)',
+	},
+	// One row of the gear menu (checkbox row and action rows alike).
+	gearMenuRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 6,
+		width: '100%',
+		padding: '5px 12px',
+		background: 'transparent',
+		border: 'none',
+		color: 'var(--rr-text-primary)',
+		fontSize: 11.5,
+		textAlign: 'left',
+		whiteSpace: 'nowrap',
+		cursor: 'pointer',
+		userSelect: 'none',
+	},
+	// Full-viewport click-catcher that closes the gear menu on outside click.
+	gearBackdrop: {
+		position: 'fixed',
+		inset: 0,
+		zIndex: 39,
 	},
 	// Anchor for a layout button's hover resolution menu.
 	layoutBtnWrap: {
@@ -375,6 +432,7 @@ const styles: Record<string, React.CSSProperties> = {
 	zoomControl: {
 		display: 'flex',
 		alignItems: 'center',
+		minWidth: 0,
 		gap: 6,
 		fontSize: 11.5,
 		color: 'var(--rr-text-secondary)',
@@ -382,7 +440,11 @@ const styles: Record<string, React.CSSProperties> = {
 		userSelect: 'none',
 	},
 	zoomSlider: {
-		width: 90,
+		// Flexible: shrinks with the pane down to a still-usable thumb run
+		// instead of holding a fixed width that forces overflow.
+		flex: '1 1 60px',
+		minWidth: 48,
+		maxWidth: 90,
 		margin: 0,
 		accentColor: 'var(--rr-brand)',
 		cursor: 'pointer',
@@ -496,6 +558,16 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	// Deliberately not persisted — it is a transient mode, and restoring a
 	// session into a non-interactive preview would read as a hang.
 	const [handTool, setHandTool] = useState(false);
+
+	// Fit mode: the frame continuously tracks the container size (FIT_MARGIN
+	// around every edge) and the zoom/hand controls are disabled — Fit owns
+	// the geometry. Old prefs bags predate the flag: a stored manual zoom
+	// means the user was driving the zoom, so default fit OFF for them and
+	// ON for everyone else.
+	const [fitMode, setFitMode] = useState(() => storedPrefs?.fit ?? (storedPrefs?.zoom == null));
+
+	// The gear (overflow options) dropdown.
+	const [gearOpen, setGearOpen] = useState(false);
 
 	// Live pane dimensions for the device fit math. Guard against 0×0: the
 	// preview pane stays MOUNTED under display:none while other pills are
@@ -613,11 +685,43 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 		return Math.max(0.25, Math.floor(fit * 20) / 20);
 	};
 
-	/** Fit button / mode entry: whole frame visible, centered. */
+	/** Layout-change auto-fit (fit mode OFF): whole frame visible, centered. */
 	const applyFit = (): void => {
 		const fit = computeFit();
 		if (fit !== null) {
 			setPreviewZoom(fit);
+			setPan({ x: 0, y: 0 });
+		}
+	};
+
+	// Fit-mode zoom: continuously proportional to the container, keeping
+	// FIT_MARGIN clear on every edge. Unlike the one-shot auto-fit it is NOT
+	// stepped or capped at 100% — the frame genuinely tracks the container,
+	// growing past actual size on a big pane. Null until measured.
+	const fitZoom = useMemo(() => {
+		if (!screenSize) return null;
+		const fit = Math.min(
+			(screenSize.width - FIT_MARGIN * 2) / (frameWidth + chrome),
+			(screenSize.height - FIT_MARGIN * 2) / (frameHeight + chrome),
+		);
+		// No 25% floor here: fit PROMISES the margins, so a skinny docked
+		// pane gets a genuinely tiny frame rather than an overflowing one.
+		return Math.max(0.05, fit);
+	}, [screenSize, frameWidth, frameHeight, chrome]);
+
+	// The zoom the frame actually renders at — Fit owns it while on.
+	const effectiveZoom = fitMode ? (fitZoom ?? previewZoom) : previewZoom;
+
+	/** Toggles Fit: entering recenters and drops the hand tool (both are
+	 *  meaningless under fit); leaving adopts the fitted zoom so the frame
+	 *  does not jump when the slider takes over. */
+	const toggleFit = (): void => {
+		if (fitMode) {
+			if (fitZoom !== null) setPreviewZoom(Math.round(fitZoom * 100) / 100);
+			setFitMode(false);
+		} else {
+			setFitMode(true);
+			setHandTool(false);
 			setPan({ x: 0, y: 0 });
 		}
 	};
@@ -651,21 +755,23 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 		setPan({ x: 0, y: 0 });
 	}, [presetIdx]);
 	useEffect(() => {
-		if (!needsFitRef.current || !screenSize) return;
+		// Fit mode owns the zoom continuously — the one-shot auto-fit only
+		// serves manual mode.
+		if (fitMode || !needsFitRef.current || !screenSize) return;
 		needsFitRef.current = false;
 		applyFit();
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- applyFit reads the same deps
-	}, [screenSize, layout, orientation, presetIdx]);
+	}, [screenSize, layout, orientation, presetIdx, fitMode]);
 
 	// Persist the whole preferences bag on any change (skip the mount run —
 	// it would just echo the loaded values back).
 	const prefsMountedRef = useRef(false);
 	useEffect(() => {
 		if (!prefsMountedRef.current) { prefsMountedRef.current = true; return; }
-		const bag: PreviewPrefs = { layout, orientation, zoom: previewZoom, presetIdx, inheritAuth };
+		const bag: PreviewPrefs = { layout, orientation, zoom: previewZoom, presetIdx, inheritAuth, fit: fitMode };
 		host.setPref?.(PREVIEW_PREFS_KEY, bag);
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- host is stable; persist on value changes only
-	}, [layout, orientation, previewZoom, presetIdx, inheritAuth]);
+	}, [layout, orientation, previewZoom, presetIdx, inheritAuth, fitMode]);
 
 	// In-flight pan drag; pointer capture on the backdrop keeps move events
 	// coming even while the pointer crosses the preview iframe.
@@ -673,7 +779,8 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 
 	/** Starts a pan drag from the gray backdrop or the device bezel. */
 	const onPanPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
-		if (e.button !== 0) return;
+		// Fit mode owns the geometry — the frame is centered, panning is off.
+		if (fitMode || e.button !== 0) return;
 		panDragRef.current = { pointerId: e.pointerId, originX: e.clientX, originY: e.clientY, baseX: pan.x, baseY: pan.y };
 		e.currentTarget.setPointerCapture(e.pointerId);
 	};
@@ -687,8 +794,8 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 		// Clamp: never let the whole device leave the pane — always keep a
 		// grabbable sliver (60px) inside the visible area.
 		if (screenSize) {
-			const maxX = (screenSize.width + (frameWidth + chrome) * previewZoom) / 2 - 60;
-			const maxY = (screenSize.height + (frameHeight + chrome) * previewZoom) / 2 - 60;
+			const maxX = (screenSize.width + (frameWidth + chrome) * effectiveZoom) / 2 - 60;
+			const maxY = (screenSize.height + (frameHeight + chrome) * effectiveZoom) / 2 - 60;
 			x = Math.max(-maxX, Math.min(maxX, x));
 			y = Math.max(-maxY, Math.min(maxY, y));
 		}
@@ -707,7 +814,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	// desktop wears the outlined box, tablet/phone the dark hardware bezel.
 	const shellStyle: React.CSSProperties = {
 		...(layout === 'desktop' ? styles.desktopShell : styles.deviceShell),
-		transform: `translate(${pan.x}px, ${pan.y}px) scale(${previewZoom})`,
+		transform: `translate(${pan.x}px, ${pan.y}px) scale(${effectiveZoom})`,
 	};
 	const glassStyle: React.CSSProperties = {
 		...(layout === 'desktop' ? styles.desktopFrame : styles.deviceFrame),
@@ -745,21 +852,7 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 								</>
 							)}
 						</div>
-					{host.setInheritAuth && (
-							<label style={styles.inheritAuth} title="Hand this window's signed-in session to the preview. Unchecked: the preview runs its own OAuth sign-in.">
-								<input
-									type="checkbox"
-									checked={inheritAuth}
-									onChange={(e) => {
-										setInheritAuth(e.target.checked);
-										host.setInheritAuth?.(e.target.checked);
-									}}
-									style={styles.inheritAuthBox}
-								/>
-								Inherit Auth
-							</label>
-						)}
-						{/* Screen-layout presets — the iframe gets REAL device CSS
+					{/* Screen-layout presets — the iframe gets REAL device CSS
 						    dimensions (breakpoints fire); entering a layout
 						    auto-fits the zoom so the whole frame is visible.
 						    Hovering a button opens its top-5 resolution menu;
@@ -810,54 +903,103 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 								onClick={() => setOrientation((o) => (o === 'portrait' ? 'landscape' : 'portrait'))}
 							><RotateCw size={14} /></button>
 						</div>
-						<label style={styles.zoomControl} title="Preview zoom: absolute scale, 100% = actual size. Switching layouts auto-fits it; drag the gray canvas to pan when zoomed in. Double-click the slider for 100%.">
+						<span style={styles.toolbarDivider} />
+						<button
+							style={fitMode ? { ...styles.toolBtn, ...styles.toolBtnOn } : styles.toolBtn}
+							title="Fit: size the preview proportionally to the pane (10px margins) and keep it centered. Zoom and the hand tool take over when off."
+							onClick={toggleFit}
+						>Fit</button>
+						<label
+							style={fitMode ? { ...styles.zoomControl, ...styles.ctlDisabled } : styles.zoomControl}
+							title={fitMode
+								? 'Zoom is driven by Fit — toggle Fit off to zoom manually.'
+								: 'Preview zoom: absolute scale, 100% = actual size. Drag the gray canvas to pan when zoomed in. Double-click the slider for 100%.'}
+						>
 							Zoom
 							<button
 								style={styles.zoomStepBtn}
-								title="Zoom out 5%"
-								onClick={() => setPreviewZoom((z) => Math.max(0.25, Math.round((z - 0.05) * 100) / 100))}
-							>-</button>
+								title="Zoom in 5%"
+								disabled={fitMode}
+								onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.05) * 100) / 100))}
+							>+</button>
 							<input
 								type="range"
 								min={25}
 								max={200}
 								step={5}
-								value={Math.round(previewZoom * 100)}
+								value={Math.round(effectiveZoom * 100)}
+								disabled={fitMode}
 								onChange={(e) => setPreviewZoom(Number(e.target.value) / 100)}
-								onDoubleClick={() => setPreviewZoom(1)}
+								onDoubleClick={() => { if (!fitMode) setPreviewZoom(1); }}
 								style={styles.zoomSlider}
 							/>
 							<button
 								style={styles.zoomStepBtn}
-								title="Zoom in 5%"
-								onClick={() => setPreviewZoom((z) => Math.min(2, Math.round((z + 0.05) * 100) / 100))}
-							>+</button>
-							<span style={styles.zoomValue}>{Math.round(previewZoom * 100)}%</span>
+								title="Zoom out 5%"
+								disabled={fitMode}
+								onClick={() => setPreviewZoom((z) => Math.max(0.25, Math.round((z - 0.05) * 100) / 100))}
+							>-</button>
+							<span style={styles.zoomValue}>{Math.round(effectiveZoom * 100)}%</span>
 						</label>
-						<button style={styles.toolBtn} title="Fit the whole frame in the view and recenter" onClick={applyFit}>Fit</button>
 						<button
-							style={handTool ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
-							title="Hand tool: drag anywhere on the preview to pan, even over the app. The app is not interactive while active."
+							style={{
+								...(handTool ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn),
+								...(fitMode ? styles.ctlDisabled : null),
+							}}
+							title={fitMode
+								? 'The hand tool is driven by Fit — toggle Fit off to pan.'
+								: 'Hand tool: drag anywhere on the preview to pan, even over the app. The app is not interactive while active.'}
+							disabled={fitMode}
 							onClick={() => setHandTool((h) => !h)}
 						><Hand size={14} /></button>
-						{host.reloadPreview && (
-							<button style={styles.toolBtn} onClick={() => host.reloadPreview?.()}>Reload</button>
-						)}
-						{host.setPreviewTheme && (
-							<>
-								<button
-									style={previewTheme === 'light' ? { ...styles.toolBtn, ...styles.toolBtnOn } : styles.toolBtn}
-									onClick={() => applyTheme('light')}
-								>Light</button>
-								<button
-									style={previewTheme === 'dark' ? { ...styles.toolBtn, ...styles.toolBtnOn } : styles.toolBtn}
-									onClick={() => applyTheme('dark')}
-								>Dark</button>
-							</>
-						)}
-						{caps.canDebug && host.debug && (
-							<button style={styles.toolBtn} onClick={() => host.debug?.()}>Debug (F5)</button>
-						)}
+						{/* Gear — the devtools-style overflow menu for the options
+						    that are not part of the geometry cluster. */}
+						<span style={styles.gearWrap}>
+							<button
+								style={gearOpen ? { ...styles.layoutBtn, ...styles.toolBtnOn } : styles.layoutBtn}
+								title="Preview options"
+								onClick={() => setGearOpen((o) => !o)}
+							><Settings size={14} /></button>
+							{gearOpen && (
+								<>
+									<div style={styles.gearBackdrop} onClick={() => setGearOpen(false)} />
+									<div style={styles.gearMenu}>
+										{host.setInheritAuth && (
+											<label style={styles.gearMenuRow} title="Hand this window's signed-in session to the preview. Unchecked: the preview runs its own OAuth sign-in.">
+												<input
+													type="checkbox"
+													checked={inheritAuth}
+													onChange={(e) => {
+														setInheritAuth(e.target.checked);
+														host.setInheritAuth?.(e.target.checked);
+													}}
+													style={styles.inheritAuthBox}
+												/>
+												Inherit Auth
+											</label>
+										)}
+										{host.setPreviewTheme && (
+											<button
+												style={styles.gearMenuRow}
+												onClick={() => applyTheme(previewTheme === 'light' ? 'dark' : 'light')}
+											>Theme: {previewTheme === 'light' ? 'Light' : 'Dark'}</button>
+										)}
+										{host.reloadPreview && (
+											<button
+												style={styles.gearMenuRow}
+												onClick={() => { host.reloadPreview?.(); setGearOpen(false); }}
+											>Reload</button>
+										)}
+										{caps.canDebug && host.debug && (
+											<button
+												style={styles.gearMenuRow}
+												onClick={() => { host.debug?.(); setGearOpen(false); }}
+											>Debug (F5)</button>
+										)}
+									</div>
+								</>
+							)}
+						</span>
 					</div>
 					<div style={styles.previewSurface}>
 						<div ref={screenRef} style={styles.previewScreen}>
@@ -870,13 +1012,13 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 							    reason: conditional children shift the glass's
 							    position and remount it. */}
 							<div
-								style={styles.deviceCenter}
+								style={fitMode ? { ...styles.deviceCenter, cursor: 'default' } : styles.deviceCenter}
 								onPointerDown={onPanPointerDown}
 								onPointerMove={onPanPointerMove}
 								onPointerUp={onPanPointerEnd}
 								onPointerCancel={onPanPointerEnd}
-								onDoubleClick={() => setPan({ x: 0, y: 0 })}
-								title="Drag the gray canvas or the frame edge to pan. Double-click to recenter."
+								onDoubleClick={() => { if (!fitMode) setPan({ x: 0, y: 0 }); }}
+								title={fitMode ? undefined : 'Drag the gray canvas or the frame edge to pan. Double-click to recenter.'}
 							>
 								<div style={shellStyle}>
 									<div style={layout === 'desktop' ? styles.cameraDotHidden : orientation === 'landscape' ? styles.cameraDotLandscape : styles.cameraDot} />

@@ -46,6 +46,7 @@
 
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const {
 	execCommand,
@@ -59,11 +60,19 @@ const {
 } = require('./index');
 const { BUILD_ROOT, DIST_ROOT, PROJECT_ROOT } = require('./paths');
 const { registerApp } = require('./registerApp');
+const registry = require('./registry');
 
-// Shared dependency sources — same for every remote app.
-// PROJECT_ROOT is always rocketride-server/, regardless of overlay.
-const SHELL_UI_SRC  = path.join(PROJECT_ROOT, 'packages', 'shell', 'src');
-const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
+// Shared dependency sources — same for every remote app. Dual-layout:
+// the platform repo carries the shell/shared SOURCE under packages/;
+// standalone app repos carry the shared library at shared/ and the shell
+// prebuilt in .rocketride/shell (vendored via client:update). Missing dirs
+// hash as 'missing', so preferring the platform layout is safe.
+const SHELL_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shell', 'src'))
+	? path.join(PROJECT_ROOT, 'packages', 'shell', 'src')
+	: path.join(PROJECT_ROOT, '.rocketride', 'shell');
+const SHARED_UI_SRC = fs.existsSync(path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src'))
+	? path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src')
+	: path.join(PROJECT_ROOT, 'shared', 'src');
 
 /**
  * Create a standard builder module for an MF remote app.
@@ -141,18 +150,21 @@ function createAppModule({ name, description, appRoot, dev = false }) {
 		{ name: `${name}:register`, action: () => registerApp(appRoot) },
 		{ name: `${name}:copy`,     action: makeCopyAction },
 
-		// Full build: compile TS client SDK → bundle → register → copy
+		// Full build: bundle → register → copy. In the platform repo the
+		// TS client SDK compiles first; standalone repos have no
+		// client-typescript module — the SDK arrives prebuilt inside the
+		// vendored shell package. Checked at action-build time (after
+		// discovery), so one canonical step list serves both repos.
 		{
 			name: `${name}:build`,
-			action: () => ({
-				description: `Build ${name}`,
-				steps: [
-					'client-typescript:build',
-					`${name}:bundle`,
-					`${name}:register`,
-					`${name}:copy`,
-				],
-			}),
+			action: () => {
+				const steps = [];
+				if (registry.getAction('client-typescript:build')) {
+					steps.push('client-typescript:build');
+				}
+				steps.push(`${name}:bundle`, `${name}:register`, `${name}:copy`);
+				return { description: `Build ${name}`, steps };
+			},
 		},
 
 		// Clean build artifacts and cached hash

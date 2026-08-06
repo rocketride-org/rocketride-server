@@ -110,9 +110,17 @@ function parseArgs(args) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
 		} else if (arg.startsWith('--path=')) {
-			// builder update: root of the repository whose scripts/ is
-			// replaced (defaults to this builder's own repository).
+			// builder:inject / builder:update: root of the target repository
+			// (inject requires it; update defaults to this repository).
 			options.path = arg.substring('--path='.length);
+		} else if (arg.startsWith('--branch=')) {
+			// builder:update: upstream branch to fetch the scripts/ tree
+			// from (default: develop).
+			options.branch = arg.substring('--branch='.length);
+		} else if (arg.startsWith('--shell=')) {
+			// Server to vendor the platform package from (auto-injection and
+			// client:update); beats ROCKETRIDE_URI from .config/.env.
+			options.shell = arg.substring('--shell='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
 			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
 			const paths = require('./lib/paths');
@@ -209,7 +217,6 @@ function showHelp(registry, options) {
 Rocketride Build System
 
 Usage: builder <action> [...] [options]
-       builder update <branch> [--path=<repo root>]   (replace scripts/ with the upstream copy)
 
 Actions:`);
 
@@ -241,6 +248,7 @@ Options:
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message
+  --shell=URL         Server to vendor the platform from (auto-injection, client:update)
   --jest="args"       Pass arguments to Jest (can be repeated)
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
@@ -283,26 +291,26 @@ async function main() {
 	const { requests: explicitRequests, options, globalCommands } = parseArgs(args);
 
 	// =========================================================================
-	// Self-update (builder update <branch>) — before any other machinery,
-	// so it works even when the local scripts/ tree is broken or outdated
+	// Pre-bootstrap injection — handled before any other machinery, on Node
+	// built-ins alone: the workspace may not even be installable yet
 	// =========================================================================
-	if (globalCommands[0] === 'update') {
-		const branch = globalCommands[1];
-		if (!branch || globalCommands.length > 2 || explicitRequests.length > 0) {
-			console.error('Usage: builder update <branch> [--path=<repo root>]');
-			process.exit(1);
-		}
-		const { selfUpdate } = require('./lib/self-update');
+	const fs = require('fs');
+	// Standalone app repo = no in-tree shell source.
+	const isStandalone = !fs.existsSync(path.join(ROOT, 'packages', 'shell'));
+
+	// Vendored-shell auto-injection — before the dependency bootstrap: a
+	// standalone workspace whose members depend on the vendored platform
+	// (file:../../.rocketride/shell) cannot even pnpm install until the
+	// package exists, so when it is needed and MISSING it is fetched here
+	// automatically (--shell=<url> beats ROCKETRIDE_URI beats localhost).
+	// Refreshing an EXISTING install is explicit: builder client:update.
+	if (isStandalone) {
+		const { ensureVendoredShell } = require('./lib/vendor-shell');
 		try {
-			// --path retargets the update at another repository that carries
-			// a copy of the builder; default is this builder's own tree.
-			await selfUpdate(options.path ? path.resolve(options.path) : ROOT, branch);
-			// Exit immediately: when updating our own tree, the scripts/
-			// this process was loaded from has just been replaced, so no
-			// further modules may load.
-			process.exit(0);
+			await ensureVendoredShell(ROOT, options);
 		} catch (err) {
-			console.error(`✖ Builder update failed: ${err.message}`);
+			console.error(`✖ Vendored shell injection failed: ${err.message}`);
+			console.error('Set ROCKETRIDE_URI in .env or pass --shell=<server url>.');
 			process.exit(1);
 		}
 	}

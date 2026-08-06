@@ -6,6 +6,8 @@ from the build directory. The packages are served as downloadable files with
 appropriate content types and filenames.
 """
 
+import os
+import sys
 from pathlib import Path
 from fastapi.responses import FileResponse, JSONResponse
 from ai.web import Request
@@ -45,6 +47,59 @@ def _find_latest_file(directory: Path, pattern: str) -> Path | None:
     # Sort by modification time, newest first
     files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
     return files[0]
+
+
+def _get_static_clients_root() -> Path:
+    """
+    Get the static clients directory served with the engine binary.
+
+    Build tasks land installable client packages in static/clients/ next to
+    the engine executable (dist/server/static/clients/), so the path is
+    resolved from the binary's location — like the shell module's static
+    roots — rather than the working directory.
+
+    Returns:
+        Path: The resolved path to the static clients directory
+    """
+    # Engine binary directory + static/clients (e.g. dist/server/static/clients)
+    return Path(os.path.dirname(sys.executable)) / 'static' / 'clients'
+
+
+async def client_shell(request: Request):
+    """
+    Serve the installable shell platform package (shell.tgz).
+
+    The shell build packs the compiled shell library, the frozen contract
+    types, and the token CSS into a stable-named shell.tgz under
+    static/clients/shell/. Standalone app repos vendor the platform from
+    here (builder shell:update), so the package always tracks the server
+    the client is connected to.
+
+    Args:
+        request (Request): The incoming HTTP request object
+
+    Returns:
+        FileResponse: The shell platform package file
+        JSONResponse: Error message if file not found (404)
+
+    Example:
+        GET /client/shell
+        -> Downloads: shell.tgz
+    """
+    # Stable name: the version rides inside the package, not the filename
+    tgz_file = _get_static_clients_root() / 'shell' / 'shell.tgz'
+
+    if not tgz_file.exists():
+        return JSONResponse(
+            status_code=404,
+            content={
+                'error': 'Shell package not found',
+                'message': 'shell.tgz could not be found in the static clients directory.',
+            },
+        )
+
+    # Serve the tgz file with appropriate headers
+    return FileResponse(tgz_file, media_type='application/gzip', filename=tgz_file.name)
 
 
 async def client_python_file(request: Request, filename: str):
