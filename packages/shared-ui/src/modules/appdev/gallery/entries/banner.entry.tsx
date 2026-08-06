@@ -27,8 +27,8 @@
 /** Gallery entry for the stock Banner callout strip. */
 
 import React from 'react';
-import { Banner } from '../../../../components/banner/Banner';
-import type { BannerVariant } from '../../../../components/banner/Banner';
+import { Banner } from 'shell';
+import type { BannerVariant } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: one Banner driven by the knob values. */

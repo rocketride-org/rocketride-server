@@ -15,7 +15,7 @@
 
 import type { CellComponent } from 'tabulator-tables';
 
-import type { GridColumnDefinition } from '../data-grid/defaults';
+import type { GridColumnDefinition } from 'shell';
 import { formatTime } from '../../modules/server/util/formatters';
 
 // =============================================================================

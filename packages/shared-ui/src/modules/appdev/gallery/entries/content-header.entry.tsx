@@ -27,8 +27,8 @@
 /** Gallery entry for the stock ContentHeader page-title row. */
 
 import React from 'react';
-import { Button } from '../../../../components/button/Button';
-import { ContentHeader } from '../../../../components/content-header/ContentHeader';
+import { Button } from 'shell';
+import { ContentHeader } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a ContentHeader driven by the knob values. */

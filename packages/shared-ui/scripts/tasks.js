@@ -29,7 +29,7 @@
  *                    smoke tests. Test files are co-located with their subject
  *                    and discovered recursively.
  *
- * Consumers of shared-ui (vscode:build, shell-ui:build, ...) should list
+ * Consumers of shared (vscode:build, shell:build, ...) should list
  * `shared-ui:test` among their steps so a build cannot succeed when the
  * shared-ui build helpers are broken.
  */

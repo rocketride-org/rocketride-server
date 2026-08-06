@@ -11,7 +11,7 @@
  * ConnectionsPanel — the Active Connections CardDataGrid shared by every
  * server-monitor host (admin-ui, monitor-ui, rocket-ui, the VSCode webview).
  *
- * Data modes follow the props (data-in, callbacks-out; no shell-ui imports):
+ * Data modes follow the props (data-in, callbacks-out; no shell imports):
  *  - `listConnections` present — REMOTE: every page request (browse, sort,
  *    filter, search) goes through the fetcher, which the host binds to its
  *    client's `listConnections`; the host drives the quiet 3s refetch through
@@ -28,11 +28,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CellComponent } from 'tabulator-tables';
 import type { ListPageRequest, ListPageResponse } from 'rocketride';
-import { Card } from '../../../components/card/Card';
-import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import { badgeEl, monoEl, mutedEl } from '../../../components/data-grid/defaults';
-import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
-import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
+import { Card, CardDataGrid, badgeEl, monoEl, mutedEl } from 'shell';
+import type { GridColumnDefinition, IDataGridHandle, IDataGridPage, IDataGridPageRequest } from 'shell';
 import type { DashboardConnection } from '../types';
 import { formatNumber, formatTime, formatTimeAgo } from '../util';
 import { ConnectionRecordPanel } from './ConnectionRecordPanel';

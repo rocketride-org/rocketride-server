@@ -6,7 +6,7 @@
 import React, { useMemo, type CSSProperties } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, RadialLinearScale, PointElement, LineElement, BarElement, ArcElement, Filler, Tooltip, Legend, Title } from 'chart.js';
 import { Bar, Line, Pie, Doughnut, Radar, PolarArea, Scatter, Bubble } from 'react-chartjs-2';
-import { commonStyles } from '../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 
 ChartJS.register(CategoryScale, LinearScale, RadialLinearScale, PointElement, LineElement, BarElement, ArcElement, Filler, Tooltip, Legend, Title);
 
@@ -62,7 +62,7 @@ function stripFunctionStrings(obj: unknown, visited = new Set<unknown>()): unkno
 	return obj;
 }
 
-interface ChartRendererProps {
+export interface ChartRendererProps {
 	config: string;
 }
 

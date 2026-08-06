@@ -27,8 +27,8 @@
 /** Gallery entry for StatusBadge / StatusDot semantic state indicators. */
 
 import React from 'react';
-import { StatusBadge, StatusDot } from '../../../../components/status-badge/StatusBadge';
-import type { StatusVariant } from '../../../../components/status-badge/StatusBadge';
+import { StatusBadge, StatusDot } from 'shell';
+import type { StatusVariant } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: the knob-driven badge + dot beside the full variant row. */

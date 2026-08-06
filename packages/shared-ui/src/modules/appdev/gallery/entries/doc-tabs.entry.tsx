@@ -26,7 +26,7 @@
 
 /**
  * Doc-only gallery entry for DocTabs. No live demo: the document model
- * (Documents / DocSplitLayout) lives in shell-ui, which shared-ui cannot
+ * (Documents / DocSplitLayout) lives in shell, which shared-ui cannot
  * import - and the strip is standard frame chrome, not a component to
  * restyle. The snippet and props are transcribed from the style guide.
  */
@@ -40,7 +40,7 @@ export const docTabsEntry: IGalleryEntry = {
 	group: 'chrome',
 	blurb: 'The document tab strip at the top of the client area - one tab per open editor per group, VS Code document model: modified dots, hover close, drag to reorder and between split groups. Tabbed (Archetype B) apps only; never draw a lookalike tab bar for documents.',
 	docNote: 'Host chrome - part of the standard frame. The APP owns the document model behind it (one Documents instance over its VFS); DocSplitLayout renders the split tree and each pane renders its own DocTabs strip. For pages INSIDE one document use TabControl - DocTabs only switches documents.',
-	code: `import { Documents, DocTabs, DocSplitLayout } from 'shell-ui';
+	code: `import { Documents, DocTabs, DocSplitLayout } from 'shell';
 
 // The app owns the document model: one Documents instance over its VFS.
 const docs = new Documents(vfs);

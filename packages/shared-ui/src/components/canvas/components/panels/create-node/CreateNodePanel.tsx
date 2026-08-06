@@ -24,11 +24,11 @@ import { Search, Plus, List, LayoutGrid } from 'lucide-react';
 
 import { useFlowGraph } from '../../../context/FlowGraphContext';
 import { useFlowProject } from '../../../context/FlowProjectContext';
-import { usePrefs } from '../../../../../contexts/PrefsContext';
+import { usePrefs } from 'shell';
 import { IService, IServiceCapabilities } from '../../../types';
 import { Icon } from '../../../util/Icon';
-import { DetailPanel } from '../../../../detail-panel/DetailPanel';
-import { commonStyles } from '../../../../../themes/styles';
+import { DetailPanel } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import { CATEGORY_TITLES } from './categoryTitles';
 
 // =============================================================================

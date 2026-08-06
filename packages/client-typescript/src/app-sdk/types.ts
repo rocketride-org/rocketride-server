@@ -24,10 +24,10 @@
 // APP SDK TYPES
 // =============================================================================
 //
-// Type definitions for the RocketRide shell-ui app plugin system.
+// Type definitions for the RocketRide shell app plugin system.
 //
-// These mirror shell-ui/src/workspace/types.ts so that third-party apps can
-// import them from `rocketride/app-sdk` without depending on the shell-ui
+// These mirror shell/src/workspace/types.ts so that third-party apps can
+// import them from `rocketride/app-sdk` without depending on the shell
 // monorepo package.  At runtime, Module Federation replaces stub implementations
 // with the real singletons from the shell host.
 // =============================================================================

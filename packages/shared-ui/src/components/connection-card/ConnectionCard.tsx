@@ -16,8 +16,8 @@
  */
 
 import React, { CSSProperties, KeyboardEvent, MouseEvent, ReactNode, useState } from 'react';
-import { StatusBadge, StatusVariant } from '../status-badge/StatusBadge';
-import { BxEditAlt, BxTrash } from '../BoxIcon';
+import { StatusBadge, StatusVariant } from 'shell';
+import { BxEditAlt, BxTrash } from 'shell';
 
 // =============================================================================
 // TYPES

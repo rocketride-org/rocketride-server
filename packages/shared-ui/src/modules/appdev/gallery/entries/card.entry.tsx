@@ -27,8 +27,8 @@
 /** Gallery entry for the stock Card content group. */
 
 import React from 'react';
-import { Button } from '../../../../components/button/Button';
-import { Card } from '../../../../components/card/Card';
+import { Button } from 'shell';
+import { Card } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a Card with header, optional header action, and body text. */

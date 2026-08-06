@@ -15,8 +15,8 @@
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EmptyState } from '../../../components/empty-state/EmptyState';
-import { Button } from '../../../components/button/Button';
+import { EmptyState } from 'shell';
+import { Button } from 'shell';
 import type { TaskEventMessage } from '../hooks/useTaskEvents';
 
 // =============================================================================

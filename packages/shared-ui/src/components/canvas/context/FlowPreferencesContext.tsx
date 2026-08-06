@@ -41,7 +41,7 @@
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import { IProjectLayout, ICanvasPreferences } from '../types';
-import { usePrefs } from '../../../contexts/PrefsContext';
+import { usePrefs } from 'shell';
 
 // =============================================================================
 // Constants

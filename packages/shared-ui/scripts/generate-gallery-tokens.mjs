@@ -57,7 +57,8 @@ const APP_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 
 /** The commonStyles definition file the transitive resolution reads. */
-const STYLES_FILE = path.join(SRC_DIR, 'themes', 'styles.ts');
+// commonStyles lives in the shell package since the surface partition.
+const STYLES_FILE = path.join(SRC_DIR, '..', '..', 'shell', 'src', 'themes', 'styles.ts');
 
 /** The generated module the gallery imports. */
 const OUTPUT_FILE = path.join(SRC_DIR, 'modules', 'appdev', 'gallery', 'tokenUsage.generated.ts');
@@ -232,7 +233,14 @@ function buildUsageMap() {
 	const usage = {};
 	for (const [entryId, dirs] of Object.entries(ENTRY_SOURCES)) {
 		const text = dirs
-			.flatMap((dir) => listSourceFiles(path.join(SRC_DIR, dir)))
+			.flatMap((dir) => {
+				// Surface components live in the shell package since the
+				// partition; the rest (canvas, deploy-panel, ...) remain here.
+				const local = path.join(SRC_DIR, dir);
+				const stock = path.join(SRC_DIR, '..', '..', 'shell', 'src', dir);
+				try { statSync(local); return listSourceFiles(local); } catch { /* moved */ }
+				return listSourceFiles(stock);
+			})
 			.map((file) => readFileSync(file, 'utf8'))
 			.join('\n');
 		const commonStyles = {};

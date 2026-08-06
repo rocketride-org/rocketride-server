@@ -29,6 +29,14 @@ export { ChatInputField } from './components/ChatInputField';
 export { MarkdownRenderer } from './components/MarkdownRenderer';
 export { ChartRenderer } from './components/ChartRenderer';
 export { TypingIndicator } from './components/TypingIndicator';
+// Props types exported so the frozen surface can NAME them (declaration
+// emit of the shellApi object needs every referenced type nameable).
+export type { MessageListProps } from './components/MessageList';
+export type { MessageBubbleProps } from './components/MessageBubble';
+export type { ChatInputFieldProps } from './components/ChatInputField';
+export type { MarkdownRendererProps } from './components/MarkdownRenderer';
+export type { ChartRendererProps } from './components/ChartRenderer';
+export type { TypingIndicatorProps } from './components/TypingIndicator';
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 export { useChatMessages } from './hooks/useChatMessages';

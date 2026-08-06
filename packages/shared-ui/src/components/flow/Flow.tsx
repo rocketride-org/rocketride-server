@@ -5,8 +5,8 @@
 
 import React, { CSSProperties } from 'react';
 import type { TaskStatus } from '../../modules/project/types';
-import { commonStyles } from '../../themes/styles';
-import { EmptyState } from '../empty-state/EmptyState';
+import { commonStyles } from 'shell/src/themes/styles';
+import { EmptyState } from 'shell';
 
 // =============================================================================
 // STYLES (component-specific only)

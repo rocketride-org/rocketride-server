@@ -80,7 +80,7 @@ const styles = {
 // COMPONENT
 // =============================================================================
 
-interface TypingIndicatorProps {
+export interface TypingIndicatorProps {
 	label?: string;
 }
 

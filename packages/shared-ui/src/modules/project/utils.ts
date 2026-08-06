@@ -11,7 +11,7 @@
  */
 
 import type { TraceEvent } from './types';
-import type { ITaskStatus } from '../../types/project';
+import type { ITaskStatus } from 'shell/src/types/project';
 
 // =============================================================================
 // TYPES

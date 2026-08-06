@@ -20,7 +20,7 @@ import { OverviewGrid } from './OverviewGrid';
 import { getEventDisplay } from './ActivityPanel';
 import type { EventTone } from './ActivityPanel';
 import { formatUptime, formatTime, formatNumber } from '../util';
-import { commonStyles } from '../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 
 // =============================================================================
 // STYLES

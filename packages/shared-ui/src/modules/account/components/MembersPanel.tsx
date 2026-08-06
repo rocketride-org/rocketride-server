@@ -39,16 +39,9 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CellComponent } from 'tabulator-tables';
-import { Card } from '../../../components/card/Card';
-import { Button } from '../../../components/button/Button';
-import { Banner } from '../../../components/banner/Banner';
-import { CardDataGrid } from '../../../components/data-grid/CardDataGrid';
-import { autoFormatter, avatarEl, badgeEl, mutedEl } from '../../../components/data-grid/defaults';
-import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
-import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
-import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
-import { Section, LabelValue } from '../../../components/section/Section';
-import { commonStyles } from '../../../themes/styles';
+import { Card, Button, Banner, CardDataGrid, autoFormatter, avatarEl, badgeEl, mutedEl, DetailPanel, ConfirmDialog, Section, LabelValue } from 'shell';
+import type { GridColumnDefinition } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import type { ConnectResult, MemberRecord, TeamRecord } from '../types';
 import { S, PermGrid, PermPill, Avatar, Badge, initials, avatarColor } from './shared';
 

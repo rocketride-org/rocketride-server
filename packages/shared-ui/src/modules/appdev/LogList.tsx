@@ -33,8 +33,8 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { EmptyState } from '../../components/empty-state/EmptyState';
-import { InputField } from '../../components/input-field/InputField';
+import { EmptyState } from 'shell';
+import { InputField } from 'shell';
 
 // =============================================================================
 // TYPES

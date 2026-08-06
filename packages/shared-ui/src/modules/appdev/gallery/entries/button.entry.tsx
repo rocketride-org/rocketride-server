@@ -27,8 +27,8 @@
 /** Gallery entry for the stock Button: live demo, knobs, snippet, props. */
 
 import React from 'react';
-import { Button } from '../../../../components/button/Button';
-import type { ButtonVariant } from '../../../../components/button/Button';
+import { Button } from 'shell';
+import type { ButtonVariant } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: one Button driven entirely by the knob values. */

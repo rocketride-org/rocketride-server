@@ -41,7 +41,7 @@ import { useMemo, useState, useEffect } from 'react';
 import FlowContainer from './components/FlowContainer';
 import FlowCanvas from './components/FlowCanvas';
 import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from './types';
-import { getMuiTheme } from '../../themes/getMuiTheme';
+import { getMuiTheme } from 'shared/themes-mui/getMuiTheme';
 import { buildInventory } from './util/helpers';
 import { IServiceCatalog } from './types';
 

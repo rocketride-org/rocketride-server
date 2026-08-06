@@ -42,10 +42,10 @@
  */
 
 import React, { Suspense, useMemo, useState } from 'react';
-import { Banner } from '../../../components/banner/Banner';
-import { Button } from '../../../components/button/Button';
-import { StatusBadge } from '../../../components/status-badge/StatusBadge';
-import { commonStyles } from '../../../themes/styles';
+import { Banner } from 'shell';
+import { Button } from 'shell';
+import { StatusBadge } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import { KnobsPanel } from './KnobsPanel';
 import { GALLERY_ENTRIES, GALLERY_GROUPS } from './registry';
 import { GALLERY_TOKEN_USAGE } from './tokenUsage.generated';

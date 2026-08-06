@@ -32,9 +32,9 @@
  */
 
 import React from 'react';
-import { InputField } from '../../../components/input-field/InputField';
+import { InputField } from 'shell';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
-import { commonStyles } from '../../../themes/styles';
+import { commonStyles } from 'shell/src/themes/styles';
 import type { IGalleryKnob, KnobValue, KnobValues } from './galleryTypes';
 
 // =============================================================================

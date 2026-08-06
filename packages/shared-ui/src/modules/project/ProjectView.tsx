@@ -25,14 +25,14 @@
 
 import React, { useState, useCallback, useRef, useMemo, ComponentProps, CSSProperties, ReactNode } from 'react';
 
-import { TabPanel } from '../../components/tab-panel/TabPanel';
-import { ContentHeader } from '../../components/content-header/ContentHeader';
-import { TabControl } from '../../components/tab-control/TabControl';
-import type { ViewMenu } from '../../types/viewMenu';
+import { TabPanel } from 'shell';
+import { ContentHeader } from 'shell';
+import { TabControl } from 'shell';
+import type { ViewMenu } from 'shell';
 import CanvasPanel from '../../components/canvas';
-import { PrefsProvider, type IPrefsApi } from '../../contexts/PrefsContext';
-import { commonStyles } from '../../themes/styles';
-import { OAUTH_ROOT_URL } from '../../config/oauth';
+import { PrefsProvider, type IPrefsApi } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
+import { OAUTH_ROOT_URL } from 'shell/src/auth/oauth';
 
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
 import { SourcePanel } from './components/SourcePanel';
@@ -66,7 +66,7 @@ export interface IProjectViewProps {
 	 * provided, the non-canvas sub-views render a stock {@link ContentHeader}
 	 * titled with this name (matching the document's DocTab). VS Code omits it:
 	 * its editor tab + breadcrumb already name the document, so the Archetype B
-	 * page header is a shell-ui-only element and no header renders without it.
+	 * page header is a shell-only element and no header renders without it.
 	 */
 	documentTitle?: string;
 	/** Available node service definitions (keyed by provider). */

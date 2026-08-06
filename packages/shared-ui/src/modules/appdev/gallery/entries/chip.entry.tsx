@@ -27,7 +27,7 @@
 /** Gallery entry for the stock Chip tag pill and its ChipAdd affordance. */
 
 import React from 'react';
-import { Chip, ChipAdd } from '../../../../components/chip/Chip';
+import { Chip, ChipAdd } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a chip row with two fixed chips, the knob-driven chip, and the add affordance. */

@@ -21,11 +21,11 @@
 
 import React, { useEffect, useMemo, useState, CSSProperties, ReactNode } from 'react';
 
-import { commonStyles } from '../../themes/styles';
-import { Button } from '../button/Button';
-import { ConfirmDialog } from '../modal/ConfirmDialog';
-import { DetailPanel } from '../detail-panel/DetailPanel';
-import { InputField } from '../input-field/InputField';
+import { commonStyles } from 'shell/src/themes/styles';
+import { Button } from 'shell';
+import { ConfirmDialog } from 'shell/src/components/modal/ConfirmDialog';
+import { DetailPanel } from 'shell';
+import { InputField } from 'shell';
 import { formatTime } from '../../modules/server/util/formatters';
 import type { SchedulePreviewResult } from './DeploymentView';
 

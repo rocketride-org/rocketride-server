@@ -27,8 +27,8 @@
 /** Gallery entry for the stock DropZone file-drop target. */
 
 import React, { useState } from 'react';
-import { DropZone } from '../../../../components/drop-zone/DropZone';
-import { commonStyles } from '../../../../themes/styles';
+import { DropZone } from 'shell';
+import { commonStyles } from 'shell/src/themes/styles';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a DropZone that reports how many files were dropped on it. */
