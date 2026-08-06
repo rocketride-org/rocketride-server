@@ -16,7 +16,6 @@ reviews:
       - 'release'
       - 'chore(release)'
   path_filters:
-    - '!apps/**'
     - '!dist/**'
     - '!build/**'
     - '!node_modules/**'
