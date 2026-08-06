@@ -16,8 +16,10 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { AccountView, CheckoutModal } from 'shared';
-import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate, CheckoutPlan, PromoRedemption, PromoValidation } from 'shared';
+import AccountView from 'shared/modules/account/AccountView';
+import { CheckoutModal } from 'shared/modules/checkout';
+import type { ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, AccountSection, ProfileUpdate } from 'shell/src/components/BoxIcon';
+import type { CheckoutPlan, PromoRedemption, PromoValidation } from 'shared/modules/checkout';
 import type { ConnectResult } from 'rocketride';
 import { useMessaging } from '../hooks/useMessaging';
 import type { AccountHostToWebview, AccountWebviewToHost } from '../types';

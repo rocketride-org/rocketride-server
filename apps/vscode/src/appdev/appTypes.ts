@@ -8,10 +8,10 @@
  * folder.
  *
  * Standalone app repos have no rocketride-server checkout: platform modules
- * (`shell-ui`, `shared`) arrive from the shell's MF share scope at runtime
+ * (the 'shell' surface) arrive from the shell's MF share scope at runtime
  * and are consume-only at build time, so TYPES are the only artifact such a
  * repo needs from the platform. The extension carries the generated bundle
- * (frozen shell-api contract + shared-ui rollup, built by shell-ui:build)
+ * (the frozen shell contract, built by shell:build)
  * and this module copies it into `<app>/types/rocketride-shell/`, where the
  * scaffolded tsconfig's `paths` point.
  *
@@ -32,7 +32,7 @@ const VENDOR_DIR = path.join('types', 'rocketride-shell');
 // The bundle's fixed file set. Three owners share this layout: the generator
 // (generate-app-types), the server publisher (/dev/types/ under the shell's
 // static root), and the vendored copy in app folders.
-const BUNDLE_FILES = ['shell-ui/index.d.ts', 'shared/index.d.ts', 'app-types.json'];
+const BUNDLE_FILES = ['shell.d.ts', 'app-types.json'];
 
 /**
  * Recursively copies a directory, replacing the destination.
@@ -87,7 +87,7 @@ async function fetchServerBundle(baseUrl: string): Promise<Array<{ rel: string; 
  * (and matches only the extension's own build vintage).
  *
  * Non-fatal by design: an unreachable server, a missing bundle (dev build
- * without shell-ui:build), or an unwritable folder logs and returns — types
+ * without shell:build), or an unwritable folder logs and returns — types
  * are an editor concern, never a reason to block the dev loop.
  *
  * @param context - Extension context (locates the packaged fallback bundle).

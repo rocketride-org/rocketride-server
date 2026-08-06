@@ -40,7 +40,7 @@
 // =============================================================================
 
 import { RocketRideClient, Question } from 'rocketride';
-import { getClient } from 'shell-ui';
+import { getClient } from 'shell';
 import { API_METHODS } from './apiMethods';
 import {
 	getEchoPipeline,

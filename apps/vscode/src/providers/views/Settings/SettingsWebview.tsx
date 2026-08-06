@@ -29,14 +29,15 @@ import { PipelineSettings } from './PipelineSettings';
 import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
-import { commonStyles } from 'shared/themes/styles';
-import type { CheckoutPlan, ViewMenu } from 'shared';
-import { TabPanel } from 'shared';
-import type { ITabPanelPanel } from 'shared/components/tab-panel/TabPanel';
+import { commonStyles } from 'shell/src/themes/styles';
+import type { CheckoutPlan } from 'shared/modules/checkout';
+import type { ViewMenu } from 'shell/src/types/viewMenu';
+import { TabPanel } from 'shell/src/components/tab-panel/TabPanel';
+import type { ITabPanelPanel } from 'shell/src/components/tab-panel/TabPanel';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/src/themes/rocketride-default.css';
+import 'shell/src/themes/rocketride-vscode.css';
 import '../../styles/root.css';
 
 // ============================================================================
@@ -316,7 +317,7 @@ const pageBodyStyle: CSSProperties = {
 
 /**
  * Left-hand settings navigation, matching the browser settings page
- * (shell-ui SettingsProvider): a fixed-width rail of `listRow` pills, one per
+ * (shell SettingsProvider): a fixed-width rail of `listRow` pills, one per
  * section, with the page bodies rendered to its right. The pages themselves
  * are unchanged — only the section selector moved from a top strip to here.
  */

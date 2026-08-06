@@ -21,8 +21,8 @@
  * native — bind, don't sync), native-files strip, F5 debugging.
  */
 
-import 'shared/themes/rocketride-default.css';
-import 'shared/themes/rocketride-vscode.css';
+import 'shell/src/themes/rocketride-default.css';
+import 'shell/src/themes/rocketride-vscode.css';
 import '../../styles/root.css';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { AppBuilderScreen } from 'shared/modules/appdev';

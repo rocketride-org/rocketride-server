@@ -25,8 +25,8 @@
 // =============================================================================
 
 import React from 'react';
-import type { AppDescriptor } from 'shell-ui';
-import { RocketRideMark } from 'shared';
+import type { AppDescriptor } from 'shell';
+import { RocketRideMark } from 'shell';
 import EventsApp from './EventsApp';
 import EventsSidebar from './EventsSidebar';
 

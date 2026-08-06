@@ -33,8 +33,8 @@
 // =============================================================================
 
 import React, { useMemo, type CSSProperties } from 'react';
-import { getShellApi } from 'shell-ui';
-import type { ShellAppProps, AppManifestEntry } from 'shell-ui';
+import { getShellApi } from 'shell';
+import type { ShellAppProps, AppManifestEntry } from 'shell';
 import GitHubStars from './GitHubStars';
 
 // =============================================================================
@@ -43,7 +43,7 @@ import GitHubStars from './GitHubStars';
 //
 // Runtime shell access (hooks, client, connection manager) flows through the
 // single curated contract accessor rather than named value imports from
-// shell-ui. Types continue to come from shell-ui's type surface (the same
+// shell. Types continue to come from shell's type surface (the same
 // contract types the frozen shell-api snapshot conforms to).
 const { useWorkspace, ConnectionManager } = getShellApi();
 

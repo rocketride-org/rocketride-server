@@ -9,15 +9,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "./dist",
-    "rootDir": "./src",
+    "noEmit": true,
     "paths": {
       "shared/*": ["../../packages/shared-ui/src/*"],
-      "shared": ["../../packages/shared-ui/src"],
-      "shell-ui": ["../shell-ui/src/index.ts"]
+      "shell": ["../../packages/shell/src/index.ts"],
+      "shell/*": ["../../packages/shell/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

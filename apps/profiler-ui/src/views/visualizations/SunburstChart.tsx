@@ -34,7 +34,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import * as d3 from 'd3';
 import type { HierarchyRectangularNode } from 'd3';
-import { commonStyles } from 'shared/themes/styles';
+import { commonStyles } from 'shell';
 import type { ProfileTreeNode, OnRootChange } from './types';
 
 // =============================================================================

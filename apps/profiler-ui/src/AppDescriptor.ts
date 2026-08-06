@@ -25,10 +25,10 @@
 // =============================================================================
 
 import React from 'react';
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import ProfilerApp from './ProfilerApp';
 import ProfilerSidebar from './ProfilerSidebar';
-import { RocketRideMark } from 'shared';
+import { RocketRideMark } from 'shell';
 
 /**
  * AppDescriptor for the Profiler app.
