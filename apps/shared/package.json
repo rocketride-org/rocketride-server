@@ -2,8 +2,6 @@
   "name": "shared",
   "version": "1.2.0",
   "private": true,
-  "module": "./index.ts",
-  "types": "./index.ts",
   "peerDependencies": {
     "@dnd-kit/core": "~6.1.0",
     "@dnd-kit/modifiers": "~7.0.0",

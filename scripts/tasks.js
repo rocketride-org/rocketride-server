@@ -208,6 +208,15 @@ const builderModule = {
 					const { selfUpdate } = require('./lib/self-update');
 					// step: --path retargets another repo; default is our own
 					const target = ctx.options.path ? path.resolve(ctx.options.path) : PROJECT_ROOT;
+					// step: refuse co-requested actions when replacing OUR OWN
+					// scripts/ — a mid-run swap lets later actions lazy-load
+					// from the new tree
+					if (target === PROJECT_ROOT) {
+						const others = process.argv.slice(2).filter((arg) => !arg.startsWith('-') && arg !== 'builder:update');
+						if (others.length) {
+							throw new Error(`builder:update targets this repository — run it as the invocation's only action (also requested: ${others.join(', ')})`);
+						}
+					}
 					await selfUpdate(target, ctx.options.branch, { log: (msg) => { task.output = msg; } });
 					task.output = `${target} scripts/ updated from upstream`;
 				},

@@ -717,6 +717,10 @@ export const DevelopView: React.FC<IDevelopViewProps> = ({ host, previewPane, co
 	 *  does not jump when the slider takes over. */
 	const toggleFit = (): void => {
 		if (fitMode) {
+			// Consume the pending one-shot auto-fit — the auto-fit effect
+			// fires on the fitMode flip and would overwrite the adopted
+			// zoom, making the frame jump.
+			needsFitRef.current = false;
 			if (fitZoom !== null) setPreviewZoom(Math.round(fitZoom * 100) / 100);
 			setFitMode(false);
 		} else {

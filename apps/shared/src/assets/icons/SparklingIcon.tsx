@@ -58,7 +58,7 @@ const SparklingIcon: FunctionComponent<SparklingIconProps> = ({
 			height={height}
 			width={width}
 			style={{
-				marginRight: isLabelDecorator ? '0.5rem' : 'inherit',
+				marginRight: isLabelDecorator ? '0.5rem' : undefined,
 				...style,
 			}}
 			opacity={opacity}

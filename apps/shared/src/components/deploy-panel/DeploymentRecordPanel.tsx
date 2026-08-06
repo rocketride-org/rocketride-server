@@ -22,7 +22,7 @@
  * deployment, so the hosted view gets no `documentTitle` (no double title).
  */
 
-import React, { useEffect, useMemo, useRef, useState, CSSProperties } from 'react';
+import React, { useMemo, useRef, useState, CSSProperties } from 'react';
 
 import { Button } from 'shell';
 import { Modal } from 'shell';
@@ -148,17 +148,17 @@ export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ o
 	// selections (sibling precedent), so the verb state above is cleared
 	// whenever the focused record changes — a staged edit, an open confirm
 	// dialog, or an error from the PREVIOUS record must never arm a verb
-	// against the NEXT one.
+	// against the NEXT one. Reset DURING render, not in an effect: an effect
+	// leaves one frame where the PREVIOUS record's staged edit/dialog/error
+	// arm the NEXT one.
 	const recordKey = data ? `${data.teamName}:${data.deployment.pipelineName}:${data.sourceId}` : null;
 	const prevRecordKeyRef = useRef<string | null>(null);
-	useEffect(() => {
-		if (recordKey !== null && recordKey !== prevRecordKeyRef.current) {
-			prevRecordKeyRef.current = recordKey;
-			setStagedConfig(null);
-			setStopOpen(false);
-			setError('');
-		}
-	}, [recordKey]);
+	if (recordKey !== null && recordKey !== prevRecordKeyRef.current) {
+		prevRecordKeyRef.current = recordKey;
+		setStagedConfig(null);
+		setStopOpen(false);
+		setError('');
+	}
 
 	/** Run one verb with shared busy/error handling (dialogs close first). */
 	const run = async (action: () => Promise<void>): Promise<void> => {

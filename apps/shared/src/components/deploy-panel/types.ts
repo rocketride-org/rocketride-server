@@ -187,7 +187,11 @@ export const createDeployHistoryColumns = (): GridColumnDefinition[] => [
 			// Past-tense verbs; 'pause'/'resume' appear only on rows
 			// written before the enable/disable vocabulary.
 			const verb = DEPLOY_ACTION_VERBS[row.action] ?? row.action;
-			return `${verb} v${row.version}${row.comment ? ` “${row.comment}”` : ''}`;
+			// A DOM node keeps the user-authored comment as TEXT — Tabulator
+			// inserts a returned STRING as markup.
+			const span = document.createElement('span');
+			span.textContent = `${verb} v${row.version}${row.comment ? ` “${row.comment}”` : ''}`;
+			return span;
 		},
 	},
 ];

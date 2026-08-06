@@ -184,19 +184,20 @@ export function getMuiTheme(): Theme {
 
 		components: {
 			MuiCssBaseline: {
+				// Selectors are direct keys: MUI v6 (emotion) treats every key as
+				// a global selector — a JSS-era '@global' wrapper would emit a
+				// literal `@global {}` block the browser ignores.
 				styleOverrides: {
-					'@global': {
-						'.add-node-list-scroll': {
-							scrollbarWidth: 'thin' as const,
-							scrollbarColor: `${scrollbarThumb} transparent`,
-						},
-						'.add-node-list-scroll::-webkit-scrollbar': {
-							width: '10px',
-						},
-						'.add-node-list-scroll::-webkit-scrollbar-thumb': {
-							backgroundColor: scrollbarThumb,
-							borderRadius: '4px',
-						},
+					'.add-node-list-scroll': {
+						scrollbarWidth: 'thin' as const,
+						scrollbarColor: `${scrollbarThumb} transparent`,
+					},
+					'.add-node-list-scroll::-webkit-scrollbar': {
+						width: '10px',
+					},
+					'.add-node-list-scroll::-webkit-scrollbar-thumb': {
+						backgroundColor: scrollbarThumb,
+						borderRadius: '4px',
 					},
 				},
 			},

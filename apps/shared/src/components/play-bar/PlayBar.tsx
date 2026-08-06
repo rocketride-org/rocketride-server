@@ -20,7 +20,7 @@
  *                        jumps the needle to the run AND frames it at a
  *                        comfortable zoom. The menu is the scale-free answer
  *                        to hundreds of runs: a list never runs out of pixels.
- * - Arrow keys         = ±30 s skips while the bar is open
+ * - Arrow keys         = ±30 s skips while the bar has focus
  * - |< / >|            = jump to the previous / next run's beginning
  * - << / >>            = step by the selected JUMP AMOUNT (dropdown between
  *                        them): a fixed time delta, or Request = the nearest
@@ -363,6 +363,8 @@ const tickStep = (secPerPx: number): number => {
  * section.
  */
 export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller, runActive = null, selection = null, onSelectionChange }) => {
+	// The whole bar — the keyboard-transport scope (see the keydown effect).
+	const containerRef = useRef<HTMLDivElement>(null);
 	const stripRef = useRef<HTMLDivElement>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
 
@@ -532,11 +534,16 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 		[timeAt, position, secPerPx, controller, onSelectionChange],
 	);
 
-	// ±30 s on arrow keys; Esc clears the selection.
+	// ±30 s on arrow keys; Esc clears the selection. Bound to the BAR, not
+	// window: several PlayBars mount at once (one per source), so a global
+	// listener would make one keypress scrub every bar. tabIndex on the
+	// container makes it focusable, so the keys reach it.
 	useEffect(() => {
+		const bar = containerRef.current;
+		if (!bar) return;
 		const onKey = (e: KeyboardEvent) => {
-			// The listener is global, so stand down while the user is typing in a
-			// form field or editable region anywhere on the page.
+			// Stand down while the user is typing in a form field or editable
+			// region (their keydowns bubble up through the bar).
 			const target = e.target as HTMLElement | null;
 			const tag = target?.tagName;
 			if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
@@ -548,8 +555,8 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 				controller.skip(SKIP_SECONDS);
 			} else if (e.key === 'Escape' && selection) onSelectionChange?.(null);
 		};
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
+		bar.addEventListener('keydown', onKey);
+		return () => bar.removeEventListener('keydown', onKey);
 	}, [controller, selection, onSelectionChange]);
 
 	/** Jump to a chapter from the menu and frame it at a comfortable zoom. */
@@ -636,7 +643,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 
 	// --- Render ---------------------------------------------------------------
 	return (
-		<div style={styles.container}>
+		<div ref={containerRef} tabIndex={0} style={styles.container}>
 			{/* Chrome row — always visible: the DVR is central chrome, live
 			    and replay alike (live still slims the row to pause + clock,
 			    since stepping means nothing at the live head). */}
@@ -662,22 +669,34 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 						</span>
 					</Button>
 					{speedOpen && speedPos && (
-						<div style={{ ...styles.speedMenu, top: speedPos.top, left: speedPos.left, transform: speedPos.up ? 'translateY(-100%)' : undefined }}>
-							{SPEEDS.map((value) => (
-								<div
-									key={value}
-									style={styles.speedItem}
-									onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
-									onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-									onClick={() => {
-										controller.setSpeed(value);
-										setSpeedOpen(false);
-									}}
-								>
-									<span style={styles.speedDot}>{player.speed === value ? '●' : ''}</span>
-									{value}×
-								</div>
-							))}
+						<div role="menu" style={{ ...styles.speedMenu, top: speedPos.top, left: speedPos.left, transform: speedPos.up ? 'translateY(-100%)' : undefined }}>
+							{SPEEDS.map((value) => {
+								const select = () => {
+									controller.setSpeed(value);
+									setSpeedOpen(false);
+								};
+								return (
+									<div
+										key={value}
+										role="menuitemradio"
+										aria-checked={player.speed === value}
+										tabIndex={0}
+										style={styles.speedItem}
+										onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
+										onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
+										onClick={select}
+										onKeyDown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												select();
+											}
+										}}
+									>
+										<span style={styles.speedDot}>{player.speed === value ? '●' : ''}</span>
+										{value}×
+									</div>
+								);
+							})}
 						</div>
 					)}
 				</div>
@@ -773,7 +792,7 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 						</span>
 					</Button>
 					{menuOpen && menuPos && (
-					<div style={{ ...styles.menu, top: menuPos.top, left: menuPos.left, transform: menuPos.up ? 'translateY(-100%)' : undefined }}>
+					<div role="menu" style={{ ...styles.menu, top: menuPos.top, left: menuPos.left, transform: menuPos.up ? 'translateY(-100%)' : undefined }}>
 						{menuGroups.length === 0 && <div style={styles.menuEmpty}>No recorded runs yet</div>}
 						{menuGroups.map((group) => (
 							<React.Fragment key={group.day}>
@@ -782,13 +801,29 @@ export const PlayBar: React.FC<IPlayBarProps> = ({ timeline, player, controller,
 									const liveChapter = chapter.endTime == null && (runActive ?? timeline?.completed === false);
 									const dotColor = liveChapter ? 'var(--rr-color-success)' : chapter.outcome === 'error' ? 'var(--rr-color-error)' : 'var(--rr-brand)';
 									const durationSec = (chapter.endTime ?? Date.now() / 1000) - chapter.beginTime;
+									// A live row returns to the live edge; a recorded
+									// row jumps the needle and frames the run.
+									const activate = () => {
+										if (liveChapter) {
+											setMenuOpen(false);
+											controller.goLive();
+										} else jumpToChapter(chapter);
+									};
 									return (
 										<div
 											key={chapter.beginSeq}
+											role="menuitem"
+											tabIndex={0}
 											style={styles.menuItem}
 											onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'var(--rr-bg-widget)')}
 											onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = 'transparent')}
-											onClick={() => (liveChapter ? (setMenuOpen(false), controller.goLive()) : jumpToChapter(chapter))}
+											onClick={activate}
+											onKeyDown={(e) => {
+												if (e.key === 'Enter' || e.key === ' ') {
+													e.preventDefault();
+													activate();
+												}
+											}}
 										>
 											<span style={{ ...styles.menuDot, background: dotColor }} />
 											<span style={styles.menuTime}>{fmtClock(new Date(chapter.beginTime * 1000), true)}</span>

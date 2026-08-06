@@ -30,7 +30,7 @@
  * transitive commonStyles resolution over `themes/styles.ts`.
  *
  * Regenerate: `node scripts/generate-gallery-tokens.mjs` (from
- * packages/shared). Verify without writing: pass `--check`.
+ * apps/shared). Verify without writing: pass `--check`.
  */
 
 /** Token usage for one gallery entry. */

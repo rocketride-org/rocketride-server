@@ -38,7 +38,7 @@ const path = require('path');
 const { readdir } = require('node:fs/promises');
 const { execCommand } = require('../../../scripts/lib');
 
-// packages/shared (one level up from this file)
+// apps/shared (one level up from this file)
 const APP_ROOT = path.join(__dirname, '..');
 const SCRIPTS_DIR = path.join(APP_ROOT, 'scripts');
 const SRC_DIR = path.join(APP_ROOT, 'src');
@@ -49,7 +49,8 @@ function makeTestAction() {
 		run: async (ctx, task) => {
 			// Pass explicit paths: `scripts` arg breaks on Node 26, `*.test.mjs` glob breaks on Node 20.
 			const scriptTests = (await readdir(SCRIPTS_DIR)).filter((f) => f.endsWith('.test.mjs')).map((f) => path.join('scripts', f));
-			const componentTests = (await readdir(SRC_DIR, { recursive: true })).filter((f) => f.endsWith('.test.tsx')).map((f) => path.join('src', f));
+			// Both extensions: pure-logic suites are .test.ts, component suites .test.tsx.
+			const componentTests = (await readdir(SRC_DIR, { recursive: true })).filter((f) => f.endsWith('.test.tsx') || f.endsWith('.test.ts')).map((f) => path.join('src', f));
 			const testFiles = [...scriptTests, ...componentTests];
 
 			if (testFiles.length === 0) {
