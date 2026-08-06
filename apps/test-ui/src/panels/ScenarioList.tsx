@@ -13,7 +13,10 @@ interface Props {
 }
 
 const ScenarioList: React.FC<Props> = ({ engine, engineState }) => {
-	const isRunning = engineState === 'running' || engineState === 'paused';
+	// Any non-idle state blocks activation: engine.start is idle-only, so a
+	// card clicked while aborting would log a phantom "Running scenario"
+	// event and then silently do nothing.
+	const isRunning = engineState !== 'idle';
 
 	return (
 		<div style={styles.scenarioList}>

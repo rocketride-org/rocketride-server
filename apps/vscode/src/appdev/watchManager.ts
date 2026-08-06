@@ -295,8 +295,17 @@ export class WatchManager {
 			};
 			// A stalled install must not wedge the single-flight memo forever —
 			// bound it and surface the failure like any other install error.
+			// shell:true wraps pnpm in cmd.exe on Windows, so SIGKILL fells only
+			// the wrapper while pnpm keeps running — taskkill /T fells the whole
+			// tree, same approach as stop().
 			const timer = setTimeout(() => {
-				try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+				try {
+					if (process.platform === 'win32' && proc.pid) {
+						spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
+					} else {
+						proc.kill('SIGKILL');
+					}
+				} catch { /* already gone */ }
 				const reason = 'pnpm install timed out after 10 minutes';
 				this.logger.output('[appdev] workspace pnpm install timed out after 10 minutes');
 				if (triggerAppId) this.appScreen.notifyError(triggerAppId, reason, 'pnpm install');

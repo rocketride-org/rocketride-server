@@ -131,6 +131,16 @@ export const ConnectionDetailPanel: React.FC<IConnectionDetailPanelProps> = (pro
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open, endpoint]);
 
+	// Fill the first-endpoint fallback when the drawer opened from the empty
+	// state and discovery delivers endpoints later. Only a never-made
+	// selection (selectedKey === null) is filled — a live selection, or its
+	// temporary absence from the list during a discovery refresh, stays.
+	useEffect(() => {
+		if (!open || selectedKey !== null) return;
+		const first = endpoints[0];
+		if (first) setSelectedKey(first.key);
+	}, [open, selectedKey, endpoints]);
+
 	// Resolve the selected endpoint object from its key.
 	const selected = useMemo(
 		() => endpoints.find((e) => e.key === selectedKey) ?? null,

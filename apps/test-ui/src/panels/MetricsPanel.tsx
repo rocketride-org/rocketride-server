@@ -104,6 +104,10 @@ const MetricsPanel: React.FC<Props> = ({
 }) => {
 	const pct = metrics.targetOps > 0 ? Math.round((metrics.totalOps / metrics.targetOps) * 100) : 0;
 	const isRunning = engineState === 'running' || engineState === 'paused';
+	// Launch/Clear gate on ANY non-idle state: engine.start (and clear) are
+	// idle-only, so an aborting engine must not offer them. isRunning stays
+	// the gate for the Abort/Pause controls of a live run.
+	const isBusy = engineState !== 'idle';
 	const isPaused = engineState === 'paused';
 
 	// Ping heartbeat stats — worst ping and what was running at that moment
@@ -168,7 +172,7 @@ const MetricsPanel: React.FC<Props> = ({
 
 				{/* ── Action Buttons ─────────────────────────────────── */}
 				<div style={actionStyles.row}>
-					{!isRunning ? (
+					{!isBusy ? (
 						<button style={actionStyles.launchBtn} onClick={onStart}>Launch Tests</button>
 					) : (
 						<button style={actionStyles.runningBtn} disabled>Running...</button>
@@ -181,7 +185,7 @@ const MetricsPanel: React.FC<Props> = ({
 							</button>
 						</>
 					)}
-					{!isRunning && (
+					{!isBusy && (
 						<button style={actionStyles.actionBtn} onClick={onClear}>Clear</button>
 					)}
 				</div>

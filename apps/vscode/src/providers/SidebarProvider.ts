@@ -91,6 +91,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private appRows: AppRowDTO[] = [];
 	/** Coalesces package.json event bursts into one workspace rescan. */
 	private rescanTimer?: NodeJS.Timeout;
+	/**
+	 * Monotonic rescan counter (the fetchSeq pattern): connect/auth/watcher
+	 * rescans overlap, and only the NEWEST run may commit its scan/rows —
+	 * a slower earlier run must not overwrite fresher state.
+	 */
+	private rescanSeq = 0;
 	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'pipelines';
 
 	private logger = getLogger();
@@ -244,8 +250,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Re-scans the workspace for app bindings and pushes the merged list. */
 	private async rescanApps(): Promise<void> {
-		this.scannedApps = await scanWorkspaceApps();
-		this.appRows = await this.buildAppRows();
+		// Capture this run's sequence; a newer rescan supersedes it at every
+		// await point below.
+		const mine = ++this.rescanSeq;
+		const scanned = await scanWorkspaceApps();
+		if (mine !== this.rescanSeq) return;
+		this.scannedApps = scanned;
+		const rows = await this.buildAppRows();
+		if (mine !== this.rescanSeq) return;
+		this.appRows = rows;
 		if (this._view) {
 			this._view.webview.postMessage({ type: 'appsUpdate', apps: this.appRows });
 		}

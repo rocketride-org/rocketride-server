@@ -217,6 +217,11 @@ export function createTestEngine(): TestEngine {
 		queuedOps: 0,
 	};
 
+	// Pool members whose connect succeeded and incremented the wsConnections
+	// gauge — destroyPool subtracts exactly this set, so a member dropped
+	// mid-phase (isConnected() now false) still brings the gauge back down.
+	const countedClients = new WeakSet<RocketRideClient>();
+
 	// =========================================================================
 	// INTERNAL UTILITIES
 	// =========================================================================
@@ -492,6 +497,9 @@ export function createTestEngine(): TestEngine {
 					.connect()
 					.then(() => {
 						metrics.wsConnections++;
+						// Mark the member as counted: destroyPool subtracts by
+						// this membership, not by isConnected() at teardown.
+						countedClients.add(pool[i]);
 						pool[i].identify(`Test - ${label}`).catch(() => {});
 						pushEvent(
 							makeEvent('pass', label, `WS-${i} connected`),
@@ -526,15 +534,16 @@ export function createTestEngine(): TestEngine {
 
 	/** Disconnect and destroy a pool of clients. */
 	async function destroyPool(pool: RocketRideClient[]): Promise<void> {
-		// Count BEFORE disconnecting: members whose connect failed never
-		// incremented wsConnections, so subtracting pool.length would
-		// undercount the gauge (and isConnected() is false after disconnect).
-		const connectedCount = pool.filter((c) => c.isConnected()).length;
+		// Subtract what was INCREMENTED: countedClients marks the members
+		// whose connect succeeded and bumped the gauge. A member dropped
+		// mid-phase (isConnected() now false) must still come back down,
+		// and members whose connect failed never went up.
+		const countedInPool = pool.filter((c) => countedClients.has(c)).length;
 		const disconnectPromises = pool.map((c) =>
 			c.disconnect().catch(() => {}),
 		);
 		await Promise.allSettled(disconnectPromises);
-		metrics.wsConnections = Math.max(0, metrics.wsConnections - connectedCount);
+		metrics.wsConnections = Math.max(0, metrics.wsConnections - countedInPool);
 	}
 
 	/**
@@ -2350,7 +2359,10 @@ export function createTestEngine(): TestEngine {
 
 		/** Clear all run data. Settings are view-owned and unaffected. */
 		clear() {
-			if (state === 'running' || state === 'paused') return;
+			// Only an idle engine may clear: aborting still owns clientPool
+			// and metrics — clearing mid-cleanup strands undisconnected
+			// sockets (destroyPool would tear down an emptied pool).
+			if (state !== 'idle') return;
 			opsCounter = 0;
 			opsWindow = [];
 			dataTransferred = 0;

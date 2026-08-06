@@ -279,9 +279,16 @@ function runRootInstall(workspaceRoot: string): Promise<void> {
 			else resolve();
 		};
 		// step: bound the install — a hung pnpm (dead registry, lock wait)
-		// must fail the pass instead of hanging it forever
+		// must fail the pass instead of hanging it forever. shell:true wraps
+		// pnpm in cmd.exe on Windows, so SIGKILL fells only the wrapper while
+		// pnpm keeps running (and holding locks) — taskkill /T fells the whole
+		// tree, same approach as watchManager.stop().
 		const timer = setTimeout(() => {
-			proc.kill('SIGKILL');
+			if (process.platform === 'win32' && proc.pid) {
+				spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F']);
+			} else {
+				proc.kill('SIGKILL');
+			}
 			finish(new Error('pnpm install timed out after 10 minutes'));
 		}, 10 * 60 * 1000);
 		proc.on('error', (err) => finish(err));

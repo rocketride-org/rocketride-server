@@ -74,6 +74,9 @@ export function usePipelineTree(client: RocketRideClient | null, isConnected: bo
 			fetchSeq.current++;
 			setTree([]);
 			setFlat([]);
+			// The invalidated load's finally can no longer clear the flag (its
+			// seq check fails), so the disconnect branch must drop it itself.
+			setLoading(false);
 			return;
 		}
 

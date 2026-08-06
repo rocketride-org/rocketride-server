@@ -362,13 +362,21 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 
 	// ── Page menu ────────────────────────────────────────────────────────────
 
+	// FK badge follows the Columns badge's Apply-projection contract: the
+	// keys the table declares AFTER Apply — fetched names (falling back to
+	// the snapshot before the first FK-page visit) minus staged drops plus
+	// staged adds.
+	const fkCount =
+		(fkNames?.length ?? tableDef?.foreign_keys?.length ?? 0) -
+		ops.filter((op) => op.kind === 'dropForeignKey').length +
+		ops.filter((op) => op.kind === 'addForeignKey').length;
+
 	const menu: ViewMenu = {
 		entries: [
 			// The badge reflects the table Apply would produce: dropped rows out.
 			{ id: 'columns', label: 'Columns', count: columns.filter((c) => c.pending !== 'dropped').length || undefined },
 			// Create mode has no FK page: constraints ride the CREATE later.
-			// Prefer the fetched constraint list (it is what the page renders).
-			...(!createMode ? [{ id: 'fks', label: 'Foreign Keys', count: (fkNames?.length ?? tableDef?.foreign_keys?.length ?? 0) || undefined }] : []),
+			...(!createMode ? [{ id: 'fks', label: 'Foreign Keys', count: fkCount || undefined }] : []),
 			{ id: 'ddl', label: 'DDL', ...(pendingCount > 0 ? { count: pendingCount } : {}) },
 		],
 	};
