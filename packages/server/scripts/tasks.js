@@ -1117,13 +1117,18 @@ function makeBuildAction() {
 			// After sync, the node/ai requirement files are in the dist, so depends()
 			// has the full constraint set — install the test/runtime deps through it.
 			'server:setup-test-deps',
+			// The shell platform ships WITH the server (static/shell bundle,
+			// /client/shell tgz, the materialized .rocketride/shell package),
+			// so the server build carries it. The TS SDK builds first —
+			// pack-shell vendors its dist inside the shell package.
+			'client-typescript:build',
+			'shell:build',
 		],
 	};
 }
 
 function makeCleanServerAction() {
 	return {
-		description: 'Cleaning server',
 		run: async (ctx, task) => {
 			await setState('server', {});
 			await setState('package', null);
@@ -1326,7 +1331,17 @@ module.exports = {
 		{ name: 'server:run-aptest', action: makeRunAptestAction },
 		{ name: 'server:run-engtest', action: makeRunEngtestAction },
 		{ name: 'server:run-rocketlib-test', action: makeRocketlibPythonTestAction },
-		{ name: 'server:clean', action: makeCleanServerAction },
+		{ name: 'server:clean-run', action: makeCleanServerAction },
+		{
+			// The shell rides the server build (see server:build), so its
+			// artifacts go with the server clean. steps SHADOW run in the
+			// runner, hence the internal clean-run + compound split.
+			name: 'server:clean',
+			action: () => ({
+				description: 'Cleaning server',
+				steps: ['server:clean-run', 'shell:clean'],
+			}),
+		},
 
 		// Public actions (have descriptions, shown in help)
 		{

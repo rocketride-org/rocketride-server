@@ -16,7 +16,7 @@
  */
 
 import React, { type CSSProperties } from 'react';
-import { commonStyles } from 'shell';
+import { commonStyles } from '../../themes/styles';
 import type { IChatViewProps } from './types';
 import { MessageList } from './components/MessageList';
 import { ChatInputField } from './components/ChatInputField';
@@ -48,12 +48,11 @@ const styles = {
  *   input (reserved for future attachments).
  * @returns The chat view element.
  */
-const ChatView: React.FC<IChatViewProps> = ({ messages, isTyping, isConnected, onSend, placeholder, emptyTitle, emptyDescription, leadingInputSlot }) => (
+export const ChatView: React.FC<IChatViewProps> = ({ messages, isTyping, isConnected, onSend, placeholder, emptyTitle, emptyDescription, leadingInputSlot }) => (
 	<div style={styles.root}>
 		<MessageList messages={messages} isTyping={isTyping} emptyTitle={emptyTitle} emptyDescription={emptyDescription} />
 		<ChatInputField onSend={onSend} disabled={!isConnected} placeholder={placeholder} leadingInputSlot={leadingInputSlot} />
 	</div>
 );
 
-export default ChatView;
 export type { IChatViewProps };

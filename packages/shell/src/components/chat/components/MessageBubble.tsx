@@ -17,7 +17,7 @@
 import React, { type CSSProperties } from 'react';
 import type { ChatMessage } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
-import { Banner } from 'shell';
+import { Banner } from '../../banner/Banner';
 
 // =============================================================================
 // STYLES

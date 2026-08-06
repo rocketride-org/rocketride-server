@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
-import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
+import { pluginRocketrideIcons } from '../../apps/shared/scripts/rsbuild-plugin-icons.mjs';
 import { pluginModuleFederation } from '@module-federation/rsbuild-plugin';
 import { pluginBasicSsl } from '@rsbuild/plugin-basic-ssl';
 import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
@@ -82,9 +82,26 @@ export default defineConfig(({ command }) => {
 	const e = (key: string) => JSON.stringify(env[key] ?? '');
 
 	return {
+		// The dev flavor deliberately defines process.env.NODE_ENV as
+		// "development" inside a production build (development React with
+		// refresh hooks, production packaging — see isDevFlavor). rspack
+		// warns about the resulting DefinePlugin conflict on every build;
+		// the conflict IS the mechanism, so that one warning is silenced.
+		tools: {
+			rspack: (config) => {
+				if (isDevFlavor) {
+					config.ignoreWarnings = [...(config.ignoreWarnings ?? []), /Conflicting values for 'process\.env\.NODE_ENV'/];
+				}
+				return config;
+			},
+		},
 		server: {
 			// Development server listens on port 3000 with HTTPS (via pluginBasicSsl).
 			port: 3000,
+			// CORS: explicitly allow any origin — the serving host isn't fixed, so no
+			// allowlist is possible; declaring it also stops the MF plugin injecting
+			// its own wildcard defaults (and warning about it).
+			cors: { origin: '*' },
 			// Serve everything from the root path — no sub-directory prefix.
 			base: '/',
 			// In dev, also serve built app bundles and static assets.
@@ -111,9 +128,7 @@ export default defineConfig(({ command }) => {
 
 			// TypeScript type checking (fork-ts-checker) — fails production builds
 			// on any type error. Uses ./tsconfig.json, whose program covers all
-			// shell sources AND the shared-ui sources pulled in via the
-			// 'shared' path alias (shared-ui is consumed as workspace TS source),
-			// so latent type errors in either package break the build here.
+			// shell sources, so latent type errors break the build here.
 			// Skipped for the dev flavor — the production build of the SAME
 			// program has already type-checked everything in the same task.
 			...(isDevFlavor ? [] : [pluginTypeCheck()]),
@@ -177,11 +192,6 @@ export default defineConfig(({ command }) => {
 		},
 		resolve: {
 			alias: {
-				// Allow `import ... from 'shared'` to resolve to the shared-ui package
-				// inside the rocketride-server submodule without a publish/link step.
-				// shared-ui lives in the same repo — resolve directly.
-				shared: path.resolve(__dirname, '../../packages/shared-ui/src'),
-
 				// shell source lives inside this package; alias resolves to the
 				// local index.ts so imports work identically across host and remotes.
 				// Exact-match: bare 'shell' is the barrel; subpaths ('shell/src/
@@ -255,11 +265,6 @@ export default defineConfig(({ command }) => {
 
 			// Watch the two aliased package sources for changes so that HMR
 			// picks up edits to shared-ui without a manual restart. The shell lives inside src/ and is watched automatically.
-			watchFiles: {
-				paths: [
-					path.resolve(__dirname, '../../packages/shared-ui/src'),
-				],
-			},
 
 		},
 		output: {

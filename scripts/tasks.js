@@ -28,7 +28,7 @@
  * work in BOTH contexts:
  *
  *   platform repo (rocketride-server) — the shell is an in-tree module
- *     (packages/shell); ui:build builds it first, then the remotes.
+ *     (packages/shell) built by server:build; ui:build builds the remotes.
  *   standalone app repo — there is no shell source; the platform arrives
  *     prebuilt in .rocketride/shell, vendored from a server's
  *     /client/shell. When the package is missing, build.js fetches it
@@ -40,7 +40,7 @@
  * Actions:
  *   ui:clean        — clean all UI app build artifacts
  *   ui:register     — register all UI apps into apps.json (no bundling)
- *   ui:build        — build all UI apps (shell first when it is in-tree)
+ *   ui:build        — build all UI app remotes (the shell rides server:build)
  *   client:update   — [standalone repos only] refresh .rocketride/shell
  *                     from a server (--shell=<url>, default ROCKETRIDE_URI)
  *                     and relink the workspace
@@ -74,18 +74,6 @@ function getRemoteUiModules() {
 	return registry.names().filter(n => n.endsWith('-ui') && n !== 'shared-ui');
 }
 
-/**
- * Returns [actionName] when the action exists in the registry, else [] —
- * lets aggregate steps include platform-repo-only actions (shell:build,
- * shell:clean) without breaking standalone repos.
- *
- * @param {string} actionName - Fully qualified action (e.g. 'shell:build').
- * @returns {string[]} Zero-or-one-element step list.
- */
-function optionalStep(actionName) {
-	return registry.getAction(actionName) ? [actionName] : [];
-}
-
 // =============================================================================
 // UI MODULE
 // =============================================================================
@@ -101,10 +89,10 @@ const uiModule = {
 			action: () => ({
 				description: 'Cleaning ui (all)',
 				steps: [
-					parallel([
-						...optionalStep('shell:clean'),
-						...getRemoteUiModules().map(n => `${n}:clean`),
-					], 'Clean UI apps'),
+					parallel(
+						getRemoteUiModules().map(n => `${n}:clean`),
+						'Clean UI apps',
+					),
 				],
 			}),
 		},
@@ -123,14 +111,13 @@ const uiModule = {
 			}),
 		},
 		{
-			// Build all UI apps. The shell builds first when it is in-tree
-			// (platform repo); standalone repos consume it prebuilt from
-			// .rocketride/shell instead.
+			// Build all UI apps — the REMOTES only. The shell platform is the
+			// server's concern (server:build carries shell:build); ui:* callers
+			// that need a fresh shell run it explicitly (shell:build ui:build).
 			name: 'ui:build',
 			action: () => ({
 				description: 'Build ui (all)',
 				steps: [
-					...optionalStep('shell:build'),
 					parallel(
 						getRemoteUiModules().map(n => `${n}:build`),
 						'Build remote apps',

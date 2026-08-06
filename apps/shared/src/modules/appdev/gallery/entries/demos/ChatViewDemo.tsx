@@ -32,8 +32,8 @@
  */
 
 import React, { useRef, useState } from 'react';
-import { ChatView } from '../../../../../modules/chat';
-import type { ChatMessage } from '../../../../../modules/chat';
+import { ChatView } from 'shell';
+import type { ChatMessage } from 'shell';
 import type { IGalleryDemoProps } from '../../galleryTypes';
 
 /** The canned conversation seed. */

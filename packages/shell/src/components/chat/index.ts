@@ -19,7 +19,7 @@
  */
 
 // ── View ─────────────────────────────────────────────────────────────────────
-export { default as ChatView } from './ChatView';
+export { ChatView } from './ChatView';
 export type { IChatViewProps } from './types';
 
 // ── Sub-components ────────────────────────────────────────────────────────────

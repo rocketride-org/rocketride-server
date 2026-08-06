@@ -11,11 +11,23 @@
     "resolveJsonModule": true,
     "noEmit": true,
     "paths": {
-      "shared/*": ["../../shared/src/*"],
-      "shell": ["./types/rocketride-shell/shell.d.ts"],
-      "rocketride": ["./types/rocketride-shell/shell.d.ts"]
+      "shared/*": [
+        "../shared/src/*"
+      ],
+      "shell": [
+        "../../.rocketride/shell/shell.d.ts"
+      ],
+      "shell/client": [
+        "../../.rocketride/shell/client.d.ts"
+      ]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }

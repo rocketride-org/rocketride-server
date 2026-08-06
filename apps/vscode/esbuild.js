@@ -49,7 +49,7 @@ esbuild
 			ssh2: path.resolve(__dirname, 'src/stubs/ssh2.js'),
 			// shared-ui source (same mapping the webview rsbuild uses) — the
 			// extension HOST imports pure modules from it (appdev templates).
-			shared: path.resolve(__dirname, '../../shared/src'),
+			shared: path.resolve(__dirname, '../shared/src'),
 		},
 		mainFields: ['main'],
 		resolveExtensions: ['.ts', '.js', '.json'],

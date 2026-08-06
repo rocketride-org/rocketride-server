@@ -298,12 +298,15 @@ async function main() {
 	// Standalone app repo = no in-tree shell source.
 	const isStandalone = !fs.existsSync(path.join(ROOT, 'packages', 'shell'));
 
-	// Vendored-shell auto-injection — before the dependency bootstrap: a
-	// standalone workspace whose members depend on the vendored platform
-	// (file:../../.rocketride/shell) cannot even pnpm install until the
-	// package exists, so when it is needed and MISSING it is fetched here
-	// automatically (--shell=<url> beats ROCKETRIDE_URI beats localhost).
-	// Refreshing an EXISTING install is explicit: builder client:update.
+	// Vendored-shell bootstrap — before the dependency check: apps link
+	// the platform package (link:../../.rocketride/shell), and pnpm needs
+	// the link target to exist with a manifest before install can succeed.
+	// Standalone repo: fetch the real package from a server (--shell=<url>
+	// beats ROCKETRIDE_URI beats localhost); refreshing an EXISTING install
+	// stays explicit (builder client:update).
+	// Platform repo: write a placeholder package — the real one is
+	// materialized locally by the first shell:build (pack-shell), and the
+	// link: junction picks the swap up with no reinstall.
 	if (isStandalone) {
 		const { ensureVendoredShell } = require('./lib/vendor-shell');
 		try {
@@ -312,6 +315,17 @@ async function main() {
 			console.error(`✖ Vendored shell injection failed: ${err.message}`);
 			console.error('Set ROCKETRIDE_URI in .env or pass --shell=<server url>.');
 			process.exit(1);
+		}
+	} else {
+		const { ensureShellStub } = require('./lib/vendor-shell');
+		ensureShellStub(ROOT);
+		// Overlay repos (the saas wrapper) carry the same canonical
+		// "shell": "link:../../.rocketride/shell" dependency, satisfied by a
+		// REAL directory at the overlay root: stubbed here for the very first
+		// install, then refreshed with the packaged types by every
+		// shell:build (pack-shell's overlay materialization).
+		if (options.overlayRoot && path.resolve(options.overlayRoot) !== path.resolve(ROOT)) {
+			ensureShellStub(options.overlayRoot);
 		}
 	}
 

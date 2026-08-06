@@ -24,10 +24,10 @@
 // CONNECTION TYPES — shared contract for shell, VSCode, and any future host
 // =============================================================================
 //
-// Both hosts import these types from 'shared'. VSCode extends ConnectionState
+// Both hosts import these types from 'shell'. VSCode extends ConnectionState
 // with engine-specific states; shell uses the base set.
 //
-// Keeping these in the shared package ensures both platforms agree on the
+// Keeping these in the shell surface ensures both platforms agree on the
 // state machine vocabulary and status structure.
 // =============================================================================
 

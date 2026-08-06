@@ -17,8 +17,8 @@
 
 import { CHAT_COLUMN_MAX_WIDTH } from '../types';
 import React, { useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { commonStyles } from 'shell';
-import { Button } from 'shell';
+import { commonStyles } from '../../../themes/styles';
+import { Button } from '../../button/Button';
 
 // =============================================================================
 // STYLES

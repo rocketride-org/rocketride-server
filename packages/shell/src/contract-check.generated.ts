@@ -15,6 +15,7 @@
 
 import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from '../contract/versions/v0';
+import type { ShellApiV1 } from '../contract/versions/v1';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -567,10 +568,22 @@ import type { ITaskStatus as Frozen_ITaskStatus } from '../contract/versions/v0'
 import type { ITaskStatus as Current_ITaskStatus } from './api';
 import type { IFlowData as Frozen_IFlowData } from '../contract/versions/v0';
 import type { IFlowData as Current_IFlowData } from './api';
+import type { ChatMessage as Frozen_ChatMessage } from '../contract/versions/v1';
+import type { ChatMessage as Current_ChatMessage } from './api';
+import type { IChatViewProps as Frozen_IChatViewProps } from '../contract/versions/v1';
+import type { IChatViewProps as Current_IChatViewProps } from './api';
+import type { UseChatMessagesOptions as Frozen_UseChatMessagesOptions } from '../contract/versions/v1';
+import type { UseChatMessagesOptions as Current_UseChatMessagesOptions } from './api';
+import type { IConnectionCardProps as Frozen_IConnectionCardProps } from '../contract/versions/v1';
+import type { IConnectionCardProps as Current_IConnectionCardProps } from './api';
+import type { IConnectionCardAddProps as Frozen_IConnectionCardAddProps } from '../contract/versions/v1';
+import type { IConnectionCardAddProps as Current_IConnectionCardAddProps } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
 void _floor_v0;
+const _floor_v1: ShellApiV1 = {} as ShellApiShape;
+void _floor_v1;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1127,3 +1140,13 @@ const _t_ITaskStatus: Frozen_ITaskStatus = {} as Current_ITaskStatus;
 void _t_ITaskStatus;
 const _t_IFlowData: Frozen_IFlowData = {} as Current_IFlowData;
 void _t_IFlowData;
+const _t_ChatMessage: Frozen_ChatMessage = {} as Current_ChatMessage;
+void _t_ChatMessage;
+const _t_IChatViewProps: Frozen_IChatViewProps = {} as Current_IChatViewProps;
+void _t_IChatViewProps;
+const _t_UseChatMessagesOptions: Frozen_UseChatMessagesOptions = {} as Current_UseChatMessagesOptions;
+void _t_UseChatMessagesOptions;
+const _t_IConnectionCardProps: Frozen_IConnectionCardProps = {} as Current_IConnectionCardProps;
+void _t_IConnectionCardProps;
+const _t_IConnectionCardAddProps: Frozen_IConnectionCardAddProps = {} as Current_IConnectionCardAddProps;
+void _t_IConnectionCardAddProps;

@@ -4,7 +4,7 @@
 // =============================================================================
 
 import { useState, useCallback, useRef } from 'react';
-import { Question, QuestionType, type PIPELINE_RESULT } from 'shell/client';
+import { Question, QuestionType, type PIPELINE_RESULT } from '../../../client';
 import type { ChatMessage, TextResult, UseChatMessagesOptions } from '../types';
 
 // Module-level monotonic counter — guarantees unique IDs even when multiple
