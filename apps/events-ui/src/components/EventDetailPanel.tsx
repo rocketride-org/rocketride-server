@@ -26,7 +26,7 @@
 
 import React from 'react';
 import type { CSSProperties } from 'react';
-import { DetailPanel, LabelValue, Section } from 'shared';
+import { DetailPanel, LabelValue, Section } from 'shell';
 // The shared token-themed JSON tree (deep import, matching this app's existing
 // `shared/themes/styles` import) — the one JSON viewer, not a per-app copy.
 import { JsonTree } from 'shared/components/trace/JsonTree';

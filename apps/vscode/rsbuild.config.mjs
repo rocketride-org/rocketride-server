@@ -64,7 +64,11 @@ export default defineConfig({
 
 	resolve: {
 		alias: {
-			shared: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts'),
+			// Deep-spec roots: the webviews consume shared and the shell's stock
+			// tree as STATIC libraries (no shell runtime here) — directory
+			// aliases so 'shared/<group>' and 'shell/src/stock/<group>' resolve.
+			shared: path.resolve(__dirname, '../../packages/shared-ui/src'),
+			shell: path.resolve(__dirname, '../../packages/shell'),
 			react: path.resolve(__dirname, 'node_modules/react'),
 			'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
 		},

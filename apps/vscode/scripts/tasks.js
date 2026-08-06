@@ -165,10 +165,10 @@ function makeStageFilesAction() {
 			const stagedPkg = JSON.stringify(pkg, null, 2);
 			const manifestChanged = !buildHasManifest || String(await readFile(stagedPkgPath)) !== stagedPkg;
 
-			// App-types bundle (frozen shell-api + shared rollup, built by
-			// shell-ui:build): shipped WITH the extension so the App Builder
+			// App-types bundle (the frozen shell contract, built by
+			// shell:build): shipped WITH the extension so the App Builder
 			// can vendor types/rocketride-shell/ into standalone app repos.
-			// Synced BEFORE the early return — it changes when shell-ui
+			// Synced BEFORE the early return — it changes when shell
 			// rebuilds, which the vscode source hash cannot see.
 			const appTypesSrc = path.join(BUILD_ROOT, 'app-types');
 			if (await exists(appTypesSrc)) {

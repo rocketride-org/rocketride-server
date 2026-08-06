@@ -26,8 +26,8 @@
 
 import React, { useCallback } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellSidebarProps } from 'shell-ui';
-import { NavButton, BxGridAlt, BxDesktop, BxCog, BxListUl, BxStop, BxPlay } from 'shell-ui';
+import type { ShellSidebarProps } from 'shell';
+import { NavButton, BxGridAlt, BxDesktop, BxCog, BxListUl, BxStop, BxPlay } from 'shell';
 import { useSavedConnections, type SavedConnection } from './connections';
 import { getDocs } from './docs';
 import { openConnection } from './TestApp';

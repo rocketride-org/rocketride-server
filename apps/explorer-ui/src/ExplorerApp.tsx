@@ -36,10 +36,10 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
-import { commonStyles } from 'shared/themes/styles';
-import { useShellConnection, useWorkspace, DocTabs, DocSplitLayout } from 'shell-ui';
-import type { Documents } from 'shell-ui';
+import type { ShellAppProps } from 'shell';
+import { commonStyles } from 'shell';
+import { useShellConnection, useWorkspace, DocTabs, DocSplitLayout } from 'shell';
+import type { Documents } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { createStoreVfs, isFileLoadError } from './store';
 import { getMediaInfo } from './mediaTypes';

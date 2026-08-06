@@ -32,7 +32,7 @@
 // =============================================================================
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useShellConnection } from 'shell-ui';
+import { useShellConnection } from 'shell';
 import { createTestEngine } from './engine';
 import type { TestConfig, EngineState } from './types';
 import { styles } from './styles';

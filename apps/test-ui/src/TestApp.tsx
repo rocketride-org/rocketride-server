@@ -26,10 +26,10 @@
 
 import React, { useState, useEffect } from 'react';
 import type { CSSProperties } from 'react';
-import type { ShellAppProps } from 'shell-ui';
-import { useWorkspace, DocSplitLayout, DocTabs } from 'shell-ui';
-import type { Documents } from 'shell-ui';
-import { commonStyles } from 'shared/themes/styles';
+import type { ShellAppProps } from 'shell';
+import { useWorkspace, DocSplitLayout, DocTabs } from 'shell';
+import type { Documents } from 'shell';
+import { commonStyles } from 'shell';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import {
 	initConnectionStore, destroyConnectionStore,

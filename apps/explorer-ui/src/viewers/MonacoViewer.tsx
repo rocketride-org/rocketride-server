@@ -5,7 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Editor, { loader } from '@monaco-editor/react';
-import type { Documents } from 'shell-ui';
+import type { Documents } from 'shell';
 
 // -----------------------------------------------------------------------------
 // Extension → Monaco language ID mapping

@@ -25,10 +25,10 @@
 // =============================================================================
 
 import React from 'react';
-import type { AppDescriptor } from 'shell-ui';
+import type { AppDescriptor } from 'shell';
 import MonitorApp from './MonitorApp';
 import MonitorSidebar from './MonitorSidebar';
-import { RocketRideMark } from 'shared';
+import { RocketRideMark } from 'shell';
 
 /**
  * AppDescriptor for the Server Monitor app.
