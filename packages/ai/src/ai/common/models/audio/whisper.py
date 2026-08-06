@@ -55,8 +55,8 @@ class WhisperLoader(BaseLoader):
         an identical copy of the weights per language. `compute_type` stays — precision
         genuinely changes the loaded weights.
 
-        `beam_size`, `vad_filter` and `vad_parameters` are excluded for the same reason —
-        all three are decode-time (#1809).
+        `beam_size`, `vad_filter`, `vad_parameters` and `word_timestamps` are excluded
+        for the same reason — all four are decode-time (#1809).
 
     Performance Note:
         - Typical throughput: ~8-15 req/s depending on model size and audio length
@@ -359,6 +359,7 @@ class WhisperLoader(BaseLoader):
         # every existing caller.
         vad_filter: bool = True,
         vad_parameters: Optional[Dict[str, Any]] = None,
+        word_timestamps: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Run Whisper transcription.
@@ -379,6 +380,9 @@ class WhisperLoader(BaseLoader):
                 setting one key leaves the others at our defaults. A nested None means
                 "unset"; 0 is a real value. Mapping only — unlike upstream, not a
                 VadOptions.
+            word_timestamps: Populate each segment's `words`. Off by default, matching
+                upstream — turning it on costs an alignment pass and moves segment
+                boundaries. The `words` block below was unreachable until this existed.
 
         Returns:
             List of transcription results with segments
@@ -425,6 +429,7 @@ class WhisperLoader(BaseLoader):
                         beam_size=beam_size,
                         vad_filter=vad_filter,
                         vad_parameters=vad_options,
+                        word_timestamps=word_timestamps,
                     )
 
                     # Convert generator to list and build result
@@ -668,6 +673,7 @@ class Whisper:
         vad_filter: bool = True,
         vad_parameters: Optional[Dict[str, Any]] = None,
         language: Optional[str] = None,
+        word_timestamps: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -680,6 +686,9 @@ class Whisper:
             vad_parameters: VAD settings, merged over WhisperLoader._VAD_DEFAULTS rather
                 than replacing them. Mapping only; a VadOptions is not accepted.
             language: Override the instance's default decode language for this call
+            word_timestamps: Populate each segment's `words` with per-word timings.
+                Off by default; turning it on costs an alignment pass and shifts
+                segment boundaries.
             **kwargs: Additional transcription arguments
 
         Returns:
@@ -695,10 +704,14 @@ class Whisper:
 
         if self._proxy_mode:
             # Model server mode — ModelClient.send_command handles perf timing
-            return self._transcribe_remote(audio, beam_size, vad_filter, vad_parameters, language, **kwargs)
+            return self._transcribe_remote(
+                audio, beam_size, vad_filter, vad_parameters, language, word_timestamps, **kwargs
+            )
         else:
             # Local mode — time each phase
-            return self._transcribe_local(audio, beam_size, vad_filter, vad_parameters, language, **kwargs)
+            return self._transcribe_local(
+                audio, beam_size, vad_filter, vad_parameters, language, word_timestamps, **kwargs
+            )
 
     def _transcribe_local(
         self,
@@ -707,6 +720,7 @@ class Whisper:
         vad_filter: bool,
         vad_parameters: Optional[Dict[str, Any]],
         language: str,
+        word_timestamps: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """Execute local transcription with perf timing."""
@@ -725,6 +739,7 @@ class Whisper:
             beam_size=beam_size,
             vad_filter=vad_filter,
             vad_parameters=vad_parameters,
+            word_timestamps=word_timestamps,
         )
         t_gpu = (time.perf_counter() - t0) * 1000
 
@@ -760,6 +775,7 @@ class Whisper:
         vad_filter: bool,
         vad_parameters: Optional[Dict[str, Any]],
         language: str,
+        word_timestamps: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """Execute remote transcription via model server.
@@ -775,6 +791,7 @@ class Whisper:
                 'vad_filter': vad_filter,
                 'vad_parameters': vad_parameters,
                 'language': language,
+                'word_timestamps': word_timestamps,
                 'output_fields': self.output_fields,
                 **kwargs,
             },

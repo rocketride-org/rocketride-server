@@ -120,6 +120,10 @@ class IGlobal(IGlobalBase):
             compute_type=compute_type,
         )
 
+        # Transcribe()'s own defaults; IInstance passes these through (#1809).
+        self.chunk_duration = int(config.get('chunk_duration', 60))
+        self.max_chunk_duration = int(config.get('max_chunk_duration', 120))
+
         # Cast to the types VadOptions declares — JSON does not distinguish 5 from 5.0.
         self._whisper_beam_size = int(config.get('beam_size', 5))
         self._whisper_vad_filter = bool(config.get('vad_filter', True))

@@ -104,6 +104,8 @@ class IInstance(IInstanceBase):
         self._transcribe = Transcribe(
             segment_callback=self._segment_callback,
             transcribe=self.IGlobal.transcribe,
+            chunk_duration=self.IGlobal.chunk_duration,
+            max_chunk_duration=self.IGlobal.max_chunk_duration,
         )
 
     def open(self, object: Entry):

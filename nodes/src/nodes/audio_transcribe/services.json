@@ -168,6 +168,20 @@
 			],
 			"default": "base"
 		},
+		// Buffering, passed to Transcribe(). Defaults are its own constants, which ran
+		// unconditionally before — min_seconds/max_seconds never reached it (#1809).
+		"transcribe.chunk_duration": {
+			"type": "number",
+			"title": "Chunk Duration (s)",
+			"description": "Seconds of audio to buffer before sending a chunk to Whisper",
+			"default": 60
+		},
+		"transcribe.max_chunk_duration": {
+			"type": "number",
+			"title": "Maximum Chunk Duration (s)",
+			"description": "Hard limit before a chunk is flushed even without a pause",
+			"default": 120
+		},
 		// Decode-time parameters, forwarded per request (#1809). Defaults mirror what
 		// the node already sent.
 		"transcribe.beam_size": {
@@ -208,7 +222,7 @@
 		},
 		"transcribe.default": {
 			"object": "default",
-			"properties": ["transcribe.model", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
+			"properties": ["transcribe.model", "transcribe.chunk_duration", "transcribe.max_chunk_duration", "transcribe.beam_size", "transcribe.vad_filter", "transcribe.vad_threshold", "transcribe.vad_min_silence_duration_ms", "transcribe.vad_speech_pad_ms", "transcribe.vad_max_speech_duration_s"]
 		},
 		"transcribe.profile": {
 			"hidden": true,

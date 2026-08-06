@@ -280,6 +280,38 @@ def test_vad_defaults_are_never_mutated():
 
 
 # -----------------------------------------------------------------------------
+# word_timestamps (#1809)
+# -----------------------------------------------------------------------------
+
+
+def test_word_timestamps_defaults_to_false():
+    """Matches upstream; turning it on costs an alignment pass and moves boundaries."""
+    assert _run_inference().captured['word_timestamps'] is False
+
+
+def test_word_timestamps_is_forwarded():
+    assert _run_inference(word_timestamps=True).captured['word_timestamps'] is True
+
+
+class _WordyWhisperModel:
+    """Yields a segment carrying word timings, as faster-whisper does when asked."""
+
+    def transcribe(self, audio, **kw):
+        word = type('W', (), {'word': ' hi', 'start': 0.1, 'end': 0.4, 'probability': 0.9})()
+        segment = type('S', (), {'start': 0.0, 'end': 0.5, 'text': ' hi', 'words': [word]})()
+        return iter((segment,)), type('Info', (), {'language': 'en'})()
+
+
+def test_words_reach_the_result():
+    """seg_dict['words'] was unreachable before #1809 — nothing ever passed the flag."""
+    preprocessed = {'audios': [[0.0] * 2000], 'batch_size': 1}
+
+    results = WhisperLoader.inference({'model': _WordyWhisperModel()}, preprocessed, word_timestamps=True)
+
+    assert results[0]['segments'][0]['words'] == [{'word': ' hi', 'start': 0.1, 'end': 0.4, 'probability': 0.9}]
+
+
+# -----------------------------------------------------------------------------
 # Cross-cutting (#1809)
 # -----------------------------------------------------------------------------
 
@@ -341,20 +373,25 @@ def test_decode_parameters_never_reach_loader_options(monkeypatch):
     whatever it is handed — it does not ignore them.
     """
     model = _proxy_whisper(monkeypatch)
-    model.transcribe(b'\x00\x01' * 2000, beam_size=10, vad_filter=False, vad_parameters={'threshold': 0.1})
+    model.transcribe(
+        b'\x00\x01' * 2000, beam_size=10, vad_filter=False, vad_parameters={'threshold': 0.1}, word_timestamps=True
+    )
 
     _, _, loader_options = _FakeClient.captured['load']
     assert loader_options == {'compute_type': 'float16'}
 
 
-def test_facade_puts_all_three_on_the_wire(monkeypatch):
+def test_facade_puts_all_four_on_the_wire(monkeypatch):
     model = _proxy_whisper(monkeypatch)
-    model.transcribe(b'\x00\x01' * 2000, beam_size=10, vad_filter=False, vad_parameters={'threshold': 0.1})
+    model.transcribe(
+        b'\x00\x01' * 2000, beam_size=10, vad_filter=False, vad_parameters={'threshold': 0.1}, word_timestamps=True
+    )
 
     _, args = _FakeClient.captured['infer']
     assert args['beam_size'] == 10
     assert args['vad_filter'] is False
     assert args['vad_parameters'] == {'threshold': 0.1}
+    assert args['word_timestamps'] is True
 
 
 def _local_whisper(monkeypatch, recorder):
@@ -378,15 +415,18 @@ def _recording_inference(calls):
     return _inference
 
 
-def test_local_mode_forwards_all_three(monkeypatch):
+def test_local_mode_forwards_all_four(monkeypatch):
     """The half no acceptance criterion covers: local mode ignored these too."""
     calls = []
     model = _local_whisper(monkeypatch, _recording_inference(calls))
-    model.transcribe(b'\x00\x01' * 2000, beam_size=4, vad_filter=False, vad_parameters={'threshold': 0.2})
+    model.transcribe(
+        b'\x00\x01' * 2000, beam_size=4, vad_filter=False, vad_parameters={'threshold': 0.2}, word_timestamps=True
+    )
 
     assert calls[0]['beam_size'] == 4
     assert calls[0]['vad_filter'] is False
     assert calls[0]['vad_parameters'] == {'threshold': 0.2}
+    assert calls[0]['word_timestamps'] is True
 
 
 def test_local_and_remote_hand_the_loader_the_same_vad_parameters(monkeypatch):

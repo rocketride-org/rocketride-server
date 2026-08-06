@@ -18,6 +18,7 @@ and the knob is dead on arrival — which is the very bug #1809 is about.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import os
 import sys
@@ -40,7 +41,7 @@ _VAD_FIELD_TO_DECODE_KEY = {
     'vad_speech_pad_ms': 'speech_pad_ms',
     'vad_max_speech_duration_s': 'max_speech_duration_s',
 }
-_NEW_FIELDS = ['beam_size', 'vad_filter', *_VAD_FIELD_TO_DECODE_KEY]
+_NEW_FIELDS = ['beam_size', 'vad_filter', 'chunk_duration', 'max_chunk_duration', *_VAD_FIELD_TO_DECODE_KEY]
 
 # Read by nothing; superseded by the vad_* fields or by fixed buffering constants.
 _DEAD_FIELDS = ['silence_threshold', 'min_seconds', 'max_seconds', 'vad_level']
@@ -240,6 +241,8 @@ def test_services_json_defaults_match_the_python_fallbacks():
     """A UI default that disagrees with the runtime fallback changes behaviour on save."""
     fields = _parse_services_json()['fields']
     expected = {
+        'transcribe.chunk_duration': 60,
+        'transcribe.max_chunk_duration': 120,
         'transcribe.beam_size': 5,
         'transcribe.vad_filter': True,
         'transcribe.vad_threshold': 0.5,
@@ -250,6 +253,57 @@ def test_services_json_defaults_match_the_python_fallbacks():
 
     for name, default in expected.items():
         assert fields[name]['default'] == default, f'{name} default drifted from IGlobal'
+
+
+def _class_attrs(path, class_name):
+    """Read a class's literal attributes without importing it (relative imports)."""
+    tree = ast.parse(open(path, encoding='utf-8').read())
+    cls = next(n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == class_name)
+    return {
+        t.id: n.value.value
+        for n in cls.body
+        if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+        for t in n.targets
+        if isinstance(t, ast.Name)
+    }
+
+
+def test_iglobal_reads_buffering_from_config():
+    IGlobal, holder = _load_iglobal()
+    holder['raw'] = {'chunk_duration': 30, 'max_chunk_duration': 90}
+
+    ig = IGlobal.__new__(IGlobal)
+    ig.glb = types.SimpleNamespace(logicalType='audio_transcribe://', connConfig={})
+    ig.beginGlobal()
+
+    assert ig.chunk_duration == 30
+    assert ig.max_chunk_duration == 90
+
+
+def test_buffering_defaults_reproduce_transcribe_constants():
+    """The defaults must equal what Transcribe ran unconditionally before it was wired."""
+    consts = _class_attrs(os.path.join(_NODE_DIR, 'transcribe.py'), 'Transcribe')
+    fields = _parse_services_json()['fields']
+
+    assert fields['transcribe.chunk_duration']['default'] == consts['CHUNK_DURATION']
+    assert fields['transcribe.max_chunk_duration']['default'] == consts['MAX_CHUNK_DURATION']
+
+
+def test_iinstance_passes_buffering_to_transcribe():
+    """IInstance built Transcribe() with no kwargs, so the config never reached it.
+
+    Static check: IInstance imports rocketlib and ai.common.avi, so the stub harness
+    above cannot load it.
+    """
+    tree = ast.parse(open(os.path.join(_NODE_DIR, 'IInstance.py'), encoding='utf-8').read())
+    call = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'Transcribe'
+    )
+    passed = {kw.arg for kw in call.keywords}
+
+    assert {'chunk_duration', 'max_chunk_duration'} <= passed, f'Transcribe() only gets {sorted(passed)}'
 
 
 def test_dead_fields_are_gone():
