@@ -92,6 +92,25 @@ export function endpointKeyFromUri(uri: string): string | null {
 	return uri.startsWith('connection:') ? uri.slice('connection:'.length) : null;
 }
 
+/**
+ * Extract the endpoint key from ANY SQL Explorer document URI, so the sidebar
+ * schema tree stays bound while a query/table/design/diagram tab is active.
+ * The key itself contains colons (`projectId:source:nodeId`), so the suffixed
+ * schemes strip exactly ONE trailing `:segment` instead of splitting on ':'.
+ *
+ * @param uri - A document URI of any scheme.
+ * @returns The endpoint key, or null for non-endpoint documents (landing doc).
+ */
+export function endpointKeyFromAnyUri(uri: string): string | null {
+	const m = /^(connection|diagram|query|table|design):(.+)$/.exec(uri);
+	if (!m || !m[1] || !m[2]) return null;
+	// connection:/diagram: carry the key verbatim.
+	if (m[1] === 'connection' || m[1] === 'diagram') return m[2];
+	// query:/table:/design: append one `:segment` (seq, table, or draft name).
+	const cut = m[2].lastIndexOf(':');
+	return cut > 0 ? m[2].slice(0, cut) : null;
+}
+
 // Monotonic query-document counter — labels new query tabs Query 1, 2, ...
 let querySeq = 0;
 

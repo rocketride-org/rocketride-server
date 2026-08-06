@@ -292,7 +292,13 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			// only fail on the missing tarball; the panel gets the REASON
 			// (center-screen) instead of a downstream pnpm ENOENT.
 			void vendorAppTypes(this.context, app.folder).then((result) => {
-				if (result.ok) return ensureWatch(app);
+				if (result.ok) {
+					// A rewired dependency spec invalidates any memoised
+					// workspace install — the watch's pnpm install must run
+					// again so the app actually links the new spec.
+					if (result.rewired) getWatchManager()?.invalidateInstall();
+					return ensureWatch(app);
+				}
 				this.notifyWatch(appId, { state: 'error', target: 'platform package', reason: result.reason });
 			});
 		} else {
@@ -463,7 +469,11 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 						const app = apps.find((a) => a.id === appId);
 						if (!app) return;
 						const result = await vendorAppTypes(this.context, app.folder);
-						if (result.ok) return ensureWatch(app);
+						if (result.ok) {
+							// Same rewired-spec invalidation as the open path.
+							if (result.rewired) getWatchManager()?.invalidateInstall();
+							return ensureWatch(app);
+						}
 						this.notifyWatch(appId, { state: 'error', target: 'platform package', reason: result.reason });
 					})();
 				}

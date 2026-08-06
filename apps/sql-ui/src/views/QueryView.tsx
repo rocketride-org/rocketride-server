@@ -116,7 +116,14 @@ const styles = {
 function applyLimit(sql: string, limit: string): string {
 	if (limit === 'All') return sql;
 	const trimmed = sql.trim().replace(/;\s*$/, '');
-	if (!/^select\b/i.test(trimmed)) return sql;
+	// Row-returning statements only: SELECT, parenthesised set expressions,
+	// and read-only WITH chains. Data-modifying CTEs (WITH ... INSERT/UPDATE/
+	// DELETE) must stay untouched — appending LIMIT there is invalid SQL.
+	const returnsRows =
+		/^select\b/i.test(trimmed) ||
+		trimmed.startsWith('(') ||
+		(/^with\b/i.test(trimmed) && !/\b(insert|update|delete)\b/i.test(trimmed));
+	if (!returnsRows) return sql;
 	if (/\blimit\s+\d+/i.test(trimmed)) return sql;
 	return `${trimmed} LIMIT ${limit}`;
 }

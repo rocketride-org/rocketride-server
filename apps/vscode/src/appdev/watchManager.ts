@@ -152,11 +152,14 @@ export class WatchManager {
 		// package.json watcher: a dependency edit invalidates the shared
 		// install and restarts THIS session (other apps' dev servers survive
 		// a root install — pnpm only rewrites the changed project's links).
-		// The cycle cannot self-trigger: nothing in install/restart writes
-		// package.json. Disposed in stop() so watcher lifetime tracks the
-		// session. Known edge: an edit landing while the install is mid-
-		// flight is swallowed by the starting guard — accepted (the debounce
-		// makes it rare, and the preview Reload button recovers).
+		// The install/restart loop DOES write package.json (the App Builder
+		// open path rewires the shell spec via ensureShellDependency), but it
+		// terminates: the rewrite early-returns once the spec is correct, so
+		// the watcher fires at most one extra cycle. Disposed in stop() so
+		// watcher lifetime tracks the session. Known edge: an edit landing
+		// while the install is mid-flight is swallowed by the starting guard —
+		// accepted (the debounce makes it rare, and the preview Reload button
+		// recovers).
 		session.pkgWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(app.folder), 'package.json'));
 		const onPkgChange = (): void => {
 			if (session.pkgTimer) clearTimeout(session.pkgTimer);
@@ -300,7 +303,9 @@ export class WatchManager {
 				this.appScreen.notifyWatchAll({ state: 'error', target: 'pnpm install', reason });
 				finish(false);
 			}, 10 * 60 * 1000);
-			proc.on('exit', (code) => {
+			// 'close' (not 'exit'): stdio is flushed first, so extractInstallCause
+			// reads the COMPLETE output — aligns with publish.ts and runRootInstall.
+			proc.on('close', (code) => {
 				if (code === 0) {
 					this.appScreen.notifyConsoleAll('log', 'pnpm install: done');
 					// Clear the broadcast 'installing' badge; running sessions

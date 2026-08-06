@@ -22,7 +22,7 @@ interface SaveDialogProps {
 // HELPERS
 // =============================================================================
 
-const FILENAME_REGEX = /^[a-zA-Z0-9 _\-]+$/;
+const FILENAME_REGEX = /^[a-zA-Z0-9 _-]+$/;
 
 function getDirNodes(nodes: TreeNode[]): TreeNode[] {
 	return nodes.filter((n) => n.type === 'dir');

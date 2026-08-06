@@ -37,7 +37,7 @@ import { DocTabs, DocSplitLayout, AppLayout } from 'shell';
 import type { Documents } from 'shell';
 import { Button, EmptyState } from 'shell';
 import { commonStyles } from 'shell';
-import { CONNECTIONS_URI, createDocs, destroyDocs, endpointKeyFromUri, getDocs, isDesignUri, isDiagramUri, isQueryUri, isTableDataUri } from './docs';
+import { CONNECTIONS_URI, createDocs, destroyDocs, endpointKeyFromAnyUri, endpointKeyFromUri, getDocs, isDesignUri, isDiagramUri, isQueryUri, isTableDataUri } from './docs';
 import { setActiveConnection } from './navigation';
 import type { ISqlEndpoint } from './connect';
 import ConnectionsView from './views/ConnectionsView';
@@ -141,12 +141,13 @@ const SqlAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 	const state = docs.useStore();
 
 	// Publish the active connection (for the sidebar's schema tree): the
-	// active group's active editor, when it is a connection document.
+	// active group's active editor, for ANY connection-scoped document —
+	// query/table/design/diagram tabs must keep the tree bound too.
 	useEffect(() => {
 		const group = state.groups[state.activeGroupId];
 		const editorId = group?.editorIds[group.activeEditorIndex];
 		const editor = editorId ? state.editors[editorId] : undefined;
-		setActiveConnection(editor ? endpointKeyFromUri(editor.documentUri) : null);
+		setActiveConnection(editor ? endpointKeyFromAnyUri(editor.documentUri) : null);
 	}, [state]);
 
 	// Multiple groups exist — show the close-group affordance on tabs.

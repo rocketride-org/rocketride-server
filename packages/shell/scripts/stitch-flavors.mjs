@@ -121,12 +121,19 @@ if (manifest.prod.css.length === 0) throw new Error('stitch-flavors: no styleshe
 
 // The picker runs inline at the END of body (#root exists by then). Dynamic
 // scripts are async by default — async=false preserves execution order.
+// Beside the flavor choice it persists the dev-locked app id ('rr:devAppId'):
+// the OAuth redirect strips the query string, and previewLockedAppId falls
+// back to this session copy.
 const picker = `<script>(function(){
 var RR_FLAVORS=${JSON.stringify(manifest)};
 var dev=false;
 try{
 	var p=new URLSearchParams(location.search);
-	if(p.get('rrdev')==='1'){try{sessionStorage.setItem('rr:dev','1');}catch(e){}}
+	if(p.get('rrdev')==='1'){
+		try{sessionStorage.setItem('rr:dev','1');}catch(e){}
+		var a=p.get('appId')||p.get('appid');
+		if(a){try{sessionStorage.setItem('rr:devAppId',a);}catch(e){}}
+	}
 	dev=p.get('rrdev')==='1';
 	if(!dev){try{dev=sessionStorage.getItem('rr:dev')==='1';}catch(e){}}
 }catch(e){}

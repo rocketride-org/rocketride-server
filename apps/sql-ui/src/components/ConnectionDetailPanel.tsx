@@ -24,7 +24,7 @@
 // SQL-UI — CONNECTION DETAIL PANEL (record drawer: inspect + probe an endpoint)
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { RocketRideClient } from 'shell';
 import { Banner, Button, DetailPanel, LabelValue, Section, StatusBadge } from 'shell';
@@ -113,14 +113,23 @@ export const ConnectionDetailPanel: React.FC<IConnectionDetailPanelProps> = (pro
 	const [probeStatus, setProbeStatus] = useState<ProbeStatus>('idle');
 	const [probe, setProbe] = useState<ISqlProbeResult | null>(null);
 
+	// Probe sequence (endpointStore refresh-seq pattern): every re-seed or
+	// target switch bumps it, so an in-flight probe result that lands late is
+	// recognised as stale and discarded instead of describing the wrong node.
+	const probeSeq = useRef(0);
+
 	// Re-seed the selection every time the drawer opens (or the caller's
 	// preselection changes) and drop any stale probe result.
 	useEffect(() => {
 		if (!open) return;
+		probeSeq.current += 1;
 		setSelectedKey(endpoint?.key ?? endpoints[0]?.key ?? null);
 		setProbeStatus('idle');
 		setProbe(null);
-	}, [open, endpoint, endpoints]);
+		// `endpoints` is read for the first-entry fallback only; a background
+		// discovery refresh must not reset the user's selection mid-inspection.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [open, endpoint]);
 
 	// Resolve the selected endpoint object from its key.
 	const selected = useMemo(
@@ -133,9 +142,13 @@ export const ConnectionDetailPanel: React.FC<IConnectionDetailPanelProps> = (pro
 	 */
 	const runProbe = async (): Promise<void> => {
 		if (!client || !selected) return;
+		// Capture the sequence: if the drawer re-seeds or the user switches
+		// endpoints while this probe is in flight, the result is stale.
+		const seq = ++probeSeq.current;
 		setProbeStatus('probing');
 		setProbe(null);
 		const result = await probeSqlEndpoint(client, selected);
+		if (seq !== probeSeq.current) return;
 		setProbeStatus('done');
 		setProbe(result);
 	};
@@ -173,7 +186,9 @@ export const ConnectionDetailPanel: React.FC<IConnectionDetailPanelProps> = (pro
 					style={styles.select}
 					value={selectedKey ?? ''}
 					onChange={(e) => {
-						// Changing the target invalidates any prior probe result.
+						// Changing the target invalidates any prior (or in-flight)
+						// probe result.
+						probeSeq.current += 1;
 						setSelectedKey(e.target.value);
 						setProbeStatus('idle');
 						setProbe(null);

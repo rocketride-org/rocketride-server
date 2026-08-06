@@ -135,6 +135,19 @@ export async function refreshSchema(client: RocketRideClient, endpoint: ISqlEndp
 // =============================================================================
 
 /**
+ * Register a store listener. Hoisted to module level so useSyncExternalStore
+ * receives a STABLE reference — one subscription per component, not one
+ * resubscribe per render.
+ *
+ * @param cb - The change callback.
+ * @returns The unsubscribe function.
+ */
+function subscribe(cb: () => void): () => void {
+	listeners.add(cb);
+	return () => { listeners.delete(cb); };
+}
+
+/**
  * Subscribe to one connection's schema snapshot.
  *
  * @param key - The endpoint key (null returns the idle placeholder).
@@ -142,7 +155,7 @@ export async function refreshSchema(client: RocketRideClient, endpoint: ISqlEndp
  */
 export function useSchema(key: string | null): ISchemaState {
 	return useSyncExternalStore(
-		(cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+		subscribe,
 		() => (key ? snapshots[key] ?? IDLE_SCHEMA : IDLE_SCHEMA),
 	);
 }
