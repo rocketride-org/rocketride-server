@@ -34,6 +34,7 @@ const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_
 const APP_ROOT = path.join(__dirname, '..');
 const SRC_DIR = path.join(APP_ROOT, 'src');
 const SHARED_UI_SRC = path.join(PROJECT_ROOT, 'packages', 'shared-ui', 'src');
+const AGENTS_CORE_SRC = path.join(PROJECT_ROOT, 'packages', 'agents-core', 'src');
 const DOCS_DIR = path.join(PROJECT_ROOT, 'docs');
 const AGENT_DOCS_DIR = path.join(DOCS_DIR, 'agents');
 const STUBS_DIR = path.join(DOCS_DIR, 'stubs');
@@ -44,6 +45,8 @@ const README_DEST = path.join(APP_ROOT, 'README.md');
 const SRC_HASH_KEY = 'vscode.srcHash';
 const BUNDLE_HASH_KEY = 'vscode.bundleHash';
 const SHARED_UI_HASH_KEY = 'vscode.sharedUiHash';
+const COMPILE_AGENTS_CORE_HASH_KEY = 'vscode.compileAgentsCoreHash';
+const BUNDLE_AGENTS_CORE_HASH_KEY = 'vscode.bundleAgentsCoreHash';
 
 // All extension build output goes here (bundle, webview, manifest for vsce and F5)
 const BUILD_DIR = path.join(BUILD_ROOT, 'vscode');
@@ -68,6 +71,14 @@ async function hasVscodeOrSharedUiChanged() {
 async function saveVscodeAndSharedUiHashes(srcHash, sharedUiHash) {
 	await saveSourceHash(SRC_HASH_KEY, srcHash);
 	await saveSourceHash(SHARED_UI_HASH_KEY, sharedUiHash);
+}
+
+// compile + bundle additionally depend on @rocketride/agents-core sources, which
+// the extension imports and esbuild inlines — so a change there must invalidate
+// the vscode rebuild even when apps/vscode/src is untouched.
+async function hasVscodeOrAgentsCoreChanged(srcKey, agentsCoreKey) {
+	const [src, core] = await Promise.all([hasSourceChanged(SRC_DIR, srcKey), hasSourceChanged(AGENTS_CORE_SRC, agentsCoreKey)]);
+	return { changed: src.changed || core.changed, srcHash: src.hash, coreHash: core.hash };
 }
 
 // =============================================================================
@@ -95,8 +106,8 @@ function makeBuildWebviewAction() {
 function makeCompileTypescriptAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check if source changed
-			const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
+			// Check if source changed (vscode src or agents-core, which we import)
+			const { changed, srcHash, coreHash } = await hasVscodeOrAgentsCoreChanged(SRC_HASH_KEY, COMPILE_AGENTS_CORE_HASH_KEY);
 			// Output goes to build/vscode/out per tsconfig.json
 			const outputExists = await exists(path.join(BUILD_DIR, 'out'));
 
@@ -108,8 +119,9 @@ function makeCompileTypescriptAction() {
 			const outDir = path.join(BUILD_DIR, 'out');
 			await execCommand('npx', ['tsc', '-p', './', '--outDir', outDir], { task, cwd: APP_ROOT });
 
-			// Save hash after successful compile
-			await saveSourceHash(SRC_HASH_KEY, hash);
+			// Save hashes after successful compile
+			await saveSourceHash(SRC_HASH_KEY, srcHash);
+			await saveSourceHash(COMPILE_AGENTS_CORE_HASH_KEY, coreHash);
 		},
 	};
 }
@@ -117,9 +129,9 @@ function makeCompileTypescriptAction() {
 function makeBundleExtensionAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check if source changed (uses its own hash key so compile-typescript
-			// saving SRC_HASH_KEY doesn't cause this step to skip)
-			const { changed, hash } = await hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY);
+			// Check if source changed (uses its own hash keys so compile-typescript
+			// saving its hashes doesn't cause this step to skip)
+			const { changed, srcHash, coreHash } = await hasVscodeOrAgentsCoreChanged(BUNDLE_HASH_KEY, BUNDLE_AGENTS_CORE_HASH_KEY);
 			const outputExists = await exists(path.join(BUILD_DIR, 'rocketride.js'));
 
 			if (!changed && outputExists) {
@@ -129,8 +141,9 @@ function makeBundleExtensionAction() {
 
 			await execCommand('node', ['esbuild.js', '--production'], { task, cwd: APP_ROOT });
 
-			// Save hash after successful build
-			await saveSourceHash(BUNDLE_HASH_KEY, hash);
+			// Save hashes after successful build
+			await saveSourceHash(BUNDLE_HASH_KEY, srcHash);
+			await saveSourceHash(BUNDLE_AGENTS_CORE_HASH_KEY, coreHash);
 		},
 	};
 }
@@ -272,14 +285,14 @@ module.exports = {
 			name: 'vscode:compile',
 			action: () => ({
 				description: 'Compile vscode',
-				steps: ['client-typescript:build', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension'],
+				steps: ['agents-core:build', 'client-typescript:build', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension'],
 			}),
 		},
 		{
 			name: 'vscode:build',
 			action: () => ({
 				description: 'Build vscode',
-				steps: ['client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['agents-core:build', 'client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{
@@ -292,6 +305,8 @@ module.exports = {
 					await setState(SRC_HASH_KEY, null);
 					await setState(BUNDLE_HASH_KEY, null);
 					await setState(SHARED_UI_HASH_KEY, null);
+					await setState(COMPILE_AGENTS_CORE_HASH_KEY, null);
+					await setState(BUNDLE_AGENTS_CORE_HASH_KEY, null);
 					task.output = 'Cleaned vscode';
 				},
 			}),
