@@ -447,6 +447,24 @@ function getRowElapsed(row: TraceRow): number | null {
 }
 
 // =============================================================================
+// HELPER: Raw JSON render budget
+// =============================================================================
+
+/** Character budget for the Raw view's single <pre> node — a multi-megabyte
+    payload (base64 media) rendered whole freezes the panel. */
+const RAW_CAP = 500_000;
+
+/**
+ * Serializes data for the Raw view, truncating past {@link RAW_CAP} with an
+ * explicit marker so the cut is visible rather than silent.
+ */
+function rawJson(data: unknown): string {
+	const text = JSON.stringify(data) ?? '';
+	if (text.length <= RAW_CAP) return text;
+	return `${text.slice(0, RAW_CAP)}… [truncated ${text.length - RAW_CAP} chars]`;
+}
+
+// =============================================================================
 // HELPER: Lane color
 // =============================================================================
 
@@ -741,7 +759,7 @@ const InputDataBox: React.FC<{
 									<JsonTree data={data} defaultExpanded={2} />
 								</div>
 							) : (
-								<pre style={{ ...S.dpTree, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(data)}</pre>
+								<pre style={{ ...S.dpTree, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{rawJson(data)}</pre>
 							)}
 						</div>
 					)}
@@ -805,7 +823,7 @@ const OutputDataBox: React.FC<{
 									<JsonTree data={data} defaultExpanded={2} />
 								</div>
 							) : (
-								<pre style={{ ...S.dpTree, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{JSON.stringify(data)}</pre>
+								<pre style={{ ...S.dpTree, fontFamily: 'monospace', fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{rawJson(data)}</pre>
 							)}
 						</div>
 					)}

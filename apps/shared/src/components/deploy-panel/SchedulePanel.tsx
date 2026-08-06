@@ -78,6 +78,10 @@ type TriggerKind = 'demand' | 'interval' | 'daily' | 'weekly' | 'cron';
 /** Interval units the picker offers. */
 type IntervalUnit = 'minutes' | 'hours';
 
+/** Largest interval each unit can express in a 5-field cron — a step
+    expression only divides within its own field (59 minutes, 23 hours). */
+const INTERVAL_MAX: Record<IntervalUnit, number> = { minutes: 59, hours: 23 };
+
 /** Day chips, Monday-first (labels) with their cron day-of-week numbers. */
 const DAY_CHIPS: Array<{ label: string; cron: number }> = [
 	{ label: 'M', cron: 1 },
@@ -489,8 +493,9 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 							picker.kind === 'interval' ? (
 								<div style={S.optionForm}>
 									Every
-									<input style={S.numBox} type="number" min={1} max={59} value={picker.intervalN} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, intervalN: Math.max(1, parseInt(e.target.value, 10) || 1) }))} />
-									<select style={S.unitSelect} value={picker.intervalUnit} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, intervalUnit: e.target.value as IntervalUnit }))}>
+									<input style={S.numBox} type="number" min={1} max={INTERVAL_MAX[picker.intervalUnit]} value={picker.intervalN} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => ({ ...prev, intervalN: Math.min(INTERVAL_MAX[prev.intervalUnit], Math.max(1, parseInt(e.target.value, 10) || 1)) }))} />
+									{/* Switching units re-clamps N — 45 minutes is valid, 45 hours is not. */}
+									<select style={S.unitSelect} value={picker.intervalUnit} disabled={busy} onClick={(e) => e.stopPropagation()} onChange={(e) => setPicker((prev) => { const unit = e.target.value as IntervalUnit; return { ...prev, intervalUnit: unit, intervalN: Math.min(INTERVAL_MAX[unit], prev.intervalN) }; })}>
 										<option value="minutes">minutes</option>
 										<option value="hours">hours</option>
 									</select>

@@ -182,77 +182,11 @@ export const SourceFlowContent: React.FC<SourceFlowContentProps> = ({ taskStatus
 	);
 };
 
+/**
+ * Flow — the section-framed variant: header with the view-mode toggle around
+ * the SAME content SourceFlowContent renders (one body, not a hand copy).
+ */
 const Flow: React.FC<FlowProps> = ({ taskStatus, viewMode, onViewModeChange }) => {
-	const getPipelines = (): Pipeline[] => {
-		if (!taskStatus?.pipeflow?.byPipe) return [];
-		return Object.entries(taskStatus.pipeflow.byPipe).map(([id, stages]) => ({
-			id: parseInt(id),
-			stages,
-		}));
-	};
-
-	const getComponentData = () => {
-		if (!taskStatus?.pipeflow?.byPipe) return {};
-		const data: Record<string, { count: number; objectNames: string[] }> = {};
-		Object.entries(taskStatus.pipeflow.byPipe).forEach(([_, pipeline]) => {
-			const filename = pipeline[0];
-			const components = pipeline.slice(1);
-			components.forEach((component) => {
-				if (!data[component]) data[component] = { count: 0, objectNames: [] };
-				data[component].count += 1;
-				data[component].objectNames.push(filename);
-			});
-		});
-		return data;
-	};
-
-	const pipelines = getPipelines();
-	const componentData = getComponentData();
-	const activePipelines = pipelines.filter((p) => p.stages && p.stages.length > 0);
-
-	const renderPipelineCard = (pipeline: Pipeline) => (
-		<div key={pipeline.id} style={styles.pipeline}>
-			<div style={styles.pipelineHeader}>
-				Pipeline <span style={styles.pipelineId}>{pipeline.id}</span>
-			</div>
-			<div style={styles.stages}>
-				{pipeline.stages.length > 0 ? (
-					pipeline.stages.map((stage, i) => {
-						const isLast = i === pipeline.stages.length - 1;
-						return (
-							<React.Fragment key={i}>
-								<span style={styles.stage(isLast)}>{stage}</span>
-								{!isLast && <span style={styles.flowArrow}>&#8594;</span>}
-							</React.Fragment>
-						);
-					})
-				) : (
-					<div style={styles.emptyStages}>No active stages</div>
-				)}
-			</div>
-		</div>
-	);
-
-	const renderComponentCard = (name: string, data: { count: number; objectNames: string[] }) => (
-		<div key={name} style={styles.pipeline}>
-			<div style={styles.pipelineHeader}>
-				Component <span style={styles.pipelineId}>{name}</span>
-				<span style={styles.componentCount(data.count > 0)}>{data.count} active</span>
-			</div>
-			<div style={styles.stages}>
-				{data.objectNames.length > 0 ? (
-					data.objectNames.map((obj, i) => (
-						<span key={`${obj}-${i}`} style={styles.stage(true)}>
-							{obj}
-						</span>
-					))
-				) : (
-					<div style={styles.emptyStages}>Not currently active in any pipeline</div>
-				)}
-			</div>
-		</div>
-	);
-
 	return (
 		<div style={commonStyles.section}>
 			<div style={commonStyles.sectionHeader}>
@@ -266,7 +200,7 @@ const Flow: React.FC<FlowProps> = ({ taskStatus, viewMode, onViewModeChange }) =
 					</button>
 				</div>
 			</div>
-			<div style={styles.content}>{viewMode === 'pipeline' ? activePipelines.length > 0 ? activePipelines.map(renderPipelineCard) : <EmptyState title="No active pipelines" description="Documents in flight appear here while the pipeline runs or when replaying a recorded run." /> : Object.keys(componentData).length > 0 ? Object.entries(componentData).map(([name, data]) => renderComponentCard(name, data)) : <EmptyState title="No active components" description="Component activity appears here while the pipeline runs or when replaying a recorded run." />}</div>
+			<SourceFlowContent taskStatus={taskStatus} viewMode={viewMode} />
 		</div>
 	);
 };

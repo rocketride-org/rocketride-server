@@ -132,6 +132,10 @@ const styles = {
 // HELPERS
 // =============================================================================
 
+/** Cap on rendered child rows per node: a huge shallow object/array must not
+    freeze the panel (leaf-string capping alone cannot bound the row count). */
+const MAX_CHILDREN = 500;
+
 function isObject(v: unknown): v is Record<string, unknown> {
 	return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
@@ -169,9 +173,14 @@ const JsonNode: React.FC<JsonNodeProps> = ({ label, value, depth, defaultExpandD
 				</div>
 				{expanded && (
 					<div style={styles.children}>
-						{entries.map(([k, v]) => (
+						{entries.slice(0, MAX_CHILDREN).map(([k, v]) => (
 							<JsonNode key={k} label={k} value={v} depth={depth + 1} defaultExpandDepth={defaultExpandDepth} />
 						))}
+						{entries.length > MAX_CHILDREN && (
+							<div style={styles.row}>
+								<span style={styles.preview}>&hellip; {entries.length - MAX_CHILDREN} more entries (switch to Raw view for the full payload)</span>
+							</div>
+						)}
 						<div style={styles.row}>
 							<span style={styles.bracket}>{bracket[1]}</span>
 						</div>

@@ -33,7 +33,7 @@
  *
  * Usage from an app's rsbuild.config.{ts,mts,mjs}:
  *
- *     import { pluginRocketrideIcons } from 'shared/build/rsbuild-plugin-icons.mjs';
+ *     import { pluginRocketrideIcons } from 'shared/scripts/rsbuild-plugin-icons.mjs';
  *
  *     export default defineConfig({
  *       plugins: [pluginReact(), pluginRocketrideIcons()],

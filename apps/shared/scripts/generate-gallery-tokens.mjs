@@ -50,15 +50,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // LOCATIONS
 // =============================================================================
 
-/** packages/shared (one level up from this script). */
+/** apps/shared (one level up from this script). */
 const APP_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The source root every scan path is relative to. */
 const SRC_DIR = path.join(APP_ROOT, 'src');
 
+/** The shell package's source root — commonStyles and the surface
+    components live there since the surface partition. */
+const SHELL_SRC = path.join(APP_ROOT, '..', '..', 'packages', 'shell', 'src');
+
 /** The commonStyles definition file the transitive resolution reads. */
-// commonStyles lives in the shell package since the surface partition.
-const STYLES_FILE = path.join(SRC_DIR, '..', '..', 'shell', 'src', 'themes', 'styles.ts');
+const STYLES_FILE = path.join(SHELL_SRC, 'themes', 'styles.ts');
 
 /** The generated module the gallery imports. */
 const OUTPUT_FILE = path.join(SRC_DIR, 'modules', 'appdev', 'gallery', 'tokenUsage.generated.ts');
@@ -79,7 +82,7 @@ const ENTRY_SOURCES = {
 	'banner': ['components/banner'],
 	'button': ['components/button'],
 	'card': ['components/card'],
-	'chat-view': ['modules/chat'],
+	'chat-view': ['components/chat'],
 	'chip': ['components/chip'],
 	'confirm-dialog': ['components/modal'],
 	'connection-card': ['components/connection-card'],
@@ -244,9 +247,12 @@ function buildUsageMap() {
 				// Surface components live in the shell package since the
 				// partition; the rest (canvas, deploy-panel, ...) remain here.
 				const local = path.join(SRC_DIR, dir);
-				const stock = path.join(SRC_DIR, '..', '..', 'shell', 'src', dir);
-				try { statSync(local); return listSourceFiles(local); } catch { /* moved */ }
-				return listSourceFiles(stock);
+				const stock = path.join(SHELL_SRC, dir);
+				if (existsSync(local)) return listSourceFiles(local);
+				if (existsSync(stock)) return listSourceFiles(stock);
+				// A missing dir means a stale ENTRY_SOURCES row — silently
+				// emitting an empty token set would mask it.
+				throw new Error(`Gallery entry '${entryId}': source dir '${dir}' found in neither ${local} nor ${stock}`);
 			})
 			.map((file) => readFileSync(file, 'utf8'))
 			.join('\n');
@@ -309,7 +315,7 @@ export function renderModule(usage) {
 	lines.push(' * transitive commonStyles resolution over `themes/styles.ts`.');
 	lines.push(' *');
 	lines.push(' * Regenerate: `node scripts/generate-gallery-tokens.mjs` (from');
-	lines.push(' * packages/shared). Verify without writing: pass `--check`.');
+	lines.push(' * apps/shared). Verify without writing: pass `--check`.');
 	lines.push(' */');
 	lines.push('');
 	lines.push('/** Token usage for one gallery entry. */');
@@ -363,7 +369,8 @@ function main() {
 	}
 	const rendered = renderModule(buildUsageMap());
 	if (process.argv.includes('--check')) {
-		const current = readFileSync(OUTPUT_FILE, 'utf8');
+		// A missing generated file is maximal drift, not a crash.
+		const current = existsSync(OUTPUT_FILE) ? readFileSync(OUTPUT_FILE, 'utf8') : '';
 		if (current !== rendered) {
 			console.error('tokenUsage.generated.ts is stale - run: node scripts/generate-gallery-tokens.mjs');
 			process.exit(1);

@@ -42,13 +42,15 @@ const CubeIcon: FunctionComponent<IIconProps> = ({
 			style={style}
 			width={width}
 			height={height}
-			viewBox={`0 0 ${width} ${height}`}
+			// The viewBox and rect are the ASSET's 102x102 coordinate system,
+			// not the display size — width/height alone scale the rendering.
+			viewBox="0 0 102 102"
 			fill="none"
 			xmlns="http://www.w3.org/2000/svg"
 			xmlnsXlink="http://www.w3.org/1999/xlink"
 			opacity={opacity}
 		>
-			<rect width={width} height={height} fill="url(#pattern0_602_541)" />
+			<rect width={102} height={102} fill="url(#pattern0_602_541)" />
 			<defs>
 				<pattern
 					id="pattern0_602_541"

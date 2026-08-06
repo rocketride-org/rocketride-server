@@ -242,6 +242,10 @@ async function packShell(options = {}) {
 	// does the packing — its packlist is the reference implementation of
 	// bundleDependencies, which carries node_modules/rocketride into the tgz.
 	fs.mkdirSync(TGZ_DIR, { recursive: true });
+	// Leftovers from an interrupted run must not be selectable by the find below.
+	for (const stale of fs.readdirSync(TGZ_DIR).filter((f) => /^shell-.*\.tgz$/.test(f))) {
+		fs.rmSync(path.join(TGZ_DIR, stale), { force: true });
+	}
 	execSync(`npm pack --pack-destination "${TGZ_DIR}"`, { cwd: STAGE_DIR, stdio: 'pipe' });
 	const packed = fs.readdirSync(TGZ_DIR).find((f) => /^shell-.*\.tgz$/.test(f));
 	if (!packed) throw new Error('pack-shell: npm pack produced no shell tarball');

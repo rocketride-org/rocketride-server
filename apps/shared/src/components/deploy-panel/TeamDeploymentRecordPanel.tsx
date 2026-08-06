@@ -30,6 +30,7 @@ import { CardDataGrid } from 'shell';
 import { commonStyles } from 'shell';
 import { formatTime, formatDayTime } from 'shell';
 import { describeCron, describeTtl } from './SchedulePanel';
+import { buttonize } from '../../utils/buttonize';
 import type { GridColumnDefinition } from 'shell';
 import type { TaskTimeline } from '../../modules/project/hooks/useTaskEvents';
 import type { DeploymentInfo } from './DeploymentView';
@@ -406,7 +407,7 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 							const outcomeColor = outcome === 'ok' ? 'var(--rr-color-success)' : outcome === 'live' ? 'var(--rr-brand)' : outcome ? 'var(--rr-color-error)' : 'var(--rr-text-secondary)';
 							const nextAt = data.nextRuns?.[row.sourceId];
 							return (
-								<div key={row.sourceId} style={{ ...S.gridRow(Boolean(onOpenSource)), ...(index === sourceRows.length - 1 ? { borderBottom: 'none' } : {}) }} onClick={() => onOpenSource?.(row.sourceId)} title={onOpenSource ? 'Open this source' : undefined}>
+								<div key={row.sourceId} style={{ ...S.gridRow(Boolean(onOpenSource)), ...(index === sourceRows.length - 1 ? { borderBottom: 'none' } : {}) }} {...buttonize(() => onOpenSource?.(row.sourceId), Boolean(onOpenSource))} title={onOpenSource ? 'Open this source' : undefined}>
 									<span style={{ fontWeight: 600 }}>
 										{row.sourceName || row.sourceId}
 										{running && <span style={{ ...S.schedulePill(true), borderStyle: 'dashed', marginLeft: 8 }}>running</span>}
@@ -476,12 +477,10 @@ export const TeamDeploymentRecordPanel: React.FC<ITeamDeploymentRecordPanelProps
 							<div
 								key={v.version}
 								style={S.pickerRow(!busy && !isCurrent)}
-								onClick={() => {
-									if (!busy && !isCurrent) {
-										setPickerOpen(false);
-										setPendingVersion(v.version);
-									}
-								}}
+								{...buttonize(() => {
+									setPickerOpen(false);
+									setPendingVersion(v.version);
+								}, !busy && !isCurrent)}
 							>
 								<span style={{ fontWeight: 700 }}>v{v.version}</span>
 								<span style={{ fontSize: 11.5, color: 'var(--rr-text-secondary)' }}>

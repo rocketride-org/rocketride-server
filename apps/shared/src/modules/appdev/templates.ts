@@ -203,8 +203,8 @@ function tsconfigJson(): string {
 	return `${JSON.stringify(
 		{
 			compilerOptions: {
-				target: 'ES2020',
-				lib: ['DOM', 'DOM.Iterable', 'ES2020'],
+				target: 'ES2022',
+				lib: ['DOM', 'DOM.Iterable', 'ES2022'],
 				module: 'ESNext',
 				moduleResolution: 'bundler',
 				jsx: 'react-jsx',

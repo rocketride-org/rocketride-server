@@ -165,8 +165,12 @@ async function vendorShell(root, host, opts = {}) {
 	log(`Fetching ${url} ...`);
 	let res;
 	try {
-		res = await fetch(url);
+		// Bounded wait — a black-holed host must fail loudly, not hang the build.
+		res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
 	} catch (err) {
+		if (err.name === 'TimeoutError') {
+			throw new Error(`${url} timed out after 60s — is the server responding?`);
+		}
 		throw new Error(`Cannot reach ${base} — is the server running? (${err.message})`);
 	}
 	if (!res.ok) throw new Error(`${url} -> HTTP ${res.status} — the server does not serve the shell package`);
