@@ -128,6 +128,10 @@ const SidebarViewWebview: React.FC = () => {
 	// ── App Builder (MY APPS) ───────────────────────────────────────────────
 	const [apps, setApps] = useState<AppListItem[]>([]);
 	const [sidebarMode, setSidebarMode] = useState<SidebarMode>('pipelines');
+	// The host-persisted mode seeds the strip ONCE: an `update` composed
+	// before the persist round trip completed carries the previous value and
+	// must not revert a selection the user just made.
+	const sidebarModeSeededRef = useRef(false);
 
 	// Synchronously-updated mirrors: the shared foldTaskEvent needs BOTH
 	// collections atomically, and relayed events can burst faster than a
@@ -225,9 +229,12 @@ const SidebarViewWebview: React.FC = () => {
 					}
 					// Subscription status
 					if ((msg.data as any).isSubscribed !== undefined) setSubscribed((msg.data as any).isSubscribed);
-					// App Builder list + host-persisted mode
+					// App Builder list + host-persisted mode (seed once — see ref)
 					if (msg.data.apps) setApps(msg.data.apps);
-					if (msg.data.sidebarMode) setSidebarMode(msg.data.sidebarMode);
+					if (msg.data.sidebarMode && !sidebarModeSeededRef.current) {
+						sidebarModeSeededRef.current = true;
+						setSidebarMode(msg.data.sidebarMode);
+					}
 					break;
 
 				case 'entriesUpdate':

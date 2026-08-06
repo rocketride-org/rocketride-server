@@ -124,9 +124,10 @@ export async function scanWorkspaceApps(): Promise<ScannedApp[]> {
 		const appsDir = level1.find((u) => u.path.endsWith('/apps'));
 		if (appsDir) candidates.push(...(await subdirs(appsDir)));
 
-		// Probe each candidate; first binding per app id wins
-		for (const candidate of candidates) {
-			const app = await probeFolder(candidate);
+		// Probed concurrently; Promise.all preserves candidate order, so
+		// first-binding-per-app-id-wins is unchanged.
+		const probed = await Promise.all(candidates.map((candidate) => probeFolder(candidate)));
+		for (const app of probed) {
 			if (app && !found.has(app.id)) found.set(app.id, app);
 		}
 	}

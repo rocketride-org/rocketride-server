@@ -85,6 +85,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// Cached workspace scan (re-run on package.json events) and the current
 	// sidebar mode (session-scoped; the webview restores it from updates).
 	private scannedApps: ScannedApp[] = [];
+	// Cached MY APPS rows — sendFullUpdate must not await the catalog RPC
+	// (it would stall every webview update on a slow server); rescans
+	// refresh this cache out-of-band and push appsUpdate when it lands.
+	private appRows: AppRowDTO[] = [];
+	/** Coalesces package.json event bursts into one workspace rescan. */
+	private rescanTimer?: NodeJS.Timeout;
 	private sidebarMode: 'pipelines' | 'apps' | 'nodes' = 'pipelines';
 
 	private logger = getLogger();
@@ -219,9 +225,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		const watcherPkg = vscode.workspace.createFileSystemWatcher('**/package.json');
 		const onPkgEvent = (uri: vscode.Uri): void => {
 			if (uri.fsPath.includes('node_modules')) return;
-			void this.rescanApps();
+			// Debounced: installs and branch switches touch many package.json
+			// files at once — one rescan after the burst settles.
+			if (this.rescanTimer) clearTimeout(this.rescanTimer);
+			this.rescanTimer = setTimeout(() => {
+				this.rescanTimer = undefined;
+				void this.rescanApps();
+			}, 500);
 		};
-		this.disposables.push(watcherPkg, watcherPkg.onDidCreate(onPkgEvent), watcherPkg.onDidDelete(onPkgEvent), watcherPkg.onDidChange(onPkgEvent));
+		this.disposables.push(watcherPkg, watcherPkg.onDidCreate(onPkgEvent), watcherPkg.onDidDelete(onPkgEvent), watcherPkg.onDidChange(onPkgEvent), {
+			dispose: () => { if (this.rescanTimer) clearTimeout(this.rescanTimer); },
+		});
 	}
 
 	// =========================================================================
@@ -231,8 +245,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	/** Re-scans the workspace for app bindings and pushes the merged list. */
 	private async rescanApps(): Promise<void> {
 		this.scannedApps = await scanWorkspaceApps();
+		this.appRows = await this.buildAppRows();
 		if (this._view) {
-			this._view.webview.postMessage({ type: 'appsUpdate', apps: await this.buildAppRows() });
+			this._view.webview.postMessage({ type: 'appsUpdate', apps: this.appRows });
 		}
 	}
 
@@ -366,10 +381,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Subscribes to connection, deploy, config, and cloud-auth events. */
 	private setupEventListeners(): void {
-		const connState = this.connectionManager.on('shell:statusChange', () => {
+		// connectionManager.on()/deployManager.on() return the SHARED manager
+		// (a Node EventEmitter), and ITS dispose() tears down the whole
+		// extension's connection — disposal must wrap off() with the named
+		// handler instead of disposing the return value.
+		const connStateHandler = () => {
 			this.sendFullUpdate();
-		});
-		const connected = this.connectionManager.on('shell:connected', async () => {
+		};
+		this.connectionManager.on('shell:statusChange', connStateHandler);
+		const connectedHandler = async () => {
 			// Subscribe to task lifecycle events
 			const client = this.connectionManager.getClient();
 			if (client) {
@@ -382,13 +402,19 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			}
 			// Teams come from ConnectResult — no fetch needed, just update the webview
 			this.sendFullUpdate();
-		});
-		const disconnected = this.connectionManager.on('shell:disconnected', () => {
+			// Server app statuses arrive out-of-band: sendFullUpdate posts the
+			// cached rows, so refresh the cache now that the server answers.
+			void this.rescanApps();
+		};
+		this.connectionManager.on('shell:connected', connectedHandler);
+		const disconnectedHandler = () => {
 			this.sendFullUpdate();
-		});
-		const error = this.connectionManager.on('shell:error', () => {
+		};
+		this.connectionManager.on('shell:disconnected', disconnectedHandler);
+		const errorHandler = () => {
 			this.sendFullUpdate();
-		});
+		};
+		this.connectionManager.on('shell:error', errorHandler);
 		const configChange = vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration('rocketride')) {
 				this.sendFullUpdate();
@@ -396,31 +422,46 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		});
 
 		// Re-parse when service definitions arrive
-		const servicesUpdated = this.connectionManager.on('shell:servicesUpdated', () => {
+		const servicesUpdatedHandler = () => {
 			this.loadPipelineFiles();
-		});
+		};
+		this.connectionManager.on('shell:servicesUpdated', servicesUpdatedHandler);
 
 		// Re-fetch teams when cloud auth state changes (sign-in/sign-out)
 		const cloudAuth = CloudAuthProvider.getInstance();
 		const cloudAuthHandler = async () => {
 			this.sendFullUpdate();
+			// Sign-in/sign-out changes which server statuses list_mine returns
+			void this.rescanApps();
 		};
 		cloudAuth.onDidChange.on('changed', cloudAuthHandler);
 
 		// ── Deploy manager events ────────────────────────────────────────────
-		const deployConnState = this.deployManager.on('shell:statusChange', () => {
+		const deployConnStateHandler = () => {
 			this.sendFullUpdate();
-		});
-		const deployConnected = this.deployManager.on('shell:connected', async () => {
+		};
+		this.deployManager.on('shell:statusChange', deployConnStateHandler);
+		const deployConnectedHandler = async () => {
 			this.sendFullUpdate();
-		});
-		const deployDisconnected = this.deployManager.on('shell:disconnected', () => {
+		};
+		this.deployManager.on('shell:connected', deployConnectedHandler);
+		const deployDisconnectedHandler = () => {
 			this.sendFullUpdate();
-		});
+		};
+		this.deployManager.on('shell:disconnected', deployDisconnectedHandler);
 
-		this.disposables.push(connState, connected, disconnected, error, configChange, servicesUpdated, deployConnState, deployConnected, deployDisconnected, {
-			dispose: () => cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler),
-		});
+		this.disposables.push(
+			{ dispose: () => this.connectionManager.off('shell:statusChange', connStateHandler) },
+			{ dispose: () => this.connectionManager.off('shell:connected', connectedHandler) },
+			{ dispose: () => this.connectionManager.off('shell:disconnected', disconnectedHandler) },
+			{ dispose: () => this.connectionManager.off('shell:error', errorHandler) },
+			configChange,
+			{ dispose: () => this.connectionManager.off('shell:servicesUpdated', servicesUpdatedHandler) },
+			{ dispose: () => this.deployManager.off('shell:statusChange', deployConnStateHandler) },
+			{ dispose: () => this.deployManager.off('shell:connected', deployConnectedHandler) },
+			{ dispose: () => this.deployManager.off('shell:disconnected', deployDisconnectedHandler) },
+			{ dispose: () => cloudAuth.onDidChange.removeListener('changed', cloudAuthHandler) }
+		);
 
 		// Forward server events to webview
 		this.connectionManager.on('shell:event', (event: GenericEvent) => {
@@ -502,8 +543,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// Pipeline data
 				entries: this.buildEntries(),
 				unknownTasks: [],
-				// App Builder (MY APPS)
-				apps: await this.buildAppRows(),
+				// App Builder (MY APPS) — the cached rows; rescanApps refreshes
+				// them out-of-band so this update never awaits the catalog RPC
+				apps: this.appRows,
 				sidebarMode: this.sidebarMode,
 			},
 		});
@@ -746,12 +788,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Generates a 32-character random nonce for Content Security Policy. */
 	private generateNonce(): string {
-		let text = '';
-		const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		for (let i = 0; i < 32; i++) {
-			text += possible.charAt(Math.floor(Math.random() * possible.length));
-		}
-		return text;
+		// Cryptographic source — a CSP nonce must be unpredictable.
+		return crypto.randomBytes(24).toString('base64url');
 	}
 
 	// =========================================================================

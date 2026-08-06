@@ -46,6 +46,8 @@ interface WatchSession {
 	pkgWatcher?: vscode.FileSystemWatcher;
 	/** Debounce timer for package.json change bursts. */
 	pkgTimer?: NodeJS.Timeout;
+	/** Incomplete trailing line carried over between output chunks. */
+	pending?: string;
 }
 
 // =============================================================================
@@ -180,8 +182,12 @@ export class WatchManager {
 		});
 		proc.on('error', (err) => {
 			this.logger.output(`[appdev] watch failed to start: ${app.id}: ${err.message}`);
-			this.sessions.delete(app.id);
-			this.notify(app.id, { state: 'error' });
+			// Only tear down the entry this handler still owns — a restart may
+			// have replaced the session under the same app id (same guard as exit).
+			if (this.sessions.get(app.id) === session) {
+				this.sessions.delete(app.id);
+				this.notify(app.id, { state: 'error' });
+			}
 		});
 	}
 
@@ -276,6 +282,24 @@ export class WatchManager {
 			let output = '';
 			proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); this.consoleAllLines('log', chunk.toString('utf8')); });
 			proc.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); this.consoleAllLines('warn', chunk.toString('utf8')); });
+			// Settle exactly once — exit, spawn-error, and the timeout race here.
+			let settled = false;
+			const finish = (ok: boolean): void => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				resolve(ok);
+			};
+			// A stalled install must not wedge the single-flight memo forever —
+			// bound it and surface the failure like any other install error.
+			const timer = setTimeout(() => {
+				try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+				const reason = 'pnpm install timed out after 10 minutes';
+				this.logger.output('[appdev] workspace pnpm install timed out after 10 minutes');
+				if (triggerAppId) this.appScreen.notifyError(triggerAppId, reason, 'pnpm install');
+				this.appScreen.notifyWatchAll({ state: 'error', target: 'pnpm install', reason });
+				finish(false);
+			}, 10 * 60 * 1000);
 			proc.on('exit', (code) => {
 				if (code === 0) {
 					this.appScreen.notifyConsoleAll('log', 'pnpm install: done');
@@ -285,13 +309,13 @@ export class WatchManager {
 					for (const s of this.sessions.values()) {
 						this.notify(s.app.id, { state: s.buildStart ? 'building' : 'ok', target: s.devOrigin?.replace(/^https?:\/\//, '') });
 					}
-					resolve(true);
+					finish(true);
 				} else {
 					const reason = `pnpm install failed: ${extractInstallCause(output, code)}`;
 					this.logger.output(`[appdev] workspace ${reason}`);
 					if (triggerAppId) this.appScreen.notifyError(triggerAppId, reason, 'pnpm install');
 					this.appScreen.notifyWatchAll({ state: 'error', target: 'pnpm install', reason });
-					resolve(false);
+					finish(false);
 				}
 			});
 			proc.on('error', (err) => {
@@ -299,7 +323,7 @@ export class WatchManager {
 				this.logger.output(`[appdev] ${reason}`);
 				if (triggerAppId) this.appScreen.notifyError(triggerAppId, reason, 'pnpm install');
 				this.appScreen.notifyWatchAll({ state: 'error', target: 'pnpm install', reason });
-				resolve(false);
+				finish(false);
 			});
 		});
 	}
@@ -347,13 +371,22 @@ export class WatchManager {
 	// =========================================================================
 
 	/**
-	 * Parses one chunk of rsbuild output: captures the dev origin the first
-	 * time it appears, then classifies build completions and failures.
+	 * Parses rsbuild output: captures the dev origin the first time it
+	 * appears, then classifies build completions and failures.
 	 *
 	 * @param session - The owning watch session.
-	 * @param text - Raw process output chunk.
+	 * @param chunk - Raw process output chunk.
 	 */
-	private handleOutput(session: WatchSession, text: string): void {
+	private handleOutput(session: WatchSession, chunk: string): void {
+		// Chunks split mid-line at the pipe's whim — a marker torn across two
+		// chunks would never match its regex. Carry the incomplete trailing
+		// line over and only parse COMPLETE lines.
+		const buffered = (session.pending ?? '') + chunk;
+		const lines = buffered.split(/\r?\n/);
+		session.pending = lines.pop() ?? '';
+		if (lines.length === 0) return;
+		const text = lines.join('\n');
+
 		// Mirror the raw rsbuild output into the panel Console pane
 		this.consoleLines(session.app.id, 'log', text);
 

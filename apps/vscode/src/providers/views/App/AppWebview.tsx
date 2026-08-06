@@ -65,6 +65,10 @@ type IncomingMessage =
 interface WireRailEntry { registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; rungs?: string[] }
 interface WirePin { rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }
 
+// Bridge RPC bound — generous because publish builds are the slowest
+// legitimate call; a host that never answers must not pend forever.
+const RPC_TIMEOUT_MS = 5 * 60 * 1000;
+
 // =============================================================================
 // STYLES
 // =============================================================================
@@ -203,6 +207,9 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	// must not satisfy the reload).
 	const [attemptSeq, setAttemptSeq] = useState(0);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
+	// Every credential-bearing post targets the shell origin explicitly so a
+	// navigated-away frame can never receive the token.
+	const shellOrigin = ((): string => { try { return new URL(url).origin; } catch { return url; } })();
 	const ready = phase === 'ready';
 
 	// Latest registration facts, readable from the message listener without
@@ -226,8 +233,8 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	 */
 	const postAuthState = useCallback((): void => {
 		const { authToken: token, inheritAuth: inherit } = registrationRef.current;
-		iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token: inherit && token ? token : '' }, '*');
-	}, []);
+		iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token: inherit && token ? token : '' }, shellOrigin);
+	}, [shellOrigin]);
 
 	/** Posts the dev-remote registration into the (current) preview shell. */
 	const inject = useCallback((): void => {
@@ -240,8 +247,8 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 			moduleId: a.moduleId,
 			name: a.name,
 			entry,
-		}, '*');
-	}, []);
+		}, shellOrigin);
+	}, [shellOrigin]);
 
 	// Inherit Auth toggled live: re-answer with the resulting state — the
 	// token (shell reboots authenticated) or empty (shell drops its session
@@ -276,7 +283,7 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	React.useEffect(() => {
 		if (explicitAuthSeq === 0) return;
 		const { authToken: token } = registrationRef.current;
-		if (token) iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token }, '*');
+		if (token) iframeRef.current?.contentWindow?.postMessage({ type: 'rrdev:auth', token }, shellOrigin);
 		// eslint-disable-next-line react-hooks/exhaustive-deps -- fires per explicit sign-in only
 	}, [explicitAuthSeq]);
 
@@ -331,7 +338,6 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 	// Fresh cache-buster per attempt: the _ts from the init payload is fixed
 	// for the panel's lifetime, so retries mint their own.
 	const attemptUrl = attemptSeq === 0 ? url : `${url.replace(/([?&])_ts=\d+/, '$1_ts=' + Date.now())}`;
-	const shellOrigin = ((): string => { try { return new URL(url).origin; } catch { return url; } })();
 
 	return (
 		<div style={styles.iframeWrap}>
@@ -499,8 +505,12 @@ const AppWebview: React.FC = () => {
 	// mirror console output + uncaught errors via postMessage — the third
 	// Console feed beside pnpm and rsbuild.
 	React.useEffect(() => {
+		// Only the preview shell's frame may drive the sign-in flow or write
+		// diagnostic rows.
+		const shellOrigin = ((): string => { try { return new URL(previewUrl).origin; } catch { return ''; } })();
 		const stamp = (): string => new Date().toLocaleTimeString(undefined, { hour12: false });
 		const onWindowMessage = (e: MessageEvent): void => {
+			if (!shellOrigin || e.origin !== shellOrigin) return;
 			const data = e.data as { type?: string; level?: 'log' | 'warn' | 'error'; text?: string; message?: string; source?: string } | undefined;
 			if (data?.type === 'rrdev:loginRequest') {
 				// The OAuth cycle always runs through the EXTENSION (VSCode
@@ -508,7 +518,7 @@ const AppWebview: React.FC = () => {
 				// dead here — ACK immediately to cancel it). An explicit Sign
 				// In click authenticates the preview even with Inherit Auth
 				// off: the checkbox governs AUTOMATIC inheritance only.
-				(e.source as Window | null)?.postMessage({ type: 'rrdev:loginPending' }, '*');
+				(e.source as Window | null)?.postMessage({ type: 'rrdev:loginPending' }, e.origin);
 				pendingExplicitLoginRef.current = true;
 				sendMessage({ type: 'appdev:login' });
 			} else if (data?.type === 'shell:devConsole' && data.text !== undefined) {
@@ -521,13 +531,22 @@ const AppWebview: React.FC = () => {
 		};
 		window.addEventListener('message', onWindowMessage);
 		return () => window.removeEventListener('message', onWindowMessage);
-	}, [sendMessage]);
+	}, [sendMessage, previewUrl]);
 
 	/** One RPC round trip to the extension host over the bridge. */
 	const rpc = useCallback(<T,>(method: string, args?: unknown[]): Promise<T> => {
 		return new Promise<T>((resolve, reject) => {
 			const id = nextCallId.current++;
-			pendingCalls.current.set(id, { resolve: resolve as (v: unknown) => void, reject });
+			const timer = setTimeout(() => {
+				pendingCalls.current.delete(id);
+				reject(new Error(`appdev call "${method}" timed out`));
+			}, RPC_TIMEOUT_MS);
+			// Both settle paths clear the timer so a late answer cannot
+			// double-settle after a timeout (the entry is gone by then).
+			pendingCalls.current.set(id, {
+				resolve: (v: unknown) => { clearTimeout(timer); (resolve as (v: unknown) => void)(v); },
+				reject: (e: Error) => { clearTimeout(timer); reject(e); },
+			});
 			sendMessage({ type: 'appdev:call', id, method, args });
 		});
 	}, [sendMessage]);
