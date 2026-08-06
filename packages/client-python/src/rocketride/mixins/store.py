@@ -280,18 +280,22 @@ class StoreMixin(DAPClient):
         results: List[Dict[str, Any]] = []
         offset = 0
         for entry in entries:
-            data = None
-            if offset + 4 <= len(frame):
-                length = int.from_bytes(frame[offset : offset + 4], 'big')
-                offset += 4
-                data = bytes(frame[offset : offset + length])
-                offset += length
+            # Every entry (failed ones included) contributes one blob, so a
+            # short frame is corruption — fail loudly, never return wrong bytes.
+            if offset + 4 > len(frame):
+                raise RuntimeError('fs_read_many frame truncated (missing length prefix)')
+            length = int.from_bytes(frame[offset : offset + 4], 'big')
+            offset += 4
+            if offset + length > len(frame):
+                raise RuntimeError('fs_read_many frame truncated (payload shorter than its length prefix)')
+            data = bytes(frame[offset : offset + length])
+            offset += length
             if entry.get('ok'):
-                results.append(
-                    {'path': entry.get('path'), 'ok': True, 'data': data if data is not None else b'', 'error': None}
-                )
+                results.append({'path': entry.get('path'), 'ok': True, 'data': data, 'error': None})
             else:
                 results.append({'path': entry.get('path'), 'ok': False, 'data': None, 'error': entry.get('error')})
+        if offset != len(frame):
+            raise RuntimeError(f'fs_read_many frame has {len(frame) - offset} trailing bytes')
         return results
 
     # =========================================================================

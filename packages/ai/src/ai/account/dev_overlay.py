@@ -259,12 +259,19 @@ async def push_refresh(server: Any, user_id: str, source: str) -> None:
             debug(f'[dev_overlay] push_account_update failed for {user_id}: {exc}')
     else:
         # OSS: rebuild the apps list directly (single implicit user)
+        # One rebuild serves every connection: the list depends only on
+        # user_id, and each rebuild re-walks the deployment registry and
+        # mints a signed URL per deployed app.
+        try:
+            apps = await account.get_apps_for_user(user_id, [])
+        except Exception as exc:
+            debug(f'[dev_overlay] OSS apps rebuild failed: {exc}')
+            apps = None
         for conn in list(server._connections.values()):
             info = getattr(conn, '_account_info', None)
-            if not info or info.userId != user_id:
+            if apps is None or not info or info.userId != user_id:
                 continue
             try:
-                apps = await account.get_apps_for_user(user_id, [])
                 # Mirror the OSS authenticate() decoration: everything is
                 # free and on the desktop on a local engine.
                 info.apps = [

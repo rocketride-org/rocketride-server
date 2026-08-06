@@ -50,6 +50,8 @@ _depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from rocketlib import debug
+
 from ..base import AccountBase
 
 
@@ -276,8 +278,9 @@ class Account(AccountBase):
                 for entry in pinned:
                     by_id[entry['id']] = {**by_id.get(entry['id'], {}), **entry}
                 apps = list(by_id.values())
-        except Exception:
-            pass  # registry empty/unavailable — the static manifest stands
+        except Exception as exc:
+            # registry empty/unavailable — the static manifest stands
+            debug(f'[oss] app pin resolution failed: {exc}')
         return apps
 
     def _read_apps_json(self, public_only: bool = False) -> list:
