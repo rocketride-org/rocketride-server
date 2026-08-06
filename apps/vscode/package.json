@@ -1,0 +1,616 @@
+{
+	"name": "rocketride",
+	"displayName": "RocketRide",
+	"description": "RocketRide extension for Visual Studio Code",
+	"version": "1.2.0",
+	"publisher": "rocketride",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/rocketride-ai/rocketride-server.git"
+	},
+	"homepage": "https://github.com/rocketride-ai/rocketride-server#readme",
+	"bugs": {
+		"url": "https://github.com/rocketride-ai/rocketride-server/issues"
+	},
+	"license": "MIT",
+	"keywords": [
+		"rocketride",
+		"data",
+		"pipeline",
+		"debugger",
+		"toolchain"
+	],
+	"icon": "rocketride-dark-icon.png",
+	"engines": {
+		"vscode": "^1.99.3"
+	},
+	"categories": [
+		"Debuggers",
+		"Other"
+	],
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"contributes": {
+		"customEditors": [
+			{
+				"viewType": "rocketride.PageProject",
+				"displayName": "Pipeline Grid Editor",
+				"selector": [
+					{
+						"filenamePattern": "*.pipe"
+					},
+					{
+						"filenamePattern": "*.pipe.json"
+					}
+				],
+				"priority": "default"
+			},
+			{
+				"viewType": "rocketride.appBuilder",
+				"displayName": "RocketRide App Builder",
+				"selector": [
+					{
+						"filenamePattern": "*.rrapp"
+					}
+				],
+				"priority": "default"
+			}
+		],
+		"configurationDefaults": {
+			"files.associations": {
+				"*.pipe": "json",
+				"*.rrapp": "json"
+			}
+		},
+		"configuration": {
+			"title": "RocketRide",
+			"properties": {
+				"rocketride.development.connectionMode": {
+					"type": "string",
+					"enum": [
+						"cloud",
+						"docker",
+						"service",
+						"onprem",
+						"local"
+					],
+					"default": "local",
+					"description": "Development connection mode",
+					"enumDescriptions": [
+						"RocketRide Cloud – sign in with your RocketRide account",
+						"Docker – connect to your local Docker instance",
+						"Service – connect to your local RocketRide service",
+						"Direct Connect – connect with host address and API key",
+						"Local (your local machine) – downloads and runs a local engine"
+					]
+				},
+				"rocketride.development.hostUrl": {
+					"type": "string",
+					"default": "",
+					"description": "Host URL for development connection",
+					"format": "uri"
+				},
+				"rocketride.development.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"description": "Engine version for local development. 'latest' for newest stable, 'prerelease' for newest prerelease, or a specific tag like 'server-v3.1.1'."
+				},
+				"rocketride.deployment.connectionMode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"enum": [
+						null,
+						"cloud",
+						"docker",
+						"service",
+						"onprem",
+						"local"
+					],
+					"default": null,
+					"description": "Deployment connection mode (null = same as development)"
+				},
+				"rocketride.deployment.hostUrl": {
+					"type": "string",
+					"default": "",
+					"description": "Host URL for deployment connection",
+					"format": "uri"
+				},
+				"rocketride.deployment.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"description": "Engine version for local deployment target"
+				},
+				"rocketride.defaultPipelinePath": {
+					"type": "string",
+					"default": "${workspaceFolder}/pipelines",
+					"description": "Default directory path for creating new pipeline files (relative to workspace root)",
+					"examples": [
+						"pipelines",
+						"src/pipelines",
+						"workflows"
+					]
+				},
+				"rocketride.welcomeDismissed": {
+					"type": "boolean",
+					"default": false,
+					"description": "Set to true to skip the welcome/setup page on startup. Reset to false to show it again."
+				},
+				"rocketride.pipelineRestartBehavior": {
+					"type": "string",
+					"enum": [
+						"auto",
+						"manual",
+						"prompt"
+					],
+					"default": "prompt",
+					"description": "Behavior when a .pipe file changes while the pipeline is running.",
+					"enumDescriptions": [
+						"Automatically restart when .pipe changes",
+						"Do not automatically restart",
+						"Prompt to restart when .pipe changes"
+					]
+				},
+				"rocketride.pipelineTTL": {
+					"type": "integer",
+					"enum": [
+						900,
+						1800,
+						3600,
+						14400,
+						28800,
+						0
+					],
+					"enumDescriptions": [
+						"15 minutes",
+						"30 minutes",
+						"1 hour",
+						"4 hours",
+						"8 hours",
+						"Run forever or until you stop it"
+					],
+					"default": 900,
+					"minimum": 0,
+					"description": "Default idle timeout before a running pipeline is shut down."
+				},
+				"rocketride.pipelineTraceLevel": {
+					"type": "string",
+					"enum": [
+						"none",
+						"metadata",
+						"summary",
+						"full"
+					],
+					"default": "full",
+					"description": "Controls tracing verbosity for pipeline execution."
+				},
+				"rocketride.taskArguments": {
+					"type": "string",
+					"default": "",
+					"description": "Additional command-line arguments passed to each pipeline task."
+				},
+				"rocketride.pipelineDebugOutput": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable full debug output for pipeline tasks (--trace=debugOut)."
+				},
+				"rocketride.integrations.autoAgentIntegration": {
+					"type": "boolean",
+					"default": true,
+					"description": "Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup"
+				},
+				"rocketride.integrations.copilot": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with GitHub Copilot"
+				},
+				"rocketride.integrations.claudeCode": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with Claude Code"
+				},
+				"rocketride.integrations.cursor": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with Cursor"
+				},
+				"rocketride.integrations.windsurf": {
+					"type": "boolean",
+					"default": false,
+					"description": "Enable RocketRide integration with Windsurf"
+				},
+				"rocketride.integrations.claudeMd": {
+					"type": "boolean",
+					"default": false,
+					"description": "Install RocketRide instructions to CLAUDE.md at the repo root (generic agent support)"
+				},
+				"rocketride.integrations.agentsMd": {
+					"type": "boolean",
+					"default": false,
+					"description": "Install RocketRide instructions to AGENTS.md at the repo root (generic agent support)"
+				},
+				"rocketride.connectionMode": {
+					"type": "string",
+					"default": "local",
+					"deprecationMessage": "Migrated to rocketride.development.connectionMode"
+				},
+				"rocketride.hostUrl": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Migrated to rocketride.development.hostUrl"
+				},
+				"rocketride.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"deprecationMessage": "Migrated to rocketride.development.local.engineVersion"
+				},
+				"rocketride.deployTargetMode": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"deprecationMessage": "Migrated to rocketride.deployment.connectionMode"
+				},
+				"rocketride.deployHostUrl": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Migrated to rocketride.deployment.hostUrl"
+				},
+				"rocketride.deploy.local.engineVersion": {
+					"type": "string",
+					"default": "latest",
+					"deprecationMessage": "Migrated to rocketride.deployment.local.engineVersion"
+				},
+				"rocketride.development.teamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — the development team is assigned by your server profile"
+				},
+				"rocketride.deployment.teamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+				},
+				"rocketride.developmentTeamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — the development team is assigned by your server profile"
+				},
+				"rocketride.deployTargetTeamId": {
+					"type": "string",
+					"default": "",
+					"deprecationMessage": "Retired — deployments are team-scoped on the server; no client-side team setting"
+				},
+				"rocketride.appdev.shellUrl": {
+					"type": "string",
+					"default": "",
+					"description": "App Builder: override the preview shell base URL (empty = the Development Mode engine). For monorepo developers running the shell dev server."
+				},
+				"rocketride.appdev.autoWatch": {
+					"type": "boolean",
+					"default": true,
+					"description": "App Builder: start the app watch/rebuild session automatically when an App Builder screen opens."
+				}
+			}
+		},
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "rocketride",
+					"title": "RocketRide",
+					"icon": "./rocketride-light-icon.png"
+				}
+			]
+		},
+		"commands": [
+			{
+				"command": "rocketride.provider.connection.focus",
+				"title": "Connections",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.provider.files.focus",
+				"title": "Pipelines",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.page.monitor.open",
+				"title": "Server Monitor",
+				"category": "RocketRide",
+				"icon": "$(dashboard)"
+			},
+			{
+				"command": "rocketride.page.status.open",
+				"title": "Task Status",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.sidebar.connection.connect",
+				"title": "Connect to Server",
+				"category": "RocketRide",
+				"icon": "$(debug-start)"
+			},
+			{
+				"command": "rocketride.sidebar.connection.disconnect",
+				"title": "Disconnect from Server",
+				"category": "RocketRide",
+				"icon": "$(debug-stop)"
+			},
+			{
+				"command": "rocketride.sidebar.connection.reconnect",
+				"title": "Reconnect to Server",
+				"category": "RocketRide",
+				"icon": "$(debug-restart)"
+			},
+			{
+				"command": "rocketride.page.settings.open",
+				"title": "Settings",
+				"category": "RocketRide",
+				"icon": "$(settings-gear)"
+			},
+			{
+				"command": "rocketride.openPipelineAsText",
+				"title": "Open as Text",
+				"category": "RocketRide",
+				"icon": "$(file-text)"
+			},
+			{
+				"command": "rocketride.page.settings.setupCredentials",
+				"title": "Setup API Key & URL",
+				"category": "RocketRide",
+				"icon": "$(key)"
+			},
+			{
+				"command": "rocketride.page.settings.updateApiKey",
+				"title": "Update API Key",
+				"category": "RocketRide",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "rocketride.page.settings.clearApiKey",
+				"title": "Clear API Key",
+				"category": "RocketRide",
+				"icon": "$(trash)"
+			},
+			{
+				"command": "rocketride.refresh",
+				"title": "Refresh All",
+				"icon": "$(refresh)",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.sidebar.files.refresh",
+				"title": "Refresh",
+				"icon": "$(refresh)",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.sidebar.files.openFile",
+				"title": "Open Status Page",
+				"icon": "$(dashboard)",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.sidebar.files.openStatus",
+				"title": "Select Component",
+				"icon": "$(symbol-class)",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.sidebar.files.createFile",
+				"title": "Create New Pipeline",
+				"icon": "$(add)",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.sidebar.files.runPipeline",
+				"title": "Run",
+				"icon": "$(play)",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.sidebar.files.stopPipeline",
+				"title": "Stop Pipeline",
+				"icon": "$(primitive-square)",
+				"category": "RocketRide Pipeline"
+			},
+			{
+				"command": "rocketride.page.deploy.open",
+				"title": "Deploy",
+				"category": "RocketRide",
+				"icon": {
+					"dark": "./rocketride-light-icon.png",
+					"light": "./rocketride-dark-icon.png"
+				}
+			},
+			{
+				"command": "rocketride.page.welcome.open",
+				"title": "Welcome",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.agents.install",
+				"title": "Install Agent Documentation",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.agents.uninstall",
+				"title": "Remove Agent Documentation",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.create",
+				"title": "New App",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.open",
+				"title": "Open App Builder",
+				"category": "RocketRide"
+			},
+			{
+				"command": "rocketride.app.debug",
+				"title": "Debug App (external browser)",
+				"category": "RocketRide"
+			}
+		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "rocketride.sidebar.files.openStatus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.openFile",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.runPipeline",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.stopPipeline",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.openPipelineAsText",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.settings.setupCredentials",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.provider.connection.focus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.provider.files.focus",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.status.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.connect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.disconnect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.connection.reconnect",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.settings.clearApiKey",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.sidebar.files.createFile",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.page.deploy.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.agents.install",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.agents.uninstall",
+					"when": "false"
+				}
+			],
+			"view/title": [
+				{
+					"command": "rocketride.sidebar.files.refresh",
+					"when": "view == rocketride.provider.files",
+					"group": "navigation"
+				},
+				{
+					"command": "rocketride.sidebar.files.createFile",
+					"when": "view == rocketride.provider.files",
+					"group": "navigation@2"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "rocketride.sidebar.files.runPipeline",
+					"when": "view == rocketride.provider.files && viewItem =~ /^pipelineSource:stopped/",
+					"group": "inline@1"
+				},
+				{
+					"command": "rocketride.sidebar.files.stopPipeline",
+					"when": "view == rocketride.provider.files && viewItem =~ /^pipelineSource:running/ || view == rocketride.provider.files && viewItem == unknownTask",
+					"group": "inline@1"
+				}
+			]
+		},
+		"views": {
+			"rocketride": [
+				{
+					"type": "webview",
+					"id": "rocketride.sidebar.main",
+					"name": "RocketRide"
+				}
+			]
+		},
+		"viewsWelcome": [
+			{
+				"view": "rocketride.sidebar.main",
+				"contents": "Loading..."
+			}
+		]
+	},
+	"main": "./dist/rocketride.js",
+	"devDependencies": {
+		"@rsbuild/core": "~2.0.11",
+		"@rsbuild/plugin-react": "~2.0.1",
+		"@rsbuild/plugin-type-check": "~1.3.5",
+		"@types/adm-zip": "^0.5.8",
+		"@types/chart.js": "^2.9.41",
+		"@types/dockerode": "^4.0.1",
+		"@types/mocha": "^10.0.10",
+		"@types/node": "20.x",
+		"@types/proper-lockfile": "^4.1.4",
+		"@types/react": "^18.3.31",
+		"@types/react-dom": "^18.3.7",
+		"@types/vscode": "~1.99.0",
+		"@types/vscode-webview": "^1.57.5",
+		"@vscode/debugprotocol": "^1.68.0",
+		"@vscode/test-cli": "^0.0.12",
+		"@vscode/test-electron": "^2.5.2",
+		"@vscode/vsce": "^3.9.1",
+		"esbuild": "^0.28.0",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1",
+		"typescript": "^5.8.3"
+	},
+	"dependencies": {
+		"@octokit/rest": "^22.0.1",
+		"adm-zip": "^0.5.17",
+		"chart.js": "^4.4.0",
+		"dockerode": "^4.0.12",
+		"proper-lockfile": "^4.1.2",
+		"shared": "file:../shared",
+		"tar": "^7.5.15",
+		"shell": "file:../../.rocketride/shell"
+	},
+	"files": [
+		"README.md",
+		"rocketride-dark-icon.png",
+		"rocketride-light-icon.png",
+		"rocketride.js",
+		"package.json",
+		"LICENSE",
+		"docs/**",
+		"dist/**"
+	]
+}
