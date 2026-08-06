@@ -804,7 +804,10 @@ class TestIInstanceLifecycle:
         inst.instance = MagicMock()
         # The real IInstanceBase.preventDefault() raises APERR by design (it's
         # meant to be caught by the C++ engine); stub it so unit tests can call
-        # writeQuestions/writeAnswers without a running engine.
+        # writeQuestions/writeAnswers without a running engine. Note: unlike the
+        # real one, this stub does not raise, so code placed after a
+        # preventDefault() call will appear to run here but never runs in the
+        # engine.
         inst.preventDefault = MagicMock()
         return inst
 

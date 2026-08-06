@@ -21,7 +21,11 @@ from .IGlobal import IGlobal
 
 
 class IInstance(IInstanceBase):
-    """Pipeline instance for the memory_persistent node."""
+    """Pipeline instance for the memory_persistent node.
+
+    preventDefault() raises immediately, so no code may follow it — anything
+    added after a preventDefault() call is unreachable at runtime.
+    """
 
     IGlobal: IGlobal
     _current_session_id: str | None = None
