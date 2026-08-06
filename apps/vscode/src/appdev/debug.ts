@@ -56,5 +56,10 @@ export async function debugApp(appId: string): Promise<void> {
 			'webpack:///*': '*',
 		},
 	};
-	await vscode.debug.startDebugging(folder, config);
+	// startDebugging resolves false (no throw) when the session never starts
+	// — a silent F5 no-op unless it is reported here.
+	const started = await vscode.debug.startDebugging(folder, config);
+	if (!started) {
+		vscode.window.showErrorMessage(`Debug session for ${app.name} did not start — check the msedge (js-debug) configuration in .vscode/launch.json.`);
+	}
 }

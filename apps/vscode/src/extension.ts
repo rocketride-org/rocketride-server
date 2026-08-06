@@ -451,10 +451,11 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 			status?.show(projectId, sourceId, displayName);
 		}),
 		vscode.commands.registerCommand('rocketride.app.open', (appId: string) => {
-			void appScreen?.show(appId);
+			// Fire-and-forget: a rejection has no other surface here — say it.
+			appScreen?.show(appId).catch((err) => vscode.window.showErrorMessage(`Failed to open app: ${err instanceof Error ? err.message : String(err)}`));
 		}),
 		vscode.commands.registerCommand('rocketride.app.debug', (appId: string) => {
-			void debugApp(appId);
+			debugApp(appId).catch((err) => vscode.window.showErrorMessage(`Failed to debug app: ${err instanceof Error ? err.message : String(err)}`));
 		}),
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();

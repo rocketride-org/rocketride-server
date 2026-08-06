@@ -287,7 +287,8 @@
 				"rocketride.appdev.shellUrl": {
 					"type": "string",
 					"default": "",
-					"description": "App Builder: override the preview shell base URL (empty = the Development Mode engine). For monorepo developers running the shell dev server."
+					"description": "App Builder: override the preview shell base URL (empty = the Development Mode engine). For monorepo developers running the shell dev server.",
+					"format": "uri"
 				},
 				"rocketride.appdev.autoWatch": {
 					"type": "boolean",
@@ -525,6 +526,14 @@
 				},
 				{
 					"command": "rocketride.agents.uninstall",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.app.open",
+					"when": "false"
+				},
+				{
+					"command": "rocketride.app.debug",
 					"when": "false"
 				}
 			],

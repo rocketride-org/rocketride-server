@@ -26,6 +26,14 @@ import { resolveRsbuildInvocation } from './watchManager';
 import { getLogger } from '../shared/util/output';
 
 // =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/** Upper bound for the one-shot publish build (template-scale apps build in
+ * seconds — ten minutes only ever means a wedged process). */
+const BUILD_TIMEOUT_MS = 10 * 60 * 1000;
+
+// =============================================================================
 // PUBLISH
 // =============================================================================
 
@@ -59,8 +67,24 @@ export async function publishApp(appId: string, message: string): Promise<Record
 		let tail = '';
 		proc.stdout?.on('data', (c: Buffer) => { tail = (tail + c.toString('utf8')).slice(-2000); });
 		proc.stderr?.on('data', (c: Buffer) => { tail = (tail + c.toString('utf8')).slice(-2000); });
-		proc.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`rsbuild build failed (${code}): ${tail.slice(-400)}`))));
-		proc.on('error', reject);
+		// Settle exactly once — close, spawn-error, and the timeout race here.
+		let settled = false;
+		const finish = (err?: Error): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			if (err) reject(err); else resolve();
+		};
+		// A hung build would otherwise leave the panel's publish RPC pending
+		// forever.
+		const timer = setTimeout(() => {
+			try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+			finish(new Error(`rsbuild build timed out after ${BUILD_TIMEOUT_MS / 60000} minutes: ${tail.slice(-400)}`));
+		}, BUILD_TIMEOUT_MS);
+		// 'close' (not 'exit') so the stdio tail is complete when a failure
+		// names its cause.
+		proc.on('close', (code) => (code === 0 ? finish() : finish(new Error(`rsbuild build failed (${code}): ${tail.slice(-400)}`))));
+		proc.on('error', (err) => finish(err));
 	});
 
 	// ── Read the built entry ─────────────────────────────────────────────
@@ -76,7 +100,12 @@ export async function publishApp(appId: string, message: string): Promise<Record
 		moduleId: app.moduleId,
 		name: app.name,
 	});
-	logger.output(`[appdev] published ${appId} v${entry?.appVersion ?? app.version} (registry v${entry?.registryVersion})`);
-	vscode.window.showInformationMessage(`Published ${app.name} v${app.version} — pin a rung from the Deploy view to make it live.`);
+	if (!entry) throw new Error(`Publish returned no version entry for ${appId}.`);
+	// The registry's answer is the truth about what was published — report
+	// the SAME version in the log and the toast (the manifest's app.version
+	// is only the fallback).
+	const publishedVersion = entry.appVersion ?? app.version;
+	logger.output(`[appdev] published ${appId} v${publishedVersion} (registry v${entry.registryVersion})`);
+	vscode.window.showInformationMessage(`Published ${app.name} v${publishedVersion} — pin a rung from the Deploy view to make it live.`);
 	return entry as Record<string, unknown>;
 }

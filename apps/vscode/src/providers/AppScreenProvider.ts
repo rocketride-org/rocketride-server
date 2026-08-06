@@ -16,6 +16,7 @@
  */
 
 import * as vscode from 'vscode';
+import { randomBytes } from 'crypto';
 import { ConnectionManager } from '../connection/connection';
 import { GenericEvent } from '../shared/types';
 import { scanWorkspaceApps } from '../appdev/appScan';
@@ -269,6 +270,8 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		});
 
 		panel.onDidDispose(() => {
+			// A newer panel may own this app id now — never clear its state.
+			if (this.panels.get(appId) !== panel) return;
 			this.panels.delete(appId);
 			this.lastWatch.delete(appId);
 			this.devEntries.delete(appId);
@@ -420,8 +423,11 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 
 	/** Forward connection + server events to every open App Builder panel. */
 	private setupEventListeners(): void {
+		// connectionManager.on() returns the SHARED manager (a Node
+		// EventEmitter), and ITS dispose() tears down the whole extension's
+		// connection — disposal must wrap off() with the named handler instead.
 		// Server push events → Events pane rows
-		const onEvent = this.connectionManager.on('shell:event', (event: GenericEvent) => {
+		const onEvent = (event: GenericEvent): void => {
 			if (!event?.event) return;
 			const row = {
 				time: AppScreenProvider.feedTime(),
@@ -431,11 +437,12 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			for (const panel of this.panels.values()) {
 				panel.webview.postMessage({ type: 'appdev:event', row });
 			}
-		});
-		this.disposables.push(onEvent);
+		};
+		this.connectionManager.on('shell:event', onEvent);
+		this.disposables.push({ dispose: () => this.connectionManager.off('shell:event', onEvent) });
 
 		// Connection status changes are feed-worthy context too
-		const onStatus = this.connectionManager.on('shell:statusChange', () => {
+		const onStatus = (): void => {
 			const row = {
 				time: AppScreenProvider.feedTime(),
 				name: 'shell:statusChange',
@@ -461,8 +468,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 					})();
 				}
 			}
-		});
-		this.disposables.push(onStatus);
+		};
+		this.connectionManager.on('shell:statusChange', onStatus);
+		this.disposables.push({ dispose: () => this.connectionManager.off('shell:statusChange', onStatus) });
 	}
 
 	// =========================================================================
@@ -488,12 +496,8 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	}
 
 	private generateNonce(): string {
-		let text = '';
-		const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		for (let i = 0; i < 32; i++) {
-			text += possible.charAt(Math.floor(Math.random() * possible.length));
-		}
-		return text;
+		// Cryptographic source — a CSP nonce must be unpredictable.
+		return randomBytes(24).toString('base64url');
 	}
 
 	// =========================================================================

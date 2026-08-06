@@ -288,7 +288,10 @@ export async function vendorShellPackage(workspaceRoot: string, fallbackTgz?: st
 		} else {
 			const base = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
 			try {
-				const res = await fetch(new URL('client/shell', base));
+				// Bounded — a hung response must fail the pass (reasoned
+				// fallback) instead of wedging the single-flight ensureShell
+				// memo forever.
+				const res = await fetch(new URL('client/shell', base), { signal: AbortSignal.timeout(30_000) });
 				if (res.ok) {
 					tgz = Buffer.from(await res.arrayBuffer());
 					source = `${baseUrl}/client/shell`;
