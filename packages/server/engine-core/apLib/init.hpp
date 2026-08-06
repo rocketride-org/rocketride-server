@@ -25,16 +25,18 @@
 
 namespace ap {
 
-// Main entry point for apLib's global state
-inline decltype(auto) init() noexcept {
+// Main entry point for apLib's global state. The scope deinits on destruction,
+// so a failed init still tears down whatever came up before it
+inline auto init() noexcept {
     // Let the standard call us back if there's a problem with memory
     auto prevHandler = std::set_new_handler(
         [] { dev::fatality(_location, "Memory allocation attempt failed"); });
 
-    return util::Guard{[] {
+    Error ccode;
+    auto scope = util::Guard{[&ccode] {
                            LOG(Init, "Init begin");
                            async::init();
-                           application::init();
+                           ccode = application::init();
                            log::init();
                            async::work::init();
                            crypto::init();
@@ -52,6 +54,10 @@ inline decltype(auto) init() noexcept {
                            std::set_new_handler(prevHandler);
                            LOG(Init, "Deinit end");
                        }};
+
+    using Scope = decltype(scope);
+    if (ccode) return ErrorOr<Scope>{ccode};
+    return ErrorOr<Scope>{_mv(scope)};
 }
 
 }  // namespace ap

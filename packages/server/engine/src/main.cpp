@@ -1,6 +1,5 @@
 // =============================================================================
 // MIT License
-//
 // Copyright (c) 2026 Aparavi Software AG
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,33 +21,19 @@
 // SOFTWARE.
 // =============================================================================
 
-#pragma once
-#include <mach-o/dyld.h>
-#include <limits.h>
+// -----------------------------------------------------------------------------
+// The engine launcher - the engine itself lives in engine.dll behind engine_run()
+// -----------------------------------------------------------------------------
 
-// The main entry point for an rocketride based executable
-int main(int argc, const char **argv) noexcept {
-    // Set the global commandline
-    ::ap::application::cmdline() = {argc, argv};
+#include <engine.h>
 
-    {
-        std::array<char, PATH_MAX> execPath{};
-        uint32_t execPathsize = PATH_MAX;
-        ASSERTD(!::_NSGetExecutablePath(&execPath[0], &execPathsize));
-
-        // Set this as the applications exec path
-        ::ap::application::cmdline().setExecPath(&execPath[0]);
-    }
-
-    // Ready the core
-    auto initScope = ::ap::init();
-
-    // Call main with blocking and translation of exceptions to errors
-    auto res = ::ap::error::call(
-        _location, [&] { return ::ap::application::Main().value(); });
-
-    // Return the error code if one was returned
-    if (!res) return res.ccode().plat();
-
-    return *res;
+// Switched on _WIN32 to match the argv character type engine.h declares
+#ifdef _WIN32
+int wmain(int argc, const wchar_t **argv) noexcept {
+    return engine_run(argc, argv);
 }
+#else
+int main(int argc, const char **argv) noexcept {
+    return engine_run(argc, argv);
+}
+#endif

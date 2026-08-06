@@ -28,6 +28,6 @@ extern application::Opt Trace;
 }
 
 namespace ap::application {
-void init() noexcept;
+Error init() noexcept;
 void deinit() noexcept;
 }  // namespace ap::application
