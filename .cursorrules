@@ -54,6 +54,9 @@ the corresponding co-located doc in the SAME change:
 - A public Python SDK signature -> `docs/clients/python/` (reference generated).
 - The MCP protocol surface -> `docs/mcp/`.
 - The WebSocket (5565) / engine protocol surface -> `docs/internal/engine-protocol/`.
+- The `.pipe` schema (`packages/client-typescript/src/client/types/pipeline.ts`) ->
+  its reference regenerates to `/pipeline-reference` (mounted from
+  `packages/client-typescript/docs/reference/pipeline`, generated — do not edit).
 - The VS Code extension surface -> `docs/clients/vscode/`.
 - Contributor/internal docs (builder, engine internals, node schema/testing, n8n,
   pre-commit hooks) -> `docs/internal/`.

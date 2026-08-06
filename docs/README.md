@@ -10,7 +10,8 @@ docs stay co-located with their nodes.
 - **`product/`** — the docs site spine: quickstart, concepts, integrations, examples,
   evaluate, glossary, troubleshooting, cloud, self-hosting.
 - **`clients/typescript/`, `clients/python/`, `clients/vscode/`** — per-client guides.
-  Each has a `readme.md`, the source for that package's committed `README.md`.
+  Each has a `readme.md`, the source for that package's `README.md` — except vscode's,
+  which is gitignored and copied at package time rather than committed.
 - **`mcp/`** — the MCP protocol surface, including `readme.md` for
   `packages/client-mcp/README.md`.
 - **`agents/`** — the `ROCKETRIDE_*` assistant-facing integration docs, exported to

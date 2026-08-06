@@ -204,6 +204,11 @@ jobs:
   # ---------------------------------------------------------------------------
   #  Ruff — Python lint + format check. Mirrors the local lefthook hook so
   #  contributors who bypass lefthook (--no-verify) still get caught in CI.
+  #
+  #  Also runs the docs export drift gate (`builder docs:check`) here: this is
+  #  the only always-on PR job (no code-change gating), so it's the one place
+  #  that reliably fires on docs-only PRs — exactly the PRs the drift gate
+  #  exists to catch.
   # ---------------------------------------------------------------------------
   ruff-check:
     name: Ruff
@@ -214,6 +219,14 @@ jobs:
       - uses: astral-sh/ruff-action@4919ec5cf1f49eff0871dbcea0da843445b837e6 # v3
       - run: ruff check
       - run: ruff format --check
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check docs export drift
+        run: node scripts/build.js docs:check
 
   # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream

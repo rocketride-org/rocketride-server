@@ -13,6 +13,9 @@ on:
       - 'nodes/src/nodes/**/README.md'
       - 'packages/*/docs/**'
       - 'apps/*/docs/**'
+      - 'packages/client-typescript/README.md'
+      - 'packages/client-python/README.md'
+      - 'packages/client-mcp/README.md'
       - '.github/workflows/docs.yml'
   workflow_dispatch: {}
 
