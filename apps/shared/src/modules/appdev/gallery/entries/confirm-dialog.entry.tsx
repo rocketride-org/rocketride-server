@@ -56,9 +56,9 @@ const buildCode = (knobs: KnobValues): string => `import { ConfirmDialog } from 
 
 {confirming && (
 	<ConfirmDialog
-		title="${String(knobs.title)}"
+		title={${JSON.stringify(String(knobs.title))}}
 		message="chat.pipe has unsaved changes that will be lost."
-		confirmLabel="${String(knobs.confirmLabel)}"${knobs.destructive ? '\n\t\tdestructive' : ''}
+		confirmLabel={${JSON.stringify(String(knobs.confirmLabel))}}${knobs.destructive ? '\n\t\tdestructive' : ''}
 		onConfirm={deletePipeline}
 		onCancel={() => setConfirming(false)}
 	/>

@@ -49,10 +49,10 @@ In VS Code the equivalent is a native status-bar contribution outside the webvie
 import { useShellConnection } from 'shell';
 import { Button } from 'shell';
 
-function RunControls() {
+function RunControls({ onRun }: { onRun: () => void }) {
 	const { isConnected } = useShellConnection();
 	// Disable actions while offline instead of inventing a second status UI.
-	return <Button disabled={!isConnected} onClick={runPipeline}>Run</Button>;
+	return <Button disabled={!isConnected} onClick={onRun}>Run</Button>;
 }`,
 	propsLabel: 'Hooks',
 	props: [

@@ -39,18 +39,21 @@ export const iframeBridgeEntry: IGalleryEntry = {
 Keep the frame hidden (\`visibility: hidden\`) until \`view:ready\` has been answered — that is the flash-free pattern; theme CSS for the initial paint belongs in the srcdoc itself.`,
 	docNote: 'The bridge forwards shell events only AFTER the frame signals view:ready - an iframe that skips the handshake receives nothing.',
 	code: `// Shell side - the hosting view wires the bridge to its frame:
+import { useRef } from 'react';
 import { useIframeBridge } from 'shell';
 
 function EmbeddedView({ src }) {
 	const frameRef = useRef<HTMLIFrameElement>(null);
 	useIframeBridge(frameRef);
-	return <iframe ref={frameRef} src={src} style={{ visibility: hidden ? 'hidden' : 'visible' }} />;
+	// Flash-free pattern: theme CSS for the initial paint lives in the srcdoc;
+	// keep the frame visibility:hidden and unhide after view:ready is answered.
+	return <iframe ref={frameRef} src={src} />;
 }
 
 // Iframe side - the handshake:
 window.parent.postMessage({ type: 'view:ready' }, '*');
 window.addEventListener('message', ({ data }) => {
-	if (data.type === 'shell:init') applyTheme(data.theme);   // ShellInitMsg
+	if (data.type === 'shell:init') applyTheme(data.theme);   // applyTheme: the frame's own CSS applier
 });`,
 	propsLabel: 'Hooks',
 	props: [

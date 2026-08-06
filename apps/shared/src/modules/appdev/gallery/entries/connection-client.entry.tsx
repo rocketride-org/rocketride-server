@@ -42,18 +42,18 @@ export const connectionClientEntry: IGalleryEntry = {
 
 All client traffic is DAP over the one WebSocket — there is no per-feature HTTP.`,
 	docNote: 'Apps NEVER initialize the ConnectionManager, construct clients, or handle auth - that is shell bootstrap. Consume the connection; do not create it.',
-	code: `import { useShellConnection, useClient, getClient } from 'shell';
+	code: `import { useShellConnection, useClient, getClient, Button } from 'shell';
 
 function RunButton() {
 	const { isConnected } = useShellConnection();
 	const client = useClient();
 	if (!client) return null;
-	return <Button disabled={!isConnected} onClick={() => client.taskExecute(...)}>Run</Button>;
+	return <Button disabled={!isConnected} onClick={() => client.use({ pipeline })}>Run</Button>;
 }
 
 // Outside React (module code, event handlers):
 const client = getClient();
-if (client) await client.listPipelines({ page: 1, size: 50 });`,
+if (client) await client.listTasks({ page: 1, page_size: 50 });`,
 	propsLabel: 'Hooks',
 	props: [
 		{ name: 'useShellConnection', type: '() => { client, isConnected, statusMessage }', dir: 'out', note: 'The everyday connection hook; re-renders on connect/disconnect and status-message changes.' },

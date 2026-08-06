@@ -107,8 +107,9 @@ class MiscCommands(DAPConn):
 
         Serves the cached service catalog (see ``services_catalog``): the
         bulk call returns each service's SUMMARY — display fields plus the
-        inline ``iconSvg`` — which is everything a client needs to render
-        the canvas. The single-service call returns the FULL entry with the
+        deduplicated ``icons`` table (each summary's ``icon`` field is an
+        id into it) — which is everything a client needs to render the
+        canvas. The single-service call returns the FULL entry with the
         configuration schema, fetched by the configure panel on demand.
 
         Args:
@@ -120,7 +121,7 @@ class MiscCommands(DAPConn):
             Dict[str, Any]: DAP response containing:
                 - body: If service specified, that service's full entry
                   (config schema included); otherwise
-                  ``{'services': {name: summary}, 'version': N}``.
+                  ``{'services': {name: summary}, 'icons': {id: svg}, 'version': N}``.
 
         Raises:
             Exception: If the specified service is not found

@@ -62,12 +62,9 @@ Call :func:`invalidate`; the next request rebuilds.
 """
 
 import asyncio
-import logging
 from typing import Any, Dict, Optional, Tuple
 
-from rocketlib import getServiceDefinitions
-
-logger = logging.getLogger(__name__)
+from rocketlib import debug, getServiceDefinitions, warning
 
 # Display fields that form a service summary. Everything else on a bulk
 # entry is configuration schema, served only by the single-service view.
@@ -92,6 +89,8 @@ SUMMARY_FIELDS = (
 # summary: the complete rrext_services response body ({'services', 'version'})
 _catalog: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
 _lock = asyncio.Lock()
+# Bumped by invalidate() so an in-flight build can detect staleness.
+_generation = 0
 
 
 def invalidate() -> None:
@@ -102,7 +101,8 @@ def invalidate() -> None:
     update, or removal). Safe to call at any time, including before first
     use.
     """
-    global _catalog
+    global _catalog, _generation
+    _generation += 1
     _catalog = None
 
 
@@ -126,7 +126,7 @@ def _read_icon(icon_path: Any) -> Optional[str]:
         with open(icon_path, 'r', encoding='utf-8-sig') as fh:
             return fh.read()
     except OSError as exc:
-        logger.warning('Service icon unreadable: %s (%s)', icon_path, exc)
+        warning(f'Service icon unreadable: {icon_path} ({exc})')
         return None
 
 
@@ -181,11 +181,7 @@ def _build() -> Tuple[Dict[str, Any], Dict[str, Any]]:
         'icons': icons,
         'version': raw.get('version'),
     }
-    logger.info(
-        'Service catalog built: %d services, %d distinct icons',
-        len(master),
-        len(icons),
-    )
+    debug(f'Service catalog built: {len(master)} services, {len(icons)} distinct icons')
     return master, summary
 
 
@@ -201,9 +197,18 @@ async def _get_catalog() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if _catalog is not None:
         return _catalog
     async with _lock:
-        if _catalog is None:
-            _catalog = await asyncio.to_thread(_build)
-        return _catalog
+        if _catalog is not None:
+            return _catalog
+        # Snapshot the generation before the build: invalidate() during the
+        # build bumps it, and a stale result must not be published as the
+        # shared cache.
+        generation = _generation
+        built = await asyncio.to_thread(_build)
+        if generation == _generation:
+            _catalog = built
+        # Even when stale, the requesting call keeps its own snapshot — it
+        # answers with the definitions that were live when it asked.
+        return built
 
 
 async def get_summary() -> Dict[str, Any]:

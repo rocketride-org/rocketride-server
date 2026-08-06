@@ -135,24 +135,43 @@ export default tseslint.config(
 			}],
 		},
 	},
-	// The shell package itself and the vscode extension: NO 'shell' barrel.
-	// Inside the shell it is a boot-order hazard (self-import resolves through
-	// the MF share scope before the factory registers); in vscode no shell
-	// runtime exists - components are statically bundled, so the barrel would
-	// be semantically false. Both use relative imports / deep shared specs.
+	// The shell package itself: NO 'shell' barrel. Inside the shell it is a
+	// boot-order hazard (self-import resolves through the MF share scope
+	// before the factory registers). Use relative imports / deep shared specs.
 	{
-		files: ['packages/shell/**/*.{ts,tsx,mts}', 'apps/vscode/**/*.{ts,tsx,mts}'],
+		files: ['packages/shell/**/*.{ts,tsx,mts}'],
 		rules: {
 			'no-restricted-imports': ['error', {
 				paths: [
-					{ name: 'shell', message: "No 'shell' barrel here: use relative imports (shell package) or deep 'shared/<group>' specs (vscode)." },
+					{ name: 'shell', message: "No 'shell' barrel here: use relative imports (shell package)." },
 					{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
-					{ name: 'shell-ui', message: "Renamed package: use relative imports or deep 'shared/<group>' specs." },
+					{ name: 'shell-ui', message: "Renamed package: use relative imports." },
 				],
 				patterns: [
 					// The in-tree STATIC path form is legal here: bundled component copies are
-					// bundled copies (no shell runtime in vscode; no self-barrel in shell).
+					// bundled copies (no self-barrel in shell).
 					{ group: ['shell/*', '!shell/src/*'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>); everything else is relative (in-package) or the barrel (elsewhere)." },
+				],
+			}],
+		},
+	},
+
+	// The vscode extension consumes the INSTALLED shell package (shell.tgz)
+	// like any workspace app, so the barrel is the legal form here - along
+	// with the one exported theme stylesheet subpath.
+	{
+		files: ['apps/vscode/**/*.{ts,tsx,mts}'],
+		rules: {
+			'no-restricted-imports': ['error', {
+				paths: [
+					{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
+					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
+				],
+				patterns: [
+					// gitignore semantics: a file under an excluded dir cannot be
+					// re-included, so un-ignore shell/themes first, then re-ban its
+					// contents except the one exported stylesheet.
+					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath)." },
 				],
 			}],
 		},

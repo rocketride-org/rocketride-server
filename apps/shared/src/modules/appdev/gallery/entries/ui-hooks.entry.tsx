@@ -40,7 +40,8 @@ export const uiHooksEntry: IGalleryEntry = {
 - \`useDebouncedValue\` is the trailing debounce for search inputs feeding \`fetchPage\` or \`matchesSearch\`.
 - \`useAnnouncements\` feeds the platform announcements ticker (fetched JSON, 1h cache, validity-window filtered).
 - \`useAppComponent\` loads a named component from ANOTHER app's catalog — the sanctioned cross-app surface (never import another app's code).`,
-	code: `import { useClickOutside, useFixedPopupPosition, useDebouncedValue } from 'shell';
+	code: `import { useState, useRef, useEffect } from 'react';
+import { useClickOutside, useFixedPopupPosition, useDebouncedValue } from 'shell';
 
 function FilterPopup({ trigger }) {
 	const [open, setOpen] = useState(false);

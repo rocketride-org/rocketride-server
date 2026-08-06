@@ -185,13 +185,13 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 			});
 	}, [isConnected, client, identity]);
 
-	// Sidebar node memoized once: AparaviSidebar takes no props and reads all
-	// its state from the shared singletons, so the slot registration is stable.
-	const sidebar = useMemo(() => <AparaviSidebar />, []);
+	// Sidebar node keyed on readiness: the docs subscription binds on mount,
+	// so remount the sidebar when Documents appears.
+	const sidebar = useMemo(() => <AparaviSidebar key={ready ? 'docs' : 'init'} />, [ready]);
 
 	// Two-column app: the chat-file Explorer sidebar mounts once Documents is
 	// ready (it shares the singleton with the editor surface).
-	if (!ready) return <AppLayout showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
+	if (!ready) return <AppLayout sidebar={sidebar} showStatus><div style={styles.welcome}>Initialising...</div></AppLayout>;
 	return (
 		<AppLayout sidebar={sidebar} showStatus>
 			<AparaviAppReady docs={getDocs()!} pipelineToken={pipelineToken} />

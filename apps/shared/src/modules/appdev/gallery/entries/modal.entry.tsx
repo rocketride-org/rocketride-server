@@ -60,7 +60,7 @@ const ModalDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 const buildCode = (knobs: KnobValues): string => `import { Modal, Button } from 'shell';
 
 {open && (
-	<Modal title="${String(knobs.title)}"${Number(knobs.width) !== 440 ? ` width={${Number(knobs.width)}}` : ''} onClose={() => setOpen(false)}${knobs.footer ? `
+	<Modal title={${JSON.stringify(String(knobs.title))}}${Number(knobs.width) !== 440 ? ` width={${Number(knobs.width)}}` : ''} onClose={() => setOpen(false)}${knobs.footer ? `
 		footer={<>
 			<Button variant="secondary" small onClick={() => setOpen(false)}>Cancel</Button>
 			<Button small onClick={onSave}>Save</Button>

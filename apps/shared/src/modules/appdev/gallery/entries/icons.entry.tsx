@@ -49,6 +49,9 @@ const TILE_STYLE: React.CSSProperties = {
 	border: '1px solid var(--rr-border)',
 	borderRadius: 6,
 	cursor: 'pointer',
+	background: 'none',
+	color: 'inherit',
+	font: 'inherit',
 };
 
 /** The tile's mono name label. */
@@ -80,10 +83,10 @@ const IconBrowserDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	return (
 		<div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
 			{shown.map(([name, Icon]) => (
-				<div key={name} style={TILE_STYLE} onClick={() => copyName(name)} title={`Copy "${name}"`}>
+				<button type="button" key={name} style={TILE_STYLE} onClick={() => copyName(name)} title={`Copy "${name}"`}>
 					<Icon size={size} />
 					<span style={TILE_NAME_STYLE}>{copiedName === name ? 'copied' : name}</span>
-				</div>
+				</button>
 			))}
 			{shown.length === 0 && <span style={commonStyles.textMuted}>No icon matches "{filter}"</span>}
 		</div>
