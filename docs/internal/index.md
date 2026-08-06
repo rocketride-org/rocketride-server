@@ -40,7 +40,7 @@ Edit `.env` and fill in the values relevant to your setup (API keys, model endpo
 
 ## Building
 
-The project uses a unified build system. See [README-builder.md](builder.md) for full details.
+The project uses a unified build system. See [builder.md](builder.md) for full details.
 
 ```bash
 # Show all available commands
@@ -84,7 +84,7 @@ After building, the engine executable is located in `dist/server/`. Run it direc
 2. Install the generated `.vsix` from `dist/vscode/` in VS Code
 3. Click the RocketRide icon in the sidebar and connect to your running server
 
-For VS Code extension development details, see [README-vscode.md](../README-vscode.md).
+For VS Code extension development details, see [VS Code extension docs](../clients/vscode/index.md).
 
 ## Testing
 
@@ -107,13 +107,13 @@ For VS Code extension development details, see [README-vscode.md](../README-vsco
 ./builder client-mcp:test
 ```
 
-For information on writing and running node-level tests, see [README-node-testing.md](node-testing.md).
+For information on writing and running node-level tests, see [node-testing.md](node-testing.md).
 
 ## Further Reading
 
 - [Build System](builder.md) -- declarative build system reference
 - [Engine Reference](engine.md) -- C++ engine architecture, CLI options, task types
 - [Pipeline Nodes](nodes.md) -- writing and extending pipeline nodes
-- [VS Code Extension](../README-vscode.md) -- extension development
+- [VS Code Extension](../clients/vscode/index.md) -- extension development
 - [Pre-commit Hooks](pre-commit-hooks.md) -- code quality automation
 - [Contributing Guide](../../CONTRIBUTING.md) -- contribution workflow and code style
