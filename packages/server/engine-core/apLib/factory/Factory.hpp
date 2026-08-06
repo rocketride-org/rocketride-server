@@ -25,25 +25,6 @@
 
 namespace ap {
 
-// Find a factory of the given type with the given name
-inline ErrorOr<FACTORY> Factory::findFactory(iTextView type,
-                                             iTextView name) noexcept {
-    if (auto iter = factories().find({type, name}); iter != factories().end())
-        return *iter;
-    return APERRL(Error, Ec::FactoryNotFound,
-                  "Could not find a factory for type:", string::enclose(type),
-                  "name:", string::enclose(name));
-}
-
-// Find all factories of a given type
-inline Factory::Names Factory::getFactories(iTextView type) noexcept {
-    Names result;
-    for (const auto &factory : factories()) {
-        if (factory.type == type) result.emplace_back(factory.name);
-    }
-    return result;
-}
-
 // Generic factory create method forwards all args to the assumed
 // present static factory api in the type, and returns a wrapped
 // unique ptr as the result

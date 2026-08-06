@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 # Add the apLib.test executable
 rocketride_add_executable(aptest LIST_ONLY "*.ipp" *.cpp *.hpp *.h)
 
+# Group it with the other test binaries in the IDE target tree
+set_property(TARGET aptest PROPERTY FOLDER "tests")
+
 # Link to apLib (we can't use unity due to the backblaze mock trick)
 target_link_libraries(aptest PRIVATE apLib)
 

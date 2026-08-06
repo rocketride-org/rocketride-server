@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 # Add the engLib.test executable
 rocketride_add_executable(engtest *.cpp *.hpp *.h EXCLUDE /rest/)
 
+# Group it with the other test binaries in the IDE target tree
+set_property(TARGET engtest PROPERTY FOLDER "tests")
+
 # Link to engLib
 target_link_libraries(engtest PRIVATE engLib)
 

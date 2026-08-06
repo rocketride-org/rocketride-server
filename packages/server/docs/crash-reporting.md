@@ -12,7 +12,9 @@ platform, so one symbolication workflow covers all of them.
   runs its handler (`crashpad_handler`) out-of-process. It ships next to the
   engine binary and is started automatically at engine startup.
 - **Windows:** the engine writes the dump in-process via the native DbgHelp
-  `MiniDumpWriteDump` API.
+  `MiniDumpWriteDump` API. The handler is installed inside `engine.dll`, the
+  shared module `engine.exe` loads and hands off to immediately -- so a crash
+  during a run symbolizes against `engine.dll.pdb`, not `engine.exe.pdb`.
 
 ## Where dumps go
 
@@ -170,8 +172,9 @@ gdbdump() {  # gdbdump <binary> <dump.dmp>
 # gdbdump dist/server/engine /tmp/<dump>.dmp
 ```
 
-**Windows** -- open the `.dmp` directly in **WinDbg** or Visual Studio with the
-matching PDBs.
+**Windows** -- open the `.dmp` directly in **WinDbg** or Visual Studio with
+`engine.dll.pdb` and `engine.exe.pdb` available (both ship in the release's
+`*.symbols.zip`).
 
 ## Memory capture
 

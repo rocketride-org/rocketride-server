@@ -34,6 +34,7 @@ const char **argv() noexcept;
 const std::vector<Text> &args() noexcept;
 bool elevated() noexcept;
 
+int detectExecPath() noexcept;
 file::Path execPath(bool stripExec = false) noexcept;
 inline auto execDir() noexcept { return execPath(true); }
 const file::Path &projectDir() noexcept;

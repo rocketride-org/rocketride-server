@@ -228,14 +228,31 @@ Set with `--monitor TYPE`.
 ## Directory Structure
 
 ```text
-packages/engine/
-├── src/
-│   ├── main.cpp                    # Entry point
-│   ├── CMakeLists.txt              # Build config
-│   └── res/                        # Resources (version info)
-
 packages/server/
-├── engine-core/apLib/              # Core utilities library
+├── engine/                         # Engine executable (launcher)
+│   ├── src/main.cpp                # Entry point
+│   └── src/res/                    # Resources (version info)
+├── engine-mod/                     # Shared engine module (engine.dll/.so)
+│   ├── include/engine.h            # engine_run() facade
+│   └── src/engine.cpp              # engLib behind the facade
+├── engine-lib/engLib/              # Main engine library (static)
+│   ├── config/                     # Configuration management
+│   ├── core/                       # Init/deinit, global config
+│   ├── headers/                    # Shared headers
+│   ├── index/                      # Inverted index, search
+│   ├── java/                       # Java/Tika integration
+│   ├── keystore/                   # Key storage
+│   ├── monitor/                    # Monitoring system
+│   ├── net/                        # RPC, TLS networking
+│   ├── perms/                      # ACL handling
+│   ├── plat/                       # Platform-specific code
+│   ├── python/                     # Python integration
+│   ├── store/                      # Store/pipeline, endpoints
+│   ├── stream/                     # Stream providers
+│   ├── sysinfo/                    # System information
+│   ├── tag/                        # Tag system
+│   └── task/                       # Task system and execution
+├── engine-core/apLib/              # Core utilities library (static)
 │   ├── application/                # CmdLine parsing, options
 │   ├── async/                      # Threading primitives
 │   ├── compress/                   # FastPFor, LZ4
@@ -253,23 +270,6 @@ packages/server/
 │   ├── url/                        # URL handling
 │   ├── util/                       # General utilities
 │   └── xml/                        # XML processing
-├── engine-lib/engLib/              # Main engine library
-│   ├── config/                     # Configuration management
-│   ├── core/                       # Init/deinit, global config
-│   ├── headers/                    # Shared headers
-│   ├── index/                      # Inverted index, search
-│   ├── java/                       # Java/Tika integration
-│   ├── keystore/                   # Key storage
-│   ├── monitor/                    # Monitoring system
-│   ├── net/                        # RPC, TLS networking
-│   ├── perms/                      # ACL handling
-│   ├── plat/                       # Platform-specific code
-│   ├── python/                     # Python integration
-│   ├── store/                      # Store/pipeline, endpoints
-│   ├── stream/                     # Stream providers
-│   ├── sysinfo/                    # System information
-│   ├── tag/                        # Tag system
-│   └── task/                       # Task system and execution
 └── CMakeLists.txt                  # Build orchestration
 ```
 

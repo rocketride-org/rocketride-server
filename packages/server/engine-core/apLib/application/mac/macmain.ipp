@@ -23,22 +23,14 @@
 // =============================================================================
 
 #pragma once
-#include <mach-o/dyld.h>
-#include <limits.h>
 
 // The main entry point for an rocketride based executable
 int main(int argc, const char **argv) noexcept {
     // Set the global commandline
     ::ap::application::cmdline() = {argc, argv};
 
-    {
-        std::array<char, PATH_MAX> execPath{};
-        uint32_t execPathsize = PATH_MAX;
-        ASSERTD(!::_NSGetExecutablePath(&execPath[0], &execPathsize));
-
-        // Set this as the applications exec path
-        ::ap::application::cmdline().setExecPath(&execPath[0]);
-    }
+    // Determine our app path
+    ::ap::application::detectExecPath();
 
     // Ready the core
     auto initScope = ::ap::init();

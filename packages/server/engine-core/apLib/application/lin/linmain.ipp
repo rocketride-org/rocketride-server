@@ -32,18 +32,8 @@ int main(int argc, const char **argv) noexcept {
     // Ready the core
     auto initScope = ::ap::init();
 
-    // We'll read our path from /proc/self/exe, in a scope so we don't
-    // park the stack allocation for the duration of the app
-    {
-        std::array<char, 4 * ::ap::Size::kKilobyte> execPath = {};
-
-        ASSERTD_MSG(
-            ::readlink("/proc/self/exe", &execPath[0], execPath.size()) >= 0,
-            "Failed to determine app path: ", ::strerror(errno), errno);
-
-        // Set this as the applications exec path
-        ::ap::application::cmdline().setExecPath(&execPath[0]);
-    }
+    // Determine our app path
+    ::ap::application::detectExecPath();
 
     // Call main with blocking and translation of exceptions to errors
     auto res = ::ap::error::call(
