@@ -21,7 +21,6 @@ docs stay co-located with their nodes.
 - **`internal/`** — contributor/internal docs: builder, engine internals, node
   schema/testing, n8n, pre-commit hooks, plus `internal/engine-protocol/` for the
   WebSocket (5565) protocol surface.
-- **`skills/`** — reserved.
 
 ## Rules
 
