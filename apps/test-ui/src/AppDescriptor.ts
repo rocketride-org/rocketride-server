@@ -5,7 +5,6 @@
 import React from 'react';
 import type { AppDescriptor } from 'shell';
 import TestApp from './TestApp';
-import TestSidebar from './TestSidebar';
 import { RocketRideMark } from 'shell';
 
 const TEST_APP: AppDescriptor = {
@@ -18,10 +17,9 @@ const TEST_APP: AppDescriptor = {
 		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0', style: { width: '100%', height: '100%' } }),
 		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34', style: { width: '100%', height: '100%' } }),
 	},
-	components: {
-		App: TestApp,
-		Sidebar: TestSidebar,
-	},
+	// Two-column app: TestApp's root AppLayout declares the connections/views
+	// sidebar and the status bar.
+	app: TestApp,
 };
 
 export default TEST_APP;

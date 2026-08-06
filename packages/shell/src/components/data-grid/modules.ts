@@ -91,20 +91,27 @@ declare module 'tabulator-tables' {
 //  - ResizeTable: re-layout when the container resizes (split panels)
 //  - Persistence: layout save/restore through IDataGridPersistence
 //  - Tooltip: truncated-cell hover tooltips
-Tabulator.registerModule([
-	AjaxModule,
-	FilterModule,
-	FormatModule,
-	InteractionModule,
-	MenuModule,
-	MoveColumnsModule,
-	PageModule,
-	PersistenceModule,
-	PopupModule,
-	ResizeColumnsModule,
-	ResizeTableModule,
-	SortModule,
-	TooltipModule,
-]);
+//
+// Guarded: under the node:test smoke runner (tsx/CJS, no DOM) the
+// tabulator-tables UMD interop yields an undefined Tabulator binding. No
+// grid ever renders there, so registration is safely skipped; every real
+// bundle (rspack ESM) resolves Tabulator and registers as before.
+if (Tabulator) {
+	Tabulator.registerModule([
+		AjaxModule,
+		FilterModule,
+		FormatModule,
+		InteractionModule,
+		MenuModule,
+		MoveColumnsModule,
+		PageModule,
+		PersistenceModule,
+		PopupModule,
+		ResizeColumnsModule,
+		ResizeTableModule,
+		SortModule,
+		TooltipModule,
+	]);
+}
 
 export { Tabulator };

@@ -24,20 +24,32 @@
 // SIDEBAR FRAME — GALLERY ENTRY (DOC-ONLY, HOST CHROME)
 // =============================================================================
 
-/** Doc-only gallery entry for the shell-owned sidebar frame. */
+/** Gallery entry for the shell-owned sidebar frame. */
 
-import type { IGalleryEntry } from '../galleryTypes';
+import React from 'react';
+import type { IGalleryDemoProps, IGalleryEntry } from '../galleryTypes';
+import { FrameSchematic } from './demos/FrameSchematic';
+
+/** Schematic demo: the sidebar's three vertical zones. */
+const SidebarFrameDemo: React.FC<IGalleryDemoProps> = () => (
+	<FrameSchematic highlight={['sidebarHeader', 'sidebarSlot', 'sidebarFooter']} />
+);
 
 /** The Sidebar frame gallery entry. */
 export const sidebarFrameEntry: IGalleryEntry = {
 	id: 'sidebar-frame',
 	name: 'Sidebar frame',
 	group: 'chrome',
-	blurb: 'The shell-owned sidebar container: fixed Header (brand + app label) on top, fixed Footer (user card) at the bottom, and a scrolling app-content slot between them, filled via useSidebarContent. No registered content = no sidebar, full-width client area. 260px expanded, 56px icon rail, drag-resizable.',
-	docNote: 'Header and Footer are the frame - apps never mount, fill, or restyle them; the app fills only the middle slot with stock components (SidebarMenu, Explorer) and custom sections. Collapsed = still mounted: on the icon rail the slot keeps rendering and components read useSidebarCollapsed() to choose their icon form. Memoize the registered node - an inline node re-registers every render.',
-	code: `import { useMemo } from 'react';
-import { useSidebarContent } from 'shell';
-import { SidebarMenu, useSidebarCollapsed } from 'shared';
+	blurb: 'The shell-owned sidebar container: fixed Header and Footer around one scrolling app-content slot, filled via the AppLayout sidebar prop.',
+	doc: `The frame is three vertical zones. **Header** (brand + app label) and **Footer** (user card + menu) belong to the shell; the **slot** between them is the one app-fillable region — the \`sidebar\` prop of the app's root \`<AppLayout>\`, filled with stock components (\`SidebarMenu\`, \`Explorer\`) plus custom sections.
+
+Sizing: 260px expanded, 56px icon rail, drag-resizable. No \`sidebar\` prop = a one-column app with no sidebar at all — the client area spans full width.
+
+**Collapsed is still mounted** — on the icon rail the slot keeps rendering and components read \`useSidebarCollapsed()\` to choose their icon form.`,
+	docNote: 'Apps never mount, fill, or restyle the Header and Footer. Memoize the sidebar node - an inline node re-registers every render.',
+	demo: SidebarFrameDemo,
+	code: `import { useMemo, useState } from 'react';
+import { AppLayout, SidebarMenu, useSidebarCollapsed } from 'shell';
 
 // A free-form sidebar section that hides itself on the icon rail.
 function RunningJobs() {
@@ -46,21 +58,25 @@ function RunningJobs() {
 	return <div>{/* custom section */}</div>;
 }
 
-function DocumentView({ page, setPage }) {
+export default function MyApp() {
+	const [page, setPage] = useState('documents');
 	// Build a stable node - the shell dedupes registrations by node identity.
 	const sidebar = useMemo(() => (
 		<>
 			<SidebarMenu menu={PAGES} activeId={page} onSelect={setPage} sectionLabel="chat.pipe" />
 			<RunningJobs />
 		</>
-	), [page, setPage]);
+	), [page]);
 
-	// Mounts into the frame's scrolling slot; unmounting withdraws it.
-	useSidebarContent(sidebar);
-	return (/* ... the view's content ... */);
+	return (
+		<AppLayout sidebar={sidebar} showStatus>
+			{/* ... the app's content ... */}
+		</AppLayout>
+	);
 }`,
+	propsLabel: 'Hooks',
 	props: [
-		{ name: 'useSidebarContent', type: '(content: ReactNode | null) => void', dir: 'in', note: 'Declares the sidebar content for the calling view; pass null (or unmount) to withdraw. Last-writer-wins - the active tab\'s view naturally owns the slot.' },
-		{ name: 'useSidebarCollapsed', type: '() => boolean', dir: 'out', note: 'Read inside registered sidebar content: true while the sidebar is on the icon rail. Returns false when no provider is mounted.' },
+		{ name: 'AppLayout sidebar', type: 'ReactNode', dir: 'in', note: 'The scrolling portion of the sidebar column. Present = two-column app; absent = one-column, no sidebar chrome.' },
+		{ name: 'useSidebarCollapsed', type: '() => boolean', dir: 'out', note: 'Read inside the sidebar node: true while the sidebar is on the icon rail. Returns false when no provider is mounted.' },
 	],
 };

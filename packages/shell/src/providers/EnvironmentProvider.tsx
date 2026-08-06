@@ -13,8 +13,8 @@
  */
 
 import React, { useState, useCallback } from 'react';
-import { EnvironmentView } from 'shared/modules/environment';
-import type { EnvironmentSlotConfig, EnvironmentScope } from 'shared/modules/environment';
+import { EnvironmentView } from '../modules/environment';
+import type { EnvironmentSlotConfig, EnvironmentScope } from '../modules/environment';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser } from '../hooks/useAuthUser';
 

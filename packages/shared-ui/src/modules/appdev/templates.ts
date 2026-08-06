@@ -237,7 +237,8 @@ function appDescriptor(v: TemplateVars): string {
 	return `${TS_HEADER}
 /**
  * AppDescriptor — the one module this app exposes to the RocketRide shell.
- * The shell lazy-loads it on activation and renders components.App.
+ * The shell lazy-loads it on activation and renders \`app\` raw; the app
+ * declares its layout inside with <AppLayout>.
  */
 
 import type { AppDescriptor } from 'rocketride/app-sdk';
@@ -247,7 +248,7 @@ const descriptor: AppDescriptor = {
 	id: '${v.appId}',
 	name: '${v.appName}',
 	branding: { appName: '${v.appName}' },
-	components: { App },
+	app: App,
 };
 
 export default descriptor;
@@ -267,6 +268,7 @@ function blankApp(v: TemplateVars): string {
 
 import React from 'react';
 import type { ShellAppProps } from 'rocketride/app-sdk';
+import { AppLayout } from 'shell';
 
 // =============================================================================
 // STYLES
@@ -282,13 +284,18 @@ const styles: Record<string, React.CSSProperties> = {
 // COMPONENT
 // =============================================================================
 
-/** Root view — replace with your app. */
+/**
+ * Root view — replace with your app. AppLayout declares the layout:
+ * pass \`sidebar\` for a two-column app, \`showStatus\` for the status bar.
+ */
 const App: React.FC<ShellAppProps> = ({ isConnected, identity }) => (
-	<div style={styles.wrap}>
-		<h1 style={styles.title}>${v.appName}</h1>
-		<p style={styles.sub}>Edit src/App.tsx and save — the preview reloads automatically.</p>
-		<p style={styles.sub}>Connected: {isConnected ? 'yes' : 'no'} · User: {identity?.displayName ?? 'not signed in'}</p>
-	</div>
+	<AppLayout showStatus>
+		<div style={styles.wrap}>
+			<h1 style={styles.title}>${v.appName}</h1>
+			<p style={styles.sub}>Edit src/App.tsx and save — the preview reloads automatically.</p>
+			<p style={styles.sub}>Connected: {isConnected ? 'yes' : 'no'} · User: {identity?.displayName ?? 'not signed in'}</p>
+		</div>
+	</AppLayout>
 );
 
 export default App;
@@ -303,6 +310,7 @@ function dashboardApp(v: TemplateVars): string {
  */
 
 import React from 'react';
+import { AppLayout } from 'shell';
 
 // =============================================================================
 // STYLES
@@ -328,24 +336,29 @@ const SERIES = [42, 55, 38, 64, 71, 52, 60, 78, 66, 83, 74, 90];
 // COMPONENT
 // =============================================================================
 
-/** Dashboard view: three stat cards + a 12-point bar chart. */
+/**
+ * Dashboard view: three stat cards + a 12-point bar chart. AppLayout
+ * declares the layout: pass \`sidebar\` for a two-column app.
+ */
 const App: React.FC = () => (
-	<div style={styles.wrap}>
-		<div style={styles.title}>${v.appName}</div>
-		<div style={styles.sub}>Live overview</div>
-		<div style={styles.row}>
-			<div style={styles.card}><div style={styles.label}>Items</div><div style={styles.value}>12,408</div></div>
-			<div style={styles.card}><div style={styles.label}>Success</div><div style={styles.value}>96.4%</div></div>
-			<div style={styles.card}><div style={styles.label}>Pending</div><div style={styles.value}>37</div></div>
-		</div>
-		<div style={styles.chart}>
-			<div style={styles.bars}>
-				{SERIES.map((h, i) => (
-					<div key={i} style={{ ...styles.bar, height: \`\${h}%\` }} />
-				))}
+	<AppLayout showStatus>
+		<div style={styles.wrap}>
+			<div style={styles.title}>${v.appName}</div>
+			<div style={styles.sub}>Live overview</div>
+			<div style={styles.row}>
+				<div style={styles.card}><div style={styles.label}>Items</div><div style={styles.value}>12,408</div></div>
+				<div style={styles.card}><div style={styles.label}>Success</div><div style={styles.value}>96.4%</div></div>
+				<div style={styles.card}><div style={styles.label}>Pending</div><div style={styles.value}>37</div></div>
+			</div>
+			<div style={styles.chart}>
+				<div style={styles.bars}>
+					{SERIES.map((h, i) => (
+						<div key={i} style={{ ...styles.bar, height: \`\${h}%\` }} />
+					))}
+				</div>
 			</div>
 		</div>
-	</div>
+	</AppLayout>
 );
 
 export default App;

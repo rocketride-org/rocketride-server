@@ -26,10 +26,10 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection, useSidebarContent } from 'shell';
-import { Explorer } from 'shared/modules/explorer';
+import { useShellConnection } from 'shell';
+import { Explorer } from 'shell';
 import { BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shell';
-import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction } from 'shared/modules/explorer';
+import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction } from 'shell';
 import type { IVirtualFileSystem } from 'shell';
 import { getDocs } from './docs';
 import { getMediaInfo } from './mediaTypes';
@@ -83,13 +83,10 @@ const styles = {
 /**
  * Sidebar for the File Explorer app.
  *
- * Registration-only component (models-ui / rocket-ui pattern): it builds the
- * file-tree Explorer node and publishes it into the shell sidebar's scrolling
- * slot via useSidebarContent(), so it composes with the shell's fixed
- * header/footer. Renders null itself; mounted by ExplorerApp (not the legacy
- * components.Sidebar slot). The registered node's root SidebarCollapsedGate
- * hides this free-form content while the sidebar is collapsed. Files open in
- * the Documents tab system on click.
+ * The app's AppLayout sidebar node: builds the file-tree Explorer and renders
+ * it behind a SidebarCollapsedGate (this free-form content has no icon-rail
+ * form). ExplorerApp passes this component as its root layout's `sidebar`
+ * prop. Files open in the Documents tab system on click.
  */
 const ExplorerSidebar: React.FC = () => {
 	const { client, isConnected } = useShellConnection();
@@ -343,12 +340,9 @@ const ExplorerSidebar: React.FC = () => {
 		</div>
 	);
 
-	// Publish to the shell sidebar slot (behind the collapse gate); withdrawn
-	// automatically on unmount.
-	useSidebarContent(<SidebarCollapsedGate>{content}</SidebarCollapsedGate>);
-
-	// Registration-only component — nothing rendered inline.
-	return null;
+	// Render behind the collapse gate — this free-form content has no
+	// icon-rail form, so it hides while the sidebar is collapsed.
+	return <SidebarCollapsedGate>{content}</SidebarCollapsedGate>;
 };
 
 // =============================================================================

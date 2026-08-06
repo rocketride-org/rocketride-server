@@ -51,7 +51,7 @@ const buildCode = (knobs: KnobValues): string => {
 		knobs.small ? ' small' : '',
 		knobs.disabled ? ' disabled' : '',
 	].join('');
-	return `import { Button } from 'shared';
+	return `import { Button } from 'shell';
 
 <Button${attrs} onClick={handleClick}>${String(knobs.label)}</Button>`;
 };

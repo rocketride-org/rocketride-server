@@ -109,6 +109,10 @@ function parseArgs(args) {
 		} else if (arg.startsWith('--log=')) {
 			options.logFile = arg.substring('--log='.length);
 			currentLogFile = options.logFile; // For signal handlers
+		} else if (arg.startsWith('--path=')) {
+			// builder update: root of the repository whose scripts/ is
+			// replaced (defaults to this builder's own repository).
+			options.path = arg.substring('--path='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
 			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
 			const paths = require('./lib/paths');
@@ -205,6 +209,7 @@ function showHelp(registry, options) {
 Rocketride Build System
 
 Usage: builder <action> [...] [options]
+       builder update <branch> [--path=<repo root>]   (replace scripts/ with the upstream copy)
 
 Actions:`);
 
@@ -276,6 +281,31 @@ async function main() {
 
 	// Parse arguments early to check for --help
 	const { requests: explicitRequests, options, globalCommands } = parseArgs(args);
+
+	// =========================================================================
+	// Self-update (builder update <branch>) — before any other machinery,
+	// so it works even when the local scripts/ tree is broken or outdated
+	// =========================================================================
+	if (globalCommands[0] === 'update') {
+		const branch = globalCommands[1];
+		if (!branch || globalCommands.length > 2 || explicitRequests.length > 0) {
+			console.error('Usage: builder update <branch> [--path=<repo root>]');
+			process.exit(1);
+		}
+		const { selfUpdate } = require('./lib/self-update');
+		try {
+			// --path retargets the update at another repository that carries
+			// a copy of the builder; default is this builder's own tree.
+			await selfUpdate(options.path ? path.resolve(options.path) : ROOT, branch);
+			// Exit immediately: when updating our own tree, the scripts/
+			// this process was loaded from has just been replaced, so no
+			// further modules may load.
+			process.exit(0);
+		} catch (err) {
+			console.error(`✖ Builder update failed: ${err.message}`);
+			process.exit(1);
+		}
+	}
 
 	// Make sure the system is setup
 	const { setupSystem } = require('./setup');

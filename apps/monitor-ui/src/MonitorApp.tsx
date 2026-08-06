@@ -34,14 +34,18 @@
 import React, { useCallback, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
-import { useShellConnection, useDashboardData, usePolling } from 'shell';
+import { useShellConnection, useDashboardData, usePolling, AppLayout } from 'shell';
 import { commonStyles } from 'shell';
-import MonitorView from 'shared/modules/server';
+import { MonitorView } from 'shell';
 import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse } from 'shell';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
+
+// Frame-only sidebar: an empty node keeps the shell's branded sidebar frame
+// (header + account footer) present with an empty middle slot.
+const SIDEBAR_FRAME_ONLY = <></>;
 
 /** Grid refresh cadence (ms) — matches the dashboard hook's 3s poll. */
 const GRID_POLL_INTERVAL_MS = 3000;
@@ -123,17 +127,19 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
 	// =========================================================================
 
 	return (
-		<div style={styles.container}>
-			<MonitorView
-				data={data}
-				events={events}
-				isConnected={isConnected}
-				onRefresh={refresh}
-				listConnections={listConnections}
-				listTasks={listTasks}
-				onRefetchReady={handleRefetchReady}
-			/>
-		</div>
+		<AppLayout sidebar={SIDEBAR_FRAME_ONLY} showStatus>
+			<div style={styles.container}>
+				<MonitorView
+					data={data}
+					events={events}
+					isConnected={isConnected}
+					onRefresh={refresh}
+					listConnections={listConnections}
+					listTasks={listTasks}
+					onRefetchReady={handleRefetchReady}
+				/>
+			</div>
+		</AppLayout>
 	);
 };
 

@@ -34,7 +34,7 @@
 
 import type { ConnectResult, DAPMessage } from 'rocketride';
 import type { ConnectionStatus } from './connection';
-import type { CheckoutPlan, PromoValidation } from 'shared/modules/checkout/types';
+import type { CheckoutPlan, PromoValidation } from '../modules/checkout/types';
 
 // =============================================================================
 // APP ENTRY — minimal shape for app catalog events

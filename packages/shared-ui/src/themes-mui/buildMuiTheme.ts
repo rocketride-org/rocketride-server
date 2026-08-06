@@ -3,7 +3,7 @@
 // =============================================================================
 
 import { createTheme, type Theme } from '@mui/material/styles';
-import type { ThemeTokens } from 'shell/src/themes/tokens';
+import type { ThemeTokens } from 'shell';
 
 /**
  * Build a MUI theme from a ThemeTokens object.

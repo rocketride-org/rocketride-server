@@ -28,7 +28,7 @@
 
 import React, { useState } from 'react';
 import { DropZone } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
 /** Live demo: a DropZone that reports how many files were dropped on it. */
@@ -53,7 +53,7 @@ const DropZoneDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 /** Snippet builder mirroring the current knob state. */
 const buildCode = (knobs: KnobValues): string => {
 	const hintAttr = knobs.hint ? `\n\thint="${String(knobs.hint)}"` : '';
-	return `import { DropZone } from 'shared';
+	return `import { DropZone } from 'shell';
 
 <DropZone
 	title="${String(knobs.title)}"${hintAttr}

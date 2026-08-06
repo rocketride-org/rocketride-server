@@ -16,10 +16,10 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 
-import { applyTheme } from 'shell/src/themes';
-import MonitorView from 'shared/modules/server';
-import { parseActivityEvent } from 'shared/modules/server';
-import type { DashboardResponse, ActivityEvent } from 'shared/modules/server';
+import { applyTheme } from 'shell';
+import { MonitorView } from 'shell';
+import { parseActivityEvent } from 'shell';
+import type { DashboardResponse, ActivityEvent } from 'shell';
 import { useMessaging } from '../hooks/useMessaging';
 import { useGridConfigBridge } from '../hooks/useGridConfigBridge';
 import type { MonitorHostToWebview, MonitorWebviewToHost } from '../types';

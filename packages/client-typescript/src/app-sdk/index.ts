@@ -45,7 +45,6 @@
 export type {
 	// Shell component prop contracts
 	ShellAppProps,
-	ShellSidebarProps,
 	ConnectResult,
 
 	// App configuration

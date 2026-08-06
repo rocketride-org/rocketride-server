@@ -21,25 +21,31 @@
 // SOFTWARE.
 
 // =============================================================================
-// DOC TABS — GALLERY ENTRY (DOC-ONLY, HOST CHROME)
+// DOC TABS — GALLERY ENTRY (DOCUMENT SYSTEM)
 // =============================================================================
 
 /**
- * Doc-only gallery entry for DocTabs. No live demo: the document model
- * (Documents / DocSplitLayout) lives in shell, which shared-ui cannot
- * import - and the strip is standard frame chrome, not a component to
- * restyle. The snippet and props are transcribed from the style guide.
+ * Gallery entry for DocTabs. No live component demo (the strip only renders
+ * meaningfully against a real Documents model); the frame schematic shows
+ * where the strip lives, and the snippet + props carry the contract.
  */
 
-import type { IGalleryEntry } from '../galleryTypes';
+import React from 'react';
+import type { IGalleryDemoProps, IGalleryEntry } from '../galleryTypes';
+import { FrameSchematic } from './demos/FrameSchematic';
+
+/** Schematic demo: the tab strip at the top of the client area. */
+const DocTabsDemo: React.FC<IGalleryDemoProps> = () => <FrameSchematic highlight="docTabs" />;
 
 /** The DocTabs gallery entry. */
 export const docTabsEntry: IGalleryEntry = {
 	id: 'doc-tabs',
 	name: 'DocTabs',
-	group: 'chrome',
-	blurb: 'The document tab strip at the top of the client area - one tab per open editor per group, VS Code document model: modified dots, hover close, drag to reorder and between split groups. Tabbed (Archetype B) apps only; never draw a lookalike tab bar for documents.',
-	docNote: 'Host chrome - part of the standard frame. The APP owns the document model behind it (one Documents instance over its VFS); DocSplitLayout renders the split tree and each pane renders its own DocTabs strip. For pages INSIDE one document use TabControl - DocTabs only switches documents.',
+	group: 'documents',
+	blurb: 'The document tab strip at the top of the client area - one tab per open editor per group: modified dots, hover close, drag to reorder and between split groups.',
+	doc: `The strip is standard frame chrome for tabbed (Archetype B) apps, but the APP owns the document model behind it: one \`Documents\` instance over its VFS. \`DocSplitLayout\` renders the split tree and each pane renders its own \`DocTabs\` strip bound to its editor group. Anything that opens a document (Explorer \`onOpenFile\`, deep links) adds a tab.`,
+	docNote: 'Never draw a lookalike tab bar for documents. For pages INSIDE one document use TabControl - DocTabs only switches documents.',
+	demo: DocTabsDemo,
 	code: `import { Documents, DocTabs, DocSplitLayout } from 'shell';
 
 // The app owns the document model: one Documents instance over its VFS.

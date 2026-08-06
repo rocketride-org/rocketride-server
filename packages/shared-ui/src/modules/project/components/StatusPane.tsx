@@ -24,8 +24,8 @@ import React, { CSSProperties, useMemo } from 'react';
 import { Button } from 'shell';
 import { EmptyState } from 'shell';
 import { MiniCard, MiniContainer } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
-import type { ITaskStatus } from 'shell/src/types/project';
+import { commonStyles } from 'shell';
+import type { ITaskStatus } from 'shell';
 import type { TaskChapter } from '../hooks/useTaskEvents';
 
 // =============================================================================

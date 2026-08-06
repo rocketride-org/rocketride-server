@@ -21,7 +21,7 @@
  */
 
 import React, { CSSProperties, ReactNode, useState } from 'react';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import { Button } from 'shell';
 import { InputField } from 'shell';
 import { ContentHeader } from 'shell';

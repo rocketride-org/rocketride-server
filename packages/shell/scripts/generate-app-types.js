@@ -36,12 +36,17 @@
  *                        (stock components included); there is no separate
  *                        shared rollup — non-surface library components are
  *                        first-party-only and never reach standalone apps.
+ *     tokens.css       — the --rr-* design-token vocabulary (a copy of the
+ *                        shell's rocketride-default.css): the types' visual
+ *                        counterpart for static hosts that compile their own
+ *                        bundles. MF apps never need it — tokens reach them
+ *                        at runtime from the host's theme system.
  *     app-types.json   — provenance: shell-api version, commit, date.
  *
  * The App Builder vendors this into app folders as `types/rocketride-shell/`
  * (scaffold + refresh on open, server-first); the scaffolded tsconfig maps
  * the 'shell' specifier onto shell.d.ts via `paths`. Servers publish the
- * same two files at /dev/types/.
+ * same files at /dev/types/.
  */
 const fs = require('fs');
 const path = require('path');
@@ -104,6 +109,11 @@ fs.mkdirSync(OUT_DIR, { recursive: true });
 const frozen = newestFrozenContract();
 fs.copyFileSync(frozen.file, path.join(OUT_DIR, 'shell.d.ts'));
 
+// The design-token vocabulary rides beside the types under its published
+// name: tokens.css is the exact rocketride-default.css (single source, no
+// drift) for consumers that compile their own bundles.
+fs.copyFileSync(path.join(APP_ROOT, 'src', 'themes', 'rocketride-default.css'), path.join(OUT_DIR, 'tokens.css'));
+
 // Provenance manifest — lets tooling (and humans) see what a vendored copy
 // was generated from.
 fs.writeFileSync(path.join(OUT_DIR, 'app-types.json'), `${JSON.stringify({
@@ -112,4 +122,4 @@ fs.writeFileSync(path.join(OUT_DIR, 'app-types.json'), `${JSON.stringify({
 	generator: `dts-bundle-generator@${DBG.version}`,
 }, null, '\t')}\n`);
 
-console.log(`generate-app-types: shell.d.ts (frozen v${frozen.version}) -> ${OUT_DIR}`);
+console.log(`generate-app-types: shell.d.ts (frozen v${frozen.version}) + tokens.css -> ${OUT_DIR}`);

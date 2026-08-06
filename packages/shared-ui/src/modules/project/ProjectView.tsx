@@ -31,8 +31,8 @@ import { TabControl } from 'shell';
 import type { ViewMenu } from 'shell';
 import CanvasPanel from '../../components/canvas';
 import { PrefsProvider, type IPrefsApi } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
-import { OAUTH_ROOT_URL } from 'shell/src/auth/oauth';
+import { commonStyles } from 'shell';
+import { OAUTH_ROOT_URL } from 'shell';
 
 import { extractPipelineEnvVars } from '../../components/canvas/util/extractEnvVars';
 import { SourcePanel } from './components/SourcePanel';

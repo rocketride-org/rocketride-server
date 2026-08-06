@@ -49,6 +49,13 @@
 // VALUE IMPORTS — hooks, client access, classes, components, icons
 // =============================================================================
 
+// Theme styles FIRST — a leaf module (no imports back into this graph) that
+// MUST initialize before any shared-ui module below re-enters this barrel:
+// shared modules spread commonStyles into top-level style consts at module
+// init, so in the shell⇄shared import cycle this binding has to be live
+// before the first 'shared/*' import statement evaluates.
+import { commonStyles } from './themes/styles';
+
 // Hooks
 import { useShellConnection } from './connection/ConnectionContext';
 import { useAuthUser, useLogout } from './hooks/useAuthUser';
@@ -62,7 +69,6 @@ import { useConnectionStatus } from './hooks/useConnectionStatus';
 import { useShellApiConfig } from './connection/ShellApiConfigContext';
 import { useIframeBridge } from './hooks/useIframeBridge';
 import { useAppComponent } from './hooks/useAppComponent';
-import { useSidebarContent } from './components/layout/HostChromeContext';
 
 // Shared hooks re-exported through shell for app convenience
 import { useClickOutside } from './hooks/useClickOutside';
@@ -93,12 +99,12 @@ import { Documents } from './components/docs/Documents';
 // The no-op virtual filesystem — Documents' companion for apps that mount
 // document workspaces without a backing store (demonstrated third-party
 // need; entered the surface via the graduation pipeline).
-import { NOOP_VFS, Explorer } from 'shared/modules/explorer';
+import { NOOP_VFS, Explorer } from './modules/explorer';
 // Explorer's contract types under their NATIVE names (the Doc* aliases the
 // document system exports remain; both names refer to the same types —
 // append-only). Standalone apps cannot bundle the library, so a
 // demonstrated third-party file-tree need graduates the component itself.
-export type { IExplorerProps, ExplorerEntry, ExplorerChild, ExplorerConfig, ExplorerStatus, ExplorerFileAction } from 'shared/modules/explorer';
+export type { IExplorerProps, ExplorerEntry, ExplorerChild, ExplorerConfig, ExplorerStatus, ExplorerFileAction } from './modules/explorer';
 import DocTabs from './components/docs/DocTabs';
 import DocSplitLayout from './components/docs/DocSplitLayout';
 import { DocExplorer } from './components/docs/DocExplorer';
@@ -108,6 +114,11 @@ import Shell from './components/layout/Shell';
 import Sidebar from './components/layout/Sidebar';
 import BottomPanel from './components/layout/BottomPanel';
 import DebugPanel from './components/layout/DebugPanel';
+
+// The one app-root layout — apps render it as the root of their `app` mount
+// and declare their layout with props (sidebar, showStatus, status).
+import { AppLayout } from './components/layout/AppLayout';
+export type { AppLayoutProps } from './components/layout/AppLayout';
 
 // Layout building blocks
 import { NavButton } from './components/layout/Sidebar';
@@ -142,7 +153,7 @@ import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxSt
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types
-export type { ShellAppProps, ShellSidebarProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+export type { ShellAppProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
 
 // Top-level shell + sidebar component prop types
 export type { ShellProps } from './components/layout/Shell';
@@ -152,6 +163,10 @@ export type { IConfirmDialogProps as ConfirmDialogProps } from './components/mod
 // Workspace context interface + provider props
 export type { IWorkspaceContext, IWorkspaceProviderProps } from './components/workspace/WorkspaceContext';
 
+// Polling options — graduated from the known-gaps queue (was reachable
+// only structurally through usePolling).
+export type { IUsePollingOptions } from './hooks/usePolling';
+
 // The shared RocketRide client — an MF shared singleton the shell serves to
 // every app, so its API surface is PART of this contract. Exporting the type
 // by name gives it its own per-version floor (Frozen = Current, covariant):
@@ -160,6 +175,12 @@ export type { IWorkspaceContext, IWorkspaceProviderProps } from './components/wo
 // bundle. It must never appear in an
 // input position on this surface — see contract-hold.ts.
 export type { RocketRideClient } from 'rocketride';
+
+// The ENTIRE SDK type surface rides the contract (type-only): out-of-repo
+// apps have no 'rocketride' workspace package, so every payload/result/config
+// type they touch must be importable from 'shell'. Values are deliberately
+// excluded — the runtime client only ever arrives via useShellConnection().
+export type * from 'rocketride';
 
 // Connection manager standalone types
 export type { InitOptions, DebugLogEntry } from './connection/connection';
@@ -181,7 +202,7 @@ export type { Editor, WorkspaceBinding, Document, EditorGroup, SplitOrientation,
 export type { DocTabsProps } from './components/docs/DocTabs';
 export type { DocSplitLayoutProps } from './components/docs/DocSplitLayout';
 export type { DocExplorerProps, DocExplorerConfig, DocEntry, DocEntryChild, DocEntryStatus } from './components/docs/DocExplorer';
-export type { IVirtualFileSystem } from 'shared/modules/explorer/types';
+export type { IVirtualFileSystem } from './modules/explorer/types';
 
 // ViewMenu declaration types (consumed by shared-ui's TabControl/SidebarMenu)
 export type { DashboardData } from './hooks/useDashboardData';
@@ -212,7 +233,7 @@ import { StatusBadge, StatusDot } from './components/status-badge/StatusBadge';
 import { EmptyState } from './components/empty-state/EmptyState';
 import { Banner } from './components/banner/Banner';
 import { InputField } from './components/input-field/InputField';
-import { ToggleGroup } from '../../shared-ui/src/components/toggle-group/ToggleGroup';
+import { ToggleGroup } from './components/toggle-group/ToggleGroup';
 import { Chip, ChipAdd } from './components/chip/Chip';
 import { DropZone } from './components/drop-zone/DropZone';
 import { Card } from './components/card/Card';
@@ -231,12 +252,21 @@ import { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
 import { DataGrid } from './components/data-grid/DataGrid';
 import { CardDataGrid } from './components/data-grid/CardDataGrid';
 import { FilterStrip } from './components/data-grid/FilterStrip';
-import { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch } from './components/data-grid/defaults';
+import { createActionsColumn, autoFormatter, badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch, formatDateValue } from './components/data-grid/defaults';
 import { createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from './components/data-grid/gridConfigChannel';
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import { formatBytes, formatDate, formatDuration } from './util/format';
-import { commonStyles } from './themes/styles';
+// (commonStyles is imported at the very top of this file — cycle-order
+// constraint — and re-exported from the export block below.)
+// Values graduated from deep shell/src imports when the package exports map
+// closed those paths: theme application (vscode webviews apply tokens at
+// mount), the vscode-host probe, the OAuth root, and the pipeline-schema
+// runtime values shared-ui's project module re-exports.
+import { applyTheme } from './themes';
+import { isInVSCode } from './themes/vscode';
+import { OAUTH_ROOT_URL } from './auth/oauth';
+import { ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE } from './types/project';
 
 export {
 	Button, StatusBadge, StatusDot, EmptyState, Banner, InputField,
@@ -250,8 +280,10 @@ export {
 	createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET,
 	GRID_CONFIG_CLEAR,
 	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
-	formatDuration,
+	formatDuration, formatDateValue,
 	commonStyles,
+	applyTheme, isInVSCode, OAUTH_ROOT_URL,
+	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
 };
 
 // Prop/config types for the kept components, plus platform data types —
@@ -261,7 +293,7 @@ export type { IStatusBadgeProps, IStatusDotProps, StatusVariant } from './compon
 export type { IEmptyStateProps } from './components/empty-state/EmptyState';
 export type { IBannerProps, BannerVariant } from './components/banner/Banner';
 export type { IInputFieldProps } from './components/input-field/InputField';
-export type { IToggleGroupProps, IToggleGroupOption } from '../../shared-ui/src/components/toggle-group/ToggleGroup';
+export type { IToggleGroupProps, IToggleGroupOption } from './components/toggle-group/ToggleGroup';
 export type { IChipProps, IChipAddProps } from './components/chip/Chip';
 export type { IDropZoneProps } from './components/drop-zone/DropZone';
 export type { ICardProps } from './components/card/Card';
@@ -285,8 +317,40 @@ export type { IGridFilterDef, IGridFilterOption, IFilterStripProps } from './com
 export type { IDataGridPersistence, DataGridLayout } from './components/data-grid/persistence';
 export type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail } from './components/data-grid/gridConfigChannel';
 export type { Announcement } from './hooks/useAnnouncements';
-export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from '../../shared-ui/src/modules/server';
-export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';
+export type { DashboardResponse, DashboardOverview, DashboardConnection, DashboardTask, DashboardEvent, TaskEvent, ActivityEvent, ListPageRequest, ListPageResponse } from './modules/server';
+// =============================================================================
+// PLATFORM VIEW MODULES — the shared partition's shell half, now in-package
+// =============================================================================
+//
+// These view modules were shared-ui residents that shell's own surface always
+// re-exported pieces of (Explorer, the dashboard types). With the partition
+// they live in packages/shell, so their host-facing components graduate to
+// the contract: the vscode webviews and first-party apps consume them from
+// 'shell' like any other surface member.
+
+import MonitorView, { parseActivityEvent } from './modules/server';
+import { ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay } from './modules/server/components';
+import { formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime } from './modules/server/util';
+import AccountView from './modules/account';
+import { EnvironmentView } from './modules/environment';
+import { CheckoutModal, PlanPicker } from './modules/checkout';
+import { UpgradeModal } from './modules/billing';
+
+export {
+	MonitorView, parseActivityEvent,
+	ActivityPanel, ConnectionsPanel, TasksPanel, OverviewGrid, getEventDisplay,
+	formatNumber, formatTime, formatUptime, formatTimeAgo, formatDayTime,
+	AccountView, EnvironmentView,
+	CheckoutModal, PlanPicker, UpgradeModal,
+};
+
+export type { EventTone } from './modules/server/components';
+export type { CheckoutPlan, PlanAction, PromoRedemption, PromoValidation } from './modules/checkout/types';
+export type { EnvironmentSlotConfig, EnvironmentScope } from './modules/environment';
+
+// The FULL pipeline-schema type family — shared-ui's project module and the
+// vscode Project webview consume all of it, so the whole set is surface.
+export type { IProject, IValidateResponse, IServiceCatalog, IProjectComponent, IComponentUI, IControlConnection, IInputConnection, IPosition, IDimensions, IService, IServiceSchema, IServiceLaneEntry, INodeConfig, IComponentValidatePayload, IValidatePipelinePayload, IToolchainExport, IToolchainState, IForm, IFormData, ITaskStatus, IFlowData } from './types/project';
 
 // The FULL icon set (the explicit Bx* subset below stays for chrome and
 // wins its names per TS star-export rules; every other glyph flows through).
@@ -296,23 +360,6 @@ import * as stockIcons from './components/BoxIcon';
 // Theme vocabulary: the token map type.
 export type { ThemeTokens } from './themes/tokens';
 
-// The picked stock values as ONE object for the shellApi spread below.
-const stockSurface = {
-	Button, StatusBadge, StatusDot, EmptyState, Banner, InputField,
-	ToggleGroup, Chip, ChipAdd, DropZone, Card, MiniCard, MiniContainer,
-	Section, LabelValue, ContentHeader, RocketRideMark,
-	DetailPanel, PanelTabBody, TabControl, TabPanel, Modal, CLOSE_GLYPH,
-	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
-	useSidebarCollapsed, SidebarFooter,
-	DataGrid, CardDataGrid, FilterStrip, createActionsColumn, autoFormatter,
-	badgeEl, buttonEl, avatarEl, monoEl, mutedEl, matchesSearch,
-	createMessageGridPersistence, GRID_CONFIG_GET, GRID_CONFIG_SET,
-	GRID_CONFIG_CLEAR,
-	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
-	formatDuration,
-	commonStyles,
-	...stockIcons,
-} as const;
 
 // =============================================================================
 // SHELL API SURFACE
@@ -326,85 +373,127 @@ const stockSurface = {
  * becomes the versioned contract enforced against shell's own compilation.
  */
 export const shellApi = {
-	// The stock library surface (see the star export above) — spread FIRST
-	// so this module's explicit members win the few name collisions, same
-	// resolution the star export applies to the named surface.
-	...stockSurface,
+	// LAZY BY DESIGN — every member is a getter, so building this object
+	// reads NOTHING at module evaluation. The aggregator is the one place
+	// that would otherwise read every surface binding eagerly, and inside
+	// the host bundle that is a boot-order landmine: any shared module the
+	// shell chrome pulls that imports the 'shell' barrel creates a require
+	// cycle back into this file, and an eager read of a still-evaluating
+	// module's binding is a TDZ ReferenceError at boot (this happened:
+	// Shell.tsx -> AccountProvider -> account module -> barrel -> here ->
+	// read of Shell). Getters defer every read to first ACCESS, which is
+	// always post-boot. typeof is unchanged (get-only = readonly member).
 
-	// Hooks
-	useShellConnection,
-	useAuthUser,
-	useLogout,
-	useWorkspace,
-	useClient,
-	useShellEvent,
-	useIframeBridge,
-	useSubscriptions,
-	usePolling,
-	useDashboardData,
-	useConnectionStatus,
-	useShellApiConfig,
-	useAppComponent,
-	useSidebarContent,
-	useClickOutside,
-	useFixedPopupPosition,
-	usePrefs,
-
-	// Client access + connection manager + connection state
-	getClient,
-	ConnectionManager,
-	ConnectionState,
-
-	// Auth providers
-	CloudAuthProvider,
-	ApiKeyAuthProvider,
-
-	// Workspace provider + prefs provider
-	WorkspaceProvider,
-	PrefsProvider,
-
-	// Document component library
-	Documents,
-	NOOP_VFS,
-	Explorer,
-	DocTabs,
-	DocSplitLayout,
-	DocExplorer,
-
-	// Top-level shell frame + zone components
-	Shell,
-	Sidebar,
-	BottomPanel,
-	DebugPanel,
-
-	// Layout building blocks
-	NavButton,
-	ConfirmDialog,
-	PopupRow,
-
-	// Shell-owned overlay pages
-	AccountProvider,
-	SettingsProvider,
-
-	// Icons
-	BxPlus,
-	BxEditAlt,
-	BxTrash,
-	BxDesktop,
-	BxGridAlt,
-	BxCog,
-	BxListUl,
-	BxStop,
-	BxPlay,
-	BxHome,
-	BxNote,
-	BxComponent,
-	BxUser,
-	BxRocket,
-	BxLockOpen,
-	BxPurchaseTag,
-	BxChevronRight,
-	BxFolderOpen,
+	// The stock library surface. The icon namespace spread is the one
+	// eager read allowed here: BoxIcon is a LEAF module (react only), so
+	// it can never participate in a cycle.
+	...stockIcons,
+	get Button() { return Button; },
+	get StatusBadge() { return StatusBadge; },
+	get StatusDot() { return StatusDot; },
+	get EmptyState() { return EmptyState; },
+	get Banner() { return Banner; },
+	get InputField() { return InputField; },
+	get ToggleGroup() { return ToggleGroup; },
+	get Chip() { return Chip; },
+	get ChipAdd() { return ChipAdd; },
+	get DropZone() { return DropZone; },
+	get Card() { return Card; },
+	get MiniCard() { return MiniCard; },
+	get MiniContainer() { return MiniContainer; },
+	get Section() { return Section; },
+	get LabelValue() { return LabelValue; },
+	get ContentHeader() { return ContentHeader; },
+	get RocketRideMark() { return RocketRideMark; },
+	get DetailPanel() { return DetailPanel; },
+	get PanelTabBody() { return PanelTabBody; },
+	get TabControl() { return TabControl; },
+	get TabPanel() { return TabPanel; },
+	get Modal() { return Modal; },
+	get CLOSE_GLYPH() { return CLOSE_GLYPH; },
+	get SidebarMenu() { return SidebarMenu; },
+	get SidebarCollapsedProvider() { return SidebarCollapsedProvider; },
+	get SidebarCollapsedGate() { return SidebarCollapsedGate; },
+	get useSidebarCollapsed() { return useSidebarCollapsed; },
+	get SidebarFooter() { return SidebarFooter; },
+	get DataGrid() { return DataGrid; },
+	get CardDataGrid() { return CardDataGrid; },
+	get FilterStrip() { return FilterStrip; },
+	get createActionsColumn() { return createActionsColumn; },
+	get autoFormatter() { return autoFormatter; },
+	get badgeEl() { return badgeEl; },
+	get buttonEl() { return buttonEl; },
+	get avatarEl() { return avatarEl; },
+	get monoEl() { return monoEl; },
+	get mutedEl() { return mutedEl; },
+	get matchesSearch() { return matchesSearch; },
+	get createMessageGridPersistence() { return createMessageGridPersistence; },
+	get GRID_CONFIG_GET() { return GRID_CONFIG_GET; },
+	get GRID_CONFIG_SET() { return GRID_CONFIG_SET; },
+	get GRID_CONFIG_CLEAR() { return GRID_CONFIG_CLEAR; },
+	get useDebouncedValue() { return useDebouncedValue; },
+	get useAnnouncements() { return useAnnouncements; },
+	get formatBytes() { return formatBytes; },
+	get formatDate() { return formatDate; },
+	get formatDuration() { return formatDuration; },
+	get commonStyles() { return commonStyles; },
+	get useShellConnection() { return useShellConnection; },
+	get useAuthUser() { return useAuthUser; },
+	get useLogout() { return useLogout; },
+	get useWorkspace() { return useWorkspace; },
+	get useClient() { return useClient; },
+	get useShellEvent() { return useShellEvent; },
+	get useIframeBridge() { return useIframeBridge; },
+	get useSubscriptions() { return useSubscriptions; },
+	get usePolling() { return usePolling; },
+	get useDashboardData() { return useDashboardData; },
+	get useConnectionStatus() { return useConnectionStatus; },
+	get useShellApiConfig() { return useShellApiConfig; },
+	get useAppComponent() { return useAppComponent; },
+	get useClickOutside() { return useClickOutside; },
+	get useFixedPopupPosition() { return useFixedPopupPosition; },
+	get usePrefs() { return usePrefs; },
+	get getClient() { return getClient; },
+	get ConnectionManager() { return ConnectionManager; },
+	get ConnectionState() { return ConnectionState; },
+	get CloudAuthProvider() { return CloudAuthProvider; },
+	get ApiKeyAuthProvider() { return ApiKeyAuthProvider; },
+	get WorkspaceProvider() { return WorkspaceProvider; },
+	get PrefsProvider() { return PrefsProvider; },
+	get Documents() { return Documents; },
+	get NOOP_VFS() { return NOOP_VFS; },
+	get Explorer() { return Explorer; },
+	get DocTabs() { return DocTabs; },
+	get DocSplitLayout() { return DocSplitLayout; },
+	get DocExplorer() { return DocExplorer; },
+	get Shell() { return Shell; },
+	get Sidebar() { return Sidebar; },
+	get BottomPanel() { return BottomPanel; },
+	get DebugPanel() { return DebugPanel; },
+	get NavButton() { return NavButton; },
+	get ConfirmDialog() { return ConfirmDialog; },
+	get PopupRow() { return PopupRow; },
+	get AccountProvider() { return AccountProvider; },
+	get SettingsProvider() { return SettingsProvider; },
+	get BxPlus() { return BxPlus; },
+	get BxEditAlt() { return BxEditAlt; },
+	get BxTrash() { return BxTrash; },
+	get BxDesktop() { return BxDesktop; },
+	get BxGridAlt() { return BxGridAlt; },
+	get BxCog() { return BxCog; },
+	get BxListUl() { return BxListUl; },
+	get BxStop() { return BxStop; },
+	get BxPlay() { return BxPlay; },
+	get BxHome() { return BxHome; },
+	get BxNote() { return BxNote; },
+	get BxComponent() { return BxComponent; },
+	get BxUser() { return BxUser; },
+	get BxRocket() { return BxRocket; },
+	get BxLockOpen() { return BxLockOpen; },
+	get BxPurchaseTag() { return BxPurchaseTag; },
+	get BxChevronRight() { return BxChevronRight; },
+	get BxFolderOpen() { return BxFolderOpen; },
+	get AppLayout() { return AppLayout; },
 } as const;
 
 // =============================================================================
@@ -424,7 +513,7 @@ export {
 	useShellConnection, useAuthUser, useLogout, useWorkspace, useClient,
 	useShellEvent, useIframeBridge, useSubscriptions, usePolling,
 	useDashboardData, useConnectionStatus, useShellApiConfig, useAppComponent,
-	useSidebarContent, useClickOutside, useFixedPopupPosition, usePrefs,
+	useClickOutside, useFixedPopupPosition, usePrefs,
 	// Client access + connection manager + connection state
 	getClient, ConnectionManager, ConnectionState,
 	// Auth providers
@@ -443,6 +532,8 @@ export {
 	BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl,
 	BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket,
 	BxLockOpen, BxPurchaseTag, BxChevronRight, BxFolderOpen,
+	// The one app-root layout
+	AppLayout,
 };
 
 /**

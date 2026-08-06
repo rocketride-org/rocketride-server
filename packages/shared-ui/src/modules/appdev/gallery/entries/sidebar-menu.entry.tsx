@@ -69,7 +69,7 @@ const SidebarMenuDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 const buildCode = (knobs: KnobValues): string => {
 	const sectionAttr = knobs.sectionLabel ? `\n\tsectionLabel="${String(knobs.sectionLabel)}"` : '';
 	const countAttr = knobs.badges ? ", count: 48" : '';
-	return `import { SidebarMenu } from 'shared';
+	return `import { SidebarMenu } from 'shell';
 
 const menu = { entries: [
 	{ id: 'overview', label: 'Overview' },

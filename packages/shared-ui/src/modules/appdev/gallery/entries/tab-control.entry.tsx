@@ -33,7 +33,7 @@
 import React, { useState } from 'react';
 import { TabControl } from 'shell';
 import { TabPanel } from 'shell';
-import { commonStyles } from 'shell/src/themes/styles';
+import { commonStyles } from 'shell';
 import type { ViewMenu } from 'shell';
 import type { IGalleryDemoProps, IGalleryEntry, KnobValues } from '../galleryTypes';
 
@@ -77,7 +77,7 @@ const TabControlDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 const buildCode = (knobs: KnobValues): string => {
 	const countAttr = knobs.count ? ', count: 48' : '';
 	const trailingAttr = knobs.trailing ? '\n\ttrailing={<span>chat.pipe</span>}' : '';
-	return `import { TabControl, TabPanel } from 'shared';
+	return `import { TabControl, TabPanel } from 'shell';
 
 const menu = { entries: [
 	{ id: 'overview', label: 'Overview' },

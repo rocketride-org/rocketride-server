@@ -44,7 +44,7 @@ const ContentHeaderDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 const buildCode = (knobs: KnobValues): string => {
 	const subtitleAttr = knobs.subtitle ? `\n\tsubtitle="${String(knobs.subtitle)}"` : '';
 	const actionsAttr = knobs.actions ? '\n\tactions={<Button onClick={createConnection}>New connection</Button>}' : '';
-	return `import { ContentHeader } from 'shared';
+	return `import { ContentHeader } from 'shell';
 
 <ContentHeader
 	title="${String(knobs.title)}"${subtitleAttr}${actionsAttr}

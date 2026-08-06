@@ -25,8 +25,8 @@
 // =============================================================================
 
 import React, { useEffect, useRef, useState } from 'react';
-import { CheckoutModal } from 'shared/modules/checkout';
-import type { CheckoutPlan, PromoValidation } from 'shared/modules/checkout';
+import { CheckoutModal } from '../../modules/checkout';
+import type { CheckoutPlan, PromoValidation } from '../../modules/checkout';
 import { ConnectionManager } from '../../connection/connection';
 import type { AppManifestEntry } from '../workspace/types';
 

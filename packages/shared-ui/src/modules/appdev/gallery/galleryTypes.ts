@@ -27,15 +27,17 @@
 /**
  * Types for the App Builder's component gallery (`appdev/gallery`).
  *
- * The gallery is the in-product explorer for the stock shared-ui component
- * library: pick a component in the list, see everything about it in the
- * detail pane — blurb, LIVE demo of the real component, knob controls, a
- * copyable usage snippet, and the prop contract. One registry entry per
- * component, one implementation file per entry under `entries/`.
+ * The gallery is the documentation source and browser for the public shell
+ * API surface (shell/src/api.ts): pick an entry in the grouped list, see
+ * everything about it in the detail pane — blurb, markdown documentation,
+ * LIVE demo of the real component (or a frame schematic for host chrome),
+ * knob controls, a copyable usage snippet, and the API contract tables.
+ * One registry entry per surface item, one implementation file per entry
+ * under `entries/`.
  *
- * Entries without a demo (`demo` and `lazyDemo` both absent) are doc-only:
- * shell-owned host chrome that apps never mount themselves — the pane
- * renders the `docNote` explanation in place of the demo frame.
+ * Entries without a demo (`demo` and `lazyDemo` both absent) are doc-only —
+ * the pane renders the `doc`/`docNote` explanation in place of the demo
+ * frame.
  */
 
 import type React from 'react';
@@ -90,8 +92,26 @@ export interface IGalleryPropRow {
 // ENTRY
 // =============================================================================
 
-/** The three gallery groups, matching the style guide's stock table. */
-export type GalleryGroup = 'chrome' | 'sidebar' | 'content';
+/**
+ * The gallery's list groups. The first three match the style guide's stock
+ * table; the rest partition the remainder of the public shell API surface:
+ * the document system, platform hooks/context, and the utility layer
+ * (formatters, icons, theme vocabulary).
+ */
+export type GalleryGroup = 'chrome' | 'sidebar' | 'documents' | 'content' | 'hooks' | 'utils';
+
+/**
+ * One labeled API table beyond the main props table — hooks a chrome zone
+ * exposes, events an entry emits, helper signatures. Rendered with the same
+ * columns as the props table but under its own section label, so hooks and
+ * events never masquerade as component props.
+ */
+export interface IGalleryApiSection {
+	/** Section heading (e.g. 'Hooks', 'Events', 'Helpers'). */
+	label: string;
+	/** The section's rows, same shape as the prop table. */
+	rows: IGalleryPropRow[];
+}
 
 /** Props every live demo component receives. */
 export interface IGalleryDemoProps {
@@ -116,11 +136,22 @@ export interface IGalleryEntry {
 	/** Lazily-loaded demo for heavy components (Tabulator, chat) — loaded on
 	    first view of the entry so the appdev bundle stays lean. */
 	lazyDemo?: () => Promise<{ default: React.ComponentType<IGalleryDemoProps> }>;
-	/** Doc-only explanation shown in place of the demo frame (host chrome). */
+	/** Markdown documentation body rendered between the blurb and the demo:
+	    ownership, composition rules, gotchas. Paragraphs, bullets, inline
+	    code, and fenced code blocks are supported. */
+	doc?: string;
+	/** Short warning/rule callout rendered as a banner under the demo (or in
+	    place of it for doc-only entries) — the ONE thing a reader must not
+	    get wrong. Longer prose belongs in `doc`. */
 	docNote?: string;
 	/** Copyable usage snippet — a static string, or a builder over the live
 	    knob values so the copied code matches the configured demo. */
 	code: string | ((knobs: KnobValues) => string);
-	/** The prop contract; omitted for doc-only entries without a component API. */
+	/** The main API table; omitted for doc-only entries without an API. */
 	props?: IGalleryPropRow[];
+	/** Heading for the main API table; defaults to 'Props'. Entries that
+	    document hooks or functions relabel it ('Hooks', 'Signature', ...). */
+	propsLabel?: string;
+	/** Additional labeled API tables rendered after the main one. */
+	sections?: IGalleryApiSection[];
 }

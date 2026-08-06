@@ -27,13 +27,12 @@
 import React from 'react';
 import type { AppDescriptor } from 'shell';
 import HelloApp from './HelloApp';
-import HelloSidebar from './HelloSidebar';
 import { RocketRideMark } from 'shell';
 
 /**
  * AppDescriptor for the Hello World demo app.
  *
- * A minimal app with an empty sidebar. Does not require authentication.
+ * A minimal app. Does not require authentication.
  */
 const HELLO_APP: AppDescriptor = {
 	id: 'rocketride.helloWorld',
@@ -45,10 +44,9 @@ const HELLO_APP: AppDescriptor = {
 		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0', style: { width: '100%', height: '100%' } }),
 		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34', style: { width: '100%', height: '100%' } }),
 	},
-	components: {
-		App: HelloApp,
-		Sidebar: HelloSidebar,
-	},
+	// Frame-only app: HelloApp's root AppLayout keeps the branded sidebar
+	// frame (empty slot) and the status bar.
+	app: HelloApp,
 };
 
 export default HELLO_APP;

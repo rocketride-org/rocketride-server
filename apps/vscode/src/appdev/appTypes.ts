@@ -31,8 +31,9 @@ const VENDOR_DIR = path.join('types', 'rocketride-shell');
 
 // The bundle's fixed file set. Three owners share this layout: the generator
 // (generate-app-types), the server publisher (/dev/types/ under the shell's
-// static root), and the vendored copy in app folders.
-const BUNDLE_FILES = ['shell.d.ts', 'app-types.json'];
+// static root), and the vendored copy in app folders. tokens.css is the
+// design-token vocabulary riding beside the types (see generate-app-types).
+const BUNDLE_FILES = ['shell.d.ts', 'tokens.css', 'app-types.json'];
 
 /**
  * Recursively copies a directory, replacing the destination.

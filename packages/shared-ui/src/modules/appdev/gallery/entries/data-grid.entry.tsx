@@ -35,8 +35,8 @@ export const dataGridEntry: IGalleryEntry = {
 	group: 'content',
 	blurb: 'Tabulator-based table: tri-state sorting, pagination, server-side search, Excel-style per-column filter/format popups, and per-user persisted layouts. Static data mode shown here; real views feed fetchPage from the list_* APIs. CardDataGrid is the same grid as a Card with a required title.',
 	lazyDemo: () => import('./demos/DataGridDemo'),
-	code: `import { DataGrid } from 'shared';
-import type { GridColumnDefinition } from 'shared';
+	code: `import { DataGrid } from 'shell';
+import type { GridColumnDefinition } from 'shell';
 
 const columns: GridColumnDefinition[] = [
 	{ title: 'Name', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Pipeline file name.' },

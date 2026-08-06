@@ -50,7 +50,7 @@ const StatusBadgeDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => (
 );
 
 /** Snippet builder mirroring the current knob state. */
-const buildCode = (knobs: KnobValues): string => `import { StatusBadge, StatusDot } from 'shared';
+const buildCode = (knobs: KnobValues): string => `import { StatusBadge, StatusDot } from 'shell';
 
 <StatusBadge variant="${String(knobs.variant)}">${String(knobs.label)}</StatusBadge>
 <StatusDot variant="${String(knobs.variant)}" />`;

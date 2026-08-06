@@ -33,8 +33,8 @@ import { useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { ConnectionManager } from '../connection/connection';
 import { getClient } from '../util/getClient';
-import { parseActivityEvent } from 'shared/modules/server';
-import type { DashboardResponse, ActivityEvent } from 'shared/modules/server';
+import { parseActivityEvent } from '../modules/server';
+import type { DashboardResponse, ActivityEvent } from '../modules/server';
 
 // =============================================================================
 // CONSTANTS
