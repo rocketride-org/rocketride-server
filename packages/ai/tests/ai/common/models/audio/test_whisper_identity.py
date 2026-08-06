@@ -417,10 +417,20 @@ class _RecordingWhisperModel:
 
 
 def _load_with(monkeypatch, **loader_options):
-    fake = types.ModuleType('faster_whisper')
-    fake.WhisperModel = _RecordingWhisperModel
-    monkeypatch.setitem(sys.modules, 'faster_whisper', fake)
-    monkeypatch.setattr(WhisperLoader, 'model_gpu_gb', staticmethod(lambda *a, **k: 0.0), raising=False)
+    """Run load() with nothing real behind it — see this module's docstring.
+
+    load() resolves dependencies and imports torch before it ever touches
+    faster-whisper, so stubbing only the latter would still need both installed.
+    """
+    fake_whisper = types.ModuleType('faster_whisper')
+    fake_whisper.WhisperModel = _RecordingWhisperModel
+    monkeypatch.setitem(sys.modules, 'faster_whisper', fake_whisper)
+
+    fake_torch = types.ModuleType('ai.common.torch')
+    fake_torch.torch = types.SimpleNamespace(cuda=types.SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setitem(sys.modules, 'ai.common.torch', fake_torch)
+
+    monkeypatch.setattr(WhisperLoader, '_ensure_dependencies', staticmethod(lambda *a, **k: None))
 
     WhisperLoader.load('tiny', device='cpu', **loader_options)
     return _RecordingWhisperModel.captured
