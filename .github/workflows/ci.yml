@@ -287,8 +287,8 @@ jobs:
           node scripts/build.js shell:regen
           git diff --exit-code -- \
             packages/shell/src/contract-check.generated.ts \
-            packages/shell-api/index.ts \
-            packages/shell-api/latest.ts
+            packages/shell/contract/index.ts \
+            packages/shell/contract/latest.ts
 
   # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.

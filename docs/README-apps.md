@@ -381,8 +381,8 @@ export default defineConfig(() => ({
   ],
   resolve: {
     alias: {
-      shared: path.resolve(__dirname, '../../rocketride-server/packages/shared/src'),
-      'shell': path.resolve(__dirname, '../../rocketride-server/apps/shell/src/index.ts'),
+      shared: path.resolve(__dirname, '../../rocketride-server/apps/shared/src'),
+      'shell': path.resolve(__dirname, '../../rocketride-server/packages/shell/src/index.ts'),
     },
   },
   server: { port: 3014 },
