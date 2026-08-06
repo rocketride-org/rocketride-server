@@ -360,6 +360,37 @@ def test_write_questions_surfaces_explain_error_not_rejected_sql(is_valid_value)
     assert fake_instance.answer_written.getText() == 'syntax error near FROM'
 
 
+@pytest.mark.parametrize('is_valid_value', [True, 'true'])
+def test_write_questions_executes_query_when_valid(is_valid_value):
+    """writeQuestions() must execute and emit results when EXPLAIN accepts the
+    query on the first attempt, for both a real JSON boolean and the string
+    'true'.
+
+    The EXPLAIN-exhaustion test above always ends with isValid forced to
+    False by _buildSQLQuery, so it can't distinguish True from 'true' -- both
+    parametrized cases hit the same overwritten value. This test exercises
+    the success path instead, where EXPLAIN accepts the query immediately and
+    the LLM's isValid value passes through _buildSQLQuery unchanged.
+    """
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)  # EXPLAIN accepts it first try
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': is_valid_value,
+        'query': 'SELECT 1',
+    }
+    inst._executeSQLQuery = lambda sql: [{'answer': 42}]
+    fake_instance = _FakeInstance(lanes=['text'])
+    inst.instance = fake_instance
+
+    question = Question()
+    question.addQuestion('the answer')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == str([{'answer': 42}])
+
+
 # ---------------------------------------------------------------------------
 # _tableExists (engine-backed)
 # ---------------------------------------------------------------------------
