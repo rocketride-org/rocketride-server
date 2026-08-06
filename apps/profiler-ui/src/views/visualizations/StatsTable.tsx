@@ -331,16 +331,16 @@ const StatsTable: React.FC<{
 
 	/** Toggle sort column/direction. */
 	const handleSort = useCallback((col: SortColumn) => {
-		setSortCol((prev) => {
-			if (prev === col) {
-				setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-				return col;
-			}
+		// Plain branches, no nesting: a setSortDir inside the setSortCol updater
+		// is an impure updater and double-toggles under StrictMode.
+		if (sortCol === col) {
+			setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+		} else {
+			setSortCol(col);
 			// Default to desc for numeric columns, asc for text
 			setSortDir(col === 'location' ? 'asc' : 'desc');
-			return col;
-		});
-	}, []);
+		}
+	}, [sortCol]);
 
 	/** Row click — re-root the visualisation (snakeviz behaviour). */
 	const handleRowClick = useCallback((row: FlatRow) => {

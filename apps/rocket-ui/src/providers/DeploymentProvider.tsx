@@ -101,19 +101,34 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 		runningSourcesRef.current = runningSources;
 	}, [runningSources]);
 
+	// Monotonic load counter: mutation re-fetches race the push-driven
+	// re-fetch by design — a slower earlier run must not overwrite newer
+	// rows, so only the newest fetchAll may commit each result.
+	const fetchSeq = useRef(0);
+
 	/** Fetch the deployment + registry state (initial load and post-mutation). */
 	const fetchAll = useCallback(async (): Promise<void> => {
 		if (!client || !isConnected || !projectId) return;
+		const mine = ++fetchSeq.current;
 		try {
 			const dep = await client.deploy.get(projectId, teamId);
+			if (mine !== fetchSeq.current) return;
 			setDeployment(dep);
 			setLoadError('');
 
 			// The artifact only changes when the pointer moves — fetch per state.
 			if (typeof dep.version === 'number') {
-				setPipeline((await client.deploy.artifact(projectId, dep.version)) as unknown as Record<string, unknown>);
+				const artifact = (await client.deploy.artifact(projectId, dep.version)) as unknown as Record<string, unknown>;
+				if (mine !== fetchSeq.current) return;
+				setPipeline(artifact);
+			} else {
+				// No published version to fetch — surface it instead of leaving
+				// the drawer with an eternal loading body.
+				setPipeline(null);
+				setLoadError('This deployment has no published version.');
 			}
 			const [history, versions] = await Promise.all([client.deploy.history(projectId, { teamId }), client.deploy.versions(projectId)]);
+			if (mine !== fetchSeq.current) return;
 			setHistoryRows(history.rows ?? []);
 			setVersionRows(versions.rows ?? []);
 
@@ -123,6 +138,7 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 			const armed = sourceId ? (dep.schedules?.[sourceId]?.cron && !dep.schedules[sourceId].paused ? ([sourceId, dep.schedules[sourceId]] as const) : undefined) : undefined;
 			if (armed && dep.state === 'enabled') {
 				const preview = await client.deploy.preview(armed[1].cron as string, 1);
+				if (mine !== fetchSeq.current) return;
 				const firstAt = preview.valid ? preview.next?.[0] : undefined;
 				setNextRun(typeof firstAt === 'number' ? { at: firstAt, sourceId: armed[0], cron: armed[1].cron as string } : undefined);
 			} else {
@@ -142,6 +158,8 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 					} catch {
 						// An unpreviewable cron just leaves the cell empty.
 					}
+					// A newer run superseded this one — stop the remaining previews.
+					if (mine !== fetchSeq.current) return;
 				}
 				setNextRuns(upcoming);
 			} else {
@@ -151,6 +169,8 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 			// the team-scoped 'task' subscription's catch-up snapshot seeds
 			// runningSources and begin/end events flip it — no registry scan.
 		} catch (err) {
+			// Only the newest run may surface its failure.
+			if (mine !== fetchSeq.current) return;
 			setLoadError(err instanceof Error ? err.message : String(err));
 		}
 	}, [client, isConnected, projectId, teamId, sourceId]);

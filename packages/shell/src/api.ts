@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference -- ambient globals must load via reference; an import would scope them to this module
 /// <reference path="./types/global.d.ts" />
 //
 // The reference above pulls the shell's ambient module declarations (the

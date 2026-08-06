@@ -126,7 +126,7 @@ function randomBytes(byteLength: number): Uint8Array {
 /**
  * Generate a test payload of the requested size and type.
  *
- * Sizes:  tiny=100B, medium=10KB, large=1MB, huge=10MB
+ * Sizes:  tiny=100B, medium=10KB, large=1MB, huge=100MB
  * Types:  text, binary, mixed, malformed, empty
  *
  * Text payloads use realistic NLP content (business/tech/medical words)
@@ -412,6 +412,9 @@ export function createTestEngine(): TestEngine {
 				running = false;
 				await loop;
 				await client.disconnect().catch(() => {});
+				// Mirror createClient's increment — the dedicated heartbeat
+				// connection is gone, so the gauge must come back down.
+				metrics.wsConnections = Math.max(0, metrics.wsConnections - 1);
 			},
 		};
 	}
@@ -523,11 +526,15 @@ export function createTestEngine(): TestEngine {
 
 	/** Disconnect and destroy a pool of clients. */
 	async function destroyPool(pool: RocketRideClient[]): Promise<void> {
+		// Count BEFORE disconnecting: members whose connect failed never
+		// incremented wsConnections, so subtracting pool.length would
+		// undercount the gauge (and isConnected() is false after disconnect).
+		const connectedCount = pool.filter((c) => c.isConnected()).length;
 		const disconnectPromises = pool.map((c) =>
 			c.disconnect().catch(() => {}),
 		);
 		await Promise.allSettled(disconnectPromises);
-		metrics.wsConnections = Math.max(0, metrics.wsConnections - pool.length);
+		metrics.wsConnections = Math.max(0, metrics.wsConnections - connectedCount);
 	}
 
 	/**
@@ -612,7 +619,9 @@ export function createTestEngine(): TestEngine {
 		const ctx: SweepContext = {};
 
 		for (const def of API_METHODS) {
-			if (signal.aborted) return;
+			// break, not return: the post-loop cleanup (terminate the sweep
+			// pipeline + disconnect the sweep client) must still run on abort.
+			if (signal.aborted) break;
 			await waitIfPaused(signal);
 
 			// Seed the monitor entry so skipped methods appear in the table
@@ -1424,11 +1433,9 @@ export function createTestEngine(): TestEngine {
 
 			const t0 = performance.now();
 			try {
-				const payloadStr =
-					typeof payload === 'string'
-						? payload
-						: new TextDecoder().decode(payload);
-				const result = await client.send(token, payloadStr);
+				// client.send accepts string | Uint8Array — pass binary
+				// payloads through untranslated.
+				const result = await client.send(token, payload);
 				const latency = performance.now() - t0;
 				dataTransferred += payloadSize(payload);
 				pipelines[idx].opsCompleted++;
@@ -1496,7 +1503,9 @@ export function createTestEngine(): TestEngine {
 		// Each client gets its own echo pipeline
 		const clientTokens: string[] = [];
 		for (let i = 0; i < connected.length; i++) {
-			if (signal.aborted) return;
+			// break, not return: the post-loop cleanup (terminate the flood
+			// pipelines already created) must still run on abort.
+			if (signal.aborted) break;
 			try {
 				const pipe = getEchoPipeline();
 				const r = await connected[i].use({
@@ -1525,11 +1534,9 @@ export function createTestEngine(): TestEngine {
 
 					const payload = generatePayload('medium', 'text');
 					try {
-						const payloadStr =
-							typeof payload === 'string'
-								? payload
-								: new TextDecoder().decode(payload);
-						await client.send(token, payloadStr);
+						// client.send accepts string | Uint8Array — pass binary
+						// payloads through untranslated.
+						await client.send(token, payload);
 						dataTransferred += payloadSize(payload);
 						recordOp(true);
 					} catch (err) {
@@ -2234,7 +2241,9 @@ export function createTestEngine(): TestEngine {
 		 * backpressure flood, pipe streaming, chaos, and concurrent hammer.
 		 */
 		start(cfg: TestConfig, selectedPhases?: Set<string>) {
-			if (state === 'running') return;
+			// Only an idle engine may start: a paused/aborting run still owns
+			// metrics, clientPool, and abortController.
+			if (state !== 'idle') return;
 			state = 'running';
 			startTime = Date.now();
 			abortController = new AbortController();

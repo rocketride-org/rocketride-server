@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, CSSProperties } from 'react';
-import { commonStyles } from 'shell';
+import { commonStyles, ConfirmDialog } from 'shell';
 import type { RocketRideClient } from 'shell';
 import { usePipelineTree } from '../../hooks/usePipelineTree';
 import type { TreeNode } from '../../hooks/usePipelineTree';
@@ -12,6 +12,8 @@ import { BxChevronRight, BxFolderOpen } from 'shell';
 interface SaveDialogProps {
 	client: RocketRideClient | null;
 	isConnected: boolean;
+	/** Relative paths (with extension) of pipelines that already exist — drives the overwrite confirm. */
+	existingPaths: string[];
 	onConfirm: (path: string) => void;
 	onCancel: () => void;
 }
@@ -60,6 +62,16 @@ const DirPicker: React.FC<DirPickerProps> = ({ nodes, depth, selectedDir, expand
 								color: isSelected ? 'var(--rr-fg-list-active)' : 'var(--rr-text-primary)',
 							}}
 							onClick={() => { onSelect(node.path); if (hasDirs) onToggle(node.path); }}
+							// Keyboard access: rows act as buttons (Enter/Space = click).
+							role="button"
+							tabIndex={0}
+							onKeyDown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									onSelect(node.path);
+									if (hasDirs) onToggle(node.path);
+								}
+							}}
 						>
 							<span style={{ display: 'inline-flex', alignItems: 'center', width: 14, height: 14, flexShrink: 0, opacity: hasDirs ? 1 : 0 }}>
 								<BxChevronRight size={12} style={{ transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 100ms ease' }} />
@@ -159,10 +171,12 @@ const styles = {
 // COMPONENT
 // =============================================================================
 
-const SaveDialog: React.FC<SaveDialogProps> = ({ client, isConnected, onConfirm, onCancel }) => {
+const SaveDialog: React.FC<SaveDialogProps> = ({ client, isConnected, existingPaths, onConfirm, onCancel }) => {
 	const [name, setName] = useState('');
 	const [selectedDir, setSelectedDir] = useState('');
 	const [expandedDirs, setExpandedDirs] = useState<Set<string>>(() => new Set());
+	// Path awaiting overwrite confirmation (target already exists), or null.
+	const [overwritePath, setOverwritePath] = useState<string | null>(null);
 	const inputRef = useRef<HTMLInputElement>(null);
 
 	const { tree } = usePipelineTree(client, isConnected);
@@ -175,8 +189,14 @@ const SaveDialog: React.FC<SaveDialogProps> = ({ client, isConnected, onConfirm,
 	const handleConfirm = useCallback(() => {
 		if (!valid) return;
 		const path = selectedDir ? `${selectedDir}/${trimmed}.pipe` : `${trimmed}.pipe`;
+		// Saving over an existing pipeline is destructive — route through an
+		// explicit overwrite confirm instead of silently replacing the file.
+		if (existingPaths.includes(path)) {
+			setOverwritePath(path);
+			return;
+		}
 		onConfirm(path);
-	}, [valid, selectedDir, trimmed, onConfirm]);
+	}, [valid, selectedDir, trimmed, existingPaths, onConfirm]);
 
 	/**
 	 * Dismisses the dialog on Escape from anywhere inside it. Attached to the
@@ -203,7 +223,7 @@ const SaveDialog: React.FC<SaveDialogProps> = ({ client, isConnected, onConfirm,
 		/* Backdrop is inert: dismissal is deliberate-only (✕ / Cancel / Escape)
 		   per the 2026-07-08 design decision — clicking outside must NOT close. */
 		<div style={commonStyles.modalOverlay}>
-			<div style={styles.dialog} onKeyDown={handleDialogKeyDown}>
+			<div style={styles.dialog} onKeyDown={handleDialogKeyDown} role="dialog" aria-modal="true" aria-label="Save Pipeline As">
 				{/* Top-right close button — same action as Cancel. */}
 				<button style={styles.dialogClose} onClick={onCancel} aria-label="Close">✕</button>
 
@@ -216,7 +236,19 @@ const SaveDialog: React.FC<SaveDialogProps> = ({ client, isConnected, onConfirm,
 
 				<div style={styles.treeArea}>
 					{/* Root option */}
-					<div style={styles.rootRow(selectedDir === '')} onClick={() => setSelectedDir('')}>
+					<div
+						style={styles.rootRow(selectedDir === '')}
+						onClick={() => setSelectedDir('')}
+						// Keyboard access: rows act as buttons (Enter/Space = click).
+						role="button"
+						tabIndex={0}
+						onKeyDown={(e) => {
+							if (e.key === 'Enter' || e.key === ' ') {
+								e.preventDefault();
+								setSelectedDir('');
+							}
+						}}
+					>
 						<BxFolderOpen size={14} style={{ color: 'inherit', flexShrink: 0 }} />
 						<span>Pipeline root</span>
 					</div>
@@ -253,6 +285,19 @@ const SaveDialog: React.FC<SaveDialogProps> = ({ client, isConnected, onConfirm,
 					</div>
 				</div>
 			</div>
+
+			{/* Overwrite confirm — mounts on top of the save dialog when the chosen
+			    path already exists; only an explicit "Overwrite" proceeds. */}
+			{overwritePath && (
+				<ConfirmDialog
+					title="Overwrite Pipeline"
+					message={`"${trimmed}" already exists — overwrite it?`}
+					confirmLabel="Overwrite"
+					destructive
+					onConfirm={() => { setOverwritePath(null); onConfirm(overwritePath); }}
+					onCancel={() => setOverwritePath(null)}
+				/>
+			)}
 		</div>
 	);
 };

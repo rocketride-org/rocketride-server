@@ -18,7 +18,9 @@ export function downloadTextFile(filename: string, data: string, mimeType = 'app
 	document.body.appendChild(a);
 	a.click();
 	a.remove();
-	URL.revokeObjectURL(url);
+	// Deferred revoke: revoking in the same task makes WebKit abort the
+	// still-queued download before it starts.
+	setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 /** Serializes `data` as pretty-printed JSON and downloads it as `filename`. */

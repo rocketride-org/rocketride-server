@@ -36,6 +36,7 @@ import * as d3 from 'd3';
 import type { HierarchyRectangularNode } from 'd3';
 import { commonStyles } from 'shell';
 import type { ProfileTreeNode, OnRootChange } from './types';
+import { pruneTree, limitDepth } from './treeUtils';
 
 // =============================================================================
 // CONSTANTS
@@ -118,36 +119,6 @@ interface SunburstChartProps {
 	cutoff: number;
 	/** Callback when user clicks an arc to re-root the visualisation. */
 	onRootChange: OnRootChange;
-}
-
-// =============================================================================
-// HELPERS
-// =============================================================================
-
-/**
- * Apply cutoff pruning to a tree node.
- * Returns a new node with children filtered by the cutoff threshold.
- * Children whose cumtime is less than cutoff * parent.cumtime are removed.
- */
-function pruneTree(node: ProfileTreeNode, cutoff: number): ProfileTreeNode {
-	if (cutoff <= 0 || !node.children.length) return node;
-	const threshold = cutoff * node.cumtime;
-	const prunedChildren = node.children
-		.filter((c) => c.cumtime >= threshold)
-		.map((c) => pruneTree(c, cutoff));
-	return { ...node, children: prunedChildren };
-}
-
-/**
- * Limit tree depth to maxDepth levels.
- * Returns a new tree with children beyond maxDepth removed.
- */
-function limitDepth(node: ProfileTreeNode, maxDepth: number, depth: number = 0): ProfileTreeNode {
-	if (depth >= maxDepth) return { ...node, children: [] };
-	return {
-		...node,
-		children: node.children.map((c) => limitDepth(c, maxDepth, depth + 1)),
-	};
 }
 
 // =============================================================================

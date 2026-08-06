@@ -1,8 +1,13 @@
 declare module '*.css' {}
 
 declare module '*.svg' {
-	const src: string;
-	export default src;
+	import type * as React from 'react';
+	// SVG imports are SVGR-generated React components (ref forwarded to the
+	// underlying <svg>), matching apps/shared/src/types/global.d.ts.
+	const Component: React.ForwardRefExoticComponent<
+		React.SVGProps<SVGSVGElement> & React.RefAttributes<SVGSVGElement>
+	>;
+	export default Component;
 }
 
 declare module '*.png' {

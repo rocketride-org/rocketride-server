@@ -415,11 +415,16 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 
 	// Report modal
 	const [showReportModal, setShowReportModal] = useState(false);
+	// Dialog box ref — receives focus on open so keyboard/screen-reader users
+	// land inside the modal.
+	const reportDialogRef = useRef<HTMLDivElement | null>(null);
 
 	// Escape closes the report modal (matching the shell modal pattern); the
 	// backdrop stays inert per the deliberate-dismissal policy.
 	useEffect(() => {
 		if (!showReportModal) return;
+		// Move focus into the freshly-opened dialog.
+		reportDialogRef.current?.focus();
 		const onKeyDown = (e: KeyboardEvent): void => {
 			if (e.key === 'Escape') setShowReportModal(false);
 		};
@@ -865,9 +870,17 @@ const ProfilerView: React.FC<ProfilerViewProps> = ({ host, port, name }) => {
 				/* Backdrop is inert: dismissal is deliberate-only (close button) per
 				   the 2026-07-08 design decision — clicking outside must NOT close. */
 				<div style={styles.modalBackdrop}>
-					<div style={styles.modalDialog}>
+					<div
+						ref={reportDialogRef}
+						style={styles.modalDialog}
+						role="dialog"
+						aria-modal="true"
+						aria-labelledby="profiler-report-title"
+						// tabIndex -1 lets the box itself take initial focus.
+						tabIndex={-1}
+					>
 						<div style={styles.modalHeader}>
-							<h3 style={{ margin: 0, fontSize: 14 }}>Raw Profile Report</h3>
+							<h3 id="profiler-report-title" style={{ margin: 0, fontSize: 14 }}>Raw Profile Report</h3>
 							{/* Top-right close button. */}
 							<button
 								style={styles.button}
