@@ -200,12 +200,13 @@ export interface ISidebarViewProps {
 	// ── App Builder mode ────────────────────────────────────────────────────
 	/**
 	 * App Builder sidebar content — presence adds the Apps tab to the mode
-	 * tabs and enables the MY APPS mode. Omitted → Pipelines only.
+	 * tabs and enables the MY APPS mode. Omitted → no Apps tab (the Nodes
+	 * placeholder still rides along whenever the mode tabs render).
 	 */
 	appBuilder?: AppBuilderSidebar;
 	/**
-	 * Force the mode tabs visible even with only the Pipelines tab (the web
-	 * host: more modes — the node builder — will land on that strip).
+	 * Force the mode tabs visible without appBuilder — Pipelines plus the
+	 * Nodes placeholder (the web host: more modes will land on that strip).
 	 */
 	showModeStrip?: boolean;
 	/** Active sidebar mode when the tabs are shown. Defaults to 'pipelines'. */

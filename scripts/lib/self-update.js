@@ -114,6 +114,13 @@ async function selfUpdate(root, branch, opts = {}) {
 	// Clear leftovers from a previously interrupted update so the clone and
 	// the rename below start from a clean slate.
 	fs.rmSync(tmpDir, { recursive: true, force: true });
+	// An interrupted swap (old scripts/ renamed away, new one not yet in
+	// place) leaves the backup as the ONLY scripts tree — restore it before
+	// discarding, so a failed fetch below cannot strand the target without
+	// a usable builder.
+	if (!fs.existsSync(scriptsDir) && fs.existsSync(backupDir)) {
+		fs.renameSync(backupDir, scriptsDir);
+	}
 	fs.rmSync(backupDir, { recursive: true, force: true });
 
 	try {

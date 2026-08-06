@@ -39,11 +39,12 @@ const ROW_STYLE: React.CSSProperties = {
 	padding: '4px 0',
 };
 
+// One fixed ISO instant so formatDate output is stable while knobs change
+const DEMO_ISO = new Date().toISOString();
+
 /** Live demo: all three formatters over the knob-driven number. */
 const FormattersDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 	const value = Number(knobs.value);
-	// One fixed ISO instant so formatDate output is stable while knobs change
-	const iso = new Date().toISOString();
 	return (
 		<div>
 			<div style={ROW_STYLE}>
@@ -56,7 +57,7 @@ const FormattersDemo: React.FC<IGalleryDemoProps> = ({ knobs }) => {
 			</div>
 			<div style={ROW_STYLE}>
 				<span style={commonStyles.fontMono}>formatDate(now)</span>
-				<span>{formatDate(iso)}</span>
+				<span>{formatDate(DEMO_ISO)}</span>
 			</div>
 		</div>
 	);

@@ -2757,21 +2757,18 @@ export class RocketRideClient extends DAPClient {
 	 * UI schema per section) the configure panel needs.
 	 *
 	 * @param service - Name of the service to retrieve (e.g., 'ocr', 'embed', 'chat')
-	 * @returns Promise resolving to service definition or undefined if not found
-	 * @throws Error if the request fails or server returns an error
+	 * @returns Promise resolving to the service definition
+	 * @throws Error if the request fails or server returns an error — an
+	 *         unknown service name is an error, not an undefined result
 	 *
 	 * @example
 	 * ```typescript
 	 * // Get OCR service definition (config sections included)
 	 * const ocr = await client.getService('ocr');
-	 * if (ocr) {
-	 *   console.log('OCR sections:', Object.keys(ocr));
-	 * } else {
-	 *   console.log('OCR service not available');
-	 * }
+	 * console.log('OCR sections:', Object.keys(ocr));
 	 * ```
 	 */
-	async getService(service: string): Promise<ServiceDefinition | undefined> {
+	async getService(service: string): Promise<ServiceDefinition> {
 		if (!service) {
 			throw new Error('Service name is required');
 		}

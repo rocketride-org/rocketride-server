@@ -40,7 +40,7 @@ The auth providers are HOST bootstrap machinery: \`CloudAuthProvider\` (OAuth2 P
 
 To trigger auth flows from UI, emit the intent events instead: \`shell:loginRequest\` / \`shell:logoutRequest\`. \`useLogout()\` currently always returns \`null\` (sign-out is a shell page-reload flow) — it exists as the forward-compatible seam.`,
 	docNote: 'The shell owns auth end to end. Apps read identity via useAuthUser and emit shell:loginRequest / shell:logoutRequest - never instantiate providers or handle tokens.',
-	code: `import { useAuthUser, ConnectionManager } from 'shell';
+	code: `import { useAuthUser, ConnectionManager, Button } from 'shell';
 
 function AccountCard() {
 	const user = useAuthUser();

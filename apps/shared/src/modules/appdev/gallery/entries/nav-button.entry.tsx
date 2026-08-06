@@ -52,7 +52,7 @@ const buildCode = (knobs: KnobValues): string => {
 	].join('');
 	return `import { NavButton, BxRocket } from 'shell';
 
-<NavButton icon={BxRocket} label="${String(knobs.label)}"${attrs} onClick={openView} />`;
+<NavButton icon={BxRocket} label={${JSON.stringify(String(knobs.label))}}${attrs} onClick={openView} />`;
 };
 
 /** The NavButton gallery entry. */

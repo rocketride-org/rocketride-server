@@ -30,12 +30,11 @@ configuration metadata used for pipeline configuration and validation.
 Usage:
     # Get all available service definitions
     services = await client.get_services()
-    # services is a dict with 'services' and 'version' keys from the engine
+    # services is a dict with 'services', 'icons' and 'version' keys from the engine
 
     # Get a specific service by name
     ocr_schema = await client.get_service('ocr')
-    if ocr_schema:
-        print('OCR schema:', ocr_schema)
+    print('OCR schema:', ocr_schema)
 """
 
 from typing import Dict, Any, Optional
@@ -51,8 +50,9 @@ class ServicesMixin(DAPClient):
 
     This mixin adds get_services() and get_service() to fetch connector
     definitions from the server via the DAP rrext_services command.
-    get_services() returns lightweight summaries (display fields + inline
-    icon SVG); get_service() returns one full definition with the
+    get_services() returns lightweight summaries (display fields; each
+    summary's 'icon' field is an id into the deduplicated 'icons' SVG
+    table); get_service() returns one full definition with the
     configuration schema sections.
 
     This is automatically included when you use RocketRideClient.
@@ -81,7 +81,7 @@ class ServicesMixin(DAPClient):
         """
         return await self.call('rrext_services')
 
-    async def get_service(self, service: str) -> Optional[SERVICE_DEFINITION]:
+    async def get_service(self, service: str) -> SERVICE_DEFINITION:
         """
         Retrieve a specific service's FULL definition by name.
 
@@ -93,11 +93,12 @@ class ServicesMixin(DAPClient):
             service: Logical name of the service (e.g. 'ocr', 'embed', 'chat').
 
         Returns:
-            The service definition dict, or None if not found.
+            The service definition dict.
 
         Raises:
             ValueError: If service is empty.
-            RuntimeError: If the server returns an error (e.g. service not found).
+            RuntimeError: If the server returns an error — an unknown
+                service name is an error, not an empty result.
         """
         if not service:
             raise ValueError('Service name is required')
