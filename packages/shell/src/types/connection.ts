@@ -51,11 +51,12 @@ export enum ConnectionState {
 	/** Successfully connected and authenticated. */
 	CONNECTED = 'connected',
 
-	/** Connection attempt failed (network, timeout, server error). */
+	/** Connection attempt failed due to a server error. */
 	FAILED = 'failed',
 
 	/** Authentication was rejected by the server (bad/expired/revoked key). */
 	AUTH_FAILED = 'auth-failed',
+
 }
 
 // =============================================================================
@@ -96,6 +97,33 @@ export interface ConnectionStatus {
 
 	/** Last error message (cleared on successful connect). */
 	lastError?: string;
+
+	/**
+	 * Discriminates AUTH_FAILED origins so recovery UI can phrase the message:
+	 * 'oauth-callback' — the IdP returned an error on the OAuth callback;
+	 * 'session' — an existing session was rejected or expired.
+	 */
+	errorKind?: 'oauth-callback' | 'session';
+
+	/**
+	 * Most recent unrecovered failure, latched across later transitions.
+	 * Persist-mode reconnect attempts report CONNECTING and a post-failure
+	 * anonymous connect reports CONNECTED — recovery UI reads this field so
+	 * the failure stays visible until it is actually resolved. Network
+	 * failures clear on reconnection; auth failures clear on re-auth.
+	 */
+	lastFailure?: {
+		/**
+		 * 'network' — transport failure, retryable, credentials intact;
+		 * 'auth' — credentials rejected/expired. Carried here (not as a new
+		 * ConnectionState member) because the enum is frozen by the versioned
+		 * shell-api contract; the state stays FAILED / AUTH_FAILED.
+		 */
+		kind: 'network' | 'auth';
+		lastError?: string;
+		/** Distinguishes an aborted OAuth callback from an expired session. */
+		errorKind?: 'oauth-callback' | 'session';
+	};
 
 	/** True if we have necessary credentials/config to attempt connection. */
 	hasCredentials: boolean;

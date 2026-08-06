@@ -34,9 +34,10 @@
 // No engine process management (that's VSCode-only via LocalManager).
 // =============================================================================
 
-import { RocketRideClient, ConnectResult } from 'rocketride';
+import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError } from 'rocketride';
 import type { ManagerInfo } from '../types/connection';
 import { BaseManager, ShellConnectionConfig } from './base-manager';
+import { AUTH_REJECTED_MESSAGE, ConnectionFailure, withTimeout } from './errors';
 import { CONNECT_TIMEOUT_MS } from '../constants';
 
 // =============================================================================
@@ -46,6 +47,16 @@ import { CONNECT_TIMEOUT_MS } from '../constants';
 export class RemoteManager extends BaseManager {
 	/** Cached server info from the most recent successful connection. */
 	private serverInfo: ManagerInfo | null = null;
+
+	/**
+	 * @param onLoginTimeout - Invoked when a login times out, BEFORE the client
+	 *   is detached. Returning `false` signals that a newer operation now owns
+	 *   the client (it must stay attached); any other result lets the timed-out
+	 *   login detach so it cannot complete late.
+	 */
+	constructor(private readonly onLoginTimeout?: () => boolean | Promise<boolean | void> | void) {
+		super();
+	}
 
 	// =========================================================================
 	// LIFECYCLE
@@ -62,20 +73,35 @@ export class RemoteManager extends BaseManager {
 	async connect(client: RocketRideClient, config: ShellConnectionConfig): Promise<void> {
 		// Validate that we have something to connect with
 		if (!config.credential) {
-			throw new Error('No credential provided for connection.');
+			throw new ConnectionFailure('No credential provided for connection.', 'auth');
 		}
 
-		// Login with timeout to avoid indefinite hangs (transport already attached)
-		const result = await Promise.race([
-			client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }),
-			new Promise<never>((_, reject) =>
-				setTimeout(() => reject(new Error(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`)), CONNECT_TIMEOUT_MS),
-			),
-		]) as ConnectResult;
+		// login() also waits for post-auth monitor resubscription, so bound the
+		// entire operation and detach before surfacing a timeout.
+		let result: ConnectResult;
+		try {
+			result = await withTimeout(
+				client.login(config.credential as string | { code: string; verifier: string; redirectUri: string }),
+				CONNECT_TIMEOUT_MS,
+				new ConnectionFailure(`Connection timed out after ${CONNECT_TIMEOUT_MS}ms`, 'network'),
+				async () => {
+					const ownsLogin = await this.onLoginTimeout?.();
+					if (ownsLogin !== false) await client.detach();
+				},
+			);
+		} catch (error) {
+			// Classify the failure so recovery UI can offer the right action.
+			if (error instanceof LoginAttemptCancelledError) throw error;
+			if (error instanceof ConnectionFailure) throw error;
+			if (error instanceof AuthenticationException) {
+				throw new ConnectionFailure(error.message, 'auth');
+			}
+			throw new ConnectionFailure(error instanceof Error ? error.message : String(error), 'network');
+		}
 
 		// Validate the result — SDK resolves even on auth failure
 		if (!result.userId) {
-			throw new Error('Authentication failed: unknown user or invalid credentials.');
+			throw new ConnectionFailure(AUTH_REJECTED_MESSAGE, 'auth');
 		}
 
 		// Cache server info if available. serverVersion is sent by newer servers

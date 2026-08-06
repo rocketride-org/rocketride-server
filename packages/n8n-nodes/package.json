@@ -1,0 +1,78 @@
+{
+	"name": "n8n-nodes-rocketride",
+	"version": "0.1.0",
+	"description": "Run RocketRide AI pipelines from n8n for document parsing, OCR, data extraction, PII anonymization, transformation, RAG, chat, and agents. Includes a RocketRide Trigger for RocketRide-to-n8n flows.",
+	"license": "MIT",
+	"homepage": "https://github.com/rocketride-org/rocketride-server/tree/develop/packages/n8n-nodes#readme",
+	"bugs": {
+		"url": "https://github.com/rocketride-org/rocketride-server/issues"
+	},
+	"keywords": [
+		"n8n-community-node-package",
+		"n8n",
+		"rocketride",
+		"ai",
+		"rag",
+		"pipeline",
+		"document-processing",
+		"automation",
+		"ai-agent",
+		"ai-pipeline",
+		"document-parsing",
+		"ocr",
+		"data-extraction",
+		"anonymization",
+		"pii",
+		"redaction",
+		"data-transformation",
+		"summarization"
+	],
+	"author": {
+		"name": "Aparavi Software AG",
+		"url": "https://rocketride.ai"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/rocketride-org/rocketride-server.git",
+		"directory": "packages/n8n-nodes"
+	},
+	"scripts": {
+		"build": "n8n-node build",
+		"build:watch": "tsc --watch",
+		"dev": "n8n-node dev",
+		"lint": "n8n-node lint",
+		"lint:fix": "n8n-node lint --fix",
+		"release": "n8n-node release",
+		"prepublishOnly": "n8n-node prerelease",
+		"test": "vitest run"
+	},
+	"files": [
+		"dist"
+	],
+	"publishConfig": {
+		"access": "public",
+		"provenance": true
+	},
+	"n8n": {
+		"n8nNodesApiVersion": 1,
+		"strict": true,
+		"credentials": [
+			"dist/credentials/RocketRideApi.credentials.js"
+		],
+		"nodes": [
+			"dist/nodes/RocketRide/RocketRide.node.js",
+			"dist/nodes/RocketRideInboundTrigger/RocketRideInboundTrigger.node.js"
+		]
+	},
+	"devDependencies": {
+		"@n8n/node-cli": "0.34.0",
+		"eslint": "9.29.0",
+		"prettier": "3.6.2",
+		"release-it": "^19.0.4",
+		"typescript": "5.9.2",
+		"vitest": "^4.1.8"
+	},
+	"peerDependencies": {
+		"n8n-workflow": "*"
+	}
+}

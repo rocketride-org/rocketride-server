@@ -1,0 +1,193 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "RocketRide Vector",
+	//
+	// Required:
+	//     The protocol is the endpoint protocol
+	//
+	"protocol": "rocketride_vector://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["store"],
+	//
+	// Required:
+	//     Capabilities are flags that change the behavior of the underlying
+	//     engine
+	//
+	"capabilities": [],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified. If the
+	//		type is specified, a factory is registered of that given type
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//     The node is the actual physical node to instantiate - if
+	//     not specified, the protocol will be used
+	//
+	"node": "python",
+	//
+	// Optional:
+	//     The path is the executable/script code - it is node dependent
+	//     and is optional for most node
+	//
+	"path": "nodes.rocketride_vector",
+	//
+	// Required:
+	//     The prefix map when added/removed when converting URLs <=> paths
+	//
+	"prefix": "RocketRide Vector Store",
+	//
+	// Optional:
+	//		Description to of this driver
+	//
+	"description": ["A RocketRide-managed vector store backed by PostgreSQL + pgvector. Stores ", "and semantically searches high-dimensional embeddings in your own provisioned ", "RocketRide cloud database with zero setup — no host, user, or password to enter; ", "the connection is resolved automatically from your signed-in RocketRide identity. ", "An HNSW index is created on first write so semantic search is fast from the start."],
+	//
+	// Optional:
+	//	  The icon is the icon to display in the UI for this node
+	//
+	"icon": "rocketride_vector.svg",
+	"documentation": "https://docs.rocketride.org",
+	//
+	//  Optional:
+	//      Rendering hints to the UI which indicate which fields of
+	//      the configuration should be used to display information
+	//
+	"tile": ["Table: ${parameters.rocketride_vector.${profile}.collection}", "Similarity: ${parameters.rocketride_vector.${profile}.similarity}"],
+	//
+	//	Optional:
+	//		As a pipe component, define what this pipe component takes
+	//		and what it produces
+	//
+	"lanes": {
+		"documents": [],
+		"questions": ["documents", "answers", "questions"]
+	},
+	//
+	//	Optional:
+	//		Profile section are configuration options used by the driver
+	//		itself
+	//
+	"preconfig": {
+		"default": "cloud",
+		"profiles": {
+			"cloud": {
+				"mode": "cloud",
+				"title": "RocketRide cloud",
+				"collection": "rocketride",
+				"score": 0.5,
+				"similarity": "cosine",
+				"hnsw_m": 16,
+				"hnsw_ef_construction": 64
+			}
+		}
+	},
+	//
+	// Optional:
+	//     Local fields definitions - these define fields only for the
+	//     current service. You may specify them here, or directly
+	//     in the shape
+	//
+	"fields": {
+		"rrvector.collection": {
+			"title": "Table",
+			"description": "Name of the table to store vectors in your RocketRide cloud database.",
+			"type": "string",
+			"default": "rocketride"
+		},
+		"rrvector.score": {
+			"title": "Score threshold",
+			"description": "Minimum similarity score for a document to be returned by search.",
+			"type": "number",
+			"default": 0.5
+		},
+		"rrvector.similarity": {
+			"title": "Similarity Metric",
+			"description": "The similarity metric to use for vector search. Also selects the HNSW index operator class.",
+			"type": "string",
+			"default": "cosine",
+			"enum": ["cosine", "l2", "inner_product"]
+		},
+		"rrvector.hnsw_m": {
+			"title": "HNSW m",
+			"description": "HNSW graph degree (max connections per layer) used when the index is first created.",
+			"type": "integer",
+			"default": 16,
+			"minimum": 2,
+			"maximum": 100
+		},
+		"rrvector.hnsw_ef_construction": {
+			"title": "HNSW ef_construction",
+			"description": "HNSW build-time candidate list size used when the index is first created.",
+			"type": "integer",
+			"default": 64,
+			"minimum": 4,
+			"maximum": 1000
+		},
+		"rrvector.cloud": {
+			"object": "cloud",
+			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction"]
+		},
+		"rrvector.profile": {
+			"hidden": true,
+			"title": "RocketRide cloud database",
+			"description": "Connect to...",
+			"type": "string",
+			"default": "cloud",
+			"enum": ["*>preconfig.profiles.*.title"],
+			"conditional": [
+				{
+					"value": "cloud",
+					"properties": ["rrvector.cloud"]
+				}
+			]
+		},
+		"rrvector.provider": {
+			"type": "string",
+			"const": "rocketride_vector",
+			"default": "rocketride_vector"
+		},
+		"rrvector.rocketride_vector": {
+			"object": "rocketride_vector",
+			"properties": ["rrvector.profile"]
+		},
+		"rrvector.store": {
+			"object": "store",
+			"title": "Store",
+			"properties": ["rrvector.provider", "rrvector.rocketride_vector"]
+		},
+		"rrvector.target.autopipe": {
+			"object": "parameters",
+			"title": "Parameters",
+			"properties": ["remote", "rrvector.store", "all.embedding"]
+		},
+		"rrvector.target.parameters": {
+			"object": "parameters",
+			"title": "Parameters",
+			"properties": ["rrvector.target.autopipe"]
+		}
+	},
+	//
+	// Required:
+	//     Defines the fields (shape) of the service. Either source or target
+	//     map be specified, or both, but at least one is required
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "RocketRide Vector Store",
+			"properties": ["rrvector.profile"]
+		},
+		{
+			"section": "Transform",
+			"title": "RocketRide Vector",
+			"properties": ["type", "rrvector.target.parameters"]
+		}
+	]
+}

@@ -136,8 +136,8 @@ class VALIDATION_RESULT(TypedDict, total=False):
     """
     Result of a pipeline validation via ``validate()``.
 
-    The engine validates structure, component compatibility, and connection
-    integrity. The result contains any errors and warnings found.
+    The engine validates structure — required fields and component
+    references. The result contains any errors and warnings found.
     """
 
     errors: List[VALIDATION_ERROR]  # Validation errors — pipeline will not execute with these

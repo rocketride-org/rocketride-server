@@ -50,6 +50,7 @@ import Sidebar from './Sidebar';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
+import { ConnectionErrorBanner } from './ConnectionErrorBanner';
 import type { ShellConfig } from '../workspace/types';
 import { commonStyles } from '../../themes/styles';
 
@@ -377,7 +378,12 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 
 		// Only gate when the manifest is loaded and explicitly requires auth.
 		// Skip for the default app (home/hello) — it must always be accessible.
-		if (!suppressGateRef.current && !identity && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
+		// A latched connection failure owns the recovery UX: while the banner is
+		// showing (network down / session expired), bouncing the visitor into an
+		// OAuth redirect would hide it — and with the server unreachable the
+		// redirect can't complete anyway. The banner's actions restart the flow.
+		const failureLatched = !!ConnectionManager.getInstance().getConnectionStatus().lastFailure;
+		if (!suppressGateRef.current && !identity && !failureLatched && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
 			if (authGateTriggeredRef.current === activeAppId) return;
 			authGateTriggeredRef.current = activeAppId;
 			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId });
@@ -424,7 +430,18 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		(!devPending && !!appLoadErrors[activeAppId]) ||
 		(!devPending && appManifest.length > 0 && !activeManifest);
 	if (hasFirstContent) firstContentRef.current = true;
-	if (!firstContentRef.current) return <LoadingScreen />;
+	if (!firstContentRef.current) {
+		// A latched failure (server unreachable, session expired) can strand the
+		// boot on this rocket forever — no app content will ever arrive to flip
+		// the latch. Surface the recovery banner OVER the rocket so the user
+		// gets the Retry / Sign in path instead of an indefinite spinner.
+		return (
+			<>
+				<ConnectionErrorBanner />
+				<LoadingScreen />
+			</>
+		);
+	}
 
 	// --- Derived layout info -------------------------------------------------
 	// The sidebar is always mounted (inside HostChromeProvider) and self-hides
@@ -446,6 +463,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		<HostChromeProvider>
 		<OverlayManager>
 		<div style={styles.shell}>
+			<ConnectionErrorBanner />
 			{/* Main row: Sidebar | Client Area | Debug Panel */}
 			<div style={styles.main}>
 				{/* Sidebar zone — always mounted; self-hides when it has no content. */}

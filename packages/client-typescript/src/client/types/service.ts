@@ -157,8 +157,8 @@ export interface ValidationError {
 /**
  * Result of a pipeline validation via `validate()`.
  *
- * The engine validates structure, component compatibility, and connection
- * integrity. The result contains any errors and warnings found.
+ * The engine validates structure — required fields and component
+ * references. The result contains any errors and warnings found.
  */
 export interface ValidationResult {
 	/** Validation errors — pipeline will not execute with these. */

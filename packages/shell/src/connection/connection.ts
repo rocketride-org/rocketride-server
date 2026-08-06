@@ -28,7 +28,7 @@
 //   - Singleton via static getInstance()
 //   - Typed event bus (emit/on) with debug log and wildcard listeners
 //   - Delegates connection backend to RemoteManager (BaseManager subclass)
-//   - Promise-based concurrency guards (connectPromise/disconnectPromise)
+//   - Credential-keyed, generation-owned connection operations
 //   - ConnectionStatus state machine with proper enum states
 //
 // Auth is decoupled into CloudAuthProvider / ApiKeyAuthProvider — this class
@@ -40,13 +40,17 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { RocketRideClient, ConnectResult } from 'rocketride';
+import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell';
 import type { IAuthProvider } from '../types/connection';
-import { ConnectionState, ConnectionStatus } from '../types/connection';
-import type { ConnectionMode } from '../types/connection';
+// ConnectionState is the one runtime value; the rest are type-only so
+// node:test loads no more than the types module at runtime.
+import { ConnectionState } from '../types/connection';
+import type { ConnectionMode, ConnectionStatus } from '../types/connection';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
+import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
+import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
 import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
@@ -103,6 +107,36 @@ type Handler<T = unknown> = (payload: T) => void;
 
 /** Handler type for wildcard listeners (debug panel). */
 type WildcardHandler = (event: string, payload: unknown) => void;
+
+type ConnectionCredential = string | { code: string; verifier: string; redirectUri: string };
+
+interface ShellConnectionOperation {
+	key: string;
+	generation: number;
+	credential: ConnectionCredential;
+	cancellationReason?: LoginAttemptCancelledError['reason'];
+	promise: Promise<ConnectResult | null>;
+	connectedPublished: boolean;
+}
+
+function isConnectionCredential(credential: unknown): credential is ConnectionCredential {
+	return typeof credential === 'string' || (
+		typeof credential === 'object' &&
+		credential !== null &&
+		typeof (credential as Record<string, unknown>).code === 'string' &&
+		typeof (credential as Record<string, unknown>).verifier === 'string' &&
+		typeof (credential as Record<string, unknown>).redirectUri === 'string'
+	);
+}
+
+function connectionCredentialKey(credential: ConnectionCredential): string {
+	if (typeof credential === 'string') return `token:${credential}`;
+	return `pkce:${JSON.stringify({
+		code: credential.code,
+		verifier: credential.verifier,
+		redirectUri: credential.redirectUri,
+	})}`;
+}
 
 /**
  * Runtime type guard narrowing an untyped DAP event body to a ConnectResult.
@@ -212,8 +246,12 @@ export class ConnectionManager implements IConnectionManager {
 	/** Active backend manager (RemoteManager). */
 	private manager: BaseManager | null = null;
 
-	/** In-flight connect guard — prevents concurrent connect() calls. */
-	private connectPromise: Promise<ConnectResult | null> | undefined;
+	/** Current in-flight shell operation, keyed by endpoint and credential. */
+	private connectionOperation: ShellConnectionOperation | undefined;
+	/** Latest operation allowed to publish SDK lifecycle state. */
+	private lifecycleOwner: ShellConnectionOperation | undefined;
+	/** Monotonic shell lifecycle generation, invalidated before SDK cleanup. */
+	private connectionGeneration = 0;
 
 	/** Connection status state machine. */
 	private connectionStatus: ConnectionStatus = {
@@ -293,6 +331,7 @@ export class ConnectionManager implements IConnectionManager {
 
 			// Fired for every push event received from the server over WebSocket
 			onEvent: async (message) => {
+				if (!this.hasCurrentLifecycleOwner()) return;
 				// Transform apaext_account into shell:accountUpdate to avoid
 				// duplicate handling downstream. The guard narrows the untyped
 				// push body to a ConnectResult without a cast.
@@ -323,34 +362,36 @@ export class ConnectionManager implements IConnectionManager {
 
 			// Fired once the WebSocket handshake completes and auth succeeds
 			onConnected: async () => {
-				this.updateConnectionStatus({
-					state: ConnectionState.CONNECTED,
-					lastConnected: new Date(),
-					lastError: undefined,
-					retryAttempt: 0,
-					progressMessage: undefined,
-				});
-				this.emit('shell:connected', {});
-				this.emit('shell:statusMessage', { message: null });
-
-				// Fetch and cache services list on connect
-				this.refreshServices().catch((err) => {
-					console.error('[ConnectionManager] Failed to refresh services on connect:', err);
-				});
+				if (!this.hasCurrentLifecycleOwner()) return;
+				if (!this.client?.isAttached() || !this.client.isAuthenticated()) return;
+				this.publishConnected(this.lifecycleOwner!);
 			},
 
 			// Fired when the WebSocket closes for any reason
 			onDisconnected: async (reason, hasError) => {
+				if (!this.hasCurrentLifecycleOwner()) return;
+				this.lifecycleOwner!.connectedPublished = false;
 				this.clearServicesCache();
 				// Don't overwrite AUTH_FAILED state
 				if (this.connectionStatus.state !== ConnectionState.AUTH_FAILED) {
-					this.updateConnectionStatus({ state: ConnectionState.CONNECTING });
+					this.updateConnectionStatus({ state: ConnectionState.CONNECTING, errorKind: undefined });
 				}
 				this.emit('shell:disconnected', { reason: reason ?? 'unknown', hasError: hasError ?? false });
 			},
 
 			// Fired on each failed connection attempt before SDK retries
-			onConnectError: () => {
+			onConnectError: (error) => {
+				if (!this.hasCurrentLifecycleOwner()) return;
+				// A background re-login rejection is terminal: the SDK downgrades
+				// to an anonymous attachment and stops retrying. Without latching
+				// here, a token revoked mid-session leaves the UI showing
+				// "Reconnecting\u2026" forever with a dead token still stored.
+				if (error instanceof AuthenticationException) {
+					if (this.handleStoredTokenFailure(error)) this.clearToken();
+					this.accountInfo = undefined;
+					this.emit('shell:statusMessage', { message: null });
+					return;
+				}
 				this.updateConnectionStatus({
 					progressMessage: 'Reconnecting\u2026',
 					retryAttempt: this.connectionStatus.retryAttempt + 1,
@@ -368,7 +409,8 @@ export class ConnectionManager implements IConnectionManager {
 
 		// Attach immediately so public APIs (rrext_public_*) work before login.
 		// The promise is stored so bootstrap() can await it before login().
-		this._attachPromise = this.client.attach().catch((err) => {
+		this._attachPromise = this.client.attach(undefined, { timeout: 10000 });
+		void this._attachPromise.catch((err) => {
 			console.error('[ConnectionManager] Failed to attach:', err);
 		});
 
@@ -378,6 +420,39 @@ export class ConnectionManager implements IConnectionManager {
 		// click would hit the guard and do nothing. Release it on bfcache restore
 		// so the button works again without a manual page refresh.
 		if (typeof window !== 'undefined') {
+			window.addEventListener('storage', (event) => {
+				try {
+					const localStorage = window.localStorage;
+					if (event.key !== LS_TOKEN || event.storageArea !== localStorage) return;
+
+					if (event.newValue === null) {
+						this.clearToken();
+						this.accountInfo = undefined;
+						this.pendingEvents.clear();
+						this.clearServicesCache();
+						this.updateConnectionStatus({
+							state: ConnectionState.DISCONNECTED,
+							hasCredentials: false,
+							lastError: undefined,
+							progressMessage: undefined,
+						});
+						window.location.reload();
+						return;
+					}
+
+					if (shouldReloadForTokenStorageUpdate({
+						oldValue: event.oldValue,
+						newValue: event.newValue,
+						currentUserToken: this.accountInfo?.userToken,
+						hasAccountInfo: Boolean(this.accountInfo),
+					})) {
+						window.location.reload();
+					}
+				} catch {
+					return;
+				}
+			});
+
 			window.addEventListener('pageshow', (e) => {
 				if ((e as PageTransitionEvent).persisted) {
 					this.oauthStarted = false;
@@ -497,12 +572,48 @@ export class ConnectionManager implements IConnectionManager {
 		onThemeChange?: (theme: string) => void;
 	}): Promise<{ result: ConnectResult; appId: string } | null> {
 		if (!this.client) throw new Error('Client not initialized — call init() first.');
+		const bootstrapGeneration = this.connectionGeneration;
 
-		// Ensure the transport is attached before any login attempt
-		await this._attachPromise;
+		// Ensure the transport is attached before any login attempt. The native
+		// attach timeout closes a timed-out handshake before this promise rejects.
+		try {
+			await this._attachPromise!;
+		} catch (error) {
+			if (this.connectionGeneration !== bootstrapGeneration) return null;
+			// Transport attach failures are network problems by definition.
+			this.handleStoredTokenFailure(
+				error instanceof ConnectionFailure
+					? error
+					: new ConnectionFailure(error instanceof Error ? error.message : String(error), 'network'),
+			);
+			return null;
+		}
+		if (this.connectionGeneration !== bootstrapGeneration) return null;
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
+		// Only honor `auth_error`: it is set exclusively by our own OAuth
+		// callback (the registered redirect_uri is the server callback, which
+		// wraps every Zitadel failure as `auth_error` before redirecting here).
+		// The generic OAuth `error`/`error_description` params never legitimately
+		// reach the app this way, so reading them would let any unrelated app
+		// deep-link (`/app?error=…`) hijack bootstrap into a false sign-in banner.
+		const errorDescription = params.get('auth_error');
+
+		if (errorDescription) {
+			if (this.connectionGeneration !== bootstrapGeneration) return null;
+			window.history.replaceState({}, '', window.location.pathname);
+			this.updateConnectionStatus({
+				state: ConnectionState.AUTH_FAILED,
+				lastError: errorDescription,
+				progressMessage: undefined,
+				errorKind: 'oauth-callback',
+				lastFailure: { kind: 'auth', lastError: errorDescription, errorKind: 'oauth-callback' },
+			});
+			this.clearPendingAppId();
+			return null;
+		}
+
 		const sessionAppId = this.getSessionAppId();
 
 		// ── OAuth callback — exchange authorization code for a session ────
@@ -520,10 +631,10 @@ export class ConnectionManager implements IConnectionManager {
 				const staleToken = this.loadToken();
 				if (staleToken) {
 					try {
-						const result = await this.client.login(staleToken);
-						return await this.finishConnect(result, sessionAppId, config);
-					} catch {
-						this.clearToken();
+						return await this.connectForBootstrap(staleToken, sessionAppId, config);
+					} catch (error) {
+						if (this.handleStoredTokenFailure(error)) this.clearToken();
+						else return null;
 					}
 				}
 				// No usable token — render unauthenticated and let the shell's
@@ -532,8 +643,30 @@ export class ConnectionManager implements IConnectionManager {
 				return null;
 			}
 
-			const result = await this.client.login({ code, verifier, redirectUri: window.location.origin });
-			return await this.finishConnect(result, sessionAppId, config);
+			try {
+				return await this.connectForBootstrap({ code, verifier, redirectUri: window.location.origin }, sessionAppId, config);
+			} catch (error) {
+				// The code is single-use and already stripped from the URL, so
+				// recovery always goes through a fresh flow — classify and latch
+				// instead of letting the failure escape bootstrap unhandled.
+				if (error instanceof AuthenticationException || (error instanceof ConnectionFailure && error.kind === 'auth')) {
+					const lastError = error.message;
+					this.updateConnectionStatus({
+						state: ConnectionState.AUTH_FAILED,
+						lastError,
+						progressMessage: undefined,
+						errorKind: 'oauth-callback',
+						lastFailure: { kind: 'auth', lastError, errorKind: 'oauth-callback' },
+					});
+				} else {
+					this.handleStoredTokenFailure(
+						error instanceof ConnectionFailure
+							? error
+							: new ConnectionFailure(error instanceof Error ? error.message : String(error), 'network'),
+					);
+				}
+				return null;
+			}
 		}
 
 		// ── Session-locked app — reconnect with stored token ─────────────
@@ -541,12 +674,14 @@ export class ConnectionManager implements IConnectionManager {
 			const token = this.loadToken();
 			if (token) {
 				try {
-					const result = await this.client.login(token);
-					return await this.finishConnect(result, sessionAppId, config);
-				} catch {
-					// Token expired or invalid — clear it and fall through to the
-					// unauthenticated render below.
-					this.clearToken();
+					return await this.connectForBootstrap(token, sessionAppId, config);
+				} catch (error) {
+					// Token expired or invalid — clear it and fall through to
+					// the unauthenticated render below (the shell's auth gate
+					// owns starting a login flow, edition-aware). A network
+					// failure keeps the token so the recovery banner can retry
+					// with it once the server is reachable again.
+					if (this.handleStoredTokenFailure(error)) this.clearToken();
 				}
 			}
 			// Unauthenticated session-locked visit: bootstrap deliberately does
@@ -563,20 +698,14 @@ export class ConnectionManager implements IConnectionManager {
 			return null;
 		}
 
-		// ── Home flow (no session lock) — try token with timeout ─────────
+		// ── Home flow (no session lock) — try stored token ────────────────
 		const token = this.loadToken();
 		if (token) {
 			try {
-				const result = await Promise.race([
-					this.client.login(token),
-					new Promise<never>((_, reject) =>
-						setTimeout(() => reject(new Error('timeout')), 8000),
-					),
-				]);
-				return await this.finishConnect(result, '', config);
+				return await this.connectForBootstrap(token, '', config);
 			} catch (err) {
-				// Connect failed — clear stale token
-				this.clearToken();
+				// Connect failed — retain the token when the server is unreachable.
+				if (this.handleStoredTokenFailure(err)) this.clearToken();
 				return null;
 			}
 		}
@@ -589,6 +718,14 @@ export class ConnectionManager implements IConnectionManager {
 		this.clearPendingAppId();
 		// Show shell unauthenticated (transport is attached, public APIs work)
 		return null;
+	}
+
+	/** Reject login results that do not identify an authenticated account. */
+	private requireAuthenticatedResult(result: ConnectResult | null | undefined): ConnectResult {
+		if (!result?.userId) {
+			throw new ConnectionFailure(AUTH_REJECTED_MESSAGE, 'auth');
+		}
+		return result;
 	}
 
 	/**
@@ -605,23 +742,31 @@ export class ConnectionManager implements IConnectionManager {
 			workspaceDir?: string;
 			onThemeChange?: (theme: string) => void;
 		},
+		operation?: ShellConnectionOperation,
 	): Promise<{ result: ConnectResult; appId: string }> {
-		// Persist the token for future page loads
-		if (result.userToken) this.saveToken(result.userToken);
+		this.requireAuthenticatedResult(result);
+		if (operation) this.assertCurrentOperation(operation);
 
-		// Cache the account info
-		this.accountInfo = result;
-
-		// Publish identity to all listeners
-		this.emit('shell:login', { user: result });
+		// Direct callers retain the original helper behaviour. Foreground connect()
+		// has already published identity before bootstrap restores shell-only state.
+		if (!operation) {
+			if (result.userToken) this.saveToken(result.userToken);
+			this.clearLatchedFailure();
+			this.accountInfo = result;
+			this.emit('shell:login', { user: result });
+		}
 
 		// Restore saved theme from workspace file
 		if (config?.onThemeChange) {
 			try {
 				const dir = config.workspaceDir ?? DEFAULT_WORKSPACE_DIR;
 				const global = await this.client!.fsReadJson<{ shellPrefs?: { theme?: string } }>(`${dir}/global.json`);
+				if (operation) this.assertCurrentOperation(operation);
 				if (global?.shellPrefs?.theme) config.onThemeChange(global.shellPrefs.theme);
-			} catch { /* theme read failed — not critical */ }
+			} catch (error) {
+				if (error instanceof LoginAttemptCancelledError) throw error;
+				// Theme restore is best-effort.
+			}
 		}
 
 		// Resolve the target app — check pending app ID from OAuth flow
@@ -630,10 +775,89 @@ export class ConnectionManager implements IConnectionManager {
 
 		// Notify the workspace to switch to the target app
 		if (resolvedAppId) {
+			if (operation) this.assertCurrentOperation(operation);
 			this.emit('shell:switchApp', { appId: resolvedAppId });
 		}
 
 		return { result, appId: resolvedAppId };
+	}
+
+	/** Finish bootstrap-only effects after the shared foreground operation succeeds. */
+	private async connectForBootstrap(
+		credential: ConnectionCredential,
+		appId: string,
+		config?: {
+			apps?: Array<{ id: string }>;
+			workspaceDir?: string;
+			onThemeChange?: (theme: string) => void;
+		},
+	): Promise<{ result: ConnectResult; appId: string } | null> {
+		const connection = this.connect(credential);
+		const operation = this.connectionOperation;
+		const result = await connection;
+		if (!operation || !this.isCurrentOperation(operation)) return null;
+		if (!result) return null;
+		try {
+			return await this.finishConnect(result, appId, config, operation);
+		} catch (error) {
+			if (error instanceof LoginAttemptCancelledError) return null;
+			throw error;
+		}
+	}
+
+	private isCurrentOperation(operation: ShellConnectionOperation): boolean {
+		return this.lifecycleOwner === operation &&
+			this.connectionGeneration === operation.generation &&
+			operation.cancellationReason === undefined;
+	}
+
+	private hasCurrentLifecycleOwner(): boolean {
+		return this.lifecycleOwner !== undefined && this.isCurrentOperation(this.lifecycleOwner);
+	}
+
+	private assertCurrentOperation(operation: ShellConnectionOperation): void {
+		if (!this.isCurrentOperation(operation)) {
+			throw new LoginAttemptCancelledError(operation.cancellationReason ?? 'superseded');
+		}
+	}
+
+	private invalidateLifecycle(reason: LoginAttemptCancelledError['reason']): void {
+		if (this.lifecycleOwner) this.lifecycleOwner.cancellationReason = reason;
+		this.connectionGeneration++;
+		this.connectionOperation = undefined;
+		this.lifecycleOwner = undefined;
+	}
+
+	/**
+	 * Retire a latched failure after an authenticated connect. Anonymous
+	 * connects must NOT call this: a public connect following a session expiry
+	 * would otherwise erase the recovery banner before the user acts on it.
+	 */
+	private clearLatchedFailure(): void {
+		if (this.connectionStatus.lastFailure) this.updateConnectionStatus({ lastFailure: undefined });
+	}
+
+	private publishConnected(operation: ShellConnectionOperation): void {
+		if (!this.isCurrentOperation(operation) || operation.connectedPublished) return;
+		operation.connectedPublished = true;
+		// NB: no `lastFailure: undefined` here. This publisher runs for every
+		// CONNECTED transition including anonymous/public connects, so clearing
+		// unconditionally would wipe a "session expired" banner before the user
+		// could act on it. updateConnectionStatus() clears network latches on
+		// CONNECTED; an auth latch is cleared only by an authenticated connect
+		// (see clearLatchedFailure callers).
+		this.updateConnectionStatus({
+			state: ConnectionState.CONNECTED,
+			lastConnected: new Date(),
+			lastError: undefined,
+			errorKind: undefined,
+			retryAttempt: 0,
+			progressMessage: undefined,
+		});
+		this.emit('shell:connected', {});
+		void this.refreshServices().catch((error: unknown) => {
+			console.error('[ConnectionManager] Failed to refresh services on connect:', error);
+		});
 	}
 
 	// =========================================================================
@@ -643,82 +867,111 @@ export class ConnectionManager implements IConnectionManager {
 	/**
 	 * Connect to the server using the provided credential.
 	 *
-	 * Deduplicates concurrent calls — if a connect is already in flight,
-	 * returns the same promise (same pattern as VSCode's connectPromise).
+	 * Deduplicates concurrent calls for the same normalized endpoint and
+	 * credential. A different credential supersedes publication by the old call.
 	 *
 	 * @param credential - Token string or PKCE exchange object.
 	 * @returns The ConnectResult on success, or null if deduplicated.
 	 */
 	public connect(credential?: unknown): Promise<ConnectResult | null> {
-		// Deduplicate: if a connect is already in flight, return the same promise
-		if (this.connectPromise) {
-			return this.connectPromise;
+		if (!isConnectionCredential(credential)) {
+			return Promise.reject(new Error('No credential provided for connection.'));
 		}
 
-		const promise = this._connect(credential).finally(() => {
-			// Only clear if we're still the active promise
-			if (this.connectPromise === promise) {
-				this.connectPromise = undefined;
-			}
+		const key = `${RocketRideClient.normalizeUri(this.serverUri)}\u0000${connectionCredentialKey(credential)}`;
+		if (this.connectionOperation?.key === key) return this.connectionOperation.promise;
+
+		if (this.lifecycleOwner) this.lifecycleOwner.cancellationReason = 'superseded';
+		const operation: ShellConnectionOperation = {
+			key,
+			generation: ++this.connectionGeneration,
+			credential,
+			promise: Promise.resolve(null),
+			connectedPublished: false,
+		};
+		this.lifecycleOwner = operation;
+		this.connectionOperation = operation;
+		const promise = this._connect(operation).catch((error: unknown) => {
+			if (error instanceof LoginAttemptCancelledError) return null;
+			throw error;
+		}).finally(() => {
+			if (this.connectionOperation === operation) this.connectionOperation = undefined;
 		});
-		this.connectPromise = promise;
+		operation.promise = promise;
 		return promise;
 	}
 
 	/**
 	 * Internal connect implementation.
 	 */
-	private async _connect(credential?: unknown): Promise<ConnectResult | null> {
+	private async _connect(operation: ShellConnectionOperation): Promise<ConnectResult | null> {
 		if (!this.client) {
 			throw new Error('Client not initialized — call initialize() first.');
 		}
-
-		if (!credential) {
-			throw new Error('No credential provided for connection.');
-		}
-
+		this.assertCurrentOperation(operation);
 		this.updateConnectionStatus({
 			state: ConnectionState.CONNECTING,
 			lastError: undefined,
+			errorKind: undefined,
 		});
 
 		try {
-			// Create manager if needed (same pattern as VSCode)
-			if (!this.manager) {
-				this.manager = new RemoteManager();
-			}
+			const manager = new RemoteManager(() => this.isCurrentOperation(operation));
+			this.manager = manager;
 
 			// Delegate connection to the manager (handles timeout internally)
-			await this.manager.connect(this.client, {
+			await manager.connect(this.client, {
 				uri: this.serverUri,
-				credential: credential as string | { code: string; verifier: string; redirectUri: string },
+				credential: operation.credential,
 			});
+			this.assertCurrentOperation(operation);
 
 			// Get the connect result from the client
-			const result = this.client.getAccountInfo() as ConnectResult;
+			const result = this.requireAuthenticatedResult(this.client.getAccountInfo());
+			this.assertCurrentOperation(operation);
+			this.updateConnectionStatus({ lastFailure: undefined });
+			this.assertCurrentOperation(operation);
 			this.accountInfo = result;
+			// Identity established — this is the only signal that retires an
+			// auth latch (publishConnected deliberately no longer does).
+			this.clearLatchedFailure();
 
 			// Persist token
 			if (result.userToken) {
+				this.assertCurrentOperation(operation);
 				this.saveToken(result.userToken);
 			}
 
 			// Emit login event
+			this.assertCurrentOperation(operation);
 			this.emit('shell:login', { user: result });
+			this.assertCurrentOperation(operation);
+			this.publishConnected(operation);
 
 			return result;
 		} catch (error) {
+			if (!this.isCurrentOperation(operation)) {
+				throw new LoginAttemptCancelledError(operation.cancellationReason ?? 'superseded');
+			}
+			if (error instanceof LoginAttemptCancelledError) throw error;
 			const errorMessage = error instanceof Error ? error.message : String(error);
-
-			// Determine if this is an auth failure vs network failure
-			const isAuthError = errorMessage.includes('Authentication failed') ||
-				errorMessage.includes('unknown user') ||
-				errorMessage.includes('invalid credentials');
+			const state = this.getConnectionFailureState(error);
+			const isAuthFailure = state === ConnectionState.AUTH_FAILED;
+			if (isAuthFailure) {
+				this.clearToken();
+				this.accountInfo = undefined;
+			}
 
 			this.updateConnectionStatus({
-				state: isAuthError ? ConnectionState.AUTH_FAILED : ConnectionState.FAILED,
+				state,
 				lastError: errorMessage,
 				progressMessage: undefined,
+				errorKind: undefined,
+				lastFailure: {
+					kind: isAuthFailure ? 'auth' : 'network',
+					lastError: errorMessage,
+					errorKind: undefined,
+				},
 			});
 
 			this.emit('shell:error', { error });
@@ -731,19 +984,24 @@ export class ConnectionManager implements IConnectionManager {
 	 * Safe to call when already disconnected.
 	 */
 	public async disconnect(): Promise<void> {
-		// Clear in-flight connect guard
-		this.connectPromise = undefined;
+		this.invalidateLifecycle('detached');
+		const generation = this.connectionGeneration;
+		const manager = this.manager;
+		const client = this.client;
 
-		if (this.manager && this.client) {
-			await this.manager.disconnect(this.client);
-			this.manager = null;
+		if (manager && client) {
+			await manager.disconnect(client);
+			if (this.manager === manager) this.manager = null;
 		}
+		if (this.connectionGeneration !== generation) return;
 
 		this.clearServicesCache();
 		this.updateConnectionStatus({
 			state: ConnectionState.DISCONNECTED,
 			progressMessage: undefined,
+			errorKind: undefined,
 		});
+		this.emit('shell:disconnected', { reason: 'Disconnected by request', hasError: false });
 	}
 
 	/**
@@ -757,10 +1015,58 @@ export class ConnectionManager implements IConnectionManager {
 		}
 	}
 
+	/** Map a connection failure to the status state that determines recovery UI. */
+	private getConnectionFailureState(error: unknown): ConnectionState {
+		if (error instanceof ConnectionFailure) {
+			switch (error.kind) {
+				case 'auth': return ConnectionState.AUTH_FAILED;
+				case 'network': return ConnectionState.FAILED;
+				case 'server': return ConnectionState.FAILED;
+			}
+		}
+
+		// The SDK types auth rejections (invalid/revoked/expired credentials).
+		if (error instanceof AuthenticationException) return ConnectionState.AUTH_FAILED;
+
+		const errorMessage = error instanceof Error ? error.message : String(error);
+		// Legacy fallback for untyped errors from older connection paths.
+		const isAuthError = errorMessage.includes('Authentication failed') ||
+			errorMessage.includes('unknown user') ||
+			errorMessage.includes('invalid credentials');
+		return isAuthError ? ConnectionState.AUTH_FAILED : ConnectionState.FAILED;
+	}
+
+	/** Surface a stored-token failure and return whether the token should be cleared. */
+	private handleStoredTokenFailure(error: unknown): boolean {
+		const state = this.getConnectionFailureState(error);
+		const isAuthFailure = state === ConnectionState.AUTH_FAILED;
+		const isNetworkFailure = error instanceof ConnectionFailure && error.kind === 'network';
+		const lastError = isNetworkFailure
+			? 'Can\'t reach the server — check your connection and retry.'
+			: isAuthFailure
+				? 'Your session has expired — please sign in again.'
+				: error instanceof Error ? error.message : String(error);
+		this.updateConnectionStatus({
+			state,
+			lastError,
+			progressMessage: undefined,
+			errorKind: isAuthFailure ? 'session' : undefined,
+			// Latched so the SDK's reconnect churn (CONNECTING) and anonymous
+			// connects can't erase the failure before recovery UI renders it.
+			lastFailure: {
+				kind: isAuthFailure ? 'auth' : 'network',
+				lastError,
+				errorKind: isAuthFailure ? 'session' : undefined,
+			},
+		});
+		return isAuthFailure;
+	}
+
 	/**
 	 * Logout: clear auth state, disconnect, and emit shell:logout.
 	 */
 	public async logout(): Promise<void> {
+		this.invalidateLifecycle('logout');
 		// Clear persisted auth state
 		this.clearToken();
 		this.clearSessionAppId();
@@ -836,22 +1142,35 @@ export class ConnectionManager implements IConnectionManager {
 	// TOKEN STORAGE
 	// =========================================================================
 
-	/** Persist a user token to sessionStorage. */
+	/** Persist a user token to localStorage. */
 	public saveToken(token: string): void {
-		try { sessionStorage.setItem(LS_TOKEN, token); } catch (e) {
+		try { localStorage.setItem(LS_TOKEN, token); } catch (e) {
 			console.error('[ConnectionManager] Failed to save token:', e);
 		}
 	}
 
-	/** Load token from sessionStorage. Returns empty string if unavailable. */
+	/** Load token from localStorage. Migrates the old sessionStorage value once. */
 	public loadToken(): string {
-		try { return sessionStorage.getItem(LS_TOKEN) ?? ''; } catch { return ''; }
+		try {
+			const token = localStorage.getItem(LS_TOKEN);
+			if (token !== null) return token;
+
+			const sessionToken = sessionStorage.getItem(LS_TOKEN);
+			if (sessionToken === null) return '';
+
+			localStorage.setItem(LS_TOKEN, sessionToken);
+			sessionStorage.removeItem(LS_TOKEN);
+			return sessionToken;
+		} catch { return ''; }
 	}
 
 	/** Clear the persisted token. */
 	public clearToken(): void {
-		try { sessionStorage.removeItem(LS_TOKEN); } catch (e) {
+		try { localStorage.removeItem(LS_TOKEN); } catch (e) {
 			console.error('[ConnectionManager] Failed to clear token:', e);
+		}
+		try { sessionStorage.removeItem(LS_TOKEN); } catch (e) {
+			console.error('[ConnectionManager] Failed to clear legacy session token:', e);
 		}
 	}
 
@@ -932,9 +1251,13 @@ export class ConnectionManager implements IConnectionManager {
 	 * Deduplicates concurrent calls.
 	 */
 	public async refreshServices(): Promise<void> {
+		const owner = this.lifecycleOwner;
+		if (!owner || !this.isCurrentOperation(owner)) return;
 		if (!this.isConnected() || !this.client) {
-			this.clearServicesCache();
-			this.emit('shell:servicesUpdated', { services: {}, servicesError: 'Not connected' });
+			if (this.isCurrentOperation(owner)) {
+				this.clearServicesCache();
+				this.emit('shell:servicesUpdated', { services: {}, servicesError: 'Not connected' });
+			}
 			return;
 		}
 
@@ -943,24 +1266,28 @@ export class ConnectionManager implements IConnectionManager {
 			return this.servicesRefreshPromise;
 		}
 
-		this.servicesRefreshPromise = (async () => {
+		const refreshPromise = (async () => {
 			try {
 				const body = await this.client!.getServices();
+				if (!this.isCurrentOperation(owner)) return;
 				const services: Record<string, unknown> = body.services ?? {};
 				this.cachedServices = services;
 				this.cachedServicesError = null;
 				this.emit('shell:servicesUpdated', { services, servicesError: undefined });
 			} catch (err: unknown) {
+				if (!this.isCurrentOperation(owner)) return;
 				const msg = err instanceof Error ? err.message : String(err);
 				this.cachedServices = null;
 				this.cachedServicesError = msg;
 				this.emit('shell:servicesUpdated', { services: {}, servicesError: msg });
-			} finally {
-				this.servicesRefreshPromise = null;
 			}
 		})();
+		this.servicesRefreshPromise = refreshPromise;
+		void refreshPromise.finally(() => {
+			if (this.servicesRefreshPromise === refreshPromise) this.servicesRefreshPromise = null;
+		});
 
-		return this.servicesRefreshPromise;
+		return refreshPromise;
 	}
 
 	/** Clear all services cache state. */
@@ -1111,6 +1438,20 @@ export class ConnectionManager implements IConnectionManager {
 	/** Update connection status and emit shell:statusChange. */
 	private updateConnectionStatus(updates: Partial<ConnectionStatus>): void {
 		Object.assign(this.connectionStatus, updates);
+
+		// Latch failures across later transitions. The SDK's persist mode keeps
+		// the state cycling through CONNECTING while it retries, and a
+		// post-failure anonymous connect reports CONNECTED — either would erase
+		// a purely state-driven failure before recovery UI could render it.
+		// A network failure clears once a connection is re-established; an
+		// auth failure persists until the user acts on it (sign-in navigates).
+		if (
+			updates.state === ConnectionState.CONNECTED &&
+			this.connectionStatus.lastFailure?.kind === 'network'
+		) {
+			this.connectionStatus.lastFailure = undefined;
+		}
+
 		this.emit('shell:statusChange' as keyof ShellConnectionEventMap, this.connectionStatus as any);
 
 		// Also emit statusMessage for simple UI consumers

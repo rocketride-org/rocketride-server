@@ -47,8 +47,13 @@ class WhisperLoader(BaseLoader):
     - MIT licensed - no restrictions
 
     Model Identity (for sharing):
-        model_name + language + compute_type
+        model_name + compute_type
         See _DEFAULTS for default values applied before hashing.
+
+        `language` is deliberately excluded: faster-whisper models are multilingual and
+        `language` is a transcribe()-time decode hint, so folding it into identity loads
+        an identical copy of the weights per language. `compute_type` stays — precision
+        genuinely changes the loaded weights.
 
     Performance Note:
         - Typical throughput: ~8-15 req/s depending on model size and audio length
@@ -61,9 +66,9 @@ class WhisperLoader(BaseLoader):
     _model_locks: Dict[int, threading.Lock] = {}
     _locks_lock = threading.Lock()
 
-    # Defaults applied before hashing (ensures consistent model IDs)
+    # Defaults applied before hashing (ensures consistent model IDs).
+    # `language` is not here — it is a per-request decode hint, not a load param.
     _DEFAULTS = {
-        'language': 'en',
         'compute_type': 'float16',
     }
 
@@ -338,6 +343,7 @@ class WhisperLoader(BaseLoader):
         preprocessed: Dict[str, Any],
         metadata: Optional[Dict] = None,
         stream: Optional[Any] = None,
+        language: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Run Whisper transcription.
@@ -349,6 +355,9 @@ class WhisperLoader(BaseLoader):
             preprocessed: Output from preprocess()
             metadata: Optional metadata dict
             stream: Optional CUDA stream (not used)
+            language: Per-request decode language. Falls back to the value carried on
+                preprocessed/the bundle, so callers that do not pass it keep the
+                previous load-time behaviour.
 
         Returns:
             List of transcription results with segments
@@ -362,7 +371,9 @@ class WhisperLoader(BaseLoader):
             models = model
 
         whisper_model = models['model']
-        language = preprocessed.get('language', models.get('language', 'en'))
+        # Per-request language wins; fall back to whatever the model was loaded with.
+        if language is None:
+            language = preprocessed.get('language', models.get('language', 'en'))
 
         # Get lock for this model instance (faster-whisper is NOT thread-safe)
         model_lock = WhisperLoader._get_model_lock(id(whisper_model))
@@ -436,6 +447,7 @@ class WhisperLoader(BaseLoader):
         raw_output: List[Dict[str, Any]],
         batch_size: int,
         output_fields: List[str],
+        language: Optional[str] = None,
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """
@@ -446,6 +458,9 @@ class WhisperLoader(BaseLoader):
             raw_output: Output from inference()
             batch_size: Expected batch size
             output_fields: Fields to extract (e.g., ['$text', '$segments'])
+            language: Language resolved for this request. Used only as a fallback for
+                results that don't already carry one; falls back to the loaded value
+                when not supplied, preserving the previous behaviour.
             **kwargs: Additional parameters (ignored)
 
         Returns:
@@ -453,17 +468,20 @@ class WhisperLoader(BaseLoader):
         """
         from ..extract import extract_outputs
 
-        # Get language from metadata
-        if hasattr(model, 'metadata'):
-            language = model.metadata.get('language', 'en')
-        elif isinstance(model, dict):
-            language = model.get('language', 'en')
-        else:
-            language = 'en'
+        # Fall back to the loaded language only when the caller didn't resolve one.
+        if language is None:
+            if hasattr(model, 'metadata'):
+                language = model.metadata.get('language', 'en')
+            elif isinstance(model, dict):
+                language = model.get('language', 'en')
+            else:
+                language = 'en'
 
         results = []
         for output in raw_output:
-            output_with_lang = {**output, 'language': language}
+            # Fallback first, so a language already on the output — the one the decoder
+            # actually detected — is preserved rather than overwritten.
+            output_with_lang = {'language': language, **output}
             extracted = extract_outputs(output_with_lang, output_fields)
             results.append(extracted)
 
@@ -599,9 +617,14 @@ class Whisper:
             )
 
     def _init_proxy(self) -> None:
-        """Initialize proxy connection and load model on server."""
+        """Initialize proxy connection and load model on server.
+
+        `language` is deliberately not sent: faster-whisper models are multilingual and
+        it is a decode-time hint, sent per request by _transcribe_remote(). Including it
+        here made generate_model_id() load one identical copy of the weights per
+        language. `compute_type` stays — it genuinely changes the loaded weights.
+        """
         loader_options = {
-            'language': self.language,
             'compute_type': self.compute_type,
         }
         if self.kwargs:
@@ -620,6 +643,7 @@ class Whisper:
         beam_size: int = 5,
         vad_filter: bool = True,
         vad_parameters: Optional[Dict[str, Any]] = None,
+        language: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -630,6 +654,7 @@ class Whisper:
             beam_size: Beam size for decoding
             vad_filter: Enable voice activity detection (Silero VAD)
             vad_parameters: VAD parameters dict
+            language: Override the instance's default decode language for this call
             **kwargs: Additional transcription arguments
 
         Returns:
@@ -641,14 +666,16 @@ class Whisper:
         # Count inference call — perf timing handled per-mode below
         metrics.counter('gpu_inference_count', 1)
 
+        language = language if language is not None else self.language
+
         if self._proxy_mode:
             # Model server mode — ModelClient.send_command handles perf timing
-            return self._transcribe_remote(audio, beam_size, vad_filter, vad_parameters, **kwargs)
+            return self._transcribe_remote(audio, beam_size, vad_filter, vad_parameters, language, **kwargs)
         else:
             # Local mode — time each phase
-            return self._transcribe_local(audio, **kwargs)
+            return self._transcribe_local(audio, language, **kwargs)
 
-    def _transcribe_local(self, audio: bytes, **kwargs) -> Dict[str, Any]:
+    def _transcribe_local(self, audio: bytes, language: str, **kwargs) -> Dict[str, Any]:
         """Execute local transcription with perf timing."""
         # Preprocess phase — convert raw PCM bytes to model input format
         t0 = time.perf_counter()
@@ -657,12 +684,18 @@ class Whisper:
 
         # GPU inference phase — run transcription model
         t0 = time.perf_counter()
-        raw_output = WhisperLoader.inference(self._model, preprocessed, self._metadata)
+        raw_output = WhisperLoader.inference(self._model, preprocessed, self._metadata, language=language)
         t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract requested output fields
         t0 = time.perf_counter()
-        results = WhisperLoader.postprocess(self._model, raw_output, 1, self.output_fields)
+        results = WhisperLoader.postprocess(
+            self._model,
+            raw_output,
+            1,
+            self.output_fields,
+            language=language,
+        )
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response
@@ -685,9 +718,14 @@ class Whisper:
         beam_size: int,
         vad_filter: bool,
         vad_parameters: Optional[Dict[str, Any]],
+        language: str,
         **kwargs,
     ) -> Dict[str, Any]:
-        """Execute remote transcription via model server."""
+        """Execute remote transcription via model server.
+
+        `language` travels with the request rather than the load, so every language
+        shares one server-side copy of the weights.
+        """
         result = self._client.send_command(
             'rrext_ms_inference',
             {
@@ -695,6 +733,7 @@ class Whisper:
                 'beam_size': beam_size,
                 'vad_filter': vad_filter,
                 'vad_parameters': vad_parameters,
+                'language': language,
                 'output_fields': self.output_fields,
                 **kwargs,
             },

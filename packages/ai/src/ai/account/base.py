@@ -319,6 +319,139 @@ class AccountBase(ABC):
         return {'transactions': [], 'total': 0, 'page': page, 'pageSize': page_size}
 
     # =========================================================================
+    # CLOUD DATABASE — env-gated broker call; raises when unconfigured
+    # =========================================================================
+
+    async def resolve_db_dsn(self, client_id: str) -> str:
+        """
+        Resolve the per-tenant database DSN for the RocketRide cloud DB nodes.
+
+        The ``rocketride_sql`` / ``rocketride_vector`` / ``rocketride_graph``
+        nodes take no connection configuration.  Instead of reading
+        host/user/password, they resolve a ready connection string for the
+        caller's own provisioned cloud database, keyed by the authenticated
+        ``client_id`` (``userId``).  One database per tenant backs all three.
+
+        Default implementation (both editions): call the data-core provisioner
+        configured via server-side environment —
+
+            ROCKETRIDE_DB_BROKER_URL    the /provision endpoint URL
+            ROCKETRIDE_DB_BROKER_TOKEN  its Bearer token (from ASM/k8s; never
+                                        hardcoded)
+
+        ``POST {url} {"tenant_id": client_id}`` -> ``{"database", "role",
+        "dsn", "created"}`` (only ``dsn`` is read here).
+        The endpoint is idempotent (same tenant -> same DSN; the per-tenant
+        password is derived, not stored), so this method is safe to call on
+        every task start with no caching or persistence on this side.
+
+        When the environment is not configured (the open-source default), this
+        raises: the cloud databases require a RocketRide cloud deployment.
+        A SaaS overlay may still override this method entirely.
+
+        Args:
+            client_id: The authenticated connection identity (``userId``).
+                Passed verbatim as the broker's ``tenant_id`` (the provisioner
+                owns slugging/hashing it into a database name).
+
+        Returns:
+            A libpq/SQLAlchemy-compatible PostgreSQL DSN for the tenant DB
+            (e.g. ``postgresql://role:pass@pooler:5432/t_<slug>?sslmode=require``).
+
+        Raises:
+            NotImplementedError: broker environment not configured.
+            RuntimeError: the broker rejected the request or returned no DSN.
+        """
+        broker_url = os.environ.get('ROCKETRIDE_DB_BROKER_URL', '').strip()
+        broker_token = os.environ.get('ROCKETRIDE_DB_BROKER_TOKEN', '').strip()
+        if not broker_url or not broker_token:
+            raise NotImplementedError('RocketRide cloud DB nodes require signing into RocketRide cloud')
+        if not client_id or not client_id.strip():
+            raise ValueError('resolve_db_dsn requires a non-empty client_id')
+        self._check_broker_url(broker_url)
+
+        import asyncio
+
+        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, client_id.strip())
+
+    @staticmethod
+    def _check_broker_url(url: str) -> None:
+        """Refuse to send the broker token over anything but HTTPS.
+
+        The token can resolve ANY tenant's DSN, so a deployment typo like an
+        ``http://`` broker URL must fail loudly, not silently ship the token
+        (and every returned DSN) in cleartext. Plain http is allowed only for
+        localhost — the local dev/test rig runs the provisioner there.
+        """
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(url)
+            scheme, host = parsed.scheme.lower(), parsed.hostname
+        except ValueError:
+            scheme, host = '', None
+        if scheme == 'https':
+            return
+        if scheme == 'http' and host in ('localhost', '127.0.0.1', '::1'):
+            return
+        raise RuntimeError(
+            f'ROCKETRIDE_DB_BROKER_URL must use https (got {scheme or "no"} scheme): '
+            'the broker token must never travel unencrypted; plain http is allowed only for localhost'
+        )
+
+    @staticmethod
+    def _call_db_broker(url: str, token: str, tenant_id: str) -> str:
+        """Blocking POST to the provisioner; runs in a worker thread.
+
+        Stdlib-only on purpose: the account layer has no async-HTTP dependency,
+        and one small request per task start does not justify adding one.
+        """
+        import json
+        import urllib.error
+        import urllib.request
+
+        request = urllib.request.Request(
+            url,
+            data=json.dumps({'tenant_id': tenant_id}).encode('utf-8'),
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            },
+            method='POST',
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=15) as response:
+                body = json.loads(response.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            # 4xx = unknown/invalid tenant per the broker contract; 5xx = broker fault.
+            raise RuntimeError(f'DB broker rejected provision for this account (HTTP {e.code})') from e
+        except Exception as e:
+            raise RuntimeError(f'DB broker unreachable: {e}') from e
+
+        dsn = body.get('dsn') if isinstance(body, dict) else None
+        if not dsn or not isinstance(dsn, str):
+            raise RuntimeError('DB broker response did not include a DSN')
+        return AccountBase._pin_dsn_tls(dsn)
+
+    @staticmethod
+    def _pin_dsn_tls(dsn: str) -> str:
+        """Validate the broker's DSN and guarantee it carries an sslmode.
+
+        The broker contract sends ``sslmode=require``; this pins that
+        guarantee client-side so a broker regression cannot silently
+        downgrade every tenant connection to cleartext.
+        """
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(dsn)
+        if parsed.scheme.lower() not in ('postgres', 'postgresql'):
+            raise RuntimeError(f'DB broker returned a non-PostgreSQL DSN (scheme {parsed.scheme!r})')
+        if 'sslmode' in parse_qs(parsed.query):
+            return dsn
+        separator = '&' if parsed.query else '?'
+        return f'{dsn}{separator}sslmode=require'
+
+    # =========================================================================
     # DEPLOYMENTS — the teams-as-environments interface.
     #
     # PUBLISH creates an immutable artifact version in the ORG registry;

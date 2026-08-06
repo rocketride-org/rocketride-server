@@ -22,7 +22,9 @@
  * SOFTWARE.
  */
 
-import { RocketRideClient, Question, TASK_STATE, UPLOAD_RESULT, PIPELINE_RESULT, DAPMessage } from '../src/client';
+import { RocketRideClient, Question, TASK_STATE, UPLOAD_RESULT, PIPELINE_RESULT, DAPMessage, TraceType } from '../src/client';
+import * as ClientExceptions from '../src/client/exceptions';
+import type { LoginAttemptCancellationReason } from '../src/client/exceptions';
 import { describe, it, expect, beforeEach, afterEach, beforeAll, jest } from '@jest/globals';
 import { getEchoPipeline } from './echo.pipeline';
 import { getChatPipeline } from './chat.pipeline';
@@ -2214,18 +2216,19 @@ describe('RocketRideClient URI normalization', () => {
 });
 
 export async function isServerAvailable(): Promise<boolean> {
+	const client = new RocketRideClient({
+		auth: TEST_CONFIG.auth,
+		uri: TEST_CONFIG.uri,
+	});
 	try {
-		const client = new RocketRideClient({
-			auth: TEST_CONFIG.auth,
-			uri: TEST_CONFIG.uri,
-		});
-
 		await client.connect();
 		await client.ping();
 		await client.disconnect();
 		return true;
 	} catch {
 		return false;
+	} finally {
+		await client.detach().catch(() => undefined);
 	}
 }
 
@@ -2241,3 +2244,1325 @@ Integration tests may fail. Please ensure:
     `);
 	}
 }, 10000);
+
+type LifecycleSentRequest = {
+	socket: LifecycleBrowserWebSocket;
+	message: DAPMessage;
+};
+
+class LifecycleBrowserWebSocket {
+	static readonly CONNECTING = 0;
+	static readonly OPEN = 1;
+	static readonly CLOSING = 2;
+	static readonly CLOSED = 3;
+	static instances: LifecycleBrowserWebSocket[] = [];
+	static requests: LifecycleSentRequest[] = [];
+
+	readonly url: string;
+	readyState = LifecycleBrowserWebSocket.CONNECTING;
+	binaryType = '';
+	onopen: ((event: Event) => unknown) | null = null;
+	onmessage: ((event: MessageEvent) => unknown) | null = null;
+	onclose: ((event: CloseEvent) => unknown) | null = null;
+	onerror: ((event: Event) => unknown) | null = null;
+
+	constructor(url: string) {
+		this.url = url;
+		LifecycleBrowserWebSocket.instances.push(this);
+	}
+
+	open(): void {
+		this.readyState = LifecycleBrowserWebSocket.OPEN;
+		void this.onopen?.({} as Event);
+	}
+
+	error(): void {
+		void this.onerror?.({} as Event);
+	}
+
+	send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+		if (typeof data !== 'string') throw new Error('Lifecycle tests expect JSON DAP requests');
+		LifecycleBrowserWebSocket.requests.push({
+			socket: this,
+			message: JSON.parse(data) as DAPMessage,
+		});
+	}
+
+	close(code = 1000, reason = ''): void {
+		if (this.readyState === LifecycleBrowserWebSocket.CLOSED) return;
+		this.readyState = LifecycleBrowserWebSocket.CLOSING;
+		queueMicrotask(() => this.serverClose(code, reason));
+	}
+
+	serverClose(code = 1000, reason = ''): void {
+		this.readyState = LifecycleBrowserWebSocket.CLOSED;
+		void this.onclose?.({ code, reason, wasClean: code === 1000 } as CloseEvent);
+	}
+
+	respond(request: DAPMessage, body: Record<string, unknown>, success = true): void {
+		const response: DAPMessage = {
+			type: 'response',
+			seq: 10_000 + (request.seq ?? 0),
+			request_seq: request.seq,
+			command: request.command,
+			success,
+			body,
+			message: success ? undefined : 'rejected',
+		};
+		queueMicrotask(() => {
+			void this.onmessage?.({ data: JSON.stringify(response) } as MessageEvent);
+		});
+	}
+}
+
+type LoginOutcome =
+	| { status: 'resolved'; value: Record<string, unknown> }
+	| { status: 'rejected'; error: unknown };
+
+function loginOutcome(promise: Promise<unknown>): Promise<LoginOutcome> {
+	return promise.then(
+		(value) => ({ status: 'resolved' as const, value: value as Record<string, unknown> }),
+		(error) => ({ status: 'rejected' as const, error }),
+	);
+}
+
+async function lifecycleSettlesSoon(promise: Promise<LoginOutcome>): Promise<LoginOutcome | { status: 'pending' }> {
+	return Promise.race([
+		promise,
+		new Promise<{ status: 'pending' }>((resolve) => setTimeout(() => resolve({ status: 'pending' }), 25)),
+	]);
+}
+
+async function flushLifecycleMicrotasks(turns = 8): Promise<void> {
+	for (let turn = 0; turn < turns; turn += 1) await Promise.resolve();
+}
+
+async function waitForLifecycle(
+	predicate: () => boolean,
+	description: string,
+): Promise<void> {
+	for (let attempt = 0; attempt < 100; attempt += 1) {
+		if (predicate()) return;
+		await new Promise<void>((resolve) => setTimeout(resolve, 1));
+	}
+	throw new Error(`Timed out waiting for ${description}`);
+}
+
+function lifecycleRequests(command: string, socket?: LifecycleBrowserWebSocket): LifecycleSentRequest[] {
+	return LifecycleBrowserWebSocket.requests.filter(
+		(entry) => entry.message.command === command && (!socket || entry.socket === socket),
+	);
+}
+
+function connectResult(key: string): Record<string, unknown> {
+	return {
+		userToken: `rr_${key}`,
+		userId: `user_${key}`,
+		displayName: key,
+		givenName: key,
+		familyName: 'Tester',
+		preferredUsername: key,
+		email: `${key}@example.test`,
+		emailVerified: true,
+		organization: { id: `org_${key}`, name: key, permissions: [], teams: [] },
+		organizations: [],
+	};
+}
+
+describe('RocketRideClient lifecycle operations', () => {
+	let originalWindow: PropertyDescriptor | undefined;
+	let originalWebSocket: PropertyDescriptor | undefined;
+	let clients: RocketRideClient[];
+
+	beforeEach(() => {
+		originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+		originalWebSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
+		Object.defineProperty(globalThis, 'window', {
+			configurable: true,
+			value: { WebSocket: LifecycleBrowserWebSocket },
+		});
+		Object.defineProperty(globalThis, 'WebSocket', {
+			configurable: true,
+			value: LifecycleBrowserWebSocket,
+		});
+		LifecycleBrowserWebSocket.instances = [];
+		LifecycleBrowserWebSocket.requests = [];
+		clients = [];
+	});
+
+	afterEach(async () => {
+		for (const client of clients) {
+			await client.detach().catch(() => undefined);
+		}
+		jest.clearAllTimers();
+		jest.useRealTimers();
+		for (const socket of LifecycleBrowserWebSocket.instances) {
+			socket.onopen = null;
+			socket.onmessage = null;
+			socket.onclose = null;
+			socket.onerror = null;
+		}
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else Reflect.deleteProperty(globalThis, 'window');
+		if (originalWebSocket) Object.defineProperty(globalThis, 'WebSocket', originalWebSocket);
+		else Reflect.deleteProperty(globalThis, 'WebSocket');
+	});
+
+	function makeClient(config: ConstructorParameters<typeof RocketRideClient>[0] = {}): RocketRideClient {
+		const client = new RocketRideClient({
+			uri: 'https://one.example.test',
+			requestTimeout: 5_000,
+			...config,
+		});
+		clients.push(client);
+		return client;
+	}
+
+	it('coalesces identical foreground logins into one auth, monitor restore, account result, and callback', async () => {
+		const onConnected = jest.fn(async () => undefined);
+		const client = makeClient({ onConnected });
+		await client.addMonitor({ token: 'task-1' }, ['output']);
+
+		const first = loginOutcome(client.login('same-key'));
+		const second = loginOutcome(client.login('same-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'coalesced socket');
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(1);
+
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth').length >= 1, 'auth request');
+		expect(lifecycleRequests('auth')).toHaveLength(1);
+		const auth = lifecycleRequests('auth')[0];
+		socket.respond(auth.message, connectResult('same'));
+
+		await waitForLifecycle(() => lifecycleRequests('rrext_monitor').length >= 1, 'monitor restore');
+		expect(lifecycleRequests('rrext_monitor')).toHaveLength(1);
+		const monitor = lifecycleRequests('rrext_monitor')[0];
+		socket.respond(monitor.message, {});
+
+		await expect(first).resolves.toMatchObject({ status: 'resolved', value: { userToken: 'rr_same' } });
+		await expect(second).resolves.toMatchObject({ status: 'resolved', value: { userToken: 'rr_same' } });
+		expect(client.getAccountInfo()).toMatchObject({ userToken: 'rr_same' });
+		expect(onConnected).toHaveBeenCalledTimes(1);
+	});
+
+	it('coalesces equivalent PKCE credentials regardless of property insertion order', async () => {
+		const client = makeClient();
+		const firstCredential = {
+			code: 'pkce-code',
+			verifier: 'pkce-verifier',
+			redirectUri: 'https://example.test/callback',
+		};
+		const secondCredential = {
+			redirectUri: 'https://example.test/callback',
+			verifier: 'pkce-verifier',
+			code: 'pkce-code',
+		};
+
+		const first = loginOutcome(client.login(firstCredential));
+		const second = loginOutcome(client.login(secondCredential));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length >= 1, 'PKCE socket');
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(1);
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'PKCE auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('pkce'));
+
+		await expect(first).resolves.toMatchObject({ status: 'resolved' });
+		await expect(second).resolves.toMatchObject({ status: 'resolved' });
+		expect(lifecycleRequests('auth', socket)).toHaveLength(1);
+	});
+
+	it('joins a matching accepted operation while onConnected is held and shares its exact cancellation', async () => {
+		let releaseConnected!: () => void;
+		const connectedGate = new Promise<void>((resolve) => {
+			releaseConnected = resolve;
+		});
+		const onConnected = jest.fn(async () => connectedGate);
+		const client = makeClient({ onConnected });
+
+		const first = loginOutcome(client.login('held-connected-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'held callback socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'held callback auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('held'));
+		await waitForLifecycle(() => onConnected.mock.calls.length === 1, 'held onConnected callback');
+
+		const second = loginOutcome(client.login('held-connected-key'));
+		await expect(lifecycleSettlesSoon(second)).resolves.toEqual({ status: 'pending' });
+
+		const detached = client.detach();
+		const [firstResult, secondResult] = await Promise.all([first, second]);
+		expect(firstResult).toMatchObject({
+			status: 'rejected',
+			error: { name: 'LoginAttemptCancelledError', reason: 'detached' },
+		});
+		expect(secondResult).toMatchObject({
+			status: 'rejected',
+			error: { name: 'LoginAttemptCancelledError', reason: 'detached' },
+		});
+		if (firstResult.status !== 'rejected' || secondResult.status !== 'rejected') {
+			throw new Error('Expected both joined callers to reject');
+		}
+		expect(secondResult.error).toBe(firstResult.error);
+		await detached;
+		releaseConnected();
+		await flushLifecycleMicrotasks();
+	});
+
+	it('does not join an in-flight login through a credential retained from the previous identity', async () => {
+		const client = makeClient();
+		const initial = loginOutcome(client.login('initial-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'initial identity socket');
+		const initialSocket = LifecycleBrowserWebSocket.instances[0];
+		initialSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', initialSocket).length === 1, 'initial identity auth');
+		initialSocket.respond(lifecycleRequests('auth', initialSocket)[0].message, connectResult('initial'));
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		const replacement = loginOutcome(client.login('replacement-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'replacement identity socket');
+		const replacementSocket = LifecycleBrowserWebSocket.instances[1];
+		replacementSocket.open();
+		await waitForLifecycle(
+			() => lifecycleRequests('auth', replacementSocket).length === 1,
+			'replacement identity auth',
+		);
+
+		const returnToInitial = loginOutcome(client.login('rr_initial'));
+		await expect(replacement).resolves.toMatchObject({
+			status: 'rejected',
+			error: { name: 'LoginAttemptCancelledError', reason: 'superseded' },
+		});
+		await waitForLifecycle(
+			() => LifecycleBrowserWebSocket.instances.length === 3,
+			'credential-specific replacement socket',
+		);
+		const finalSocket = LifecycleBrowserWebSocket.instances[2];
+		finalSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', finalSocket).length === 1, 'final identity auth');
+		finalSocket.respond(lifecycleRequests('auth', finalSocket)[0].message, connectResult('returned'));
+
+		await expect(returnToInitial).resolves.toMatchObject({
+			status: 'resolved',
+			value: { userToken: 'rr_returned' },
+		});
+	});
+
+	it('clears identity published by an accepted callback-held login before its replacement authenticates', async () => {
+		let releaseFirstConnected!: () => void;
+		const firstConnectedGate = new Promise<void>((resolve) => {
+			releaseFirstConnected = resolve;
+		});
+		const onConnected = jest.fn(async () => {
+			if (onConnected.mock.calls.length === 1) await firstConnectedGate;
+		});
+		const client = makeClient({ onConnected });
+
+		const first = loginOutcome(client.login('callback-held-a'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'callback-held A socket');
+		const firstSocket = LifecycleBrowserWebSocket.instances[0];
+		firstSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', firstSocket).length === 1, 'callback-held A auth');
+		firstSocket.respond(lifecycleRequests('auth', firstSocket)[0].message, connectResult('callback-held-a'));
+		await waitForLifecycle(() => onConnected.mock.calls.length === 1, 'first held connected callback');
+		expect(client.isAuthenticated()).toBe(true);
+
+		const second = loginOutcome(client.login('callback-held-b'));
+		expect(client.isAuthenticated()).toBe(false);
+		expect(client.getAccountInfo()).toBeUndefined();
+		await expect(first).resolves.toMatchObject({
+			status: 'rejected',
+			error: { name: 'LoginAttemptCancelledError', reason: 'superseded' },
+		});
+
+		releaseFirstConnected();
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'callback-held B socket');
+		const secondSocket = LifecycleBrowserWebSocket.instances[1];
+		secondSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', secondSocket).length === 1, 'callback-held B auth');
+		secondSocket.respond(lifecycleRequests('auth', secondSocket)[0].message, connectResult('callback-held-b'));
+		await expect(second).resolves.toMatchObject({
+			status: 'resolved',
+			value: { userToken: 'rr_callback-held-b' },
+		});
+	});
+
+	it('supersedes a different-key login, closes its auth transport, and ignores its late response', async () => {
+		const onConnected = jest.fn(async () => undefined);
+		const client = makeClient({ onConnected });
+		const first = loginOutcome(client.login('key-a'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'first socket');
+		const firstSocket = LifecycleBrowserWebSocket.instances[0];
+		firstSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', firstSocket).length === 1, 'first auth');
+		const firstAuth = lifecycleRequests('auth', firstSocket)[0];
+		const oldOnMessage = firstSocket.onmessage;
+		if (!oldOnMessage) throw new Error('Expected the old response handler to be installed');
+
+		const second = loginOutcome(client.login('key-b'));
+		await expect(lifecycleSettlesSoon(first)).resolves.toMatchObject({
+			status: 'rejected',
+			error: { name: 'LoginAttemptCancelledError', reason: 'superseded' },
+		});
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'replacement socket');
+		const secondSocket = LifecycleBrowserWebSocket.instances[1];
+		expect(firstSocket.readyState).toBe(LifecycleBrowserWebSocket.CLOSED);
+
+		secondSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', secondSocket).length === 1, 'second auth');
+		const secondAuth = lifecycleRequests('auth', secondSocket)[0];
+		secondSocket.respond(secondAuth.message, connectResult('b'));
+		await expect(second).resolves.toMatchObject({ status: 'resolved', value: { userToken: 'rr_b' } });
+
+		oldOnMessage.call(firstSocket, {
+			data: JSON.stringify({
+				type: 'response',
+				seq: 10_000 + (firstAuth.message.seq ?? 0),
+				request_seq: firstAuth.message.seq,
+				command: firstAuth.message.command,
+				success: true,
+				body: connectResult('a'),
+			}),
+		} as MessageEvent);
+		await flushLifecycleMicrotasks();
+		expect(client.getAccountInfo()).toMatchObject({ userToken: 'rr_b' });
+		expect(onConnected).toHaveBeenCalledTimes(1);
+	});
+
+	it('foreground login supersedes a same-key automatic background reconnect', async () => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		const client = makeClient({ persist: true });
+		const initial = loginOutcome(client.login('persist-key'));
+		await flushLifecycleMicrotasks();
+		const firstSocket = LifecycleBrowserWebSocket.instances[0];
+		firstSocket.open();
+		await flushLifecycleMicrotasks();
+		const firstAuth = lifecycleRequests('auth', firstSocket)[0];
+		firstSocket.respond(firstAuth.message, connectResult('persist'));
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		firstSocket.serverClose(1006, 'lost');
+		await flushLifecycleMicrotasks();
+		jest.advanceTimersByTime(250);
+		await flushLifecycleMicrotasks();
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(2);
+		const backgroundSocket = LifecycleBrowserWebSocket.instances[1];
+		backgroundSocket.open();
+		await flushLifecycleMicrotasks();
+		expect(lifecycleRequests('auth', backgroundSocket)[0].message.arguments?.auth).toBe('rr_persist');
+
+		const foreground = loginOutcome(client.login('rr_persist'));
+		await flushLifecycleMicrotasks(50);
+		expect(backgroundSocket.readyState).toBe(LifecycleBrowserWebSocket.CLOSED);
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(3);
+		const foregroundSocket = LifecycleBrowserWebSocket.instances[2];
+		foregroundSocket.open();
+		await flushLifecycleMicrotasks();
+		const auth = lifecycleRequests('auth', foregroundSocket)[0];
+		foregroundSocket.respond(auth.message, connectResult('foreground'));
+		await expect(foreground).resolves.toMatchObject({ status: 'resolved' });
+	});
+
+	it('foreground login supersedes a background reconnect accepted inside a held callback', async () => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		let releaseBackgroundConnected!: () => void;
+		const backgroundConnectedGate = new Promise<void>((resolve) => {
+			releaseBackgroundConnected = resolve;
+		});
+		let connectedCalls = 0;
+		const onConnected = jest.fn(async () => {
+			connectedCalls += 1;
+			if (connectedCalls === 2) await backgroundConnectedGate;
+		});
+		const client = makeClient({ persist: true, onConnected });
+
+		const initial = loginOutcome(client.login('accepted-background-key'));
+		await flushLifecycleMicrotasks();
+		const initialSocket = LifecycleBrowserWebSocket.instances[0];
+		initialSocket.open();
+		await flushLifecycleMicrotasks();
+		initialSocket.respond(
+			lifecycleRequests('auth', initialSocket)[0].message,
+			connectResult('accepted-background'),
+		);
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		initialSocket.serverClose(1006, 'lost');
+		await flushLifecycleMicrotasks(20);
+		jest.advanceTimersByTime(250);
+		await flushLifecycleMicrotasks(20);
+		const backgroundSocket = LifecycleBrowserWebSocket.instances[1];
+		backgroundSocket.open();
+		await flushLifecycleMicrotasks();
+		backgroundSocket.respond(
+			lifecycleRequests('auth', backgroundSocket)[0].message,
+			connectResult('accepted-background-reconnected'),
+		);
+		await flushLifecycleMicrotasks(20);
+		expect(onConnected).toHaveBeenCalledTimes(2);
+
+		const foreground = loginOutcome(client.login());
+		await flushLifecycleMicrotasks(50);
+		expect(backgroundSocket.readyState).toBe(LifecycleBrowserWebSocket.CLOSED);
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(3);
+
+		releaseBackgroundConnected();
+		const foregroundSocket = LifecycleBrowserWebSocket.instances[2];
+		foregroundSocket.open();
+		await flushLifecycleMicrotasks();
+		foregroundSocket.respond(
+			lifecycleRequests('auth', foregroundSocket)[0].message,
+			connectResult('accepted-background-foreground'),
+		);
+		await expect(foreground).resolves.toMatchObject({
+			status: 'resolved',
+			value: { userToken: 'rr_accepted-background-foreground' },
+		});
+		expect(onConnected).toHaveBeenCalledTimes(3);
+	});
+
+	it.each([
+		['logout', 'attach', 'logout'],
+		['detach', 'attach', 'detached'],
+		['logout', 'auth', 'logout'],
+		['detach', 'auth', 'detached'],
+		['logout', 'monitor restoration', 'logout'],
+		['detach', 'monitor restoration', 'detached'],
+	] as const)(
+		'%s during %s cancels all login waiters and preserves the requested terminal state',
+		async (action, phase, reason) => {
+			const onConnected = jest.fn(async () => undefined);
+			const client = makeClient({ onConnected });
+			if (phase === 'monitor restoration') {
+				await client.addMonitor({ token: 'task-phase' }, ['output']);
+			}
+
+			const firstLogin = loginOutcome(client.login('phase-key'));
+			const secondLogin = loginOutcome(client.login('phase-key'));
+			await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'phase socket');
+			const socket = LifecycleBrowserWebSocket.instances[0];
+			if (phase !== 'attach') {
+				socket.open();
+				await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'phase auth');
+			}
+			if (phase === 'monitor restoration') {
+				const auth = lifecycleRequests('auth', socket)[0];
+				socket.respond(auth.message, connectResult('phase'));
+				await waitForLifecycle(
+					() => lifecycleRequests('rrext_monitor', socket).length === 1,
+					'held monitor restore',
+				);
+			}
+
+			const terminal = action === 'logout' ? client.logout() : client.detach();
+			const [firstResult, secondResult] = await Promise.all([firstLogin, secondLogin]);
+			expect(firstResult).toMatchObject({
+				status: 'rejected',
+				error: { name: 'LoginAttemptCancelledError', reason },
+			});
+			expect(secondResult).toMatchObject({
+				status: 'rejected',
+				error: { name: 'LoginAttemptCancelledError', reason },
+			});
+			if (firstResult.status !== 'rejected' || secondResult.status !== 'rejected') {
+				throw new Error('Expected both coalesced login waiters to reject');
+			}
+			expect(secondResult.error).toBe(firstResult.error);
+
+			if (action === 'logout') {
+				await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'fresh anonymous socket');
+				const anonymousSocket = LifecycleBrowserWebSocket.instances[1];
+				expect(anonymousSocket).not.toBe(socket);
+				anonymousSocket.open();
+				await terminal;
+				expect(client.isAttached()).toBe(true);
+				expect(client.isAuthenticated()).toBe(false);
+				expect(lifecycleRequests('auth', anonymousSocket)).toHaveLength(0);
+			} else {
+				await terminal;
+				expect(client.isAttached()).toBe(false);
+				expect(client.isAuthenticated()).toBe(false);
+			}
+			expect(onConnected).not.toHaveBeenCalled();
+		},
+	);
+
+	it('cancels a captured reconnect timer and resets backoff after foreground success', async () => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		const client = makeClient({ persist: true });
+		const initial = loginOutcome(client.login('timer-key'));
+		await flushLifecycleMicrotasks();
+		const firstSocket = LifecycleBrowserWebSocket.instances[0];
+		firstSocket.open();
+		await flushLifecycleMicrotasks();
+		firstSocket.respond(lifecycleRequests('auth', firstSocket)[0].message, connectResult('timer'));
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		(client as unknown as { _currentReconnectDelay: number })._currentReconnectDelay = 1_000;
+		firstSocket.serverClose(1006, 'lost');
+		await flushLifecycleMicrotasks();
+
+		const foreground = loginOutcome(client.login('rr_timer'));
+		await flushLifecycleMicrotasks();
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(2);
+		const secondSocket = LifecycleBrowserWebSocket.instances[1];
+		secondSocket.open();
+		await flushLifecycleMicrotasks();
+		secondSocket.respond(lifecycleRequests('auth', secondSocket)[0].message, connectResult('timer-2'));
+		await expect(foreground).resolves.toMatchObject({ status: 'resolved' });
+		expect((client as unknown as { _currentReconnectDelay: number })._currentReconnectDelay).toBe(250);
+
+		const authCount = lifecycleRequests('auth').length;
+		jest.advanceTimersByTime(15_000);
+		await flushLifecycleMicrotasks();
+		expect(lifecycleRequests('auth')).toHaveLength(authCount);
+	});
+
+	it.each(['authenticated', 'anonymous'] as const)(
+		'uses capped linear reconnect delays after successive %s failures',
+		async (mode) => {
+			jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+			const onConnectError = jest.fn(async () => undefined);
+			const client = makeClient({ persist: true, onConnectError });
+
+			let initialSocket: LifecycleBrowserWebSocket;
+			if (mode === 'authenticated') {
+				const initial = loginOutcome(client.login('linear-key'));
+				await flushLifecycleMicrotasks();
+				initialSocket = LifecycleBrowserWebSocket.instances[0];
+				initialSocket.open();
+				await flushLifecycleMicrotasks();
+				initialSocket.respond(
+					lifecycleRequests('auth', initialSocket)[0].message,
+					connectResult('linear'),
+				);
+				await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+			} else {
+				const initial = client.attach();
+				await flushLifecycleMicrotasks();
+				initialSocket = LifecycleBrowserWebSocket.instances[0];
+				initialSocket.open();
+				await initial;
+			}
+
+			initialSocket.serverClose(1006, 'lost');
+			await flushLifecycleMicrotasks(20);
+
+			const internals = client as unknown as {
+				_currentReconnectDelay: number;
+				_reconnectTimer?: ReturnType<typeof setTimeout>;
+				_lifecycleGeneration: number;
+				_scheduleReconnect(ownerGeneration?: number): void;
+			};
+			const failAfterDelay = async (delay: number, expectedNextDelay: number): Promise<void> => {
+				const attemptsBefore = LifecycleBrowserWebSocket.instances.length;
+				jest.advanceTimersByTime(delay - 1);
+				await flushLifecycleMicrotasks();
+				expect(LifecycleBrowserWebSocket.instances).toHaveLength(attemptsBefore);
+				jest.advanceTimersByTime(1);
+				await flushLifecycleMicrotasks(20);
+				expect(LifecycleBrowserWebSocket.instances).toHaveLength(attemptsBefore + 1);
+				LifecycleBrowserWebSocket.instances[attemptsBefore].error();
+				await flushLifecycleMicrotasks(30);
+				expect(internals._currentReconnectDelay).toBe(expectedNextDelay);
+			};
+
+			await failAfterDelay(250, 500);
+			await failAfterDelay(500, 750);
+			await failAfterDelay(750, 1_000);
+
+			if (internals._reconnectTimer) clearTimeout(internals._reconnectTimer);
+			internals._reconnectTimer = undefined;
+			internals._currentReconnectDelay = 14_750;
+			internals._scheduleReconnect(internals._lifecycleGeneration);
+			await failAfterDelay(14_750, 15_000);
+			await failAfterDelay(15_000, 15_000);
+			expect(onConnectError).toHaveBeenCalledTimes(5);
+		},
+	);
+
+	it('awaits an authenticated reconnect error callback and cannot re-arm after foreground replacement', async () => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		let releaseConnectError!: () => void;
+		const connectErrorGate = new Promise<void>((resolve) => {
+			releaseConnectError = resolve;
+		});
+		const onConnectError = jest.fn(async () => connectErrorGate);
+		const client = makeClient({ persist: true, onConnectError });
+		const initial = loginOutcome(client.login('callback-key'));
+		await flushLifecycleMicrotasks();
+		const initialSocket = LifecycleBrowserWebSocket.instances[0];
+		initialSocket.open();
+		await flushLifecycleMicrotasks();
+		initialSocket.respond(
+			lifecycleRequests('auth', initialSocket)[0].message,
+			connectResult('callback'),
+		);
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		initialSocket.serverClose(1006, 'lost');
+		await flushLifecycleMicrotasks(20);
+		jest.advanceTimersByTime(250);
+		await flushLifecycleMicrotasks(20);
+		const failedSocket = LifecycleBrowserWebSocket.instances[1];
+		failedSocket.error();
+		await flushLifecycleMicrotasks(30);
+		expect(onConnectError).toHaveBeenCalledTimes(1);
+		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer)
+			.toBeUndefined();
+
+		const foreground = loginOutcome(client.login('foreground-after-error'));
+		await flushLifecycleMicrotasks(30);
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(3);
+		const foregroundSocket = LifecycleBrowserWebSocket.instances[2];
+		releaseConnectError();
+		await flushLifecycleMicrotasks(30);
+		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer)
+			.toBeUndefined();
+
+		foregroundSocket.open();
+		await flushLifecycleMicrotasks();
+		foregroundSocket.respond(
+			lifecycleRequests('auth', foregroundSocket)[0].message,
+			connectResult('foreground-after-error'),
+		);
+		await expect(foreground).resolves.toMatchObject({ status: 'resolved' });
+		jest.advanceTimersByTime(30_000);
+		await flushLifecycleMicrotasks();
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(3);
+	});
+
+	it('waits for reconnect error handling before retrying an established transport lost during auth', async () => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		let releaseConnectError!: () => void;
+		const connectErrorGate = new Promise<void>((resolve) => {
+			releaseConnectError = resolve;
+		});
+		const onConnectError = jest.fn(async () => connectErrorGate);
+		const client = makeClient({ persist: true, onConnectError });
+
+		const initial = loginOutcome(client.login('established-retry-key'));
+		await flushLifecycleMicrotasks();
+		const initialSocket = LifecycleBrowserWebSocket.instances[0];
+		initialSocket.open();
+		await flushLifecycleMicrotasks();
+		initialSocket.respond(
+			lifecycleRequests('auth', initialSocket)[0].message,
+			connectResult('established-retry'),
+		);
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		initialSocket.serverClose(1006, 'initial loss');
+		await flushLifecycleMicrotasks(20);
+		jest.advanceTimersByTime(250);
+		await flushLifecycleMicrotasks(20);
+		const reconnectSocket = LifecycleBrowserWebSocket.instances[1];
+		reconnectSocket.open();
+		await flushLifecycleMicrotasks();
+		expect(lifecycleRequests('auth', reconnectSocket)).toHaveLength(1);
+
+		reconnectSocket.serverClose(1006, 'lost during auth');
+		await flushLifecycleMicrotasks(30);
+		expect(onConnectError).toHaveBeenCalledTimes(1);
+		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer)
+			.toBeUndefined();
+		jest.advanceTimersByTime(30_000);
+		await flushLifecycleMicrotasks(20);
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(2);
+
+		releaseConnectError();
+		await flushLifecycleMicrotasks(30);
+		const internals = client as unknown as {
+			_currentReconnectDelay: number;
+			_reconnectTimer?: ReturnType<typeof setTimeout>;
+		};
+		expect(internals._currentReconnectDelay).toBe(500);
+		expect(internals._reconnectTimer).toBeDefined();
+		jest.advanceTimersByTime(499);
+		await flushLifecycleMicrotasks();
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(2);
+		jest.advanceTimersByTime(1);
+		await flushLifecycleMicrotasks(20);
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(3);
+	});
+
+	it('exports exactly the three cancellation reasons and a non-RocketRide cancellation error', () => {
+		const exports = ClientExceptions as unknown as {
+			LoginAttemptCancelledError?: new (
+				reason: LoginAttemptCancellationReason,
+			) => Error & { reason: LoginAttemptCancellationReason };
+			RocketRideException: new (result: Record<string, unknown>) => Error;
+		};
+		expect(exports.LoginAttemptCancelledError).toBeDefined();
+		const Cancellation = exports.LoginAttemptCancelledError!;
+		const reasons: readonly LoginAttemptCancellationReason[] = ['superseded', 'logout', 'detached'];
+		// @ts-expect-error "disconnected" is not a public login cancellation reason.
+		const invalidReason: LoginAttemptCancellationReason = 'disconnected';
+		void invalidReason;
+		for (const reason of reasons) {
+			const error = new Cancellation(reason);
+			expect(error).toMatchObject({
+				name: 'LoginAttemptCancelledError',
+				message: reason,
+				reason,
+			});
+			expect(error).toBeInstanceOf(Error);
+			expect(error).not.toBeInstanceOf(exports.RocketRideException);
+		}
+	});
+
+	it('never writes credentials or operation keys to protocol logs', async () => {
+		const protocolMessages: string[] = [];
+		const traceMessages: DAPMessage[] = [];
+		const client = makeClient({
+			onProtocolMessage: (message) => protocolMessages.push(message),
+			onTrace: (_traceType, message) => traceMessages.push(message),
+		});
+		const login = loginOutcome(client.login('do-not-log-this-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'logging socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'logging auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('logging'));
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		client.setEnv({ ROCKETRIDE_APIKEY: 'nested-do-not-log-this-key' });
+		const use = client.use({ pipeline: getEchoPipeline(), token: 'task-do-not-log-this-token' });
+		await waitForLifecycle(() => lifecycleRequests('execute', socket).length === 1, 'logging execute');
+		socket.respond(lifecycleRequests('execute', socket)[0].message, { token: 'logging-task' });
+		await use;
+
+		expect(protocolMessages.join('\n')).not.toContain('do-not-log-this-key');
+		expect(protocolMessages.join('\n')).not.toContain('nested-do-not-log-this-key');
+		expect(protocolMessages.join('\n')).not.toContain('task-do-not-log-this-token');
+		expect(protocolMessages.join('\n')).not.toContain('logging-task');
+		expect(JSON.stringify(traceMessages)).not.toContain('nested-do-not-log-this-key');
+		expect(JSON.stringify(traceMessages)).not.toContain('task-do-not-log-this-token');
+		expect(JSON.stringify(traceMessages)).not.toContain('logging-task');
+		expect(traceMessages).toContainEqual(expect.objectContaining({
+			arguments: expect.objectContaining({
+				env: expect.objectContaining({ ROCKETRIDE_APIKEY: '<redacted>' }),
+			}),
+		}));
+	});
+
+	it('traces fsRead binary data by byte count while returning the original response data', async () => {
+		const traces: Array<[TraceType, DAPMessage]> = [];
+		const client = makeClient({
+			onTrace: (traceType, message) => traces.push([traceType, message]),
+		});
+		const data = new Uint8Array([1, 2, 3]);
+		const response: DAPMessage = {
+			type: 'response',
+			seq: 1,
+			request_seq: 1,
+			command: 'rrext_store',
+			success: true,
+			arguments: { data },
+		};
+		jest.spyOn(client, 'request').mockResolvedValue(response);
+
+		await expect(client.fsRead('handle')).resolves.toBe(data);
+		expect(response.arguments?.data).toBe(data);
+		expect(traces).toContainEqual([
+			TraceType.Success,
+			expect.objectContaining({ arguments: { data: '<3 bytes>' } }),
+		]);
+	});
+
+	it('completes best-effort monitor restoration before publishing connected', async () => {
+		const onConnected = jest.fn(async () => undefined);
+		const client = makeClient({ onConnected });
+		await client.addMonitor({ token: 'best-effort-monitor' }, ['output']);
+
+		const login = loginOutcome(client.login('best-effort-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'best-effort socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'best-effort auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('best-effort'));
+		await waitForLifecycle(
+			() => lifecycleRequests('rrext_monitor', socket).length === 1,
+			'best-effort monitor request',
+		);
+		expect(onConnected).not.toHaveBeenCalled();
+		socket.respond(lifecycleRequests('rrext_monitor', socket)[0].message, {}, false);
+
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+		expect(onConnected).toHaveBeenCalledTimes(1);
+	});
+
+	it('suppresses downstream publication when an old event resumes after transport replacement', async () => {
+		let releaseSse!: () => void;
+		const sseGate = new Promise<void>((resolve) => {
+			releaseSse = resolve;
+		});
+		let sseStarted = false;
+		const onEvent = jest.fn(async (_message: DAPMessage) => undefined);
+		const client = makeClient({ onEvent });
+		client._ssePipeCallbacks.set(7, async () => {
+			sseStarted = true;
+			await sseGate;
+		});
+
+		const initial = loginOutcome(client.login('event-a'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'event A socket');
+		const oldSocket = LifecycleBrowserWebSocket.instances[0];
+		oldSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', oldSocket).length === 1, 'event A auth');
+		oldSocket.respond(lifecycleRequests('auth', oldSocket)[0].message, connectResult('event-a'));
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		const oldOnMessage = oldSocket.onmessage;
+		if (!oldOnMessage) throw new Error('Expected old event handler');
+		oldOnMessage.call(oldSocket, {
+			data: JSON.stringify({
+				type: 'event',
+				seq: 81,
+				event: 'apaevt_sse',
+				body: { pipe_id: 7, type: 'chunk', data: { value: 'old' } },
+			}),
+		} as MessageEvent);
+		await waitForLifecycle(() => sseStarted, 'held old SSE callback');
+
+		const replacement = loginOutcome(client.login('event-b'));
+		await flushLifecycleMicrotasks();
+		releaseSse();
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'event B socket');
+		const newSocket = LifecycleBrowserWebSocket.instances[1];
+		newSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', newSocket).length === 1, 'event B auth');
+		newSocket.respond(lifecycleRequests('auth', newSocket)[0].message, connectResult('event-b'));
+		await expect(replacement).resolves.toMatchObject({ status: 'resolved' });
+
+		expect(onEvent).not.toHaveBeenCalled();
+		newSocket.onmessage?.({
+			data: JSON.stringify({ type: 'event', seq: 82, event: 'new-event', body: {} }),
+		} as MessageEvent);
+		await waitForLifecycle(() => onEvent.mock.calls.length === 1, 'new event publication');
+		expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ event: 'new-event' }));
+	});
+
+	it('keeps authenticated identity when attach targets the already attached endpoint', async () => {
+		const client = makeClient();
+		const login = loginOutcome(client.login('attach-no-op-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'attach no-op socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'attach no-op auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('attach-no-op'));
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+		const account = client.getAccountInfo();
+
+		await client.attach('https://one.example.test');
+
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(1);
+		expect(client.isAttached()).toBe(true);
+		expect(client.isAuthenticated()).toBe(true);
+		expect(client.getAccountInfo()).toBe(account);
+		expect(lifecycleRequests('deauth', socket)).toHaveLength(0);
+	});
+
+	it('disconnect sends deauth exactly once before closing the authenticated socket', async () => {
+		const client = makeClient();
+		const login = loginOutcome(client.login('serial-disconnect-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'serial socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'serial auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('serial'));
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		const disconnected = client.disconnect();
+		await waitForLifecycle(() => lifecycleRequests('deauth', socket).length === 1, 'serial deauth');
+		expect(socket.readyState).toBe(LifecycleBrowserWebSocket.OPEN);
+		socket.respond(lifecycleRequests('deauth', socket)[0].message, {});
+		await disconnected;
+
+		expect(lifecycleRequests('deauth', socket)).toHaveLength(1);
+		expect(socket.readyState).toBe(LifecycleBrowserWebSocket.CLOSED);
+		expect(client.isAttached()).toBe(false);
+		expect(client.isAuthenticated()).toBe(false);
+	});
+
+	it('a same-endpoint attach supersedes a disconnect held in deauth', async () => {
+		const client = makeClient();
+		const login = loginOutcome(client.login('disconnect-overlap-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'overlap socket');
+		const oldSocket = LifecycleBrowserWebSocket.instances[0];
+		oldSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', oldSocket).length === 1, 'overlap auth');
+		oldSocket.respond(lifecycleRequests('auth', oldSocket)[0].message, connectResult('overlap'));
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		const disconnected = client.disconnect();
+		await waitForLifecycle(() => lifecycleRequests('deauth', oldSocket).length === 1, 'held overlap deauth');
+		const attached = client.attach('https://one.example.test');
+		await waitForLifecycle(
+			() => LifecycleBrowserWebSocket.instances.length === 2,
+			'replacement anonymous socket',
+		);
+		const newSocket = LifecycleBrowserWebSocket.instances[1];
+		newSocket.open();
+		await attached;
+		await disconnected;
+
+		expect(oldSocket.readyState).toBe(LifecycleBrowserWebSocket.CLOSED);
+		expect(newSocket.readyState).toBe(LifecycleBrowserWebSocket.OPEN);
+		expect(client.isAttached()).toBe(true);
+		expect(client.isAuthenticated()).toBe(false);
+	});
+
+	it('treats foreground replacement as controlled ownership transfer without stale disconnected publication', async () => {
+		const onConnected = jest.fn(async () => undefined);
+		const onDisconnected = jest.fn(async () => undefined);
+		const client = makeClient({ onConnected, onDisconnected });
+
+		const first = loginOutcome(client.login('accepted-a'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'accepted A socket');
+		const firstSocket = LifecycleBrowserWebSocket.instances[0];
+		firstSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', firstSocket).length === 1, 'accepted A auth');
+		firstSocket.respond(lifecycleRequests('auth', firstSocket)[0].message, connectResult('accepted-a'));
+		await expect(first).resolves.toMatchObject({ status: 'resolved' });
+
+		const second = loginOutcome(client.login('accepted-b'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'accepted B socket');
+		// Supersession is intentional control flow, not an unsolicited transport
+		// loss: the old generation has no right to publish a disconnected event.
+		expect(onDisconnected).not.toHaveBeenCalled();
+		const secondSocket = LifecycleBrowserWebSocket.instances[1];
+		secondSocket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', secondSocket).length === 1, 'accepted B auth');
+		secondSocket.respond(lifecycleRequests('auth', secondSocket)[0].message, connectResult('accepted-b'));
+		await expect(second).resolves.toMatchObject({ status: 'resolved' });
+		expect(onConnected).toHaveBeenCalledTimes(2);
+		expect(onDisconnected).not.toHaveBeenCalled();
+	});
+
+	it('keeps foreground authentication rejection on the login promise instead of publishing a reconnect callback', async () => {
+		const onConnectError = jest.fn(async () => undefined);
+		const client = makeClient({ persist: true, onConnectError });
+		const login = loginOutcome(client.login('rejected-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'rejected auth socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'rejected auth request');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, {}, false);
+
+		await expect(login).resolves.toMatchObject({
+			status: 'rejected',
+			error: { name: 'AuthenticationException' },
+		});
+		expect(onConnectError).not.toHaveBeenCalled();
+		expect(client.isAttached()).toBe(true);
+		expect(client.isAuthenticated()).toBe(false);
+	});
+
+	it('does not let a stale disconnect callback schedule work for a newer foreground generation', async () => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		let replacement: Promise<LoginOutcome> | undefined;
+		let client!: RocketRideClient;
+		const onDisconnected = jest.fn(async () => {
+			replacement = loginOutcome(client.login('replacement-key'));
+		});
+		client = makeClient({ persist: true, onDisconnected });
+
+		const initial = loginOutcome(client.login('initial-key'));
+		await flushLifecycleMicrotasks();
+		const firstSocket = LifecycleBrowserWebSocket.instances[0];
+		firstSocket.open();
+		await flushLifecycleMicrotasks();
+		firstSocket.respond(lifecycleRequests('auth', firstSocket)[0].message, connectResult('initial'));
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		firstSocket.serverClose(1006, 'lost');
+		await flushLifecycleMicrotasks();
+		expect(replacement).toBeDefined();
+		expect((client as unknown as { _reconnectTimer?: ReturnType<typeof setTimeout> })._reconnectTimer).toBeUndefined();
+
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 2, 'replacement socket');
+		const replacementSocket = LifecycleBrowserWebSocket.instances[1];
+		replacementSocket.open();
+		await flushLifecycleMicrotasks();
+		replacementSocket.respond(
+			lifecycleRequests('auth', replacementSocket)[0].message,
+			connectResult('replacement'),
+		);
+		await expect(replacement!).resolves.toMatchObject({ status: 'resolved' });
+
+		jest.advanceTimersByTime(15_000);
+		await flushLifecycleMicrotasks();
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(2);
+	});
+
+	it('maps unsolicited transport loss during auth to ConnectionException without disconnected publication', async () => {
+		const onDisconnected = jest.fn(async () => undefined);
+		const client = makeClient({ onDisconnected });
+		const login = loginOutcome(client.login('loss-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'loss socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'auth before loss');
+
+		socket.serverClose(1006, 'transport lost');
+		await expect(login).resolves.toMatchObject({
+			status: 'rejected',
+			error: { name: 'ConnectionException' },
+		});
+		const result = await login;
+		if (result.status !== 'rejected') throw new Error('Expected login rejection');
+		expect(result.error).not.toMatchObject({ name: 'LoginAttemptCancelledError' });
+		expect(onDisconnected).not.toHaveBeenCalled();
+	});
+
+	it('reuses the explicit foreground credential when reconnecting after transport loss during initial auth', async () => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		const onConnected = jest.fn(async () => undefined);
+		const client = makeClient({
+			auth: 'configured-fallback-key',
+			persist: true,
+			onConnected,
+		});
+		const login = loginOutcome(client.login('pre-auth-reconnect-key'));
+		await flushLifecycleMicrotasks();
+		const firstSocket = LifecycleBrowserWebSocket.instances[0];
+		firstSocket.open();
+		await flushLifecycleMicrotasks();
+		expect(lifecycleRequests('auth', firstSocket)[0].message.arguments?.auth)
+			.toBe('pre-auth-reconnect-key');
+
+		firstSocket.serverClose(1006, 'lost before auth response');
+		await expect(login).resolves.toMatchObject({
+			status: 'rejected',
+			error: { name: 'ConnectionException' },
+		});
+		await flushLifecycleMicrotasks();
+		jest.advanceTimersByTime(250);
+		await flushLifecycleMicrotasks();
+
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(2);
+		const reconnectSocket = LifecycleBrowserWebSocket.instances[1];
+		reconnectSocket.open();
+		await flushLifecycleMicrotasks();
+		const reconnectAuth = lifecycleRequests('auth', reconnectSocket)[0];
+		expect(reconnectAuth.message.arguments?.auth).toBe('pre-auth-reconnect-key');
+		reconnectSocket.respond(reconnectAuth.message, connectResult('pre-auth-reconnected'));
+		await flushLifecycleMicrotasks(30);
+		expect(onConnected).toHaveBeenCalledTimes(1);
+		expect(client.getAccountInfo()).toMatchObject({
+			userToken: 'rr_pre-auth-reconnected',
+		});
+	});
+
+	it('stops persistent authentication retries after a background auth rejection', async () => {
+		jest.useFakeTimers({ doNotFake: ['queueMicrotask'] });
+		const onConnectError = jest.fn(async () => undefined);
+		const client = makeClient({ persist: true, onConnectError });
+		const initial = loginOutcome(client.login('background-rejection-key'));
+		await flushLifecycleMicrotasks();
+		const initialSocket = LifecycleBrowserWebSocket.instances[0];
+		initialSocket.open();
+		await flushLifecycleMicrotasks();
+		initialSocket.respond(
+			lifecycleRequests('auth', initialSocket)[0].message,
+			connectResult('background-rejection'),
+		);
+		await expect(initial).resolves.toMatchObject({ status: 'resolved' });
+
+		initialSocket.serverClose(1006, 'lost before background rejection');
+		await flushLifecycleMicrotasks();
+		jest.advanceTimersByTime(250);
+		await flushLifecycleMicrotasks();
+		const reconnectSocket = LifecycleBrowserWebSocket.instances[1];
+		reconnectSocket.open();
+		await flushLifecycleMicrotasks();
+		reconnectSocket.respond(lifecycleRequests('auth', reconnectSocket)[0].message, {}, false);
+		await flushLifecycleMicrotasks(30);
+
+		expect(onConnectError).toHaveBeenCalledTimes(1);
+		expect(client.isAttached()).toBe(true);
+		expect(client.isAuthenticated()).toBe(false);
+		jest.advanceTimersByTime(30_000);
+		await flushLifecycleMicrotasks();
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(2);
+	});
+
+	it('publishes one disconnected callback when a completed authenticated session is replaced by attach', async () => {
+		const callbacks: string[] = [];
+		let client!: RocketRideClient;
+		client = makeClient({
+			onConnected: async () => { callbacks.push('connected'); },
+			onDisconnected: async () => {
+				callbacks.push('disconnected');
+				expect(client.isAttached()).toBe(false);
+				expect(client.isAuthenticated()).toBe(false);
+			},
+		});
+		const login = loginOutcome(client.login('attach-replacement-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'authenticated socket');
+		const authenticatedSocket = LifecycleBrowserWebSocket.instances[0];
+		authenticatedSocket.open();
+		await waitForLifecycle(
+			() => lifecycleRequests('auth', authenticatedSocket).length === 1,
+			'authenticated request',
+		);
+		authenticatedSocket.respond(
+			lifecycleRequests('auth', authenticatedSocket)[0].message,
+			connectResult('attach-replacement'),
+		);
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		const attach = client.attach('https://two.example.test');
+		await waitForLifecycle(
+			() => LifecycleBrowserWebSocket.instances.length === 2,
+			'anonymous replacement socket',
+		);
+		const replacementSocket = LifecycleBrowserWebSocket.instances[1];
+		replacementSocket.open();
+		await expect(attach).resolves.toBeUndefined();
+
+		expect(callbacks).toEqual(['connected', 'disconnected']);
+		expect(client.isAttached()).toBe(true);
+		expect(client.isAuthenticated()).toBe(false);
+	});
+
+	it('yields attach replacement when its disconnected callback detaches reentrantly', async () => {
+		let client!: RocketRideClient;
+		const onDisconnected = jest.fn(async () => {
+			await client.detach();
+		});
+		client = makeClient({ onDisconnected });
+		const login = loginOutcome(client.login('attach-reentrant-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'reentrant source socket');
+		const sourceSocket = LifecycleBrowserWebSocket.instances[0];
+		sourceSocket.open();
+		await waitForLifecycle(
+			() => lifecycleRequests('auth', sourceSocket).length === 1,
+			'reentrant source auth',
+		);
+		sourceSocket.respond(
+			lifecycleRequests('auth', sourceSocket)[0].message,
+			connectResult('attach-reentrant'),
+		);
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		await expect(client.attach('https://two.example.test')).resolves.toBeUndefined();
+
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(1);
+		expect(sourceSocket.readyState).toBe(LifecycleBrowserWebSocket.CLOSED);
+		expect(client.isAttached()).toBe(false);
+		expect(client.isAuthenticated()).toBe(false);
+	});
+
+	it('delivers a claimed disconnect when cancelled-login cleanup detaches during attach teardown', async () => {
+		let releaseConnected!: () => void;
+		const connectedGate = new Promise<void>((resolve) => { releaseConnected = resolve; });
+		const callbacks: string[] = [];
+		let client!: RocketRideClient;
+		client = makeClient({
+			onConnected: async () => {
+				callbacks.push('connected');
+				await connectedGate;
+			},
+			onDisconnected: async () => {
+				callbacks.push('disconnected');
+			},
+		});
+		const login = loginOutcome(client.login('attach-claim-race-key').catch(async (error) => {
+			callbacks.push('login rejected');
+			await client.detach();
+			throw error;
+		}));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'claim-race source socket');
+		const sourceSocket = LifecycleBrowserWebSocket.instances[0];
+		sourceSocket.open();
+		await waitForLifecycle(
+			() => lifecycleRequests('auth', sourceSocket).length === 1,
+			'claim-race source auth',
+		);
+		sourceSocket.respond(
+			lifecycleRequests('auth', sourceSocket)[0].message,
+			connectResult('attach-claim-race'),
+		);
+		await waitForLifecycle(() => callbacks.includes('connected'), 'held connected callback');
+
+		const attach = client.attach('https://two.example.test');
+		await expect(login).resolves.toMatchObject({
+			status: 'rejected',
+			error: { name: 'LoginAttemptCancelledError', reason: 'superseded' },
+		});
+		releaseConnected();
+		await expect(attach).resolves.toBeUndefined();
+		await flushLifecycleMicrotasks();
+
+		expect(callbacks.filter((callback) => callback === 'disconnected')).toHaveLength(1);
+		expect(sourceSocket.readyState).toBe(LifecycleBrowserWebSocket.CLOSED);
+		expect(LifecycleBrowserWebSocket.instances).toHaveLength(1);
+		expect(client.isAttached()).toBe(false);
+		expect(client.isAuthenticated()).toBe(false);
+	});
+
+	it('logout during a reconnect gap re-attaches anonymously instead of stranding a persist client', async () => {
+		const onDisconnected = jest.fn(async () => undefined);
+		const client = makeClient({ persist: true, onDisconnected });
+		const login = loginOutcome(client.login('reconnect-gap-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'gap login socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'gap auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('gap'));
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		// Drop the connection: persist mode arms the reconnect timer.
+		socket.serverClose(1006, 'connection lost');
+		await flushLifecycleMicrotasks();
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+
+		// logout() clears that timer; it must leave the client attached anyway.
+		const logoutDone = client.logout();
+		await waitForLifecycle(
+			() => LifecycleBrowserWebSocket.instances.length === 2,
+			'post-logout anonymous socket',
+		);
+		const anonymousSocket = LifecycleBrowserWebSocket.instances[1];
+		anonymousSocket.open();
+		await logoutDone;
+		await flushLifecycleMicrotasks();
+
+		expect(client.isAttached()).toBe(true);
+		expect(client.isAuthenticated()).toBe(false);
+		// The transport drop already published the balancing disconnect.
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+		expect(lifecycleRequests('auth', anonymousSocket)).toHaveLength(0);
+	});
+
+	it('logout publishes exactly one balancing onDisconnected for an accepted login', async () => {
+		const onDisconnected = jest.fn(async (_reason?: string, _hasError?: boolean) => undefined);
+		const client = makeClient({ onDisconnected });
+		const login = loginOutcome(client.login('balance-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'balance socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'balance auth');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, connectResult('balance'));
+		await expect(login).resolves.toMatchObject({ status: 'resolved' });
+
+		const logoutDone = client.logout();
+		await waitForLifecycle(() => lifecycleRequests('deauth', socket).length === 1, 'balance deauth');
+		socket.respond(lifecycleRequests('deauth', socket)[0].message, {});
+		await logoutDone;
+
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+		expect(onDisconnected).toHaveBeenCalledWith('Logged out', false);
+		expect(client.isAttached()).toBe(true);
+
+		// A later transport drop must not publish the retired generation again.
+		socket.serverClose(1006, 'late close');
+		await flushLifecycleMicrotasks();
+		expect(onDisconnected).toHaveBeenCalledTimes(1);
+	});
+});

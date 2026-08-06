@@ -160,8 +160,7 @@ class MiscCommands(DAPConn):
         """
         Handle DAP 'rrext_validate' command to validate a pipeline configuration.
 
-        Validates pipeline structure, component compatibility, and connection
-        integrity using rocketlib's validatePipeline function.
+        Validates pipeline structure using rocketlib's validatePipeline function.
 
         Before validation, ``${ROCKETRIDE_*}`` environment variable references
         are resolved using the same merged environment as pipeline execution,

@@ -737,6 +737,111 @@ async def test_forward_task_event_debugger_swallows_send_failure():
 
 
 # ---------------------------------------------------------------------------
+# _pipeline_uses_rocketride_db
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_uses_rocketride_db_detects_each_provider():
+    """Any of the three RocketRide cloud DB providers triggers DSN injection."""
+    for provider in ('rocketride_sql', 'rocketride_vector', 'rocketride_graph'):
+        t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]})
+        assert Task._pipeline_uses_rocketride_db(t), provider
+
+
+def test_pipeline_uses_rocketride_db_false_without_db_nodes():
+    """Ordinary pipelines never trigger provisioning."""
+    t = _task(pipeline={'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': 'db_postgres'}]})
+    assert not Task._pipeline_uses_rocketride_db(t)
+
+
+def test_pipeline_uses_rocketride_db_tolerates_malformed_components():
+    """Missing components / non-dict entries must not raise at task start."""
+    assert not Task._pipeline_uses_rocketride_db(_task(pipeline={}))
+    t = _task(pipeline={'components': ['not-a-dict', {'no-provider': True}]})
+    assert not Task._pipeline_uses_rocketride_db(t)
+
+
+# ---------------------------------------------------------------------------
+# _build_subprocess_env — RocketRide DB credential hygiene
+# ---------------------------------------------------------------------------
+
+_DB_PIPELINE = {'components': [{'id': 'db', 'provider': 'rocketride_sql'}]}
+
+
+def _env_task(pipeline=None):
+    t = _task(pipeline=pipeline if pipeline is not None else {})
+    t.client_id = 'client-env-test'
+    return t
+
+
+def _patch_resolve(monkeypatch, fake):
+    import ai.account
+
+    monkeypatch.setattr(ai.account.account, 'resolve_db_dsn', fake)
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_scrubs_broker_credentials(monkeypatch):
+    """The broker credential can mint ANY tenant's DSN — it must never reach
+    node subprocesses, and neither may a parent-level DSN or stale error.
+    """
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', 'https://broker.example')
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', 'super-secret')
+    monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/db')
+    monkeypatch.setenv('ROCKETRIDE_DB_RESOLVE_ERROR', 'stale reason')
+
+    env = await Task._build_subprocess_env(_env_task())  # no DB nodes
+
+    assert 'ROCKETRIDE_DB_BROKER_URL' not in env
+    assert 'ROCKETRIDE_DB_BROKER_TOKEN' not in env
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+    # Identity rides the task file (#1686), never the environment.
+    assert 'ROCKETRIDE_CLIENT_ID' not in env
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_injects_resolved_dsn(monkeypatch):
+    async def fake_resolve(client_id):
+        assert client_id == 'client-env-test'
+        return 'postgresql://tenant@pooler/db?sslmode=require'
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
+    assert env['ROCKETRIDE_DB_DSN'] == 'postgresql://tenant@pooler/db?sslmode=require'
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_stale_dsn_does_not_survive_broker_failure(monkeypatch):
+    """A parent-env DSN must not become the node's DSN when resolution fails —
+    it could point at another tenant. The failure reason is passed down instead.
+    """
+    monkeypatch.setenv('ROCKETRIDE_DB_DSN', 'postgresql://stale@parent/other-tenant')
+
+    async def fake_resolve(client_id):
+        raise RuntimeError('DB broker request failed: HTTP 503')
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    t = _env_task(pipeline=_DB_PIPELINE)
+    env = await Task._build_subprocess_env(t)
+
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert env['ROCKETRIDE_DB_RESOLVE_ERROR'] == 'DB broker request failed: HTTP 503'
+    t.debug_message.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_subprocess_env_unconfigured_account_is_nonfatal(monkeypatch):
+    async def fake_resolve(client_id):
+        raise NotImplementedError('sign in')
+
+    _patch_resolve(monkeypatch, fake_resolve)
+    env = await Task._build_subprocess_env(_env_task(pipeline=_DB_PIPELINE))
+    assert 'ROCKETRIDE_DB_DSN' not in env
+    assert 'ROCKETRIDE_DB_RESOLVE_ERROR' not in env
+
+
+# ---------------------------------------------------------------------------
 # _accumulate_analytics — run analytics in the status body
 # ---------------------------------------------------------------------------
 

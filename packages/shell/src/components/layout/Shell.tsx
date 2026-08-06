@@ -487,6 +487,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	const handleApiKeySubmit = useCallback(async (apiKey: string) => {
 		const result = await cm.connect(apiKey);
+		if (!result) return;
 		if (mountedRef.current) {
 			const target = loginTargetRef.current;
 			loginTargetRef.current = null;

@@ -64,7 +64,6 @@ void PipelineConfig::setRoot(json::Value root) noexcept {
  *  11. The value of "pipeline.source" must reference a valid component id.
  *  12. The value of each "lane" in component inputs must match one of
  *      engine::store::Binder::MethodNames.
- *  13. Three must be no cycles in the pipeline connections.
  *
  * @return Error
  */
@@ -97,33 +96,8 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
         return APERR(Ec::InvalidParam,
                      "'pipeline.components' must be an array");
 
-    struct CompInfo;
-    struct LaneInfo;
-
-    // Component information for validation and graph analysis
-    struct CompInfo {
-        Text id;
-        json::ArrayIndex pos = 0;
-        IServices::ServiceDefinitionPtr def = nullptr;
-        std::vector<LaneInfo *> inputs, outputs;
-        std::vector<CompInfo *> controls;
-        bool visited = false;
-    };
-    std::unordered_map<Text, CompInfo> comps;
-
-    // Lane information for validation and graph analysis
-    struct LaneInfo {
-        static Text makeKey(TextView lane, TextView from,
-                            TextView to) noexcept {
-            return _ts(from, "-[", lane, "]->", to);
-        }
-
-        Text name;
-        CompInfo *from = nullptr, *to = nullptr;
-        std::vector<LaneInfo *> outputs;
-        bool visited = false;
-    };
-    std::unordered_map<Text, LaneInfo> lanes;
+    // Component ids seen so far, mapped to their array position.
+    std::unordered_map<Text, json::ArrayIndex> ids;
 
     // Validate structure of each component
     for (json::Value::ArrayIndex pos = 0; pos < components().size(); ++pos) {
@@ -137,14 +111,7 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
 
         // [Rule 5] Check that the component's "id" is unique
         Text id = component["id"].asString();
-
-        // Get component info
-        Text provider = component["provider"].asString();
-        auto def = IServices::getServiceDefinition(provider);
-        if (!def) continue;
-
-        // Store extended component information for later validation
-        if (!comps.emplace(id, CompInfo{id, pos, *def}).second)
+        if (!ids.emplace(id, pos).second)
             return APERR(Ec::InvalidParam, "Duplicate component", id);
     }
 
@@ -161,8 +128,8 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
 
         // [Rule 11] Final validation: Ensure pipeline.source references a known
         // component
-        if (auto it = comps.find(sourceId); it != comps.end())
-            m_sourcePos = it->second.pos;
+        if (auto it = ids.find(sourceId); it != ids.end())
+            m_sourcePos = it->second;
         else
             return APERR(
                 Ec::InvalidParam,
@@ -173,7 +140,6 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
     // 'control' arrays
     for (const auto &component : components()) {
         Text id = component["id"].asString();
-        auto &comp = comps[id];
 
         // [Rule 9] Validate 'input' connections if present
         if (component.isMember("input")) {
@@ -206,24 +172,10 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                     return APERR(Ec::InvalidParam, "Component", id,
                                  "input 'from' must be a non-empty string");
 
-                if (!comps.count(from))
+                if (!ids.count(from))
                     return APERR(
                         Ec::InvalidParam, "Component", id,
                         "input references unknown component id:", from);
-
-                // Store the lane information for later validation and update
-                // appropriate components
-                auto &compFrom = comps[from];
-                if (auto res = lanes.emplace(LaneInfo::makeKey(lane, from, id),
-                                             LaneInfo{lane, &compFrom, &comp});
-                    res.second) {
-                    compFrom.outputs.push_back(&res.first->second);
-                    comp.inputs.push_back(&res.first->second);
-                } else {
-                    // The issue on UI is that output lanes may be duplicated
-                    // return APERR(Ec::InvalidParam, "Duplicate lane", lane,
-                    // "from component", from, "to component", id);
-                }
             }
         }
 
@@ -252,14 +204,10 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                     return APERR(Ec::InvalidParam, "Component", id,
                                  "control 'from' must be a non-empty string");
 
-                if (!comps.count(from))
+                if (!ids.count(from))
                     return APERR(
                         Ec::InvalidParam, "Component", id,
                         "control references unknown component id:", from);
-
-                // Store the component information for later validation
-                auto &compFrom = comps[from];
-                compFrom.controls.push_back(&comp);
             }
         }
     }
@@ -270,122 +218,6 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
     if (!sourceConfig().isMember("mode")) sourceConfig()["mode"] = "Source";
     if (!sourceConfig().isMember("type"))
         sourceConfig()["type"] = source()["provider"];
-
-    // Link input lanes to output lanes of the components by service definition.
-    //
-    // @example:
-    //     "lanes": {
-    //         "tags": [
-    //             "text",
-    //             "table",
-    //             "image",
-    //             "video",
-    //             "audio"
-    //         ]
-    //     }
-    _block() {
-        for (auto &[id, comp] : comps) {
-            for (auto &input : comp.inputs) {
-                for (auto &output : comp.outputs) {
-                    // Unregistered provider (e.g. a debug-only node in a release
-                    // build) — error instead of dereferencing a null def.
-                    if (!comp.def)
-                        return APERR(Ec::InvalidParam, "Component", id,
-                                     "references a provider with no registered "
-                                     "service definition; it is unavailable in "
-                                     "this engine build (e.g. a debug-only node)");
-
-                    if (!comp.def->serviceDefinition["lanes"].isMember(
-                            input->name))
-                        return APERR(Ec::InvalidParam, "Component", id,
-                                     "input lane", input->name,
-                                     "not found in service definition");
-
-                    if (_anyOf(
-                            comp.def->serviceDefinition["lanes"][input->name],
-                            output->name))
-                        input->outputs.push_back(output);
-                }
-            }
-        }
-    }
-
-    // [Rule 13] Check for cycles in the pipeline lane connections
-    _block() {
-        // Define an array to keep track of the current path in the pipeline
-        // graph
-        std::vector<LaneInfo *> lanePath;
-
-        // Lambda function to detect cycles in the pipeline graph
-        std::function<bool(LaneInfo *)> hasCycle;
-        hasCycle = [&](LaneInfo *lane) -> bool {
-            if (auto it = std::find(lanePath.begin(), lanePath.end(), lane);
-                it != lanePath.end()) {
-                // Cycle detected, let's leave only the cycle part in the path
-                lanePath.erase(lanePath.begin(), it);
-                return true;
-            }
-
-            if (lane->visited)
-                return false;  // Lane already visited, no cycle here
-
-            // Add the lane to the path
-            lanePath.push_back(lane);
-            // Mark the lane and the target component as visited
-            lane->visited = lane->to->visited = true;
-            for (auto *controlComp : lane->to->controls)
-                controlComp->visited = true;
-
-            // Recursively check all outputs of this lane for cycles
-            for (auto *nextLane : lane->outputs) {
-                if (hasCycle(nextLane)) return true;
-            }
-
-            // If no cycle was found, remove the lane from the stack
-            lanePath.pop_back();
-            return false;
-        };
-
-        // Mark the source component as visited, INCLUDING its
-        // control-attached components — a control edge is wiring exactly
-        // like a lane (lane targets get the same treatment in the DFS
-        // above), and an invoke-capable source (the 'tools' endpoint) has
-        // members with no data lanes at all. Keeps the reported chain in
-        // agreement with what generatePipelineStack actually instantiates.
-        for (auto &[_, comp] : comps) {
-            if (comp.id == sourceId) {
-                comp.visited = true;
-                for (auto *controlComp : comp.controls)
-                    controlComp->visited = true;
-                break;
-            }
-        }
-
-        // Check the source lanes for cycles
-        for (auto &[_, lane] : lanes) {
-            if (lane.from->id != sourceId) continue;  // Skip non-source lanes
-
-            if (hasCycle(&lane)) {
-                // Format the cycle stack into a string for error reporting
-                Text pathMsg;
-                for (size_t i = 0; i < lanePath.size(); ++i) {
-                    auto *lane = lanePath[i];
-                    pathMsg += lane->from->id + "-[" + lane->name + "]->";
-                    if (i == lanePath.size() - 1) pathMsg += lane->to->id;
-                }
-                return APERR(Ec::InvalidParam,
-                             "Cycle detected in pipeline:", pathMsg);
-            }
-        }
-    }
-
-    // Build the chain of the components linked with the source
-    _block() {
-        auto &chain = pipeline["chain"] =
-            json::Value{json::ValueType::arrayValue};
-        for (const auto &[_, comp] : comps)
-            if (comp.def && comp.visited) chain.append(comp.id);
-    }
 
     return {};
 }

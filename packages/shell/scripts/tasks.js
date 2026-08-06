@@ -28,13 +28,15 @@
  * independently; this module only builds the shell itself.
  *
  * Actions:
+ *   shell:test    — run node:test against co-located TypeScript tests
  *   shell:bundle  — run rsbuild build
  *   shell:copy    — sync build/shell → dist/server/static/shell
- *   shell:build   — full build: client-typescript → bundle → copy
+ *   shell:build   — full build: client-typescript → test → bundle → copy
  *   shell:dev     — start rsbuild dev server on port 3000
  *   shell:clean   — remove build artifacts
  */
 const path = require('path');
+const { readdir } = require('node:fs/promises');
 const {
 	execCommand,
 	syncDir,
@@ -178,6 +180,34 @@ function makeCopyAction() {
 	};
 }
 
+/**
+ * Run co-located shell TypeScript tests through node:test.
+ *
+ * Discovers *.test.ts and *.test.tsx files recursively under src/ and
+ * executes them with tsx as the TypeScript loader — no emit step, tests
+ * run straight from source.
+ *
+ * @returns {object} Action with run function.
+ */
+function makeTestRunAction() {
+	return {
+		description: 'Testing the shell',
+		run: async (ctx, task) => {
+			// Discover co-located tests anywhere under src/.
+			const testFiles = (await readdir(SRC_DIR, { recursive: true }))
+				.filter((file) => file.endsWith('.test.ts') || file.endsWith('.test.tsx'))
+				.map((file) => path.join('src', file));
+
+			if (testFiles.length === 0) {
+				task.output = 'No shell test files found';
+				return;
+			}
+
+			await execCommand('node', ['--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], { task, cwd: APP_ROOT });
+		},
+	};
+}
+
 // =============================================================================
 // MODULE DEFINITION
 // =============================================================================
@@ -191,16 +221,28 @@ const shellModule = {
 
 	actions: [
 		// Internal actions (no description — not shown in builder --help)
+		{ name: 'shell:test-run', action: makeTestRunAction },
 		{ name: 'shell:bundle', action: makeBundleAction },
 		{ name: 'shell:copy', action: makeCopyAction },
 
 		{
-			// Full build: compile TS client SDK, bundle shell, copy to dist.
+			// Standalone test entry: compile the TS client SDK first so the
+			// tests' `rocketride` imports resolve to fresh dist/types.
+			name: 'shell:test',
+			action: () => ({
+				description: 'Testing the shell',
+				steps: ['client-typescript:build', 'shell:test-run'],
+			}),
+		},
+
+		{
+			// Full build: compile TS client SDK, test, bundle shell, copy to dist.
 			name: 'shell:build',
 			action: () => ({
 				description: 'Build the shell',
 				steps: [
 					'client-typescript:build',
+					'shell:test-run',
 					'shell:bundle',
 					'shell:copy',
 				],
