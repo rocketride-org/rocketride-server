@@ -75,6 +75,7 @@ class StoreCommands(DAPConn):
             'fs_stat': self._store_fs_stat,
             'fs_rename': self._store_fs_rename,
             'fs_geturl': self._store_fs_geturl,
+            'fs_read_many': self._store_fs_read_many,
         }
 
     # =========================================================================
@@ -193,6 +194,84 @@ class StoreCommands(DAPConn):
         # body carries byte count; arguments carries raw data separately
         response = self.build_response(request, body={'size': len(data)})
         response['arguments'] = {'data': data}
+        return response
+
+    async def _store_fs_read_many(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Batch-read many small files in one round trip.
+
+        Motivation: the web App Builder lazily reads many small files (the
+        lockfile-resolved node_modules view, type manifests); per-file
+        open/read/close over DAP is too chatty for that access pattern.
+
+        Args:
+            request: Original DAP request.
+            args:    Must contain ``paths`` (list of store paths). Caps:
+                     256 paths per call, 32 MiB total payload.
+
+        Returns:
+            DAP response whose body carries ``entries`` — one
+            ``{path, size, ok, error?}`` per requested path IN ORDER — and
+            whose ``arguments.data`` carries the binary frame: each blob
+            prefixed with a 4-byte big-endian length, concatenated in the
+            same order (failed entries contribute a zero-length blob).
+            Missing/unreadable files are per-entry errors, never a request
+            failure; exceeding a cap IS a request failure.
+        """
+        fs = self._get_file_store()
+        paths = args.get('paths')
+        if not isinstance(paths, list) or not paths:
+            raise ValueError('paths (non-empty list) is required')
+        if len(paths) > 256:
+            raise ValueError(f'fs_read_many caps at 256 paths per call (got {len(paths)})')
+
+        # Total-payload budget: exceeding it fails the request rather than
+        # silently truncating — the caller re-batches with fewer paths.
+        budget = 32 * 1024 * 1024
+
+        entries: list = []
+        blobs: list = []
+        total = 0
+        for path in paths:
+            # Each entry succeeds or fails alone (missing files are data,
+            # not errors); authorization runs inside every open_read.
+            try:
+                info = await fs.open_read(path)
+                handle = info['handle']
+                try:
+                    # Whole-file read in chunk-sized steps
+                    size = int(info.get('size', 0))
+                    buf = bytearray()
+                    offset = 0
+                    while offset < size:
+                        chunk = await fs.read_chunk(handle, offset, 4_194_304)
+                        if not chunk:
+                            break
+                        buf.extend(chunk)
+                        offset += len(chunk)
+                finally:
+                    await fs.close_read(handle)
+
+                total += len(buf)
+                if total > budget:
+                    raise ValueError('fs_read_many caps at 32 MiB total payload — re-batch with fewer paths')
+                blobs.append(bytes(buf))
+                entries.append({'path': path, 'size': len(buf), 'ok': True})
+            except ValueError:
+                # Cap violations abort the whole request (see docstring)
+                raise
+            except Exception as exc:
+                blobs.append(b'')
+                entries.append({'path': path, 'size': 0, 'ok': False, 'error': str(exc)})
+
+        # Binary frame: 4-byte BE length prefix per blob, concatenated in order
+        frame = bytearray()
+        for blob in blobs:
+            frame.extend(len(blob).to_bytes(4, 'big'))
+            frame.extend(blob)
+
+        response = self.build_response(request, body={'entries': entries})
+        response['arguments'] = {'data': bytes(frame)}
         return response
 
     async def _store_fs_write(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:

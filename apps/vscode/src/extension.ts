@@ -54,6 +54,10 @@ import { EnvironmentProvider } from './providers/EnvironmentProvider';
 import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
+import { AppScreenProvider } from './providers/AppScreenProvider';
+import { initWatchManager } from './appdev/watchManager';
+import { createApp } from './appdev/scaffolder';
+import { debugApp } from './appdev/debug';
 
 // Extension context — set once in activate(), available via getExtensionContext()
 let extensionContext: vscode.ExtensionContext;
@@ -70,6 +74,7 @@ let settings: SettingsProvider | undefined;
 let _monitor: MonitorProvider | undefined;
 // deploy removed — functionality moved to Settings panels
 let status: StatusProvider | undefined;
+let appScreen: AppScreenProvider | undefined;
 let barStatus: BarStatus | undefined;
 let welcome: WelcomeProvider | undefined;
 
@@ -288,6 +293,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				// deploy removed — register redirect command so sidebar "Deploy" opens Settings
 				context.subscriptions.push(vscode.commands.registerCommand('rocketride.page.deploy.open', () => vscode.commands.executeCommand('rocketride.page.settings.open', 'deployment')));
 				status = new StatusProvider(context);
+				// App Builder — a first-class DOCUMENT, .pipe-style: a custom
+				// editor over the app's real <name>.rrapp file (VSCode owns tab
+				// identity, dedupe, and restore-on-reload; double-clicking the
+				// file in the Explorer opens the App Builder), plus the
+				// watch-session manager driving the inner loop.
+				appScreen = new AppScreenProvider(context);
+				const watchManager = initWatchManager(appScreen);
+				context.subscriptions.push(
+					vscode.window.registerCustomEditorProvider('rocketride.appBuilder', appScreen, {
+						webviewOptions: { retainContextWhenHidden: true },
+						supportsMultipleEditorsPerDocument: false,
+					}),
+					appScreen,
+					{ dispose: () => watchManager.dispose() },
+				);
 				// File-less per-team deployment tabs (teams-as-environments)
 				welcome = new WelcomeProvider(context, context.extensionUri);
 				const account = new AccountProvider(context);
@@ -427,6 +447,15 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		}),
 		vscode.commands.registerCommand('rocketride.page.status.open', (projectId: string, sourceId: string, displayName: string) => {
 			status?.show(projectId, sourceId, displayName);
+		}),
+		vscode.commands.registerCommand('rocketride.app.open', (appId: string) => {
+			void appScreen?.show(appId);
+		}),
+		vscode.commands.registerCommand('rocketride.app.create', () => {
+			void createApp();
+		}),
+		vscode.commands.registerCommand('rocketride.app.debug', (appId: string) => {
+			void debugApp(appId);
 		}),
 		vscode.commands.registerCommand('rocketride.refresh', async () => {
 			await refreshAllProviders();

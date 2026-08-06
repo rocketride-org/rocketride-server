@@ -2290,6 +2290,124 @@ export class RocketRideClient extends DAPClient {
 		return (body as any).url;
 	}
 
+	/**
+	 * Batch-read many small files in one round trip.
+	 *
+	 * Designed for many-small-file access patterns (the App Builder's
+	 * lockfile-resolved node_modules view, type manifests) where per-file
+	 * open/read/close is too chatty. Missing/unreadable files are per-entry
+	 * results (`ok: false`), never a call failure.
+	 *
+	 * @param paths - Store paths to read (max 256 per call; 32 MiB total).
+	 * @returns One entry per requested path IN ORDER: `{path, ok, data?, error?}`.
+	 */
+	async fsReadMany(paths: string[]): Promise<Array<{ path: string; ok: boolean; data?: Uint8Array; error?: string }>> {
+		// Client-side cap with a clear error before any wire traffic
+		if (paths.length === 0) return [];
+		if (paths.length > 256) {
+			throw new Error(`fsReadMany caps at 256 paths per call (got ${paths.length})`);
+		}
+		for (const p of paths) this.validateStorePath(p);
+
+		// Bypass call(): the blobs ride response.arguments.data as one binary
+		// frame (4-byte big-endian length prefix per blob, in request order);
+		// response.body.entries carries the per-path metadata.
+		const message = this.buildRequest('rrext_store', {
+			arguments: { subcommand: 'fs_read_many', paths },
+		});
+		this._onTrace?.(TraceType.Request, message);
+		const response = await this.request(message);
+		if (response.success === false) {
+			this._onTrace?.(TraceType.Error, response);
+			throw new Error(response.message ?? 'fs_read_many failed');
+		}
+		this._onTrace?.(TraceType.Success, response);
+
+		const entries = ((response as any).body?.entries ?? []) as Array<{ path: string; size: number; ok: boolean; error?: string }>;
+		const frame = ((response as any).arguments?.data as Uint8Array) || new Uint8Array(0);
+
+		// Decode the length-prefixed frame in entry order
+		const results: Array<{ path: string; ok: boolean; data?: Uint8Array; error?: string }> = [];
+		let offset = 0;
+		for (const entry of entries) {
+			let data: Uint8Array | undefined;
+			if (offset + 4 <= frame.length) {
+				const len = (frame[offset] << 24) | (frame[offset + 1] << 16) | (frame[offset + 2] << 8) | frame[offset + 3];
+				offset += 4;
+				data = frame.slice(offset, offset + len);
+				offset += len;
+			}
+			results.push(entry.ok ? { path: entry.path, ok: true, data: data ?? new Uint8Array(0) } : { path: entry.path, ok: false, error: entry.error });
+		}
+		return results;
+	}
+
+	// ============================================================================
+	// APP PUBLISH LADDER (rrext_app_deploy)
+	// ============================================================================
+
+	/**
+	 * Publish an immutable app version to the org registry.
+	 *
+	 * Publishing never activates anything — pin a rung with {@link appDeploy}
+	 * to make the version live somewhere.
+	 *
+	 * @param options.appId - App id (appManifest.id, e.g. 'acme.brandy')
+	 * @param options.version - Semver label (e.g. '0.5.0')
+	 * @param options.bundle - The built remoteEntry.js bytes (single-file v1)
+	 * @param options.message - Commit-style "what changed" note (version card)
+	 * @param options.moduleId - MF container name (derived when omitted)
+	 * @param options.name - Display name (defaults to appId)
+	 * @returns The version-rail entry (registryVersion, appVersion, sha256, ...)
+	 */
+	async appPublish(options: { appId: string; version: string; bundle: Uint8Array; message?: string; moduleId?: string; name?: string }): Promise<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string }> {
+		const body = await this.call('rrext_app_deploy', {
+			subcommand: 'publish',
+			appId: options.appId,
+			version: options.version,
+			message: options.message ?? '',
+			moduleId: options.moduleId,
+			name: options.name,
+			data: options.bundle,
+		});
+		return (body as any)?.entry ?? {};
+	}
+
+	/**
+	 * List an app's published versions, newest first (the version rail).
+	 *
+	 * @param appId - App id
+	 * @returns Rail entries; each carries `rungs` naming the rungs pinned to it
+	 */
+	async appVersions(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; rungs: string[] }>> {
+		const body = await this.call('rrext_app_deploy', { subcommand: 'versions', appId });
+		return (body as any)?.versions ?? [];
+	}
+
+	/**
+	 * Pin a rung to a published version — deploy, promote, and rollback are
+	 * all this one verb ("repoint, never rebuild").
+	 *
+	 * @param appId - App id
+	 * @param registryVersion - Registry version number from the rail
+	 * @param target - '@user', '@team/<name-or-id>', or '@org'
+	 * @returns The updated deployment record and the rung word
+	 */
+	async appDeploy(appId: string, registryVersion: number, target: string): Promise<{ deployment: Record<string, unknown>; rung: string }> {
+		return (await this.call('rrext_app_deploy', { subcommand: 'deploy', appId, version: registryVersion, target })) as any;
+	}
+
+	/**
+	 * The reverse index: which rungs run which version of an app.
+	 *
+	 * @param appId - App id
+	 * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
+	 */
+	async appWhere(appId: string): Promise<Array<{ rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }>> {
+		const body = await this.call('rrext_app_deploy', { subcommand: 'where', appId });
+		return (body as any)?.pins ?? [];
+	}
+
 	// ============================================================================
 	// CONVENIENCE WRAPPERS (text/JSON over binary, handle open/close internally)
 	// ============================================================================

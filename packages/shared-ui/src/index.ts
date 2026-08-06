@@ -46,7 +46,7 @@ export type { IOverviewPanelProps, IOverviewGridProps, IConnectionsPanelProps, I
 
 // --- Sidebar module (unified sidebar) ----------------------------------------
 export { SidebarView } from './modules/sidebar/SidebarView';
-export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo } from './modules/sidebar/types';
+export type { ISidebarViewProps, ProjectEntry, ProjectSource, DirEntry, ActiveTaskState, UnknownTask, ConnectionInfo, AppListItem, AppBuilderSidebar } from './modules/sidebar/types';
 export { foldTaskEvent, foldDeployRunState, foldProjectDeployRuns } from './modules/sidebar/taskFold';
 export type { TaskLifecycleEvent, TaskFoldResult } from './modules/sidebar/taskFold';
 
@@ -56,8 +56,14 @@ export type { TaskLifecycleEvent, TaskFoldResult } from './modules/sidebar/taskF
 // 'shared/components/deploy-panel' directly, like 'shared/modules/project'.
 
 // --- Explorer module (generic file tree panel) -------------------------------
-export { Explorer } from './modules/explorer';
+// NOOP_VFS rides along: standalone apps import by barrel ONLY (deep 'shared/*'
+// paths resolve neither in the vendored types rollup nor in the MF share
+// scope, whose consume matches the exact 'shared' specifier).
+export { Explorer, NOOP_VFS } from './modules/explorer';
 export type { IVirtualFileSystem, IExplorerProps, ExplorerFileAction, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus } from './modules/explorer';
+
+// --- Common styles (the canonical style constants for apps) ------------------
+export { commonStyles } from './themes/styles';
 
 // --- Shared types ------------------------------------------------------------
 export type { IProject, IValidateResponse, IServiceCatalog } from './types/project';

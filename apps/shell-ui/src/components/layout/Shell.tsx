@@ -50,8 +50,9 @@ import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
-import { registerAndMapApps } from '../../lib/appLoader';
+import { registerAndMapApps, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote } from '../../lib/appLoader';
 import type { ServerAppEntry } from '../../lib/appLoader';
+import { waitForEmbeddedSession } from '../../lib/devMode';
 
 // =============================================================================
 // STYLES
@@ -177,6 +178,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const [identity, setIdentity] = useState<ConnectResult | null>(null);
 	const [activeAppId, setActiveAppId] = useState<string | null>(null);
 	const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
+	// Embedded (iframe) sign-in prompt — the popup-based OAuth entry point
+	const [showEmbeddedSignIn, setShowEmbeddedSignIn] = useState(false);
+	// Pending popup-fallback timer for the embedded sign-in (cancelled when
+	// the embedder ACKs that it is running its own sign-in flow).
+	const loginPopupTimerRef = useRef<number | null>(null);
 	const [apiKeyError] = useState<string | null>(null);
 	const loginTargetRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
@@ -184,13 +190,29 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── Connection state ──────────────────────────────────────────────────
 	const { isConnected, statusMessage } = useShellConnection();
 
+	// ── Local dev apps — synthetic client-side entries ────────────────────
+	// registerLocalApp with meta creates manifest presence for apps the
+	// server has never heard of (in-browser compile + inject, zero server
+	// round trips). The listener bumps this seq so the memo re-merges.
+	const [localAppsSeq, setLocalAppsSeq] = useState(0);
+	useEffect(() => {
+		setLocalAppsListener(() => setLocalAppsSeq((n) => n + 1));
+		return () => setLocalAppsListener(null);
+	}, []);
+
 	// ── Apps — probe catalog + post-auth merge ────────────────────────────
 	// The pre-auth probe registers public MF remotes. Post-auth, the
 	// ConnectResult may include additional apps the user is entitled to
 	// (e.g. apps gated by requiredPermissions). Those need to be registered
 	// as MF remotes and merged into the app list so they can be launched.
 	const apps = useMemo(() => {
-		if (!identity?.apps?.length) return config.apps;
+		// Synthetic local entries first computed so both return paths merge them
+		const withLocal = (list: typeof config.apps): typeof config.apps => {
+			const present = new Set(list.map((a) => a.id));
+			const locals = getLocalAppEntries().filter((e) => !present.has(e.id));
+			return locals.length > 0 ? [...list, ...locals] : list;
+		};
+		if (!identity?.apps?.length) return withLocal(config.apps);
 
 		// Index ConnectResult apps by id
 		const identityApps = identity.apps as Array<ServerAppEntry & { appStatus?: string; onDesktop?: boolean }>;
@@ -213,8 +235,9 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			}
 		}
 
-		return merged;
-	}, [identity?.apps, config.apps]);
+		return withLocal(merged);
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- localAppsSeq re-merges synthetic entries
+	}, [identity?.apps, config.apps, localAppsSeq]);
 
 	// =====================================================================
 	// BOOTSTRAP — one-time auth sequence on mount
@@ -242,6 +265,34 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// Run the optional init callback (e.g. theme initialisation)
 			config.onInit?.();
 
+			// ── Auth-popup role ─────────────────────────────────────────────
+			// An EMBEDDED shell cannot run the OAuth redirect (IdPs send
+			// frame-ancestors 'none' — the iframe goes blank). Instead the
+			// embedded sign-in prompt opens THIS ORIGIN in a popup named
+			// 'rrauth': the popup runs the normal top-level round trip, then
+			// hands the session token back over BroadcastChannel and closes.
+			const bootParams = new URLSearchParams(window.location.search);
+			const isAuthPopup = window.name === 'rrauth' || bootParams.get('rrauth') === '1';
+			if (isAuthPopup && !bootParams.get('code') && !cm.loadToken()) {
+				// Fresh popup: head straight to the IdP (top-level — allowed)
+				void cm.startOAuth();
+				return;
+			}
+
+			// Embedded dev preview: the App Builder host answers this shell's
+			// shell:devReady with the definitive session state (rrdev:auth —
+			// a token to adopt, or empty for "no session"). Hold the loading
+			// phase for that answer so the FIRST boot comes up already
+			// authenticated: without the wait the auth gate renders "Sign in
+			// required" for the length of the postMessage round-trip and the
+			// late token then forces a reload. The timeout only guards
+			// embedders that do not speak the protocol; hosts always answer,
+			// so the common paths resolve immediately.
+			if (window.self !== window.top && !cm.loadToken()) {
+				await waitForEmbeddedSession(2000);
+				if (!mountedRef.current) return;
+			}
+
 			// Run the auth bootstrap
 			try {
 				const result = await cm.bootstrap({
@@ -250,6 +301,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					onThemeChange: config.themeConfig?.onThemeChange,
 				});
 				if (!mountedRef.current) return;
+
+				// Popup completion: deliver the session to the opener's iframe
+				// and close — the popup never renders the shell.
+				if (isAuthPopup) {
+					try {
+						const token = cm.loadToken();
+						if (token) new BroadcastChannel('rr:auth').postMessage({ type: 'login', token });
+					} catch { /* channel unavailable — the user closes the popup */ }
+					window.close();
+					return;
+				}
 
 				if (result) {
 					setIdentity(result.result);
@@ -273,6 +335,30 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// EVENT LISTENERS
 	// =====================================================================
 
+	// Re-register remotes whose entry URL changed and evict their cached
+	// descriptors. The apps memo above only registers apps ABSENT from the
+	// probe set — an account push that repoints an EXISTING app's entry (dev
+	// overlay upsert/expiry, a newly published version) would otherwise leave
+	// the old MF container registered and the stale descriptor cached. Runs
+	// as an effect (not in the memo) because invalidation sets state.
+	useEffect(() => {
+		const identityApps = (identity?.apps ?? []) as ServerAppEntry[];
+		const changed = identityApps.filter((a) => {
+			if (!a.entry || !a.moduleId) return false;
+			// Dev-owned containers are exempt: the manifest entry ALWAYS
+			// differs from the injected dev entry, and repointing would swap
+			// the live dev bundle for the server's published one mid-session.
+			if (isDevRemote(a.moduleId)) return false;
+			const registered = getRegisteredEntry(a.moduleId);
+			return registered !== undefined && registered !== a.entry;
+		});
+		if (changed.length === 0) return;
+		// Force re-register the MF containers at their new entry URLs, then
+		// evict descriptors so the next activation loads the new container.
+		registerAndMapApps(changed);
+		for (const a of changed) invalidateAppDescriptor(a.id);
+	}, [identity?.apps]);
+
 	// Refresh identity on account update
 	useEffect(() => {
 		return cm.on('shell:accountUpdate', (result: ConnectResult) => {
@@ -295,6 +381,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				loginTargetRef.current = appId;
 			}
 			if (isSaas) {
+				// EMBEDDED: never navigate the iframe to the IdP (framed IdPs
+				// go blank) — show the sign-in prompt whose button opens the
+				// popup flow instead.
+				if (window.self !== window.top) {
+					if (mountedRef.current) setShowEmbeddedSignIn(true);
+					return;
+				}
 				// "Get Started" CTAs pass register:true → Zitadel sign-up form.
 				cm.startOAuth(register);
 			} else {
@@ -302,6 +395,34 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			}
 		});
 	}, [cm, isSaas]);
+
+	// Embedded session handoff: an auth popup (or the embedding host's dev
+	// tooling) delivers a token over BroadcastChannel — persist it into THIS
+	// tab's sessionStorage and reboot into the authenticated flow. The
+	// window listener hears the embedder ACK a login request (it is running
+	// its own sign-in), cancelling the popup fallback timer.
+	useEffect(() => {
+		if (window.self === window.top) return;
+		const channel = new BroadcastChannel('rr:auth');
+		channel.onmessage = (e: MessageEvent) => {
+			const data = e.data as { type?: string; token?: string } | undefined;
+			if (data?.type === 'login' && data.token) {
+				cm.saveToken(data.token);
+				window.location.reload();
+			}
+		};
+		const onWindowMessage = (e: MessageEvent): void => {
+			if ((e.data as { type?: string } | undefined)?.type === 'rrdev:loginPending' && loginPopupTimerRef.current !== null) {
+				window.clearTimeout(loginPopupTimerRef.current);
+				loginPopupTimerRef.current = null;
+			}
+		};
+		window.addEventListener('message', onWindowMessage);
+		return () => {
+			channel.close();
+			window.removeEventListener('message', onWindowMessage);
+		};
+	}, [cm]);
 
 	// =====================================================================
 	// LOGOUT
@@ -382,6 +503,40 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// =====================================================================
 	// RENDER — AUTH PHASES
 	// =====================================================================
+
+	// Embedded sign-in (iframe previews): the OAuth redirect cannot run in a
+	// frame, so a user-gesture button opens this origin as an auth POPUP
+	// ('rrauth' — see the bootstrap popup role); the popup hands the session
+	// back over BroadcastChannel and this shell reboots authenticated.
+	if (showEmbeddedSignIn) {
+		return (
+			<div style={styles.statusScreen}>
+				<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center', maxWidth: 380, padding: '0 24px' }}>
+					<div style={{ fontSize: 15, fontWeight: 600, color: 'var(--rr-text-primary)' }}>Sign in required</div>
+					<div style={{ fontSize: 12.5 }}>
+						This app requires authentication. Sign in opens in a separate window; this preview continues automatically afterwards.
+					</div>
+					<button
+						style={styles.signInButton}
+						onClick={() => {
+							// Ask the EMBEDDER to run its own sign-in first (the
+							// VSCode host authenticates natively and hands the
+							// session down via rrdev:auth, which reboots this
+							// shell). The popup is the fallback for embedders
+							// without an auth flow of their own — if no session
+							// arrived after a grace period, this page is still
+							// here and opens it.
+							try { window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*'); } catch { /* parentless */ }
+							loginPopupTimerRef.current = window.setTimeout(() => {
+								loginPopupTimerRef.current = null;
+								window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
+							}, 1500);
+						}}
+					>Sign In</button>
+				</div>
+			</div>
+		);
+	}
 
 	// API Key Login (OSS mode)
 	if (showApiKeyLogin) {

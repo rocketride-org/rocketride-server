@@ -58,6 +58,7 @@ export default defineConfig({
 			'page-monitor': './src/providers/views/Monitor/index.tsx',
 			'page-account': './src/providers/views/Account/index.tsx',
 			'page-environment': './src/providers/views/Environment/index.tsx',
+			'page-app': './src/providers/views/App/index.tsx',
 		},
 	},
 
@@ -102,6 +103,18 @@ export default defineConfig({
 				// CRITICAL: Disable all code splitting for VS Code webviews
 				splitChunks: false,
 				runtimeChunk: false,
+			},
+			module: {
+				parser: {
+					javascript: {
+						// splitChunks:false does NOT cover dynamic import() —
+						// rspack still emits an async chunk per import() site
+						// (the component gallery's lazy demos), and the webview
+						// never ships those files. Eager mode inlines every
+						// dynamic import into the single bundle instead.
+						dynamicImportMode: 'eager',
+					},
+				},
 			},
 		},
 	},

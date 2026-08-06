@@ -23,15 +23,16 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-07-28T19:11:58.922Z
-// Source commit: 7d708f3711c106a2d6a7007260c83c73d61dd92c
+// Generated:     2026-08-02T00:53:20.419Z
+// Source commit: a24f1e0a04dc27a41c4c454a1854858737f5800c
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
 
 // ===== BEGIN FROZEN BUNDLE — do not edit =====
 import React$1 from 'react';
-import { CSSProperties, ReactNode, ReactNode as ReactNode$1, RefObject } from 'react';
+import { CSSProperties, ReactNode, RefObject } from 'react';
+import { Options, Sequelize } from 'sequelize';
 declare class DAPException extends Error {
     readonly dapResult: Record<string, unknown>;
     constructor(dapResult: Record<string, unknown>);
@@ -608,6 +609,11 @@ interface DeploymentSchedule {
     paused?: boolean;
     /** Run window in seconds ('fixed window'); null/absent = until finished. */
     ttl?: number | null;
+    /** Trace verbosity for this source's deploy runs; null/absent = the
+        deploy default (full). */
+    traceLevel?: "none" | "metadata" | "summary" | "full" | null;
+    /** Full task debug output (--trace=debugOut) for this source. */
+    debugOut?: boolean;
     /** Unix timestamp (seconds) of the last scheduler dispatch, or null. */
     lastRunAt?: number | null;
 }
@@ -625,6 +631,10 @@ interface Deployment {
     createdBy?: DeployActor;
     updatedAt?: number;
     updatedBy?: DeployActor;
+    /** Unix seconds of the latest POINTER MOVE for this team (deploy or
+        rollback), computed from the audit trail — unlike `updatedAt`, it is
+        NOT bumped by disable/enable or schedule edits. */
+    deployedAt?: number;
     /** Registry-joined fields of the pointed-at version. */
     sha256?: string;
     publishedAt?: number;
@@ -697,6 +707,9 @@ interface LogChapter {
     endTime?: number | null;
     /** 'ok' | 'error' | 'cancelled'; null while the run is live. */
     outcome?: string | null;
+    /** The run's trace level (null/'none' = tracing off; absent on
+        chapters recorded before the stamp existed). */
+    traceLevel?: string | null;
 }
 interface LogActivitySpan {
     /** Segment id — the raw segment fetch / DVR cache key. */
@@ -2263,6 +2276,7 @@ declare class BillingApi {
         url: string;
     }>;
 }
+type SequelizeConstructor = new (options?: Options) => Sequelize;
 declare enum DatabaseDialect {
     POSTGRES = "postgres",
     MYSQL = "mysql",
@@ -2280,15 +2294,68 @@ declare class DatabaseApi {
      * @param options.sql - Raw SQL or Cypher statement to execute.
      * @param options.nodeId - Target database node ID.  When empty the call
      *   broadcasts to all tool-lane nodes; the first database node handles it.
+     * @param options.sessionId - Optional transaction session ID returned by
+     *   `beginTransaction`.  When provided the statement runs within that session.
+     * @param options.params - Optional positional parameters bound to the statement
+     *   (e.g. `[1, 'foo']` for `$1`, `$2` placeholders).
      * @returns Object with `rows` (array of row objects) and `affected_rows` (number).
      */
     query(options: {
         token: string;
         sql: string;
         nodeId?: string;
+        sessionId?: string;
+        params?: unknown[];
     }): Promise<{
         rows: Record<string, unknown>[];
         affected_rows: number;
+    }>;
+    /**
+     * Begin a database transaction on a pipeline node.
+     *
+     * Returns a `session_id` that must be threaded through subsequent
+     * `query`, `commit`, and `rollback` calls to keep them within the
+     * same transaction.
+     *
+     * @param options.token - Pipeline token for authentication and resource access.
+     * @param options.nodeId - Target database node ID.
+     * @returns Object containing the `session_id` string for the new transaction.
+     */
+    beginTransaction(options: {
+        token: string;
+        nodeId?: string;
+    }): Promise<{
+        session_id: string;
+    }>;
+    /**
+     * Commit an open transaction session, making all its changes permanent.
+     *
+     * @param options.token - Pipeline token for authentication and resource access.
+     * @param options.sessionId - Transaction session ID returned by `beginTransaction`.
+     * @param options.nodeId - Target database node ID.
+     * @returns Object with `ok: true` on success.
+     */
+    commit(options: {
+        token: string;
+        sessionId: string;
+        nodeId?: string;
+    }): Promise<{
+        ok: boolean;
+    }>;
+    /**
+     * Roll back an open transaction session, discarding all its changes.
+     *
+     * @param options.token - Pipeline token for authentication and resource access.
+     * @param options.sessionId - Transaction session ID returned by `beginTransaction`.
+     * @param options.nodeId - Target database node ID.
+     * @returns Object with `ok: true` on success.
+     */
+    rollback(options: {
+        token: string;
+        sessionId: string;
+        nodeId?: string;
+    }): Promise<{
+        ok: boolean;
     }>;
     /**
      * Discover the underlying database engine for a pipeline node.
@@ -2305,6 +2372,29 @@ declare class DatabaseApi {
         token: string;
         nodeId?: string;
     }): Promise<DatabaseDialect>;
+    /**
+     * Build a Sequelize ORM instance that transports its SQL over this RocketRide
+     * pipe (via `query`/`beginTransaction`/`commit`/`rollback`) instead of a TCP socket.
+     *
+     * Passes `this` as the `DatabaseLike` transport — TypeScript confirms structural
+     * compatibility at compile time.
+     *
+     * The `sequelize` package is a peer dependency, not a hard dependency: it pulls
+     * in Node built-ins (`util`, `debug`) that cannot be bundled for browser targets.
+     * Callers must import `Sequelize` themselves and pass the class in.
+     *
+     * @param options.Sequelize - The `Sequelize` class (`import { Sequelize } from 'sequelize'`).
+     * @param options.token - Pipeline token for authentication.
+     * @param options.nodeId - Target database node id (pins transactions to one node).
+     * @param options.sequelizeOptions - Extra Sequelize options merged over the defaults.
+     * @returns A configured `Sequelize` instance ready for model definition and queries.
+     */
+    sequelize(options: {
+        Sequelize: SequelizeConstructor;
+        token: string;
+        nodeId?: string;
+        sequelizeOptions?: import("sequelize").Options;
+    }): import("sequelize").Sequelize;
 }
 declare class DeployApi {
     /** @param client - The parent RocketRideClient that owns this namespace. */
@@ -2317,14 +2407,19 @@ declare class DeployApi {
      * with {@link deploy} (or pass `deployTo` to do both in one step, the
      * small-team convenience).
      *
-     * @param pipeline - The full pipeline definition to snapshot.
+     * @param pipeline - The full pipeline definition to snapshot. `name` is
+     *   REQUIRED here (narrowed at compile time, enforced by the server):
+     *   artifacts are immutable and pipelineName renders on every deploy
+     *   surface — a nameless publish would show as a project GUID forever.
      * @param options - Optional publish options.
      * @param options.comment - "What changed" note kept in the registry.
      * @param options.deployTo - Team id to deploy the new version to
      *   immediately (one-step publish+deploy).
      * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
-    publish(pipeline: PipelineConfig, options?: {
+    publish(pipeline: PipelineConfig & {
+        name: string;
+    }, options?: {
         comment?: string;
         deployTo?: string;
     }): Promise<PublishResult>;
@@ -2373,8 +2468,9 @@ declare class DeployApi {
      * Starts one deployed source NOW (manual trigger).
      *
      * The same trusted team dispatch the scheduler uses — the run executes
-     * as the team, with the caller as the billing-attribution actor. The
-     * deployment must be enabled.
+     * as the team and carries NO human identity; billing attributes to the
+     * org and team, and who fired it is recorded only in the deployment's
+     * audit history. The deployment must be enabled.
      *
      * @param projectId - The deployed project.
      * @param sourceId - The pipeline source to fire.
@@ -2464,6 +2560,26 @@ declare class DeployApi {
      */
     setSchedule(projectId: string, sourceId: string, schedule: string | null, teamId: string, options?: {
         ttl?: number;
+    }): Promise<Deployment>;
+    /**
+     * Sets one source's execution settings (trace level + debug output).
+     *
+     * These ride every deploy run of the source — scheduled and manual —
+     * exactly like the dev-run settings. Editing the schedule never touches
+     * them; a source keeps its settings even with no schedule.
+     *
+     * @param projectId - The project.
+     * @param sourceId - The source whose settings to store.
+     * @param teamId - The team whose deployment carries them.
+     * @param options - The settings.
+     * @param options.traceLevel - Trace verbosity; omit/null for the deploy
+     *   default (full).
+     * @param options.debugOut - Full task debug output (--trace=debugOut).
+     * @returns The updated deployment record.
+     */
+    setSourceConfig(projectId: string, sourceId: string, teamId: string, options?: {
+        traceLevel?: "none" | "metadata" | "summary" | "full" | null;
+        debugOut?: boolean;
     }): Promise<Deployment>;
     /**
      * Pauses ONE source's schedule — the cron/ttl stay configured, it just
@@ -2731,6 +2847,7 @@ declare class DataPipe {
 type MonitorKey = {
     token: string;
 } | {
+    teamId?: string;
     projectId: string;
     source: string;
     pipeId?: number;
@@ -3040,12 +3157,14 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.projectId - The project identifier.
      * @param options.source - The source component identifier.
      * @param options.pipeline - The pipeline configuration to restart with.
+     * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
      */
     restart(options: {
         token?: string;
         projectId: string;
         source: string;
         pipeline: Record<string, unknown>;
+        teamId?: string;
     }): Promise<void>;
     /**
      * Get the current status of a running pipeline.
@@ -3063,12 +3182,17 @@ export declare class RocketRideClient extends DAPClient {
      * The token is required for operations like terminate and restart.
      * Returns undefined if no task is currently running for the given project/source.
      *
+     * The scope IS the kind: pass teamId to resolve the team's DEPLOYED run;
+     * omit it to resolve your own dev run.
+     *
      * @param options.projectId - The project identifier.
      * @param options.source - The source component identifier.
+     * @param options.teamId - Address the team's DEPLOY run; omit for your own dev run.
      */
     getTaskToken(options: {
         projectId: string;
         source: string;
+        teamId?: string;
     }): Promise<string | undefined>;
     /**
      * Returns the unresolved pipeline for a running task.
@@ -3423,6 +3547,94 @@ export declare class RocketRideClient extends DAPClient {
      * @returns A direct HTTP(S) URL to the file
      */
     fsGetUrl(path: string, expiresIn?: number, downloadName?: string): Promise<string>;
+    /**
+     * Batch-read many small files in one round trip.
+     *
+     * Designed for many-small-file access patterns (the App Builder's
+     * lockfile-resolved node_modules view, type manifests) where per-file
+     * open/read/close is too chatty. Missing/unreadable files are per-entry
+     * results (`ok: false`), never a call failure.
+     *
+     * @param paths - Store paths to read (max 256 per call; 32 MiB total).
+     * @returns One entry per requested path IN ORDER: `{path, ok, data?, error?}`.
+     */
+    fsReadMany(paths: string[]): Promise<Array<{
+        path: string;
+        ok: boolean;
+        data?: Uint8Array;
+        error?: string;
+    }>>;
+    /**
+     * Publish an immutable app version to the org registry.
+     *
+     * Publishing never activates anything — pin a rung with {@link appDeploy}
+     * to make the version live somewhere.
+     *
+     * @param options.appId - App id (appManifest.id, e.g. 'acme.brandy')
+     * @param options.version - Semver label (e.g. '0.5.0')
+     * @param options.bundle - The built remoteEntry.js bytes (single-file v1)
+     * @param options.message - Commit-style "what changed" note (version card)
+     * @param options.moduleId - MF container name (derived when omitted)
+     * @param options.name - Display name (defaults to appId)
+     * @returns The version-rail entry (registryVersion, appVersion, sha256, ...)
+     */
+    appPublish(options: {
+        appId: string;
+        version: string;
+        bundle: Uint8Array;
+        message?: string;
+        moduleId?: string;
+        name?: string;
+    }): Promise<{
+        registryVersion: number;
+        appVersion: string;
+        sha256: string;
+        publishedAt: number;
+        author: string;
+        message: string;
+    }>;
+    /**
+     * List an app's published versions, newest first (the version rail).
+     *
+     * @param appId - App id
+     * @returns Rail entries; each carries `rungs` naming the rungs pinned to it
+     */
+    appVersions(appId: string): Promise<Array<{
+        registryVersion: number;
+        appVersion: string;
+        sha256: string;
+        publishedAt: number;
+        author: string;
+        message: string;
+        rungs: string[];
+    }>>;
+    /**
+     * Pin a rung to a published version — deploy, promote, and rollback are
+     * all this one verb ("repoint, never rebuild").
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @param target - '@user', '@team/<name-or-id>', or '@org'
+     * @returns The updated deployment record and the rung word
+     */
+    appDeploy(appId: string, registryVersion: number, target: string): Promise<{
+        deployment: Record<string, unknown>;
+        rung: string;
+    }>;
+    /**
+     * The reverse index: which rungs run which version of an app.
+     *
+     * @param appId - App id
+     * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
+     */
+    appWhere(appId: string): Promise<Array<{
+        rung: string;
+        handle: string;
+        version: number;
+        appVersion: string;
+        state: string;
+        deployedAt?: number;
+    }>>;
     /** Read a file as a UTF-8 string. */
     fsReadString(path: string): Promise<string>;
     /** Write a UTF-8 string to a file. */
@@ -3692,9 +3904,44 @@ interface ShellConnectionState {
     /** Transient status bar text (e.g. `"Reconnecting\u2026"`), or `null` when clear. */
     statusMessage: string | null;
 }
-declare function useShellConnection(): ShellConnectionState;
-declare function useAuthUser(): ConnectResult | null;
-declare function useLogout(): (() => void) | null;
+/**
+ * React hook that provides connection state from the ConnectionManager singleton.
+ *
+ * Subscribes to `shell:connected`, `shell:disconnected`, and `shell:statusMessage`
+ * events and returns React state that triggers re-renders on changes.
+ *
+ * No context provider is required — call this hook from any component.
+ *
+ * @returns The current connection state (`client`, `isConnected`, `statusMessage`).
+ *
+ * @example
+ * ```tsx
+ * const { client, isConnected } = useShellConnection();
+ * if (!client || !isConnected) return <div>Connecting...</div>;
+ * ```
+ */
+export declare function useShellConnection(): ShellConnectionState;
+/**
+ * Hook that returns the current authenticated user identity, or null if
+ * the shell has not yet completed a successful connectClient() call.
+ *
+ * Consumers should treat a null return as "not authenticated" and either
+ * show a loading state or redirect to login.
+ *
+ * @returns The ConnectResult from the most recent successful connection, or null.
+ */
+export declare function useAuthUser(): ConnectResult | null;
+/**
+ * Hook that returns a logout callback, or null if logout is not applicable.
+ *
+ * In the current server-driven auth architecture, logout is handled by
+ * ShellApp via a full page reload rather than an explicit callback, so
+ * this hook always returns null. It exists as a forward-compatible
+ * placeholder for future OAuth-based logout flows.
+ *
+ * @returns Always null in the current implementation.
+ */
+export declare function useLogout(): (() => void) | null;
 /**
  * Props injected by the shell into the app's main `<App />` component.
  *
@@ -4287,6 +4534,18 @@ interface IExplorerProps {
      */
     onUpload?: (files: File[], targetDir: string) => void;
 }
+/**
+ * Explorer — a generic file tree panel like VS Code's EXPLORER.
+ *
+ * Renders a hierarchical file tree from a flat entries array.  Supports
+ * inline rename/create, context menus, status indicators, child items
+ * with action buttons, and tree/flat view toggle.
+ *
+ * The component is fully generic — it knows nothing about pipelines,
+ * sources, or any app-specific concepts.  The hosting container provides
+ * entries, statuses, and callbacks.
+ */
+declare const Explorer: React$1.FC<IExplorerProps>;
 interface CheckoutPlan {
     /** Internal price UUID. */
     id: string;
@@ -4337,7 +4596,13 @@ interface PromoValidation$1 {
     /** First-invoice price in cents after the discount (if priceId given). */
     discountedAmountCents?: number;
 }
-declare enum ConnectionState {
+/**
+ * Core connection states shared by all hosts.
+ *
+ * VSCode extends this with engine-specific states (DOWNLOADING_ENGINE,
+ * STARTING_ENGINE, etc.) via its own local enum that includes these values.
+ */
+export declare enum ConnectionState {
     /** No active connection. */
     DISCONNECTED = "disconnected",
     /** Connecting to WebSocket (after any engine/credential setup). */
@@ -4575,6 +4840,37 @@ interface ShellConnectionEventMap {
     "shell:viewActivated": {
         viewId: string;
     };
+    /**
+     * The server-side app manifest changed for this user — a dev overlay was
+     * registered/expired or an app version was published/deployed. The server
+     * pushes the rebuilt account (shell:accountUpdate) alongside this signal;
+     * consumers that maintain their own app caches use `source` to decide
+     * whether/how to refresh (e.g. 'dev-overlay', 'publish', 'expiry').
+     */
+    "shell:manifestRefresh": {
+        source: string;
+    };
+    /**
+     * An app's marketplace review status changed (submitted, approved,
+     * rejected). Pushed to the developer org's connections so App Builder
+     * surfaces update badges and show the decision toast. Optional `notes`
+     * carries reviewer notes on rejection.
+     */
+    "app:statusChanged": {
+        appId: string;
+        status: string;
+        notes?: string;
+    };
+    /**
+     * Files changed under a watched store prefix (app-dev project sources,
+     * install-task outputs). Debounced server-side; `paths` is the coalesced
+     * set of changed paths under `prefix`. App Builder file views and type
+     * caches invalidate on this.
+     */
+    "store:changed": {
+        prefix: string;
+        paths: string[];
+    };
 }
 interface IConnectionManager {
     /**
@@ -4633,7 +4929,198 @@ interface IConnectionManager {
      * @param handler - Callback invoked when the event fires.
      * @returns An unsubscribe function — call it to remove the handler.
      */
-    on<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): () => void;
+    /**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:disconnected', handler: (payload: ShellConnectionEventMap['shell:disconnected']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:statusMessage', handler: (payload: ShellConnectionEventMap['shell:statusMessage']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:statusChange', handler: (payload: ShellConnectionEventMap['shell:statusChange']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:error', handler: (payload: ShellConnectionEventMap['shell:error']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:event', handler: (payload: ShellConnectionEventMap['shell:event']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:accountUpdate', handler: (payload: ShellConnectionEventMap['shell:accountUpdate']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:servicesUpdated', handler: (payload: ShellConnectionEventMap['shell:servicesUpdated']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:appsUpdated', handler: (payload: ShellConnectionEventMap['shell:appsUpdated']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:login', handler: (payload: ShellConnectionEventMap['shell:login']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:logout', handler: (payload: ShellConnectionEventMap['shell:logout']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:loginRequest', handler: (payload: ShellConnectionEventMap['shell:loginRequest']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:logoutRequest', handler: (payload: ShellConnectionEventMap['shell:logoutRequest']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:switchApp', handler: (payload: ShellConnectionEventMap['shell:switchApp']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:subscribe', handler: (payload: ShellConnectionEventMap['shell:subscribe']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:unsubscribe', handler: (payload: ShellConnectionEventMap['shell:unsubscribe']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myApps']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:sidebarCollapsing', handler: (payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:themeChange', handler: (payload: ShellConnectionEventMap['shell:themeChange']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:viewActivated', handler: (payload: ShellConnectionEventMap['shell:viewActivated']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:manifestRefresh', handler: (payload: ShellConnectionEventMap['shell:manifestRefresh']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'app:statusChanged', handler: (payload: ShellConnectionEventMap['app:statusChanged']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'store:changed', handler: (payload: ShellConnectionEventMap['store:changed']) => void): () => void;
     /**
      * Emits a typed shell event, dispatching to all registered handlers.
      *
@@ -4643,13 +5130,256 @@ interface IConnectionManager {
      * @param event   - The event name from `ShellConnectionEventMap`.
      * @param payload - The payload matching the event's type.
      */
-    emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void;
+    /**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:error', payload: ShellConnectionEventMap['shell:error']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:event', payload: ShellConnectionEventMap['shell:event']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:login', payload: ShellConnectionEventMap['shell:login']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'store:changed', payload: ShellConnectionEventMap['store:changed']): void;
 }
-declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
-declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
+export declare function useClickOutside(ref: React$1.RefObject<HTMLElement | null>, onClose: () => void): void;
+export declare function useFixedPopupPosition(triggerRef: React$1.RefObject<HTMLElement | null>, isOpen: boolean, placement?: "below" | "above"): {
     top: number;
     left: number;
 } | null;
+export declare const PopupRow: React$1.FC<{
+    children: React$1.ReactNode;
+    onClick?: (e: React$1.MouseEvent<HTMLDivElement>) => void;
+}>;
 /** One selectable entry in a view's sub-view menu. */
 export interface ViewMenuEntry {
     /** Stable identifier for the entry; passed back through `onSelect`. */
@@ -4694,11 +5424,25 @@ export interface IPrefsApi {
     /** Persist `value` under `key` (shallow-merged into the prefs bag). */
     setPref: (key: string, value: unknown) => void;
 }
-declare function PrefsProvider({ value, children }: {
+/**
+ * Provides the app's prefs accessor to every shared-ui component beneath it.
+ * Mount ONCE near the app root with a value backed by the host's prefs store.
+ *
+ * @param props.value - The `{ getPref, setPref }` implementation for this host.
+ * @param props.children - The subtree that may read prefs via {@link usePrefs}.
+ * @returns The provider element.
+ */
+export declare function PrefsProvider({ value, children }: {
     value: IPrefsApi;
     children: React$1.ReactNode;
 }): React$1.ReactElement;
-declare function usePrefs(): IPrefsApi;
+/**
+ * Reads the ambient prefs accessor. Returns a no-op accessor when no provider is
+ * mounted, so callers never need to null-check.
+ *
+ * @returns The `{ getPref, setPref }` accessor.
+ */
+export declare function usePrefs(): IPrefsApi;
 /**
  * The full public API surface of the workspace context — consumed by any
  * component or hook that calls `useWorkspace()`.
@@ -4731,6 +5475,14 @@ export interface IWorkspaceContext {
      * load. Resolves true when the re-attempt succeeded.
      */
     retryApp: (appId: string) => Promise<boolean>;
+    /**
+     * Evicts an app's cached descriptor so its next activation loads fresh.
+     * When the app is currently active, the reload happens immediately — the
+     * fresh descriptor's new component identities force a full remount (no
+     * state preservation; that is the intended semantic). Used by the dev
+     * hooks (local app injection) and by entry-URL change reconciliation.
+     */
+    invalidateApp: (appId: string) => void;
     /**
      * Set when a switch-to-app failed to load while another app stayed on
      * screen — surfaced by the shell as a modal over the current app.
@@ -4779,9 +5531,59 @@ export interface IWorkspaceContext {
         [key: string]: unknown;
     }) => void;
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
-    emit: <K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]) => void;
+    /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
+emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
     /** Subscribe to a named event. Returns an unsubscribe function. */
-    on: <K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void) => () => void;
+    /** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:disconnected', handler: (payload: ShellConnectionEventMap['shell:disconnected']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:statusMessage', handler: (payload: ShellConnectionEventMap['shell:statusMessage']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:statusChange', handler: (payload: ShellConnectionEventMap['shell:statusChange']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:error', handler: (payload: ShellConnectionEventMap['shell:error']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:event', handler: (payload: ShellConnectionEventMap['shell:event']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:accountUpdate', handler: (payload: ShellConnectionEventMap['shell:accountUpdate']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:servicesUpdated', handler: (payload: ShellConnectionEventMap['shell:servicesUpdated']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:appsUpdated', handler: (payload: ShellConnectionEventMap['shell:appsUpdated']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:login', handler: (payload: ShellConnectionEventMap['shell:login']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:logout', handler: (payload: ShellConnectionEventMap['shell:logout']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:loginRequest', handler: (payload: ShellConnectionEventMap['shell:loginRequest']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:logoutRequest', handler: (payload: ShellConnectionEventMap['shell:logoutRequest']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:switchApp', handler: (payload: ShellConnectionEventMap['shell:switchApp']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:subscribe', handler: (payload: ShellConnectionEventMap['shell:subscribe']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:unsubscribe', handler: (payload: ShellConnectionEventMap['shell:unsubscribe']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myApps']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:sidebarCollapsing', handler: (payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:themeChange', handler: (payload: ShellConnectionEventMap['shell:themeChange']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:viewActivated', handler: (payload: ShellConnectionEventMap['shell:viewActivated']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:manifestRefresh', handler: (payload: ShellConnectionEventMap['shell:manifestRefresh']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'app:statusChanged', handler: (payload: ShellConnectionEventMap['app:statusChanged']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'store:changed', handler: (payload: ShellConnectionEventMap['store:changed']) => void): () => void;
+    /** Open-set overload — the event set grows; see IConnectionManager.on (shared). */
+    on(event: string, handler: (payload: unknown) => void): () => void;
 }
 /**
  * Props for {@link WorkspaceProvider}.
@@ -4811,11 +5613,73 @@ export interface IWorkspaceProviderProps {
     /** Notifies the host bootstrap when the user switches theme. */
     onThemeChange?: (themeId: string) => void;
 }
-declare function useWorkspace(): IWorkspaceContext;
-declare function useClient(): RocketRideClient | null;
-declare function useShellEvent<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): void;
+/**
+ * Provides workspace state, lazy app descriptor loading, and the shell event
+ * bus to the entire React tree beneath it. Sources the RocketRide client and
+ * connection state from the ConnectionManager singleton via
+ * {@link useShellConnection} (provider-less; re-renders on connect events).
+ *
+ * @param props - See {@link IWorkspaceProviderProps}.
+ */
+export declare const WorkspaceProvider: React$1.FC<IWorkspaceProviderProps>;
+/**
+ * Returns the `IWorkspaceContext` from the nearest `WorkspaceProvider` ancestor.
+ *
+ * Throws an informative error if called outside the provider tree, which makes
+ * misconfigured component hierarchies immediately obvious during development.
+ *
+ * @returns The current workspace context value.
+ */
+export declare function useWorkspace(): IWorkspaceContext;
+/**
+ * Returns the RocketRideClient if connected, or null if not.
+ *
+ * Replaces the common defensive pattern:
+ * ```ts
+ * const client = getClient();
+ * if (!client || !client.isConnected()) return;
+ * ```
+ *
+ * The returned client is guaranteed to be connected when non-null.
+ * Re-renders when connection state changes.
+ *
+ * @returns The connected RocketRideClient, or null.
+ *
+ * @example
+ * ```tsx
+ * const client = useClient();
+ * if (!client) return <div>Not connected</div>;
+ * const data = await client.getDashboard();
+ * ```
+ */
+export declare function useClient(): RocketRideClient | null;
+/**
+ * Subscribe to a typed shell event with automatic cleanup on unmount.
+ *
+ * Replaces the common pattern of manually calling `cm.on()` in a useEffect
+ * and returning the unsubscribe function. The handler is stable — it always
+ * calls the latest version without needing it in the dependency array.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ *
+ * @example
+ * ```tsx
+ * useShellEvent('shell:event', ({ event }) => {
+ *     console.log('Server pushed:', event);
+ * });
+ * ```
+ */
+export declare function useShellEvent<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): void;
 type AppStatus = "auth" | "free" | "unsubscribed" | "subscribed" | "trialing" | "past_due" | "canceled";
-declare function useSubscriptions(): {
+/**
+ * Returns the user's desktop apps from ``ConnectResult.apps``.
+ *
+ * Single source of truth for which apps are on the desktop and their
+ * subscription status. Data arrives with the auth handshake and is
+ * pushed live via ``apaext_account`` events.
+ */
+export declare function useSubscriptions(): {
     desktopApps: AppManifestEntry[];
     /** Quick lookup: is this appId on the desktop? */
     isOnDesktop: (appId: string) => boolean;
@@ -4833,23 +5697,114 @@ interface IUsePollingOptions {
      */
     gate?: "shell" | "none";
 }
-declare function usePolling(fetcher: () => void | Promise<void>, interval: number, options?: IUsePollingOptions): void;
+export declare function usePolling(fetcher: () => void | Promise<void>, interval: number, options?: IUsePollingOptions): void;
 /** Data returned by the useDashboardData hook. */
 export interface DashboardData {
     /** Latest dashboard snapshot, or null if not yet loaded. */
     data: DashboardResponse | null;
     /** Activity events (newest first). */
     events: ActivityEvent[];
+    /** Last fetch failure (e.g. a permission denial), or null when healthy. */
+    error: string | null;
     /** Trigger a manual refresh. */
     refresh: () => void;
 }
-declare function useDashboardData(): DashboardData;
-declare function useConnectionStatus(): ConnectionStatus;
-declare function useShellApiConfig(): ShellApiConfig;
-declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameElement>): void;
-declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
-declare function useSidebarContent(content: React$1.ReactNode | null): void;
-declare function getClient(): RocketRideClient | null;
+/**
+ * Shared hook that provides server dashboard data and activity events.
+ *
+ * Uses a module-level singleton: the first consumer starts polling, the last
+ * one to unmount stops it. Data persists across view switches.
+ *
+ * @returns Dashboard data, events, and a manual refresh callback.
+ */
+export declare function useDashboardData(): DashboardData;
+/**
+ * Returns the current ConnectionStatus with automatic re-renders on changes.
+ *
+ * Subscribes to `shell:statusChange` events and returns the full
+ * ConnectionStatus object (state, connectionMode, retryAttempt, etc.).
+ *
+ * @returns The current ConnectionStatus.
+ *
+ * @example
+ * ```tsx
+ * const status = useConnectionStatus();
+ * if (status.state === ConnectionState.AUTH_FAILED) {
+ *     return <div>Authentication failed: {status.lastError}</div>;
+ * }
+ * if (status.retryAttempt > 0) {
+ *     return <div>Reconnecting... (attempt {status.retryAttempt})</div>;
+ * }
+ * ```
+ */
+export declare function useConnectionStatus(): ConnectionStatus;
+/** Access host-provided API config from any component under Shell. */
+export declare function useShellApiConfig(): ShellApiConfig;
+/**
+ * Sets up the full shell ↔ iframe postMessage bridge for a single iframe element.
+ *
+ * This hook must be called once per iframe component.  It installs three things:
+ *
+ * 1. An inbound `MessageEvent` listener on `window` that handles messages
+ *    originating from the iframe (`view:ready`, `shell:logout`, `shell:openTab`).
+ *
+ * 2. Subscriptions to the `connectionManager` singleton that forward shell-wide events
+ *    (`shell:themeChange`, `shell:connected`, `shell:disconnected`, `shell:login`,
+ *    `shell:logout`, `shell:event`, `shell:viewActivated`) to the iframe as typed
+ *    `postMessage` calls — but only after the iframe has signalled `view:ready`.
+ *
+ * 3. A stable `sendInit` callback that assembles and posts the `shell:init`
+ *    bootstrap message (theme tokens, auth user, connection state, API config).
+ *
+ * All subscriptions are cleaned up when the component unmounts.
+ *
+ * @param iframeRef - A ref pointing to the `<iframe>` DOM element to bridge.
+ */
+export declare function useIframeBridge(iframeRef: React$1.RefObject<HTMLIFrameElement>): void;
+/**
+ * Loads a React component from another app's component catalog.
+ *
+ * If the target app's descriptor hasn't been loaded yet, triggers a lazy
+ * load automatically.  Returns `null` while loading, then the component
+ * once the descriptor is available.
+ *
+ * @param appId         - The appId of the target app (e.g. 'rocketride.pipeBuilder').
+ * @param componentName - The key in that app's `components` object (e.g. 'SpecialChart').
+ * @returns The React component, or null if not yet loaded / not found.
+ *
+ * @example
+ * ```tsx
+ * const Chart = useAppComponent('rocketride.otherApp', 'SpecialChart');
+ * if (!Chart) return <div>Loading...</div>;
+ * return <Chart data={myData} />;
+ * ```
+ */
+export declare function useAppComponent(appId: string, componentName: string): React$1.ComponentType<any> | null;
+/**
+ * Declare the shell sidebar content for the calling view.
+ *
+ * Opt-in: an app that never calls this keeps its legacy `components.Sidebar`
+ * behavior. Passing a node mounts it inside the sidebar's scrolling slot; passing
+ * `null` (or unmounting) withdraws it. When no app supplies sidebar content and
+ * the app has no legacy sidebar, the shell renders no sidebar and the client area
+ * spans full width.
+ *
+ * Collapse contract: the node stays mounted while the sidebar is collapsed to
+ * its icon rail. Components inside it read shared-ui's `useSidebarCollapsed()`
+ * and choose their collapsed form (SidebarMenu iconifies; free-form content
+ * typically returns null).
+ *
+ * @param content - The sidebar node to mount, or null to declare nothing.
+ */
+export declare function useSidebarContent(content: React$1.ReactNode | null): void;
+/**
+ * Returns the shared RocketRideClient instance, or `null` if not yet initialised.
+ *
+ * Convenience wrapper for call sites that need the client outside of a
+ * React component. Prefer `ConnectionManager.getInstance().getClient()` for
+ * new code.
+ */
+export declare function getClient(): RocketRideClient | null;
 /**
  * Options for ConnectionManager.initialize().
  */
@@ -4885,7 +5840,26 @@ export interface DebugLogEntry {
     payload: unknown;
 }
 type WildcardHandler = (event: string, payload: unknown) => void;
-declare class ConnectionManager implements IConnectionManager {
+/**
+ * Centralized connection manager for shell-ui.
+ *
+ * Owns a single persistent RocketRideClient (created at initialize(), lives
+ * for the page lifetime). The SDK's persist mode handles reconnection
+ * automatically.
+ *
+ * Delegates connection backend to RemoteManager (mirrors VSCode's BaseManager
+ * pattern). Auth is handled externally by CloudAuthProvider/ApiKeyAuthProvider.
+ *
+ * @example
+ * ```ts
+ * import { ConnectionManager } from 'shell-ui';
+ *
+ * const cm = ConnectionManager.getInstance();
+ * cm.on('shell:event', ({ event }) => console.log('Server pushed:', event));
+ * cm.emit('shell:switchApp', { appId: 'rocketride.home' });
+ * ```
+ */
+export declare class ConnectionManager implements IConnectionManager {
     /** Returns the singleton ConnectionManager instance. */
     static getInstance(): ConnectionManager;
     /**
@@ -5016,7 +5990,198 @@ declare class ConnectionManager implements IConnectionManager {
      * @param event   - The event name from ShellConnectionEventMap.
      * @param payload - The payload matching the event's type.
      */
-    emit<K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]): void;
+    /**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:error', payload: ShellConnectionEventMap['shell:error']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:event', payload: ShellConnectionEventMap['shell:event']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:login', payload: ShellConnectionEventMap['shell:login']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'store:changed', payload: ShellConnectionEventMap['store:changed']): void;
     /**
      * Register a typed handler for a shell event.
      *
@@ -5024,7 +6189,198 @@ declare class ConnectionManager implements IConnectionManager {
      * @param handler - Callback invoked when the event fires.
      * @returns An unsubscribe function.
      */
-    on<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): () => void;
+    /**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:disconnected', handler: (payload: ShellConnectionEventMap['shell:disconnected']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:statusMessage', handler: (payload: ShellConnectionEventMap['shell:statusMessage']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:statusChange', handler: (payload: ShellConnectionEventMap['shell:statusChange']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:error', handler: (payload: ShellConnectionEventMap['shell:error']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:event', handler: (payload: ShellConnectionEventMap['shell:event']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:accountUpdate', handler: (payload: ShellConnectionEventMap['shell:accountUpdate']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:servicesUpdated', handler: (payload: ShellConnectionEventMap['shell:servicesUpdated']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:appsUpdated', handler: (payload: ShellConnectionEventMap['shell:appsUpdated']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:login', handler: (payload: ShellConnectionEventMap['shell:login']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:logout', handler: (payload: ShellConnectionEventMap['shell:logout']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:loginRequest', handler: (payload: ShellConnectionEventMap['shell:loginRequest']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:logoutRequest', handler: (payload: ShellConnectionEventMap['shell:logoutRequest']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:switchApp', handler: (payload: ShellConnectionEventMap['shell:switchApp']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:subscribe', handler: (payload: ShellConnectionEventMap['shell:subscribe']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:unsubscribe', handler: (payload: ShellConnectionEventMap['shell:unsubscribe']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myApps']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:sidebarCollapsing', handler: (payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:themeChange', handler: (payload: ShellConnectionEventMap['shell:themeChange']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:viewActivated', handler: (payload: ShellConnectionEventMap['shell:viewActivated']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:manifestRefresh', handler: (payload: ShellConnectionEventMap['shell:manifestRefresh']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'app:statusChanged', handler: (payload: ShellConnectionEventMap['app:statusChanged']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'store:changed', handler: (payload: ShellConnectionEventMap['store:changed']) => void): () => void;
     /**
      * Register a wildcard listener called for every emitted event.
      * Used by the debug panel to display all events in real time.
@@ -5038,7 +6394,7 @@ declare class ConnectionManager implements IConnectionManager {
     /** Clears all entries from the debug log. */
     clearDebugLog(): void;
 }
-declare class CloudAuthProvider implements IAuthProvider {
+export declare class CloudAuthProvider implements IAuthProvider {
     /** Returns the singleton CloudAuthProvider instance. */
     static getInstance(): CloudAuthProvider;
     /**
@@ -5104,7 +6460,7 @@ declare class CloudAuthProvider implements IAuthProvider {
      */
     signOut(): Promise<void>;
 }
-declare class ApiKeyAuthProvider implements IAuthProvider {
+export declare class ApiKeyAuthProvider implements IAuthProvider {
     /** Returns the singleton ApiKeyAuthProvider instance. */
     static getInstance(): ApiKeyAuthProvider;
     /**
@@ -5259,7 +6615,21 @@ export interface WorkspaceBinding {
     /** Functional updater to write back to workspace appState. */
     updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
 }
-declare class Documents {
+/**
+ * VS Code-style document model.
+ *
+ * Create an instance in your app, pass it to your components.  The shell
+ * never sees this — it's entirely app-owned.
+ *
+ * ```typescript
+ * const docs = new Documents(vfs);
+ * docs.openDocument('myfile.pipe');
+ *
+ * // In a React component:
+ * const state = docs.useStore();
+ * ```
+ */
+export declare class Documents {
     /**
      * Creates a new Documents instance.
      *
@@ -5445,12 +6815,69 @@ declare class Documents {
     destroy(): void;
 }
 /**
+ * Props for the DocTabs component.
+ */
+export interface DocTabsProps {
+    /** The Documents instance to read state from and dispatch actions to. */
+    docs: Public<Documents>;
+    /** The editor group whose tabs should be rendered. */
+    groupId: string;
+    /** Whether this group is the currently focused group. */
+    isActive?: boolean;
+    /** Whether this group can be closed (false when it's the only group). */
+    canClose?: boolean;
+    /** Optional callback when a tab's close button triggers a dirty document prompt. */
+    onDirtyClose?: (editorId: string, documentUri: string) => void;
+    /** Optional callback to split this group in a given direction. */
+    onSplit?: (groupId: string, orientation: SplitOrientation) => void;
+    /** Optional callback to close (remove) this entire group. */
+    onCloseGroup?: (groupId: string) => void;
+}
+/**
+ * Tab bar UI for a single editor group.
+ *
+ * Renders one tab per editor in the group. Tabs show the editor label, a
+ * dirty indicator dot for unsaved documents, and a close button on hover.
+ *
+ * @param props.groupId    - ID of the EditorGroup to render tabs for.
+ * @param props.onDirtyClose - Optional callback for dirty-close confirmation.
+ */
+export declare const DocTabs: React$1.FC<DocTabsProps>;
+/**
+ * Props for the DocSplitLayout component.
+ */
+export interface DocSplitLayoutProps {
+    /** The Documents instance to read layout state from. */
+    docs: Public<Documents>;
+    /** Render function for each leaf pane — receives groupId, returns JSX. */
+    renderPane: (groupId: string) => React$1.ReactNode;
+}
+/**
+ * Recursive split layout renderer.
+ *
+ * Reads the layout tree from the Documents instance and renders nested
+ * allotment split panes.  Each leaf calls the app's renderPane callback.
+ *
+ * @param props.docs       - The Documents instance.
+ * @param props.renderPane - Callback that renders the content of a leaf pane.
+ */
+export declare const DocSplitLayout: React$1.FC<DocSplitLayoutProps>;
+/**
  * Props for the top-level Shell component.
  */
 export interface ShellProps {
     /** Full shell configuration assembled by the host (bootstrap.tsx). */
     config: ShellConfig;
 }
+/**
+ * Top-level Shell component — auth bootstrap + provider composition.
+ *
+ * On mount, initialises the ConnectionManager and runs the auth bootstrap
+ * sequence. Once auth resolves, renders the ShellLayout with providers.
+ *
+ * @param props.config - The complete ShellConfig assembled by the host.
+ */
+export declare const Shell: React$1.FC<ShellProps>;
 interface IconProps {
     size?: number;
     color?: string;
@@ -5458,6 +6885,24 @@ interface IconProps {
     style?: React$1.CSSProperties;
 }
 type IconComponent = React$1.FC<IconProps>;
+export declare const BxPlus: IconComponent;
+export declare const BxNote: IconComponent;
+export declare const BxLockOpen: IconComponent;
+export declare const BxPurchaseTag: IconComponent;
+export declare const BxListUl: IconComponent;
+export declare const BxFolderOpen: IconComponent;
+export declare const BxHome: IconComponent;
+export declare const BxChevronRight: IconComponent;
+export declare const BxCog: IconComponent;
+export declare const BxUser: IconComponent;
+export declare const BxGridAlt: IconComponent;
+export declare const BxDesktop: IconComponent;
+export declare const BxRocket: IconComponent;
+export declare const BxComponent: IconComponent;
+export declare const BxPlay: IconComponent;
+export declare const BxStop: IconComponent;
+export declare const BxEditAlt: IconComponent;
+export declare const BxTrash: IconComponent;
 /**
  * Props for the Sidebar component.
  */
@@ -5498,6 +6943,42 @@ export interface NavButtonProps {
     /** Tooltip override. Falls back to `label` if not provided. */
     title?: string;
 }
+/**
+ * A single navigation button in the sidebar.
+ *
+ * Renders as an icon-only button when the sidebar is collapsed, or as an
+ * icon-plus-label row when expanded.
+ */
+export declare const NavButton: React$1.FC<NavButtonProps>;
+/**
+ * Collapsible, resizable sidebar that renders the active app's sidebar
+ * component and a footer with theme picker, account/billing nav, app
+ * switcher, and logout.
+ *
+ * @param props - Sidebar configuration and callbacks.
+ */
+export declare const Sidebar: React$1.FC<SidebarProps>;
+interface BottomPanelProps {
+    onClose: () => void;
+}
+export declare const BottomPanel: React$1.FC<BottomPanelProps>;
+/**
+ * Debug trace panel that displays a live scrolling log of all shell events.
+ *
+ * The panel passively listens to the connectionManager wildcard handler and appends
+ * new entries in real time.  It also captures iframe postMessage traffic via
+ * a window `message` event listener.
+ *
+ * Features:
+ * - Live auto-scrolling (locks to bottom unless user scrolls up)
+ * - Text filter to narrow events by name
+ * - Clear button to reset the log
+ *
+ * @param props.onClose - Callback to hide the debug panel (ALT+D toggle).
+ */
+export declare const DebugPanel: React$1.FC<{
+    onClose: () => void;
+}>;
 export interface ConfirmDialogProps {
     title: string;
     message: string;
@@ -5508,6 +6989,24 @@ export interface ConfirmDialogProps {
     onCancel: () => void;
     onSecondary?: () => void;
 }
+export declare const ConfirmDialog: React$1.FC<ConfirmDialogProps>;
+/**
+ * Cloud-UI AccountView wrapper.
+ *
+ * Fetches account data via DAP commands (`rrext_account_*`) and delegates
+ * all rendering to the shared-ui AccountView. Listens for `shell:accountUpdate`
+ * bus events to keep the profile in sync with server-pushed updates.
+ */
+export declare const AccountProvider: React$1.FC;
+/**
+ * Shell-owned settings overlay, VSCode-style, rendered entirely from the
+ * settings registry.
+ *
+ * Two view modes: with no search text only the nav-selected app's section
+ * renders; typing a search switches to a cross-app results view spanning
+ * every section.  All edits apply immediately (deltas-only persistence).
+ */
+export declare const SettingsProvider: React$1.FC;
 /**
  * Sent by the shell to an iframe immediately after the iframe posts `view:ready`.
  *
@@ -5573,37 +7072,6 @@ interface IframeOpenTabMsg {
  * iframe and discriminates on `msg.type` to route each message.
  */
 export type IframeToShellMsg = ViewReadyMsg | ViewInitializedMsg | IframeShellLogoutMsg | IframeOpenTabMsg;
-/**
- * Props for the DocTabs component.
- */
-export interface DocTabsProps {
-    /** The Documents instance to read state from and dispatch actions to. */
-    docs: Public<Documents>;
-    /** The editor group whose tabs should be rendered. */
-    groupId: string;
-    /** Whether this group is the currently focused group. */
-    isActive?: boolean;
-    /** Whether this group can be closed (false when it's the only group). */
-    canClose?: boolean;
-    /** Optional callback when a tab's close button triggers a dirty document prompt. */
-    onDirtyClose?: (editorId: string, documentUri: string) => void;
-    /** Optional callback to split this group in a given direction. */
-    onSplit?: (groupId: string, orientation: SplitOrientation) => void;
-    /** Optional callback to close (remove) this entire group. */
-    onCloseGroup?: (groupId: string) => void;
-}
-/**
- * Props for the DocSplitLayout component.
- */
-export interface DocSplitLayoutProps {
-    /** The Documents instance to read layout state from. */
-    docs: Public<Documents>;
-    /** Render function for each leaf pane — receives groupId, returns JSX. */
-    renderPane: (groupId: string) => React$1.ReactNode;
-}
-interface BottomPanelProps {
-    onClose: () => void;
-}
 /**
  * The curated set of value symbols shell-ui exposes to remote apps.
  *
@@ -5691,7 +7159,7 @@ export type ShellApiShape = typeof shellApi;
  * @returns The frozen `shellApi` object.
  */
 export declare function getShellApi(): ShellApiShape;
-export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IExplorerProps as DocExplorerProps, ShellConnectionEventMap as ShellEventMap, };
+export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IExplorerProps as DocExplorerProps, ShellConnectionEventMap as ShellEventMap, };
 export {};
 // ===== END FROZEN BUNDLE =====
 export type ShellApiV0 = ShellApiShape;

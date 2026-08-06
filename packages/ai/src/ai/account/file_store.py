@@ -59,6 +59,72 @@ FETCH_CLAIM_VERSION = 2
 _INVALID_SEGMENT_CHARS = frozenset('*?<>|":\x00')
 
 
+def mint_directory_url(dir_path: str, entry_file: str, expires_in: int = 86400, sub: str = 'system') -> str:
+    """
+    Mint a signed DIRECTORY-capability fetch URL for a multi-file bundle.
+
+    Module Federation remotes are multi-file: ``remoteEntry.js`` fetches its
+    async chunks RELATIVE to its own URL, so a single-file query-token URL
+    (``/task/fetch?token=...``) cannot serve one — the chunk requests would
+    resolve tokenless against ``/task/fetch/``. This mints the path-embedded
+    form instead: ``{base}/task/fetch/{token}/{entry_file}``, whose token
+    authorizes the whole ``dir_path`` directory. Every relative chunk request
+    then inherits the token naturally
+    (``/task/fetch/{token}/static/js/async/...``).
+
+    The caller is responsible for AUTHORIZING ``dir_path`` before minting —
+    like ``FileStore.get_url``, the signed JWT is the capability and the
+    fetch handler serves it verbatim. Bundle directories are immutable, so
+    the default expiry is generous (24h); manifest deliveries re-mint on
+    every login/account push.
+
+    Args:
+        dir_path:   RESOLVED physical store path of the bundle directory
+                    (e.g. ``marketplace/apps/<id>/<ver>``, no trailing slash).
+        entry_file: File within the directory the URL should address
+                    (e.g. ``remoteEntry.js``).
+        expires_in: Token validity in seconds (default 24 hours).
+        sub:        Audit-trail subject baked into the claim.
+
+    Returns:
+        Absolute URL to ``entry_file`` inside the signed directory.
+
+    Raises:
+        ValueError:   If ``expires_in`` is not positive or the signing key
+                      is not configured.
+        RuntimeError: If ``RR_BASE_URL`` is not configured.
+    """
+    import os
+    import time
+
+    import jwt
+
+    if expires_in <= 0:
+        raise ValueError('expires_in must be positive')
+
+    signing_key = os.environ.get('RR_SIGNING_KEY', '')
+    if not signing_key:
+        raise ValueError('RR_SIGNING_KEY not configured — cannot generate fetch URL')
+
+    # Directory claim: `dir` (not `path`) so the fetch handler knows the
+    # capability covers a subtree, gated by the same claim generation.
+    payload = {
+        'sub': sub,
+        'dir': dir_path.rstrip('/'),
+        'v': FETCH_CLAIM_VERSION,
+        'exp': int(time.time()) + expires_in,
+    }
+    token = jwt.encode(payload, signing_key, algorithm='HS256')
+
+    base_url = os.environ.get('RR_BASE_URL')
+    if not base_url:
+        raise RuntimeError(
+            'RR_BASE_URL is not set — configure it in .env or ensure'
+            ' the web server has started before generating fetch URLs'
+        )
+    return f'{base_url}/task/fetch/{token}/{entry_file}'
+
+
 # =============================================================================
 # SCOPE GRAMMAR + PERMISSION POLICY
 #

@@ -57,6 +57,14 @@ export default defineConfig(({ command }) => {
 	// Used to gate dev-only plugins (HTTPS) and server configuration.
 	const isDev = command === 'dev';
 
+	// DEV FLAVOR (RR_SHELL_FLAVOR=dev): a second production-shaped build with
+	// DEVELOPMENT React — react-dom carries the react-refresh hooks, so App
+	// Builder previews get state-preserving HMR for dev-linked apps. Built to
+	// its own dist dir, then stitched into the main output behind an inline
+	// flavor picker in index.html (scripts/stitch-flavors.mjs) — one URL, one
+	// OAuth callback, CDN-safe (the flavor choice happens client-side).
+	const isDevFlavor = command !== 'dev' && process.env.RR_SHELL_FLAVOR === 'dev';
+
 	// ---------------------------------------------------------------------------
 	// Load build-time config: .config (defaults) → .env (overrides).
 	//
@@ -106,7 +114,9 @@ export default defineConfig(({ command }) => {
 			// shell-ui sources AND the shared-ui sources pulled in via the
 			// 'shared' path alias (shared-ui is consumed as workspace TS source),
 			// so latent type errors in either package break the build here.
-			pluginTypeCheck(),
+			// Skipped for the dev flavor — the production build of the SAME
+			// program has already type-checked everything in the same task.
+			...(isDevFlavor ? [] : [pluginTypeCheck()]),
 
 			// SVGR + auto-currentcolor svgo plugin for node icons (used by canvas).
 			pluginRocketrideIcons(),
@@ -140,6 +150,7 @@ export default defineConfig(({ command }) => {
 					'shell-ui':   { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
 					'shared':     { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/shared-ui/src/index.ts') },
 					'rocketride': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
+
 				},
 
 				// Skip TypeScript declaration file generation for MF exposed modules —
@@ -168,8 +179,11 @@ export default defineConfig(({ command }) => {
 		},
 		source: {
 			// Build entry points — each produces a separate HTML page and JS bundle.
+			// The dev flavor's entry injects the react-refresh runtime into the
+			// devtools global hook BEFORE react-dom evaluates (a hard ordering
+			// requirement of react-refresh), then continues into the same boot.
 			entry: {
-				index: './src/index.tsx',
+				index: isDevFlavor ? './src/index.dev.tsx' : './src/index.tsx',
 			},
 
 			// Compile-time constant substitution.
@@ -183,7 +197,9 @@ export default defineConfig(({ command }) => {
 			// Those values are never needed in the browser and must stay server-side.
 			define: {
 				// Standard Node.js env flag — enables React's production optimisations.
-				'process.env.NODE_ENV': JSON.stringify(isDev ? 'development' : 'production'),
+				// The dev FLAVOR builds with development React so react-refresh has a
+				// renderer that supports it (production react-dom has no refresh hooks).
+				'process.env.NODE_ENV': JSON.stringify(isDev || isDevFlavor ? 'development' : 'production'),
 
 				// WebSocket URI for the RocketRide server.
 				'process.env.ROCKETRIDE_URI': e('ROCKETRIDE_URI'),
@@ -236,7 +252,9 @@ export default defineConfig(({ command }) => {
 		output: {
 			// Write the production bundle to build/shell-ui/ at the repo root so that
 			// all app bundles live under a single top-level build/ directory.
-			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', 'shell-ui') },
+			// The dev flavor builds beside it; the stitch step merges its hashed
+			// assets into shell-ui/ and generates the flavor-picking index.html.
+			distPath: { root: path.join(process.env.ROCKETRIDE_BUILD_ROOT ?? '../../build', isDevFlavor ? 'shell-ui-dev' : 'shell-ui') },
 
 			// Prefix all asset URLs with /shell/ so they route through the shell
 			// module's public endpoints. Without this, assets load from /static/

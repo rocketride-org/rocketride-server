@@ -28,7 +28,7 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile } = require('../../../scripts/lib');
+const { execCommand, removeDirs, removeMatching, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT, hasSourceChanged, saveSourceHash, setState, exists, copyFile, mkdir, rm, readFile, writeFile, syncDir } = require('../../../scripts/lib');
 
 // Paths
 const APP_ROOT = path.join(__dirname, '..');
@@ -44,6 +44,10 @@ const README_DEST = path.join(APP_ROOT, 'README.md');
 const SRC_HASH_KEY = 'vscode.srcHash';
 const BUNDLE_HASH_KEY = 'vscode.bundleHash';
 const SHARED_UI_HASH_KEY = 'vscode.sharedUiHash';
+// The extension-host bundle's OWN shared-ui fingerprint — esbuild inlines
+// shared-ui (appdev templates) into rocketride.js, and reusing the webview's
+// SHARED_UI_HASH_KEY would let whichever step ran first mark the other clean.
+const BUNDLE_SHARED_UI_HASH_KEY = 'vscode.bundleSharedUiHash';
 
 // All extension build output goes here (bundle, webview, manifest for vsce and F5)
 const BUILD_DIR = path.join(BUILD_ROOT, 'vscode');
@@ -117,20 +121,26 @@ function makeCompileTypescriptAction() {
 function makeBundleExtensionAction() {
 	return {
 		run: async (ctx, task) => {
-			// Check if source changed (uses its own hash key so compile-typescript
-			// saving SRC_HASH_KEY doesn't cause this step to skip)
-			const { changed, hash } = await hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY);
+			// Check vscode src AND shared-ui (own hash keys so compile-typescript /
+			// build-webview saving theirs doesn't cause this step to skip). esbuild
+			// inlines shared-ui (the appdev templates) into rocketride.js, so a
+			// shared-ui-only change must rebuild the host bundle too.
+			const [vsrc, sharedUi] = await Promise.all([
+				hasSourceChanged(SRC_DIR, BUNDLE_HASH_KEY),
+				hasSourceChanged(SHARED_UI_SRC, BUNDLE_SHARED_UI_HASH_KEY),
+			]);
 			const outputExists = await exists(path.join(BUILD_DIR, 'rocketride.js'));
 
-			if (!changed && outputExists) {
+			if (!vsrc.changed && !sharedUi.changed && outputExists) {
 				task.output = 'No changes detected';
 				return;
 			}
 
 			await execCommand('node', ['esbuild.js', '--production'], { task, cwd: APP_ROOT });
 
-			// Save hash after successful build
-			await saveSourceHash(BUNDLE_HASH_KEY, hash);
+			// Save hashes after successful build
+			await saveSourceHash(BUNDLE_HASH_KEY, vsrc.hash);
+			await saveSourceHash(BUNDLE_SHARED_UI_HASH_KEY, sharedUi.hash);
 		},
 	};
 }
@@ -139,9 +149,34 @@ function makeStageFilesAction() {
 	return {
 		run: async (ctx, task) => {
 			const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
-			const buildHasManifest = await exists(path.join(BUILD_DIR, 'package.json'));
+			const stagedPkgPath = path.join(BUILD_DIR, 'package.json');
+			const buildHasManifest = await exists(stagedPkgPath);
 
-			if (!changed && buildHasManifest) {
+			// Build the transformed manifest FIRST: the extension manifest
+			// (contributes, settings, custom editors) lives OUTSIDE the hashed
+			// src/ trees, so a package.json-only edit must still restage — the
+			// dev host loads build/vscode and would otherwise run a stale
+			// manifest with the old contributions.
+			const pkgPath = path.join(APP_ROOT, 'package.json');
+			const pkg = JSON.parse(await readFile(pkgPath));
+			pkg.main = './rocketride.js';
+			pkg.icon = 'rocketride-dark-icon.png';
+			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'app-types/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
+			const stagedPkg = JSON.stringify(pkg, null, 2);
+			const manifestChanged = !buildHasManifest || String(await readFile(stagedPkgPath)) !== stagedPkg;
+
+			// App-types bundle (frozen shell-api + shared rollup, built by
+			// shell-ui:build): shipped WITH the extension so the App Builder
+			// can vendor types/rocketride-shell/ into standalone app repos.
+			// Synced BEFORE the early return — it changes when shell-ui
+			// rebuilds, which the vscode source hash cannot see.
+			const appTypesSrc = path.join(BUILD_ROOT, 'app-types');
+			if (await exists(appTypesSrc)) {
+				await mkdir(BUILD_DIR);
+				await syncDir(appTypesSrc, path.join(BUILD_DIR, 'app-types'));
+			}
+
+			if (!changed && !manifestChanged) {
 				task.output = 'No changes detected';
 				return;
 			}
@@ -151,12 +186,7 @@ function makeStageFilesAction() {
 
 			// Copy manifest and assets so build/vscode is a complete extension
 			task.output = 'Staging manifest and assets to build/vscode...';
-			const pkgPath = path.join(APP_ROOT, 'package.json');
-			const pkg = JSON.parse(await readFile(pkgPath));
-			pkg.main = './rocketride.js';
-			pkg.icon = 'rocketride-dark-icon.png';
-			pkg.files = ['rocketride.js', 'rocketride.js.map', 'webview/**', 'docs/**', 'rocketride-dark-icon.png', 'rocketride-light-icon.png', 'docker.svg', 'onprem.svg', 'package.json', 'LICENSE', 'README.md'];
-			await writeFile(path.join(BUILD_DIR, 'package.json'), JSON.stringify(pkg, null, 2));
+			await writeFile(stagedPkgPath, stagedPkg);
 			const iconDark = path.join(APP_ROOT, 'rocketride-dark-icon.png');
 			const iconLight = path.join(APP_ROOT, 'rocketride-light-icon.png');
 			if (await exists(iconDark)) {
@@ -279,7 +309,7 @@ module.exports = {
 			name: 'vscode:build',
 			action: () => ({
 				description: 'Build vscode',
-				steps: ['client-typescript:build', 'shared-ui:test', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
+				steps: ['client-typescript:build', 'shared-ui:test', 'shared-ui:check-gallery-tokens', 'vscode:copy-readme', 'vscode:build-webview', 'vscode:compile-typescript', 'vscode:bundle-extension', 'vscode:stage-files', 'vscode:package-vsix'],
 			}),
 		},
 		{

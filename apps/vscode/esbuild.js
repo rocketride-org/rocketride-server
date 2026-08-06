@@ -47,6 +47,9 @@ esbuild
 			// docker-modem requires ssh2 at load time, but we only use local socket.
 			// Stub it out so no native .node binaries are needed.
 			ssh2: path.resolve(__dirname, 'src/stubs/ssh2.js'),
+			// shared-ui source (same mapping the webview rsbuild uses) — the
+			// extension HOST imports pure modules from it (appdev templates).
+			shared: path.resolve(__dirname, '../../packages/shared-ui/src'),
 		},
 		mainFields: ['main'],
 		resolveExtensions: ['.ts', '.js', '.json'],

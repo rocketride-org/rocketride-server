@@ -18,8 +18,10 @@ import React, { useState, useCallback, CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { BxPlus, BxDesktop, BxChevronRight, BxChevronDown, BxStop } from '../../components/BoxIcon';
 import { SidebarMenu } from '../../components/sidebar-menu/SidebarMenu';
+import { StatusBadge } from '../../components/status-badge/StatusBadge';
+import type { StatusVariant } from '../../components/status-badge/StatusBadge';
 import { Explorer, NOOP_VFS } from '../explorer';
-import type { ISidebarViewProps } from './types';
+import type { AppListItem, ISidebarViewProps } from './types';
 import type { ViewMenu } from '../../types/viewMenu';
 import type { ExplorerEntry, ExplorerStatus, ExplorerConfig } from '../explorer';
 
@@ -77,6 +79,56 @@ const S = {
 		display: 'flex',
 		alignItems: 'center',
 	}),
+	// Mode strip — the TabControl idiom applied to the sidebar top:
+	// uppercase labels, active = text-primary + 2px brand underline.
+	modeStrip: {
+		display: 'flex',
+		gap: 2,
+		padding: '0 10px',
+		borderBottom: '1px solid var(--rr-border)',
+		flexShrink: 0,
+	} as CSSProperties,
+	modeTab: {
+		padding: '9px 12px 7px',
+		fontSize: 11,
+		fontWeight: 700,
+		letterSpacing: '0.06em',
+		textTransform: 'uppercase' as const,
+		color: 'var(--rr-text-secondary)',
+		borderBottom: '2px solid transparent',
+		cursor: 'pointer',
+		userSelect: 'none' as const,
+	} as CSSProperties,
+	modeTabActive: {
+		color: 'var(--rr-text-primary)',
+		borderBottomColor: 'var(--rr-brand)',
+	} as CSSProperties,
+	appsSection: {
+		padding: '6px 6px 2px',
+		flex: 1,
+		minHeight: 0,
+		overflowY: 'auto' as const,
+	} as CSSProperties,
+	appsLabel: {
+		padding: '8px 10px 4px',
+		fontSize: 11,
+		fontWeight: 700,
+		letterSpacing: '0.08em',
+		textTransform: 'uppercase' as const,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+};
+
+// StatusBadge variant + label per app lifecycle state ('pending' reads
+// "in review" — the mockup's vocabulary).
+const APP_BADGE: Record<AppListItem['status'], { variant: StatusVariant; label: string }> = {
+	local: { variant: 'muted', label: 'local' },
+	dev: { variant: 'warning', label: 'dev' },
+	draft: { variant: 'muted', label: 'draft' },
+	pending: { variant: 'warning', label: 'in review' },
+	approved: { variant: 'success', label: 'approved' },
+	rejected: { variant: 'error', label: 'rejected' },
+	live: { variant: 'info', label: 'live' },
 };
 
 const HOVER_BG = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
@@ -105,12 +157,17 @@ const PIPELINE_CONFIG: ExplorerConfig = {
  * Maps ISidebarViewProps (pipeline-specific) to IExplorerProps (generic).
  * The Explorer component handles all file tree rendering internally.
  */
-export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath }) => {
+export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscribed = true, entries, activeTasks, unknownTasks, headerSlot, onNavigate, onOpenFile, onFileManage, fileActions, onSourceAction, onRefresh, footerSlot, onOpenUnknownTask, activeFilePath, appBuilder, showModeStrip = false, sidebarMode = 'pipelines', onSidebarModeChange }) => {
 	const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 	const [unknownExpanded, setUnknownExpanded] = useState(true);
 
 	const isConnected = connection.state === 'connected';
 	const hasUnknown = (unknownTasks?.length ?? 0) > 0;
+	// The App Builder tab exists only when the host wires it; the apps mode
+	// is only honored when it can actually render something. The strip itself
+	// can also be forced visible with a single Pipelines tab (web host).
+	const hasAppBuilder = Boolean(appBuilder);
+	const mode = hasAppBuilder ? sidebarMode : 'pipelines';
 	// --- Static top-nav menu (New pipeline / Monitor) ------------------------
 
 	// The fixed nav actions rendered above the Explorer as a stock SidebarMenu.
@@ -151,8 +208,78 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 
 	// --- Render --------------------------------------------------------------
 
+	// --- MY APPS nav (App Builder mode) --------------------------------------
+
+	// "+ New app" as a stock SidebarMenu entry, mirroring "New pipeline".
+	const appsNavMenu: ViewMenu = {
+		entries: [{ id: 'newApp', label: 'New app', icon: <BxPlus size={16} /> }],
+	};
+
 	return (
 		<div style={S.container}>
+			{/* ── Mode strip: App Builder tab when wired; strip alone when
+			    forced (web host — future modes land here) ─────────────── */}
+			{(hasAppBuilder || showModeStrip) && (
+				<div style={S.modeStrip}>
+					<div
+						style={mode === 'pipelines' ? { ...S.modeTab, ...S.modeTabActive } : S.modeTab}
+						onClick={() => onSidebarModeChange?.('pipelines')}
+					>Pipelines</div>
+					{hasAppBuilder && (
+						<div
+							style={mode === 'apps' ? { ...S.modeTab, ...S.modeTabActive } : S.modeTab}
+							onClick={() => onSidebarModeChange?.('apps')}
+						>App Builder</div>
+					)}
+				</div>
+			)}
+
+			{/* ── APP BUILDER MODE — + New app / MY APPS list ─────────── */}
+			{mode === 'apps' && appBuilder && (
+				<>
+					<div style={S.navSection}>
+						<SidebarMenu
+							menu={appsNavMenu}
+							activeId=""
+							onSelect={(id) => {
+								if (id === 'newApp') appBuilder.onNewApp();
+							}}
+						/>
+					</div>
+					<div style={S.appsSection}>
+						<div style={S.appsLabel}>My Apps</div>
+						{appBuilder.apps.length === 0 && (
+							<div style={{ padding: '4px 10px', fontSize: 12, color: 'var(--rr-text-secondary)' }}>
+								No apps yet — create one with New app.
+							</div>
+						)}
+						{appBuilder.apps.map((app) => {
+							const rowKey = `app:${app.id}`;
+							const active = app.id === appBuilder.activeAppId;
+							const badge = APP_BADGE[app.status] ?? APP_BADGE.local;
+							return (
+								<div
+									key={app.id}
+									style={{ ...S.row, ...(active ? { background: HOVER_BG } : hoverBg(rowKey)) }}
+									onMouseEnter={() => setHoveredRow(rowKey)}
+									onMouseLeave={() => setHoveredRow(null)}
+									onClick={() => appBuilder.onOpenApp(app.id)}
+									title={app.folder ? `${app.id}\n${app.folder}` : app.id}
+								>
+									<span style={S.rowName}>{app.name}</span>
+									<span style={S.spacer} />
+									<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>
+								</div>
+							);
+						})}
+					</div>
+					{footerSlot}
+				</>
+			)}
+
+			{/* ── PIPELINES MODE — the existing layout, untouched ─────── */}
+			{mode === 'pipelines' && (
+				<>
 			{/* ── Navigation ──────────────────────────────────────────── */}
 			<div style={S.navSection}>
 				{/* Host-injected nav (e.g. rocket-ui's Home button). Bare render so an
@@ -214,6 +341,8 @@ export const SidebarView: React.FC<ISidebarViewProps> = ({ connection, isSubscri
 
 			{/* ── Footer slot ─────────────────────────────────────────── */}
 			{footerSlot}
+				</>
+			)}
 		</div>
 	);
 };

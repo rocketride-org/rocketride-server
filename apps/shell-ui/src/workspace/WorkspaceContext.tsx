@@ -35,7 +35,7 @@ import { GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from 'shared';
 import type { IGridConfigGetDetail, IGridConfigSetDetail, IGridConfigClearDetail, DataGridLayout } from 'shared';
 import { ConnectionManager } from '../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../constants';
-import { resetRemote } from '../lib/appLoader';
+import { resetRemote, setDescriptorInvalidator } from '../lib/appLoader';
 import { SHELL_API_VERSION } from '../apiver';
 
 // =============================================================================
@@ -118,6 +118,14 @@ export interface IWorkspaceContext {
 	 */
 	retryApp: (appId: string) => Promise<boolean>;
 	/**
+	 * Evicts an app's cached descriptor so its next activation loads fresh.
+	 * When the app is currently active, the reload happens immediately — the
+	 * fresh descriptor's new component identities force a full remount (no
+	 * state preservation; that is the intended semantic). Used by the dev
+	 * hooks (local app injection) and by entry-URL change reconciliation.
+	 */
+	invalidateApp: (appId: string) => void;
+	/**
 	 * Set when a switch-to-app failed to load while another app stayed on
 	 * screen — surfaced by the shell as a modal over the current app.
 	 * Null when no failure is pending.
@@ -158,7 +166,9 @@ export interface IWorkspaceContext {
 	/** Emit a named event to all subscribers. Does NOT mutate workspace state. */
 	emit: <K extends keyof ShellConnectionEventMap>(event: K, payload: ShellConnectionEventMap[K]) => void;
 	/** Subscribe to a named event. Returns an unsubscribe function. */
-	on: <K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void) => () => void;
+	on<K extends keyof ShellConnectionEventMap>(event: K, handler: (payload: ShellConnectionEventMap[K]) => void): () => void;
+	/** Open-set overload — the event set grows; see IConnectionManager.on (shared). */
+	on(event: string, handler: (payload: unknown) => void): () => void;
 }
 
 // =============================================================================
@@ -387,7 +397,9 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			setLoadedApps((prev) => ({ ...prev, [appId]: descriptor }));
 			return true;
 		} catch (e) {
-			console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}":`, e);
+			// message + stack explicitly: Error objects JSON-stringify to {}
+			// through console forwarding, hiding the actual failure.
+			console.error(`[WorkspaceContext] Failed to load AppDescriptor for "${appId}": ${e instanceof Error ? (e.stack || e.message) : String(e)}`);
 			failedSetRef.current.add(appId);
 			setAppLoadErrors((prev) => ({ ...prev, [appId]: (e instanceof Error ? e.message : String(e)) || `App "${appId}" failed to load.` }));
 			return false;
@@ -415,6 +427,33 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		if (entry?.moduleId) resetRemote(entry.moduleId);
 		return loadDescriptor(appId);
 	}, [apps, loadDescriptor]);
+
+	/**
+	 * Evicts an app's cached descriptor (and all failure bookkeeping) so the
+	 * next activation loads fresh. If the app is ACTIVE, kicks the reload
+	 * immediately: the replacement descriptor carries new component
+	 * identities, so React fully remounts the app (intended — no state
+	 * preservation). The ref mirror is cleared synchronously so a
+	 * loadDescriptor racing this call cannot early-return on stale cache.
+	 */
+	const invalidateDescriptor = useCallback((appId: string): void => {
+		// Synchronous eviction from the ref mirror + failure bookkeeping
+		delete loadedAppsRef.current[appId];
+		failedSetRef.current.delete(appId);
+		// State eviction (descriptor + surfaced error)
+		setLoadedApps((prev) => { if (!(appId in prev)) return prev; const next = { ...prev }; delete next[appId]; return next; });
+		setAppLoadErrors((prev) => { if (!prev[appId]) return prev; const next = { ...prev }; delete next[appId]; return next; });
+		// Active app: reload now so the screen swaps to the fresh descriptor
+		if (appId === activeAppId) void loadDescriptor(appId);
+	}, [activeAppId, loadDescriptor]);
+
+	// Publish the invalidator on the appLoader bridge so non-React code
+	// (Shell's entry-change reconciliation, window.__rrShellDev) can evict
+	// descriptors. Not dev-gated — production entry changes invalidate too.
+	useEffect(() => {
+		setDescriptorInvalidator(invalidateDescriptor);
+		return () => setDescriptorInvalidator(null);
+	}, [invalidateDescriptor]);
 
 	// Load the active app's descriptor once workspace state is ready
 	// (seeded is enough — don't wait for the full disk load)
@@ -549,7 +588,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			appManifest: apps,
 			loadedApps,
 			loadApp: loadDescriptor,
-			appLoadErrors, retryApp,
+			appLoadErrors, retryApp, invalidateApp: invalidateDescriptor,
 			loadFailure, dismissLoadFailure,
 			settings, settingsOverrides, settingsRegistry, updateSetting,
 			updatePrefs, themeOptions, setTheme, dispatch, emit, on,
