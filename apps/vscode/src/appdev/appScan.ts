@@ -138,6 +138,13 @@ export async function scanWorkspaceApps(): Promise<ScannedApp[]> {
 // ICON
 // =============================================================================
 
+/**
+ * Icon size ceiling for the data: URI conversion. The manifest can point at
+ * an arbitrarily large file; base64-inlining it would balloon the webview
+ * message, so anything above this falls back to the generic glyph.
+ */
+const MAX_ICON_BYTES = 256 * 1024;
+
 /** Media type per icon file extension the app store accepts. */
 const ICON_MEDIA_TYPES: Record<string, string> = {
 	'.svg': 'image/svg+xml',
@@ -164,8 +171,14 @@ export async function appIconDataUri(iconPath: string | undefined): Promise<stri
 		const mediaType = ICON_MEDIA_TYPES[ext];
 		if (!mediaType) return undefined;
 
-		// Read + base64-encode the file (app icons are small by store policy).
-		const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(iconPath));
+		// Stat before reading: the manifest can point at an arbitrarily large
+		// file, and only this size gate keeps the data: URI bounded.
+		const uri = vscode.Uri.file(iconPath);
+		const stat = await vscode.workspace.fs.stat(uri);
+		if (stat.size > MAX_ICON_BYTES) return undefined;
+
+		// Read + base64-encode the file (bounded by the gate above).
+		const bytes = await vscode.workspace.fs.readFile(uri);
 		return `data:${mediaType};base64,${Buffer.from(bytes).toString('base64')}`;
 	} catch {
 		// Unreadable icon — the row falls back to the generic glyph

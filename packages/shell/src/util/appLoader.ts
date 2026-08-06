@@ -316,13 +316,17 @@ export function isDevPreviewPage(): boolean {
 
 /**
  * The app id this page is session-locked to (`?appid=` / `?appId=`), or ''.
- * Read from the URL directly: the value identifies WHICH app's first load
- * the dev-preview hold applies to.
+ * The value identifies WHICH app's first load the dev-preview hold applies
+ * to. The URL wins; the sessionStorage copy ('rr:devAppId', persisted by the
+ * flavor picker beside 'rr:dev') covers the OAuth redirect, which strips the
+ * query string on its way back to the bare origin.
  */
 export function previewLockedAppId(): string {
 	try {
 		const params = new URLSearchParams(window.location.search);
-		return params.get('appId') || params.get('appid') || '';
+		const fromUrl = params.get('appId') || params.get('appid');
+		if (fromUrl) return fromUrl;
+		return sessionStorage.getItem('rr:devAppId') || '';
 	} catch {
 		return '';
 	}

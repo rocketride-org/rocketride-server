@@ -90,7 +90,9 @@ export async function discoverSqlEndpoints(client: RocketRideClient): Promise<IS
 	// rows for the same pipeline; the token resolver returns the live one.
 	const seen = new Set<string>();
 	const candidates = tasks.rows.filter((task) => {
-		if (task.completed) return false;
+		// TASK_STATE >= 4 (STOPPING/COMPLETED/CANCELLED) is not attachable;
+		// `completed` alone misses the stopping window.
+		if (task.completed || task.state >= 4) return false;
 		const id = `${task.projectId}:${task.source}`;
 		if (seen.has(id)) return false;
 		seen.add(id);
@@ -112,7 +114,9 @@ export async function discoverSqlEndpoints(client: RocketRideClient): Promise<IS
 				if (!component.id || !component.provider) continue;
 				if (!DATABASE_PROVIDERS.has(component.provider)) continue;
 				endpoints.push({
-					key: `${task.projectId}:${component.id}`,
+					// Source is part of the identity: the same project can run
+					// several tasks, each exposing a component with this id.
+					key: `${task.projectId}:${task.source}:${component.id}`,
 					projectId: task.projectId,
 					pipelineName: task.name,
 					source: task.source,

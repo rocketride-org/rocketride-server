@@ -66,13 +66,22 @@ export async function fetchForeignKeyNames(session: ISqlSession, dialect: SqlDia
 			'FROM information_schema.KEY_COLUMN_USAGE ' +
 			`WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ${quoteValue(table)} AND REFERENCED_TABLE_NAME IS NOT NULL`;
 	} else if (dialect === 'postgres') {
-		// Join constraints to their key columns; ccu carries the referenced side.
+		// Constraint names are only unique PER SCHEMA in Postgres, so every
+		// join carries constraint_schema. The referenced side pairs through
+		// referential_constraints to the unique constraint's key columns via
+		// position_in_unique_constraint = ordinal_position, so composite keys
+		// map each referencing column to ITS referenced column (no cross join).
 		sql =
-			'SELECT tc.constraint_name AS name, kcu.column_name AS col, ccu.table_name AS ref ' +
+			'SELECT tc.constraint_name AS name, kcu.column_name AS col, ref_kcu.table_name AS ref ' +
 			'FROM information_schema.table_constraints tc ' +
-			'JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name ' +
-			'JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name ' +
-			`WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = ${quoteValue(table)}`;
+			'JOIN information_schema.key_column_usage kcu ' +
+			'ON kcu.constraint_schema = tc.constraint_schema AND kcu.constraint_name = tc.constraint_name ' +
+			'JOIN information_schema.referential_constraints rc ' +
+			'ON rc.constraint_schema = tc.constraint_schema AND rc.constraint_name = tc.constraint_name ' +
+			'JOIN information_schema.key_column_usage ref_kcu ' +
+			'ON ref_kcu.constraint_schema = rc.unique_constraint_schema AND ref_kcu.constraint_name = rc.unique_constraint_name ' +
+			'AND ref_kcu.ordinal_position = kcu.position_in_unique_constraint ' +
+			`WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = ${quoteValue(table)} AND tc.table_schema = current_schema()`;
 	} else {
 		return [];
 	}

@@ -140,9 +140,12 @@ export function buildErModel(schema: ISqlSchemaResponse): { nodes: ErNode[]; edg
 	for (const [name, def] of Object.entries(tables)) {
 		for (const fk of def.foreign_keys ?? []) {
 			fk.columns.forEach((col, i) => {
-				const refColumn = fk.referred_columns[i] ?? fk.referred_columns[0] ?? '';
 				// Skip FKs pointing outside the snapshot (cross-schema refs).
 				if (!tables[fk.referred_table]) return;
+				const refColumn = fk.referred_columns[i] ?? fk.referred_columns[0];
+				// Engine reported no referred column — skip: an edge to a
+				// missing 't:' handle renders detached.
+				if (!refColumn) return;
 				edges.push({
 					id: `${name}.${col}->${fk.referred_table}.${refColumn}`,
 					source: name,

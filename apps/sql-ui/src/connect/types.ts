@@ -51,7 +51,7 @@ export type SqlDialect = 'mysql' | 'postgres' | 'clickhouse' | 'neo4j' | 'unknow
  * a "connection" binds to. Purely descriptive: holds no token or client state.
  */
 export interface ISqlEndpoint {
-	/** Stable identity for lists/maps: `${projectId}:${nodeId}`. */
+	/** Stable identity for lists/maps: `${projectId}:${source}:${nodeId}`. */
 	key: string;
 	/** Project (pipeline) identifier the task was started from. */
 	projectId: string;

@@ -34,7 +34,16 @@ import { ConnectionManager } from '../connection/connection';
  * Builder renders it center-screen); "returned null, check the log" is
  * not an API.
  */
-export type ShellVendorResult = { ok: true; tgzPath: string } | { ok: false; reason: string };
+export type ShellVendorResult =
+	| {
+		ok: true;
+		/** Absolute path of the vendored shell tarball. */
+		tgzPath: string;
+		/** True when THIS pass rewrote the app's dependency spec — callers
+		 * must invalidate any memoised install so the new spec links. */
+		rewired?: boolean;
+	}
+	| { ok: false; reason: string };
 
 // Single-flight memo for the workspace's ONE shell package: the first
 // caller performs the vendor pass; concurrent callers (several App
@@ -95,17 +104,32 @@ export async function vendorAppTypes(context: vscode.ExtensionContext, appFolder
 	const logger = getLogger();
 	const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 	if (!workspaceRoot) return { ok: false, reason: 'No workspace folder is open — the platform package lives under the workspace root.' };
+	// Wiring failures FAIL the pass: an app whose workspace file or shell
+	// dependency could not be written will not link the platform package, so
+	// pretending success would only defer the error to a confusing place.
 	try {
 		ensureWorkspaceFile(workspaceRoot);
-		ensureShellDependency(appFolder, path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz'));
 	} catch (err) {
-		logger.output(`[appdev] wiring the shell package dependency failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+		const reason = `Could not prepare the workspace file: ${err instanceof Error ? err.message : String(err)}`;
+		logger.output(`[appdev] ${reason}`);
+		return { ok: false, reason };
+	}
+	let rewired = false;
+	try {
+		rewired = ensureShellDependency(appFolder, path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz'));
+	} catch (err) {
+		const reason = `Could not wire the shell dependency into ${appFolder}: ${err instanceof Error ? err.message : String(err)}`;
+		logger.output(`[appdev] ${reason}`);
+		return { ok: false, reason };
 	}
 	const result = await ensureShell(context);
 	if (!result.ok) {
 		logger.output(`[appdev] shell package unavailable: ${result.reason}`);
+		return result;
 	}
-	return result;
+	// Success carries whether this pass rewired the dependency spec, so the
+	// caller can invalidate a pre-rewire install memo.
+	return { ...result, rewired };
 }
 
 // =============================================================================
@@ -149,8 +173,19 @@ function ensureWorkspaceFile(workspaceRoot: string): void {
 		// step: amend the existing file only when the claim is missing
 		let text = fs.readFileSync(yamlPath, 'utf8');
 		if (!/^\s*-\s*['"]?apps\/\*/m.test(text)) {
-			if (/^packages:/m.test(text)) {
-				text = text.replace(/^packages:[^\n]*\n/m, (m) => `${m}  - 'apps/*'\n`);
+			const packagesLine = /^packages:([^\n]*)$/m.exec(text);
+			if (packagesLine) {
+				// An inline value (`packages: ['x']` / a scalar) cannot take an
+				// appended block entry — refuse loudly instead of corrupting
+				// the user-owned file (a trailing comment does not count).
+				if ((packagesLine[1] ?? '').replace(/#.*$/, '').trim().length > 0) {
+					throw new Error(`${yamlPath} declares packages as an inline value — add 'apps/*' manually`);
+				}
+				// Block form: match the first existing entry's indentation so
+				// the added line follows the user's formatting; two spaces
+				// when the list is empty.
+				const indent = /^packages:[^\n]*\n([ \t]*)-\s/m.exec(text)?.[1] ?? '  ';
+				text = text.replace(/^packages:[^\n]*\n?/m, (m) => `${m.endsWith('\n') ? m : `${m}\n`}${indent}- 'apps/*'\n`);
 			} else {
 				text += `${text.endsWith('\n') ? '' : '\n'}packages:\n  - 'apps/*'\n`;
 			}
@@ -191,20 +226,23 @@ function ensureWorkspaceFile(workspaceRoot: string): void {
  *
  * @param appFolder - The app's root folder (owns the package.json).
  * @param pkgTgz - Absolute path of the shell package tarball.
+ * @returns True when a new spec was written; false when already correct (or
+ *          the app has no package.json).
  */
-function ensureShellDependency(appFolder: string, pkgTgz: string): void {
+function ensureShellDependency(appFolder: string, pkgTgz: string): boolean {
 	const logger = getLogger();
 	const pkgJsonPath = path.join(appFolder, 'package.json');
-	if (!fs.existsSync(pkgJsonPath)) return;
+	if (!fs.existsSync(pkgJsonPath)) return false;
 	// step: compute the app-relative file: spec with posix separators
 	const rel = path.relative(appFolder, pkgTgz).split(path.sep).join('/');
 	const spec = `file:${rel}`;
 	// step: rewrite only when missing or different
 	const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8'));
-	if (pkg.dependencies?.shell === spec) return;
+	if (pkg.dependencies?.shell === spec) return false;
 	pkg.dependencies = { ...(pkg.dependencies ?? {}), shell: spec };
 	fs.writeFileSync(pkgJsonPath, `${JSON.stringify(pkg, null, 2)}\n`);
 	logger.output(`[appdev] package.json: "shell": "${spec}"`);
+	return true;
 }
 
 /**
@@ -229,10 +267,27 @@ function runRootInstall(workspaceRoot: string): Promise<void> {
 		let output = '';
 		proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
 		proc.stderr?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
-		proc.on('error', reject);
+		// step: settle EXACTLY once — an unsettled promise here wedges the
+		// single-flight ensureShell memo for the whole session, and 'error'
+		// followed by 'close' (or a timeout racing either) fires both paths
+		let settled = false;
+		const finish = (err?: Error): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			if (err) reject(err);
+			else resolve();
+		};
+		// step: bound the install — a hung pnpm (dead registry, lock wait)
+		// must fail the pass instead of hanging it forever
+		const timer = setTimeout(() => {
+			proc.kill('SIGKILL');
+			finish(new Error('pnpm install timed out after 10 minutes'));
+		}, 10 * 60 * 1000);
+		proc.on('error', (err) => finish(err));
 		proc.on('close', (code) => {
-			if (code === 0) resolve();
-			else reject(new Error(`pnpm install failed: ${extractInstallCause(output, code)}`));
+			if (code === 0) finish();
+			else finish(new Error(`pnpm install failed: ${extractInstallCause(output, code)}`));
 		});
 	});
 }
@@ -248,9 +303,13 @@ function runRootInstall(workspaceRoot: string): Promise<void> {
  */
 export function extractInstallCause(output: string, code: number | null): string {
 	const lines = output.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-	// step: prefer pnpm's own error markers, newest last
-	const marked = lines.filter((l) => /ERR_PNPM|ENOENT|EACCES|EPERM|ERR!|error/i.test(l));
-	if (marked.length > 0) return marked[marked.length - 1];
+	// step: tiered markers, most specific first — a generic "error" line must
+	// not outrank pnpm's own ERR_PNPM_* code; newest match within a tier wins
+	const tiers = [/ERR_PNPM\w*/, /\b(ENOENT|EACCES|EPERM)\b/, /ERR!/, /\berror\b/i];
+	for (const marker of tiers) {
+		const marked = lines.filter((l) => marker.test(l));
+		if (marked.length > 0) return marked[marked.length - 1];
+	}
 	// step: otherwise the last line of output beats a bare exit code
 	return lines.length > 0 ? lines[lines.length - 1] : `exit code ${code}`;
 }

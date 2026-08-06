@@ -24,7 +24,7 @@
 // SQL-UI — DIAGRAM VIEW (reverse-engineered ER canvas on xyflow)
 // =============================================================================
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, useEdgesState, useNodesState, useReactFlow } from '@xyflow/react';
 import type { Edge } from '@xyflow/react';
@@ -122,24 +122,39 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 	const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
 	const [laidOut, setLaidOut] = useState(false);
 
+	// Rebuild run guard: the async layout of a superseded run (newer snapshot
+	// or unmount) must not overwrite the current nodes; the pending fit frame
+	// is cancelled alongside it.
+	const runIdRef = useRef(0);
+	const rafRef = useRef(0);
+
 	/**
 	 * Rebuild the model from the snapshot and auto-layout it.
 	 */
 	const rebuild = useCallback(async (): Promise<void> => {
 		if (!snapshot.schema) return;
+		// Capture this run's id — a later rebuild bumps the ref and this run's
+		// results are discarded when they land.
+		const runId = ++runIdRef.current;
 		const model = buildErModel(snapshot.schema);
 		const positioned = await layoutErNodes(model.nodes, model.edges);
+		if (runId !== runIdRef.current) return;
 		setNodes(positioned);
 		setEdges(model.edges);
 		setLaidOut(true);
 		// Fit after the nodes have painted at their new positions.
-		requestAnimationFrame(() => fitView({ padding: 0.15 }));
+		rafRef.current = requestAnimationFrame(() => fitView({ padding: 0.15 }));
 	}, [snapshot.schema, setNodes, setEdges, fitView]);
 
 	// Build once per snapshot refresh (refreshedAt bumps on every reflection).
 	useEffect(() => {
 		setLaidOut(false);
 		void rebuild();
+		return () => {
+			// Supersede any in-flight rebuild and cancel the pending fit frame.
+			runIdRef.current += 1;
+			cancelAnimationFrame(rafRef.current);
+		};
 	}, [snapshot.refreshedAt, rebuild]);
 
 	// ── Framing states ───────────────────────────────────────────────────────

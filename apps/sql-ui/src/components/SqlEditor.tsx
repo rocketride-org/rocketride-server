@@ -29,7 +29,7 @@
 // @monaco-editor/react Editor with a theme derived from the --rr-* tokens.
 // =============================================================================
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Editor from '@monaco-editor/react';
 import type * as MonacoNS from 'monaco-editor';
@@ -119,6 +119,36 @@ function defineTheme(monaco: typeof MonacoNS): void {
 	});
 }
 
+// Monotonic theme-change counter shared by every editor instance.
+let themeVersion = 0;
+
+/**
+ * Watch for app theme changes and bump a version the editor can re-derive its
+ * Monaco theme from (explorer-ui's MonacoViewer pattern): a MutationObserver
+ * on the documentElement's data-theme/class/style attributes catches the
+ * shell's theme toggle, which Monaco's registered theme cannot see by itself.
+ *
+ * @returns The current theme version (changes on every theme switch).
+ */
+function useThemeVersion(): number {
+	const [version, setVersion] = useState(themeVersion);
+
+	useEffect(() => {
+		// Any attribute mutation that can restyle :root counts as a change.
+		const observer = new MutationObserver(() => {
+			themeVersion += 1;
+			setVersion(themeVersion);
+		});
+		observer.observe(document.documentElement, {
+			attributes: true,
+			attributeFilter: ['data-theme', 'class', 'style'],
+		});
+		return () => observer.disconnect();
+	}, []);
+
+	return version;
+}
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -129,13 +159,29 @@ function defineTheme(monaco: typeof MonacoNS): void {
  */
 export const SqlEditor: React.FC<ISqlEditorProps> = ({ value, onChange, dialect, onRun }) => {
 	// Keep the latest onRun reachable from the (once-registered) Monaco action.
-	const onRunRef = React.useRef(onRun);
-	onRunRef.current = onRun;
+	// Assigned in an effect: mutating a ref during render is unsafe under
+	// concurrent rendering (a discarded render must not leak its props).
+	const onRunRef = useRef(onRun);
+	useEffect(() => { onRunRef.current = onRun; }, [onRun]);
+
+	// Monaco namespace captured at mount + the app-theme version, so a theme
+	// toggle re-derives the token-based editor theme.
+	const monacoRef = useRef<typeof MonacoNS | null>(null);
+	const themeVersion = useThemeVersion();
+
+	// Re-define and re-apply the theme whenever the app theme changes.
+	useEffect(() => {
+		if (monacoRef.current) {
+			defineTheme(monacoRef.current);
+			monacoRef.current.editor.setTheme(THEME_NAME);
+		}
+	}, [themeVersion]);
 
 	/**
 	 * Register the theme before the editor mounts.
 	 */
 	const handleBeforeMount = useCallback((monaco: typeof MonacoNS) => {
+		monacoRef.current = monaco;
 		defineTheme(monaco);
 	}, []);
 

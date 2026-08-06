@@ -180,21 +180,11 @@ export function ConnectionCard({
 	return (
 		<div
 			style={styles.card(connected, onClick != null)}
-			// The whole card is a select target only when onClick is set; then it is
-			// focusable and Enter / Space activate it, like a button.
-			role={onClick ? 'button' : undefined}
-			tabIndex={onClick ? 0 : undefined}
+			// The outer div is a plain mouse target: role="button" would turn
+			// ALL descendants presentational and strip the Edit/Delete controls
+			// from the accessibility tree, so the button semantics live on the
+			// content wrapper below instead.
 			onClick={onClick}
-			onKeyDown={
-				onClick
-					? (e) => {
-							if (e.key === 'Enter' || e.key === ' ') {
-								e.preventDefault();
-								onClick();
-							}
-					  }
-					: undefined
-			}
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
 			// Focus mirrors hover so keyboard users see the revealed actions:
@@ -236,13 +226,32 @@ export function ConnectionCard({
 					)}
 				</div>
 			)}
-			{/* Optional source icon. */}
-			{icon && <div style={styles.icon(connected)}>{icon}</div>}
-			<div style={styles.name}>{name}</div>
-			<div style={styles.address}>{address}</div>
-			{/* Stock status pill. */}
-			<div style={styles.badge}>
-				<StatusBadge variant={status}>{statusLabel}</StatusBadge>
+			{/* Content wrapper carries the button semantics: its children are
+			    genuinely presentational, so role="button" is safe here (the
+			    Edit/Delete controls above keep their own roles). Focusable and
+			    Enter / Space activate it, like a button. */}
+			<div
+				role={onClick ? 'button' : undefined}
+				tabIndex={onClick ? 0 : undefined}
+				onKeyDown={
+					onClick
+						? (e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									onClick();
+								}
+						  }
+						: undefined
+				}
+			>
+				{/* Optional source icon. */}
+				{icon && <div style={styles.icon(connected)}>{icon}</div>}
+				<div style={styles.name}>{name}</div>
+				<div style={styles.address}>{address}</div>
+				{/* Stock status pill. */}
+				<div style={styles.badge}>
+					<StatusBadge variant={status}>{statusLabel}</StatusBadge>
+				</div>
 			</div>
 		</div>
 	);

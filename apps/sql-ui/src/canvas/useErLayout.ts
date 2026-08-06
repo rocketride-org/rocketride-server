@@ -69,7 +69,15 @@ export async function layoutErNodes(nodes: ErNode[], edges: Edge[]): Promise<ErN
 		})),
 	};
 
-	const result = await elk.layout(graph);
+	let result;
+	try {
+		result = await elk.layout(graph);
+	} catch (err) {
+		// A layout rejection must not strand the diagram in its loading state —
+		// fall back to the caller's positions and keep the canvas usable.
+		console.log('[sql-ui] ER layout failed', err);
+		return nodes;
+	}
 
 	// Map elk positions back onto the xyflow nodes.
 	const positions = new Map((result.children ?? []).map((child) => [child.id, { x: child.x ?? 0, y: child.y ?? 0 }]));

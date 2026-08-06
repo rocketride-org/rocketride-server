@@ -58,6 +58,8 @@ export interface ITableDesignViewProps {
 
 /** One display row of the columns page (snapshot + staged ops applied). */
 interface IEffectiveColumn {
+	/** Stable row identity (survives renames; React keys must not shift). */
+	id: string;
 	/** Current (possibly renamed) column name. */
 	name: string;
 	/** Current (possibly retyped) datatype. */
@@ -182,13 +184,16 @@ function blankSpec(): IColumnSpec {
  * @returns The effective display rows (dropped rows stay, marked).
  */
 function effectiveColumns(base: ISqlSchemaColumn[], pk: string[], ops: AlterOp[]): IEffectiveColumn[] {
+	// Snapshot rows carry a base: identity keyed by the ORIGINAL name so the
+	// row keeps its React key across staged renames.
 	const rows: IEffectiveColumn[] = base.map((c) => ({
+		id: `base:${c.column}`,
 		name: c.column,
 		type: c.type,
 		primaryKey: pk.includes(c.column),
 		pending: '',
 	}));
-	for (const op of ops) {
+	ops.forEach((op, i) => {
 		if (op.kind === 'dropColumn') {
 			const row = rows.find((r) => r.name === op.name);
 			if (row) row.pending = 'dropped';
@@ -199,27 +204,11 @@ function effectiveColumns(base: ISqlSchemaColumn[], pk: string[], ops: AlterOp[]
 			const row = rows.find((r) => r.name === op.name);
 			if (row) { row.type = op.type; row.pending = row.pending || 'retyped'; }
 		} else if (op.kind === 'addColumn') {
-			rows.push({ name: op.spec.name, type: op.spec.type, primaryKey: false, pending: 'added' });
+			// Staged adds are identified by their op index (names may repeat).
+			rows.push({ id: `op:${i}`, name: op.spec.name, type: op.spec.type, primaryKey: false, pending: 'added' });
 		}
-	}
+	});
 	return rows;
-}
-
-/**
- * Resolve a display row's ORIGINAL column name (rename ops are keyed by it).
- *
- * @param displayName - The row's current display name.
- * @param ops - The staged operations.
- * @returns The snapshot-time column name.
- */
-function originalName(displayName: string, ops: AlterOp[]): string {
-	// Walk renames backwards: the display name is the latest newName.
-	let name = displayName;
-	for (let i = ops.length - 1; i >= 0; i--) {
-		const op = ops[i];
-		if (op && op.kind === 'renameColumn' && op.newName === name) name = op.name;
-	}
-	return name;
 }
 
 // =============================================================================
@@ -264,7 +253,8 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 	const tableDef = !createMode ? snapshot.schema?.tables?.[table] ?? null : null;
 	const columns = useMemo<IEffectiveColumn[]>(() => {
 		if (createMode) {
-			return createColumns.map((c) => ({ name: c.name, type: c.type, primaryKey: c.primaryKey, pending: 'added' as const }));
+			// Drafts are positional: identity by index, not (possibly duplicated) name.
+			return createColumns.map((c, i) => ({ id: `draft:${i}`, name: c.name, type: c.type, primaryKey: c.primaryKey, pending: 'added' as const }));
 		}
 		return effectiveColumns(tableDef?.columns ?? [], tableDef?.primary_key ?? [], ops);
 	}, [createMode, createColumns, tableDef, ops]);
@@ -285,10 +275,15 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 
 	useEffect(() => {
 		if (createMode || activePage !== 'fks' || fkNames !== null || !client || snapshot.status !== 'ready') return;
+		// Cancellation flag: a response landing after unmount/re-run must not
+		// set state for the wrong table.
+		let cancelled = false;
+		setFkError(null);
 		const session = getSession(client, endpoint);
 		fetchForeignKeyNames(session, snapshot.dialect, table)
-			.then(setFkNames)
-			.catch((err) => setFkError(err instanceof Error ? err.message : String(err)));
+			.then((names) => { if (!cancelled) setFkNames(names); })
+			.catch((err) => { if (!cancelled) setFkError(err instanceof Error ? err.message : String(err)); });
+		return () => { cancelled = true; };
 	}, [createMode, activePage, fkNames, client, snapshot.status, snapshot.dialect, endpoint, table]);
 
 	// ── Gestures ─────────────────────────────────────────────────────────────
@@ -313,18 +308,19 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 	const applyEdit = useCallback((): void => {
 		if (!selected) return;
 		const next: AlterOp[] = [];
-		const orig = originalName(selected, ops);
+		// Ops execute sequentially against the mutated table — address the
+		// column by its CURRENT display name, never a snapshot-time name.
 		if (editName.trim() && editName.trim() !== selected) {
-			next.push({ kind: 'renameColumn', name: orig, newName: editName.trim() });
+			next.push({ kind: 'renameColumn', name: selected, newName: editName.trim() });
 		}
 		const current = columns.find((c) => c.name === selected);
 		if (editType.trim() && editType.trim() !== current?.type) {
 			// Retype targets the FINAL name (rename runs first in op order).
-			next.push({ kind: 'changeType', name: editName.trim() || orig, type: editType.trim() });
+			next.push({ kind: 'changeType', name: editName.trim() || selected, type: editType.trim() });
 		}
 		if (next.length > 0) setOps((prev) => [...prev, ...next]);
 		setSelected(null);
-	}, [selected, ops, editName, editType, columns]);
+	}, [selected, editName, editType, columns]);
 
 	/**
 	 * Execute the staged statements in order, then re-reflect the schema.
@@ -333,12 +329,16 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 		if (!client || statements.length === 0) return;
 		setApplying(true);
 		setApplyError(null);
+		// No transaction: MySQL/ClickHouse DDL auto-commits statement by
+		// statement, so a failed batch leaves a committed prefix behind.
+		let done = 0;
 		try {
 			const session = getSession(client, endpoint);
-			// Statements run in op order; the first failure stops the batch so
-			// the DDL page still shows exactly what remains un-run.
+			// Statements run in op order; the first failure stops the batch and
+			// `done` counts what committed so the plan can drop it.
 			for (const sql of statements) {
 				await session.execute(sql);
+				done++;
 			}
 			// Success: clear the plan and re-reflect.
 			setOps([]);
@@ -347,6 +347,13 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 			await refreshSchema(client, endpoint);
 		} catch (err) {
 			setApplyError(err instanceof Error ? err.message : String(err));
+			if (done > 0) {
+				// Drop the committed prefix so the remaining plan matches what
+				// is actually left to run, then re-reflect the mutated schema.
+				setOps((prev) => prev.slice(done));
+				setFkNames(null);
+				await refreshSchema(client, endpoint).catch(() => undefined);
+			}
 		} finally {
 			setApplying(false);
 			setConfirmOpen(false);
@@ -357,9 +364,11 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 
 	const menu: ViewMenu = {
 		entries: [
-			{ id: 'columns', label: 'Columns', count: columns.length || undefined },
+			// The badge reflects the table Apply would produce: dropped rows out.
+			{ id: 'columns', label: 'Columns', count: columns.filter((c) => c.pending !== 'dropped').length || undefined },
 			// Create mode has no FK page: constraints ride the CREATE later.
-			...(!createMode ? [{ id: 'fks', label: 'Foreign Keys', count: (tableDef?.foreign_keys?.length ?? 0) || undefined }] : []),
+			// Prefer the fetched constraint list (it is what the page renders).
+			...(!createMode ? [{ id: 'fks', label: 'Foreign Keys', count: (fkNames?.length ?? tableDef?.foreign_keys?.length ?? 0) || undefined }] : []),
 			{ id: 'ddl', label: 'DDL', ...(pendingCount > 0 ? { count: pendingCount } : {}) },
 		],
 	};
@@ -430,9 +439,9 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 												</tr>
 											</thead>
 											<tbody>
-												{columns.map((col) => (
+												{columns.map((col, rowIndex) => (
 													<tr
-														key={col.name}
+														key={col.id}
 														style={styles.rowSelectable(selected === col.name)}
 														onClick={() => {
 															// Select for rename/retype (alter mode, not dropped rows).
@@ -456,9 +465,12 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 																small
 																onClick={() => {
 																	if (createMode) {
-																		setCreateColumns((prev) => prev.filter((c) => c.name !== col.name));
+																		// Drafts map 1:1 to rows — drop by index so
+																		// duplicate names cannot remove each other.
+																		setCreateColumns((prev) => prev.filter((_, i) => i !== rowIndex));
 																	} else if (col.pending !== 'dropped') {
-																		setOps((prev) => [...prev, { kind: 'dropColumn', name: originalName(col.name, prev) }]);
+																		// Ops execute sequentially — address by CURRENT name.
+																		setOps((prev) => [...prev, { kind: 'dropColumn', name: col.name }]);
 																	}
 																	if (selected === col.name) setSelected(null);
 																}}
@@ -563,6 +575,15 @@ export const TableDesignView: React.FC<ITableDesignViewProps> = ({ endpoint, tab
 															</tr>
 														);
 													})}
+													{/* Staged (not yet applied) foreign keys — keyed by op index. */}
+													{ops.map((op, i) => op.kind === 'addForeignKey' ? (
+														<tr key={`staged:${i}`}>
+															<td style={{ ...styles.td, ...styles.mono }}>{op.name}</td>
+															<td style={{ ...styles.td, ...styles.mono }}>{op.column}</td>
+															<td style={{ ...styles.td, ...styles.mono }}>{op.refTable}</td>
+															<td style={styles.td}><StatusBadge variant="warning">added</StatusBadge></td>
+														</tr>
+													) : null)}
 													{fkNames !== null && fkNames.length === 0 && (
 														<tr><td style={styles.td} colSpan={4}>This table declares no foreign keys.</td></tr>
 													)}

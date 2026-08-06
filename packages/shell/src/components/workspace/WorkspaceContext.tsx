@@ -377,16 +377,25 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		// below is registered before any of the body (or its finally) executes.
 		const load = (async (): Promise<boolean> => {
 		await Promise.resolve();
-		// Embedded dev preview: the locked app's remote is registered by the
-		// embedder AFTER boot (its dev server may still be installing —
-		// seconds of pnpm + rsbuild startup against a millisecond shell
-		// boot). Hold this load until the registration arrives; attempting
-		// earlier can only fail with RUNTIME-004 noise.
-		if (isDevPreviewPage() && previewLockedAppId() === appId) {
-			console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
-			await waitForDevRemote(appId);
-		}
 		try {
+			// Embedded dev preview: the locked app's remote is registered by the
+			// embedder AFTER boot (its dev server may still be installing —
+			// seconds of pnpm + rsbuild startup against a millisecond shell
+			// boot). Hold this load until the registration arrives; attempting
+			// earlier can only fail with RUNTIME-004 noise. BOUNDED, and inside
+			// the try, so a never-registering dev server fails into the normal
+			// error path (which clears loadingMapRef) instead of holding the
+			// loading flag forever.
+			if (isDevPreviewPage() && previewLockedAppId() === appId) {
+				console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
+				const DEV_REMOTE_TIMEOUT = 300000;
+				await Promise.race([
+					waitForDevRemote(appId),
+					new Promise<never>((_, reject) =>
+						setTimeout(() => reject(new Error(`Dev remote for "${appId}" did not register within ${DEV_REMOTE_TIMEOUT / 1000}s — is the app's dev server running?`)), DEV_REMOTE_TIMEOUT),
+					),
+				]);
+			}
 			// Load with timeout to avoid indefinite hangs on unreachable remotes
 			const APP_LOAD_TIMEOUT = 15000;
 			const descriptor = await Promise.race([
