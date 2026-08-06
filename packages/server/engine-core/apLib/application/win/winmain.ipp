@@ -23,12 +23,7 @@
 // =============================================================================
 
 #pragma once
-#include <csignal>
-
-// Forward declarations of exception handlers
-LONG WINAPI
-unhandledExceptionFilter(::PEXCEPTION_POINTERS pExceptionInfo) noexcept;
-void abortHandler(int signal) noexcept;
+#include <apLib/application/win/crashHandlers.ipp>
 
 // The main entry point for an rocketride based executable, in the windows
 // case the strings are ucs2 which we convert to utf8 inline
@@ -48,27 +43,10 @@ int wmain(int argc, const WCHAR **argv) noexcept {
     // Initialize apLib
     auto initScope = ::ap::init();
 
-    // Determine our app path, in a frame so we don't park the stack
-    // allocation for the duration of the apps run
-    {
-        std::array<Utf16Chr, MAX_PATH> execPath = {};
+    // Determine our app path
+    if (auto err = ::ap::application::detectExecPath()) return err;
 
-        if (!::GetModuleFileNameW(NULL, &execPath[0], MAX_PATH))
-            return ::ap::log::write(_location,
-                                    "Failed to determine app path: {,x0}",
-                                    ::GetLastError());
-
-        // Set this as the exec path
-        ::ap::application::cmdline().setExecPath(&execPath[0]);
-    }
-
-    // Don't set the unhandled exception filter if there's a debugger attached--
-    // if a crash occurs while debugging, you want to be taken to the site of
-    // the crash, not to the unhandled exception filter
-    if (!::IsDebuggerPresent()) {
-        ::SetUnhandledExceptionFilter(unhandledExceptionFilter);
-        std::signal(SIGABRT, abortHandler);
-    }
+    installCrashHandlers();
 
     // Call main with blocking and translation of exceptions to errors
     auto res = ::ap::error::call(
@@ -78,51 +56,4 @@ int wmain(int argc, const WCHAR **argv) noexcept {
     if (!res) return res.ccode().plat();
 
     return *res;
-}
-
-LONG WINAPI
-unhandledExceptionFilter(::PEXCEPTION_POINTERS pExceptionInfo) noexcept {
-    using namespace ::ap;
-
-    // If we're being cancelled, just exit
-    if (async::cancelled(_location, true))
-        dev::fatality(_location, APERR(Ec::Cancelled,
-                                       "Application execution was cancelled"));
-
-    // Print and log the error
-    const Text errorStr =
-        _fmt("Application caught unhandled SEH exception: {,x,8}",
-             pExceptionInfo->ExceptionRecord->ExceptionCode);
-    std::cerr << "FATAL ERROR: " << errorStr << std::endl;
-    LOG(Always, errorStr);
-
-    // Create a minidump of the crash (or the program state, if no exception
-    // info is available)
-    plat::createMinidump(pExceptionInfo);
-
-    // Report the error and exit
-    dev::fatality(_location, APERR(Ec::Fatality, errorStr));
-}
-
-void abortHandler(int signal) noexcept {
-    using namespace ::ap;
-
-    // If we're being cancelled, just exit
-    if (async::cancelled(_location, true))
-        dev::fatality(_location, APERR(Ec::Cancelled,
-                                       "Application execution was cancelled"));
-
-    // Print and log the error
-    const Text errorStr =
-        _fmt("Application received system signal: {}: {} ({})",
-             plat::renderSignal(signal), plat::renderSignalDescription(signal),
-             signal);
-    std::cerr << "FATAL ERROR: " << errorStr << std::endl;
-    LOG(Always, errorStr);
-
-    // Create a minidump of the program state
-    plat::createMinidump(signal);
-
-    // Report the error and exit
-    dev::fatality(_location, APERR(Ec::Fatality, errorStr));
 }

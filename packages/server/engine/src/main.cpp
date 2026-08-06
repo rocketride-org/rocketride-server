@@ -21,42 +21,19 @@
 // SOFTWARE.
 // =============================================================================
 
-#include <engLib/eng.h>
+// -----------------------------------------------------------------------------
+// The engine launcher - the engine itself lives in engine.dll behind engine_run()
+// -----------------------------------------------------------------------------
 
-#include <apLib/application/mainstub.ipp>
+#include <engine.h>
 
-namespace ap::application {
-    ErrorCode Main() {
-		Error ccode;
-
-		// NOTE: Temporary handle --verify option to workaround CI/CD failure (see OPS-6087)
-		// TODO: Remove this once OPS-6087 is fixed.
-		if (cmdline().argc() == 2 && cmdline().argv()[1] == "--verify"_tv)
-            return engine::TaskEc::COMPLETED;
-
-		// Init the engine
-        ccode = engine::init();
-
-		// Run it if we inited it
-        if (!ccode)
-            ccode = engine::task::Main();
-
-		// Output the exit code
-		if (engine::config::monitor()) {
-			MONCCODE(exit, ccode);
-		} else {
-			std::string message = _ts(ccode);
-			std::cout << "Error: " << message << std::endl;
-		}
-
-		// Deinit the engine
-		engine::deinit();
-
-		// Get the exit status
-	    if (ccode)
-            return engine::TaskEc::END_CODE_ERROR;
-        else
-            return engine::TaskEc::COMPLETED;
-    }
-
-}  // namespace ap::application
+// Switched on _WIN32 to match the argv character type engine.h declares
+#ifdef _WIN32
+int wmain(int argc, const wchar_t **argv) noexcept {
+    return engine_run(argc, argv);
+}
+#else
+int main(int argc, const char **argv) noexcept {
+    return engine_run(argc, argv);
+}
+#endif
