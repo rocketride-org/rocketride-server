@@ -272,7 +272,6 @@ class TaskCommands(DAPConn):
             response = await self._server.start_task(
                 request,
                 self,
-                attach_debugger=True,
                 client_id=self._account_info.userId,
                 user_id=self._account_info.userId,
                 team_id=team_id,

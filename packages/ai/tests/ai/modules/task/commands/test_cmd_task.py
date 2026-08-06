@@ -303,7 +303,6 @@ async def test_on_launch_starts_task_with_resolved_org():
 
     server.start_task.assert_awaited_once()
     assert server.start_task.call_args.kwargs['org_id'] == 'org-1'
-    assert server.start_task.call_args.kwargs['attach_debugger'] is True
     conn.send_response.assert_awaited_once()
 
 
