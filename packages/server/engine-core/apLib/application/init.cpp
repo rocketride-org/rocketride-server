@@ -109,7 +109,18 @@ void tika() {
     LOGOUTPUT("\n");
 }
 
-void init() noexcept {
+Error init() noexcept {
+    // Before anything that resolves paths off the executable, and before
+    // plat::init(), which names the minidump database after it. The failure
+    // is returned at the end, so deinit() never undoes a step that did not run
+    Error ccode;
+    if (auto err = detectExecPath())
+        ccode = APERR(err, "Failed to determine app path");
+
+#if ROCKETRIDE_PLAT_WIN
+    installCrashHandlers();
+#endif
+
     Options::get().init();
 
     // If we are to output help
@@ -131,6 +142,8 @@ void init() noexcept {
 #if ROCKETRIDE_PLAT_UNX
     signal::init();
 #endif
+
+    return ccode;
 }
 
 void deinit() noexcept {
