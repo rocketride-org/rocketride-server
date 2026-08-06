@@ -4,6 +4,9 @@ Covers `language` (#1751) plus `beam_size` / `vad_filter` / `vad_parameters` (#1
 No torch, no faster-whisper, no model download.
 """
 
+import sys
+import types
+
 import pytest
 
 from ai.common.models.audio.whisper import WhisperLoader, Whisper
@@ -379,6 +382,63 @@ def test_decode_parameters_never_reach_loader_options(monkeypatch):
 
     _, _, loader_options = _FakeClient.captured['load']
     assert loader_options == {'compute_type': 'float16'}
+
+
+@pytest.mark.parametrize(
+    'param,value',
+    [
+        ('language', 'de'),
+        ('beam_size', 10),
+        ('vad_filter', False),
+        ('vad_parameters', {'threshold': 0.1}),
+        ('word_timestamps', True),
+    ],
+)
+def test_decode_params_in_loader_options_do_not_split_identity(param, value):
+    """An old client may still send these at load; they must not duplicate the weights.
+
+    Enforced by _SERVER_PARAMS, so it holds even though the facade no longer sends them.
+    """
+    assert WhisperLoader.generate_model_id('tiny', **{param: value}) == WhisperLoader.generate_model_id('tiny')
+
+
+def test_genuine_loader_options_still_split_identity():
+    """The other half: revision changes the weights, so it must change the id."""
+    assert WhisperLoader.generate_model_id('tiny', revision='abc') != WhisperLoader.generate_model_id('tiny')
+
+
+class _RecordingWhisperModel:
+    """Captures what load() hands the faster-whisper constructor."""
+
+    captured = {}
+
+    def __init__(self, model_name, **kw):
+        _RecordingWhisperModel.captured = {'model_name': model_name, **kw}
+
+
+def _load_with(monkeypatch, **loader_options):
+    fake = types.ModuleType('faster_whisper')
+    fake.WhisperModel = _RecordingWhisperModel
+    monkeypatch.setitem(sys.modules, 'faster_whisper', fake)
+    monkeypatch.setattr(WhisperLoader, 'model_gpu_gb', staticmethod(lambda *a, **k: 0.0), raising=False)
+
+    WhisperLoader.load('tiny', device='cpu', **loader_options)
+    return _RecordingWhisperModel.captured
+
+
+def test_load_absorbs_decode_params_instead_of_forwarding_them(monkeypatch):
+    """WhisperModel() does not accept them — forwarding blindly would raise."""
+    captured = _load_with(monkeypatch, beam_size=10, vad_filter=False, word_timestamps=True)
+
+    for name in ('beam_size', 'vad_filter', 'vad_parameters', 'word_timestamps'):
+        assert name not in captured
+
+
+def test_load_forwards_genuine_loader_options(monkeypatch):
+    """Before this, revision changed the model id but never reached the constructor."""
+    captured = _load_with(monkeypatch, revision='abc123')
+
+    assert captured['revision'] == 'abc123'
 
 
 def test_facade_puts_all_four_on_the_wire(monkeypatch):

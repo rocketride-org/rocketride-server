@@ -56,7 +56,12 @@ class WhisperLoader(BaseLoader):
         genuinely changes the loaded weights.
 
         `beam_size`, `vad_filter`, `vad_parameters` and `word_timestamps` are excluded
-        for the same reason — all four are decode-time (#1809).
+        for the same reason — all four are decode-time (#1809). The exclusion is
+        enforced by _SERVER_PARAMS, so it holds even when an old client sends them.
+
+        Anything else in `**kwargs` is treated as a genuine WhisperModel option and
+        forwarded to it, so `revision` or `download_root` change both the weights and
+        the identity, as they should.
 
     Performance Note:
         - Typical throughput: ~8-15 req/s depending on model size and audio length
@@ -73,6 +78,18 @@ class WhisperLoader(BaseLoader):
     # `language` is not here — it is a per-request decode hint, not a load param.
     _DEFAULTS = {
         'compute_type': 'float16',
+    }
+
+    # Excluded from the identity hash, not merely omitted by the facade: an older client
+    # that still sends these in loader_options would otherwise hash to a different
+    # model_id and duplicate the weights for the length of a rolling upgrade. Same
+    # reasoning as GLiNER's #1750; load() absorbs them and never applies them.
+    _SERVER_PARAMS = BaseLoader._SERVER_PARAMS | {
+        'language',
+        'beam_size',
+        'vad_filter',
+        'vad_parameters',
+        'word_timestamps',
     }
 
     # Merged under a caller's vad_parameters. Unlike _DEFAULTS, never reaches identity.
@@ -163,6 +180,14 @@ class WhisperLoader(BaseLoader):
         exclude_gpus: Optional[List[int]] = None,
         language: str = 'en',
         compute_type: str = 'float16',
+        # Named so they are absorbed rather than forwarded to WhisperModel(), which does
+        # not accept them and would raise. An older client can still put them in
+        # loader_options; forwarding **kwargs blindly would trade one bug for a worse
+        # one (#1750). Everything else in **kwargs is a genuine WhisperModel option.
+        beam_size: Optional[int] = None,
+        vad_filter: Optional[bool] = None,
+        vad_parameters: Optional[Dict[str, Any]] = None,
+        word_timestamps: Optional[bool] = None,
         **kwargs,
     ) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
         """
@@ -179,7 +204,12 @@ class WhisperLoader(BaseLoader):
             exclude_gpus: GPUs to exclude (server mode)
             language: Language code for transcription (default: 'en')
             compute_type: Precision type (float16, int8, float32)
-            **kwargs: Additional arguments (ignored for compatibility)
+            beam_size: Absorbed, not applied — decode-time, see the class docstring
+            vad_filter: Absorbed, not applied
+            vad_parameters: Absorbed, not applied
+            word_timestamps: Absorbed, not applied
+            **kwargs: Forwarded to WhisperModel() as genuine loader options
+                (revision, download_root, cpu_threads, …)
 
         Returns:
             Tuple of (model_bundle, metadata_dict, gpu_index)
@@ -266,6 +296,7 @@ class WhisperLoader(BaseLoader):
                     model_name,
                     device='cpu',
                     compute_type=compute_type,
+                    **kwargs,
                 )
             else:
                 # Extract real device index from torch_device (e.g., 'cuda:0' -> 0)
@@ -276,6 +307,7 @@ class WhisperLoader(BaseLoader):
                     device='cuda',
                     device_index=real_device_index,
                     compute_type=compute_type,
+                    **kwargs,
                 )
         except Exception as e:
             logger.error(f'Failed to load whisper model: {e}')
@@ -612,7 +644,9 @@ class Whisper:
             device: Device ('server', 'cuda', 'cpu', 'cuda:N', or None for auto)
             language: Language code for transcription
             compute_type: Compute type ('float16', 'int8', etc.)
-            **kwargs: Additional arguments (ignored for compatibility)
+            **kwargs: Loader options, forwarded to WhisperModel() and part of model
+                identity. Decode parameters do not belong here — pass them to
+                transcribe() instead; sent here they are absorbed and ignored.
         """
         self.model_name = model_name
         self.output_fields = output_fields or ['$text']
