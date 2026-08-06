@@ -119,18 +119,18 @@ export default tseslint.config(
 	// Two legal import forms, declared by the specifier itself:
 	//   Form 1 - bare 'shell':      runtime-bound platform surface (barrel-only)
 	//   Form 2 - 'shared/<group>':  statically bundled library (deep specs only)
-	// The bare 'shared' root barrel and the old 'shell' name do not exist.
+	// The bare 'shared' root barrel and the old 'shell-ui' name do not exist.
 	{
 		files: ['**/*.{ts,tsx,mts}'],
 		rules: {
 			'no-restricted-imports': ['error', {
 				paths: [
 					{ name: 'shared', message: "The shared root barrel is retired. Surface symbols come from 'shell'; library components use deep 'shared/<group>' specs." },
-					{ name: 'shell', message: "Renamed: import from 'shell'." },
+					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
 				],
 				patterns: [
 					{ group: ['shell/*'], message: "The shell surface is barrel-only: import the name from 'shell'." },
-					{ group: ['shell/*'], message: "Renamed: import from 'shell'." },
+					{ group: ['shell-ui/*'], message: "Renamed: import from 'shell'." },
 				],
 			}],
 		},
@@ -147,7 +147,7 @@ export default tseslint.config(
 				paths: [
 					{ name: 'shell', message: "No 'shell' barrel here: use relative imports (shell package) or deep 'shared/<group>' specs (vscode)." },
 					{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
-					{ name: 'shell', message: "Renamed package: use relative imports or deep 'shared/<group>' specs." },
+					{ name: 'shell-ui', message: "Renamed package: use relative imports or deep 'shared/<group>' specs." },
 				],
 				patterns: [
 					// The in-tree STATIC path form is legal here: bundled component copies are
@@ -161,12 +161,12 @@ export default tseslint.config(
 	// shared (the static library): imports the surface from 'shell' (Form 1)
 	// and non-surface stock internals via the in-tree path form.
 	{
-		files: ['packages/shared/**/*.{ts,tsx,mts}'],
+		files: ['apps/shared/**/*.{ts,tsx,mts}'],
 		rules: {
 			'no-restricted-imports': ['error', {
 				paths: [
 					{ name: 'shared', message: "The shared root barrel is retired: use relative imports inside the library." },
-					{ name: 'shell', message: "Renamed: import from 'shell'." },
+					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
 				],
 				patterns: [
 					{ group: ['shell/*', '!shell/src/*'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>)." },

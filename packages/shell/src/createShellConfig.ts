@@ -25,7 +25,7 @@
 // =============================================================================
 
 import { fetchAndApplyTheme } from './themes';
-import type { ShellConfig, ShellApiConfig, AppManifestEntry } from 'shell';
+import type { ShellConfig, ShellApiConfig, AppManifestEntry } from './components/workspace/types';
 import { ConnectionManager } from './connection/connection';
 
 // =============================================================================
