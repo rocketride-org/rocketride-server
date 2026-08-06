@@ -29,7 +29,7 @@
 // @monaco-editor/react Editor with a theme derived from the --rr-* tokens.
 // =============================================================================
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Editor from '@monaco-editor/react';
 import type * as MonacoNS from 'monaco-editor';
@@ -161,8 +161,11 @@ export const SqlEditor: React.FC<ISqlEditorProps> = ({ value, onChange, dialect,
 	// Keep the latest onRun reachable from the (once-registered) Monaco action.
 	// Assigned in an effect: mutating a ref during render is unsafe under
 	// concurrent rendering (a discarded render must not leak its props).
+	// useLayoutEffect: the ref must be current before Monaco's native keydown
+	// — outside React's event system — can fire post-commit; a passive
+	// effect leaves a gap where the stale closure would run.
 	const onRunRef = useRef(onRun);
-	useEffect(() => { onRunRef.current = onRun; }, [onRun]);
+	useLayoutEffect(() => { onRunRef.current = onRun; }, [onRun]);
 
 	// Monaco namespace captured at mount + the app-theme version, so a theme
 	// toggle re-derives the token-based editor theme.

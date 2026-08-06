@@ -210,8 +210,14 @@ const builderModule = {
 					const target = ctx.options.path ? path.resolve(ctx.options.path) : PROJECT_ROOT;
 					// step: refuse co-requested actions when replacing OUR OWN
 					// scripts/ — a mid-run swap lets later actions lazy-load
-					// from the new tree
-					if (target === PROJECT_ROOT) {
+					// from the new tree. realpathSync both sides (the
+					// copy-scripts self-copy guard rule): a symlinked or
+					// case-variant --path must not slip past the identity
+					// check. A missing target cannot resolve — leave it to
+					// selfUpdate, which fails naming the real cause.
+					let targetReal = target;
+					try { targetReal = fs.realpathSync(target); } catch { /* missing target — selfUpdate reports it */ }
+					if (targetReal === fs.realpathSync(PROJECT_ROOT)) {
 						const others = process.argv.slice(2).filter((arg) => !arg.startsWith('-') && arg !== 'builder:update');
 						if (others.length) {
 							throw new Error(`builder:update targets this repository — run it as the invocation's only action (also requested: ${others.join(', ')})`);

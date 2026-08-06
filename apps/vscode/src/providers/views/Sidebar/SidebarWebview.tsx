@@ -362,6 +362,9 @@ const SidebarViewWebview: React.FC = () => {
 	/** Mode strip selection — local state now, host persists via message. */
 	const onSidebarModeChange = useCallback(
 		(mode: SidebarMode) => {
+			// A user selection counts as the seed: an `update` composed before
+			// the persist round trip completed must not revert it.
+			sidebarModeSeededRef.current = true;
 			setSidebarMode(mode);
 			sendMessage({ type: 'setSidebarMode', mode });
 		},

@@ -143,6 +143,11 @@ export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ o
 	const [stagedConfig, setStagedConfig] = useState<{ traceLevel: 'none' | 'metadata' | 'summary' | 'full' | null; debugOut: boolean } | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState('');
+	/** Verb-run generation counter: an in-flight verb from the PREVIOUS
+	    record must not land its error/busy on the NEXT one — the record-key
+	    render-reset bumps this, and every post-await setState in run() (and
+	    the Save closure) checks it before touching state. */
+	const runGenRef = useRef(0);
 
 	// Identity of the focused record. ONE drawer instance persists across
 	// selections (sibling precedent), so the verb state above is cleared
@@ -155,22 +160,30 @@ export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ o
 	const prevRecordKeyRef = useRef<string | null>(null);
 	if (recordKey !== null && recordKey !== prevRecordKeyRef.current) {
 		prevRecordKeyRef.current = recordKey;
+		// Supersede any in-flight verb run before clearing its state.
+		runGenRef.current += 1;
 		setStagedConfig(null);
 		setStopOpen(false);
 		setError('');
+		// The superseded run's guarded finally may no longer clear busy (its
+		// generation check fails), so the reset must drop the flag itself.
+		setBusy(false);
 	}
 
 	/** Run one verb with shared busy/error handling (dialogs close first). */
 	const run = async (action: () => Promise<void>): Promise<void> => {
+		// Capture this run's generation: after the record switches, every
+		// settle path below is void — the reset already owns the state.
+		const mine = runGenRef.current;
 		setBusy(true);
 		setError('');
 		try {
 			await action();
-			setStopOpen(false);
+			if (mine === runGenRef.current) setStopOpen(false);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
+			if (mine === runGenRef.current) setError(err instanceof Error ? err.message : String(err));
 		} finally {
-			setBusy(false);
+			if (mine === runGenRef.current) setBusy(false);
 		}
 	};
 
@@ -228,12 +241,15 @@ export const DeploymentRecordPanel: React.FC<IDeploymentRecordPanelProps> = ({ o
 						variant="primary"
 						small
 						disabled={busy}
-						onClick={() =>
+						onClick={() => {
+							// Same generation guard as run(): a save settling after a
+							// record switch must not clear the NEXT record's staged edits.
+							const mine = runGenRef.current;
 							void run(async () => {
 								await onSetSourceConfig(stagedConfig.traceLevel, stagedConfig.debugOut);
-								setStagedConfig(null);
-							})
-						}
+								if (mine === runGenRef.current) setStagedConfig(null);
+							});
+						}}
 					>
 						{busy ? 'Saving…' : 'Save'}
 					</Button>

@@ -146,6 +146,20 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 		rafRef.current = requestAnimationFrame(() => fitView({ padding: 0.15 }));
 	}, [snapshot.schema, setNodes, setEdges, fitView]);
 
+	/**
+	 * Re-run the elk layout on the CURRENT nodes (toolbar Auto-layout): same
+	 * run guard + fit-frame ownership as rebuild(), so a layout superseded by
+	 * a newer rebuild/layout (or unmount) is discarded and the pending fit
+	 * frame stays cancellable through rafRef.
+	 */
+	const autoLayout = useCallback(async (): Promise<void> => {
+		const runId = ++runIdRef.current;
+		const positioned = await layoutErNodes(nodes, edges);
+		if (runId !== runIdRef.current) return;
+		setNodes(positioned);
+		rafRef.current = requestAnimationFrame(() => fitView({ padding: 0.15 }));
+	}, [nodes, edges, setNodes, fitView]);
+
 	// Build once per snapshot refresh (refreshedAt bumps on every reflection).
 	useEffect(() => {
 		setLaidOut(false);
@@ -188,7 +202,7 @@ const DiagramCanvas: React.FC<IDiagramViewProps> = ({ endpoint }) => {
 		<>
 			{/* Floating toolbar (pipeline-canvas convention). */}
 			<div style={styles.toolbar}>
-				<Button variant="ghost" small onClick={() => { void layoutErNodes(nodes, edges).then((n) => { setNodes(n); requestAnimationFrame(() => fitView({ padding: 0.15 })); }); }}>
+				<Button variant="ghost" small onClick={() => { void autoLayout(); }}>
 					Auto-layout
 				</Button>
 				<Button variant="ghost" small onClick={() => fitView({ padding: 0.15 })}>Fit</Button>
