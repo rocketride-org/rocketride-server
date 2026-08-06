@@ -37,7 +37,7 @@ The `qdrant` node ships with two built-in profiles:
   "provider": "qdrant",
   "config": {
     "profile": "self-hosted",
-    "serverName": "localhost",
+    "host": "localhost",
     "collection": "my-docs"
   }
 }
@@ -76,7 +76,7 @@ A single `qdrant` node can handle both at the same time:
 {
   "id": "store_1",
   "provider": "qdrant",
-  "config": { "profile": "self-hosted", "serverName": "localhost", "collection": "docs" },
+  "config": { "profile": "self-hosted", "host": "localhost", "collection": "docs" },
   "input": [
     { "lane": "documents", "from": "embed_1" },
     { "lane": "questions", "from": "source_1" }

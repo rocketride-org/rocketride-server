@@ -966,7 +966,7 @@ run: async (ctx, task) => {
     // Check if source changed since last build
     const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
 
-    if (!changed && await exists(OUTPUT_DIR)) {
+    if (!ctx.options?.force && !changed && await exists(OUTPUT_DIR)) {
         task.output = 'No changes detected';
         return;
     }
@@ -1123,7 +1123,7 @@ function makeCompileAction() {
         run: async (ctx, task) => {
             const { changed, hash } = await hasSourceChanged(SRC_DIR, SRC_HASH_KEY);
 
-            if (!changed && await exists(BUILD_DIR)) {
+            if (!ctx.options?.force && !changed && await exists(BUILD_DIR)) {
                 task.output = 'No changes detected';
                 return;
             }
@@ -1520,8 +1520,8 @@ function makeBuildAction() {
             // 1. Check if source changed since last successful build
             const { changed, hash } = await hasSourceChanged(SRC_DIR, 'pkg.srcHash');
 
-            // 2. Skip if nothing changed AND output exists
-            if (!changed && await exists(OUTPUT_DIR)) {
+            // 2. Skip if nothing changed AND output exists (unless --force)
+            if (!ctx.options?.force && !changed && await exists(OUTPUT_DIR)) {
                 task.output = 'Up to date (no changes)';
                 return;
             }
@@ -1881,4 +1881,4 @@ Error: Unknown action 'my-package:build'
 
 ---
 
-MIT License -- see [LICENSE](../LICENSE).
+MIT License -- see [LICENSE](../../LICENSE).

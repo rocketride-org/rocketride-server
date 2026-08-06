@@ -29,7 +29,7 @@ status = await client.get_task_status(token)
 ### TypeScript
 
 ```typescript
-const status = await client.getTaskStatus(token);
+client.getTaskStatus(token: string, options?: { timeout?: number | false }): Promise<TASK_STATUS>
 ```
 
 ## **Parameters**
@@ -37,6 +37,7 @@ const status = await client.getTaskStatus(token);
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `token` | `str` / `string` | Yes | Task token returned by `use()` |
+| `options.timeout` | `number \| false` (TypeScript only) | No | Per-call timeout override in ms. Default `15000`; pass `false` to disable it and fall back to the client-level timeout only. |
 
 ## **Returns**
 

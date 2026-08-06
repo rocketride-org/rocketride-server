@@ -81,18 +81,20 @@ sudo dnf install libcxx libcxxabi libgomp
 sudo apk add libc++ libgomp
 ```
 
-From inside the runtime directory, start the engine:
+From inside the runtime directory, start the engine. This binds to `127.0.0.1`
+(localhost only) by default:
 
 ```bash
 # Linux / macOS
-./engine ./ai/eaas.py --host=0.0.0.0
+./engine ./ai/eaas.py --host=127.0.0.1
 
 # Windows
-engine.exe ./ai/eaas.py --host=0.0.0.0
+engine.exe ./ai/eaas.py --host=127.0.0.1
 ```
 
 The engine now listens for the [WebSocket protocol](/protocols/websocket) on port
-**5565**. Use `--host=127.0.0.1` to bind to localhost only.
+**5565**. Only pass `--host=0.0.0.0` (all interfaces) once the engine sits behind
+TLS and authentication — see [Connect a client](#connect-a-client) below.
 
 ### Alternative: full stack with Docker (Option B only)
 

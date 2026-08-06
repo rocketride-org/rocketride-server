@@ -153,10 +153,13 @@ print(result['deployment']['version'], result['deployment']['state'])
 const { artifact } = await client.deploy.publish(pipeline, { comment: 'RC1' });
 await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
 // ... verify ...
+const previous = await client.deploy.get('proj-1', 'team-prod');
 await client.deploy.deploy('proj-1', artifact.version!, 'team-prod');
 
-// Rollback is the same gesture aimed at the previous version.
-await client.deploy.deploy('proj-1', artifact.version! - 1, 'team-prod');
+// Rollback is the same gesture aimed at the version team-prod was on before —
+// recorded, not assumed: artifact.version! - 1 can be a different artifact
+// entirely once versions aren't contiguous with this team's history.
+await client.deploy.deploy('proj-1', previous.version!, 'team-prod');
 ```
 
 ### Audit: who put what live where

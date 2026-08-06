@@ -51,21 +51,25 @@ preprocessing) transforms data as it flows through.
 
 ## Swap providers, keep the pipeline
 
-Because behaviour lives in `provider` + `config`, you can change _which_ LLM or
-vector store a pipeline uses without touching its shape. Point an `llm` node at
-a different provider, or repoint a `store` node at a different collection, and
-the surrounding graph is unchanged.
+Because behaviour lives in `provider` + `config`, you can often change _which_
+LLM or vector store a pipeline uses without touching its shape — as long as the
+new provider has a compatible contract (same class type, supported lanes, and
+control connections). Point an `llm` node at a different provider, or repoint a
+`store` node at a different collection, and the surrounding graph is unchanged;
+swapping to a provider with a different contract can change required config,
+lanes, or control connections. Always [validate](/pipeline-reference) the
+pipeline after changing a provider.
 
 ## The catalog
- 
- Every available provider (100+ nodes across 15+ LLM providers, 9 vector
- databases, OCR, NER, PII anonymization, transcription, and web tools) is
- documented with its config, inputs, and outputs in
- **[Nodes](/nodes)**.
- 
- ## Next steps
- 
- - [Nodes](/nodes): every provider and its schema.
+
+Every available provider (100+ nodes across 15+ LLM providers, 9 vector
+databases, OCR, NER, PII anonymization, transcription, and web tools) is
+documented with its config, inputs, and outputs in
+**[Nodes](/nodes)**.
+
+## Next steps
+
+- [Nodes](/nodes): every provider and its schema.
 - [Agents & tools](/concepts/agents-tools-skills): the control-plane nodes.
 - [Execution model](/concepts/execution-model): how lanes carry data between
   nodes.

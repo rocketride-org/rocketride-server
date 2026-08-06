@@ -24,6 +24,10 @@ identical logic with Supabase-appropriate defaults.
 
 ## Configuration
 
+`db_postgres` translates the question into SQL itself; it needs an LLM wired as
+a **control** connection (see [Agents & tools](/concepts/agents-tools-skills)),
+not as a data-lane predecessor:
+
 ```json
 {
   "id": "db_1",
@@ -38,7 +42,7 @@ identical logic with Supabase-appropriate defaults.
     "profile": "default"
   },
   "input": [
-    { "lane": "questions", "from": "llm_1" }
+    { "lane": "questions", "from": "source_1" }
   ]
 }
 ```
@@ -67,7 +71,10 @@ Keep it `false` for read-only Q&A use cases.
 
 ## Wiring: natural-language Q&A
 
-Connect the node to receive questions from an LLM or directly from a source:
+`db_postgres` translates the question into SQL itself; it needs an LLM wired as
+a **control** connection (see [Agents & tools](/concepts/agents-tools-skills)),
+not as a data-lane predecessor. Connect the node to receive raw questions
+directly from a source:
 
 ```json
 {
@@ -77,7 +84,7 @@ Connect the node to receive questions from an LLM or directly from a source:
       "id": "llm_1",
       "provider": "llm_openai",
       "config": { "profile": "openai-4o", "apikey": "${OPENAI_API_KEY}" },
-      "input": [{ "lane": "questions", "from": "source_1" }]
+      "control": [{ "classType": "llm", "from": "db_1" }]
     },
     {
       "id": "db_1",
@@ -90,7 +97,7 @@ Connect the node to receive questions from an LLM or directly from a source:
         "table": "orders",
         "db_description": "Orders table: id (int), customer (text), amount (numeric), created_at (timestamp)."
       },
-      "input": [{ "lane": "questions", "from": "llm_1" }]
+      "input": [{ "lane": "questions", "from": "source_1" }]
     },
     {
       "id": "target_1",

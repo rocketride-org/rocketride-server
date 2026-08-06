@@ -24,12 +24,15 @@ This reads: _take the `questions` lane produced by `qdrant_1` as my input._
 
 ### Lane types
 
-Lanes are typed, and the type must match across a connection:
+Lanes are typed, and the type must match across a connection. This table is not
+exhaustive — individual nodes can define additional lanes (see each node's
+entry in [Nodes](/nodes)):
 
 | Lane        | Carries                          |
 | ----------- | -------------------------------- |
 | `questions` | Queries flowing toward a model   |
 | `answers`   | Model responses flowing back     |
+| `documents` | Vector-ready chunks              |
 | `text`      | Plain text content               |
 | `tags`      | Structured metadata / parameters |
 | `image`     | Image content                    |
@@ -42,7 +45,8 @@ Lanes are typed, and the type must match across a connection:
   of the next. A `text` output feeds a `text` input; mismatched lanes are a
   pipeline error.
 - **Transformation**: many nodes change the lane type. An embedding node turns
-  `questions` into vectors for a store; an LLM turns `questions` into `answers`.
+  `text` into `documents` (vector-ready chunks) for a store; an LLM turns
+  `questions` into `answers`.
 - **Fan-in**: a node can consume the same lane from several upstream nodes by
   listing multiple entries in `input`. A `response` node, for example, can merge
   `answers` from several agents.

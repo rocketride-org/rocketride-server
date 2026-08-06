@@ -28,18 +28,18 @@ not on the agent. Each LLM, tool, or memory node carries a `control` array whose
 `from` points back at the agent that invokes it. The agent itself has no
 `control` array, only its input lanes.
 
+The agent has input lanes only, no `control` array. The LLM declares it is
+controlled _by_ the agent, and the tool does likewise:
+
 ```json
-// The agent: input lanes only, no control array.
-{ "id": "agent_1", "provider": "agent_rocketride",
-  "input": [{ "lane": "questions", "from": "chat_1" }] }
-
-// The LLM declares it is controlled BY the agent.
-{ "id": "llm_1", "provider": "llm_openai",
-  "control": [{ "classType": "llm", "from": "agent_1" }] }
-
-// The tool, likewise.
-{ "id": "tool_1", "provider": "tool_http_request",
-  "control": [{ "classType": "tool", "from": "agent_1" }] }
+[
+  { "id": "agent_1", "provider": "agent_rocketride",
+    "input": [{ "lane": "questions", "from": "chat_1" }] },
+  { "id": "llm_1", "provider": "llm_openai",
+    "control": [{ "classType": "llm", "from": "agent_1" }] },
+  { "id": "tool_1", "provider": "tool_http_request",
+    "control": [{ "classType": "tool", "from": "agent_1" }] }
+]
 ```
 
 A single LLM, tool, or memory node can serve several invokers: list each one as

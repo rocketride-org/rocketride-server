@@ -83,6 +83,7 @@ const User = sequelize.define(
 		id: { type: DataTypes.INTEGER, primaryKey: true },
 		name: { type: DataTypes.STRING },
 		email: { type: DataTypes.STRING },
+		active: { type: DataTypes.BOOLEAN },
 	},
 	{ tableName: 'users', timestamps: false }
 );

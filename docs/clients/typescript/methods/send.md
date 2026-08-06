@@ -33,6 +33,7 @@ Send text or binary data to a running pipeline and get the processing result.
 ### Method Signature
 
 **Python (async):**
+
 ```python
 result = await client.send(token, data, objinfo=None, mimetype=None)
 ```
@@ -111,6 +112,7 @@ Upload multiple files to a pipeline with parallel transfers and progress trackin
 ### Method Signature
 
 **Python (async):**
+
 ```python
 results = await client.send_files(files, token)
 ```
@@ -218,6 +220,7 @@ Create a streaming data pipe for sending large datasets in chunks.
 ### Method Signature
 
 **Python (async):**
+
 ```python
 pipe = await client.pipe(token, objinfo=None, mime_type=None, provider=None)
 ```

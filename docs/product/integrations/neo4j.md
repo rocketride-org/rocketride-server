@@ -56,6 +56,7 @@ The node connects over the Bolt protocol with the official neo4j Python driver.
     "uri": "neo4j+s://your-instance.databases.neo4j.io",
     "auth_method": "userpass",
     "user": "neo4j",
+    "password": "${NEO4J_PASSWORD}",
     "database": "neo4j",
     "db_description": "Movie graph: People, Movies, and ACTED_IN / DIRECTED relationships."
   }

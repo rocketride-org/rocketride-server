@@ -5,7 +5,7 @@ sidebar_label: Understanding RocketRide
 
 # Understanding RocketRide
 
-RocketRide has a small number of moving parts. Once you know how they fit together, the rest
+RocketRide has a few moving parts. Once you know how they fit together, the rest
 of the docs map cleanly onto them.
 
 ## The pipeline

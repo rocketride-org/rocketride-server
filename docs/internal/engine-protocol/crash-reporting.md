@@ -66,7 +66,7 @@ files that match the exact crashed build. Release/Sanitize builds generate them
 automatically with modern [Mozilla `dump_syms`](https://github.com/mozilla/dump_syms)
 (DWARF-5 capable) into a `symbols/` store next to the engine, keyed by debug-ID:
 
-```
+```text
 symbols/<module>/<debug-id>/<module>.sym
 ```
 
@@ -90,12 +90,16 @@ store or the separated `.debug` next to it (via `.gnu_debuglink`).
 readers are not. Build/fetch them and put them on your `PATH` (`/usr/local/bin`
 below; anywhere on `PATH` works). `lldb` and `gdb` come from your distro or LLVM.
 
-```
-# minidump-stackwalk -- prebuilt from rust-minidump
-url=$(curl -fsSL https://api.github.com/repos/rust-minidump/rust-minidump/releases/latest \
-  | grep -oE '"browser_download_url": *"[^"]+"' | cut -d'"' -f4 \
-  | grep 'minidump-stackwalk-x86_64-unknown-linux-gnu\.tar\.xz$')
-curl -fsSL "$url" | tar -xJ -C /tmp
+```bash
+# minidump-stackwalk -- prebuilt from rust-minidump. Pin a release and verify
+# its checksum before installing; bump `version` when you need a newer build.
+version=v0.26.1
+asset=minidump-stackwalk-x86_64-unknown-linux-gnu.tar.xz
+base_url="https://github.com/rust-minidump/rust-minidump/releases/download/${version}"
+curl -fsSL -o "/tmp/${asset}" "${base_url}/${asset}"
+curl -fsSL -o "/tmp/${asset}.sha256" "${base_url}/${asset}.sha256"
+(cd /tmp && sha256sum -c "${asset}.sha256")
+tar -xJ -C /tmp -f "/tmp/${asset}"
 sudo install -m755 /tmp/minidump-stackwalk-*/minidump-stackwalk /usr/local/bin/
 
 # minidump-2-core -- built from breakpad (needs g++)
@@ -113,7 +117,7 @@ sudo install -m755 /tmp/minidump-2-core /usr/local/bin/
 
 ### minidump-stackwalk + the `.sym` store (field workflow, no binary needed)
 
-```
+```bash
 minidump-stackwalk --human --symbols-path dist/server/symbols crash.dmp
 ```
 
@@ -122,7 +126,7 @@ or the symbols don't match it (debug-ID mismatch).
 
 ### LLDB -- reads the minidump directly (recommended when you have the binary)
 
-```
+```bash
 DEBUGINFOD_URLS= lldb --batch \
   -o "settings set symbols.enable-external-lookup false" \
   -o "target create <binary> --core crash.dmp" \
@@ -159,12 +163,14 @@ Do **not** pass the binary as GDB's first argument (that loads it at 0);
 
 Wrap it in a shell function (convert -> read base -> launch GDB):
 
-```
+```bash
 gdbdump() {  # gdbdump <binary> <dump.dmp>
-  local bin="$1" dmp="$2" core="/tmp/$(basename "$dmp").core"
+  local bin="$1" dmp="$2"
+  local core; core=$(mktemp /tmp/gdbdump.XXXXXX.core)
+  trap 'rm -f "$core"' RETURN
   minidump-2-core "$dmp" > "$core" || return 1
-  local base; base=$(minidump-stackwalk --json "$dmp" 2>/dev/null | python3 -c \
-    "import json,sys,os;b=os.path.basename('$bin');print(next(m['base_addr'] for m in json.load(sys.stdin)['modules'] if b in (m['filename'] or '')))")
+  local base; base=$(minidump-stackwalk --json "$dmp" 2>/dev/null | BIN_PATH="$bin" python3 -c \
+    "import json,sys,os;b=os.path.basename(os.environ['BIN_PATH']);print(next(m['base_addr'] for m in json.load(sys.stdin)['modules'] if b in (m['filename'] or '')))")
   gdb --core "$core" -ex "add-symbol-file $bin -o $base" -ex "bt 7"
 }
 # gdbdump dist/server/engine /tmp/<dump>.dmp

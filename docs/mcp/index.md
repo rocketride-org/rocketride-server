@@ -136,7 +136,7 @@ This reads `rocketride://pipelines` and returns the list of running tasks.
 pip install rocketride-mcp
 ```
 
-Requires Python 3.10+ and `rocketride-client-python` >= 1.1.0.
+Requires Python 3.10+ and `rocketride` >= 1.0.4.
 
 ## Client Configuration
 

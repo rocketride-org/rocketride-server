@@ -30,7 +30,7 @@ result = await client.validate(pipeline, source=None)
 ### TypeScript
 
 ```typescript
-const result = await client.validate({ pipeline, source? });
+const result = await client.validate({ pipeline, source: undefined });
 ```
 
 ## **Parameters**
@@ -130,12 +130,13 @@ const result = await client.validate({
 ### Validate Before Starting
 
 ```python
-# Validate first, then start if valid
+# Validate first, then start only if valid
 result = await client.validate(pipeline)
 
-# Check the result for errors before proceeding
-# (exact structure depends on pipeline configuration)
-task = await client.use(pipeline=pipeline)
+if not result['errors']:
+    task = await client.use(pipeline=pipeline)
+else:
+    print('Validation errors:', result['errors'])
 ```
 
 ## **Response Format**

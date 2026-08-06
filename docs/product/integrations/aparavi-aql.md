@@ -66,7 +66,7 @@ to correct it.
 
 `STORE` is the only table (no JOINs). Query structure:
 
-```
+```sql
 SELECT cols FROM STORE [WHERE cond] [WHICH CONTAIN 'term'] [GROUP BY col] [HAVING cond] [ORDER BY col ASC|DESC] [LIMIT n]
 ```
 

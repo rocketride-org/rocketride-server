@@ -39,7 +39,9 @@ that triggered them.
 
 The client sends a **request** naming a `command`. Arguments (including the auth
 `token`) travel in `arguments`; raw file bytes, when a command carries a
-payload, travel in `data`.
+payload, travel in `data` -- but never as an in-JSON value. The SDK strips
+`data` out of `arguments`, appends a single `\n` byte after the JSON header,
+then the raw bytes, so the frame on the wire is `<json-header>\n<binary-payload>`.
 
 ```json
 {
@@ -49,6 +51,23 @@ payload, travel in `data`.
 	"arguments": { "subcommand": "open", "token": "$ROCKETRIDE_APIKEY" }
 }
 ```
+
+This particular request -- opening a data pipe -- intentionally sends the API
+key as its `token`: it's the first request on the pipe, so no task token exists
+yet. Requests that operate on an already-running task (`write`, `close`, ...)
+carry that task's own `token` in `arguments` instead, for example:
+
+```json
+{
+	"type": "request",
+	"seq": 3,
+	"command": "rrext_process",
+	"arguments": { "subcommand": "write", "pipe_id": 1, "token": "$TASK_TOKEN" }
+}
+```
+
+followed immediately by the `\n` byte and the raw payload bytes -- `data` never
+appears in the JSON itself.
 
 ### Responses
 

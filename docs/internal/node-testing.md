@@ -25,12 +25,13 @@ Add a `test` property to your node's `services.json`:
 ```
 
 Run tests:
+
 ```bash
 # Contract tests (no server needed)
-builder nodes:test
+./builder nodes:test
 
 # Full integration tests (starts a server, runs test cases)
-builder nodes:test-full
+./builder nodes:test-full
 ```
 
 ---
@@ -90,6 +91,7 @@ Each test case specifies an input and expected output.
 The input lane is specified as a key, with the value depending on the lane type:
 
 **Text-based lanes** (inline content):
+
 ```json
 {
     "text": "What is the capital of France?",
@@ -98,6 +100,7 @@ The input lane is specified as a key, with the value depending on the lane type:
 ```
 
 **File-based lanes** (path relative to `testdata/`):
+
 ```json
 {
     "image": "ocr/sample.png",
@@ -138,6 +141,7 @@ The input lane is specified as a key, with the value depending on the lane type:
 ### Explicit file reference
 
 For any lane, you can use an explicit file reference:
+
 ```json
 {
     "text": { "file": "text/sample.txt" },
@@ -176,11 +180,13 @@ For known lanes, content matchers (`equals`, `contains`, `matches`, `beginsWith`
 | `tags` | `[0]` | `[...]` |
 
 This means:
+
 ```json
 "expect": { "text": { "contains": "hello" } }
 ```
 
 Is equivalent to:
+
 ```json
 "expect": { "text": { "property": { "path": "[0]", "contains": "hello" } } }
 ```
@@ -407,10 +413,10 @@ Contract tests validate `services*.json` structure (required fields, lane names,
 
 ```bash
 # Run contract tests
-builder nodes:test
+./builder nodes:test
 
 # Or explicitly
-builder nodes:test-contracts
+./builder nodes:test-contracts
 
 # Or directly with pytest
 pytest nodes/test/test_contracts.py -v
@@ -425,19 +431,19 @@ Integration tests execute the test cases defined in `services*.json` through a l
 
 ```bash
 # Run full integration tests
-builder nodes:test-full
+./builder nodes:test-full
 
 # With verbose pytest output
-builder nodes:test-full --pytest="-v -s"
+./builder nodes:test-full --pytest="-v -s"
 
 # Run specific test by name pattern
-builder nodes:test-full --pytest="-k question"
+./builder nodes:test-full --pytest="-k question"
 
 # Filter by pytest markers
-builder nodes:test-full --markers="slow"
+./builder nodes:test-full --markers="slow"
 
 # Filter by test pattern
-builder nodes:test-full --pattern="llm"
+./builder nodes:test-full --pattern="llm"
 ```
 
 ### Mock support

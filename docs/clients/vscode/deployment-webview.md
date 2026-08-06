@@ -25,8 +25,11 @@ Conventions shared by both protocols:
 - **Two correlation styles**: MUTATION and RPC-style requests
   (`deploy:artifact`/`deploy:publish`/`deploy:deploy`, every
   `deployment:*` mutation, `deployment:preview`, `deployment:validate`)
-  carry a `requestId`, and their `…Result` reply echoes it with an
-  optional `error` string — nothing else rides those replies. FETCH
+  carry a `requestId`. Pure mutations' `…actionResult` reply echoes it with
+  only an optional `error` string; the RPC-style reads' replies also carry
+  their payload alongside the same echo — `deploy:artifactResult` carries
+  `pipeline?`, `deployment:previewResult` carries `result` (+ optional
+  `error`), and `deployment:validateResult` carries `result`. FETCH
   messages (`deploy:fetch`, `deployment:fetch`) carry NO `requestId`:
   their answer is a scoped push (`deploy:data`; `deployment:load` /
   `deployment:error` stamped with `teamId` + optional `sourceId`) that

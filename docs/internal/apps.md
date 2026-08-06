@@ -41,7 +41,7 @@ Shell-UI is a thin shell framework that hosts micro-frontend applications via [M
 
 Apps are independent packages that export an `AppDescriptor` via Module Federation. The shell loads them lazily when the user activates the app.
 
-```
+```text
 ┌──────────┬─────────────────────────┬────────────┐
 │          │                         │            │
 │ Sidebar  │      Client Area        │   Debug    │
@@ -84,7 +84,7 @@ npm install -D @rsbuild/core @rsbuild/plugin-react @module-federation/rsbuild-pl
 
 #### 2. Project structure
 
-```
+```text
 my-app/
 ├── package.json
 ├── rsbuild.config.ts
@@ -243,7 +243,7 @@ For first-party apps built inside the `saas` monorepo.
 
 #### 1. Create the app package
 
-```
+```text
 apps/my-app/
 ├── package.json
 ├── rsbuild.config.ts
@@ -844,7 +844,7 @@ const MyComponent: React.FC = () => {
 
 Your `App` and `Sidebar` components are React siblings, they can't share a React context. Instead, they share the same `Documents` instance via the module-level `getDocs()` function:
 
-```
+```text
 MyApp (creates instance)     MySidebar (uses same instance)
      ↓                            ↓
   createDocs(vfs)              getDocs()

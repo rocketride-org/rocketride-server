@@ -1,3 +1,5 @@
+# RocketRide Python SDK
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/rocketride-org/rocketride-server/main/docs/images/banner-python.png" alt="RocketRide Python SDK" width="900">
 </p>
@@ -153,6 +155,8 @@ client = RocketRideClient(
 **Example:**
 
 ```python
+import os
+
 async with RocketRideClient(uri='wss://api.rocketride.ai', auth=os.environ['ROCKETRIDE_APIKEY']) as client:
     result = await client.use(filepath='pipeline.pipe')
     token = result['token']
@@ -400,7 +404,7 @@ from rocketride import RocketRideClient
 
 async def main():
     async with RocketRideClient(uri='wss://api.rocketride.ai', auth='my-key') as client:
-        result = await client.use(pipeline={'pipeline': my_pipeline_config})
+        result = await client.use(pipeline=my_pipeline_config)
         token = result['token']
         await client.send(token, '{"data": 1}')
         status = await client.get_task_status(token)
@@ -545,6 +549,7 @@ async def main():
     ocr = await client.get_service('ocr')
     if ocr:
         print('OCR schema:', ocr.get('schema'))
+    my_token = 'existing-task-token'  # token from an earlier client.use() call
     req = client.build_request('rrext_ping', token=my_token)
     res = await client.request(req, timeout=5000)
     if client.did_fail(res):

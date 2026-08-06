@@ -107,8 +107,10 @@ run. When you start the pipeline (`use()` / `execute`), pass:
 The engine pushes [events](/protocols/websocket#events) whose `event` field is the
 type discriminator and whose `body` carries the payload. Authoritative type
 definitions live in the SDK type modules
-(`client-typescript/src/client/types/events.ts`,
-`client-python/src/rocketride/types/events.py`, and the matching `task` modules).
+(`packages/client-typescript/src/client/types/events.ts`,
+`packages/client-python/src/rocketride/types/events.py`, and the matching `task`
+modules -- `packages/client-typescript/src/client/types/task.ts` and
+`packages/client-python/src/rocketride/types/task.py`).
 
 | Event                  | Subscribe to | Fires on                                          |
 | ---------------------- | ------------ | ------------------------------------------------- |
