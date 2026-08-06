@@ -532,8 +532,18 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 	const handlePillChange = useCallback((id: string) => setPill(id as SourcePill), []);
 
 	// --- Pane rendering -------------------------------------------------------
-	const errorItems = cleared ? [] : (paneStatus?.errors ?? []);
-	const warningItems = cleared ? [] : (paneStatus?.warnings ?? []);
+	// Errors/Warnings are a SNAPSHOT of the task's problems, not an accumulating
+	// window, so they must not vanish the moment a run ends. `cleared` is
+	// `!track.active`, and `active` means "inside a chapter that has not ended"
+	// (useTaskEvents.ts:646) — so gating these on it emptied both lists as soon
+	// as endTime was set, and the pane reported "No errors or warnings" about
+	// arrays it had just discarded. Outside a track, fall back to the task's own
+	// status. Replay still blanks, because there the question genuinely is "what
+	// was true at this position". The accumulating panes below stay on `cleared`,
+	// where that gate is correct.
+	const snapshotStatus = cleared ? (isReplay ? undefined : liveTaskStatus) : paneStatus;
+	const errorItems = snapshotStatus?.errors ?? [];
+	const warningItems = snapshotStatus?.warnings ?? [];
 	const [flowViewMode, setFlowViewMode] = useState<'pipeline' | 'component'>('pipeline');
 
 	/** Render the pane for the active pill. */
@@ -589,7 +599,7 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 				);
 			case 'errors':
 				return errorItems.length === 0 && warningItems.length === 0 ? (
-					<EmptyState title="No errors or warnings" description="Problems raised by the pipeline appear here while it runs or when replaying a recorded run." />
+					<EmptyState title="No errors or warnings" description="Problems raised by the pipeline appear here while it runs, after it finishes, and when replaying a recorded run." />
 				) : (
 					<>
 						{errorItems.length > 0 && <Errors title="Errors" items={errorItems} type="error" />}
