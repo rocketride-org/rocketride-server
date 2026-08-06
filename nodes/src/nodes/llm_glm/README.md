@@ -7,7 +7,6 @@ hybrid-reasoning models, served through the OpenAI-compatible Z.ai cloud API
 - **Lane:** `questions → answers`
 - **Endpoint (cloud, international):** `https://api.z.ai/api/paas/v4`
 - **Endpoint (cloud, mainland China):** `https://open.bigmodel.cn/api/paas/v4`
-- **Endpoint (local, default):** `http://localhost:8000/v1`
 
 ## Models
 
@@ -38,20 +37,13 @@ node strips it so downstream nodes only see the final answer (the
 `llm_minimax` pattern). Budget generous output tokens for reasoning-heavy
 prompts.
 
-## Local deploy
+## Self-hosting
 
 GLM weights are openly published on Hugging Face under MIT-style licenses
-(`zai-org/GLM-5.2`, `zai-org/GLM-4.5-Air`, ...). The "(Local)" profiles reuse
-the cloud model strings against `http://localhost:8000/v1` — set
-`--served-model-name` to the profile's model ID (or use a Custom profile with
-your own name):
-
-```sh
-vllm serve zai-org/GLM-4.5-Air --served-model-name glm-4.5-air --port 8000
-```
-
-GLM-4.5 Air runs on a single high-memory GPU node; the GLM-5 family MoE
-flagships need multi-GPU servers.
+(`zai-org/GLM-5.2`, `zai-org/GLM-4.5-Air`, ...). To use a self-hosted vLLM or
+SGLang deployment, select the **Custom Model** profile and point its server
+base URL at your OpenAI-compatible endpoint; the API key may be left empty
+(the node passes a dummy token — local servers accept any).
 
 ## Authentication
 
@@ -59,9 +51,6 @@ Cloud profiles require a Z.ai / Zhipu AI API key in `apikey`. The key
 requirement is enforced by base-URL match: if `serverbase` contains `api.z.ai`
 or `bigmodel.cn` and no key is set, the node raises `GLM API key is required
 for cloud profiles.` at startup. Key format is not validated beyond presence.
-
-Local profiles have no `apikey` field; local OpenAI-compatible servers accept
-any token, so the node passes a dummy key (`sk-local-dummy-key`).
 
 ## Model sync
 
