@@ -23,11 +23,37 @@
 
 #include <apLib/ap.h>
 
+#if ROCKETRIDE_PLAT_MAC
+#include <limits.h>
+#include <mach-o/dyld.h>
+#endif
+
 namespace ap::application {
 
 // Checks if the current process is elevated
 // @returns
 // True if elevated
 bool elevated() noexcept { return getuid() == geteuid(); }
+
+#if ROCKETRIDE_PLAT_LIN
+int detectExecPath() noexcept {
+    std::array<char, 4 * Size::kKilobyte> execPath = {};
+
+    ASSERTD_MSG(::readlink("/proc/self/exe", &execPath[0], execPath.size()) >= 0,
+                "Failed to determine app path: ", ::strerror(errno), errno);
+
+    cmdline().setExecPath(&execPath[0]);
+    return 0;
+}
+#elif ROCKETRIDE_PLAT_MAC
+int detectExecPath() noexcept {
+    std::array<char, PATH_MAX> execPath{};
+    uint32_t execPathsize = PATH_MAX;
+    ASSERTD(!::_NSGetExecutablePath(&execPath[0], &execPathsize));
+
+    cmdline().setExecPath(&execPath[0]);
+    return 0;
+}
+#endif
 
 }  // namespace ap::application

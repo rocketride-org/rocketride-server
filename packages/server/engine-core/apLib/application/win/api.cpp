@@ -43,4 +43,17 @@ bool elevated() noexcept {
     return static_cast<bool>(Elevation.TokenIsElevated);
 }
 
+int detectExecPath() noexcept {
+    std::array<Utf16Chr, MAX_PATH> execPath = {};
+
+    if (!::GetModuleFileNameW(NULL, &execPath[0], MAX_PATH)) {
+        const auto error = ::GetLastError();
+        log::write(_location, "Failed to determine app path: {,x0}", error);
+        return static_cast<int>(error);
+    }
+
+    cmdline().setExecPath(&execPath[0]);
+    return 0;
+}
+
 }  // namespace ap::application
