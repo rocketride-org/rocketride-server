@@ -42,6 +42,9 @@ _VAD_FIELD_TO_DECODE_KEY = {
 }
 _NEW_FIELDS = ['beam_size', 'vad_filter', *_VAD_FIELD_TO_DECODE_KEY]
 
+# Read by nothing; superseded by the vad_* fields or by fixed buffering constants.
+_DEAD_FIELDS = ['silence_threshold', 'min_seconds', 'max_seconds', 'vad_level']
+
 
 class _FakeWhisper:
     """Stands in for ai.common.models.Whisper, recording the decode kwargs."""
@@ -247,3 +250,29 @@ def test_services_json_defaults_match_the_python_fallbacks():
 
     for name, default in expected.items():
         assert fields[name]['default'] == default, f'{name} default drifted from IGlobal'
+
+
+def test_dead_fields_are_gone():
+    """Nothing reads these, so declaring them offers knobs that silently do nothing."""
+    service = _parse_services_json()
+    fields = service['fields']
+    properties = fields['transcribe.default']['properties']
+
+    for name in _DEAD_FIELDS:
+        key = f'transcribe.{name}'
+        assert key not in fields, f'{name} is declared again but nothing reads it'
+        assert key not in properties, f'{name} is back in transcribe.default'
+
+    for profile, values in service['preconfig']['profiles'].items():
+        leftovers = sorted(set(values) & set(_DEAD_FIELDS))
+        assert not leftovers, f'profile {profile} still carries {leftovers}'
+
+
+def test_every_profile_selects_its_own_model():
+    """Profiles used to set "mode" while IGlobal reads "model", so all six loaded base."""
+    profiles = _parse_services_json()['preconfig']['profiles']
+
+    for name, values in profiles.items():
+        assert 'mode' not in values, f'profile {name} still sets "mode", which nothing reads'
+        expected = 'base' if name == 'default' else name
+        assert values.get('model') == expected, f'profile {name} selects {values.get("model")!r}'

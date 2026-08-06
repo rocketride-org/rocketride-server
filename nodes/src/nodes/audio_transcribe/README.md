@@ -28,10 +28,6 @@ When a `documents` listener is attached, the node also emits one document per me
 | Field | Type | Description |
 |---|---|---|
 | `model` | string | Default "base". The Whisper model to use for transcription |
-| `silence_threshold` | number | Default 0.25. The silence threshold to detect silence in speech (in seconds) |
-| `min_seconds` | number | Default 240. The minimum seconds of audio to process in a batch and looking for silence |
-| `max_seconds` | number | Default 300. The maximum seconds of audio to buffer to process |
-| `vad_level` | number | Default 1. The VAD level to use for silence detection (0-3) |
 | `beam_size` | number | Default 5. Beam size for decoding. 1 is greedy (fastest); higher is slower and usually more accurate |
 | `vad_filter` | boolean | Default true. Use Whisper's built-in Silero VAD to drop non-speech before transcribing |
 | `vad_threshold` | number | Default 0.5. Silero speech probability above which audio counts as speech (0-1) |
@@ -45,14 +41,21 @@ node's defaults rather than replacing them, so setting one leaves the others alo
 `vad_threshold` and `vad_speech_pad_ms` accept `0` as a real value; only
 `vad_max_speech_duration_s` treats `0` specially, as "no limit".
 
-### VAD levels
+### Removed fields
 
-| Level | Behaviour |
-|-------|-----------|
-| `0`   | Most permissive: detects the most audio as speech (risk: includes noise) |
-| `1`   | Slightly more aggressive: skips minor background noise (default) |
-| `2`   | Balanced: moderate filtering of non-speech |
-| `3`   | Most aggressive: filters aggressively, may cut off quiet or short speech |
+`silence_threshold`, `min_seconds`, `max_seconds` and `vad_level` were declared but read
+by nothing, and are gone as of #1809. They predate the move to faster-whisper's built-in
+Silero VAD:
+
+| Removed | Replacement |
+|---|---|
+| `vad_level` (webrtcvad 0-3 aggressiveness) | `vad_threshold` (Silero 0-1 speech probability) |
+| `silence_threshold` (seconds) | `vad_min_silence_duration_ms` |
+| `min_seconds` / `max_seconds` | none — buffering is fixed at 60 s, forced flush at 120 s |
+
+Configs that still carry them keep working: nothing validates node config keys, so the
+unknown values are ignored. There is no automatic translation to the replacements, since
+that would change transcripts for anyone who had set them.
 
 ---
 
@@ -70,7 +73,9 @@ node's defaults rather than replacing them, so setting one leaves the others alo
 
 ## Profiles
 
-The node ships one profile per model size (`tiny`, `base`, `small`, `medium`, `large-v3`) plus `default`, which is an alias for `base`. Every profile uses the same defaults: `language: en`, `silence_threshold: 0.25`, `min_seconds: 240`, `max_seconds: 300`, `vad_level: 1`. Only the model differs between profiles.
+The node ships one profile per model size (`tiny`, `base`, `small`, `medium`, `large-v3`) plus `default`, which is an alias for `base`. Only the model and `language: en` differ; everything else comes from the field defaults.
+
+Before #1809 the profiles set `mode`, but the node reads `model` — so every profile silently loaded `base`, whichever one you picked. Selecting a profile now actually selects that model.
 
 ---
 
