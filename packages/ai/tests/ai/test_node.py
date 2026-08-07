@@ -64,6 +64,20 @@ def _fire_startup_callback_async(on_startup) -> None:
     threading.Thread(target=fire, daemon=True).start()
 
 
+def _fire_startup_callback_now(on_startup) -> None:
+    """Invoke an ``on_startup`` async callback and return once it has run.
+
+    Unlike :pyfunc:`_fire_startup_callback_async`, the event is set before this
+    returns. Tests that need ``signalled`` to be true use this so they cannot
+    race the wait's own timeout on a loaded machine.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(on_startup())
+    finally:
+        loop.close()
+
+
 # ---------------------------------------------------------------------------
 # _setup_shared_web_server — argv parsing and gating
 # ---------------------------------------------------------------------------
@@ -319,6 +333,73 @@ def test_setup_reraises_when_serve_future_already_failed(monkeypatch):
 
     with pytest.raises(RuntimeError, match='bind failed'):
         node._setup_shared_web_server()
+
+
+def test_setup_reports_when_the_listener_never_comes_up(monkeypatch):
+    """Startup signalled but no socket bound is its own diagnosis.
+
+    uvicorn fires the lifespan hook before it binds, so the callback firing
+    proves nothing about the port. Reaching the deadline with `serve()` still
+    running and `Server.started` still false means the listener never appeared —
+    a different fault from "the callback never fired", and the one a reserved or
+    occupied port produces. It must name the endpoint and must not claim the
+    callback failed.
+    """
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_host=127.0.0.1', '--data_port=12345'])
+    monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 0.05)
+
+    # A bare MagicMock reports done() truthy and started truthy, which would
+    # leave the poll at the future branch and never reach the deadline.
+    server_instance = MagicMock(name='WebServer-instance')
+    server_instance.server.started = False
+    future = MagicMock(name='future')
+    future.done.return_value = False
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        _fire_startup_callback_now(on_startup)
+        return server_instance
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: future)
+
+    messages = []
+    monkeypatch.setattr(node, 'debug', lambda msg, *a, **kw: messages.append(str(msg)))
+
+    server, returned_future = node._setup_shared_web_server()
+
+    assert server is not None
+    assert returned_future is not None
+    assert any('never began listening on 127.0.0.1:12345' in m for m in messages), (
+        f'expected the listener case to be named; got {messages!r}'
+    )
+    assert not any('did not signal' in m for m in messages), (
+        f'callback did fire, so the not-signalled line must stay quiet; got {messages!r}'
+    )
+
+
+def test_setup_is_quiet_when_the_listener_comes_up(monkeypatch):
+    """A healthy startup logs nothing — the control for the test above."""
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_host=127.0.0.1', '--data_port=12345'])
+    monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 0.5)
+
+    server_instance = MagicMock(name='WebServer-instance')
+    server_instance.server.started = True
+    future = MagicMock(name='future')
+    future.done.return_value = False
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        _fire_startup_callback_now(on_startup)
+        return server_instance
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: future)
+
+    messages = []
+    monkeypatch.setattr(node, 'debug', lambda msg, *a, **kw: messages.append(str(msg)))
+
+    node._setup_shared_web_server()
+
+    assert messages == [], f'a healthy startup should be silent; got {messages!r}'
 
 
 # ---------------------------------------------------------------------------

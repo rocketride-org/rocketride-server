@@ -3,6 +3,7 @@ import sys
 import os
 import asyncio
 import threading
+import time
 from typing import Optional, Tuple, Any
 
 # Remove auto-added script directory to avoid import conflicts with the ai package
@@ -15,11 +16,16 @@ os.environ['PYDEVD_DISABLE_FILE_VALIDATION'] = '1'
 # Import directly from C++
 from engLib import debug
 
-# How long to wait for the shared WebServer's startup callback to fire
-# before giving up and proceeding to processArguments. The callback fires
-# when uvicorn enters its serve loop; the wait is the handshake that
-# guarantees the listener is up before EaaS gets a chance to connect.
+# Total budget for the shared WebServer to come up: the startup callback plus
+# the wait for a bound listener share this one deadline, so a slow start cannot
+# spend it twice. The callback marks uvicorn entering its serve loop, which
+# happens before the socket is bound — proof of a listener comes from
+# Server.started, which is polled separately.
 _SHARED_SERVER_STARTUP_TIMEOUT_SECONDS = 10.0
+
+# Gap between readiness polls. This runs on the subprocess's main thread while
+# uvicorn starts on another, so a spin would compete with the startup it waits on.
+_SHARED_SERVER_POLL_INTERVAL_SECONDS = 0.02
 
 # Bound for waiting on ``serve()`` after ``server.stop()`` — guards
 # against a stuck uvicorn hanging subprocess shutdown forever.
@@ -122,9 +128,9 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
 
     from ai.web import WebServer
 
-    # Event the on_startup callback sets when the server is ready to
-    # accept connections. Main thread waits on this to guarantee EaaS
-    # never connects before the listener is bound.
+    # Event the on_startup callback sets. It marks uvicorn entering its serve
+    # loop, which happens before the socket is bound, so it is a liveness hint
+    # rather than proof of a listener. The poll below carries that guarantee.
     startup_ready = threading.Event()
 
     async def _on_startup() -> None:
@@ -140,22 +146,39 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
 
     future = asyncio.run_coroutine_threadsafe(server.serve(), server_loop)
 
-    # Block until the server's lifespan startup callback fires, with a
-    # safety-net timeout so a misbehaving uvicorn can't deadlock the
-    # subprocess. The timeout is generous in production (10s) and is
-    # dialled down by tests.
-    signalled = startup_ready.wait(timeout=_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS)
+    # Read the constant here, at call time: tests override it on the module.
+    timeout = _SHARED_SERVER_STARTUP_TIMEOUT_SECONDS
+    deadline = time.monotonic() + timeout
 
-    # Fail fast if `serve()` exited before signalling startup (e.g. bind
-    # error, permission denied, port already in use).
-    if future.done():
-        future.result()  # re-raises the exception from serve()
+    # Block until the lifespan startup callback fires, bounded so a misbehaving
+    # uvicorn can't deadlock the subprocess.
+    signalled = startup_ready.wait(timeout=max(0.0, deadline - time.monotonic()))
+
+    # Then wait for a listener to actually exist. uvicorn sets Server.started
+    # only after create_server() returns, which is the first moment the port is
+    # ours. `future.done()` is checked first on every pass, so a child that has
+    # already died wins over a stale readiness flag.
+    while True:
+        if future.done():
+            # Re-raises a bind error, permission denied or port-already-in-use
+            # out of serve(). A future that finished cleanly just ends the wait.
+            future.result()
+            break
+
+        if getattr(getattr(server, 'server', None), 'started', False):
+            break
+
+        if time.monotonic() >= deadline:
+            debug(
+                f'shared WebServer never began listening on {data_host}:{data_port} '
+                f'within {timeout}s; proceeding anyway'
+            )
+            break
+
+        time.sleep(_SHARED_SERVER_POLL_INTERVAL_SECONDS)
 
     if not signalled:
-        debug(
-            f'shared WebServer startup did not signal within '
-            f'{_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS}s; proceeding anyway'
-        )
+        debug(f'shared WebServer startup did not signal within {timeout}s; proceeding anyway')
 
     return server, future
 
@@ -272,9 +295,11 @@ def run():
                 debugpy.wait_for_client()
 
         except Exception as e:
-            import logging
-
-            logging.getLogger(__name__).warning('Failed to initialize debugpy: %s', e)
+            # Non-fatal: debugging is optional and must not take the task down.
+            # Named, though — a debug port inside an OS exclusion range fails
+            # here, and that is indistinguishable from "debugging is off" unless
+            # the host and port are said out loud.
+            debug(f'failed to initialize debugpy on {parsed_args.debug_host}:{parsed_args.debug_port}: {e}')
 
     # Start the global event loop for async operations
     _start_event_loop()
