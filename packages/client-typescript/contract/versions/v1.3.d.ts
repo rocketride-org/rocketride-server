@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.3 — never edit by hand
 // =============================================================================
 // Floor key:     1.3 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 02eb2375d7963391ae0f6cb8426226affdb0adff
+// Source commit: 2c198c3a464142e067635cb3d78d85ed67c951fa
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -452,11 +452,11 @@ export declare class DocGroupHelper {
  * Defines different types of questions and queries you can ask.
  */
 export declare const QuestionType: {
-	readonly QUESTION: 'question';
-	readonly SEMANTIC: 'semantic';
-	readonly KEYWORD: 'keyword';
-	readonly GET: 'get';
-	readonly PROMPT: 'prompt';
+	readonly QUESTION: "question";
+	readonly SEMANTIC: "semantic";
+	readonly KEYWORD: "keyword";
+	readonly GET: "get";
+	readonly PROMPT: "prompt";
 };
 export type QuestionType = string;
 /**
@@ -3771,9 +3771,9 @@ export interface DatabaseLike {
  * detect when they're talking to a graph DB instead of a relational one.
  */
 export declare const DatabaseDialect: {
-	readonly POSTGRES: 'postgres';
-	readonly MYSQL: 'mysql';
-	readonly NEO4J: 'neo4j';
+	readonly POSTGRES: "postgres";
+	readonly MYSQL: "mysql";
+	readonly NEO4J: "neo4j";
 };
 export type DatabaseDialect = string;
 /**

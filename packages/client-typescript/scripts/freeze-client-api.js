@@ -265,7 +265,10 @@ function rewriteEnumsStructural(dtsText) {
 		const lines = [];
 		lines.push(`${constPrefix} ${st.name.text}: {`);
 		for (const [name, value] of memberValues) {
-			const lit = typeof value === 'string' ? `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'` : String(value);
+			// JSON.stringify escapes every control character (newlines, tabs,
+			// quotes), so a pathological enum value can never break the emitted
+			// literal across lines and un-parse the frozen bundle.
+			const lit = typeof value === 'string' ? JSON.stringify(value) : String(value);
 			lines.push(`\treadonly ${name}: ${lit};`);
 		}
 		lines.push('};');
