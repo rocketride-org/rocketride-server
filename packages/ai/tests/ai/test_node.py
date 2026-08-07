@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -257,8 +258,13 @@ def test_setup_blocks_until_on_startup_fires(monkeypatch):
         # Note: do NOT fire on_startup here — the test controls timing.
         return MagicMock()
 
+    # A real serve() future is pending while the server runs, and the wait polls
+    # it: a bare MagicMock would report done() truthy and end the wait at once.
+    pending_future = MagicMock(name='future')
+    pending_future.done.return_value = False
+
     monkeypatch.setattr('ai.web.WebServer', fake_web_server)
-    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: MagicMock())
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: pending_future)
 
     # Use a sub-thread so we can observe whether _setup is still blocked.
     def call_setup():
@@ -333,6 +339,38 @@ def test_setup_reraises_when_serve_future_already_failed(monkeypatch):
 
     with pytest.raises(RuntimeError, match='bind failed'):
         node._setup_shared_web_server()
+
+
+def test_setup_reraises_without_waiting_out_the_timeout(monkeypatch):
+    """A ``serve()`` that dies before the callback fires is reported at once.
+
+    uvicorn runs the lifespan hook before it binds, so a bind failure normally
+    signals startup first and is caught right after the wait. When the failure
+    comes earlier — the lifespan handler itself raising — nothing will ever set
+    the event, and waiting out the full budget before looking at the future
+    would delay the diagnosis by exactly that long.
+    """
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_port=12345'])
+    # Generous on purpose: the point of the test is that it is not spent.
+    monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 30.0)
+
+    future = MagicMock(name='future')
+    future.done.return_value = True
+    future.result.side_effect = RuntimeError('lifespan startup failed')
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        # Never fire on_startup: the failure precedes it.
+        return MagicMock(name='WebServer-instance')
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: future)
+
+    started_at = time.monotonic()
+    with pytest.raises(RuntimeError, match='lifespan startup failed'):
+        node._setup_shared_web_server()
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 5.0, f'should not have waited out the 30s budget; took {elapsed:.1f}s'
 
 
 def test_setup_reports_when_the_listener_never_comes_up(monkeypatch):

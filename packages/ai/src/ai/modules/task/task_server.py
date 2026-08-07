@@ -773,119 +773,6 @@ class TaskServer(DAPBase):
         # Extract and return the task instance
         return control.task
 
-    @staticmethod
-    def _probe_port(port: int) -> Optional[int]:
-        """
-        Test whether a TCP port can be bound right now.
-
-        Binds a throwaway socket to IPv4 loopback and closes it again — the
-        address both consumers of an assigned port use: the data WebServer is
-        started on '127.0.0.1', and pydevd's listener opens an AF_INET socket
-        on the '--debug_host' it is handed.
-
-        No socket options are set, deliberately. On Windows SO_REUSEADDR makes
-        a busy port report EACCES instead of EADDRINUSE, and EACCES is the
-        verdict assign_port caches for the life of the process — so the option
-        would have the allocator permanently blacklist ports that are merely
-        busy. Anyone adding socket options here has to revisit that cache.
-        bind() alone proves ownership, so the socket never listens and cannot
-        accept a stray connection.
-
-        Args:
-            port (int): TCP port number to test.
-
-        Returns:
-            Optional[int]: None when the port binds, otherwise the errno of the
-                failure: EACCES when the operating system forbids the port,
-                EADDRINUSE when another socket holds it. Never None for a
-                failure — an OSError carrying no errno falls back to
-                EADDRINUSE, so a port that failed to bind can never read as
-                free.
-        """
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        except OSError as e:
-            return e.errno or errno.EADDRINUSE
-
-        try:
-            sock.bind(('127.0.0.1', port))
-        except OSError as e:
-            return e.errno or errno.EADDRINUSE
-        finally:
-            sock.close()
-
-        return None
-
-    @staticmethod
-    def _no_ports_message(
-        base_port: int,
-        first_port: int,
-        last_port: int,
-        tallies: Dict[str, int],
-        unexpected_errno: Optional[int],
-    ) -> str:
-        """
-        Build the error message for an exhausted port window.
-
-        Names whichever cause accounts for most of the window, so nobody is
-        sent hunting a foreign process when the ports are held by this server
-        or when probing itself was failing. Only the two causes that point
-        outward — other processes, operating-system reservations — carry a
-        platform command.
-
-        Args:
-            base_port (int): The configured base port, before clamping.
-            first_port (int): First port the scan considered.
-            last_port (int): Last port the scan considered.
-            tallies (Dict[str, int]): Counts keyed 'allocated', 'occupied',
-                'reserved' and 'unexpected'.
-            unexpected_errno (Optional[int]): Last errno that was neither
-                EACCES nor EADDRINUSE, if one occurred.
-
-        Returns:
-            str: A message beginning 'No available ports'.
-        """
-        if first_port > last_port:
-            return f'No available ports: configured base_port {base_port} leaves no ports at or below 65535.'
-
-        kind = max(tallies, key=lambda name: tallies[name])
-
-        if kind == 'allocated':
-            cause = 'the whole range is already allocated by this server'
-            hint = (
-                'This server holds that many task ports; look for tasks that never released one, or widen its window.'
-            )
-        elif kind == 'unexpected':
-            name = errno.errorcode.get(unexpected_errno, str(unexpected_errno))
-            cause = f'every probe failed with errno {unexpected_errno} ({name})'
-            hint = (
-                'That is this process running out of resources rather than a port conflict; check its open descriptors.'
-            )
-        elif kind == 'reserved':
-            cause = 'most of the range is reserved by the operating system'
-            if sys.platform == 'win32':
-                hint = (
-                    'List the exclusions with `netsh int ipv4 show excludedportrange protocol=tcp` '
-                    '(and the ipv6 equivalent) and move base_port outside them.'
-                )
-            else:
-                hint = 'Ports below 1024 need elevated privileges; move base_port higher.'
-        else:
-            cause = 'most of the range is in use by other processes'
-            if sys.platform == 'win32':
-                hint = 'List current listeners with `netstat -ano`.'
-            elif sys.platform == 'darwin':
-                hint = 'List current listeners with `lsof -nP -iTCP -sTCP:LISTEN`.'
-            else:
-                hint = 'List current listeners with `ss -ltn`.'
-
-        return (
-            f'No available ports in the range {first_port}-{last_port}: {cause} '
-            f'({tallies["allocated"]} allocated by this server, {tallies["occupied"]} in use by other processes, '
-            f'{tallies["reserved"]} reserved by the operating system, '
-            f'{tallies["unexpected"]} unexpected probe failures). {hint}'
-        )
-
     def assign_port(self) -> int:
         """
         Allocate an available port from the managed pool.
@@ -915,8 +802,14 @@ class TaskServer(DAPBase):
         tallies = {'allocated': 0, 'occupied': 0, 'reserved': 0, 'unexpected': 0}
         unexpected_errno = None
 
+        # Membership snapshot. `_allocated_ports` stays a list — release_port and
+        # the pool assertions read it as one — but a linear scan per candidate
+        # makes a full window quadratic, and this method blocks the event loop.
+        # Nothing awaits inside the loop, so the snapshot cannot go stale.
+        already_allocated = set(self._allocated_ports)
+
         for port in range(first_port, last_port + 1):
-            if port in self._allocated_ports:
+            if port in already_allocated:
                 tallies['allocated'] += 1
                 continue
 
@@ -1815,3 +1708,116 @@ class TaskServer(DAPBase):
         finally:
             # Ensure cleanup occurs regardless of how connection ends
             await self._dapbase_on_disconnected(conn)
+
+    @staticmethod
+    def _probe_port(port: int) -> Optional[int]:
+        """
+        Test whether a TCP port can be bound right now.
+
+        Binds a throwaway socket to IPv4 loopback and closes it again — the
+        address both consumers of an assigned port use: the data WebServer is
+        started on '127.0.0.1', and pydevd's listener opens an AF_INET socket
+        on the '--debug_host' it is handed.
+
+        No socket options are set, deliberately. On Windows SO_REUSEADDR makes
+        a busy port report EACCES instead of EADDRINUSE, and EACCES is the
+        verdict assign_port caches for the life of the process — so the option
+        would have the allocator permanently blacklist ports that are merely
+        busy. Anyone adding socket options here has to revisit that cache.
+        bind() alone proves ownership, so the socket never listens and cannot
+        accept a stray connection.
+
+        Args:
+            port (int): TCP port number to test.
+
+        Returns:
+            Optional[int]: None when the port binds, otherwise the errno of the
+                failure: EACCES when the operating system forbids the port,
+                EADDRINUSE when another socket holds it. Never None for a
+                failure — an OSError carrying no errno falls back to
+                EADDRINUSE, so a port that failed to bind can never read as
+                free.
+        """
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        except OSError as e:
+            return e.errno or errno.EADDRINUSE
+
+        try:
+            sock.bind(('127.0.0.1', port))
+        except OSError as e:
+            return e.errno or errno.EADDRINUSE
+        finally:
+            sock.close()
+
+        return None
+
+    @staticmethod
+    def _no_ports_message(
+        base_port: int,
+        first_port: int,
+        last_port: int,
+        tallies: Dict[str, int],
+        unexpected_errno: Optional[int],
+    ) -> str:
+        """
+        Build the error message for an exhausted port window.
+
+        Names whichever cause accounts for most of the window, so nobody is
+        sent hunting a foreign process when the ports are held by this server
+        or when probing itself was failing. Only the two causes that point
+        outward — other processes, operating-system reservations — carry a
+        platform command.
+
+        Args:
+            base_port (int): The configured base port, before clamping.
+            first_port (int): First port the scan considered.
+            last_port (int): Last port the scan considered.
+            tallies (Dict[str, int]): Counts keyed 'allocated', 'occupied',
+                'reserved' and 'unexpected'.
+            unexpected_errno (Optional[int]): Last errno that was neither
+                EACCES nor EADDRINUSE, if one occurred.
+
+        Returns:
+            str: A message beginning 'No available ports'.
+        """
+        if first_port > last_port:
+            return f'No available ports: configured base_port {base_port} leaves no ports at or below 65535.'
+
+        kind = max(tallies, key=lambda name: tallies[name])
+
+        if kind == 'allocated':
+            cause = 'most of the range is already allocated by this server'
+            hint = (
+                'This server holds that many task ports; look for tasks that never released one, or widen its window.'
+            )
+        elif kind == 'unexpected':
+            name = errno.errorcode.get(unexpected_errno, str(unexpected_errno))
+            cause = f'most probes failed unexpectedly, last with errno {unexpected_errno} ({name})'
+            hint = (
+                'That is this process running out of resources rather than a port conflict; check its open descriptors.'
+            )
+        elif kind == 'reserved':
+            cause = 'most of the range is reserved by the operating system'
+            if sys.platform == 'win32':
+                hint = (
+                    'List the exclusions with `netsh int ipv4 show excludedportrange protocol=tcp` '
+                    '(and the ipv6 equivalent) and move base_port outside them.'
+                )
+            else:
+                hint = 'Ports below 1024 need elevated privileges; move base_port higher.'
+        else:
+            cause = 'most of the range is in use by other processes'
+            if sys.platform == 'win32':
+                hint = 'List current listeners with `netstat -ano`.'
+            elif sys.platform == 'darwin':
+                hint = 'List current listeners with `lsof -nP -iTCP -sTCP:LISTEN`.'
+            else:
+                hint = 'List current listeners with `ss -ltn`.'
+
+        return (
+            f'No available ports in the range {first_port}-{last_port}: {cause} '
+            f'({tallies["allocated"]} allocated by this server, {tallies["occupied"]} in use by other processes, '
+            f'{tallies["reserved"]} reserved by the operating system, '
+            f'{tallies["unexpected"]} unexpected probe failures). {hint}'
+        )

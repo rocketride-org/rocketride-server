@@ -150,9 +150,23 @@ def _setup_shared_web_server() -> Tuple[Optional[Any], Optional[Any]]:
     timeout = _SHARED_SERVER_STARTUP_TIMEOUT_SECONDS
     deadline = time.monotonic() + timeout
 
-    # Block until the lifespan startup callback fires, bounded so a misbehaving
-    # uvicorn can't deadlock the subprocess.
-    signalled = startup_ready.wait(timeout=max(0.0, deadline - time.monotonic()))
+    # Wait for the lifespan startup callback in slices, so a serve() that dies
+    # before ever firing it is noticed now instead of at the deadline. uvicorn
+    # runs that hook before it binds, so a bind failure normally sets the event
+    # first and is caught by the poll below; this covers the earlier failures,
+    # such as the lifespan handler itself raising.
+    while not startup_ready.is_set():
+        if future.done():
+            future.result()
+            break
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+
+        startup_ready.wait(timeout=min(_SHARED_SERVER_POLL_INTERVAL_SECONDS, remaining))
+
+    signalled = startup_ready.is_set()
 
     # Then wait for a listener to actually exist. uvicorn sets Server.started
     # only after create_server() returns, which is the first moment the port is

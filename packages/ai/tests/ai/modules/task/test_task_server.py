@@ -309,7 +309,7 @@ def test_assign_port_exhausted_reports_unexpected_errno(monkeypatch):
     """A probe failing for our own reasons is reported as itself, not as 'in use'."""
     _patch_probe(monkeypatch, lambda port: errno.EMFILE)
     ts = _make_server()
-    with pytest.raises(RuntimeError, match=f'every probe failed with errno {errno.EMFILE}'):
+    with pytest.raises(RuntimeError, match=f'most probes failed unexpectedly, last with errno {errno.EMFILE}'):
         ts.assign_port()
 
 
