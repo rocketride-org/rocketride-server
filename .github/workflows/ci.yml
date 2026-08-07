@@ -297,6 +297,11 @@ jobs:
         # (the regen also re-runs the contract tsc, so a removed or narrowed
         # SDK export fails here), then fail on any diff — a hand-edited floor
         # line cannot launder a breaking change past the tsc floors.
+        # DELIBERATE asymmetry with shell:check above: additive SDK drift is
+        # allowed between releases (client floors are release history keyed to
+        # npm versions, not growth-minted), so no client-typescript:check runs
+        # here — client-typescript:create-package gates publishing on the
+        # floors, and client-typescript:freeze seals each released minor.
         run: |
           node scripts/build.js client-typescript:regen
           git diff --exit-code -- \

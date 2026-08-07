@@ -359,7 +359,7 @@ module.exports = {
 
 #### Monorepo-only: rsbuild.config.ts
 
-The monorepo version adds `shared` to the MF config and uses path aliases:
+The monorepo version consumes `shell` and `rocketride` as host-provided MF singletons (`import: false` — nothing bundled; the `shared` library is static and needs no share entry):
 
 ```typescript
 import fs from 'node:fs';
@@ -1100,7 +1100,7 @@ See the [Getting Started](#getting-started) section for complete `rsbuild.config
 Key points:
 - The MF container `name` is derived automatically from `appManifest.id` in `package.json`
 - Always expose `./AppDescriptor` as the single MF entry point
-- Standalone apps share `rocketride/app-sdk`; monorepo apps share `shell` + `shared`
+- Standalone apps share `rocketride/app-sdk`; monorepo apps share `shell` + `rocketride`
 - React and react-dom must be shared singletons to avoid duplicate instances
 
 ---

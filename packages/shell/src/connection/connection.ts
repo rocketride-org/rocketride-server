@@ -275,6 +275,10 @@ export class ConnectionManager implements IConnectionManager {
 	private cachedServiceIcons: Record<string, string> | null = null;
 	private cachedServicesError: string | null = null;
 	private servicesRefreshPromise: Promise<void> | null = null;
+	// The ONE pending jittered-refresh timer for services-changed pushes: a
+	// burst of pushes restarts it (coalescing to a single fetch) and
+	// dispose() cancels it so the callback cannot outlive the manager.
+	private servicesRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// --- Event bus ---
 	private listeners = new Map<string, Set<Handler>>();
@@ -362,11 +366,18 @@ export class ConnectionManager implements IConnectionManager {
 				// The service catalog changed server-side: re-fetch the summary
 				// cache after a random delay — the push is a broadcast, and the
 				// jitter keeps the whole fleet from refetching in the same
-				// instant. refreshServices() no-ops safely if the connection
-				// turned over during the delay, and its shell:servicesUpdated
-				// fanout delivers the fresh catalog to every subscriber.
+				// instant. A single pending timer is held: a burst of pushes
+				// restarts it instead of stacking one fetch per push, so K
+				// rapid-fire changes cost one getServices() round trip.
+				// refreshServices() no-ops safely if the connection turned over
+				// during the delay, and its shell:servicesUpdated fanout
+				// delivers the fresh catalog to every subscriber.
 				if (message.event === SERVICES_CHANGED_EVENT) {
-					setTimeout(() => {
+					if (this.servicesRefreshTimer !== null) {
+						clearTimeout(this.servicesRefreshTimer);
+					}
+					this.servicesRefreshTimer = setTimeout(() => {
+						this.servicesRefreshTimer = null;
 						void this.refreshServices().catch(() => {});
 					}, Math.random() * SERVICES_REFRESH_JITTER_MS);
 					return;
@@ -1102,6 +1113,12 @@ export class ConnectionManager implements IConnectionManager {
 	 */
 	public async dispose(): Promise<void> {
 		await this.disconnect();
+		// Cancel any pending jittered services refresh — the callback holds a
+		// reference to this manager and must not fire after disposal.
+		if (this.servicesRefreshTimer !== null) {
+			clearTimeout(this.servicesRefreshTimer);
+			this.servicesRefreshTimer = null;
+		}
 		this.listeners.clear();
 		this.wildcardListeners.clear();
 		this.pendingEvents.clear();
@@ -1254,9 +1271,10 @@ export class ConnectionManager implements IConnectionManager {
 		if (!this.isConnected()) {
 			return { services: {}, icons: {}, servicesError: 'Not connected' };
 		}
-		// Lazy fetch on first access
+		// Lazy fetch on first access — fire-and-forget with the same rejection
+		// guard the other refreshServices() call sites use.
 		if (this.cachedServices === null && !this.cachedServicesError && !this.servicesRefreshPromise) {
-			this.refreshServices();
+			void this.refreshServices().catch(() => {});
 		}
 		if (this.cachedServicesError) {
 			return { services: this.cachedServices ?? {}, icons: this.cachedServiceIcons ?? {}, servicesError: this.cachedServicesError };

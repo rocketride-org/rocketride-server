@@ -33,6 +33,9 @@ import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { getenv, requireKeys } = require('../../scripts/lib/getenv');
+// The SDK version the host serves under the 'rocketride' MF share — read from
+// the package itself so the advertised share version never drifts from it.
+const sdkVersion: string = require('../client-typescript/package.json').version;
 
 /**
  * Rsbuild configuration factory for the `shell` host application.
@@ -169,7 +172,9 @@ export default defineConfig(({ command }) => {
 					// identity across the host boundary. Share keys match
 					// exactly: sharing 'shell' does NOT cover other specifiers.
 					// Client INSTANCES still only arrive via useShellConnection().
-					'rocketride': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
+					// The advertised version is the SDK package's own, so MF
+					// diagnostics report the version actually being served.
+					'rocketride': { singleton: true, version: sdkVersion, requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
 					// NOTE: no 'shared' share key — the shared library is STATIC
 					// (each consumer bundles its own copy via deep specs); only
 					// the shell surface and the SDK are runtime-bound.
