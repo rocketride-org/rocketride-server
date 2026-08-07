@@ -371,7 +371,11 @@ function main() {
 	if (process.argv.includes('--check')) {
 		// A missing generated file is maximal drift, not a crash.
 		const current = existsSync(OUTPUT_FILE) ? readFileSync(OUTPUT_FILE, 'utf8') : '';
-		if (current !== rendered) {
+		// Compare EOL-insensitively: the renderer emits LF, but a Windows
+		// checkout under core.autocrlf=true (GitHub's Windows runners) smudges
+		// the committed file to CRLF — a raw byte compare would then report
+		// permanent staleness on that platform only.
+		if (current.replace(/\r\n/g, '\n') !== rendered.replace(/\r\n/g, '\n')) {
 			console.error('tokenUsage.generated.ts is stale - run: node scripts/generate-gallery-tokens.mjs');
 			process.exit(1);
 		}
