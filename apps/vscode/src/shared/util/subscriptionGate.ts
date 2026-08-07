@@ -11,7 +11,7 @@
  * behind an active subscription on SaaS servers.
  */
 
-import type { RocketRideClient } from 'shell/client';
+import type { RocketRideClient } from 'rocketride';
 
 /**
  * Returns true if pipeline execution is allowed for the given app.

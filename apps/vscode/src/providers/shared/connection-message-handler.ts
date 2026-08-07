@@ -14,7 +14,7 @@
 
 import * as https from 'https';
 import * as vscode from 'vscode';
-import { RocketRideClient } from 'shell/client';
+import { RocketRideClient } from 'rocketride';
 import { EngineInstaller } from '../../engine/shared/engine-installer';
 import { EngineRegistry } from '../../engine';
 import { IMAGE_BASE } from '../../engine/docker/docker-manager';

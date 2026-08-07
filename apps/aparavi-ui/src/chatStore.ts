@@ -28,7 +28,7 @@
 // Files are JSON with { messages: ChatMessage[] }.
 // =============================================================================
 
-import type { RocketRideClient } from 'shell/client';
+import type { RocketRideClient } from 'rocketride';
 
 /** Server-side directory where chat files are stored. */
 const CHAT_DIR = '.chats';

@@ -12,7 +12,7 @@
  * Pure types only — imported by both the extension host and the webviews.
  */
 
-import type { AppPrice } from 'shell';
+import type { AppPrice } from 'rocketride';
 
 /** Checkout replies from the host. */
 export type CheckoutResultHostToWebview =

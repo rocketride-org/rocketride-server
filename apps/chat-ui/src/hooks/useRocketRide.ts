@@ -23,7 +23,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { RocketRideClient } from 'shell/client';
+import { RocketRideClient } from 'rocketride';
 import { getClient, subscribeToClient } from './clientSingleton';
 
 /**

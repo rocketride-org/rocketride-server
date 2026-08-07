@@ -23,7 +23,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { Question, QuestionType, PIPELINE_RESULT } from 'shell/client';
+import { Question, QuestionType, PIPELINE_RESULT } from 'rocketride';
 import { Message } from '../types/chat.types';
 import { extractTextFromResult } from '../utils/pipelineUtils';
 

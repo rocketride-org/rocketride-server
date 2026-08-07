@@ -39,15 +39,20 @@ packages:
 
 # Workspace-wide dependency overrides — the SINGLE source of overrides (never
 # add a pnpm.overrides section to package.json: it silently supersedes this
-# whole block). shell resolves every member to THIS root's packed platform
-# artifact (root-relative path) — in a saas checkout the saas root's own
-# override governs saas-anchored installs; this one governs standalone and
-# subtree-anchored installs. The rest are security floors that still BIND:
-# floors the natural resolution already satisfies are pruned (re-audit by
-# stripping pins and re-resolving with --lockfile-only), and the scoped
-# react-router entries are compat downgrades for Docusaurus-era parents.
+# whole block). shell resolves IN-TREE to the workspace package: app manifests
+# keep the portable "file:../../.rocketride/shell/shell.tgz" spec (exactly
+# right when an app is lifted into its own repo, where the tgz is downloaded
+# and vendored), and this override supersedes it inside the monorepo — a
+# workspace link carries no tarball integrity pin, so fresh clones and
+# frozen-lockfile CI install without the gitignored artifact existing.
+# Enforcement is unchanged: the exports map (barrel, ./client, the theme
+# stylesheet) governs linked packages the same as installed ones.
+# The rest are security floors that still BIND: floors the natural resolution
+# already satisfies are pruned (re-audit by stripping pins and re-resolving
+# with --lockfile-only), and the scoped react-router entries are compat
+# downgrades for Docusaurus-era parents.
 overrides:
-  shell: 'file:.rocketride/shell/shell.tgz'
+  shell: 'workspace:*'
   '@remix-run/router': '>=1.23.2 <2'
   brace-expansion: '>=5.0.5 <6'
   # minimatch 3.x (eslint's config-array, glob@7) does a CJS default-import of

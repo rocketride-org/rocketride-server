@@ -54,7 +54,11 @@ export default defineConfig({
 			// OAuth broker base URL for the social-login buttons (shared OAUTH_ROOT_URL).
 			'process.env.REACT_APP_OAUTH_ROOT_URL': JSON.stringify(env.REACT_APP_OAUTH_ROOT_URL || ''),
 		},
-		include: ['./src/**/*'],
+		// The workspace-linked shell package ships TypeScript source (its
+		// exports map points at src/), and node_modules symlinks resolve
+		// outside this app root — include it for transpilation explicitly,
+		// same as the shared library below.
+		include: ['./src/**/*', path.resolve(__dirname, '../../packages/shell')],
 		exclude: ['./dist/**', './node_modules/**', './**/*.test.*', './**/*.spec.*'],
 		entry: {
 			'page-sidebar': './src/providers/views/Sidebar/index.tsx',
@@ -79,11 +83,13 @@ export default defineConfig({
 			// shared is a STATIC library the webviews compile from source, so
 			// its whole tree stays reachable via 'shared/<group>' deep specs.
 			shared: path.resolve(__dirname, '../shared/src'),
-			// shell carries NO alias: it is the INSTALLED platform package
-			// (the workspace's canonical .rocketride/shell/shell.tgz wired as
-			// this app's "shell" dependency), so runtime code and types both
-			// resolve through its exports map like any other node_modules
-			// package — barrel-only enforcement travels with the package.
+			// shell carries NO alias: in-tree it is the WORKSPACE-LINKED
+			// platform package (the monorepo override maps this app's
+			// portable file: spec to workspace:*), so runtime code and types
+			// both resolve through its exports map like any other
+			// node_modules package — barrel-only enforcement travels with
+			// the package. Standalone app repos install the downloaded
+			// shell.tgz instead; resolution semantics are identical.
 			// The SDK's TransportWebSocket has a Node-only dynamic import('ws')
 			// fallback (browsers use the native WebSocket; the branch never
 			// executes in a webview). Stub it so rspack doesn't try to

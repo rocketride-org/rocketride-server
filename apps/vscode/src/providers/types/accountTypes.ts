@@ -12,9 +12,9 @@
  * Pure types only — imported by both the extension host and the webview.
  */
 
-import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from 'shell';
-import type { PromoRedemption, PromoValidation } from 'shell';
-import type { AppPrice, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'shell';
+import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from 'rocketride';
+import type { PromoRedemption, PromoValidation } from 'rocketride';
+import type { AppPrice, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
 import type { ShellHostToWebview, ShellWebviewToHost } from './shellTypes';
 import type { CheckoutResultHostToWebview, CheckoutRequestWebviewToHost } from './checkoutTypes';
 

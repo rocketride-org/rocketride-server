@@ -46,7 +46,7 @@ export default defineConfig(() => {
 					// Without this, MF bundles the entire shared tree
 					// (fonts, Chart.js, MUI) as a "just in case" fallback.
 					'shell': { singleton: true, requiredVersion: false, import: false },
-					'shell/client': { singleton: true, requiredVersion: false, import: false },
+					'rocketride': { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],

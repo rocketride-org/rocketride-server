@@ -20,7 +20,7 @@ import { TaskStatus, GenericEvent, ConnectionState, PIPE_BUILDER_APP_ID } from '
 import { ConnectionManager } from '../connection/connection';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { ConfigManager } from '../config';
-import type { PipelineConfig, RocketRideClient } from 'shell/client';
+import type { PipelineConfig, RocketRideClient } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { PipelineFileParser } from '../shared/util/pipelineParser';

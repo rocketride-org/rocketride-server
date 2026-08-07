@@ -39,7 +39,7 @@
  * @module clientSingleton
  */
 
-import { RocketRideClient, RocketRideClientConfig, ConnectionException } from 'shell/client';
+import { RocketRideClient, RocketRideClientConfig, ConnectionException } from 'rocketride';
 import { API_CONFIG } from '../config/apiConfig';
 
 // ============================================================================

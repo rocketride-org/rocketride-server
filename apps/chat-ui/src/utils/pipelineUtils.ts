@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { PIPELINE_RESULT } from 'shell/client';
+import { PIPELINE_RESULT } from 'rocketride';
 
 /**
  * Extracts text responses from pipeline result

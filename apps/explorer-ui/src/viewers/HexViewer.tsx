@@ -13,7 +13,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { RocketRideClient } from 'shell/client';
+import type { RocketRideClient } from 'rocketride';
 import { viewerStyles } from './styles';
 
 // -----------------------------------------------------------------------------

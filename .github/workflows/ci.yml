@@ -247,8 +247,10 @@ jobs:
   #  the actionable-drift check (so ADDING an export without `shell:freeze`
   #  fails). A second step regenerates the committed floors from the immutable
   #  versions/*.d.ts and fails on any diff — so a per-version floor cannot be
-  #  hand-edited/dropped to launder a removed export past the tsc floors. Only
-  #  runs when code changed; skipped for docs-only PRs.
+  #  hand-edited/dropped to launder a removed export past the tsc floors. A
+  #  final step gives the rocketride TypeScript SDK's contract floors the same
+  #  regen-must-be-a-no-op guarantee. Only runs when code changed; skipped for
+  #  docs-only PRs.
   # ---------------------------------------------------------------------------
   shell-contract:
     name: Shell API contract
@@ -289,6 +291,18 @@ jobs:
             packages/shell/src/contract-check.generated.ts \
             packages/shell/contract/index.ts \
             packages/shell/contract/latest.ts
+      - name: client SDK contract floors are un-tampered — regen must be a no-op
+        # Same guarantee for the rocketride TypeScript SDK: regenerate its
+        # contract barrels + conformance file from the immutable frozen floors
+        # (the regen also re-runs the contract tsc, so a removed or narrowed
+        # SDK export fails here), then fail on any diff — a hand-edited floor
+        # line cannot launder a breaking change past the tsc floors.
+        run: |
+          node scripts/build.js client-typescript:regen
+          git diff --exit-code -- \
+            packages/client-typescript/src/contract-check.generated.ts \
+            packages/client-typescript/contract/index.ts \
+            packages/client-typescript/contract/latest.ts
 
   # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.

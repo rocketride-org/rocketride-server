@@ -44,7 +44,7 @@ export default defineConfig(() => {
 					// import: false tells MF to NOT bundle a fallback copy —
 					// the host (the shell) always provides these at runtime.
 					'shell': { singleton: true, requiredVersion: false, import: false },
-					'shell/client': { singleton: true, requiredVersion: false, import: false },
+					'rocketride': { singleton: true, requiredVersion: false, import: false },
 				},
 			}),
 		],

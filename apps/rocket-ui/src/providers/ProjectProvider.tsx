@@ -200,21 +200,28 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	const { flat: pipelineFlat } = usePipelineTree(client, isConnected);
 	const existingPaths = useMemo(() => pipelineFlat.map((entry) => entry.path), [pipelineFlat]);
 
-	// --- Services fetch -------------------------------------------------------
+	// --- Services from the shell's cached catalog -----------------------------
 
 	useEffect(() => {
-		if (!client || !isConnected) return;
-		(client as any)
-			.getServices?.()
-			.then((res: any) => {
-				// The summary response carries the deduplicated icon table —
-				// (re)build the icon registry with the same lifecycle as the
-				// services list itself.
-				registerServiceIcons(res);
-				setServicesJson(res?.services ?? res ?? {});
-			})
-			.catch(() => {});
-	}, [client, isConnected]);
+		if (!isConnected) return;
+		// Seed from the shell's summary cache (first access triggers its lazy
+		// fetch) and follow refreshes — the shell fetches the catalog once per
+		// connection, so opening more canvases issues no services traffic.
+		const manager = ConnectionManager.getInstance();
+		const cached = manager.getCachedServices();
+		if (!cached.servicesError && Object.keys(cached.services).length > 0) {
+			// The summary carries the deduplicated icon table — (re)build the
+			// icon registry with the same lifecycle as the services list itself.
+			registerServiceIcons({ services: cached.services, icons: cached.icons ?? {} });
+			setServicesJson(cached.services);
+		}
+		return manager.on('shell:servicesUpdated', ({ services, icons, servicesError }) => {
+			// A failed refresh keeps the last good catalog on the canvas.
+			if (servicesError) return;
+			registerServiceIcons({ services, icons: icons ?? {} });
+			setServicesJson(services);
+		});
+	}, [isConnected]);
 
 	// --- Environment variable keys (for ${...} autocomplete in config fields) -
 	// Mirrors the VS Code host: fetch the saved variable names and feed them to

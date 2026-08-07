@@ -21,7 +21,7 @@
  */
 
 import * as vscode from 'vscode';
-import { RocketRideClient } from 'shell/client';
+import { RocketRideClient } from 'rocketride';
 import { generatePkce, buildAuthUrl } from './pkce';
 
 import { EventEmitter } from 'events';

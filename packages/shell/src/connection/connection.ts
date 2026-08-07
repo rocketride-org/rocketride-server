@@ -60,6 +60,8 @@ import {
 	DEFAULT_CLIENT_NAME,
 	DEFAULT_WORKSPACE_DIR,
 	MAX_RETRY_ATTEMPTS,
+	SERVICES_CHANGED_EVENT,
+	SERVICES_REFRESH_JITTER_MS,
 } from '../constants';
 
 // =============================================================================
@@ -270,6 +272,7 @@ export class ConnectionManager implements IConnectionManager {
 
 	// --- Services cache ---
 	private cachedServices: Record<string, unknown> | null = null;
+	private cachedServiceIcons: Record<string, string> | null = null;
 	private cachedServicesError: string | null = null;
 	private servicesRefreshPromise: Promise<void> | null = null;
 
@@ -354,6 +357,18 @@ export class ConnectionManager implements IConnectionManager {
 				}
 				if (message.event === 'store:changed') {
 					this.emit('store:changed', (message.body ?? {}) as ShellConnectionEventMap['store:changed']);
+					return;
+				}
+				// The service catalog changed server-side: re-fetch the summary
+				// cache after a random delay — the push is a broadcast, and the
+				// jitter keeps the whole fleet from refetching in the same
+				// instant. refreshServices() no-ops safely if the connection
+				// turned over during the delay, and its shell:servicesUpdated
+				// fanout delivers the fresh catalog to every subscriber.
+				if (message.event === SERVICES_CHANGED_EVENT) {
+					setTimeout(() => {
+						void this.refreshServices().catch(() => {});
+					}, Math.random() * SERVICES_REFRESH_JITTER_MS);
 					return;
 				}
 				// Broadcast all other server events
@@ -1231,19 +1246,22 @@ export class ConnectionManager implements IConnectionManager {
 
 	/**
 	 * Returns the cached service catalog, triggering a lazy fetch on first access.
+	 *
+	 * The summary response's deduplicated icon table rides along so consumers
+	 * (the canvas icon registry) never need a fetch of their own.
 	 */
-	public getCachedServices(): { services: Record<string, unknown>; servicesError?: string } {
+	public getCachedServices(): { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } {
 		if (!this.isConnected()) {
-			return { services: {}, servicesError: 'Not connected' };
+			return { services: {}, icons: {}, servicesError: 'Not connected' };
 		}
 		// Lazy fetch on first access
 		if (this.cachedServices === null && !this.cachedServicesError && !this.servicesRefreshPromise) {
 			this.refreshServices();
 		}
 		if (this.cachedServicesError) {
-			return { services: this.cachedServices ?? {}, servicesError: this.cachedServicesError };
+			return { services: this.cachedServices ?? {}, icons: this.cachedServiceIcons ?? {}, servicesError: this.cachedServicesError };
 		}
-		return { services: this.cachedServices ?? {} };
+		return { services: this.cachedServices ?? {}, icons: this.cachedServiceIcons ?? {} };
 	}
 
 	/**
@@ -1271,15 +1289,18 @@ export class ConnectionManager implements IConnectionManager {
 				const body = await this.client!.getServices();
 				if (!this.isCurrentOperation(owner)) return;
 				const services: Record<string, unknown> = body.services ?? {};
+				const icons: Record<string, string> = body.icons ?? {};
 				this.cachedServices = services;
+				this.cachedServiceIcons = icons;
 				this.cachedServicesError = null;
-				this.emit('shell:servicesUpdated', { services, servicesError: undefined });
+				this.emit('shell:servicesUpdated', { services, icons, servicesError: undefined });
 			} catch (err: unknown) {
 				if (!this.isCurrentOperation(owner)) return;
 				const msg = err instanceof Error ? err.message : String(err);
 				this.cachedServices = null;
+				this.cachedServiceIcons = null;
 				this.cachedServicesError = msg;
-				this.emit('shell:servicesUpdated', { services: {}, servicesError: msg });
+				this.emit('shell:servicesUpdated', { services: {}, icons: {}, servicesError: msg });
 			}
 		})();
 		this.servicesRefreshPromise = refreshPromise;
@@ -1293,6 +1314,7 @@ export class ConnectionManager implements IConnectionManager {
 	/** Clear all services cache state. */
 	private clearServicesCache(): void {
 		this.cachedServices = null;
+		this.cachedServiceIcons = null;
 		this.cachedServicesError = null;
 		this.servicesRefreshPromise = null;
 	}

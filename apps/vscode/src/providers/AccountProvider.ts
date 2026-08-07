@@ -22,7 +22,7 @@ import { DeployManager } from '../connection/deploy-manager';
 import { ConfigManager } from '../config';
 import { ConnectionState } from '../shared/types';
 import type { ConnectionStatus } from '../shared/types';
-import type { ConnectResult, TeamDetail } from 'shell/client';
+import type { ConnectResult, TeamDetail } from 'rocketride';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
 

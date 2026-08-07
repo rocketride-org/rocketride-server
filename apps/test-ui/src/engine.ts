@@ -39,7 +39,7 @@
 //   6. Concurrent API   — hammer multiple methods in parallel from all clients
 // =============================================================================
 
-import { RocketRideClient, Question } from 'shell/client';
+import { RocketRideClient, Question } from 'rocketride';
 import { getClient } from 'shell';
 import { API_METHODS } from './apiMethods';
 import {

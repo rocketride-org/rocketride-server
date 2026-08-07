@@ -70,7 +70,7 @@ ConnectionManager.getInstance().emit('shell:switchApp', { appId: 'monitor' });`,
 			rows: [
 				{ name: 'shell:event', type: '{ event: DAPMessage }', dir: 'out', note: 'EVERY server push over the WebSocket - the one live-data firehose.' },
 				{ name: 'shell:accountUpdate', type: 'ConnectResult', dir: 'out', note: 'Server-pushed account/subscription update.' },
-				{ name: 'shell:servicesUpdated', type: '{ services, servicesError? }', dir: 'out', note: 'Service catalog fetched or refreshed.' },
+				{ name: 'shell:servicesUpdated', type: '{ services, icons?, servicesError? }', dir: 'out', note: 'Service catalog fetched or refreshed (icons = deduplicated icon table).' },
 				{ name: 'shell:appsUpdated', type: '{ apps: ShellAppEntry[] }', dir: 'out', note: 'App catalog changed (full replacement).' },
 			],
 		},

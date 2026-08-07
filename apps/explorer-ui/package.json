@@ -35,6 +35,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "xlsx": "^0.18.5",
+    "rocketride": "workspace:*",
     "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {

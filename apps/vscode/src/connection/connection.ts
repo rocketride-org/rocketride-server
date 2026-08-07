@@ -51,7 +51,7 @@ import {
 	TraceType,
 	AuthenticationException,
 	LoginAttemptCancelledError,
-} from 'shell/client';
+} from 'rocketride';
 import { ConfigManager, type ConnectionMode, type ConnectionGroup, type ConnectionGroupConfig } from '../config';
 import { EngineRegistry, EngineManager, type EngineStatusEvent } from '../engine';
 import { getUserConfigDir, getSystemInstallDir } from '../engine/config/config-migration';
