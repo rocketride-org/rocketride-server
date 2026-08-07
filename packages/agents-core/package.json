@@ -1,0 +1,27 @@
+{
+  "name": "@rocketride/agents-core",
+  "version": "0.1.0",
+  "description": "Framework-agnostic project scaffolding routines for RocketRide (docs, agent stubs, service catalog).",
+  "license": "MIT",
+  "author": "RocketRide, Inc.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/**/*",
+    "docs/**/*"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "jest",
+    "sync-bundle": "ts-node scripts/sync-bundle.ts"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.19.41",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  }
+}

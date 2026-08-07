@@ -30,6 +30,7 @@ packages:
 
   # Client libraries
   - 'packages/client-typescript'
+  - 'packages/agents-core'
 
   # Documentation site
   - 'packages/docs'
