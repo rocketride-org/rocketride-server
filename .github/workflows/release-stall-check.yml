@@ -80,7 +80,7 @@ jobs:
 
       - name: Open or refresh the tracking issue
         if: steps.gap.outputs.stalled == 'true'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         with:
           script: |
             const behind  = '${{ steps.gap.outputs.behind }}';
@@ -122,7 +122,7 @@ jobs:
 
       - name: Close the tracking issue once main catches up
         if: steps.gap.outputs.stalled == 'false'
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         with:
           script: |
             const marker = '<!-- release-stall-check -->';
