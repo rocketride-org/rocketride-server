@@ -40,8 +40,23 @@ import { registerAndMapApps } from './lib/appLoader';
  * 5. Renders the Shell React tree.
  */
 async function main() {
-	// Read the server URI from the build-time env define
-	const serverUri = process.env.ROCKETRIDE_URI || 'localhost:5565';
+	// Resolve the server URI with three-tier precedence:
+	//   1. Runtime injection (window.__ROCKETRIDE_URI__) — set by shell.py at
+	//      serve time to the request's OWN origin. This is what makes local /
+	//      docker / self-hosted "same-origin": the engine that served this HTML
+	//      tells the SPA to talk back to the exact host:port the browser used,
+	//      overriding whatever ROCKETRIDE_URI was baked at build time.
+	//   2. Build-time define (process.env.ROCKETRIDE_URI) — used by the standalone
+	//      rsbuild dev server (UI :3000, engine :5565 → NOT same-origin) and by the
+	//      cloud S3 build (UI cloud.rocketride.ai, API api.rocketride.ai).
+	//   3. window.location.origin — last-resort fallback.
+	// getServerInfo()/normalizeUri() accepts a bare host, http(s):// or ws(s)://.
+	const injected = (window as unknown as { __ROCKETRIDE_URI__?: string }).__ROCKETRIDE_URI__;
+	const serverUri =
+		(injected && injected !== '__ROCKETRIDE_URI__' ? injected : '') ||
+		process.env.ROCKETRIDE_URI ||
+		(typeof window !== 'undefined' ? window.location.origin : '') ||
+		'localhost:5565';
 
 	// Probe the server for capabilities and public apps (no auth required)
 	let capabilities: string[] = [];

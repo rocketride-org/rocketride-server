@@ -42,10 +42,11 @@ Routes:
 
 import os
 import sys
+import json
 from pathlib import Path
 
 from fastapi import HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from ai.web import Request
 
@@ -85,6 +86,43 @@ def _resolve_safe(base_dir: str, requested_path: str) -> Path:
         return Path(base_dir) / 'index.html'
 
 
+def _client_origin(request: Request) -> str:
+    """
+    Reconstruct the origin (scheme://host[:port]) the browser used to reach us,
+    honouring a TLS-terminating / port-mapping reverse proxy in front of the
+    engine (docker port map, self-hosted service behind nginx/traefik).
+
+    Order: X-Forwarded-Proto/Host (proxy) → Host header → request.url.
+    """
+    host = request.headers.get('x-forwarded-host') or request.headers.get('host') or request.url.netloc
+    proto = request.headers.get('x-forwarded-proto') or request.url.scheme or 'http'
+    # X-Forwarded-* may be comma-joined hop lists; take the first (client-facing) hop.
+    host = host.split(',')[0].strip()
+    proto = proto.split(',')[0].strip()
+    return f'{proto}://{host}'
+
+
+def _serve_index(request: Request, index_path: Path) -> HTMLResponse:
+    """
+    Serve the shell SPA entry with the engine's OWN origin injected as
+    window.__ROCKETRIDE_URI__, so the bundled shell-UI always talks back to the
+    host that served it (same-origin), regardless of the build-time define.
+
+    Runs ONLY on the engine-served path (local / docker / self-hosted). The cloud
+    UI is served from S3/CloudFront and never reaches this handler, so it keeps
+    its explicit build-time ROCKETRIDE_URI (api.rocketride.ai).
+    """
+    html = index_path.read_text(encoding='utf-8')
+    snippet = f'<script>window.__ROCKETRIDE_URI__={json.dumps(_client_origin(request))};</script>'
+    # Inject as the first child of <head> so it runs before the MF bundle loads.
+    if '<head>' in html:
+        html = html.replace('<head>', '<head>\n    ' + snippet, 1)
+    else:
+        html = snippet + html
+    # index.html carries a request-specific origin — never cache it.
+    return HTMLResponse(html, headers={'Cache-Control': 'no-store'})
+
+
 async def shell_static(request: Request):
     """
     Serve static files for the shell SPA with client-side routing fallback.
@@ -117,16 +155,16 @@ async def shell_static(request: Request):
 
     # Resolve safely within the shell root
     file_path = _resolve_safe(_shell_root, raw_path)
+    index_path = (Path(_shell_root) / 'index.html').resolve()
 
-    # Serve the file if it exists
-    if file_path.exists() and file_path.is_file():
+    # Real asset files (JS/CSS/themes/favicon) — serve unchanged.
+    if file_path.exists() and file_path.is_file() and file_path != index_path:
         return FileResponse(file_path)
 
-    # SPA fallback: serve index.html for any unmatched route so that
-    # client-side routing (React Router, etc.) can handle it.
-    index_path = Path(_shell_root) / 'index.html'
+    # index.html — bare "/", explicit /shell/index.html, or SPA fallback.
+    # Inject the engine's own origin so the bundled shell-UI is same-origin.
     if index_path.exists() and index_path.is_file():
-        return FileResponse(index_path)
+        return _serve_index(request, index_path)
 
     # Shell hasn't been built yet
     raise HTTPException(
