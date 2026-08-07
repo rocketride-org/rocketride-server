@@ -33,6 +33,9 @@ import { pluginTypeCheck } from '@rsbuild/plugin-type-check';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { getenv, requireKeys } = require('../../scripts/lib/getenv');
+// The SDK version the host serves under the 'rocketride' MF share — read from
+// the package itself so the advertised share version never drifts from it.
+const sdkVersion: string = require('../client-typescript/package.json').version;
 
 /**
  * Rsbuild configuration factory for the `shell` host application.
@@ -163,18 +166,18 @@ export default defineConfig(({ command }) => {
 					// MF shared resolution bypasses rsbuild aliases — explicit import
 					// paths are required so MF can find the modules at build time.
 					'shell':   { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/index.ts') },
-					// The SDK surface, mediated by the shell — remotes import
-					// runtime values from 'shell/client' and consume this
-					// host-provided singleton, so protocol classes keep ONE
+					// The SDK surface — remotes import runtime values (protocol
+					// classes, enums, constants) from 'rocketride' and consume
+					// this host-provided singleton, so those classes keep ONE
 					// identity across the host boundary. Share keys match
-					// exactly: sharing 'shell' does NOT cover the subpath.
-					'shell/client': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, './src/client.ts') },
+					// exactly: sharing 'shell' does NOT cover other specifiers.
+					// Client INSTANCES still only arrive via useShellConnection().
+					// The advertised version is the SDK package's own, so MF
+					// diagnostics report the version actually being served.
+					'rocketride': { singleton: true, version: sdkVersion, requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
 					// NOTE: no 'shared' share key — the shared library is STATIC
 					// (each consumer bundles its own copy via deep specs); only
 					// the shell surface and the SDK are runtime-bound.
-					// 'rocketride' stays host-provided for already-deployed
-					// remotes that predate shell/client; new apps never use it.
-					'rocketride': { singleton: true, version: '1.0.0', requiredVersion: false, eager: true, import: path.resolve(__dirname, '../../packages/client-typescript/src/client/index.ts') },
 
 				},
 

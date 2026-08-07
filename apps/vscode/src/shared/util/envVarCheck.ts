@@ -13,7 +13,7 @@
  */
 
 import * as vscode from 'vscode';
-import type { RocketRideClient } from 'shell/client';
+import type { RocketRideClient } from 'rocketride';
 
 /** Extract all unique ROCKETRIDE_* variable names referenced in a pipeline. */
 function extractPipelineEnvVars(pipeline: Record<string, unknown>): string[] {

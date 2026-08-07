@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { RocketRideClient } from 'shell/client';
+import { RocketRideClient } from 'rocketride';
 import { useRocketRideClient } from '../hooks/useRocketRide';
 import { useFileProcessing } from '../hooks/useFileProcessing';
 import { DropperHeader } from './DropperHeader';

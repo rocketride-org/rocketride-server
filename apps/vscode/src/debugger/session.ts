@@ -31,7 +31,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { RocketRideClient, DAPMessage, ConnectionException } from 'shell/client';
+import { RocketRideClient, DAPMessage, ConnectionException } from 'rocketride';
 import { getLogger } from '../shared/util/output';
 import { icons } from '../shared/util/icons';
 import { ConfigManager } from '../config';

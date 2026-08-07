@@ -13,9 +13,13 @@
 // RE-EXPORTS
 // =============================================================================
 
-export type { ITaskStatus as TaskStatus } from 'shell';
-export type { IFlowData as FlowData } from 'shell';
-export { ITaskState as TASK_STATE } from 'shell';
+// SDK-native names, aliased to this module's public vocabulary. Importing
+// them from 'rocketride' (not the 'shell' barrel) keeps this module pure:
+// the VS Code extension host compiles it under Node16, and the SDK's d.ts
+// surface is digestible there while the shell's UI source is not.
+export type { TASK_STATUS as TaskStatus } from 'rocketride';
+export type { TASK_STATUS_FLOW as FlowData } from 'rocketride';
+export { TASK_STATE } from 'rocketride';
 
 // =============================================================================
 // TRACE TYPES

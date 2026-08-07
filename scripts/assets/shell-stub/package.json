@@ -7,7 +7,6 @@
 	"types": "./shell.d.ts",
 	"exports": {
 		".": { "types": "./shell.d.ts", "default": "./index.js" },
-		"./client": { "types": "./client.d.ts", "default": "./client.js" },
 		"./themes/rocketride-default.css": "./themes/rocketride-default.css",
 		"./tokens.css": "./tokens.css",
 		"./package.json": "./package.json"

@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV0 — never edit by hand
 // =============================================================================
-// Generated:     2026-08-04T05:58:37.003Z
-// Source commit: f8bdd8f9e534c45486ba80cdcd7f74ec8af47794
+// Generated:     2026-08-07T07:09:39.400Z
+// Source commit: 02eb2375d7963391ae0f6cb8426226affdb0adff
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -147,6 +147,24 @@ export declare class ConnectionException extends RocketRideException {
  */
 export declare class AuthenticationException extends ConnectionException {
     constructor(dapResult: Record<string, unknown>);
+}
+/**
+ * Terminal reason for a public login or connect attempt cancelled by later
+ * user intent: replacement credentials (`superseded`), `logout`, or `detach`
+ * (`detached`).
+ */
+export type LoginAttemptCancellationReason = "superseded" | "logout" | "detached";
+/**
+ * Raised when a public `login()` or `connect()` attempt is cancelled by newer
+ * user intent. Callers may inspect `reason` to distinguish replacement,
+ * logout, and detachment from transport or server failures.
+ *
+ * This deliberately extends Error directly: cancellation is control flow, not a
+ * RocketRide server or protocol failure.
+ */
+export declare class LoginAttemptCancelledError extends Error {
+    readonly reason: LoginAttemptCancellationReason;
+    constructor(reason: LoginAttemptCancellationReason);
 }
 /**
  * Exception raised for data pipe operations.
@@ -1593,18 +1611,19 @@ export interface RocketRideClientConfig {
     uri?: string;
     /**
      * Environment variables dictionary for configuration and variable substitution.
-     * If not provided, will load from .env file (Node.js only), then fall back to process.env
+     * If provided, it is copied and used instead of process.env. If omitted in
+     * Node.js, string values are copied from process.env. The SDK does not load .env files.
      */
     env?: Record<string, string>;
-    /** Callback for handling real-time events from server */
+    /** Called for events owned by the current transport epoch; stale async event publication is suppressed. */
     onEvent?: EventCallback;
-    /** Callback for connection establishment */
+    /** Called once after an accepted authentication and best-effort monitor restoration completes. */
     onConnected?: ConnectCallback;
-    /** Callback for disconnection events */
+    /** Called at most once for an accepted generation that previously published onConnected. */
     onDisconnected?: DisconnectCallback;
-    /** Callback when a connection attempt fails (persist mode: called on each failure while retrying) */
+    /** Called for each accepted automatic reconnect failure; foreground methods reject their own promises. */
     onConnectError?: ConnectErrorCallback;
-    /** Optional function to output a protocol message */
+    /** Optional function to output a credential-redacted protocol message. */
     onProtocolMessage?: (message: string) => void;
     /** Optional function to output a debug message */
     onDebugMessage?: (message: string) => void;
@@ -1618,7 +1637,10 @@ export interface RocketRideClientConfig {
     persist?: boolean;
     /** Default timeout in ms for individual requests. Default: no timeout. */
     requestTimeout?: number;
-    /** Max total time in ms to keep retrying connections. Default: undefined (forever). */
+    /**
+     * @deprecated Accepted for backward compatibility but currently ignored;
+     * persistent retry continues until stopped.
+     */
     maxRetryTime?: number;
     /** Custom WebSocket path override (default: '/task/service'). Use '/models' for the model server. */
     wsPath?: string;
@@ -1630,7 +1652,8 @@ export interface RocketRideClientConfig {
     clientVersion?: string;
     /**
      * Optional trace callback invoked at the start and end of every `call()`.
-     * Use for logging, debugging, or telemetry.
+     * Credential-bearing fields are redacted from the callback copy. Use for
+     * logging, debugging, or telemetry.
      *
      * @param traceType - 0 = request (before send), 1 = success (response), 2 = error
      * @param payload   - The trace data: command, args, and (for success/error) the result or error message.
@@ -1676,6 +1699,13 @@ export interface OrgInfo {
     id: string;
     /** Display name of the organisation */
     name: string;
+    /**
+     * Public developer slug — the organisation's app publisher identity, the
+     * first segment of app linkage names ('<developerId>.<appName>').
+     * Null/absent until the organisation registers as a marketplace developer
+     * (and always absent on OSS servers).
+     */
+    developerId?: string | null;
     /**
      * Organisation-level permission strings granted to the authenticated user.
      * These apply across all teams within the organisation.
@@ -2603,8 +2633,8 @@ export interface ValidationError {
 /**
  * Result of a pipeline validation via `validate()`.
  *
- * The engine validates structure, component compatibility, and connection
- * integrity. The result contains any errors and warnings found.
+ * The engine validates structure — required fields and component
+ * references. The result contains any errors and warnings found.
  */
 export interface ValidationResult {
     /** Validation errors — pipeline will not execute with these. */
@@ -3116,7 +3146,8 @@ declare abstract class TransportBase {
      */
     bind(callbacks: TransportCallbacks): void;
     /**
-     * Update connection URI. Takes effect on the next connect().
+     * Update the connection URI. Concrete transports may invalidate an active
+     * connection immediately so callbacks from the previous URI cannot publish.
      */
     setUri(_uri: string): void;
     /**
@@ -4459,7 +4490,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param config.onDisconnected - Callback when connection is lost
      * @param config.persist - Enable automatic reconnection
      * @param config.requestTimeout - Default timeout in ms for individual requests
-     * @param config.maxRetryTime - Max total time in ms to keep retrying connections
+     * @param config.maxRetryTime - Accepted for backward compatibility but currently ignored
      * @param config.module - Optional module name for client identification
      *
      * @example
@@ -4528,12 +4559,6 @@ export declare class RocketRideClient extends DAPClient {
     attach(uri?: string, options?: {
         timeout?: number;
     }): Promise<void>;
-    /**
-     * Detach from the server (close WebSocket, cancel reconnection).
-     *
-     * Sets ``_desiredState`` to ``'detached'`` so the reconnect engine
-     * stops and ``onDisconnected`` does not restart it.
-     */
     detach(): Promise<void>;
     /**
      * True when the WebSocket transport is connected (regardless of auth).
@@ -4636,8 +4661,7 @@ export declare class RocketRideClient extends DAPClient {
      * Validate a pipeline configuration.
      *
      * Sends the pipeline to the server for structural validation, checking
-     * component compatibility, connection integrity, and the resolved
-     * execution chain.
+     * required fields and component references.
      *
      * Source resolution follows the same logic as {@link use}:
      * 1. Explicit `source` option (if provided)
@@ -4647,7 +4671,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.pipeline - Pipeline configuration to validate
      * @param options.source - Optional override for the source component ID
      * @returns Promise resolving to validation result with errors, warnings,
-     *          resolved component, and execution chain
+     *          and resolved component
      * @throws Error if the server returns a validation error
      *
      * @example
@@ -5347,21 +5371,18 @@ export declare class RocketRideClient extends DAPClient {
      * UI schema per section) the configure panel needs.
      *
      * @param service - Name of the service to retrieve (e.g., 'ocr', 'embed', 'chat')
-     * @returns Promise resolving to service definition or undefined if not found
-     * @throws Error if the request fails or server returns an error
+     * @returns Promise resolving to the service definition
+     * @throws Error if the request fails or server returns an error — an
+     *         unknown service name is an error, not an undefined result
      *
      * @example
      * ```typescript
      * // Get OCR service definition (config sections included)
      * const ocr = await client.getService('ocr');
-     * if (ocr) {
-     *   console.log('OCR sections:', Object.keys(ocr));
-     * } else {
-     *   console.log('OCR service not available');
-     * }
+     * console.log('OCR sections:', Object.keys(ocr));
      * ```
      */
-    getService(service: string): Promise<ServiceDefinition | undefined>;
+    getService(service: string): Promise<ServiceDefinition>;
     /**
      * Get connection information (TypeScript-specific convenience)
      */
@@ -5902,7 +5923,7 @@ export declare enum ConnectionState {
     CONNECTING = "connecting",
     /** Successfully connected and authenticated. */
     CONNECTED = "connected",
-    /** Connection attempt failed (network, timeout, server error). */
+    /** Connection attempt failed due to a server error. */
     FAILED = "failed",
     /** Authentication was rejected by the server (bad/expired/revoked key). */
     AUTH_FAILED = "auth-failed"
@@ -5933,6 +5954,31 @@ export interface ConnectionStatus {
     lastConnected?: Date;
     /** Last error message (cleared on successful connect). */
     lastError?: string;
+    /**
+     * Discriminates AUTH_FAILED origins so recovery UI can phrase the message:
+     * 'oauth-callback' — the IdP returned an error on the OAuth callback;
+     * 'session' — an existing session was rejected or expired.
+     */
+    errorKind?: "oauth-callback" | "session";
+    /**
+     * Most recent unrecovered failure, latched across later transitions.
+     * Persist-mode reconnect attempts report CONNECTING and a post-failure
+     * anonymous connect reports CONNECTED — recovery UI reads this field so
+     * the failure stays visible until it is actually resolved. Network
+     * failures clear on reconnection; auth failures clear on re-auth.
+     */
+    lastFailure?: {
+        /**
+         * 'network' — transport failure, retryable, credentials intact;
+         * 'auth' — credentials rejected/expired. Carried here (not as a new
+         * ConnectionState member) because the enum is frozen by the versioned
+         * shell-api contract; the state stays FAILED / AUTH_FAILED.
+         */
+        kind: "network" | "auth";
+        lastError?: string;
+        /** Distinguishes an aborted OAuth callback from an expired session. */
+        errorKind?: "oauth-callback" | "session";
+    };
     /** True if we have necessary credentials/config to attempt connection. */
     hasCredentials: boolean;
     /** Current retry attempt number (0 when not retrying). */
@@ -6204,11 +6250,12 @@ interface ShellConnectionEventMap {
     /**
      * Emitted when the service catalog is fetched or refreshed.
      *
-     * Contains the full services map and an optional error string if
-     * the fetch failed.
+     * Contains the full services map, the summary's deduplicated icon
+     * table, and an optional error string if the fetch failed.
      */
     "shell:servicesUpdated": {
         services: Record<string, unknown>;
+        icons?: Record<string, string>;
         servicesError?: string;
     };
     /**
@@ -6360,10 +6407,12 @@ interface IConnectionManager {
      *
      * If the cache is empty and the client is connected, implementations
      * should trigger a lazy background fetch and emit `shell:servicesUpdated`
-     * when the result arrives.
+     * when the result arrives. The summary's deduplicated icon table rides
+     * along with the services map.
      */
     getCachedServices(): {
         services: Record<string, unknown>;
+        icons?: Record<string, string>;
         servicesError?: string;
     };
     /**
@@ -7371,8 +7420,8 @@ export declare class ConnectionManager implements IConnectionManager {
     /**
      * Connect to the server using the provided credential.
      *
-     * Deduplicates concurrent calls — if a connect is already in flight,
-     * returns the same promise (same pattern as VSCode's connectPromise).
+     * Deduplicates concurrent calls for the same normalized endpoint and
+     * credential. A different credential supersedes publication by the old call.
      *
      * @param credential - Token string or PKCE exchange object.
      * @returns The ConnectResult on success, or null if deduplicated.
@@ -7411,9 +7460,9 @@ export declare class ConnectionManager implements IConnectionManager {
     getAccountInfo(): ConnectResult | undefined;
     /** Returns the resolved server HTTP URL. */
     getHttpUrl(): string;
-    /** Persist a user token to sessionStorage. */
+    /** Persist a user token to localStorage. */
     saveToken(token: string): void;
-    /** Load token from sessionStorage. Returns empty string if unavailable. */
+    /** Load token from localStorage. Migrates the old sessionStorage value once. */
     loadToken(): string;
     /** Clear the persisted token. */
     clearToken(): void;
@@ -7433,9 +7482,13 @@ export declare class ConnectionManager implements IConnectionManager {
     setPendingAppId(id: string): void;
     /**
      * Returns the cached service catalog, triggering a lazy fetch on first access.
+     *
+     * The summary response's deduplicated icon table rides along so consumers
+     * (the canvas icon registry) never need a fetch of their own.
      */
     getCachedServices(): {
         services: Record<string, unknown>;
+        icons?: Record<string, string>;
         servicesError?: string;
     };
     /**
@@ -7952,7 +8005,7 @@ export declare class ApiKeyAuthProvider implements IAuthProvider {
     /**
      * Sign in with an API key.
      *
-     * Stores the key in sessionStorage for the current session. An empty string
+     * Stores the key in localStorage. An empty string
      * is valid (some OSS servers allow unauthenticated access).
      *
      * @param apiKey - The API key to store.
@@ -9487,7 +9540,11 @@ export interface ISidebarMenuProps {
     activeId: string;
     /** Fired with an entry id when the user selects it. */
     onSelect: (id: string) => void;
-    /** Section label above the menu, e.g. the owning document name. Optional. */
+    /**
+     * Section label above the menu, e.g. the owning document name. The label
+     * sits flush at indent 0 and every row nests 10px beneath it; without a
+     * label, rows sit flush where the label would. Optional.
+     */
     sectionLabel?: string;
     /**
      * Collapsed (icon-rail) rendering: entries draw icon-only (the entry's
@@ -10173,6 +10230,207 @@ export interface IGridConfigClearDetail {
  * @returns A persistence adapter for one or more DataGrids.
  */
 export declare function createMessageGridPersistence(): IDataGridPersistence;
+/** A single message in the conversation. */
+export interface ChatMessage {
+    /** Unique monotonic ID — never collides even within the same millisecond. */
+    id: number;
+    /** Raw text content (may contain markdown). */
+    text: string;
+    /** Who produced the message. */
+    sender: "user" | "bot" | "system" | "status";
+    /** Formatted time string, e.g. "14:32". */
+    timestamp: string;
+    /** Pipeline result key — shown as a small label below bot messages. */
+    resultKey?: string;
+    /** SSE event type — used to identify thinking-group status messages. */
+    sseType?: string;
+    /** Optional metadata line (e.g. "2,340 tokens · 1.8s") shown under the bubble content. */
+    meta?: string;
+    /** When true, the message renders as an in-thread error Banner instead of a bubble. */
+    isError?: boolean;
+}
+/** Props for the top-level ChatView component. */
+export interface IChatViewProps {
+    /** Current message list managed by the host via useChatMessages. */
+    messages: ChatMessage[];
+    /** Whether the assistant is currently composing a response. */
+    isTyping: boolean;
+    /** Whether the underlying WebSocket client is connected. */
+    isConnected: boolean;
+    /** Called when the user submits a message. */
+    onSend: (text: string) => void;
+    /** Placeholder shown in the input when idle. Defaults to "Ask anything…". */
+    placeholder?: string;
+    /** Title for the EmptyState shown when the conversation has no messages. */
+    emptyTitle?: string;
+    /** Description for the EmptyState shown when the conversation has no messages. */
+    emptyDescription?: string;
+    /** Optional node rendered before the input field (reserved for future attachments). */
+    leadingInputSlot?: React$1.ReactNode;
+}
+/** Options for useChatMessages. */
+export interface UseChatMessagesOptions {
+    /** System message shown after clearMessages(). */
+    welcomeMessage?: string;
+    /** Seed messages to restore a previous conversation (preserves sender, timestamp, etc.). */
+    initialMessages?: ChatMessage[];
+}
+/**
+ * Renders the chat surface (message thread + composer).
+ *
+ * @param props - {@link IChatViewProps}. The composer is disabled whenever
+ *   `isConnected` is false; `emptyTitle` / `emptyDescription` configure the
+ *   EmptyState for new conversations; `leadingInputSlot` is rendered before the
+ *   input (reserved for future attachments).
+ * @returns The chat view element.
+ */
+export declare const ChatView: React$1.FC<IChatViewProps>;
+interface MessageListProps {
+    messages: ChatMessage[];
+    isTyping: boolean;
+    /** Title for the EmptyState shown when there are no messages. */
+    emptyTitle?: string;
+    /** Description for the EmptyState shown when there are no messages. */
+    emptyDescription?: string;
+}
+/**
+ * Renders the scrollable message thread with scroll-locked autoscroll.
+ *
+ * @param props - {@link MessageListProps}.
+ * @returns The thread element (or an EmptyState when empty).
+ */
+export declare const MessageList: React$1.FC<MessageListProps>;
+interface MarkdownRendererProps {
+    content: string;
+}
+export declare const MarkdownRenderer: React$1.FC<MarkdownRendererProps>;
+interface UseChatMessagesReturn {
+    messages: ChatMessage[];
+    isTyping: boolean;
+    sendMessage: (text: string, client: any, authToken: string) => Promise<void>;
+    clearMessages: () => void;
+    addSystemMessage: (text: string) => void;
+}
+/**
+ * Manages chat message state and RocketRide API communication.
+ *
+ * IMPORTANT: always use the internal updateMessages helper — never call
+ * setMessages directly. Direct setMessages calls bypass the messagesRef
+ * sync and will cause sendMessage to build history from a stale snapshot.
+ */
+export declare function useChatMessages({ welcomeMessage, initialMessages }?: UseChatMessagesOptions): UseChatMessagesReturn;
+/** Props for the {@link ConnectionCard} component. */
+export interface IConnectionCardProps {
+    /** Optional source icon (rendered at 30px, inherits the card's icon colour). */
+    icon?: React$1.ReactNode;
+    /** Source name. */
+    name: string;
+    /** Source address / endpoint. */
+    address: string;
+    /** StatusBadge variant for the source's state. */
+    status: Extract<StatusVariant, "success" | "muted" | "error">;
+    /** StatusBadge label, e.g. "Connected" / "Disconnected". */
+    statusLabel: string;
+    /** When true, the card carries the brand border and brand icon colour. */
+    connected?: boolean;
+    /** Edit action — reveals the pencil icon on hover. */
+    onEdit?: () => void;
+    /** Delete action — reveals the trash icon on hover. */
+    onDelete?: () => void;
+    /** Select action for the whole card. */
+    onClick?: () => void;
+}
+/** Props for the {@link ConnectionCardAdd} component. */
+export interface IConnectionCardAddProps {
+    /** Label beneath the plus glyph, e.g. "New Connection". */
+    label: string;
+    /** Fired when the add tile is activated. */
+    onClick: () => void;
+}
+/**
+ * Renders a connection / source card.
+ *
+ * @param props - {@link IConnectionCardProps}.
+ * @returns The card element.
+ */
+export declare function ConnectionCard({ icon, name, address, status, statusLabel, connected, onEdit, onDelete, onClick, }: IConnectionCardProps): React$1.ReactElement;
+/**
+ * Renders the dashed "add a source" tile.
+ *
+ * @param props - {@link IConnectionCardAddProps}.
+ * @returns The add-tile element.
+ */
+export declare function ConnectionCardAdd({ label, onClick }: IConnectionCardAddProps): React$1.ReactElement;
+/** Display props derived from a connection for its {@link ConnectionCard}. */
+export interface IConnectionCardDisplay {
+    /** Card title (connection name). */
+    name: string;
+    /** Card sub-line (address / endpoint, e.g. "localhost:5590"). */
+    address: string;
+    /** StatusBadge variant for the connection's state. */
+    status: Extract<StatusVariant, "success" | "muted" | "error">;
+    /** StatusBadge label, e.g. "Connected" / "Disconnected". */
+    statusLabel: string;
+    /** When true, the card carries the brand border and brand icon colour. */
+    connected?: boolean;
+}
+/** One field in the add/edit form. */
+export interface IConnectionFormField {
+    /** Key into the form's value map (also the persisted field name). */
+    key: string;
+    /** Field label shown above the input. */
+    label: string;
+    /** Placeholder text for the input. */
+    placeholder?: string;
+    /** Render as a password input with a Show/Hide reveal toggle. */
+    secret?: boolean;
+    /** The form cannot be saved while this field is empty (after trim). */
+    required?: boolean;
+    /** Autofocus this field when the dialog opens. */
+    autoFocus?: boolean;
+}
+/** Props for {@link ConnectionManagerView}. */
+export interface IConnectionManagerViewProps<T extends {
+    id: string;
+}> {
+    /** Page title, e.g. "Model Server Connections". */
+    title: string;
+    /** One-line subtitle beneath the title. */
+    subtitle: string;
+    /** Empty-state heading. Defaults to "No connections yet". */
+    emptyTitle?: string;
+    /** Empty-state supporting line. */
+    emptyDescription: string;
+    /** The saved connections to list. */
+    connections: T[];
+    /** Derive a card's display props from a connection. */
+    card: (conn: T) => IConnectionCardDisplay;
+    /** The add/edit form fields (rendered in order). */
+    fields: IConnectionFormField[];
+    /** Seed values for a new (add) form, keyed by field key. */
+    newValues: Record<string, string>;
+    /** Extract an existing connection's field values for the edit form. */
+    editValues: (conn: T) => Record<string, string>;
+    /** Persist a new connection from the (raw) field values; may open it. */
+    onCreate: (values: Record<string, string>) => void;
+    /** Persist edits to an existing connection from the (raw) field values. */
+    onUpdate: (conn: T, values: Record<string, string>) => void;
+    /** Open a saved connection (app-specific — tab, doc, session, …). */
+    onOpen: (conn: T) => void;
+    /** Delete a saved connection (the app owns any confirmation prompt). */
+    onDelete: (conn: T) => void;
+    /** Icon renderer for cards (30px) and the empty state (40px). Defaults to BxDesktop. */
+    icon?: (size: number) => React$1.ReactNode;
+}
+/**
+ * Renders the shared connections landing page (Archetype C).
+ *
+ * @param props - {@link IConnectionManagerViewProps}.
+ * @returns The connections landing element.
+ */
+export declare function ConnectionManagerView<T extends {
+    id: string;
+}>({ title, subtitle, emptyTitle, emptyDescription, connections, card, fields, newValues, editValues, onCreate, onUpdate, onOpen, onDelete, icon, }: IConnectionManagerViewProps<T>): React$1.ReactElement;
 /**
  * Debounce a value: the returned value updates only after `delayMs` of
  * silence following the last change.

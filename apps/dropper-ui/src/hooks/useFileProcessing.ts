@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { RocketRideClient, UPLOAD_RESULT } from 'shell/client';
+import { RocketRideClient, UPLOAD_RESULT } from 'rocketride';
 import { UploadedFile, ProcessedResults } from '../types/dropper.types';
 import { parseDropperResults, generateFileId } from '../utils/dropperUtils';
 import { subscribeToClient } from './clientSingleton';

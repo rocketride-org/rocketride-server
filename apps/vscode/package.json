@@ -610,6 +610,7 @@
 		"proper-lockfile": "^4.1.2",
 		"shared": "file:../shared",
 		"tar": "^7.5.15",
+		"rocketride": "workspace:*",
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"files": [

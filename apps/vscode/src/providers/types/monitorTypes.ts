@@ -11,7 +11,7 @@
  * Pure types only — imported by both the extension host and the webview.
  */
 
-import type { DashboardResponse } from 'shell';
+import type { DashboardResponse } from 'rocketride';
 import type { ShellHostToWebview, ShellWebviewToHost } from './shellTypes';
 
 /** All messages the extension host can send to the MonitorWebview. */

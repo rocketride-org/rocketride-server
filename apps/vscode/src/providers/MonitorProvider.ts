@@ -18,7 +18,7 @@ import { getLogger } from '../shared/util/output';
 import { ConnectionManager } from '../connection/connection';
 import { ConnectionStatus, ConnectionState, GenericEvent } from '../shared/types';
 import { GridConfigStore } from './GridConfigStore';
-import type { DashboardResponse } from 'shell/client';
+import type { DashboardResponse } from 'rocketride';
 
 const POLL_INTERVAL_MS = 5_000;
 

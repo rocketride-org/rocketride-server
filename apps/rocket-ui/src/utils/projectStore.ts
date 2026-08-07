@@ -2,7 +2,7 @@
 // projectStore — Project file operations (prepends PROJECT_DIR transparently)
 // =============================================================================
 
-import { type RocketRideClient, PROJECT_DIR } from 'shell/client';
+import { type RocketRideClient, PROJECT_DIR } from 'rocketride';
 
 /** Read a project file. path is relative, e.g. "Chat.pipe" or "dir1/Chat.pipe" */
 export function loadProject(client: RocketRideClient, path: string): Promise<any> {

@@ -229,18 +229,25 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId, source
 		}
 	}, [isConnected]);
 
-	// Service catalog for the readonly canvas (same fetch as ProjectProvider).
+	// Service catalog for the readonly canvas — served from the shell's
+	// summary cache (same source as ProjectProvider; no fetch of its own).
+	// The icon registry is (re)built here too, so the drawer owns its own
+	// icon lifecycle instead of depending on ProjectProvider mounting first.
 	useEffect(() => {
-		if (!client || !isConnected) return;
-		(
-			client as {
-				getServices?: () => Promise<{ services?: Record<string, unknown> }>;
-			}
-		)
-			.getServices?.()
-			.then((res) => setServicesJson((res?.services ?? res ?? {}) as Record<string, unknown>))
-			.catch(() => {});
-	}, [client, isConnected]);
+		if (!isConnected) return;
+		const manager = ConnectionManager.getInstance();
+		const cached = manager.getCachedServices();
+		if (!cached.servicesError && Object.keys(cached.services).length > 0) {
+			registerServiceIcons({ services: cached.services, icons: cached.icons ?? {} });
+			setServicesJson(cached.services);
+		}
+		return manager.on('shell:servicesUpdated', ({ services, icons, servicesError }) => {
+			// A failed refresh keeps the last good catalog on the canvas.
+			if (servicesError) return;
+			registerServiceIcons({ services, icons: icons ?? {} });
+			setServicesJson(services);
+		});
+	}, [isConnected]);
 
 	// --- View models ----------------------------------------------------------
 

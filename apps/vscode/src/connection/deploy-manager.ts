@@ -51,7 +51,7 @@
 
 import { ConnectionManager } from './connection';
 import type { ConnectionStatus } from '../shared/types';
-import type { RocketRideClient } from 'shell/client';
+import type { RocketRideClient } from 'rocketride';
 
 // =============================================================================
 // DEPLOY MANAGER

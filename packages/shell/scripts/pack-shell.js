@@ -37,10 +37,13 @@
  * (no longer imported by shell). 'rocketride' — the SDK the shell's
  * connection code wraps — is a BUNDLED dependency: the tgz carries the
  * in-repo build at node_modules/rocketride (npm's bundleDependencies),
- * so 'shell/client' always resolves to the SDK this server was built
- * with — the registry is never consulted. The SDK's own deps stay
- * ordinary registry deps. An app that wants a private SDK instance
- * declares its own 'rocketride' dependency and owns the divergence.
+ * so the shell's compiled dist always runs against the SDK this server
+ * was built with — the registry is never consulted. The SDK's own deps
+ * stay ordinary registry deps. Apps consume the SDK through their OWN
+ * 'rocketride' dependency (registry-installed for standalone repos,
+ * workspace-linked in-tree): types at compile time, the host-provided
+ * MF singleton at runtime. The SDK's append-only contract floors keep
+ * registry versions backward compatible with the host's.
  */
 const fs = require('fs');
 const path = require('path');
@@ -168,11 +171,6 @@ async function packShell(options = {}) {
 	fs.copyFileSync(frozen.file, path.join(STAGE_DIR, 'shell.d.ts'));
 	fs.copyFileSync(path.join(SRC_DIR, 'themes', 'rocketride-default.css'), path.join(STAGE_DIR, 'tokens.css'));
 
-	// step: the shell/client subpath types — the SDK surface rides the
-	// bundled rocketride package's own types, so the declaration is a
-	// bare star re-export resolved against the copy vendored below
-	fs.writeFileSync(path.join(STAGE_DIR, 'client.d.ts'), "export * from 'rocketride';\n");
-
 	// step: vendor the in-repo SDK at node_modules/rocketride — its publish
 	// file set (manifest + dist), exactly what `npm pack` would ship. The
 	// bundleDependencies entry in the manifest below makes npm pack carry
@@ -191,12 +189,11 @@ async function packShell(options = {}) {
 		if (name === 'rocketride' || name === 'shared') continue;
 		dependencies[name] = spec;
 	}
-	// The rocketride SDK is an implementation detail of the shell (the
-	// connection code wraps it). It ships BUNDLED — the exact in-repo
-	// build vendored above rides inside the tgz, so the guaranteed
-	// shell/client surface can never drift from the serving server —
-	// apps themselves never import 'rocketride'; the shell barrel is the
-	// only door.
+	// The rocketride SDK ships BUNDLED — the exact in-repo build vendored
+	// above rides inside the tgz, so the shell's own compiled code can
+	// never drift from the serving server. This copy is PRIVATE to the
+	// shell: apps import the SDK from their own 'rocketride' dependency
+	// (types at compile time; the host-served singleton at runtime).
 	dependencies['rocketride'] = sdkPkg.version;
 	// The vendored SDK rides as a plain directory, so npm/pnpm never read
 	// ITS manifest to install its runtime deps — carry them here as deps
@@ -219,10 +216,6 @@ async function packShell(options = {}) {
 		types: './shell.d.ts',
 		exports: {
 			'.': { types: './shell.d.ts', default: './dist/index.js' },
-			// The SDK surface, mediated by the shell — apps import runtime
-			// values (Question, PROJECT_DIR, ...) from here, never from a
-			// 'rocketride' dependency of their own.
-			'./client': { types: './client.d.ts', default: './dist/client.js' },
 			'./themes/rocketride-default.css': './dist/themes/rocketride-default.css',
 			'./tokens.css': './tokens.css',
 			'./package.json': './package.json',

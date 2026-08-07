@@ -23,6 +23,7 @@
   "dependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "rocketride": "workspace:*",
     "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {

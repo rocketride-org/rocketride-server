@@ -347,7 +347,7 @@ export class EngineService extends EngineBackend {
 					return { success: true, data: { version: installer.getInstalledVersion()?.tag } };
 				}
 				case 'test': {
-					const { RocketRideClient } = require('shell/client');
+					const { RocketRideClient } = require('rocketride');
 					const client = new RocketRideClient({ persist: false });
 					await client.connect('MYAPIKEY', { uri: `http://localhost:${SERVICE_PORT}`, timeout: 10000 });
 					const version = client.getServerVersion?.() ?? null;

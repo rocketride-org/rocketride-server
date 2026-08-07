@@ -317,17 +317,12 @@ async function main() {
 			console.error('Set ROCKETRIDE_URI in .env or pass --shell=<server url>.');
 			process.exit(1);
 		}
-	} else {
-		const { ensureShellStub } = require('./lib/vendor-shell');
-		ensureShellStub(ROOT);
-		// Overlay repos (the saas wrapper) resolve the same canonical
-		// "shell": "file:.rocketride/shell/shell.tgz" override at THEIR
-		// root: stubbed here for the very first install, then replaced by
-		// every shell:build (pack-shell emits to the invoking root).
-		if (options.overlayRoot && path.resolve(options.overlayRoot) !== path.resolve(ROOT)) {
-			ensureShellStub(options.overlayRoot);
-		}
 	}
+	// Platform and overlay repos need no bootstrap: their workspace override
+	// resolves shell to the in-tree package (workspace:*), which carries no
+	// tarball to exist or verify — install works on a fresh clone as-is.
+	// pack-shell still emits the tgz on every shell:build for /client/shell
+	// serving and standalone vendoring.
 
 	// Make sure the system is setup
 	const { setupSystem } = require('./setup');

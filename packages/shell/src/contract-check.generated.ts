@@ -15,8 +15,6 @@
 
 import type { ShellApiShape } from './api';
 import type { ShellApiV0 } from '../contract/versions/v0';
-import type { ShellApiV1 } from '../contract/versions/v1';
-import type { ShellApiV2 } from '../contract/versions/v2';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -25,6 +23,10 @@ import type { ConnectionException as Frozen_ConnectionException } from '../contr
 import type { ConnectionException as Current_ConnectionException } from './api';
 import type { AuthenticationException as Frozen_AuthenticationException } from '../contract/versions/v0';
 import type { AuthenticationException as Current_AuthenticationException } from './api';
+import type { LoginAttemptCancellationReason as Frozen_LoginAttemptCancellationReason } from '../contract/versions/v0';
+import type { LoginAttemptCancellationReason as Current_LoginAttemptCancellationReason } from './api';
+import type { LoginAttemptCancelledError as Frozen_LoginAttemptCancelledError } from '../contract/versions/v0';
+import type { LoginAttemptCancelledError as Current_LoginAttemptCancelledError } from './api';
 import type { PipeException as Frozen_PipeException } from '../contract/versions/v0';
 import type { PipeException as Current_PipeException } from './api';
 import type { ExecutionException as Frozen_ExecutionException } from '../contract/versions/v0';
@@ -493,6 +495,22 @@ import type { IGridConfigSetDetail as Frozen_IGridConfigSetDetail } from '../con
 import type { IGridConfigSetDetail as Current_IGridConfigSetDetail } from './api';
 import type { IGridConfigClearDetail as Frozen_IGridConfigClearDetail } from '../contract/versions/v0';
 import type { IGridConfigClearDetail as Current_IGridConfigClearDetail } from './api';
+import type { ChatMessage as Frozen_ChatMessage } from '../contract/versions/v0';
+import type { ChatMessage as Current_ChatMessage } from './api';
+import type { IChatViewProps as Frozen_IChatViewProps } from '../contract/versions/v0';
+import type { IChatViewProps as Current_IChatViewProps } from './api';
+import type { UseChatMessagesOptions as Frozen_UseChatMessagesOptions } from '../contract/versions/v0';
+import type { UseChatMessagesOptions as Current_UseChatMessagesOptions } from './api';
+import type { IConnectionCardProps as Frozen_IConnectionCardProps } from '../contract/versions/v0';
+import type { IConnectionCardProps as Current_IConnectionCardProps } from './api';
+import type { IConnectionCardAddProps as Frozen_IConnectionCardAddProps } from '../contract/versions/v0';
+import type { IConnectionCardAddProps as Current_IConnectionCardAddProps } from './api';
+import type { IConnectionCardDisplay as Frozen_IConnectionCardDisplay } from '../contract/versions/v0';
+import type { IConnectionCardDisplay as Current_IConnectionCardDisplay } from './api';
+import type { IConnectionFormField as Frozen_IConnectionFormField } from '../contract/versions/v0';
+import type { IConnectionFormField as Current_IConnectionFormField } from './api';
+import type { IConnectionManagerViewProps as Frozen_IConnectionManagerViewProps } from '../contract/versions/v0';
+import type { IConnectionManagerViewProps as Current_IConnectionManagerViewProps } from './api';
 import type { Announcement as Frozen_Announcement } from '../contract/versions/v0';
 import type { Announcement as Current_Announcement } from './api';
 import type { ThemeTokens as Frozen_ThemeTokens } from '../contract/versions/v0';
@@ -569,30 +587,10 @@ import type { ITaskStatus as Frozen_ITaskStatus } from '../contract/versions/v0'
 import type { ITaskStatus as Current_ITaskStatus } from './api';
 import type { IFlowData as Frozen_IFlowData } from '../contract/versions/v0';
 import type { IFlowData as Current_IFlowData } from './api';
-import type { ChatMessage as Frozen_ChatMessage } from '../contract/versions/v1';
-import type { ChatMessage as Current_ChatMessage } from './api';
-import type { IChatViewProps as Frozen_IChatViewProps } from '../contract/versions/v1';
-import type { IChatViewProps as Current_IChatViewProps } from './api';
-import type { UseChatMessagesOptions as Frozen_UseChatMessagesOptions } from '../contract/versions/v1';
-import type { UseChatMessagesOptions as Current_UseChatMessagesOptions } from './api';
-import type { IConnectionCardProps as Frozen_IConnectionCardProps } from '../contract/versions/v1';
-import type { IConnectionCardProps as Current_IConnectionCardProps } from './api';
-import type { IConnectionCardAddProps as Frozen_IConnectionCardAddProps } from '../contract/versions/v1';
-import type { IConnectionCardAddProps as Current_IConnectionCardAddProps } from './api';
-import type { IConnectionCardDisplay as Frozen_IConnectionCardDisplay } from '../contract/versions/v2';
-import type { IConnectionCardDisplay as Current_IConnectionCardDisplay } from './api';
-import type { IConnectionFormField as Frozen_IConnectionFormField } from '../contract/versions/v2';
-import type { IConnectionFormField as Current_IConnectionFormField } from './api';
-import type { IConnectionManagerViewProps as Frozen_IConnectionManagerViewProps } from '../contract/versions/v2';
-import type { IConnectionManagerViewProps as Current_IConnectionManagerViewProps } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
 void _floor_v0;
-const _floor_v1: ShellApiV1 = {} as ShellApiShape;
-void _floor_v1;
-const _floor_v2: ShellApiV2 = {} as ShellApiShape;
-void _floor_v2;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -605,6 +603,10 @@ const _t_ConnectionException: Frozen_ConnectionException = {} as Current_Connect
 void _t_ConnectionException;
 const _t_AuthenticationException: Frozen_AuthenticationException = {} as Current_AuthenticationException;
 void _t_AuthenticationException;
+const _t_LoginAttemptCancellationReason: Frozen_LoginAttemptCancellationReason = {} as Current_LoginAttemptCancellationReason;
+void _t_LoginAttemptCancellationReason;
+const _t_LoginAttemptCancelledError: Frozen_LoginAttemptCancelledError = {} as Current_LoginAttemptCancelledError;
+void _t_LoginAttemptCancelledError;
 const _t_PipeException: Frozen_PipeException = {} as Current_PipeException;
 void _t_PipeException;
 const _t_ExecutionException: Frozen_ExecutionException = {} as Current_ExecutionException;
@@ -1073,6 +1075,22 @@ const _t_IGridConfigSetDetail: Frozen_IGridConfigSetDetail = {} as Current_IGrid
 void _t_IGridConfigSetDetail;
 const _t_IGridConfigClearDetail: Frozen_IGridConfigClearDetail = {} as Current_IGridConfigClearDetail;
 void _t_IGridConfigClearDetail;
+const _t_ChatMessage: Frozen_ChatMessage = {} as Current_ChatMessage;
+void _t_ChatMessage;
+const _t_IChatViewProps: Frozen_IChatViewProps = {} as Current_IChatViewProps;
+void _t_IChatViewProps;
+const _t_UseChatMessagesOptions: Frozen_UseChatMessagesOptions = {} as Current_UseChatMessagesOptions;
+void _t_UseChatMessagesOptions;
+const _t_IConnectionCardProps: Frozen_IConnectionCardProps = {} as Current_IConnectionCardProps;
+void _t_IConnectionCardProps;
+const _t_IConnectionCardAddProps: Frozen_IConnectionCardAddProps = {} as Current_IConnectionCardAddProps;
+void _t_IConnectionCardAddProps;
+const _t_IConnectionCardDisplay: Frozen_IConnectionCardDisplay = {} as Current_IConnectionCardDisplay;
+void _t_IConnectionCardDisplay;
+const _t_IConnectionFormField: Frozen_IConnectionFormField = {} as Current_IConnectionFormField;
+void _t_IConnectionFormField;
+const _t_IConnectionManagerViewProps: Frozen_IConnectionManagerViewProps<any> = {} as Current_IConnectionManagerViewProps<any>;
+void _t_IConnectionManagerViewProps;
 const _t_Announcement: Frozen_Announcement = {} as Current_Announcement;
 void _t_Announcement;
 const _t_ThemeTokens: Frozen_ThemeTokens = {} as Current_ThemeTokens;
@@ -1149,19 +1167,3 @@ const _t_ITaskStatus: Frozen_ITaskStatus = {} as Current_ITaskStatus;
 void _t_ITaskStatus;
 const _t_IFlowData: Frozen_IFlowData = {} as Current_IFlowData;
 void _t_IFlowData;
-const _t_ChatMessage: Frozen_ChatMessage = {} as Current_ChatMessage;
-void _t_ChatMessage;
-const _t_IChatViewProps: Frozen_IChatViewProps = {} as Current_IChatViewProps;
-void _t_IChatViewProps;
-const _t_UseChatMessagesOptions: Frozen_UseChatMessagesOptions = {} as Current_UseChatMessagesOptions;
-void _t_UseChatMessagesOptions;
-const _t_IConnectionCardProps: Frozen_IConnectionCardProps = {} as Current_IConnectionCardProps;
-void _t_IConnectionCardProps;
-const _t_IConnectionCardAddProps: Frozen_IConnectionCardAddProps = {} as Current_IConnectionCardAddProps;
-void _t_IConnectionCardAddProps;
-const _t_IConnectionCardDisplay: Frozen_IConnectionCardDisplay = {} as Current_IConnectionCardDisplay;
-void _t_IConnectionCardDisplay;
-const _t_IConnectionFormField: Frozen_IConnectionFormField = {} as Current_IConnectionFormField;
-void _t_IConnectionFormField;
-const _t_IConnectionManagerViewProps: Frozen_IConnectionManagerViewProps<any> = {} as Current_IConnectionManagerViewProps<any>;
-void _t_IConnectionManagerViewProps;

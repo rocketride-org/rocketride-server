@@ -13,7 +13,7 @@
  * whose mapping logic this module mirrors line-for-line.
  */
 
-import type { RocketRideClient, Deployment, DeployArtifact, DeployHistoryEntry } from 'shell/client';
+import type { RocketRideClient, Deployment, DeployArtifact, DeployHistoryEntry } from 'rocketride';
 import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO } from '../../providers/types/deployTypes';
 
 // =============================================================================

@@ -129,9 +129,9 @@ export default tseslint.config(
 					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
 				],
 				patterns: [
-					// shell/client is the sanctioned SDK door (an exports-map subpath
-					// alongside the barrel); everything else stays barrel-only.
-					{ group: ['shell/*', '!shell/client'], message: "The shell surface is barrel-only: import the name from 'shell' (shell/client is the one SDK subpath)." },
+					// The SDK surface lives in the 'rocketride' package now; the
+					// shell exposes no subpaths besides the theme stylesheet.
+					{ group: ['shell/*'], message: "The shell surface is barrel-only: import the name from 'shell' (SDK values/types come from 'rocketride')." },
 					{ group: ['shell-ui/*'], message: "Renamed: import from 'shell'." },
 				],
 			}],
@@ -173,7 +173,7 @@ export default tseslint.config(
 					// gitignore semantics: a file under an excluded dir cannot be
 					// re-included, so un-ignore shell/themes first, then re-ban its
 					// contents except the one exported stylesheet.
-					{ group: ['shell/*', '!shell/client', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css'], message: "The shell surface is barrel-only: import the name from 'shell' (shell/client and the theme stylesheet are the exported subpaths)." },
+					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride')." },
 				],
 			}],
 		},

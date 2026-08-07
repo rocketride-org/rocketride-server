@@ -82,9 +82,9 @@ function candidatePackageJsons(root) {
  * Whether the root or any app depends on the vendored shell package.
  *
  * The signal is a `shell` dependency whose spec points into
- * .rocketride/shell (file:../../.rocketride/shell/shell.tgz). Source-level
- * 'shell/client' imports resolve through the same installed package, so
- * this one check covers the whole platform surface.
+ * .rocketride/shell (file:../../.rocketride/shell/shell.tgz). Every
+ * source-level 'shell' import resolves through the same installed
+ * package, so this one check covers the whole platform surface.
  *
  * @param {string} root - Repository root.
  * @returns {boolean} True when the vendored package is required.

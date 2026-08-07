@@ -308,7 +308,7 @@ export class EngineDocker extends EngineBackend {
 				}
 				case 'test': {
 					// Dynamic require — avoids bundling the SDK into the webview; only used at runtime
-					const { RocketRideClient } = require('shell/client');
+					const { RocketRideClient } = require('rocketride');
 					const client = new RocketRideClient({ persist: false });
 					// Local Docker doesn't need a real API key — any non-empty string works
 					await client.connect('MYAPIKEY', { uri: `http://localhost:${CONTAINER_PORT}`, timeout: 10000 });

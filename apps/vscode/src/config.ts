@@ -26,7 +26,7 @@
  */
 
 import * as vscode from 'vscode';
-import { RocketRideClient } from 'shell/client';
+import { RocketRideClient } from 'rocketride';
 
 export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
 

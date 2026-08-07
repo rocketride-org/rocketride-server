@@ -135,10 +135,10 @@ export interface ShellConnectionEventMap {
 	/**
 	 * Emitted when the service catalog is fetched or refreshed.
 	 *
-	 * Contains the full services map and an optional error string if
-	 * the fetch failed.
+	 * Contains the full services map, the summary's deduplicated icon
+	 * table, and an optional error string if the fetch failed.
 	 */
-	'shell:servicesUpdated': { services: Record<string, unknown>; servicesError?: string };
+	'shell:servicesUpdated': { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string };
 
 	/**
 	 * The app catalog has changed — shell and app-store views should update.
@@ -299,9 +299,10 @@ export interface IConnectionManager {
 	 *
 	 * If the cache is empty and the client is connected, implementations
 	 * should trigger a lazy background fetch and emit `shell:servicesUpdated`
-	 * when the result arrives.
+	 * when the result arrives. The summary's deduplicated icon table rides
+	 * along with the services map.
 	 */
-	getCachedServices(): { services: Record<string, unknown>; servicesError?: string };
+	getCachedServices(): { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string };
 
 	/**
 	 * Fetches the service catalog from the server and updates the cache.

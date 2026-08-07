@@ -64,6 +64,28 @@ export const MAX_RETRY_ATTEMPTS = 120;
 export const DEFAULT_WORKSPACE_DIR = '.workspace';
 
 // =============================================================================
+// SERVER PUSH EVENTS
+// =============================================================================
+
+/**
+ * Wire name of the server push announcing a service-catalog change.
+ *
+ * PLACEHOLDER: the server half of this push has not shipped yet — update
+ * this one value to the real wire name when it does. The connection layer
+ * already routes it: a matching push schedules a jittered refreshServices()
+ * whose result fans out through shell:servicesUpdated.
+ */
+export const SERVICES_CHANGED_EVENT = 'rrext_servicesChanged';
+
+/**
+ * Upper bound (ms) of the random delay before re-fetching the catalog after
+ * a services-changed push. The server broadcasts the push to every client
+ * at once; spreading the refetches keeps the fleet from stampeding the
+ * server with simultaneous rrext_services calls.
+ */
+export const SERVICES_REFRESH_JITTER_MS = 3000;
+
+// =============================================================================
 // APP IDS
 // =============================================================================
 
